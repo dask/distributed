@@ -19,11 +19,12 @@ import warnings
 import weakref
 import xml.etree.ElementTree
 from asyncio import TimeoutError
-from collections import OrderedDict, UserDict, deque
+from collections import deque
 from collections.abc import Callable, Collection, Container, KeysView, ValuesView
 from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
+from datetime import timedelta
 from functools import wraps
 from hashlib import md5
 from importlib.util import cache_from_source
@@ -32,7 +33,7 @@ from time import sleep
 from types import ModuleType
 from typing import TYPE_CHECKING
 from typing import Any as AnyType
-from typing import ClassVar, TypeVar, overload
+from typing import ClassVar, Iterator, TypeVar, overload
 
 import click
 import tblib.pickling_support
@@ -78,11 +79,29 @@ if TYPE_CHECKING:
 
 no_default = "__no_default__"
 
+_forkserver_preload_set = False
 
-def _initialize_mp_context():
+
+def get_mp_context():
+    """Create a multiprocessing context
+
+    The context type is controlled by the
+    ``distributed.worker.multiprocessing-method`` configuration key.
+
+    Returns
+    -------
+    multiprocessing.BaseContext
+        The multiprocessing context
+
+    Notes
+    -----
+    Repeated calls with the same method will return the same object
+    (since multiprocessing.get_context returns singleton instances).
+    """
+    global _forkserver_preload_set
     method = dask.config.get("distributed.worker.multiprocessing-method")
     ctx = multiprocessing.get_context(method)
-    if method == "forkserver":
+    if method == "forkserver" and not _forkserver_preload_set:
         # Makes the test suite much faster
         preload = ["distributed"]
 
@@ -96,11 +115,9 @@ def _initialize_mp_context():
             else:
                 preload.append(pkg)
         ctx.set_forkserver_preload(preload)
+        _forkserver_preload_set = True
 
     return ctx
-
-
-mp_context = _initialize_mp_context()
 
 
 def has_arg(func, argname):
@@ -109,7 +126,8 @@ def has_arg(func, argname):
     """
     while True:
         try:
-            if argname in inspect.getfullargspec(func).args:
+            argspec = inspect.getfullargspec(func)
+            if argname in set(argspec.args) | set(argspec.kwonlyargs):
                 return True
         except TypeError:
             break
@@ -662,7 +680,7 @@ def key_split(s):
         return "Other"
 
 
-def key_split_group(x) -> str:
+def key_split_group(x: object) -> str:
     """A more fine-grained version of key_split
 
     >>> key_split_group(('x-2', 1))
@@ -678,10 +696,9 @@ def key_split_group(x) -> str:
     >>> key_split_group('x-1')
     'x'
     """
-    typ = type(x)
-    if typ is tuple:
+    if isinstance(x, tuple):
         return x[0]
-    elif typ is str:
+    elif isinstance(x, str):
         if x[0] == "(":
             return x.split(",", 1)[0].strip("()\"'")
         elif len(x) == 32 and re.match(r"[a-f0-9]{32}", x):
@@ -690,7 +707,7 @@ def key_split_group(x) -> str:
             return x.strip("<>").split()[0].split(".")[-1]
         else:
             return key_split(x)
-    elif typ is bytes:
+    elif isinstance(x, bytes):
         return key_split_group(x.decode())
     else:
         return "Other"
@@ -1036,22 +1053,21 @@ def ensure_memoryview(obj):
         return mv
 
 
-def open_port(host=""):
+def open_port(host: str = "") -> int:
     """Return a probably-open port
 
     There is a chance that this port will be taken by the operating system soon
     after returning from this function.
     """
     # http://stackoverflow.com/questions/2838244/get-open-tcp-port-in-python
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind((host, 0))
-    s.listen(1)
-    port = s.getsockname()[1]
-    s.close()
-    return port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((host, 0))
+        s.listen(1)
+        port = s.getsockname()[1]
+        return port
 
 
-def import_file(path: str):
+def import_file(path: str) -> list[ModuleType]:
     """Loads modules for a file (.py, .zip, .egg)"""
     directory, filename = os.path.split(path)
     name, ext = os.path.splitext(filename)
@@ -1239,12 +1255,19 @@ def iscoroutinefunction(f):
 
 
 @contextmanager
-def warn_on_duration(duration, msg):
+def warn_on_duration(duration: str | float | timedelta, msg: str) -> Iterator[None]:
+    """Generate a UserWarning if the operation in this context takes longer than
+    *duration* and print *msg*
+
+    The message may include a format string `{duration}` which will be formatted
+    to include the actual duration it took
+    """
     start = time()
     yield
     stop = time()
-    if stop - start > _parse_timedelta(duration):
-        warnings.warn(msg, stacklevel=2)
+    diff = stop - start
+    if diff > _parse_timedelta(duration):
+        warnings.warn(msg.format(duration=diff), stacklevel=2)
 
 
 def format_dashboard_link(host, port):
@@ -1339,7 +1362,11 @@ class Logs(dict):
         return get_template("logs.html.j2").render(logs=self)
 
 
-def cli_keywords(d: dict, cls=None, cmd=None):
+def cli_keywords(
+    d: dict[str, AnyType],
+    cls: Callable | None = None,
+    cmd: str | ModuleType | None = None,
+) -> list[str]:
     """Convert a kwargs dictionary into a list of CLI keywords
 
     Parameters
@@ -1404,7 +1431,7 @@ _offload_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="Dask-O
 weakref.finalize(_offload_executor, _offload_executor.shutdown)
 
 
-def import_term(name: str):
+def import_term(name: str) -> AnyType:
     """Return the fully qualified term
 
     Examples
@@ -1445,25 +1472,6 @@ class EmptyContext:
 
 
 empty_context = EmptyContext()
-
-
-class LRU(UserDict):
-    """Limited size mapping, evicting the least recently looked-up key when full"""
-
-    def __init__(self, maxsize):
-        super().__init__()
-        self.data = OrderedDict()
-        self.maxsize = maxsize
-
-    def __getitem__(self, key):
-        value = super().__getitem__(key)
-        self.data.move_to_end(key)
-        return value
-
-    def __setitem__(self, key, value):
-        if len(self) >= self.maxsize:
-            self.data.popitem(last=False)
-        super().__setitem__(key, value)
 
 
 def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> list[dict]:

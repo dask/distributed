@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import asyncio
 import contextvars
 import functools
 import io
+import multiprocessing
 import os
 import queue
 import socket
@@ -19,7 +22,6 @@ import dask
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.metrics import time
 from distributed.utils import (
-    LRU,
     All,
     Log,
     Logs,
@@ -30,6 +32,7 @@ from distributed.utils import (
     ensure_memoryview,
     format_dashboard_link,
     get_ip_interface,
+    get_mp_context,
     get_traceback,
     is_kernel,
     is_valid_xml,
@@ -160,6 +163,18 @@ def test_get_ip_interface():
     assert get_ip_interface(iface) == "127.0.0.1"
     with pytest.raises(ValueError, match=f"'__notexist'.+network interface.+'{iface}'"):
         get_ip_interface("__notexist")
+
+
+@pytest.mark.skipif(
+    WINDOWS, reason="Windows doesn't support different multiprocessing contexts"
+)
+def test_get_mp_context():
+    # this will need updated if the default multiprocessing context changes from spawn.
+    assert get_mp_context() is multiprocessing.get_context("spawn")
+    with dask.config.set({"distributed.worker.multiprocessing-method": "forkserver"}):
+        assert get_mp_context() is multiprocessing.get_context("forkserver")
+    with dask.config.set({"distributed.worker.multiprocessing-method": "fork"}):
+        assert get_mp_context() is multiprocessing.get_context("fork")
 
 
 def test_truncate_exception():
@@ -537,7 +552,16 @@ def test_warn_on_duration():
             sleep(0.100)
 
     assert record
-    assert any("foo" in str(rec.message) for rec in record)
+
+    with pytest.warns(UserWarning) as record:
+        with warn_on_duration("1ms", "{duration:.4f}"):
+            start = time()
+            sleep(0.100)
+            measured = time() - start
+
+    assert record
+    assert len(record) == 1
+    assert float(str(record[0].message)) >= float(str(f"{measured:.4f}"))
 
 
 def test_logs():
@@ -594,24 +618,6 @@ def test_parse_ports():
         parse_ports("100.5")
 
 
-def test_lru():
-
-    l = LRU(maxsize=3)
-    l["a"] = 1
-    l["b"] = 2
-    l["c"] = 3
-    assert list(l.keys()) == ["a", "b", "c"]
-
-    # Use "a" and ensure it becomes the most recently used item
-    l["a"]
-    assert list(l.keys()) == ["b", "c", "a"]
-
-    # Ensure maxsize is respected
-    l["d"] = 4
-    assert len(l) == 3
-    assert list(l.keys()) == ["c", "a", "d"]
-
-
 @gen_test()
 async def test_offload():
     assert (await offload(inc, 1)) == 2
@@ -622,7 +628,7 @@ async def test_offload():
 async def test_offload_preserves_contextvars():
     var = contextvars.ContextVar("var")
 
-    async def set_var(v: str):
+    async def set_var(v: str) -> None:
         var.set(v)
         r = await offload(var.get)
         assert r == v

@@ -1,15 +1,15 @@
+from __future__ import annotations
+
 import asyncio
 import atexit
 import gc
 import logging
 import os
 import re
-import signal
 import sys
 import warnings
 
 import click
-from tornado.ioloop import IOLoop
 
 from distributed import Scheduler
 from distributed._signals import wait_for_signals
@@ -186,11 +186,9 @@ def main(
         resource.setrlimit(resource.RLIMIT_NOFILE, (limit, hard))
 
     async def run():
-        loop = IOLoop.current()
         logger.info("-" * 47)
 
         scheduler = Scheduler(
-            loop=loop,
             security=sec,
             host=host,
             port=port,
@@ -208,7 +206,7 @@ def main(
 
         async def wait_for_signals_and_close():
             """Wait for SIGINT or SIGTERM and close the scheduler upon receiving one of those signals"""
-            await wait_for_signals([signal.SIGINT, signal.SIGTERM])
+            await wait_for_signals()
             await scheduler.close()
 
         wait_for_signals_and_close_task = asyncio.create_task(

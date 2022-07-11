@@ -91,6 +91,7 @@ distributed:
       restart: False        # Do we ressurrect the worker after the lifetime deadline?
 
     profile:
+      enabled: True         # Whether or not to enable profiling
       interval: 10ms        # Time between statistical profiling queries
       cycle: 1000ms         # Time between starting new profile
       low-level: False      # Whether or not to include low-level functions
@@ -163,8 +164,13 @@ distributed:
   nanny:
     preload: []             # Run custom modules with Nanny
     preload-argv: []        # See https://docs.dask.org/en/latest/how-to/customize-initialization.html
+
+    # Override environment variables. Read important caveats at
+    # https://distributed.dask.org/en/stable/worker.html#nanny.
     environ:
+      # See https://distributed.dask.org/en/stable/worker-memory.html#automatically-trim-memory
       MALLOC_TRIM_THRESHOLD_: 65536
+      # Numpy configuration
       OMP_NUM_THREADS: 1
       MKL_NUM_THREADS: 1
 
@@ -279,6 +285,7 @@ distributed:
     pdb-on-err: False       # enter debug mode on scheduling error
     system-monitor:
       interval: 500ms
+      disk: true
     event-loop: tornado
   rmm:
     pool-size: null

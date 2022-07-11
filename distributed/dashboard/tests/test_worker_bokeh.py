@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import re
 from operator import add, sub
@@ -14,7 +16,6 @@ from distributed.dashboard.components.worker import (
     CommunicatingStream,
     CommunicatingTimeSeries,
     Counters,
-    CrossFilter,
     ExecutingTimeSeries,
     StateTable,
     SystemMonitor,
@@ -55,11 +56,8 @@ async def test_simple(c, s, a, b):
     await asyncio.sleep(0.1)
 
     http_client = AsyncHTTPClient()
-    for suffix in ["crossfilter", "system"]:
-        response = await http_client.fetch(
-            "http://localhost:%d/%s" % (a.http_server.port, suffix)
-        )
-        assert "bokeh" in response.body.decode().lower()
+    response = await http_client.fetch(f"http://localhost:{a.http_server.port}/system")
+    assert "bokeh" in response.body.decode().lower()
 
 
 @gen_cluster(client=True, worker_kwargs={"dashboard": True})
@@ -67,35 +65,35 @@ async def test_services_kwargs(c, s, a, b):
     assert s.workers[a.address].services == {"dashboard": a.http_server.port}
 
 
-@gen_cluster(client=True)
-async def test_basic(c, s, a, b):
-    for component in [
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "cls",
+    (
         StateTable,
         ExecutingTimeSeries,
         CommunicatingTimeSeries,
-        CrossFilter,
         SystemMonitor,
-    ]:
+    ),
+)
+@gen_cluster(client=True)
+async def test_basic(c, s, a, b, cls):
+    aa = cls(a)
+    bb = cls(b)
 
-        aa = component(a)
-        bb = component(b)
+    xs = c.map(inc, range(10), workers=a.address)
+    ys = c.map(dec, range(10), workers=b.address)
 
-        xs = c.map(inc, range(10), workers=a.address)
-        ys = c.map(dec, range(10), workers=b.address)
+    def slowall(*args):
+        sleep(1)
 
-        def slowall(*args):
-            sleep(1)
+    x = c.submit(slowall, xs, ys, 1, workers=a.address)
+    y = c.submit(slowall, xs, ys, 2, workers=b.address)
+    await asyncio.sleep(0.1)
 
-        x = c.submit(slowall, xs, ys, 1, workers=a.address)
-        y = c.submit(slowall, xs, ys, 2, workers=b.address)
-        await asyncio.sleep(0.1)
+    aa.update()
+    bb.update()
 
-        aa.update()
-        bb.update()
-
-        assert len(first(aa.source.data.values())) and len(
-            first(bb.source.data.values())
-        )
+    assert len(first(aa.source.data.values())) and len(first(bb.source.data.values()))
 
 
 @gen_cluster(client=True)

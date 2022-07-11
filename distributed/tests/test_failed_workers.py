@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import os
 import random
@@ -16,6 +18,7 @@ from distributed.compatibility import MACOS
 from distributed.metrics import time
 from distributed.utils import CancelledError, sync
 from distributed.utils_test import (
+    BlockedGatherDep,
     captured_logger,
     cluster,
     div,
@@ -24,7 +27,7 @@ from distributed.utils_test import (
     slowadd,
     slowinc,
 )
-from distributed.worker_state_machine import TaskState
+from distributed.worker_state_machine import FreeKeysEvent
 
 pytestmark = pytest.mark.ci1
 
@@ -41,30 +44,30 @@ def test_submit_after_failed_worker_sync(loop):
 
 
 @pytest.mark.slow()
-@gen_cluster(client=True, timeout=60, active_rpc_timeout=10)
-async def test_submit_after_failed_worker_async(c, s, a, b):
+@pytest.mark.parametrize("compute_on_failed", [False, True])
+@gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "500ms"})
+async def test_submit_after_failed_worker_async(c, s, a, b, compute_on_failed):
     async with Nanny(s.address, nthreads=2) as n:
-        while len(s.workers) < 3:
-            await asyncio.sleep(0.1)
+        await c.wait_for_workers(3)
 
         L = c.map(inc, range(10))
         await wait(L)
 
-        s.loop.add_callback(n.kill)
-        total = c.submit(sum, L)
-        result = await total
-        assert result == sum(map(inc, range(10)))
+        kill_task = asyncio.create_task(n.kill())
+        compute_addr = n.worker_address if compute_on_failed else a.address
+        total = c.submit(sum, L, workers=[compute_addr], allow_other_workers=True)
+        assert await total == sum(range(1, 11))
+        await kill_task
 
 
 @gen_cluster(client=True, timeout=60)
 async def test_submit_after_failed_worker(c, s, a, b):
     L = c.map(inc, range(10))
     await wait(L)
-    await a.close()
 
+    await a.close()
     total = c.submit(sum, L)
-    result = await total
-    assert result == sum(map(inc, range(10)))
+    assert await total == sum(range(1, 11))
 
 
 @pytest.mark.slow
@@ -345,6 +348,7 @@ class SlowTransmitData:
         return parse_bytes(dask.config.get("distributed.comm.offload")) + 1
 
 
+@pytest.mark.slow
 @gen_cluster(client=True)
 async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     """This test is very sensitive to cluster state consistency. Timeouts often
@@ -380,9 +384,9 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
 
         await result_fut
 
-        assert not a.has_what.get(n_worker_address)
+        assert not a.state.has_what.get(n_worker_address)
         assert not any(
-            n_worker_address in s for ts in a.tasks.values() for s in ts.who_has
+            n_worker_address in s for ts in a.state.tasks.values() for s in ts.who_has
         )
 
 
@@ -425,7 +429,9 @@ async def test_worker_same_host_replicas_missing(c, s, a, b, x):
         # artificially, without notifying the scheduler.
         # This can only succeed if B handles the missing data properly by
         # removing A from the known sources of keys
-        a.handle_free_keys(keys=["f1"], stimulus_id="Am I evil?")  # Yes, I am!
+        a.handle_stimulus(
+            FreeKeysEvent(keys=["f1"], stimulus_id="Am I evil?")
+        )  # Yes, I am!
         result_fut = c.submit(sink, futures, workers=x.address)
 
         await result_fut
@@ -467,22 +473,27 @@ async def test_worker_time_to_live(c, s, a, b):
     assert time() - start < interval + 2.0
 
 
-@gen_cluster()
-async def test_forget_data_not_supposed_to_have(s, a, b):
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_forget_data_not_supposed_to_have(c, s, a):
     """If a dependency fetch finishes on a worker after the scheduler already released
     everything, the worker might be stuck with a redundant replica which is never
     cleaned up.
     """
-    # FIXME: Replace with "blackbox test" which shows an actual example where
-    #        this situation is provoked if this is even possible.
-    ts = TaskState("key", state="flight")
-    a.tasks["key"] = ts
-    recommendations = {ts: ("memory", 123)}
-    a.transitions(recommendations, stimulus_id="test")
+    async with BlockedGatherDep(s.address) as b:
+        x = c.submit(inc, 1, key="x", workers=[a.address])
+        y = c.submit(inc, x, key="y", workers=[b.address])
 
-    assert a.data
-    while a.data:
-        await asyncio.sleep(0.001)
+        await b.in_gather_dep.wait()
+        assert b.state.tasks["x"].state == "flight"
+
+        x.release()
+        y.release()
+        while s.tasks:
+            await asyncio.sleep(0.01)
+
+        b.block_gather_dep.set()
+        while b.state.tasks:
+            await asyncio.sleep(0.01)
 
 
 @gen_cluster(

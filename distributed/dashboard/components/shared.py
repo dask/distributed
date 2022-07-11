@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import weakref
 from statistics import mean
@@ -14,6 +16,7 @@ from bokeh.models import (
     NumeralTickFormatter,
     Range1d,
     Select,
+    Title,
 )
 from bokeh.palettes import Spectral9
 from bokeh.plotting import figure
@@ -193,7 +196,6 @@ class ProfileTimePlot(DashboardComponent):
         data = profile.plot_data(self.state, profile_interval)
         self.states = data.pop("states")
         self.profile_plot, self.source = profile.plot_figure(data, **kwargs)
-
         changing = [False]  # avoid repeated changes from within callback
 
         @without_property_validation
@@ -269,6 +271,14 @@ class ProfileTimePlot(DashboardComponent):
             self.ts_plot,
             **kwargs,
         )
+
+        self.subtitle = Title(text=" ", text_font_style="italic")
+        self.profile_plot.add_layout(self.subtitle, "above")
+        if not dask.config.get("distributed.worker.profile.enabled"):
+            self.subtitle.text = "Profiling is disabled."
+            self.select.disabled = True
+            self.reset_button.disabled = True
+            self.update_button.disabled = True
 
     @without_property_validation
     @log_errors
@@ -387,6 +397,13 @@ class ProfileServer(DashboardComponent):
             self.ts_plot,
             **kwargs,
         )
+
+        self.subtitle = Title(text=" ", text_font_style="italic")
+        self.profile_plot.add_layout(self.subtitle, "above")
+        if not dask.config.get("distributed.worker.profile.enabled"):
+            self.subtitle.text = "Profiling is disabled."
+            self.reset_button.disabled = True
+            self.update_button.disabled = True
 
     @without_property_validation
     @log_errors

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from inspect import isawaitable
 
@@ -158,7 +160,7 @@ class Adaptive(AdaptiveCore):
 
         return await super().recommendations(target)
 
-    async def workers_to_close(self, target: int):
+    async def workers_to_close(self, target: int) -> list[str]:
         """
         Determine which, if any, workers should potentially be removed from
         the cluster.

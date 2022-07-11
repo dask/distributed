@@ -22,6 +22,13 @@ from distributed.metrics import monotonic
 from distributed.spill import has_zict_210
 from distributed.utils_test import captured_logger, gen_cluster, inc
 from distributed.worker_memory import parse_memory_limit
+from distributed.worker_state_machine import (
+    ComputeTaskEvent,
+    ExecuteSuccessEvent,
+    GatherDep,
+    GatherDepSuccessEvent,
+    TaskErredMsg,
+)
 
 requires_zict_210 = pytest.mark.skipif(
     not has_zict_210,
@@ -97,10 +104,17 @@ async def assert_basic_futures(c: Client) -> None:
 
 
 @gen_cluster(client=True)
-async def test_fail_to_pickle_target_1(c, s, a, b):
-    """Test failure to serialize triggered by key which is individually larger
-    than target. The data is lost and the task is marked as failed;
-    the worker remains in usable condition.
+async def test_fail_to_pickle_execute_1(c, s, a, b):
+    """Test failure to serialize triggered by computing a key which is individually
+    larger than target. The data is lost and the task is marked as failed; the worker
+    remains in usable condition.
+
+    See also
+    --------
+    test_workerstate_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_flight
+    test_fail_to_pickle_execute_2
+    test_fail_to_pickle_spill
     """
     x = c.submit(FailToPickle, reported_size=100e9, key="x")
     await wait(x)
@@ -113,6 +127,70 @@ async def test_fail_to_pickle_target_1(c, s, a, b):
     await assert_basic_futures(c)
 
 
+class FailStoreDict(UserDict):
+    def __setitem__(self, key, value):
+        raise CustomError()
+
+
+def test_workerstate_fail_to_pickle_execute_1(ws_with_running_task):
+    """Same as test_fail_to_pickle_target_execute_1
+
+    See also
+    --------
+    test_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_flight
+    test_fail_to_pickle_execute_2
+    test_fail_to_pickle_spill
+    """
+    ws = ws_with_running_task
+    assert not ws.data
+    ws.data = FailStoreDict()
+
+    instructions = ws.handle_stimulus(
+        ExecuteSuccessEvent.dummy("x", None, stimulus_id="s1")
+    )
+    assert instructions == [TaskErredMsg.match(key="x", stimulus_id="s1")]
+    assert ws.tasks["x"].state == "error"
+
+
+@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/6705")
+def test_workerstate_fail_to_pickle_flight(ws):
+    """Same as test_workerstate_fail_to_pickle_execute_1, but the task was
+    computed on another host and for whatever reason it did not fail to pickle when it
+    was sent over the network.
+
+    See also
+    --------
+    test_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_execute_1
+    test_fail_to_pickle_execute_2
+    test_fail_to_pickle_spill
+
+    See also test_worker_state_machine.py::test_gather_dep_failure, where the task
+    instead fails to unpickle when leaving the network stack.
+    """
+    assert not ws.data
+    ws.data = FailStoreDict()
+    ws.total_resources = {"R": 1}
+    ws.available_resources = {"R": 1}
+    ws2 = "127.0.0.1:2"
+
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "y", who_has={"x": [ws2]}, resource_restrictions={"R": 1}, stimulus_id="s1"
+        ),
+        GatherDepSuccessEvent(
+            worker=ws2, total_nbytes=1, data={"x": 123}, stimulus_id="s2"
+        ),
+    )
+    assert instructions == [
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
+        TaskErredMsg.match(key="x", stimulus_id="s2"),
+    ]
+    assert ws.tasks["x"].state == "error"
+    assert ws.tasks["y"].state == "waiting"  # Not constrained
+
+
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
@@ -123,10 +201,17 @@ async def test_fail_to_pickle_target_1(c, s, a, b):
         "distributed.worker.memory.pause": False,
     },
 )
-async def test_fail_to_pickle_target_2(c, s, a):
-    """Test failure to spill triggered by key which is individually smaller
-    than target, so it is not spilled immediately. The data is retained and
-    the task is NOT marked as failed; the worker remains in usable condition.
+async def test_fail_to_pickle_execute_2(c, s, a):
+    """Test failure to spill triggered by computing a key which is individually smaller
+    than target, so it is not spilled immediately. The data is retained and the task is
+    NOT marked as failed; the worker remains in usable condition.
+
+    See also
+    --------
+    test_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_flight
+    test_fail_to_pickle_spill
     """
     x = c.submit(FailToPickle, reported_size=256, key="x")
     await wait(x)
@@ -157,7 +242,15 @@ async def test_fail_to_pickle_target_2(c, s, a):
     },
 )
 async def test_fail_to_pickle_spill(c, s, a):
-    """Test failure to evict a key, triggered by the spill threshold"""
+    """Test failure to evict a key, triggered by the spill threshold.
+
+    See also
+    --------
+    test_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_flight
+    test_fail_to_pickle_execute_2
+    """
     a.monitor.get_process_memory = lambda: 701 if a.data.fast else 0
 
     with captured_logger(logging.getLogger("distributed.spill")) as logs:
@@ -376,12 +469,12 @@ async def test_pause_executor_manual(c, s, a):
 
     # Task that is running on the worker when the worker pauses
     x = c.submit(f, ev_x, key="x")
-    while a.executing_count != 1:
+    while a.state.executing_count != 1:
         await asyncio.sleep(0.01)
 
     # Task that is queued on the worker when the worker pauses
     y = c.submit(inc, 1, key="y")
-    while "y" not in a.tasks:
+    while "y" not in a.state.tasks:
         await asyncio.sleep(0.01)
 
     a.status = Status.paused
@@ -403,10 +496,10 @@ async def test_pause_executor_manual(c, s, a):
     assert await x == 1
     await asyncio.sleep(0.05)
 
-    assert a.executing_count == 0
-    assert len(a.ready) == 1
-    assert a.tasks["y"].state == "ready"
-    assert "z" not in a.tasks
+    assert a.state.executing_count == 0
+    assert len(a.state.ready) == 1
+    assert a.state.tasks["y"].state == "ready"
+    assert "z" not in a.state.tasks
 
     # Unpause. Tasks that were queued on the worker are executed.
     # Tasks that were stuck on the scheduler are sent to the worker and executed.
@@ -440,13 +533,13 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
 
     # Task that is running on the worker when the worker pauses
     x = c.submit(f, ev_x, key="x")
-    while a.executing_count != 1:
+    while a.state.executing_count != 1:
         await asyncio.sleep(0.01)
 
     with captured_logger(logging.getLogger("distributed.worker_memory")) as logger:
         # Task that is queued on the worker when the worker pauses
         y = c.submit(inc, 1, key="y")
-        while "y" not in a.tasks:
+        while "y" not in a.state.tasks:
             await asyncio.sleep(0.01)
 
         # Hog the worker with 900GB unmanaged memory
@@ -470,10 +563,10 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
         assert await x == 1
         await asyncio.sleep(0.05)
 
-        assert a.executing_count == 0
-        assert len(a.ready) == 1
-        assert a.tasks["y"].state == "ready"
-        assert "z" not in a.tasks
+        assert a.state.executing_count == 0
+        assert len(a.state.ready) == 1
+        assert a.state.tasks["y"].state == "ready"
+        assert "z" not in a.state.tasks
 
         # Release the memory. Tasks that were queued on the worker are executed.
         # Tasks that were stuck on the scheduler are sent to the worker and executed.
@@ -527,7 +620,7 @@ async def test_pause_prevents_deps_fetch(c, s, a, b):
     # - w and z respectively make x and y go into fetch state.
     #   w has a higher priority than z, therefore w's dependency x has a higher priority
     #   than z's dependency y.
-    #   a.data_needed = ["x", "y"]
+    #   a.state.data_needed[b.address] = ["x", "y"]
     # - ensure_communicating decides to fetch x but not to fetch y together with it, as
     #   it thinks x is 1TB in size
     # - x fetch->flight; a is added to in_flight_workers
@@ -538,17 +631,17 @@ async def test_pause_prevents_deps_fetch(c, s, a, b):
     # - ensure_communicating is triggered again
     # - ensure_communicating refuses to fetch y because the worker is paused
 
-    while "y" not in a.tasks or a.tasks["y"].state != "fetch":
+    while "y" not in a.state.tasks or a.state.tasks["y"].state != "fetch":
         await asyncio.sleep(0.01)
     await asyncio.sleep(0.1)
-    assert a.tasks["y"].state == "fetch"
+    assert a.state.tasks["y"].state == "fetch"
     assert "y" not in a.data
-    assert [ts.key for ts in a.data_needed] == ["y"]
+    assert [ts.key for ts in a.state.data_needed[b.address]] == ["y"]
 
     # Unpausing kicks off ensure_communicating again
     a.status = Status.running
     assert await z == 3
-    assert a.tasks["y"].state == "memory"
+    assert a.state.tasks["y"].state == "memory"
     assert "y" in a.data
 
 
@@ -710,7 +803,7 @@ async def leak_until_restart(c: Client, s: Scheduler) -> None:
         await future
     assert s.tasks["leak"].suspicious == 1
     assert not any(
-        (await c.run(lambda dask_worker: "leak" in dask_worker.tasks)).values()
+        (await c.run(lambda dask_worker: "leak" in dask_worker.state.tasks)).values()
     )
     future.release()
     while "leak" in s.tasks:
@@ -755,8 +848,13 @@ async def test_disk_cleanup_on_terminate(c, s, a, ignore_sigterm):
     At the next iteration of the memory manager, if the process is still alive, the
     nanny sends SIGKILL.
     """
+
+    def do_ignore_sigterm():
+        # ignore the return value of signal.signal:  it may not be serializable
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
     if ignore_sigterm:
-        await c.run(signal.signal, signal.SIGTERM, signal.SIG_IGN)
+        await c.run(do_ignore_sigterm)
 
     fut = c.submit(inc, 1, key="myspill")
     await wait(fut)

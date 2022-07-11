@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import random
 import sys
 
@@ -78,7 +80,7 @@ def test_errors():
             "--spec-file",
             "foo.yaml",
         ],
-        flush_output=False,
+        capture_output=True,
     ) as proc:
         line = proc.stdout.readline().decode()
         assert "exactly one" in line
@@ -86,7 +88,7 @@ def test_errors():
 
     with popen(
         [sys.executable, "-m", "distributed.cli.dask_spec"],
-        flush_output=False,
+        capture_output=True,
     ) as proc:
         line = proc.stdout.readline().decode()
         assert "exactly one" in line

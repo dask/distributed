@@ -1,12 +1,18 @@
+from __future__ import annotations
+
 import asyncio
 import os
 import pathlib
 import signal
 import socket
+import subprocess
 import sys
+import textwrap
 import threading
 from contextlib import contextmanager
+from multiprocessing.synchronize import Barrier
 from time import sleep
+from unittest import mock
 
 import pytest
 import yaml
@@ -14,11 +20,14 @@ from tornado import gen
 
 import dask.config
 
-from distributed import Client, Nanny, Scheduler, Worker, config, default_client
+from distributed import Client, Event, Nanny, Scheduler, Worker, config, default_client
+from distributed.batched import BatchedSend
+from distributed.comm.core import connect
 from distributed.compatibility import WINDOWS
 from distributed.core import Server, Status, rpc
 from distributed.metrics import time
-from distributed.utils import mp_context
+from distributed.tests.test_batched import EchoServer
+from distributed.utils import get_mp_context
 from distributed.utils_test import (
     _LockedCommPool,
     _UnhashableCallable,
@@ -27,14 +36,25 @@ from distributed.utils_test import (
     check_process_leak,
     cluster,
     dump_cluster_state,
+    freeze_batched_send,
     gen_cluster,
     gen_test,
     inc,
     new_config,
+    popen,
     raises_with_cause,
     tls_only_security,
+    wait_for_state,
+    wait_for_stimulus,
 )
-from distributed.worker import InvalidTransition, fail_hard
+from distributed.worker import fail_hard
+from distributed.worker_state_machine import (
+    ComputeTaskEvent,
+    InvalidTaskState,
+    InvalidTransition,
+    PauseEvent,
+    WorkerState,
+)
 
 
 def test_bare_cluster(loop):
@@ -488,7 +508,7 @@ async def test_assert_story_identity(c, s, a, strict):
     assert await f2 == 3
     scheduler_story = s.story(f2.key)
     assert scheduler_story
-    worker_story = a.story(f2.key)
+    worker_story = a.state.story(f2.key)
     assert worker_story
     assert_story(worker_story, worker_story, strict=strict)
     assert_story(scheduler_story, scheduler_story, strict=strict)
@@ -572,7 +592,9 @@ else:
     TERM_SIGNALS = (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)
 
 
-def garbage_process(barrier, ignore_sigterm: bool = False, t: float = 3600) -> None:
+def garbage_process(
+    barrier: Barrier, ignore_sigterm: bool = False, t: float = 3600
+) -> None:
     if ignore_sigterm:
         for signum in TERM_SIGNALS:
             signal.signal(signum, signal.SIG_IGN)
@@ -581,10 +603,10 @@ def garbage_process(barrier, ignore_sigterm: bool = False, t: float = 3600) -> N
 
 
 def test_check_process_leak():
-    barrier = mp_context.Barrier(parties=2)
+    barrier = get_mp_context().Barrier(parties=2)
     with pytest.raises(AssertionError):
         with check_process_leak(check=True, check_timeout=0.01):
-            p = mp_context.Process(target=garbage_process, args=(barrier,))
+            p = get_mp_context().Process(target=garbage_process, args=(barrier,))
             p.start()
             barrier.wait()
     assert not p.is_alive()
@@ -592,9 +614,9 @@ def test_check_process_leak():
 
 def test_check_process_leak_slow_cleanup():
     """check_process_leak waits a bit for processes to terminate themselves"""
-    barrier = mp_context.Barrier(parties=2)
+    barrier = get_mp_context().Barrier(parties=2)
     with check_process_leak(check=True):
-        p = mp_context.Process(target=garbage_process, args=(barrier, False, 0.2))
+        p = get_mp_context().Process(target=garbage_process, args=(barrier, False, 0.2))
         p.start()
         barrier.wait()
     assert not p.is_alive()
@@ -605,8 +627,8 @@ def test_check_process_leak_slow_cleanup():
     [False, pytest.param(True, marks=pytest.mark.skipif(WINDOWS, reason="no SIGKILL"))],
 )
 def test_check_process_leak_pre_cleanup(ignore_sigterm):
-    barrier = mp_context.Barrier(parties=2)
-    p = mp_context.Process(target=garbage_process, args=(barrier, ignore_sigterm))
+    barrier = get_mp_context().Barrier(parties=2)
+    p = get_mp_context().Process(target=garbage_process, args=(barrier, ignore_sigterm))
     p.start()
     barrier.wait()
 
@@ -619,9 +641,11 @@ def test_check_process_leak_pre_cleanup(ignore_sigterm):
     [False, pytest.param(True, marks=pytest.mark.skipif(WINDOWS, reason="no SIGKILL"))],
 )
 def test_check_process_leak_post_cleanup(ignore_sigterm):
-    barrier = mp_context.Barrier(parties=2)
+    barrier = get_mp_context().Barrier(parties=2)
     with check_process_leak(check=False, term_timeout=0.2):
-        p = mp_context.Process(target=garbage_process, args=(barrier, ignore_sigterm))
+        p = get_mp_context().Process(
+            target=garbage_process, args=(barrier, ignore_sigterm)
+        )
         p.start()
         barrier.wait()
     assert not p.is_alive()
@@ -645,18 +669,17 @@ def test_start_failure_scheduler():
 
 
 def test_invalid_transitions(capsys):
-    @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+    @gen_cluster(client=True, nthreads=[("", 1)])
     async def test_log_invalid_transitions(c, s, a):
         x = c.submit(inc, 1, key="task-name")
-        y = c.submit(inc, x)
-        xkey = x.key
-        del x
-        await y
-        while a.tasks[xkey].state != "released":
-            await asyncio.sleep(0.01)
-        ts = a.tasks[xkey]
-        with pytest.raises(InvalidTransition):
-            a.transition(ts, "foo", stimulus_id="bar")
+        await x
+        ts = a.state.tasks["task-name"]
+        ev = PauseEvent(stimulus_id="test")
+        with mock.patch.object(
+            WorkerState, "_handle_event", return_value=({ts: "foo"}, [])
+        ):
+            with pytest.raises(InvalidTransition):
+                a.handle_stimulus(ev)
 
         while not s.events["invalid-worker-transition"]:
             await asyncio.sleep(0.01)
@@ -674,20 +697,20 @@ def test_invalid_transitions(capsys):
     assert "task-name" in out + err
 
 
-def test_invalid_worker_states(capsys):
+def test_invalid_worker_state(capsys):
     @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
-    async def test_log_invalid_worker_task_states(c, s, a):
+    async def test_log_invalid_worker_task_state(c, s, a):
         x = c.submit(inc, 1, key="task-name")
         await x
-        a.tasks[x.key].state = "released"
-        with pytest.raises(Exception):
-            a.validate_task(a.tasks[x.key])
+        a.state.tasks[x.key].state = "released"
+        with pytest.raises(InvalidTaskState):
+            a.validate_state()
 
-        while not s.events["invalid-worker-task-states"]:
+        while not s.events["invalid-worker-task-state"]:
             await asyncio.sleep(0.01)
 
     with pytest.raises(Exception) as info:
-        test_log_invalid_worker_task_states()
+        test_log_invalid_worker_task_state()
 
     out, err = capsys.readouterr()
 
@@ -772,3 +795,185 @@ def test_fail_hard(sync):
     with pytest.raises(CustomError):
         test()
     assert test_done
+
+
+def test_popen_write_during_terminate_deadlock():
+    # Fabricate a command which, when terminated, tries to write more than the pipe
+    # buffer can hold (OS specific: on Linux it's typically 65536 bytes; on Windows it's
+    # less). This would deadlock if `proc.wait()` was called, since the process will be
+    # trying to write to stdout, but stdout isn't being cleared because our process is
+    # blocked in `proc.wait()`. `proc.communicate()` is necessary:
+    # https://docs.python.org/3/library/subprocess.html#subprocess.Popen.wait
+    with popen(
+        [
+            sys.executable,
+            "-c",
+            textwrap.dedent(
+                """
+                import signal
+                import threading
+
+                e = threading.Event()
+
+                def cb(signum, frame):
+                    # 131072 is 2x the size of the default Linux pipe buffer
+                    print('x' * 131072)
+                    e.set()
+
+                signal.signal(signal.SIGINT, cb)
+                print('ready', flush=True)
+                e.wait()
+                """
+            ),
+        ],
+        capture_output=True,
+    ) as proc:
+        assert proc.stdout.readline().strip() == b"ready"
+    # Exiting the context manager (terminating the subprocess) will raise
+    # `subprocess.TimeoutExpired` if this test breaks.
+
+
+def test_popen_timeout(capsys):
+    with pytest.raises(subprocess.TimeoutExpired):
+        with popen(
+            [
+                sys.executable,
+                "-c",
+                textwrap.dedent(
+                    """
+                    import signal
+                    import sys
+                    import time
+
+                    if sys.platform == "win32":
+                        signal.signal(signal.SIGBREAK, signal.default_int_handler)
+                        # ^ Cause `CTRL_BREAK_EVENT` on Windows to raise `KeyboardInterrupt`
+
+                    print('ready', flush=True)
+                    while True:
+                        try:
+                            time.sleep(0.1)
+                            print("slept", flush=True)
+                        except KeyboardInterrupt:
+                            print("interrupted", flush=True)
+                    """
+                ),
+            ],
+            capture_output=True,
+            terminate_timeout=1,
+        ) as proc:
+            assert proc.stdout
+            assert proc.stdout.readline().strip() == b"ready"
+    # Exiting contextmanager sends SIGINT, waits 1s for shutdown.
+    # Our script ignores SIGINT, so after 1s it sends SIGKILL.
+    # The contextmanager raises `TimeoutExpired` once the process is killed,
+    # because it failed the 1s timeout
+    captured = capsys.readouterr()
+    assert "stdout: returncode" in captured.out
+    assert "interrupted" in captured.out
+    assert "slept" in captured.out
+
+
+def test_popen_always_prints_output(capsys):
+    # We always print stdout even if there was no error, in case some other assertion
+    # later in the test fails and the output would be useful.
+    with popen([sys.executable, "-c", "print('foo')"], capture_output=True) as proc:
+        proc.communicate(timeout=5)
+
+    captured = capsys.readouterr()
+    assert "stdout: returncode 0" in captured.out
+    assert "foo" in captured.out
+
+
+@gen_test()
+async def test_freeze_batched_send():
+    async with EchoServer() as e:
+        comm = await connect(e.address)
+        b = BatchedSend(interval=0)
+        b.start(comm)
+
+        b.send("hello")
+        assert await comm.read() == ("hello",)
+
+        with freeze_batched_send(b) as locked_comm:
+            b.send("foo")
+            b.send("bar")
+
+            # Sent messages are available on the write queue
+            msg = await locked_comm.write_queue.get()
+            assert msg == (comm.peer_address, ["foo", "bar"])
+
+            # Sent messages will not reach the echo server
+            await asyncio.sleep(0.01)
+            assert e.count == 1
+
+            # Now we let messages send to the echo server
+            locked_comm.write_event.set()
+            assert await comm.read() == ("foo", "bar")
+            assert e.count == 2
+
+            locked_comm.write_event.clear()
+            b.send("baz")
+            await asyncio.sleep(0.01)
+            assert e.count == 2
+
+        assert b.comm is comm
+        assert await comm.read() == ("baz",)
+        assert e.count == 3
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_wait_for_state(c, s, a, capsys):
+    ev = Event()
+    x = c.submit(lambda ev: ev.wait(), ev, key="x")
+
+    await asyncio.gather(
+        wait_for_state("x", "processing", s),
+        wait_for_state("x", "executing", a),
+        c.run(wait_for_state, "x", "executing"),
+    )
+
+    await ev.set()
+
+    await asyncio.gather(
+        wait_for_state("x", "memory", s),
+        wait_for_state("x", "memory", a),
+        c.run(wait_for_state, "x", "memory"),
+    )
+
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(wait_for_state("x", "bad_state", s), timeout=0.1)
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(wait_for_state("y", "memory", s), timeout=0.1)
+    assert capsys.readouterr().out == (
+        f"tasks[x].state='memory' on {s.address}; expected state='bad_state'\n"
+        f"tasks[y] not found on {s.address}\n"
+    )
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_wait_for_stimulus(c, s, a):
+    t1 = asyncio.create_task(wait_for_stimulus(ComputeTaskEvent, a))
+    t2 = asyncio.create_task(wait_for_stimulus(ComputeTaskEvent, a, key="y"))
+    await asyncio.sleep(0.05)
+    assert not t1.done()
+    assert not t2.done()
+
+    x = c.submit(inc, 1, key="x")
+    ev = await t1
+    assert isinstance(ev, ComputeTaskEvent)
+    await wait_for_stimulus(ComputeTaskEvent, a, key="x")
+    await c.run(wait_for_stimulus, ComputeTaskEvent, key="x")
+    assert not t2.done()
+
+    y = c.submit(inc, 1, key="y")
+    await t2
+
+
+def test_ws_with_running_task(ws_with_running_task):
+    ws = ws_with_running_task
+    ts = ws.tasks["x"]
+    assert ts.resource_restrictions == {"R": 1}
+    assert ws.available_resources == {"R": 0}
+    assert ws.total_resources == {"R": 1}
+    assert ts.state in ("executing", "long-running")

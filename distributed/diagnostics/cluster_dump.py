@@ -1,4 +1,7 @@
-from typing import Any, Collection, Dict, Literal
+from __future__ import annotations
+
+from collections.abc import Collection
+from typing import Any, Literal
 
 from distributed.cluster_dump import (
     DEFAULT_CLUSTER_DUMP_EXCLUDE,
@@ -20,9 +23,9 @@ class ClusterDump(SchedulerPlugin):
     def __init__(
         self,
         url: str,
-        exclude: "Collection[str]" = DEFAULT_CLUSTER_DUMP_EXCLUDE,
+        exclude: Collection[str] = DEFAULT_CLUSTER_DUMP_EXCLUDE,
         format_: Literal["msgpack", "yaml"] = DEFAULT_CLUSTER_DUMP_FORMAT,
-        **storage_options: Dict[str, Any],
+        **storage_options: dict[str, Any],
     ):
         self.url = url
         self.exclude = exclude
