@@ -842,7 +842,6 @@ def test_workerstate_deadlock_cancelled_after_inflight_before_gather_from_worker
         assert ws.tasks["f1B"].state == "memory"
     assert ws.tasks["f2"].state == "memory"
     assert ws.tasks["f3"].state == "memory"
-    assert "f4" not in ws.tasks
 
 
 def test_workerstate_executing_to_executing(ws_with_running_task):
