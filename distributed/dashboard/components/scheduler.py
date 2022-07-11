@@ -11,7 +11,7 @@ from numbers import Number
 from typing import TypeVar
 
 import numpy as np
-from bokeh.core.properties import without_property_validation
+from bokeh.core.properties import value, without_property_validation
 from bokeh.io import curdoc
 from bokeh.layouts import column, row
 from bokeh.models import (
@@ -40,7 +40,6 @@ from bokeh.models import (
     Title,
     VeeHead,
     WheelZoomTool,
-    value,
 )
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.models.widgets.markups import Div
