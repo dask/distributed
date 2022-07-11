@@ -109,7 +109,12 @@ async def test_fail_to_pickle_execute_1(c, s, a, b):
     larger than target. The data is lost and the task is marked as failed; the worker
     remains in usable condition.
 
-    See also test_workerstate_fail_to_pickle_1
+    See also
+    --------
+    test_workerstate_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_flight
+    test_fail_to_pickle_execute_2
+    test_fail_to_pickle_spill
     """
     x = c.submit(FailToPickle, reported_size=100e9, key="x")
     await wait(x)
@@ -128,8 +133,14 @@ class FailStoreDict(UserDict):
 
 
 def test_workerstate_fail_to_pickle_execute_1(ws_with_running_task):
-    """Same as test_fail_to_pickle_target_execute_1, but testing the WorkerState in
-    isolation.
+    """Same as test_fail_to_pickle_target_execute_1
+
+    See also
+    --------
+    test_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_flight
+    test_fail_to_pickle_execute_2
+    test_fail_to_pickle_spill
     """
     ws = ws_with_running_task
     assert not ws.data
@@ -147,6 +158,13 @@ def test_workerstate_fail_to_pickle_flight(ws):
     """Same as test_workerstate_fail_to_pickle_execute_1, but the task was
     computed on another host and for whatever reason it did not fail to pickle when it
     was sent over the network.
+
+    See also
+    --------
+    test_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_execute_1
+    test_fail_to_pickle_execute_2
+    test_fail_to_pickle_spill
 
     See also test_worker_state_machine.py::test_gather_dep_failure, where the task
     instead fails to unpickle when leaving the network stack.
@@ -187,6 +205,13 @@ async def test_fail_to_pickle_execute_2(c, s, a):
     """Test failure to spill triggered by computing a key which is individually smaller
     than target, so it is not spilled immediately. The data is retained and the task is
     NOT marked as failed; the worker remains in usable condition.
+
+    See also
+    --------
+    test_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_flight
+    test_fail_to_pickle_spill
     """
     x = c.submit(FailToPickle, reported_size=256, key="x")
     await wait(x)
@@ -217,7 +242,15 @@ async def test_fail_to_pickle_execute_2(c, s, a):
     },
 )
 async def test_fail_to_pickle_spill(c, s, a):
-    """Test failure to evict a key, triggered by the spill threshold"""
+    """Test failure to evict a key, triggered by the spill threshold.
+
+    See also
+    --------
+    test_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_flight
+    test_fail_to_pickle_execute_2
+    """
     a.monitor.get_process_memory = lambda: 701 if a.data.fast else 0
 
     with captured_logger(logging.getLogger("distributed.spill")) as logs:
