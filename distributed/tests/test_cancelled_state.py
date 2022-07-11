@@ -606,11 +606,10 @@ def test_workerstate_executing_skips_fetch_on_success(ws_with_running_task):
         ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s2"),
         ExecuteSuccessEvent.dummy("x", 123, stimulus_id="s3"),
     )
-    assert len(instructions) == 2
-    assert isinstance(instructions[0], TaskFinishedMsg)
-    assert instructions[0].key == "x"
-    assert instructions[0].stimulus_id == "s3"
-    assert instructions[1] == Execute(key="y", stimulus_id="s3")
+    assert instructions == [
+        TaskFinishedMsg.match(key="x", stimulus_id="s3"),
+        Execute(key="y", stimulus_id="s3"),
+    ]
     assert ws.tasks["x"].state == "memory"
     assert ws.data["x"] == 123
 
@@ -662,12 +661,10 @@ def test_workerstate_flight_skips_executing_on_success(ws):
             worker=ws2, total_nbytes=1, data={"x": 123}, stimulus_id="s4"
         ),
     )
-    assert len(instructions) == 2
-    assert instructions[0] == GatherDep(
-        worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"
-    )
-    assert isinstance(instructions[1], TaskFinishedMsg)
-    assert instructions[1].stimulus_id == "s4"
+    assert instructions == [
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
+        TaskFinishedMsg.match(key="x", stimulus_id="s4"),
+    ]
     assert ws.tasks["x"].state == "memory"
     assert ws.data["x"] == 123
 
