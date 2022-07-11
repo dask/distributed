@@ -1850,7 +1850,8 @@ class WorkerState:
                 for dep in ts.dependencies
             )
             assert all(dep.state == "memory" for dep in ts.dependencies)
-            assert ts.key not in self.ready
+            # FIXME https://github.com/dask/distributed/issues/6710
+            # assert ts.key not in pluck(1, self.ready)
         ts.state = "constrained"
         self.constrained.append(ts.key)
         return self._ensure_computing()
@@ -1885,7 +1886,8 @@ class WorkerState:
     ) -> RecsInstrs:
         if self.validate:
             assert ts.state == "waiting"
-            assert ts.key not in self.ready
+            # FIXME https://github.com/dask/distributed/issues/6710
+            # assert ts.key not in pluck(1, self.ready)
             assert not ts.waiting_for_data
             for dep in ts.dependencies:
                 assert dep.key in self.data or dep.key in self.actors
@@ -2165,7 +2167,6 @@ class WorkerState:
         if self.validate:
             assert ts.state in ("executing", "long-running")
             assert not ts.waiting_for_data
-            assert ts.key not in self.ready
 
         self.executing.discard(ts)
         self.long_running.discard(ts)
@@ -2182,7 +2183,9 @@ class WorkerState:
             assert not ts.waiting_for_data
             assert ts.key not in self.data
             assert ts.state in READY
-            assert ts.key not in self.ready
+            # FIXME https://github.com/dask/distributed/issues/6710
+            # assert ts.key not in pluck(1, self.ready)
+            # assert ts.key not in self.constrained
             for dep in ts.dependencies:
                 assert dep.key in self.data or dep.key in self.actors
 
@@ -2197,7 +2200,9 @@ class WorkerState:
             assert not ts.waiting_for_data
             assert ts.key not in self.data
             assert ts.state in READY
-            assert ts.key not in self.ready
+            # FIXME https://github.com/dask/distributed/issues/6710
+            # assert ts.key not in pluck(1, self.ready)
+            # assert ts.key not in self.constrained
             assert all(
                 dep.key in self.data or dep.key in self.actors
                 for dep in ts.dependencies
@@ -3082,7 +3087,6 @@ class WorkerState:
         assert ts.key in self.data or ts.key in self.actors
         assert isinstance(ts.nbytes, int)
         assert not ts.waiting_for_data
-        assert ts.key not in self.ready
 
     def _validate_task_executing(self, ts: TaskState) -> None:
         if ts.state == "executing":
@@ -3129,7 +3133,8 @@ class WorkerState:
     def _validate_task_flight(self, ts: TaskState) -> None:
         assert ts.key not in self.data
         assert ts in self.in_flight_tasks
-        assert not any(dep.key in self.ready for dep in ts.dependents)
+        # FIXME https://github.com/dask/distributed/issues/6710
+        # assert not any(dep.key in self.ready for dep in ts.dependents)
         assert ts.coming_from
         assert ts.coming_from in self.in_flight_workers
         assert ts.key in self.in_flight_workers[ts.coming_from]
