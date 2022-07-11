@@ -120,6 +120,17 @@ def test_TaskState__to_dict():
     ]
 
 
+def test_TaskState_repr():
+    ts = TaskState("x")
+    assert str(ts) == "<TaskState 'x' released>"
+    ts.state = "cancelled"
+    ts.previous = "flight"
+    assert str(ts) == "<TaskState 'x' cancelled(flight)>"
+    ts.state = "resumed"
+    ts.next = "waiting"
+    assert str(ts) == "<TaskState 'x' resumed(flight->waiting)>"
+
+
 def test_WorkerState__to_dict(ws):
     ws.handle_stimulus(
         AcquireReplicasEvent(
@@ -1162,7 +1173,7 @@ def test_task_with_dependencies_acquires_resources(ws):
         (ExecuteSuccessEvent, "memory"),
         pytest.param(
             ExecuteFailureEvent,
-            "error",
+            "flight",
             marks=pytest.mark.xfail(
                 reason="distributed#6682,distributed#6689,distributed#6693"
             ),
@@ -1238,7 +1249,7 @@ def test_done_task_not_in_all_running_tasks(
         (ExecuteSuccessEvent, "memory"),
         pytest.param(
             ExecuteFailureEvent,
-            "error",
+            "flight",
             marks=pytest.mark.xfail(reason="distributed#6689"),
         ),
     ],
