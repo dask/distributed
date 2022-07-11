@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import pickle
-from typing import Any, List
+from typing import Any
 
 from toolz import first
 
@@ -15,7 +17,7 @@ except ImportError:
 
 PLASMA_PATH = dask.config.get("distributed.protocol.shared.plasma_path", "tmp/plasma")
 
-plasma: "List[Any]" = []
+plasma: list[Any] = []
 
 
 def _get_plasma():
@@ -38,7 +40,7 @@ def ser(x, context=None):
 
     plasma_size_limit = dask.config.get("distributed.protocol.shared.minsize", 1)
 
-    frames: "List[bytes|memoryview]" = [b""]
+    frames: list[bytes | memoryview] = [b""]
     try:
         worker = get_worker()
     except ValueError:
