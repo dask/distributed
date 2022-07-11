@@ -203,35 +203,45 @@ async def test_executing_cancelled_error(c, s, w):
         async with lock:
             raise RuntimeError()
 
-    fut = c.submit(wait_and_raise)
-    await wait_for_state(fut.key, "executing", w)
+    f1 = c.submit(wait_and_raise, key="f1")
+    await wait_for_state(f1.key, "executing", w)
     # Queue up another task to ensure this is not affected by our error handling
-    fut2 = c.submit(inc, 1)
-    await wait_for_state(fut2.key, "ready", w)
+    f2 = c.submit(inc, 1, key="f2")
+    await wait_for_state(f2.key, "ready", w)
 
-    fut.release()
-    await wait_for_state(fut.key, "cancelled", w)
+    f1.release()
+    await wait_for_state(f1.key, "cancelled", w)
     await lock.release()
 
     # At this point we do not fetch the result of the future since the future
     # itself would raise a cancelled exception. At this point we're concerned
     # about the worker. The task should transition over error to be eventually
     # forgotten since we no longer hold a ref.
-    while fut.key in w.state.tasks:
+    while f1.key in w.state.tasks:
         await asyncio.sleep(0.01)
 
-    assert await fut2 == 2
+    assert await f2 == 2
     # Everything should still be executing as usual after this
     await c.submit(sum, c.map(inc, range(10))) == sum(map(inc, range(10)))
 
     # Everything above this line should be generically true, regardless of
     # refactoring. Below verifies some implementation specific test assumptions
 
-    story = w.state.story(fut.key)
-    start_finish = [(msg[1], msg[2], msg[3]) for msg in story if len(msg) == 7]
-    assert ("executing", "released", "cancelled") in start_finish
-    assert ("cancelled", "error", "error") in start_finish
-    assert ("error", "released", "released") in start_finish
+    assert_story(
+        w.state.story(f1.key),
+        [
+            (f1.key, "executing", "released", "cancelled", {}),
+            (
+                f1.key,
+                "cancelled",
+                "error",
+                "error",
+                {f2.key: "executing", f1.key: "released"},
+            ),
+            (f1.key, "error", "released", "released", {f1.key: "forgotten"}),
+            (f1.key, "released", "forgotten", "forgotten", {}),
+        ],
+    )
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
