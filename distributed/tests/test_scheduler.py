@@ -629,38 +629,54 @@ async def test_restart(c, s, a, b):
     assert not s.tasks
 
 
-@gen_cluster(client=True, Worker=Nanny, timeout=60)
+@pytest.mark.slow
+@gen_cluster(Worker=Nanny, nthreads=[("", 1)] * 5)
+async def test_restart_waits_for_new_workers(s, *workers):
+    n_initial_workers = len(s.workers)
+    await s.restart()
+    assert len(s.workers) == n_initial_workers
+    for w in workers:
+        assert w.address not in s.workers
+
+
+class SlowRestartNanny(Nanny):
+    def __init__(self, *args, **kwargs):
+        self.restart_proceed = asyncio.Event()
+        self.restart_called = asyncio.Event()
+        super().__init__(*args, **kwargs)
+
+    async def restart(self, *, timeout):
+        self.restart_called.set()
+        try:
+            await asyncio.wait_for(self.restart_proceed.wait(), timeout)
+        except TimeoutError:
+            return "timed out"
+        return await super().restart(timeout=timeout)
+
+
+@gen_cluster(Worker=SlowRestartNanny, nthreads=[("", 1)] * 2)
+async def test_restart_nanny_timeout_exceeded(s, a, b):
+    with pytest.raises(TimeoutError, match=r"2 worker\(s\) did not restart within 1s"):
+        await s.restart(timeout=1)
+    assert a.restart_called.is_set()
+    assert b.restart_called.is_set()
+
+
+@gen_cluster(nthreads=[("", 1)] * 2)
+async def test_restart_not_all_workers_return(s, a, b):
+    with pytest.raises(TimeoutError, match=r"after 1s, only 0 have returned"):
+        await s.restart(timeout=1)
+
+
+@gen_cluster(client=True, Worker=Nanny)
 async def test_restart_some_nannies_some_not(c, s, a, b):
     original_procs = {a.process.process, b.process.process}
     original_workers = dict(s.workers)
     async with Worker(s.address, nthreads=1) as w:
         await c.wait_for_workers(3)
 
-        # Halfway through `Scheduler.restart`, only the non-Nanny workers should be removed.
-        # Nanny-based workers should be kept around so we can call their `restart` RPC.
-        class ValidateRestartPlugin(SchedulerPlugin):
-            error: Exception | None
-
-            def restart(self, scheduler: Scheduler) -> None:
-                try:
-                    assert scheduler.workers.keys() == {
-                        a.worker_address,
-                        b.worker_address,
-                    }
-                    assert all(ws.nanny for ws in scheduler.workers.values())
-                except Exception as e:
-                    # `Scheduler.restart` swallows exceptions within plugins
-                    self.error = e
-                    raise
-                else:
-                    self.error = None
-
-        plugin = ValidateRestartPlugin()
-        s.add_plugin(plugin)
-        await s.restart()
-
-        if plugin.error:
-            raise plugin.error
+        with pytest.raises(TimeoutError, match="after 5s, only 2 have returned"):
+            await s.restart(timeout=5)
 
         assert w.status == Status.closed
 
@@ -673,18 +689,6 @@ async def test_restart_some_nannies_some_not(c, s, a, b):
         assert s.workers.keys().isdisjoint(original_workers.keys())
         # The old WorkerState instances should be replaced
         assert set(s.workers.values()).isdisjoint(original_workers.values())
-
-
-class SlowRestartNanny(Nanny):
-    def __init__(self, *args, **kwargs):
-        self.restart_proceed = asyncio.Event()
-        self.restart_called = asyncio.Event()
-        super().__init__(*args, **kwargs)
-
-    async def restart(self, **kwargs):
-        self.restart_called.set()
-        await self.restart_proceed.wait()
-        return await super().restart(**kwargs)
 
 
 @gen_cluster(

@@ -3493,16 +3493,6 @@ async def test_Client_clears_references_after_restart(c, s, a, b):
         assert key not in c.refcount
 
 
-@pytest.mark.slow
-@gen_cluster(Worker=Nanny, client=True, nthreads=[("", 1)] * 5)
-async def test_restart_waits_for_new_workers(c, s, *workers):
-    initial_workers = set(s.workers)
-    await c.restart()
-    assert len(s.workers) == len(initial_workers)
-    for w in workers:
-        assert w.address not in s.workers
-
-
 @gen_cluster(Worker=Nanny, client=True)
 async def test_restart_timeout_is_logged(c, s, a, b):
     with captured_logger(logging.getLogger("distributed.client")) as logger:
