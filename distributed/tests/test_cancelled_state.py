@@ -905,7 +905,7 @@ async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
         await b.in_gather_dep.wait()
 
         await s.remove_worker(
-            address=x.address, safe=True, close=close_worker, stimulus_id="test"
+            address=x.address, safe=True, close=close_worker, stimulus_id="remove-worker"
         )
 
         await wait_for_state(fut2.key, intermediate_state, b, interval=0)
