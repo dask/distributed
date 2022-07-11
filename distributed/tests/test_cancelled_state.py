@@ -8,12 +8,14 @@ import distributed
 from distributed import Event, Lock, Worker
 from distributed.client import wait
 from distributed.utils_test import (
+    BlockedGatherDep,
     BlockedGetData,
     _LockedCommPool,
     assert_story,
     gen_cluster,
     inc,
     lock_inc,
+    slowinc,
     wait_for_state,
     wait_for_stimulus,
 )
@@ -875,3 +877,38 @@ def test_workerstate_resumed_waiting_to_flight(ws):
         GatherDep(worker=ws2, to_gather={"x"}, stimulus_id="s1", total_nbytes=1),
     ]
     assert ws.tasks["x"].state == "flight"
+
+
+@pytest.mark.parametrize("intermediate_state", ["resumed", "cancelled"])
+@pytest.mark.parametrize("close_worker", [False, True])
+@gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "500ms"})
+async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
+    c, s, a, x, intermediate_state, close_worker
+):
+    """If a task was transitioned to in-flight, the gather_dep coroutine was
+    scheduled but a cancel request came in before gather_data_from_worker was
+    issued this might corrupt the state machine if the cancelled key is not
+    properly handled
+    """
+    fut1 = c.submit(slowinc, 1, workers=[a.address], key="f1")
+    fut1B = c.submit(slowinc, 2, workers=[x.address], key="f1B")
+    fut2 = c.submit(sum, [fut1, fut1B], workers=[x.address], key="f2")
+    await fut2
+
+    async with BlockedGatherDep(s.address, name="b") as b:
+        fut3 = c.submit(inc, fut2, workers=[b.address], key="f3")
+
+        await wait_for_state(fut2.key, "flight", b)
+
+        s.set_restrictions(worker={fut1B.key: a.address, fut2.key: b.address})
+
+        await b.in_gather_dep.wait()
+
+        await s.remove_worker(
+            address=x.address, safe=True, close=close_worker, stimulus_id="test"
+        )
+
+        await wait_for_state(fut2.key, intermediate_state, b, interval=0)
+
+        b.block_gather_dep.set()
+        await fut3
