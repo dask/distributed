@@ -32,6 +32,7 @@ from distributed.worker_state_machine import (
     ExecuteSuccessEvent,
     FreeKeysEvent,
     GatherDep,
+    GatherDepFailureEvent,
     GatherDepSuccessEvent,
     Instruction,
     InvalidTaskState,
@@ -45,6 +46,7 @@ from distributed.worker_state_machine import (
     SecedeEvent,
     SerializedTask,
     StateMachineEvent,
+    TaskErredMsg,
     TaskState,
     TransitionCounterMaxExceeded,
     UnpauseEvent,
@@ -1255,3 +1257,26 @@ def test_done_resumed_task_not_in_all_running_tasks(
     ts = ws.tasks["x"]
     assert ts.state == done_status
     assert ts not in ws.all_running_tasks
+
+
+@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/6705")
+def test_gather_dep_failure(ws):
+    """Simulate a task failing to unpickle when it reaches the destination worker after
+    a flight.
+
+    See also test_worker_memory.py::test_workerstate_fail_to_pickle_flight,
+    where the task instead is gathered successfully, but fails to spill.
+    """
+    ws2 = "127.0.0.1:2"
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s1"),
+        GatherDepFailureEvent.from_exception(
+            Exception(), worker=ws2, total_nbytes=1, stimulus_id="s2"
+        ),
+    )
+    assert instructions == [
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
+        TaskErredMsg.match(key="x", stimulus_id="s2"),
+    ]
+    assert ws.tasks["x"].state == "error"
+    assert ws.tasks["y"].state == "waiting"  # Not ready

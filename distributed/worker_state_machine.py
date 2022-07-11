@@ -2132,12 +2132,6 @@ class WorkerState:
                 f"Tried to transition task {ts} to `memory` without data available"
             )
 
-        self._release_resources(ts)
-        self.executing.discard(ts)
-        self.long_running.discard(ts)
-        self.in_flight_tasks.discard(ts)
-        ts.coming_from = None
-
         instructions: Instructions = []
         try:
             recs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
@@ -2145,6 +2139,12 @@ class WorkerState:
             msg = error_message(e)
             recs = {ts: tuple(msg.values())}
         else:
+            self._release_resources(ts)
+            self.executing.discard(ts)
+            self.long_running.discard(ts)
+            self.in_flight_tasks.discard(ts)
+            ts.coming_from = None
+
             if self.validate:
                 assert ts.key in self.data or ts.key in self.actors
             instructions.append(
