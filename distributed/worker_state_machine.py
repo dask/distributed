@@ -1162,12 +1162,13 @@ class WorkerState:
     executing: set[TaskState]
 
     #: Set of tasks that are currently running and have called
-    #: :func:`~distributed.secede`.
+    #: :func:`~distributed.secede`, so they no longer count towards the maximum number
+    #: of concurrent tasks (nthreads).
     #: These tasks do not appear in the :attr:`executing` set.
     long_running: set[TaskState]
 
-    #: A number of tasks that this worker has run in its lifetime.
-    #: See also :meth:`executing_count`.
+    #: A number of tasks that this worker has run in its lifetime; this includes failed
+    #: and cancelled tasks. See also :meth:`executing_count`.
     executed_count: int
 
     #: Actor tasks. See :doc:`actors`.
@@ -1283,24 +1284,34 @@ class WorkerState:
 
     @property
     def executing_count(self) -> int:
-        """Count of tasks currently executing on this worker.
-        Does not include long running (a.k.a. seceded) and cancelled tasks.
+        """Count of tasks currently executing on this worker and counting towards the
+        maximum number of threads.
+
+        It includes cancelled tasks, but does not include long running (a.k.a. seceded)
+        tasks.
 
         See also
         --------
         WorkerState.executing
         WorkerState.executed_count
         WorkerState.nthreads
+        WorkerState.all_running_tasks
         """
         return len(self.executing)
 
     @property
     def all_running_tasks(self) -> set[TaskState]:
-        """All tasks that are currently occupying a thread.
+        """All tasks that are currently occupying a thread. They may or may not count
+        towards the maximum number of threads.
+
         These are:
 
-        - ``ts.status in ("executing", "long-running", "cancelled")``
-        - ``ts.status == "resumed" and ts.previous in ("executing", "long-running")``
+        - ts.status in (executing, long-running)
+        - ts.status in (cancelled, resumed) and ts.previous in (executing, long-running)
+
+        See also
+        --------
+        WorkerState.executing_count
         """
         # Note: cancelled and resumed tasks are still in either of these sets
         return self.executing | self.long_running
@@ -3283,10 +3294,6 @@ class WorkerState:
 
         if self.transition_counter_max:
             assert self.transition_counter < self.transition_counter_max
-
-        # Test that there aren't multiple TaskState objects with the same key in data_needed
-        for tss in self.data_needed.values():
-            assert len({ts.key for ts in tss}) == len(tss)
 
         self._validate_resources()
 
