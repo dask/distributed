@@ -20,7 +20,6 @@ from distributed.utils_test import (
     wait_for_stimulus,
 )
 from distributed.worker_state_machine import (
-    AddKeysMsg,
     ComputeTaskEvent,
     Execute,
     ExecuteFailureEvent,
@@ -29,8 +28,6 @@ from distributed.worker_state_machine import (
     GatherDep,
     GatherDepNetworkFailureEvent,
     GatherDepSuccessEvent,
-    ReleaseWorkerDataMsg,
-    TaskErredMsg,
     TaskFinishedMsg,
 )
 
@@ -475,7 +472,6 @@ async def test_resumed_cancelled_handle_compute(
     executing -> cancelled -> resumed(fetch)
 
     A handle_compute should properly restore executing.
-    See also: test_workerstate_resumed_cancelled_handle_compute
     """
     # This test is heavily using set_restrictions to simulate certain scheduler
     # decisions of placing keys
@@ -564,98 +560,6 @@ async def test_resumed_cancelled_handle_compute(
         )
 
 
-@pytest.mark.parametrize("wait_for_processing", [True, False])
-@pytest.mark.parametrize("raise_error", [True, False])
-def test_workerstate_resumed_cancelled_handle_compute(
-    ws, raise_error, wait_for_processing
-):
-    """Same as test_resumed_cancelled_handle_compute"""
-    ws2 = "127.0.0.1:2"
-    instructions = ws.handle_stimulus(
-        ComputeTaskEvent.dummy(key="f3", who_has={"f2": [ws2]}, stimulus_id="s1"),
-        GatherDepSuccessEvent(
-            worker=ws2, data={"f2": None}, total_nbytes=1, stimulus_id="s2"
-        ),
-        FreeKeysEvent(keys=["f3", "f2"], stimulus_id="s3"),
-        ComputeTaskEvent.dummy(
-            key="f4", who_has={"f3": [ws2], "f1": [ws2]}, stimulus_id="s4"
-        ),
-        GatherDepSuccessEvent(
-            worker=ws2, data={"f1": None}, total_nbytes=1, stimulus_id="s5"
-        ),
-        FreeKeysEvent(keys=["f4", "f1"], stimulus_id="s6"),
-    )
-    assert instructions == [
-        GatherDep(worker=ws2, to_gather={"f2"}, total_nbytes=1, stimulus_id="s1"),
-        AddKeysMsg(keys=["f2"], stimulus_id="s2"),
-        Execute(key="f3", stimulus_id="s2"),
-        ReleaseWorkerDataMsg(key="f2", stimulus_id="s3"),
-        GatherDep(worker=ws2, to_gather={"f1"}, total_nbytes=1, stimulus_id="s4"),
-        AddKeysMsg(keys=["f1"], stimulus_id="s5"),
-        ReleaseWorkerDataMsg(key="f1", stimulus_id="s6"),
-    ]
-    assert "f1" not in ws.tasks
-    assert ws.tasks["f2"].state == "released"
-    assert ws.tasks["f3"].state == "resumed"
-    assert ws.tasks["f3"].previous == "executing"
-    assert ws.tasks["f3"].next == "fetch"
-    assert "f4" not in ws.tasks
-
-    s7 = ComputeTaskEvent.dummy(key="f3", who_has={"f2": [ws2]}, stimulus_id="s7")
-    if raise_error:
-        s8 = ExecuteFailureEvent.dummy(key="f3", stimulus_id="s8")
-        if wait_for_processing:
-            instructions = ws.handle_stimulus(s7, s8)
-            assert instructions == [
-                TaskErredMsg.match(key="f3", stimulus_id="s8"),
-            ]
-        else:
-            instructions = ws.handle_stimulus(s8, s7)
-            assert instructions == [
-                TaskErredMsg.match(stimulus_id="s8", key="f3"),
-                TaskErredMsg.match(stimulus_id="s7", key="f3"),
-            ]
-
-        assert "f1" not in ws.tasks
-        assert ws.tasks["f2"].state == "released"
-        assert ws.tasks["f3"].state == "error"
-        assert "f4" not in ws.tasks
-
-    else:
-        if wait_for_processing:
-            instructions = ws.handle_stimulus(s7)
-            assert not instructions
-
-        instructions = ws.handle_stimulus(
-            ExecuteSuccessEvent.dummy(key="f3", stimulus_id="s8"),
-            ComputeTaskEvent.dummy(
-                key="f4", who_has={"f3": [ws.address], "f1": [ws2]}, stimulus_id="s9"
-            ),
-            GatherDepSuccessEvent(
-                worker=ws2, data={"f1": None}, total_nbytes=1, stimulus_id="s10"
-            ),
-            ExecuteSuccessEvent.dummy(key="f4", stimulus_id="s11"),
-        )
-        assert instructions == [
-            TaskFinishedMsg.match(stimulus_id="s8", key="f3"),
-            GatherDep(worker=ws2, to_gather={"f1"}, total_nbytes=1, stimulus_id="s9"),
-            AddKeysMsg(keys=["f1"], stimulus_id="s10"),
-            Execute(key="f4", stimulus_id="s10"),
-            TaskFinishedMsg.match(key="f4", stimulus_id="s11"),
-        ]
-
-        if not wait_for_processing:
-            instructions = ws.handle_stimulus(s7)
-            assert instructions == [
-                TaskFinishedMsg.match(key="f3", stimulus_id="s7"),
-            ]
-
-        assert ws.tasks["f1"].state == "memory"
-        assert ws.tasks["f2"].state == "released"
-        assert ws.tasks["f3"].state == "memory"
-        assert ws.tasks["f4"].state == "memory"
-
-
 @pytest.mark.parametrize("intermediate_state", ["resumed", "cancelled"])
 @pytest.mark.parametrize("close_worker", [False, True])
 @gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "500ms"})
@@ -695,153 +599,6 @@ async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
 
         b.block_gather_dep.set()
         await fut3
-
-
-@pytest.mark.parametrize("intermediate_state", ["resumed", "cancelled"])
-@pytest.mark.parametrize("close_worker", [False, True])
-def test_workerstate_deadlock_cancelled_after_inflight_before_gather_from_worker(
-    ws, intermediate_state, close_worker
-):
-    """Same as test_deadlock_cancelled_after_inflight_before_gather_from_worker"""
-    ws2 = "127.0.0.1:2"
-    ws3 = "127.0.0.1:3"
-    ws4 = "127.0.0.1:4"
-
-    instructions = ws.handle_stimulus(
-        ComputeTaskEvent.dummy(key="f3", who_has={"f2": [ws2]}, stimulus_id="compute1"),
-        FreeKeysEvent(keys=["f3"], stimulus_id="remove-worker"),
-    )
-    assert instructions == [
-        GatherDep(
-            stimulus_id="compute1",
-            worker=ws2,
-            to_gather={"f2"},
-            total_nbytes=1,
-        )
-    ]
-
-    compute2 = ComputeTaskEvent.dummy(
-        key="f2",
-        who_has={"f1": [ws3], "f1B": [ws3]},
-        stimulus_id="compute2",
-    )
-    gather_ws2_fail = GatherDepNetworkFailureEvent(
-        worker=ws2,
-        total_nbytes=1,
-        stimulus_id="gather-ws2",
-    )
-    gather_ws2_success = GatherDepSuccessEvent(
-        worker=ws2,
-        total_nbytes=1,
-        data={"f2": None},
-        stimulus_id="gather-ws2",
-    )
-    gather_ws3 = GatherDepSuccessEvent(
-        worker=ws3,
-        total_nbytes=2,
-        data={"f1": None, "f1B": None},
-        stimulus_id="gather-ws3",
-    )
-    finished2 = ExecuteSuccessEvent.dummy(key="f2", stimulus_id="finished2")
-
-    def _reorder_addkeys(instructions):
-        # We need this hack because sets order is non-deterministic
-        assert isinstance(instructions[1], AddKeysMsg)
-        assert isinstance(instructions[2], AddKeysMsg)
-        if instructions[1].keys == ["f1B"]:
-            # Swap position of instructions[1] and instructions[2] so that
-            # f1 is always before f1B
-            instructions[1:3] = instructions[2:0:-1]
-
-    if not close_worker and intermediate_state == "resumed":
-        instructions = ws.handle_stimulus(
-            compute2,
-            gather_ws2_success,
-        )
-        assert instructions == [
-            TaskFinishedMsg.match(stimulus_id="gather-ws2", key="f2"),
-        ]
-
-    elif not close_worker and intermediate_state == "cancelled":
-        instructions = ws.handle_stimulus(
-            gather_ws2_success,
-            compute2,
-            gather_ws3,
-            finished2,
-        )
-        _reorder_addkeys(instructions)
-        assert instructions == [
-            GatherDep(
-                stimulus_id="compute2",
-                worker=ws3,
-                to_gather={"f1", "f1B"},
-                total_nbytes=2,
-            ),
-            AddKeysMsg(stimulus_id="gather-ws3", keys=["f1"]),
-            AddKeysMsg(stimulus_id="gather-ws3", keys=["f1B"]),
-            Execute(stimulus_id="gather-ws3", key="f2"),
-            TaskFinishedMsg.match(stimulus_id="finished2", key="f2"),
-        ]
-
-    elif close_worker and intermediate_state == "resumed":
-        instructions = ws.handle_stimulus(
-            compute2,
-            gather_ws2_fail,
-            gather_ws3,
-            finished2,
-        )
-        _reorder_addkeys(instructions)
-        assert instructions == [
-            GatherDep(
-                stimulus_id="gather-ws2",
-                worker=ws3,
-                to_gather={"f1", "f1B"},
-                total_nbytes=2,
-            ),
-            AddKeysMsg(stimulus_id="gather-ws3", keys=["f1"]),
-            AddKeysMsg(stimulus_id="gather-ws3", keys=["f1B"]),
-            Execute(stimulus_id="gather-ws3", key="f2"),
-            TaskFinishedMsg.match(stimulus_id="finished2", key="f2"),
-        ]
-
-    elif close_worker and intermediate_state == "cancelled":
-        instructions = ws.handle_stimulus(
-            gather_ws2_fail,
-            compute2,
-            gather_ws3,
-            finished2,
-        )
-        _reorder_addkeys(instructions)
-        assert instructions == [
-            GatherDep(
-                stimulus_id="compute2",
-                worker=ws3,
-                to_gather={"f1", "f1B"},
-                total_nbytes=2,
-            ),
-            AddKeysMsg(stimulus_id="gather-ws3", keys=["f1"]),
-            AddKeysMsg(stimulus_id="gather-ws3", keys=["f1B"]),
-            Execute(stimulus_id="gather-ws3", key="f2"),
-            TaskFinishedMsg.match(stimulus_id="finished2", key="f2"),
-        ]
-
-    instructions = ws.handle_stimulus(
-        ComputeTaskEvent.dummy(key="f3", who_has={"f2": [ws4]}, stimulus_id="compute3"),
-        ExecuteSuccessEvent.dummy(key="f3", stimulus_id="finished3"),
-    )
-    assert instructions == [
-        Execute(stimulus_id="compute3", key="f3"),
-        TaskFinishedMsg.match(stimulus_id="finished3", key="f3"),
-    ]
-
-    if not close_worker and intermediate_state == "resumed":
-        assert ws.tasks["f1"].state == "released"
-        assert ws.tasks["f1B"].state == "released"
-    else:
-        assert ws.tasks["f1"].state == "memory"
-        assert ws.tasks["f1B"].state == "memory"
-    assert ws.tasks["f2"].state == "memory"
-    assert ws.tasks["f3"].state == "memory"
 
 
 def test_workerstate_executing_to_executing(ws_with_running_task):
