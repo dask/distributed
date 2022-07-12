@@ -14,7 +14,11 @@ from distributed import Client, Scheduler, wait
 from distributed.comm import connect, listen, parse_address, ucx
 from distributed.comm.registry import backends, get_backend
 from distributed.deploy.local import LocalCluster
-from distributed.diagnostics.nvml import has_cuda_context
+from distributed.diagnostics.nvml import (
+    device_get_count,
+    get_device_mig_mode,
+    has_cuda_context,
+)
 from distributed.protocol import to_serialize
 from distributed.utils_test import gen_test, inc
 
@@ -321,16 +325,33 @@ async def test_simple(
 async def test_cuda_context(
     ucx_loop,
 ):
+    device_index = None
+    for i in range(device_get_count()):
+        if get_device_mig_mode(i)[0] == 0:
+            device_index = i
+            break
+        pytest.skip("No CUDA devices in non-MIG mode available.")
+
     with dask.config.set({"distributed.comm.ucx.create-cuda-context": True}):
         async with LocalCluster(
             protocol="ucx", n_workers=1, asynchronous=True
         ) as cluster:
             async with Client(cluster, asynchronous=True) as client:
                 assert cluster.scheduler_address.startswith("ucx://")
-                assert has_cuda_context() == 0
+                ctx = has_cuda_context()
+                assert (
+                    ctx["has-context"]
+                    and ctx["device-index"] == device_index
+                    and isinstance(ctx["uuid"], bytes)
+                )
                 worker_cuda_context = await client.run(has_cuda_context)
                 assert len(worker_cuda_context) == 1
-                assert list(worker_cuda_context.values())[0] == 0
+                worker_cuda_context = list(worker_cuda_context.values())
+                assert (
+                    worker_cuda_context[0]["has-context"]
+                    and worker_cuda_context[0]["device-index"] == device_index
+                    and isinstance(worker_cuda_context[0]["uuid"], bytes)
+                )
 
 
 @gen_test()

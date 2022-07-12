@@ -56,12 +56,17 @@ def test_wsl_monitoring_enabled():
 
 def run_has_cuda_context(queue):
     try:
-        assert not nvml.has_cuda_context()
+        assert not nvml.has_cuda_context()["has-context"]
 
         import numba.cuda
 
         numba.cuda.current_context()
-        assert nvml.has_cuda_context() == 0
+        ctx = nvml.has_cuda_context()
+        assert (
+            ctx["has-context"]
+            and ctx["device-index"] == 0
+            and isinstance(ctx["uuid"], bytes)
+        )
 
         queue.put(None)
 
