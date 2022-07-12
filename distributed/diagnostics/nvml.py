@@ -147,6 +147,31 @@ def _pynvml_handles():
         return pynvml.nvmlDeviceGetHandleByIndex(gpu_idx)
 
 
+def _running_process_matches(handle):
+    """Check whether the current process is same as of handle's
+
+    Parameters
+    ----------
+    handle: ``pyvnml.nvml.LP_struct_c_nvmlDevice_t``
+        NVML handle to CUDA device
+
+    Returns
+    -------
+    out: bool
+        ``True`` if device handle's has a CUDA context on the running process,
+        or ``False`` otherwise.
+    """
+    init_once()
+    if hasattr(pynvml, "nvmlDeviceGetComputeRunningProcesses_v2"):
+        running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses_v2(handle)
+    else:
+        running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+    for proc in running_processes:
+        if os.getpid() == proc.pid:
+            return True
+    return False
+
+
 def has_cuda_context():
     """Check whether the current process already has a CUDA context created.
 
@@ -155,19 +180,110 @@ def has_cuda_context():
     ``False`` if current process has no CUDA context created, otherwise returns the
     index of the device for which there's a CUDA context.
     """
+    no_context = {
+        "has-context": False,
+        "device-index": None,
+        "mig-index": None,
+        "uuid": None,
+    }
     init_once()
     if not is_initialized():
-        return False
+        return no_context
     for index in range(device_get_count()):
         handle = pynvml.nvmlDeviceGetHandleByIndex(index)
-        if hasattr(pynvml, "nvmlDeviceGetComputeRunningProcesses_v2"):
-            running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses_v2(handle)
+        mig_current_mode, mig_pending_mode = pynvml.nvmlDeviceGetMigMode(handle)
+        if mig_current_mode == pynvml.NVML_DEVICE_MIG_ENABLE:
+            for mig_index in range(pynvml.nvmlDeviceGetMaxMigDeviceCount(handle)):
+                try:
+                    mig_handle = pynvml.nvmlDeviceGetMigDeviceHandleByIndex(
+                        handle, mig_index
+                    )
+                except pynvml.NVMLError_NotFound:
+                    # No MIG device with that index
+                    continue
+                if _running_process_matches(mig_handle):
+                    uuid = pynvml.nvmlDeviceGetUUID(mig_handle)
+                    return {
+                        "has-context": True,
+                        "device-index": index,
+                        "mig-index": mig_index,
+                        "uuid": uuid,
+                    }
         else:
-            running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
-        for proc in running_processes:
-            if os.getpid() == proc.pid:
-                return index
-    return False
+            if _running_process_matches(handle):
+                uuid = pynvml.nvmlDeviceGetUUID(handle)
+                return {
+                    "has-context": True,
+                    "device-index": index,
+                    "mig-index": None,
+                    "uuid": uuid,
+                }
+    return no_context
+
+
+def get_device_index_and_uuid(device):
+    """Get both device index and UUID from device index or UUID
+
+    Parameters
+    ----------
+    device: ``int``, ``bytes`` or``str``
+        An ``int`` with the index of a GPU, or ``bytes`` or ``str`` with the UUID
+        of a CUDA (either GPU or MIG) device.
+
+    Returns
+    -------
+    out: ``dict``
+        Dictionary containing ``"device-index"`` and ``"uuid"`` keys.
+
+    Examples
+    --------
+    >>> get_device_index_and_uuid(0)
+    {'device-index': 0, 'uuid': b'GPU-e1006a74-5836-264f-5c26-53d19d212dfe'}
+
+    >>> get_device_index_and_uuid('GPU-e1006a74-5836-264f-5c26-53d19d212dfe')
+    {'device-index': 0, 'uuid': b'GPU-e1006a74-5836-264f-5c26-53d19d212dfe'}
+
+    >>> get_device_index_and_uuid('MIG-7feb6df5-eccf-5faa-ab00-9a441867e237')
+    {'device-index': 0, 'uuid': b'MIG-7feb6df5-eccf-5faa-ab00-9a441867e237'}
+    """
+    init_once()
+    try:
+        device_index = int(device)
+        device_handle = pynvml.nvmlDeviceGetHandleByIndex(device_index)
+        uuid = pynvml.nvmlDeviceGetUUID(device_handle)
+    except ValueError:
+        uuid = device if isinstance(device, bytes) else bytes(device, "utf-8")
+
+        # Validate UUID, get index and UUID as seen with `nvidia-smi -L`
+        uuid_handle = pynvml.nvmlDeviceGetHandleByUUID(uuid)
+        device_index = pynvml.nvmlDeviceGetIndex(uuid_handle)
+        uuid = pynvml.nvmlDeviceGetUUID(uuid_handle)
+
+    return {"device-index": device_index, "uuid": uuid}
+
+
+def get_device_mig_mode(device):
+    """Get MIG mode for a device index or UUID
+
+    Parameters
+    ----------
+    device: ``int``, ``bytes`` or``str``
+        An ``int`` with the index of a GPU, or ``bytes`` or ``str`` with the UUID
+        of a CUDA (either GPU or MIG) device.
+
+    Returns
+    -------
+    out: ``list``
+        A ``list`` with two integers ``[current_mode, pending_mode]``.
+    """
+    init_once()
+    try:
+        device_index = int(device)
+        handle = pynvml.nvmlDeviceGetHandleByIndex(device_index)
+    except ValueError:
+        uuid = device if isinstance(device, bytes) else bytes(device, "utf-8")
+        handle = pynvml.nvmlDeviceGetHandleByUUID(uuid)
+    return pynvml.nvmlDeviceGetMigMode(handle)
 
 
 def _get_utilization(h):
