@@ -191,7 +191,10 @@ def has_cuda_context():
         return no_context
     for index in range(device_get_count()):
         handle = pynvml.nvmlDeviceGetHandleByIndex(index)
-        mig_current_mode, mig_pending_mode = pynvml.nvmlDeviceGetMigMode(handle)
+        try:
+            mig_current_mode, mig_pending_mode = pynvml.nvmlDeviceGetMigMode(handle)
+        except pynvml.NVMLError_NotSupported:
+            mig_current_mode = pynvml.NVML_DEVICE_MIG_DISABLE
         if mig_current_mode == pynvml.NVML_DEVICE_MIG_ENABLE:
             for mig_index in range(pynvml.nvmlDeviceGetMaxMigDeviceCount(handle)):
                 try:
@@ -283,7 +286,10 @@ def get_device_mig_mode(device):
     except ValueError:
         uuid = device if isinstance(device, bytes) else bytes(device, "utf-8")
         handle = pynvml.nvmlDeviceGetHandleByUUID(uuid)
-    return pynvml.nvmlDeviceGetMigMode(handle)
+    try:
+        return pynvml.nvmlDeviceGetMigMode(handle)
+    except pynvml.NVMLError_NotSupported:
+        return [0, 0]
 
 
 def _get_utilization(h):
