@@ -28,7 +28,7 @@ from distributed.comm.utils import (
     host_array,
     to_frames,
 )
-from distributed.diagnostics.nvml import has_cuda_context
+from distributed.diagnostics.nvml import get_device_index_and_uuid, has_cuda_context
 from distributed.utils import ensure_ip, get_ip, get_ipv6, log_errors, nbytes
 
 logger = logging.getLogger(__name__)
@@ -57,17 +57,27 @@ _warning_suffix = (
 )
 
 
+def _get_device_and_uuid_str(ctx):
+    print(f"{ctx=}")
+    return f"{ctx['device-index']} ({ctx['uuid']})"
+
+
 def _warn_existing_cuda_context(ctx, pid):
+    device_uuid_str = _get_device_and_uuid_str(ctx)
     warnings.warn(
-        f"A CUDA context for device {ctx} already exists on process ID {pid}. {_warning_suffix}"
+        f"A CUDA context for device {device_uuid_str} already exists "
+        f"on process ID {pid}. {_warning_suffix}"
     )
 
 
 def _warn_cuda_context_wrong_device(ctx_expected, ctx_actual, pid):
+    print(ctx_expected)
+    expected_device_uuid_str = _get_device_and_uuid_str(ctx_expected)
+    actual_device_uuid_str = _get_device_and_uuid_str(ctx_actual)
     warnings.warn(
         f"Worker with process ID {pid} should have a CUDA context assigned to device "
-        f"{ctx_expected}, but instead the CUDA context is on device {ctx_actual}. "
-        f"{_warning_suffix}"
+        f"{expected_device_uuid_str}, but instead the CUDA context is on device "
+        f"{actual_device_uuid_str}. {_warning_suffix}"
     )
 
 
@@ -104,19 +114,19 @@ def init_once():
                 "CUDA support with UCX requires Numba for context management"
             )
 
-        cuda_visible_device = int(
+        cuda_visible_device = get_device_index_and_uuid(
             os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",")[0]
         )
         pre_existing_cuda_context = has_cuda_context()
-        if pre_existing_cuda_context is not False:
+        if pre_existing_cuda_context["has-context"] is True:
             _warn_existing_cuda_context(pre_existing_cuda_context, os.getpid())
 
         numba.cuda.current_context()
 
         cuda_context_created = has_cuda_context()
         if (
-            cuda_context_created is not False
-            and cuda_context_created != cuda_visible_device
+            cuda_context_created["has-context"] is True
+            and cuda_context_created["uuid"] != cuda_visible_device["uuid"]
         ):
             _warn_cuda_context_wrong_device(
                 cuda_visible_device, cuda_context_created, os.getpid()
