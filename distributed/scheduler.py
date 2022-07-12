@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import heapq
 import inspect
 import itertools
@@ -611,6 +612,23 @@ class WorkerState:
             exclude=set(exclude) | {"versions"},  # type: ignore
             members=True,
         )
+
+
+@dataclasses.dataclass
+class ErredTask:
+    """Lightweight representation of an erred task without any dependency information
+    or runspec.
+
+    See also
+    --------
+    TaskState
+    """
+
+    key: Hashable
+    timestamp: float
+    erred_on: set[str]
+    exception_text: str
+    traceback_text: str
 
 
 class Computation:
@@ -1318,7 +1336,7 @@ class SchedulerState:
         self.computations: deque[Computation] = deque(
             maxlen=dask.config.get("distributed.diagnostics.computations.max-history")
         )
-        self.erred_tasks: deque[TaskState] = deque(
+        self.erred_tasks: deque[ErredTask] = deque(
             maxlen=dask.config.get("distributed.diagnostics.erred-tasks.max-history")
         )
         self.task_groups: dict[str, TaskGroup] = {}
@@ -1541,10 +1559,6 @@ class SchedulerState:
                     except Exception:
                         logger.info("Plugin failed with exception", exc_info=True)
                 if ts.state == "forgotten":
-                    # self.erred_tasks might hang on to task states for a bit longer
-                    # before they are garbage-collected. Wipe the run_spec as it might
-                    # be large, and is unneeded for erred_task reporting.
-                    del self.tasks[ts.key].run_spec
                     del self.tasks[ts.key]
 
             tg: TaskGroup = ts.group
@@ -2330,8 +2344,15 @@ class SchedulerState:
             else:
                 failing_ts = ts.exception_blame  # type: ignore
 
-            if exception_text and traceback_text:
-                self.erred_tasks.appendleft(ts)
+            self.erred_tasks.appendleft(
+                ErredTask(
+                    ts.key,
+                    time(),
+                    ts.erred_on.copy(),
+                    exception_text or "",
+                    traceback_text or "",
+                )
+            )
 
             for dts in ts.dependents:
                 dts.exception_blame = failing_ts
