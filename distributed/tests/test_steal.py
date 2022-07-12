@@ -1063,7 +1063,7 @@ async def test_steal_concurrent_simple(c, s, *workers):
         await asyncio.sleep(0.1)
 
     # ready is a heap but we don't need last, just not the next
-    victim_key = w0.state.ready.peek().key
+    victim_key = w0.state.ready.peekright().key
     victim_ts = s.tasks[victim_key]
 
     ws0 = s.workers[w0.address]
@@ -1098,7 +1098,7 @@ async def test_steal_reschedule_reset_in_flight_occupancy(c, s, *workers):
         await asyncio.sleep(0.01)
 
     # ready is a heap but we don't need last, just not the next
-    victim_key = w0.state.ready.peek().key
+    victim_key = w0.state.ready.peekright().key
     victim_ts = s.tasks[victim_key]
 
     wsA = victim_ts.processing_on
@@ -1156,7 +1156,8 @@ async def test_steal_worker_dies_same_ip(c, s, w0, w1):
     while not w0.active_keys:
         await asyncio.sleep(0.01)
 
-    victim_key = w0.state.ready.peek().key
+    # ready is a heap but we don't need last, just not the next
+    victim_key = w0.state.ready.peekright().key
     victim_ts = s.tasks[victim_key]
 
     wsA = victim_ts.processing_on

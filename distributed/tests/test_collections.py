@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import heapq
 import operator
 import pickle
 import random
@@ -155,6 +156,43 @@ def test_heapset():
         heap.add(C("unsortable_key", None))
     assert len(heap) == 1
     assert set(heap) == {cx}
+
+
+@pytest.mark.parametrize("peek", [False, True])
+def test_heapset_popright(peek):
+    heap = HeapSet(key=operator.attrgetter("i"))
+    with pytest.raises(KeyError):
+        heap.peekright()
+    with pytest.raises(KeyError):
+        heap.popright()
+
+    # The heap contains broken weakrefs
+    for i in range(200):
+        c = C(f"y{i}", random.random())
+        heap.add(c)
+        if random.random() > 0.7:
+            heap.remove(c)
+
+    c0 = heap.peek()
+    while len(heap) > 1:
+        # These two code paths determine which of the two methods deals with the
+        # removal of broken weakrefs
+        if peek:
+            c1 = heap.peekright()
+            assert c1.i >= c0.i
+            assert heap.popright() is c1
+        else:
+            c1 = heap.popright()
+            assert c1.i >= c0.i
+
+        # Test that the heap hasn't been corrupted
+        h2 = heap._heap[:]
+        heapq.heapify(h2)
+        assert h2 == heap._heap
+
+    assert heap.peekright() is c0
+    assert heap.popright() is c0
+    assert not heap
 
 
 def test_heapset_pickle():
