@@ -24,7 +24,7 @@ from functools import lru_cache, partial, singledispatchmethod
 from itertools import chain
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypedDict, cast
 
-from tlz import peekn, pluck
+from tlz import peekn
 
 import dask
 from dask.utils import parse_bytes, typename
@@ -1077,13 +1077,14 @@ class WorkerState:
     #: method, is available.
     plugins: dict[str, WorkerPlugin]
 
-    # heapq ``[(priority, key), ...]``. Keys that are ready to run.
-    ready: list[tuple[tuple[int, ...], str]]
+    #: Priority heap of tasks that are ready to run and have no resource constrains.
+    #: Mutually exclusive with :attr:`constrained`.
+    ready: HeapSet[TaskState]
 
-    #: Keys for which we have the data to run, but are waiting on abstract resources
-    #: like GPUs. Stored in a FIFO deque.
+    #: Priority heap of tasks that are ready to run, but are waiting on abstract
+    #: resources like GPUs. Mutually exclusive with :attr:`ready`.
     #: See :attr:`available_resources` and :doc:`resources`.
-    constrained: deque[str]
+    constrained: HeapSet[TaskState]
 
     #: Number of tasks that can be executing in parallel.
     #: At any given time, :meth:`executing_count` <= nthreads.
@@ -1246,8 +1247,8 @@ class WorkerState:
         self.comm_nbytes = 0
         self.missing_dep_flight = set()
         self.generation = 0
-        self.ready = []
-        self.constrained = deque()
+        self.ready = HeapSet(key=operator.attrgetter("priority"))
+        self.constrained = HeapSet(key=operator.attrgetter("priority"))
         self.executing = set()
         self.in_flight_tasks = set()
         self.executed_count = 0
@@ -1414,6 +1415,9 @@ class WorkerState:
         ts.next = None
         ts.done = False
 
+        self.missing_dep_flight.discard(ts)
+        self.ready.discard(ts)
+        self.constrained.discard(ts)
         self.executing.discard(ts)
         self.long_running.discard(ts)
         self.in_flight_tasks.discard(ts)
@@ -1580,53 +1584,44 @@ class WorkerState:
             return {}, []
 
         recs: Recs = {}
-        while self.constrained and len(self.executing) < self.nthreads:
-            key = self.constrained[0]
-            ts = self.tasks.get(key, None)
-            if ts is None or ts.state != "constrained":
-                self.constrained.popleft()
-                continue
-
-            # There may be duplicates in the self.constrained and self.ready queues.
-            # This happens if a task:
-            # 1. is assigned to a Worker and transitioned to ready (heappush)
-            # 2. is stolen (no way to pop from heap, the task stays there)
-            # 3. is assigned to the worker again (heappush again)
-            if ts in recs:
-                continue
-
-            if not self._resource_restrictions_satisfied(ts):
+        while len(self.executing) < self.nthreads:
+            ts = self._next_ready_task()
+            if not ts:
                 break
 
-            self.constrained.popleft()
-            self._acquire_resources(ts)
+            if self.validate:
+                assert ts.state in READY
+                assert ts not in recs
 
             recs[ts] = "executing"
+            self._acquire_resources(ts)
             self.executing.add(ts)
 
-        while self.ready and len(self.executing) < self.nthreads:
-            _, key = heapq.heappop(self.ready)
-            ts = self.tasks.get(key)
-            if ts is None:
-                # It is possible for tasks to be released while still remaining on
-                # `ready`. The scheduler might have re-routed to a new worker and
-                # told this worker to release. If the task has "disappeared", just
-                # continue through the heap.
-                continue
-
-            if key in self.data:
-                # See comment above about duplicates
-                if self.validate:
-                    assert ts not in recs or recs[ts] == "memory"
-                recs[ts] = "memory"
-            elif ts.state in READY:
-                # See comment above about duplicates
-                if self.validate:
-                    assert ts not in recs or recs[ts] == "executing"
-                recs[ts] = "executing"
-                self.executing.add(ts)
-
         return recs, []
+
+    def _next_ready_task(self) -> TaskState | None:
+        """Pop the top-priority task from self.ready or self.constrained"""
+        if self.ready and self.constrained:
+            tsr = self.ready.peek()
+            tsc = self.constrained.peek()
+            assert tsr.priority
+            assert tsc.priority
+            if tsc.priority < tsr.priority and self._resource_restrictions_satisfied(
+                tsc
+            ):
+                return self.constrained.pop()
+            else:
+                return self.ready.pop()
+
+        elif self.ready:
+            return self.ready.pop()
+
+        elif self.constrained:
+            tsc = self.constrained.peek()
+            if self._resource_restrictions_satisfied(tsc):
+                return self.constrained.pop()
+
+        return None
 
     def _get_task_finished_msg(
         self, ts: TaskState, stimulus_id: str
@@ -1861,11 +1856,10 @@ class WorkerState:
                 for dep in ts.dependencies
             )
             assert all(dep.state == "memory" for dep in ts.dependencies)
-            # FIXME https://github.com/dask/distributed/issues/6710
-            # assert ts.key not in pluck(1, self.ready)
-            # assert ts.key not in self.constrained
+            assert ts not in self.ready
+            assert ts not in self.constrained
         ts.state = "constrained"
-        self.constrained.append(ts.key)
+        self.constrained.add(ts)
         return self._ensure_computing()
 
     def _transition_executing_rescheduled(
@@ -1898,9 +1892,8 @@ class WorkerState:
     ) -> RecsInstrs:
         if self.validate:
             assert ts.state == "waiting"
-            # FIXME https://github.com/dask/distributed/issues/6710
-            # assert ts.key not in pluck(1, self.ready)
-            # assert ts.key not in self.constrained
+            assert ts not in self.ready
+            assert ts not in self.constrained
             assert not ts.waiting_for_data
             for dep in ts.dependencies:
                 assert dep.key in self.data or dep.key in self.actors
@@ -1911,7 +1904,7 @@ class WorkerState:
 
         ts.state = "ready"
         assert ts.priority is not None
-        heapq.heappush(self.ready, (ts.priority, ts.key))
+        self.ready.add(ts)
 
         return self._ensure_computing()
 
@@ -2193,12 +2186,11 @@ class WorkerState:
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
         if self.validate:
+            assert ts.state == "constrained"
             assert not ts.waiting_for_data
             assert ts.key not in self.data
-            assert ts.state in READY
-            # FIXME https://github.com/dask/distributed/issues/6710
-            # assert ts.key not in pluck(1, self.ready)
-            # assert ts.key not in self.constrained
+            assert ts not in self.ready
+            assert ts not in self.constrained
             for dep in ts.dependencies:
                 assert dep.key in self.data or dep.key in self.actors
 
@@ -2210,12 +2202,11 @@ class WorkerState:
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
         if self.validate:
+            assert ts.state == "ready"
             assert not ts.waiting_for_data
             assert ts.key not in self.data
-            assert ts.state in READY
-            # FIXME https://github.com/dask/distributed/issues/6710
-            # assert ts.key not in pluck(1, self.ready)
-            # assert ts.key not in self.constrained
+            assert ts not in self.ready
+            assert ts not in self.constrained
             assert all(
                 dep.key in self.data or dep.key in self.actors
                 for dep in ts.dependencies
@@ -2389,7 +2380,6 @@ class WorkerState:
         ("missing", "released"): _transition_missing_released,
         ("missing", "error"): _transition_generic_error,
         ("missing", "waiting"): _transition_missing_waiting,
-        ("ready", "error"): _transition_generic_error,
         ("ready", "executing"): _transition_ready_executing,
         ("ready", "released"): _transition_generic_released,
         ("released", "error"): _transition_generic_error,
@@ -3072,8 +3062,8 @@ class WorkerState:
             "address": self.address,
             "nthreads": self.nthreads,
             "running": self.running,
-            "ready": self.ready,
-            "constrained": self.constrained,
+            "ready": [ts.key for ts in self.ready.sorted()],
+            "constrained": [ts.key for ts in self.constrained.sorted()],
             "data": dict.fromkeys(self.data),
             "data_needed": {
                 w: [ts.key for ts in tss.sorted()]
@@ -3120,15 +3110,13 @@ class WorkerState:
     def _validate_task_ready(self, ts: TaskState) -> None:
         if ts.state == "ready":
             assert not ts.resource_restrictions
-            assert ts.key in pluck(1, self.ready)
-            # FIXME https://github.com/dask/distributed/issues/6710
-            # assert ts.key not in self.constrained
+            assert ts in self.ready
+            assert ts not in self.constrained
         else:
             assert ts.resource_restrictions
             assert ts.state == "constrained"
-            # FIXME https://github.com/dask/distributed/issues/6710
-            # assert ts.key not in pluck(1, self.ready)
-            assert ts.key in self.constrained
+            assert ts not in self.ready
+            assert ts in self.constrained
 
         assert ts.key not in self.data
         assert not ts.done
@@ -3146,8 +3134,9 @@ class WorkerState:
     def _validate_task_flight(self, ts: TaskState) -> None:
         assert ts.key not in self.data
         assert ts in self.in_flight_tasks
-        # FIXME https://github.com/dask/distributed/issues/6710
-        # assert not any(dep.key in self.ready for dep in ts.dependents)
+        for dep in ts.dependents:
+            assert dep not in self.ready
+            assert dep not in self.constrained
         assert ts.coming_from
         assert ts.coming_from in self.in_flight_workers
         assert ts.key in self.in_flight_workers[ts.coming_from]
@@ -3263,26 +3252,39 @@ class WorkerState:
                 assert k in self.tasks, self.story(k)
                 assert worker in self.tasks[k].who_has
 
+        # Test contents of the various sets of TaskState objects
         for worker, tss in self.data_needed.items():
             for ts in tss:
                 assert ts.state == "fetch"
                 assert worker in ts.who_has
-
+        for ts in self.missing_dep_flight:
+            assert ts.state == "missing"
+        for ts in self.ready:
+            assert ts.state == "ready"
+        for ts in self.constrained:
+            assert ts.state == "constrained"
+        # FIXME https://github.com/dask/distributed/issues/6708
+        # for ts in self.in_flight_tasks:
+        #     assert ts.state == "flight" or (
+        #         ts.state in ("cancelled", "resumed") and ts.previous == "flight"
+        #     )
         # FIXME https://github.com/dask/distributed/issues/6689
         # for ts in self.executing:
         #     assert ts.state == "executing" or (
         #         ts.state in ("cancelled", "resumed") and ts.previous == "executing"
-        #     ), self.story(ts)
+        #     )
         # for ts in self.long_running:
         #     assert ts.state == "long-running" or (
         #         ts.state in ("cancelled", "resumed") and ts.previous == "long-running"
-        #     ), self.story(ts)
+        #     )
 
         # Test that there aren't multiple TaskState objects with the same key in any
         # Set[TaskState]. See note in TaskState.__hash__.
         for ts in chain(
             *self.data_needed.values(),
             self.missing_dep_flight,
+            self.ready,
+            self.constrained,
             self.in_flight_tasks,
             self.executing,
             self.long_running,

@@ -1877,7 +1877,7 @@ class Worker(BaseWorker, ServerNode):
         return {
             "executing": ts.state == "executing",
             "waiting_for_data": bool(ts.waiting_for_data),
-            "heap": key in pluck(1, self.state.ready),
+            "heap": ts in self.state.ready or ts in self.state.constrained,
             "data": key in self.data,
         }
 
