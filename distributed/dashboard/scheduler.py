@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from urllib.parse import urljoin
 
+from tlz import memoize
 from tornado import web
 from tornado.ioloop import IOLoop
 
-from distributed.dashboard.components.nvml import gpu_doc  # noqa: 1708
 from distributed.dashboard.components.nvml import (
-    NVML_ENABLED,
+    gpu_doc,
     gpu_memory_doc,
     gpu_utilization_doc,
 )
@@ -116,41 +116,44 @@ applications = {
 }
 
 
-template_variables: dict = {
-    "pages": [
-        "status",
-        "workers",
-        "tasks",
-        "system",
-        "profile",
-        "graph",
-        "groups",
-        "info",
-    ],
-    "plots": [
-        {
-            "url": x.strip("/"),
-            "name": " ".join(x.strip("/").split("-")[1:])
-            .title()
-            .replace("Cpu", "CPU")
-            .replace("Gpu", "GPU"),
-        }
-        for x in applications
-        if "individual" in x
-    ]
-    + [{"url": "hardware", "name": "Hardware"}],
-}
-template_variables["plots"] = sorted(
-    template_variables["plots"], key=lambda d: d["name"]
-)
+@memoize
+def template_variables():
+    from distributed.diagnostics.nvml import device_get_count
 
-if NVML_ENABLED:
-    template_variables["pages"].insert(4, "gpu")
+    template_variables: dict = {
+        "pages": [
+            "status",
+            "workers",
+            "tasks",
+            "system",
+            *(["gpu"] if device_get_count() > 0 else []),
+            "profile",
+            "graph",
+            "groups",
+            "info",
+        ],
+        "plots": [
+            {
+                "url": x.strip("/"),
+                "name": " ".join(x.strip("/").split("-")[1:])
+                .title()
+                .replace("Cpu", "CPU")
+                .replace("Gpu", "GPU"),
+            }
+            for x in applications
+            if "individual" in x
+        ]
+        + [{"url": "hardware", "name": "Hardware"}],
+    }
+    template_variables["plots"] = sorted(
+        template_variables["plots"], key=lambda d: d["name"]
+    )
+    return template_variables
 
 
 def connect(application, http_server, scheduler, prefix=""):
     bokeh_app = BokehApplication(
-        applications, scheduler, prefix=prefix, template_variables=template_variables
+        applications, scheduler, prefix=prefix, template_variables=template_variables()
     )
     application.add_application(bokeh_app)
     bokeh_app.initialize(IOLoop.current())
