@@ -431,7 +431,7 @@ class Worker(BaseWorker, ServerNode):
     execution_state: dict[str, Any]
     plugins: dict[str, WorkerPlugin]
     _pending_plugins: tuple[WorkerPlugin, ...]
-    shared_data: MutableMapping[str, list[bytes | memoryview]]
+    shared_data: MutableMapping[str, list[bytes | memoryview]]  # or weak dict+finalize?
 
     def __init__(
         self,

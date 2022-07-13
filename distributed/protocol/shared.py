@@ -1,41 +1,56 @@
 from __future__ import annotations
 
+import os
 import pickle
 from typing import Any
+from urllib import parse
 
 from toolz import first
 
 import dask.config
+from dask.base import tokenize
 
 try:
-    from pyarrow.plasma import ObjectID, connect
+    from pyarrow.plasma import ObjectID, PlasmaObjectExists, PlasmaStoreFull, connect
 except ImportError:
 
-    def connect():
+    def connect(*_):
         raise ImportError("pyarrow.plasma was not importable")
 
 
-PLASMA_PATH = dask.config.get("distributed.protocol.shared.plasma_path", "tmp/plasma")
-
-plasma: list[Any] = []
+plasma: list[Any] = []  # module global to cache client
 
 
 def _get_plasma():
+    # TODO: cache error so we don't try this every time?
     if not plasma:
-        plasma.append(connect("/tmp/plasma"))
+        PLASMA_PATH = dask.config.get(
+            "distributed.protocol.shared.plasma_path", "/tmp/plasma"
+        )
+        plasma.append(connect(PLASMA_PATH))
     return plasma[0]
 
 
 def _put_buffer(buf):
     client = _get_plasma()
-    object_id = ObjectID.from_random()
-    buffer = memoryview(client.create(object_id, buf.nbytes))
-    buffer[:] = buf.cast("b")[:]
-    client.seal(object_id)
+    try:
+        object_id = ObjectID(tokenize(buf)[:20].encode())  # use id()?
+        buffer = memoryview(client.create(object_id, buf.nbytes))
+        buffer[:] = buf.cast("b")[:]
+        client.seal(object_id)
+        print("PUT", os.getpid(), buffer, object_id, sum(buffer))
+    except PlasmaObjectExists:
+        pass
+    except PlasmaStoreFull:
+        # warn?
+        return buf
+    except Exception as e:
+        print("###########", type(e), e)
     return b"plasma:" + object_id.binary()
 
 
 def ser(x, context=None):
+    print("SER", x)
     from distributed.worker import get_worker
 
     plasma_size_limit = dask.config.get("distributed.protocol.shared.minsize", 1)
@@ -48,39 +63,69 @@ def ser(x, context=None):
         worker = None
 
     if worker and id(x) in worker.shared_data:
+        print("########## CACHE HIT")
+        print("####", worker.shared_data)
         return worker.shared_data[id(x)]
 
     def add_buf(buf):
         frames.append(memoryview(buf))
 
     frames[0] = pickle.dumps(x, protocol=-1, buffer_callback=add_buf)
-    head = {"serializer": "plasma"}
-    if any(buf.nbytes > plasma_size_limit for buf in frames[1:]):
+    if on_node(context) != on_node(context, "recipient"):
+        # across nodes
+        head = {"serializer": "pickle"}
+    else:
+        head = {"serializer": "plasma"}
+        if any(buf.nbytes > plasma_size_limit for buf in frames[1:]):
 
-        frames[1:] = [
-            _put_buffer(buf) if buf.nbytes > plasma_size_limit else buf
-            for buf in frames[1:]
-        ]
-        if worker is not None:
-            # find object's dask key; it ought to exist
-            seq = [k for k, d in worker.data.items() if d is x]
-            # if key is not in data, this is probably a test in-process worker
-            if seq:
-                k = first(seq)
-                new_obj = deser(
-                    None, frames
-                )  # version of object pointing at shared buffers
-                worker.shared_data[id(new_obj)] = head, frames  # save shared buffers
-                worker.data[k] = new_obj  # replace original object
+            frames[1:] = [
+                _put_buffer(buf) if buf.nbytes > plasma_size_limit else buf
+                for buf in frames[1:]
+            ]
+            if worker is not None:
+                # find object's dask key; it ought to exist
+                seq = [k for k, d in worker.data.items() if d is x]
+                # if key is not in data, this is probably a test in-process worker
+                if seq:
+                    k = first(seq)
+                    new_obj = deser(
+                        None, frames
+                    )  # version of object pointing at shared buffers
+                    worker.data[k] = new_obj  # replace original object
     return head, frames
 
 
+def on_node(context, which="sender"):
+    if context is None:
+        return None
+    info = context.get(which, {})
+    if isinstance(info, dict):
+        info = info.get("address", "")
+    return parse.urlparse(info).hostname
+
+
 def deser(header, frames):
+    print("DESER", header, frames)
+    from distributed.worker import get_worker
+
+    try:
+        worker = get_worker()
+    except ValueError:
+        # on client; must be scattering
+        worker = None
     client = _get_plasma()
+    bufs = None
+    frames0 = frames.copy()
     for i, buf in enumerate(frames.copy()):
         if isinstance(buf, (bytes, memoryview)) and buf[:7] == b"plasma:":
             # probably faster to get all the buffers in a single call
             ob = ObjectID(bytes(buf)[7:])
+            print("GET", os.getpid(), ob, worker)
             bufs = client.get_buffers([ob])
             frames[i] = bufs[0]
-    return pickle.loads(frames[0], buffers=frames[1:])
+    out = pickle.loads(frames[0], buffers=frames[1:])
+    if worker and bufs:
+        # "bufs" is a poor condition, maybe store in header
+        worker.shared_data[id(out)] = header, frames0  # save shared buffers
+    print(type(out))
+    return out
