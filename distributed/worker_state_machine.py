@@ -24,7 +24,7 @@ from functools import lru_cache, partial, singledispatchmethod
 from itertools import chain
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypedDict, cast
 
-from tlz import peekn, pluck
+from tlz import peekn
 
 import dask
 from dask.utils import parse_bytes, typename
@@ -81,7 +81,18 @@ PROCESSING: set[TaskStateState] = {
     "resumed",
 }
 READY: set[TaskStateState] = {"ready", "constrained"}
-
+# Valid states for a task that is found in TaskState.waiting_for_data
+WAITING_FOR_DATA: set[TaskStateState] = {
+    "constrained",
+    "executing",
+    "fetch",
+    "flight",
+    "long-running",
+    "missing",
+    "ready",
+    "resumed",
+    "waiting",
+}
 
 NO_VALUE = "--no-value-sentinel--"
 
@@ -118,6 +129,9 @@ class InvalidTransition(Exception):
         self.start = start
         self.finish = finish
         self.story = story
+
+    def __reduce__(self) -> tuple[Callable, tuple]:
+        return type(self), (self.key, self.start, self.finish, self.story)
 
     def __repr__(self) -> str:
         return (
@@ -157,6 +171,9 @@ class InvalidTaskState(Exception):
         self.key = key
         self.state = state
         self.story = story
+
+    def __reduce__(self) -> tuple[Callable, tuple]:
+        return type(self), (self.key, self.state, self.story)
 
     def __repr__(self) -> str:
         return (
@@ -220,10 +237,10 @@ class TaskState:
 
     #: The current state of the task
     state: TaskStateState = "released"
-    #: The previous state of the task. This is a state machine implementation detail.
-    _previous: TaskStateState | None = None
-    #: The next state of the task. This is a state machine implementation detail.
-    _next: TaskStateState | None = None
+    #: The previous state of the task. It is not None iff state in (cancelled, resumed).
+    previous: TaskStateState | None = None
+    #: The next state of the task. It is not None iff state == resumed.
+    next: TaskStateState | None = None
 
     #: Expected duration of the task
     duration: float | None = None
@@ -272,7 +289,13 @@ class TaskState:
         TaskState._instances.add(self)
 
     def __repr__(self) -> str:
-        return f"<TaskState {self.key!r} {self.state}>"
+        if self.state == "cancelled":
+            state = f"cancelled({self.previous})"
+        elif self.state == "resumed":
+            state = f"resumed({self.previous}->{self.next})"
+        else:
+            state = self.state
+        return f"<TaskState {self.key!r} {state}>"
 
     def __hash__(self) -> int:
         """Override dataclass __hash__, reverting to the default behaviour
@@ -328,6 +351,56 @@ class Instruction:
 
     __slots__ = ("stimulus_id",)
     stimulus_id: str
+
+    @classmethod
+    def match(cls, **kwargs: Any) -> _InstructionMatch:
+        """Generate a partial match to compare against an Instruction instance.
+        The typical usage is to compare a list of instructions returned by
+        :meth:`WorkerState.handle_stimulus` or in :attr:`WorkerState.stimulus_log` vs.
+        an expected list of matches.
+
+        Example
+        -------
+
+        .. code-block:: python
+
+            instructions = ws.handle_stimulus(...)
+            assert instructions == [
+                TaskFinishedMsg.match(key="x"),
+                ...
+            ]
+        """
+        return _InstructionMatch(cls, **kwargs)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, _InstructionMatch):
+            return other == self
+        else:
+            # Revert to default dataclass behaviour
+            return super().__eq__(other)
+
+
+class _InstructionMatch:
+    """Utility class, to be used to test an instructions list.
+    See :meth:`Instruction.match`.
+    """
+
+    cls: type[Instruction]
+    kwargs: dict[str, Any]
+
+    def __init__(self, cls: type[Instruction], **kwargs: Any):
+        self.cls = cls
+        self.kwargs = kwargs
+
+    def __repr__(self) -> str:
+        cls_str = self.cls.__name__
+        kwargs_str = ", ".join(f"{k}={v}" for k, v in self.kwargs.items())
+        return f"{cls_str}({kwargs_str}) (partial match)"
+
+    def __eq__(self, other: object) -> bool:
+        if type(other) is not self.cls:
+            return False
+        return all(getattr(other, k) == v for k, v in self.kwargs.items())
 
 
 @dataclass
@@ -524,7 +597,14 @@ class StateMachineEvent:
             "stimulus_id": self.stimulus_id,
             "handled": self.handled,
         }
-        info.update({k: getattr(self, k) for k in self.__annotations__})
+        info.update(
+            {
+                k: getattr(self, k)
+                for k in self.__annotations__
+                # Necessary for subclasses that don't define their own annotations
+                if k != "_classes"
+            }
+        )
         info = {k: v for k, v in info.items() if k not in exclude}
         return recursive_to_dict(info, exclude=exclude)
 
@@ -696,8 +776,8 @@ class ComputeTaskEvent(StateMachineEvent):
 
     @staticmethod
     def dummy(
-        *,
         key: str,
+        *,
         who_has: dict[str, Collection[str]] | None = None,
         nbytes: dict[str, int] | None = None,
         priority: tuple[int, ...] = (0,),
@@ -747,6 +827,27 @@ class ExecuteSuccessEvent(StateMachineEvent):
         self.value = None
         self.type = None
 
+    @staticmethod
+    def dummy(
+        key: str,
+        value: object = None,
+        *,
+        nbytes: int = 1,
+        stimulus_id: str,
+    ) -> ExecuteSuccessEvent:
+        """Build a dummy event, with most attributes set to a reasonable default.
+        This is a convenience method to be used in unit testing only.
+        """
+        return ExecuteSuccessEvent(
+            key=key,
+            value=value,
+            start=0.0,
+            stop=1.0,
+            nbytes=nbytes,
+            type=None,
+            stimulus_id=stimulus_id,
+        )
+
 
 @dataclass
 class ExecuteFailureEvent(StateMachineEvent):
@@ -786,6 +887,26 @@ class ExecuteFailureEvent(StateMachineEvent):
             traceback=msg["traceback"],
             exception_text=msg["exception_text"],
             traceback_text=msg["traceback_text"],
+            stimulus_id=stimulus_id,
+        )
+
+    @staticmethod
+    def dummy(
+        key: str,
+        *,
+        stimulus_id: str,
+    ) -> ExecuteFailureEvent:
+        """Build a dummy event, with most attributes set to a reasonable default.
+        This is a convenience method to be used in unit testing only.
+        """
+        return ExecuteFailureEvent(
+            key=key,
+            start=None,
+            stop=None,
+            exception=Serialize(None),
+            traceback=None,
+            exception_text="",
+            traceback_text="",
             stimulus_id=stimulus_id,
         )
 
@@ -956,13 +1077,14 @@ class WorkerState:
     #: method, is available.
     plugins: dict[str, WorkerPlugin]
 
-    # heapq ``[(priority, key), ...]``. Keys that are ready to run.
-    ready: list[tuple[tuple[int, ...], str]]
+    #: Priority heap of tasks that are ready to run and have no resource constrains.
+    #: Mutually exclusive with :attr:`constrained`.
+    ready: HeapSet[TaskState]
 
-    #: Keys for which we have the data to run, but are waiting on abstract resources
-    #: like GPUs. Stored in a FIFO deque.
+    #: Priority heap of tasks that are ready to run, but are waiting on abstract
+    #: resources like GPUs. Mutually exclusive with :attr:`ready`.
     #: See :attr:`available_resources` and :doc:`resources`.
-    constrained: deque[str]
+    constrained: HeapSet[TaskState]
 
     #: Number of tasks that can be executing in parallel.
     #: At any given time, :meth:`executing_count` <= nthreads.
@@ -1027,22 +1149,27 @@ class WorkerState:
     #: determining a last-in-first-out order between them.
     generation: int
 
+    #: ``{resource name: amount}``. Total resources available for task execution.
+    #: See :doc: `resources`.
+    total_resources: dict[str, float]
+
     #: ``{resource name: amount}``. Current resources that aren't being currently
-    #: consumed by task execution. Always less or equal to ``Worker.total_resources``.
+    #: consumed by task execution. Always less or equal to :attr:`total_resources`.
     #: See :doc:`resources`.
     available_resources: dict[str, float]
 
     #: Set of tasks that are currently running.
-    #: See also :meth:`executing_count` and :attr:`long_runing`.
+    #: See also :meth:`executing_count` and :attr:`long_running`.
     executing: set[TaskState]
 
-    #: Set of keys of tasks that are currently running and have called
-    #: :func:`~distributed.secede`.
+    #: Set of tasks that are currently running and have called
+    #: :func:`~distributed.secede`, so they no longer count towards the maximum number
+    #: of concurrent tasks (nthreads).
     #: These tasks do not appear in the :attr:`executing` set.
-    long_running: set[str]
+    long_running: set[TaskState]
 
-    #: A number of tasks that this worker has run in its lifetime.
-    #: See also :meth:`executing_count`.
+    #: A number of tasks that this worker has run in its lifetime; this includes failed
+    #: and cancelled tasks. See also :meth:`executing_count`.
     executed_count: int
 
     #: Actor tasks. See :doc:`actors`.
@@ -1102,7 +1229,8 @@ class WorkerState:
         self.data = data if data is not None else {}
         self.threads = threads if threads is not None else {}
         self.plugins = plugins if plugins is not None else {}
-        self.available_resources = dict(resources) if resources is not None else {}
+        self.total_resources = dict(resources) if resources is not None else {}
+        self.available_resources = self.total_resources.copy()
 
         self.validate = validate
         self.tasks = {}
@@ -1119,8 +1247,8 @@ class WorkerState:
         self.comm_nbytes = 0
         self.missing_dep_flight = set()
         self.generation = 0
-        self.ready = []
-        self.constrained = deque()
+        self.ready = HeapSet(key=operator.attrgetter("priority"))
+        self.constrained = HeapSet(key=operator.attrgetter("priority"))
         self.executing = set()
         self.in_flight_tasks = set()
         self.executed_count = 0
@@ -1157,15 +1285,37 @@ class WorkerState:
 
     @property
     def executing_count(self) -> int:
-        """Count of tasks currently executing on this worker.
+        """Count of tasks currently executing on this worker and counting towards the
+        maximum number of threads.
+
+        It includes cancelled tasks, but does not include long running (a.k.a. seceded)
+        tasks.
 
         See also
         --------
         WorkerState.executing
         WorkerState.executed_count
         WorkerState.nthreads
+        WorkerState.all_running_tasks
         """
         return len(self.executing)
+
+    @property
+    def all_running_tasks(self) -> set[TaskState]:
+        """All tasks that are currently occupying a thread. They may or may not count
+        towards the maximum number of threads.
+
+        These are:
+
+        - ts.status in (executing, long-running)
+        - ts.status in (cancelled, resumed) and ts.previous in (executing, long-running)
+
+        See also
+        --------
+        WorkerState.executing_count
+        """
+        # Note: cancelled and resumed tasks are still in either of these sets
+        return self.executing | self.long_running
 
     @property
     def in_flight_tasks_count(self) -> int:
@@ -1261,11 +1411,15 @@ class WorkerState:
 
         ts.waiting_for_data.clear()
         ts.nbytes = None
-        ts._previous = None
-        ts._next = None
+        ts.previous = None
+        ts.next = None
         ts.done = False
 
+        self.missing_dep_flight.discard(ts)
+        self.ready.discard(ts)
+        self.constrained.discard(ts)
         self.executing.discard(ts)
+        self.long_running.discard(ts)
         self.in_flight_tasks.discard(ts)
 
     def _ensure_communicating(self, *, stimulus_id: str) -> RecsInstrs:
@@ -1430,57 +1584,44 @@ class WorkerState:
             return {}, []
 
         recs: Recs = {}
-        while self.constrained and len(self.executing) < self.nthreads:
-            key = self.constrained[0]
-            ts = self.tasks.get(key, None)
-            if ts is None or ts.state != "constrained":
-                self.constrained.popleft()
-                continue
-
-            # There may be duplicates in the self.constrained and self.ready queues.
-            # This happens if a task:
-            # 1. is assigned to a Worker and transitioned to ready (heappush)
-            # 2. is stolen (no way to pop from heap, the task stays there)
-            # 3. is assigned to the worker again (heappush again)
-            if ts in recs:
-                continue
-
-            if any(
-                self.available_resources[resource] < needed
-                for resource, needed in ts.resource_restrictions.items()
-            ):
+        while len(self.executing) < self.nthreads:
+            ts = self._next_ready_task()
+            if not ts:
                 break
 
-            self.constrained.popleft()
-            for resource, needed in ts.resource_restrictions.items():
-                self.available_resources[resource] -= needed
+            if self.validate:
+                assert ts.state in READY
+                assert ts not in recs
 
             recs[ts] = "executing"
+            self._acquire_resources(ts)
             self.executing.add(ts)
 
-        while self.ready and len(self.executing) < self.nthreads:
-            _, key = heapq.heappop(self.ready)
-            ts = self.tasks.get(key)
-            if ts is None:
-                # It is possible for tasks to be released while still remaining on
-                # `ready`. The scheduler might have re-routed to a new worker and
-                # told this worker to release. If the task has "disappeared", just
-                # continue through the heap.
-                continue
-
-            if key in self.data:
-                # See comment above about duplicates
-                if self.validate:
-                    assert ts not in recs or recs[ts] == "memory"
-                recs[ts] = "memory"
-            elif ts.state in READY:
-                # See comment above about duplicates
-                if self.validate:
-                    assert ts not in recs or recs[ts] == "executing"
-                recs[ts] = "executing"
-                self.executing.add(ts)
-
         return recs, []
+
+    def _next_ready_task(self) -> TaskState | None:
+        """Pop the top-priority task from self.ready or self.constrained"""
+        if self.ready and self.constrained:
+            tsr = self.ready.peek()
+            tsc = self.constrained.peek()
+            assert tsr.priority
+            assert tsc.priority
+            if tsc.priority < tsr.priority and self._resource_restrictions_satisfied(
+                tsc
+            ):
+                return self.constrained.pop()
+            else:
+                return self.ready.pop()
+
+        elif self.ready:
+            return self.ready.pop()
+
+        elif self.constrained:
+            tsc = self.constrained.peek()
+            if self._resource_restrictions_satisfied(tsc):
+                return self.constrained.pop()
+
+        return None
 
     def _get_task_finished_msg(
         self, ts: TaskState, stimulus_id: str
@@ -1528,8 +1669,8 @@ class WorkerState:
         Raises
         ------
         Exception:
-            In case the data is put into the in memory buffer and a serialization error
-            occurs during spilling, this raises that error. This has to be handled by
+            In case the data is put into the in-memory buffer and a serialization error
+            occurs during spilling, this re-raises that error. This has to be handled by
             the caller since most callers generate scheduler messages on success (see
             comment above) but we need to signal that this was not successful.
 
@@ -1673,8 +1814,6 @@ class WorkerState:
 
         if ts.waiting_for_data:
             self.waiting_for_data_count += 1
-        elif ts.resource_restrictions:
-            recommendations[ts] = "constrained"
         else:
             recommendations[ts] = "ready"
 
@@ -1717,9 +1856,10 @@ class WorkerState:
                 for dep in ts.dependencies
             )
             assert all(dep.state == "memory" for dep in ts.dependencies)
-            assert ts.key not in self.ready
+            assert ts not in self.ready
+            assert ts not in self.constrained
         ts.state = "constrained"
-        self.constrained.append(ts.key)
+        self.constrained.add(ts)
         return self._ensure_computing()
 
     def _transition_executing_rescheduled(
@@ -1734,9 +1874,9 @@ class WorkerState:
             # Reschedule(), which is "cancelled"
             assert ts.state in ("executing", "long-running"), ts
 
-        for resource, quantity in ts.resource_restrictions.items():
-            self.available_resources[resource] += quantity
+        self._release_resources(ts)
         self.executing.discard(ts)
+        self.long_running.discard(ts)
 
         return merge_recs_instructions(
             ({}, [RescheduleMsg(key=ts.key, stimulus_id=stimulus_id)]),
@@ -1752,15 +1892,19 @@ class WorkerState:
     ) -> RecsInstrs:
         if self.validate:
             assert ts.state == "waiting"
-            assert ts.key not in self.ready
+            assert ts not in self.ready
+            assert ts not in self.constrained
             assert not ts.waiting_for_data
             for dep in ts.dependencies:
                 assert dep.key in self.data or dep.key in self.actors
                 assert dep.state == "memory"
 
+        if ts.resource_restrictions:
+            return {ts: "constrained"}, []
+
         ts.state = "ready"
         assert ts.priority is not None
-        heapq.heappush(self.ready, (ts.priority, ts.key))
+        self.ready.add(ts)
 
         return self._ensure_computing()
 
@@ -1774,7 +1918,7 @@ class WorkerState:
         *,
         stimulus_id: str,
     ) -> RecsInstrs:
-        assert ts._previous == "executing" or ts.key in self.long_running
+        assert ts.previous in ("executing", "long-running")
         recs, instructions = self._transition_executing_error(
             ts,
             exception,
@@ -1787,9 +1931,7 @@ class WorkerState:
         # message to the scheduler since from the schedulers POV it already
         # released this task
         if self.validate:
-            assert len(instructions) == 1
-            assert isinstance(instructions[0], TaskErredMsg)
-            assert instructions[0].key == ts.key
+            assert instructions == [TaskErredMsg.match(key=ts.key)]
         instructions.clear()
         # Workers should never "retry" tasks. A transition to error should, by
         # default, be the end. Since cancelled indicates that the scheduler lost
@@ -1831,9 +1973,9 @@ class WorkerState:
         *,
         stimulus_id: str,
     ) -> RecsInstrs:
-        for resource, quantity in ts.resource_restrictions.items():
-            self.available_resources[resource] += quantity
+        self._release_resources(ts)
         self.executing.discard(ts)
+        self.long_running.discard(ts)
 
         return merge_recs_instructions(
             self._transition_generic_error(
@@ -1872,21 +2014,26 @@ class WorkerState:
         recs: Recs = {}
         instructions: Instructions = []
 
-        if ts._previous == finish:
+        if ts.previous == finish:
             # We're back where we started. We should forget about the entire
             # cancellation attempt
             ts.state = finish
-            ts._next = None
-            ts._previous = None
+            ts.next = None
+            ts.previous = None
         elif not ts.done:
             # If we're not done, yet, just remember where we want to be next
-            ts._next = finish
+            ts.next = finish
         else:
             # Flight/executing finished unsuccessfully, i.e. not in memory
             assert finish != "memory"
-            next_state = ts._next
+            next_state = ts.next
             assert next_state in {"waiting", "fetch"}, next_state
-            assert ts._previous in {"executing", "flight"}, ts._previous
+            assert ts.previous in {"executing", "long-running", "flight"}, ts.previous
+
+            if ts.previous in ("executing", "long-running"):
+                self._release_resources(ts)
+                self.executing.discard(ts)
+                self.long_running.discard(ts)
 
             if next_state != finish:
                 recs, instructions = self._transition_generic_released(
@@ -1922,7 +2069,7 @@ class WorkerState:
     ) -> RecsInstrs:
         if not ts.done:
             ts.state = "cancelled"
-            ts._next = None
+            ts.next = None
             return {}, []
         else:
             return self._transition_generic_released(ts, stimulus_id=stimulus_id)
@@ -1938,13 +2085,13 @@ class WorkerState:
     ) -> RecsInstrs:
         if ts.done:
             return {ts: "released"}, []
-        elif ts._previous == "flight":
-            ts.state = ts._previous
+        elif ts.previous == "flight":
+            ts.state = ts.previous
             return {}, []
         else:
-            assert ts._previous == "executing"
+            assert ts.previous in ("executing", "long-running")
             ts.state = "resumed"
-            ts._next = "fetch"
+            ts.next = "fetch"
             return {}, []
 
     def _transition_cancelled_waiting(
@@ -1952,19 +2099,19 @@ class WorkerState:
     ) -> RecsInstrs:
         if ts.done:
             return {ts: "released"}, []
-        elif ts._previous in ("executing", "long-running"):
-            ts.state = ts._previous
+        elif ts.previous in ("executing", "long-running"):
+            ts.state = ts.previous
             return {}, []
         else:
-            assert ts._previous == "flight"
+            assert ts.previous == "flight"
             ts.state = "resumed"
-            ts._next = "waiting"
+            ts.next = "waiting"
             return {}, []
 
     def _transition_cancelled_forgotten(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
-        ts._next = "forgotten"
+        ts.next = "forgotten"
         if not ts.done:
             return {}, []
         return {ts: "released"}, []
@@ -1975,28 +2122,21 @@ class WorkerState:
         if not ts.done:
             return {}, []
         self.executing.discard(ts)
+        self.long_running.discard(ts)
         self.in_flight_tasks.discard(ts)
 
-        for resource, quantity in ts.resource_restrictions.items():
-            self.available_resources[resource] += quantity
-
+        self._release_resources(ts)
         return self._transition_generic_released(ts, stimulus_id=stimulus_id)
 
     def _transition_executing_released(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
-        ts._previous = ts.state
-        ts._next = None
+        ts.previous = ts.state
+        ts.next = None
         # See https://github.com/dask/distributed/pull/5046#discussion_r685093940
         ts.state = "cancelled"
         ts.done = False
         return {}, []
-
-    def _transition_long_running_memory(
-        self, ts: TaskState, value: object = NO_VALUE, *, stimulus_id: str
-    ) -> RecsInstrs:
-        self.executed_count += 1
-        return self._transition_generic_memory(ts, value=value, stimulus_id=stimulus_id)
 
     def _transition_generic_memory(
         self, ts: TaskState, value: object = NO_VALUE, *, stimulus_id: str
@@ -2006,14 +2146,6 @@ class WorkerState:
                 f"Tried to transition task {ts} to `memory` without data available"
             )
 
-        if ts.resource_restrictions is not None:
-            for resource, quantity in ts.resource_restrictions.items():
-                self.available_resources[resource] += quantity
-
-        self.executing.discard(ts)
-        self.in_flight_tasks.discard(ts)
-        ts.coming_from = None
-
         instructions: Instructions = []
         try:
             recs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
@@ -2021,6 +2153,12 @@ class WorkerState:
             msg = error_message(e)
             recs = {ts: tuple(msg.values())}
         else:
+            self._release_resources(ts)
+            self.executing.discard(ts)
+            self.long_running.discard(ts)
+            self.in_flight_tasks.discard(ts)
+            ts.coming_from = None
+
             if self.validate:
                 assert ts.key in self.data or ts.key in self.actors
             instructions.append(
@@ -2033,11 +2171,11 @@ class WorkerState:
         self, ts: TaskState, value: object = NO_VALUE, *, stimulus_id: str
     ) -> RecsInstrs:
         if self.validate:
-            assert ts.state == "executing" or ts.key in self.long_running
+            assert ts.state in ("executing", "long-running")
             assert not ts.waiting_for_data
-            assert ts.key not in self.ready
 
         self.executing.discard(ts)
+        self.long_running.discard(ts)
         self.executed_count += 1
         return merge_recs_instructions(
             self._transition_generic_memory(ts, value=value, stimulus_id=stimulus_id),
@@ -2048,10 +2186,11 @@ class WorkerState:
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
         if self.validate:
+            assert ts.state == "constrained"
             assert not ts.waiting_for_data
             assert ts.key not in self.data
-            assert ts.state in READY
-            assert ts.key not in self.ready
+            assert ts not in self.ready
+            assert ts not in self.constrained
             for dep in ts.dependencies:
                 assert dep.key in self.data or dep.key in self.actors
 
@@ -2063,10 +2202,11 @@ class WorkerState:
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
         if self.validate:
+            assert ts.state == "ready"
             assert not ts.waiting_for_data
             assert ts.key not in self.data
-            assert ts.state in READY
-            assert ts.key not in self.ready
+            assert ts not in self.ready
+            assert ts not in self.constrained
             assert all(
                 dep.key in self.data or dep.key in self.actors
                 for dep in ts.dependencies
@@ -2117,8 +2257,8 @@ class WorkerState:
             # sensible?
             return self._transition_generic_released(ts, stimulus_id=stimulus_id)
         else:
-            ts._previous = "flight"
-            ts._next = None
+            ts.previous = "flight"
+            ts.next = None
             # See https://github.com/dask/distributed/pull/5046#discussion_r685093940
             ts.state = "cancelled"
             return {}, []
@@ -2126,9 +2266,11 @@ class WorkerState:
     def _transition_cancelled_memory(
         self, ts: TaskState, value: object, *, stimulus_id: str
     ) -> RecsInstrs:
-        # We only need this because the to-memory signatures require a value but
-        # we do not want to store a cancelled result and want to release
-        # immediately
+        """We only need this because the to-memory signatures require a value but
+        we do not want to store a cancelled result and want to release immediately.
+
+        See also ``_transition_cancelled_error``
+        """
         assert ts.done
         return self._transition_cancelled_released(ts, stimulus_id=stimulus_id)
 
@@ -2137,7 +2279,7 @@ class WorkerState:
     ) -> RecsInstrs:
         ts.state = "long-running"
         self.executing.discard(ts)
-        self.long_running.add(ts.key)
+        self.long_running.add(ts)
 
         smsg = LongRunningMsg(
             key=ts.key, compute_duration=compute_duration, stimulus_id=stimulus_id
@@ -2229,8 +2371,8 @@ class WorkerState:
         ("flight", "memory"): _transition_flight_memory,
         ("flight", "missing"): _transition_flight_missing,
         ("flight", "released"): _transition_flight_released,
-        ("long-running", "error"): _transition_generic_error,
-        ("long-running", "memory"): _transition_long_running_memory,
+        ("long-running", "error"): _transition_executing_error,
+        ("long-running", "memory"): _transition_executing_memory,
         ("long-running", "rescheduled"): _transition_executing_rescheduled,
         ("long-running", "released"): _transition_executing_released,
         ("memory", "released"): _transition_memory_released,
@@ -2238,7 +2380,6 @@ class WorkerState:
         ("missing", "released"): _transition_missing_released,
         ("missing", "error"): _transition_generic_error,
         ("missing", "waiting"): _transition_missing_waiting,
-        ("ready", "error"): _transition_generic_error,
         ("ready", "executing"): _transition_ready_executing,
         ("ready", "released"): _transition_generic_released,
         ("released", "error"): _transition_generic_error,
@@ -2344,12 +2485,29 @@ class WorkerState:
                 # final
                 ts.state,
                 # new recommendations
-                {ts.key: new for ts, new in recs.items()},
+                {
+                    ts.key: new[0] if isinstance(new, tuple) else new
+                    for ts, new in recs.items()
+                },
                 stimulus_id,
                 time(),
             )
         )
         return recs, instructions
+
+    def _resource_restrictions_satisfied(self, ts: TaskState) -> bool:
+        return all(
+            self.available_resources[resource] >= needed
+            for resource, needed in ts.resource_restrictions.items()
+        )
+
+    def _acquire_resources(self, ts: TaskState) -> None:
+        for resource, needed in ts.resource_restrictions.items():
+            self.available_resources[resource] -= needed
+
+    def _release_resources(self, ts: TaskState) -> None:
+        for resource, needed in ts.resource_restrictions.items():
+            self.available_resources[resource] += needed
 
     def _transitions(self, recommendations: Recs, *, stimulus_id: str) -> Instructions:
         """Process transitions until none are left
@@ -2904,15 +3062,15 @@ class WorkerState:
             "address": self.address,
             "nthreads": self.nthreads,
             "running": self.running,
-            "ready": self.ready,
-            "constrained": self.constrained,
+            "ready": [ts.key for ts in self.ready.sorted()],
+            "constrained": [ts.key for ts in self.constrained.sorted()],
             "data": dict.fromkeys(self.data),
             "data_needed": {
                 w: [ts.key for ts in tss.sorted()]
                 for w, tss in self.data_needed.items()
             },
             "executing": {ts.key for ts in self.executing},
-            "long_running": self.long_running,
+            "long_running": {ts.key for ts in self.long_running},
             "in_flight_tasks": {ts.key for ts in self.in_flight_tasks},
             "in_flight_workers": self.in_flight_workers,
             "busy_workers": self.busy_workers,
@@ -2932,11 +3090,16 @@ class WorkerState:
         assert ts.key in self.data or ts.key in self.actors
         assert isinstance(ts.nbytes, int)
         assert not ts.waiting_for_data
-        assert ts.key not in self.ready
-        assert ts.state == "memory"
 
     def _validate_task_executing(self, ts: TaskState) -> None:
-        assert ts.state == "executing"
+        if ts.state == "executing":
+            assert ts in self.executing
+            assert ts not in self.long_running
+        else:
+            assert ts.state == "long-running"
+            assert ts not in self.executing
+            assert ts in self.long_running
+
         assert ts.run_spec is not None
         assert ts.key not in self.data
         assert not ts.waiting_for_data
@@ -2945,9 +3108,17 @@ class WorkerState:
             assert dep.key in self.data or dep.key in self.actors
 
     def _validate_task_ready(self, ts: TaskState) -> None:
-        assert ts.key in pluck(1, self.ready)
+        if ts.state == "ready":
+            assert not ts.resource_restrictions
+            assert ts in self.ready
+            assert ts not in self.constrained
+        else:
+            assert ts.resource_restrictions
+            assert ts.state == "constrained"
+            assert ts not in self.ready
+            assert ts in self.constrained
+
         assert ts.key not in self.data
-        assert ts.state != "executing"
         assert not ts.done
         assert not ts.waiting_for_data
         assert all(
@@ -2956,7 +3127,6 @@ class WorkerState:
 
     def _validate_task_waiting(self, ts: TaskState) -> None:
         assert ts.key not in self.data
-        assert ts.state == "waiting"
         assert not ts.done
         if ts.dependencies and ts.run_spec:
             assert not all(dep.key in self.data for dep in ts.dependencies)
@@ -2964,7 +3134,9 @@ class WorkerState:
     def _validate_task_flight(self, ts: TaskState) -> None:
         assert ts.key not in self.data
         assert ts in self.in_flight_tasks
-        assert not any(dep.key in self.ready for dep in ts.dependents)
+        for dep in ts.dependents:
+            assert dep not in self.ready
+            assert dep not in self.constrained
         assert ts.coming_from
         assert ts.coming_from in self.in_flight_workers
         assert ts.key in self.in_flight_workers[ts.coming_from]
@@ -2987,19 +3159,19 @@ class WorkerState:
 
     def _validate_task_cancelled(self, ts: TaskState) -> None:
         assert ts.key not in self.data
-        assert ts._previous in {"long-running", "executing", "flight"}
+        assert ts.previous in {"long-running", "executing", "flight"}
         # We'll always transition to released after it is done
-        assert ts._next is None, (ts.key, ts._next, self.story(ts))
+        assert ts.next is None
 
     def _validate_task_resumed(self, ts: TaskState) -> None:
         assert ts.key not in self.data
-        assert ts._next
-        assert ts._previous in {"long-running", "executing", "flight"}
+        assert ts.next in {"fetch", "waiting"}
+        assert ts.previous in {"long-running", "executing", "flight"}
 
     def _validate_task_released(self, ts: TaskState) -> None:
         assert ts.key not in self.data
-        assert not ts._next
-        assert not ts._previous
+        assert not ts.next
+        assert not ts.previous
         for tss in self.data_needed.values():
             assert ts not in tss
         assert ts not in self.executing
@@ -3021,7 +3193,7 @@ class WorkerState:
     def validate_task(self, ts: TaskState) -> None:
         try:
             if ts.key in self.tasks:
-                assert self.tasks[ts.key] == ts
+                assert self.tasks[ts.key] is ts
             if ts.state == "memory":
                 self._validate_task_memory(ts)
             elif ts.state == "waiting":
@@ -3032,9 +3204,9 @@ class WorkerState:
                 self._validate_task_cancelled(ts)
             elif ts.state == "resumed":
                 self._validate_task_resumed(ts)
-            elif ts.state == "ready":
+            elif ts.state in ("ready", "constrained"):
                 self._validate_task_ready(ts)
-            elif ts.state == "executing":
+            elif ts.state in ("executing", "long-running"):
                 self._validate_task_executing(ts)
             elif ts.state == "flight":
                 self._validate_task_flight(ts)
@@ -3049,10 +3221,7 @@ class WorkerState:
             ) from e
 
     def validate_state(self) -> None:
-        assert len(self.executing) >= 0
-        waiting_for_data_count = 0
         for ts in self.tasks.values():
-            assert ts.state is not None
             # check that worker has task
             for worker in ts.who_has:
                 assert worker != self.address
@@ -3065,37 +3234,60 @@ class WorkerState:
                 # so we may have popped the key out of `self.tasks` but the
                 # dependency can still be in `memory` before GC grabs it...?
                 # Might need better bookkeeping
-                assert dep.state is not None
+                assert self.tasks[dep.key] is dep
                 assert ts in dep.dependents, ts
-            if ts.waiting_for_data:
-                waiting_for_data_count += 1
+
             for ts_wait in ts.waiting_for_data:
-                assert ts_wait.key in self.tasks
-                assert (
-                    ts_wait.state in READY | {"executing", "flight", "fetch", "missing"}
-                    or ts_wait in self.missing_dep_flight
-                    or ts_wait.who_has.issubset(self.in_flight_workers)
-                ), (ts, ts_wait, self.story(ts), self.story(ts_wait))
+                assert self.tasks[ts_wait.key] is ts_wait
+                assert ts_wait.state in WAITING_FOR_DATA, ts_wait
+
         # FIXME https://github.com/dask/distributed/issues/6319
-        # assert self.waiting_for_data_count == waiting_for_data_count
+        # assert self.waiting_for_data_count == sum(
+        #     bool(ts.waiting_for_data) for ts in self.tasks.values()
+        # )
+
         for worker, keys in self.has_what.items():
             assert worker != self.address
             for k in keys:
                 assert k in self.tasks, self.story(k)
                 assert worker in self.tasks[k].who_has
 
+        # Test contents of the various sets of TaskState objects
         for worker, tss in self.data_needed.items():
             for ts in tss:
                 assert ts.state == "fetch"
                 assert worker in ts.who_has
+        for ts in self.missing_dep_flight:
+            assert ts.state == "missing"
+        for ts in self.ready:
+            assert ts.state == "ready"
+        for ts in self.constrained:
+            assert ts.state == "constrained"
+        # FIXME https://github.com/dask/distributed/issues/6708
+        # for ts in self.in_flight_tasks:
+        #     assert ts.state == "flight" or (
+        #         ts.state in ("cancelled", "resumed") and ts.previous == "flight"
+        #     )
+        # FIXME https://github.com/dask/distributed/issues/6689
+        # for ts in self.executing:
+        #     assert ts.state == "executing" or (
+        #         ts.state in ("cancelled", "resumed") and ts.previous == "executing"
+        #     )
+        # for ts in self.long_running:
+        #     assert ts.state == "long-running" or (
+        #         ts.state in ("cancelled", "resumed") and ts.previous == "long-running"
+        #     )
 
         # Test that there aren't multiple TaskState objects with the same key in any
         # Set[TaskState]. See note in TaskState.__hash__.
         for ts in chain(
             *self.data_needed.values(),
             self.missing_dep_flight,
+            self.ready,
+            self.constrained,
             self.in_flight_tasks,
             self.executing,
+            self.long_running,
         ):
             assert self.tasks[ts.key] is ts
 
@@ -3105,9 +3297,21 @@ class WorkerState:
         if self.transition_counter_max:
             assert self.transition_counter < self.transition_counter_max
 
-        # Test that there aren't multiple TaskState objects with the same key in data_needed
-        for tss in self.data_needed.values():
-            assert len({ts.key for ts in tss}) == len(tss)
+        self._validate_resources()
+
+    def _validate_resources(self) -> None:
+        """Assert that available_resources + resources held by tasks = total_resources"""
+        assert self.total_resources.keys() == self.available_resources.keys()
+        total = self.total_resources.copy()
+        for k, v in self.available_resources.items():
+            assert v > -1e-9, self.available_resources
+            total[k] -= v
+        for ts in self.all_running_tasks:
+            for k, v in ts.resource_restrictions.items():
+                assert v >= 0, (ts, ts.resource_restrictions)
+                total[k] -= v
+
+        assert all((abs(v) < 1e-9) for v in total.values()), total
 
 
 class BaseWorker(abc.ABC):
