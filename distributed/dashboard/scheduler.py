@@ -122,6 +122,7 @@ def template_variables():
             "workers",
             "tasks",
             "system",
+            *(["gpu"] if device_get_count() > 0 else []),
             "profile",
             "graph",
             "groups",
@@ -143,8 +144,6 @@ def template_variables():
     template_variables["plots"] = sorted(
         template_variables["plots"], key=lambda d: d["name"]
     )
-    if device_get_count() > 0:
-        template_variables["pages"].insert(4, "gpu")
     return template_variables
 
 
