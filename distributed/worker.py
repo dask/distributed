@@ -932,14 +932,12 @@ class Worker(BaseWorker, ServerNode):
         Also handles pausing/unpausing.
         """
         prev_status = self.status
-        if prev_status == value:
-            return
 
         ServerNode.status.__set__(self, value)  # type: ignore
         stimulus_id = f"worker-status-change-{time()}"
         self._send_worker_status_change(stimulus_id)
 
-        if prev_status == Status.running:
+        if prev_status == Status.running and value != Status.running:
             self.handle_stimulus(PauseEvent(stimulus_id=stimulus_id))
         elif value == Status.running and prev_status in (
             Status.paused,
@@ -1118,7 +1116,7 @@ class Worker(BaseWorker, ServerNode):
                 middle = (_start + _end) / 2
                 self._update_latency(_end - start)
                 self.scheduler_delay = response["time"] - middle
-                # self.status = Status.running
+                self.status = Status.running
                 break
             except OSError:
                 logger.info("Waiting to connect to: %26s", self.scheduler.address)

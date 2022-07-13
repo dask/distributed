@@ -33,6 +33,7 @@ from distributed import (
     Client,
     Event,
     Nanny,
+    WorkerPlugin,
     default_client,
     get_client,
     get_worker,
@@ -3479,3 +3480,21 @@ async def test_reconnect_argument_deprecated(s):
         warnings.simplefilter("error")
         async with Worker(s.address):
             pass
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_worker_running_before_running_plugins(c, s, caplog):
+    class InitWorkerNewThread(WorkerPlugin):
+        name: str = "init_worker_new_thread"
+        setup_status: Status | None = None
+
+        def setup(self, worker):
+            self.setup_status = worker.status
+
+        def teardown(self, worker):
+            pass
+
+    await c.register_worker_plugin(InitWorkerNewThread())
+    async with Worker(s.address) as worker:
+        assert await c.submit(inc, 1) == 2
+        assert worker.plugins[InitWorkerNewThread.name].setup_status is Status.running
