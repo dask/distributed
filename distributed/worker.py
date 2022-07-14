@@ -2555,7 +2555,7 @@ def get_worker() -> Worker:
             raise ValueError("No workers found")
 
 
-def get_client(address=None, timeout=None, resolve_address=True) -> Client:
+def get_client(address=None, timeout=None, resolve_address=True, asynchronous=False) -> Client:
     """Get a client while within a task.
 
     This client connects to the same scheduler to which the worker is connected
@@ -2618,7 +2618,7 @@ def get_client(address=None, timeout=None, resolve_address=True) -> Client:
     if client and (not address or client.scheduler.address == address):
         return client
     elif address:
-        return Client(address, timeout=timeout)
+        return Client(address, timeout=timeout, asynchronous=asynchronous)
     else:
         raise ValueError("No global client found and no address provided")
 
