@@ -5064,6 +5064,30 @@ async def test_get_client(c, s, a, b):
         del distributed.tmp_client
 
 
+@pytest.mark.parametrize("asynchronous", [True, False])
+@gen_cluster(client=False)
+async def test_get_async_clients(c, s, a, b, asynchronous):
+    async def create_client(scheduler):
+        client = await get_client(
+            address=scheduler.address, timeout=2, asynchronous=asynchronous
+        )
+        return client
+
+    futures = [asyncio.create_task(create_client(s)) for i in range(5)]
+
+    clients = await asyncio.gather(*futures)
+    for i, client in enumerate(clients):
+        assert client.scheduler.address == s.address
+        assert client._asynchronous == asynchronous
+        if i < 4:
+            assert clients[i] == clients[i + 1]
+
+    if asynchronous:
+        await clients[0].close()
+    else:
+        clients[0].close()
+
+
 def test_get_client_no_cluster():
     # Clean up any global workers added by other tests. This test requires that
     # there are no global workers.
