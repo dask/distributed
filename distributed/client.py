@@ -908,6 +908,7 @@ class Client(SyncMethodMixin):
             "cancelled-key": self._handle_cancelled_key,
             "task-retried": self._handle_retried_key,
             "task-erred": self._handle_task_erred,
+            "restart": self._handle_restart,
             "error": self._handle_error,
             "event": self._handle_event,
         }
@@ -1462,6 +1463,15 @@ class Client(SyncMethodMixin):
         state = self.futures.get(key)
         if state is not None:
             state.set_error(exception, traceback)
+
+    def _handle_restart(self):
+        logger.info("Receive restart signal from scheduler")
+        for state in self.futures.values():
+            state.cancel()
+        self.futures.clear()
+        self.generation += 1
+        with self._refcount_lock:
+            self.refcount.clear()
 
     def _handle_error(self, exception=None):
         logger.warning("Scheduler exception:")
@@ -3316,17 +3326,7 @@ class Client(SyncMethodMixin):
         if timeout is not None:
             timeout = parse_timedelta(timeout, "s")
 
-        try:
-            await self.scheduler.restart(timeout=timeout)
-        finally:
-            for state in self.futures.values():
-                state.cancel()
-            self.futures.clear()
-
-            self.generation += 1
-            with self._refcount_lock:
-                self.refcount.clear()
-
+        await self.scheduler.restart(timeout=timeout)
         return self
 
     def restart(self, **kwargs):

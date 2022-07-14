@@ -5146,6 +5146,7 @@ class Scheduler(SchedulerState, ServerNode):
             )
 
         self.clear_task_state()
+        self.report({"op": "restart"})
 
         start = time()
 
