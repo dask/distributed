@@ -2615,7 +2615,9 @@ def get_client(address=None, timeout=None, resolve_address=True, asynchronous=Fa
         client = Client.current()  # TODO: assumes the same scheduler
     except ValueError:
         client = None
-    if client and (not address or client.scheduler.address == address):
+    if client and (not address or not client.scheduler or client.scheduler.address == address):
+        # Client may not have yet been awaited on if get_client() was
+        # previously called with asynchronous=True
         return client
     elif address:
         return Client(address, timeout=timeout, asynchronous=asynchronous)
