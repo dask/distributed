@@ -4,7 +4,7 @@
   {% set ts = tasks[Task] %}
   <h1 class="title"> Task: {{ ts.key }} </h1>
 
-      <table class="table">
+      <table class="table box">
           <tr>
               <th> Status </th>
               <td> {{ ts.state }} </td>
@@ -53,7 +53,23 @@
           {% end %}
       </table>
 
-    <div id="dependencies-dependents" class="columns">
+    {% if ts.exception_text and ts.traceback_text %}
+    <div class="box">
+        <h3 class="title is-5"> Exception information </h3>
+        <p>
+            <span>Exception:</span>
+            <code> {{ ts.exception_text }} </code>
+        </p>
+        <details style="border: 1px solid black; border-radius: 4px; padding: 1em; margin-top: 4px;">
+            <summary style="font-weight: bold">Traceback</summary>
+            <pre><code>{{ ts.traceback_text }} </code></pre>
+        </details>
+        <div>
+        </div>
+    </div>
+    {% end %}
+
+    <div id="dependencies-dependents" class="columns box">
       <div id="dependencies" class="column">
         <h3 class="title is-5"> Dependencies </h3>
         <table class="table is-striped is-hoverable">
@@ -87,7 +103,7 @@
       </div><!-- #dependents -->
     </div><!-- #dependencies-dependents -->
 
-    <div id="workers-clients" class="columns">
+    <div id="workers-clients" class="columns box">
       {% if ts.state == 'memory' %}
       <div id="workers" class="column">
         <h3 class="title is-5"> Workers with data </h3>
@@ -110,7 +126,7 @@
       {% end %}
     </div><!-- #workers-clients -->
 
-      <div id="transition-log" class="section">
+      <div id="transition-log" class="box">
         <h3 class="title is-5"> Transition Log </h3>
           <table class="table is-bordered is-striped is-hoverable">
               <thead>

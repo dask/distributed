@@ -5,6 +5,7 @@ import errno
 import logging
 import os
 import shutil
+import tempfile
 import threading
 import uuid
 import warnings
@@ -27,6 +28,7 @@ from distributed import preloading
 from distributed.comm import get_address_host
 from distributed.comm.addressing import address_from_user_args
 from distributed.core import (
+    AsyncTaskGroupClosedError,
     CommClosedError,
     RPCClosed,
     Status,
@@ -43,9 +45,9 @@ from distributed.security import Security
 from distributed.utils import (
     TimeoutError,
     get_ip,
+    get_mp_context,
     json_load_robust,
     log_errors,
-    mp_context,
     parse_ports,
     silence_logging,
 )
@@ -86,6 +88,19 @@ class Nanny(ServerNode):
             2. Existing environment variables
             3. Dask configuration
 
+        Note
+        ----
+        Some environment variables, like ``OMP_NUM_THREADS``, must be set before
+        importing numpy to have effect. Others, like ``MALLOC_TRIM_THRESHOLD_`` (see
+        :ref:`memtrim`), must be set before starting the Linux process. So we need to
+        set them before spawning the subprocess, even if this means poisoning the
+        process running the Nanny.
+
+        For the same reason, be warned that changing
+        ``distributed.worker.multiprocessing-method`` from ``spawn`` to ``fork`` or
+        ``forkserver`` may inhibit some environment variables; if you do, you should
+        set the variables yourself in the shell before you start ``dask-worker``.
+
     See Also
     --------
     Worker
@@ -99,7 +114,7 @@ class Nanny(ServerNode):
     _given_worker_port: int | str | Collection[int] | None
     _start_port: int | str | Collection[int] | None
 
-    def __init__(
+    def __init__(  # type: ignore[no-untyped-def]
         self,
         scheduler_ip=None,
         scheduler_port=None,
@@ -107,7 +122,6 @@ class Nanny(ServerNode):
         worker_port: int | str | Collection[int] | None = 0,
         nthreads=None,
         loop=None,
-        local_dir=None,
         local_directory=None,
         services=None,
         name=None,
@@ -151,12 +165,10 @@ class Nanny(ServerNode):
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("worker")
 
-        if local_dir is not None:
-            warnings.warn("The local_dir keyword has moved to local_directory")
-            local_directory = local_dir
-
         if local_directory is None:
-            local_directory = dask.config.get("temporary-directory") or os.getcwd()
+            local_directory = (
+                dask.config.get("temporary-directory") or tempfile.gettempdir()
+            )
             self._original_local_dir = local_directory
             local_directory = os.path.join(local_directory, "dask-worker-space")
         else:
@@ -305,12 +317,6 @@ class Nanny(ServerNode):
     @property
     def worker_dir(self):
         return None if self.process is None else self.process.worker_dir
-
-    @property
-    def local_dir(self):
-        """For API compatibility with Nanny"""
-        warnings.warn("The local_dir attribute has moved to local_directory")
-        return self.local_directory
 
     async def start_unsafe(self):
         """Start nanny, start local process, start watching"""
@@ -498,7 +504,10 @@ class Nanny(ServerNode):
         return run(self, comm, *args, **kwargs)
 
     def _on_worker_exit_sync(self, exitcode):
-        self.loop.add_callback(self._on_worker_exit, exitcode)
+        try:
+            self.loop.add_callback(self._on_worker_exit, exitcode)
+        except AsyncTaskGroupClosedError:  # Async task group has already been closed, so the nanny is already clos(ed|ing).
+            pass
 
     @log_errors
     async def _on_worker_exit(self, exitcode):
@@ -597,7 +606,7 @@ class Nanny(ServerNode):
         )
 
     def log_event(self, topic, msg):
-        self.loop.add_callback(self._log_event, topic, msg)
+        self._ongoing_background_tasks.call_soon(self._log_event, topic, msg)
 
 
 class WorkerProcess:
@@ -640,8 +649,8 @@ class WorkerProcess:
             await self.running.wait()
             return self.status
 
-        self.init_result_q = init_q = mp_context.Queue()
-        self.child_stop_q = mp_context.Queue()
+        self.init_result_q = init_q = get_mp_context().Queue()
+        self.child_stop_q = get_mp_context().Queue()
         uid = uuid.uuid4().hex
 
         self.process = AsyncProcess(
@@ -663,6 +672,10 @@ class WorkerProcess:
         self.running = asyncio.Event()
         self.stopped = asyncio.Event()
         self.status = Status.starting
+
+        # Must set env variables before spawning the subprocess.
+        # See note in Nanny docstring.
+        os.environ.update(self.env)
 
         try:
             await self.process.start()
@@ -734,7 +747,7 @@ class WorkerProcess:
             if self.on_exit is not None:
                 self.on_exit(r)
 
-    async def kill(self, timeout: float = 2, executor_wait: bool = True):
+    async def kill(self, timeout: float = 2, executor_wait: bool = True) -> None:
         """
         Ensure the worker process is stopped, waiting at most
         ``timeout * 0.8`` seconds before killing it abruptly.
@@ -817,6 +830,9 @@ class WorkerProcess:
         Worker,
     ):  # pragma: no cover
         try:
+            # Set the environment variables again. This is to avoid race conditions
+            # where different nannies in the same process set different environment
+            # variables.
             os.environ.update(env)
             dask.config.set(config)
 

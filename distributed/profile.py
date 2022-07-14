@@ -108,7 +108,7 @@ def info_frame(frame: FrameType) -> dict[str, Any]:
 
 def process(
     frame: FrameType,
-    child,
+    child: object | None,
     state: dict[str, Any],
     *,
     stop: str | None = None,
@@ -521,7 +521,11 @@ def _remove_py_stack(frames):
         yield entry
 
 
-def llprocess(frames, child, state: dict[str, Any] | None) -> dict[str, Any] | None:
+def llprocess(  # type: ignore[no-untyped-def]
+    frames,
+    child: object | None,
+    state: dict[str, Any] | None,
+) -> dict[str, Any] | None:
     """Add counts from low level profile information onto existing state
 
     This uses the ``stacktrace`` module to collect low level stack trace

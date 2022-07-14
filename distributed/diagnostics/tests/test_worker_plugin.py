@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import warnings
 
@@ -106,7 +108,7 @@ async def test_normal_task_transitions_called(c, s, w):
 
     await c.register_worker_plugin(plugin)
     await c.submit(lambda x: x, 1, key="task")
-    await async_wait_for(lambda: not w.tasks, timeout=10)
+    await async_wait_for(lambda: not w.state.tasks, timeout=10)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
@@ -137,6 +139,7 @@ async def test_failing_task_transitions_called(c, s, w):
 async def test_superseding_task_transitions_called(c, s, w):
     expected_notifications = [
         {"key": "task", "start": "released", "finish": "waiting"},
+        {"key": "task", "start": "waiting", "finish": "ready"},
         {"key": "task", "start": "waiting", "finish": "constrained"},
         {"key": "task", "start": "constrained", "finish": "executing"},
         {"key": "task", "start": "executing", "finish": "memory"},
@@ -148,7 +151,7 @@ async def test_superseding_task_transitions_called(c, s, w):
 
     await c.register_worker_plugin(plugin)
     await c.submit(lambda x: x, 1, key="task", resources={"X": 1})
-    await async_wait_for(lambda: not w.tasks, timeout=10)
+    await async_wait_for(lambda: not w.state.tasks, timeout=10)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
@@ -174,7 +177,7 @@ async def test_dependent_tasks(c, s, w):
 
     await c.register_worker_plugin(plugin)
     await c.get(dsk, "task", sync=False)
-    await async_wait_for(lambda: not w.tasks, timeout=10)
+    await async_wait_for(lambda: not w.state.tasks, timeout=10)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
@@ -207,7 +210,7 @@ async def test_assert_no_warning_no_overload(c, s, a):
     with warnings.catch_warnings(record=True) as record:
         await c.register_worker_plugin(Dummy())
         assert await c.submit(inc, 1, key="x") == 2
-        while "x" in a.tasks:
+        while "x" in a.state.tasks:
             await asyncio.sleep(0.01)
 
     assert not record
@@ -235,7 +238,7 @@ async def test_WorkerPlugin_overwrite(c, s, w):
     await c.submit(inc, 0)
     assert w.foo == 123
 
-    while s.tasks or w.tasks:
+    while s.tasks or w.state.tasks:
         await asyncio.sleep(0.01)
 
     class MyCustomPlugin(WorkerPlugin):

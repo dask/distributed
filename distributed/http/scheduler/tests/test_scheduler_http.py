@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import re
@@ -13,42 +15,45 @@ from tornado.httpclient import AsyncHTTPClient, HTTPClientError
 import dask.config
 from dask.sizeof import sizeof
 
+from distributed import Lock
 from distributed.utils import is_valid_xml
-from distributed.utils_test import gen_cluster, inc, slowinc
+from distributed.utils_test import gen_cluster, inc, lock_inc, slowinc
 
 DEFAULT_ROUTES = dask.config.get("distributed.scheduler.http.routes")
 
 
 @gen_cluster(client=True)
 async def test_connect(c, s, a, b):
-    future = c.submit(lambda x: x + 1, 1)
-    x = c.submit(slowinc, 1, delay=1, retries=5)
-    await future
-    http_client = AsyncHTTPClient()
-    for suffix in [
-        "info/main/workers.html",
-        "info/worker/" + url_escape(a.address) + ".html",
-        "info/task/" + url_escape(future.key) + ".html",
-        "info/main/logs.html",
-        "info/logs/" + url_escape(a.address) + ".html",
-        "info/call-stack/" + url_escape(x.key) + ".html",
-        "info/call-stacks/" + url_escape(a.address) + ".html",
-        "json/counts.json",
-        "json/identity.json",
-        "json/index.html",
-        "individual-plots.json",
-        "sitemap.json",
-    ]:
-        response = await http_client.fetch(
-            "http://localhost:%d/%s" % (s.http_server.port, suffix)
-        )
-        assert response.code == 200
-        body = response.body.decode()
-        if suffix.endswith(".json"):
-            json.loads(body)
-        else:
-            assert is_valid_xml(body)
-            assert not re.search("href=./", body)  # no absolute links
+    lock = Lock()
+    async with lock:
+        future = c.submit(lambda x: x + 1, 1)
+        x = c.submit(lock_inc, 1, lock=lock, retries=5)
+        await future
+        http_client = AsyncHTTPClient()
+        for suffix in [
+            "info/main/workers.html",
+            "info/worker/" + url_escape(a.address) + ".html",
+            "info/task/" + url_escape(future.key) + ".html",
+            "info/main/logs.html",
+            "info/logs/" + url_escape(a.address) + ".html",
+            "info/call-stack/" + url_escape(x.key) + ".html",
+            "info/call-stacks/" + url_escape(a.address) + ".html",
+            "json/counts.json",
+            "json/identity.json",
+            "json/index.html",
+            "individual-plots.json",
+            "sitemap.json",
+        ]:
+            response = await http_client.fetch(
+                "http://localhost:%d/%s" % (s.http_server.port, suffix)
+            )
+            assert response.code == 200
+            body = response.body.decode()
+            if suffix.endswith(".json"):
+                json.loads(body)
+            else:
+                assert is_valid_xml(body)
+                assert not re.search("href=./", body)  # no absolute links
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -144,7 +149,7 @@ async def test_prometheus_collect_task_states(c, s, a, b):
 
     # submit a task which should show up in the prometheus scraping
     future = c.submit(slowinc, 1, delay=0.5)
-    while not any(future.key in w.tasks for w in [a, b]):
+    while not any(future.key in w.state.tasks for w in [a, b]):
         await asyncio.sleep(0.001)
 
     active_metrics, forgotten_tasks = await fetch_metrics()
@@ -157,7 +162,7 @@ async def test_prometheus_collect_task_states(c, s, a, b):
 
     future.release()
 
-    while any(future.key in w.tasks for w in [a, b]):
+    while any(future.key in w.state.tasks for w in [a, b]):
         await asyncio.sleep(0.001)
 
     active_metrics, forgotten_tasks = await fetch_metrics()

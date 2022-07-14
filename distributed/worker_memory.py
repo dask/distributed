@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 
 
 class WorkerMemoryManager:
-    data: MutableMapping[str, Any]  # {task key: task payload}
+    data: MutableMapping[str, object]  # {task key: task payload}
     memory_limit: int | None
     memory_target_fraction: float | Literal[False]
     memory_spill_fraction: float | Literal[False]
@@ -68,6 +68,7 @@ class WorkerMemoryManager:
         self,
         worker: Worker,
         *,
+        nthreads: int,
         memory_limit: str | float = "auto",
         # This should be None most of the times, short of a power user replacing the
         # SpillBuffer with their own custom dict-like
@@ -84,7 +85,7 @@ class WorkerMemoryManager:
         memory_spill_fraction: float | Literal[False] | None = None,
         memory_pause_fraction: float | Literal[False] | None = None,
     ):
-        self.memory_limit = parse_memory_limit(memory_limit, worker.nthreads)
+        self.memory_limit = parse_memory_limit(memory_limit, nthreads)
 
         self.memory_target_fraction = _parse_threshold(
             "distributed.worker.memory.target",
@@ -145,8 +146,7 @@ class WorkerMemoryManager:
             pc = PeriodicCallback(
                 # Don't store worker as self.worker to avoid creating a circular
                 # dependency. We could have alternatively used a weakref.
-                # FIXME annotations: https://github.com/tornadoweb/tornado/issues/3117
-                partial(self.memory_monitor, worker),  # type: ignore
+                partial(self.memory_monitor, worker),
                 self.memory_monitor_interval * 1000,
             )
             worker.periodic_callbacks["memory_monitor"] = pc
@@ -293,12 +293,8 @@ class WorkerMemoryManager:
             )
 
     def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
-        info = {
-            k: v
-            for k, v in self.__dict__.items()
-            if not k.startswith("_") and k != "data" and k not in exclude
-        }
-        info["data"] = list(self.data)
+        info = {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
+        info["data"] = dict.fromkeys(self.data)
         return info
 
 
@@ -385,7 +381,7 @@ class NannyMemoryManager:
 
 
 def parse_memory_limit(
-    memory_limit: str | float, nthreads: int, total_cores: int = CPU_COUNT
+    memory_limit: str | float | None, nthreads: int, total_cores: int = CPU_COUNT
 ) -> int | None:
     if memory_limit is None:
         return None
@@ -438,20 +434,20 @@ class DeprecatedMemoryManagerAttribute:
     def __set_name__(self, owner: type, name: str) -> None:
         self.name = name
 
-    def __get__(self, instance: Nanny | Worker | None, _):
+    def __get__(self, instance: Nanny | Worker | None, owner: type) -> Any:
         if instance is None:
             # This is triggered by Sphinx
             return None  # pragma: nocover
         _warn_deprecated(instance, self.name)
         return getattr(instance.memory_manager, self.name)
 
-    def __set__(self, instance: Nanny | Worker, value) -> None:
+    def __set__(self, instance: Nanny | Worker, value: Any) -> None:
         _warn_deprecated(instance, self.name)
         setattr(instance.memory_manager, self.name, value)
 
 
 class DeprecatedMemoryMonitor:
-    def __get__(self, instance: Nanny | Worker | None, owner):
+    def __get__(self, instance: Nanny | Worker | None, owner: type) -> Any:
         if instance is None:
             # This is triggered by Sphinx
             return None  # pragma: nocover
