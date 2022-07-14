@@ -15,6 +15,16 @@ from distributed.diagnostics import nvml
 from distributed.utils_test import gen_cluster
 
 
+@pytest.fixture(autouse=True)
+def reset_nvml_state():
+    try:
+        pynvml.nvmlShutdown()
+    except pynvml.NVMLError_Uninitialized:
+        pass
+    nvml.NVML_STATE = nvml.NVML_STATE.UNINITIALIZED
+    nvml.NVML_OWNER_PID = None
+
+
 def test_one_time():
     if nvml.device_get_count() < 1:
         pytest.skip("No GPUs available")
@@ -27,36 +37,21 @@ def test_one_time():
 
 
 def test_enable_disable_nvml():
-    try:
-        pynvml.nvmlShutdown()
-    except pynvml.NVMLError_Uninitialized:
-        pass
-    else:
-        nvml.nvmlInitialized = False
-
     with dask.config.set({"distributed.diagnostics.nvml": False}):
         nvml.init_once()
-        assert nvml.nvmlInitialized is False
+        assert not nvml.is_initialized()
+        assert nvml.NVML_STATE == nvml.NVMLState.DISABLED_CONFIG
 
-    with dask.config.set({"distributed.diagnostics.nvml": True}):
-        nvml.init_once()
-        assert (
-            nvml.nvmlInitialized
-            ^ nvml.nvmlLibraryNotFound
-            ^ nvml.nvmlWslInsufficientDriver
-        )
+    # Idempotent (once we've decided not to turn things on with
+    # configuration, it's set in stone)
+    nvml.init_once()
+    assert not nvml.is_initialized()
+    assert nvml.NVML_STATE == nvml.NVMLState.DISABLED_CONFIG
 
 
 def test_wsl_monitoring_enabled():
-    try:
-        pynvml.nvmlShutdown()
-    except pynvml.NVMLError_Uninitialized:
-        pass
-    else:
-        nvml.nvmlInitialized = False
-
     nvml.init_once()
-    assert nvml.nvmlWslInsufficientDriver is False
+    assert nvml.NVML_STATE != nvml.NVMLState.DISABLED_WSL_INSUFFICIENT_DRIVER
 
 
 def run_has_cuda_context(queue):

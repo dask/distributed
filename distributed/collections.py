@@ -90,7 +90,7 @@ class HeapSet(MutableSet[T]):
             self._heap.clear()
 
     def peek(self) -> T:
-        """Get the smallest element without removing it"""
+        """Return the smallest element without removing it"""
         if not self._data:
             raise KeyError("peek into empty set")
         while True:
@@ -104,6 +104,31 @@ class HeapSet(MutableSet[T]):
             raise KeyError("pop from an empty set")
         while True:
             _, _, vref = heapq.heappop(self._heap)
+            value = vref()
+            if value in self._data:
+                self._data.discard(value)
+                return value
+
+    def peekright(self) -> T:
+        """Return one of the largest elements (not necessarily the largest!) without
+        removing it. It's guaranteed that ``self.peekright() >= self.peek()``.
+        """
+        if not self._data:
+            raise KeyError("peek into empty set")
+        while True:
+            value = self._heap[-1][2]()
+            if value in self._data:
+                return value
+            del self._heap[-1]
+
+    def popright(self) -> T:
+        """Remove and return one of the largest elements (not necessarily the largest!)
+        It's guaranteed that ``self.popright() >= self.peek()``.
+        """
+        if not self._data:
+            raise KeyError("pop from an empty set")
+        while True:
+            _, _, vref = self._heap.pop()
             value = vref()
             if value in self._data:
                 self._data.discard(value)

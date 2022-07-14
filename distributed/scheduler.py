@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import heapq
 import inspect
 import itertools
@@ -611,6 +612,23 @@ class WorkerState:
             exclude=set(exclude) | {"versions"},  # type: ignore
             members=True,
         )
+
+
+@dataclasses.dataclass
+class ErredTask:
+    """Lightweight representation of an erred task without any dependency information
+    or runspec.
+
+    See also
+    --------
+    TaskState
+    """
+
+    key: Hashable
+    timestamp: float
+    erred_on: set[str]
+    exception_text: str
+    traceback_text: str
 
 
 class Computation:
@@ -1255,6 +1273,7 @@ class SchedulerState:
         "bandwidth",
         "clients",
         "computations",
+        "erred_tasks",
         "extensions",
         "host_info",
         "idle",
@@ -1317,6 +1336,9 @@ class SchedulerState:
         self.computations: deque[Computation] = deque(
             maxlen=dask.config.get("distributed.diagnostics.computations.max-history")
         )
+        self.erred_tasks: deque[ErredTask] = deque(
+            maxlen=dask.config.get("distributed.diagnostics.erred-tasks.max-history")
+        )
         self.task_groups: dict[str, TaskGroup] = {}
         self.task_prefixes: dict[str, TaskPrefix] = {}
         self.task_metadata = {}  # type: ignore
@@ -1374,6 +1396,7 @@ class SchedulerState:
             "task_prefixes": self.task_prefixes,
             "total_nthreads": self.total_nthreads,
             "total_occupancy": self.total_occupancy,
+            "erred_tasks": self.erred_tasks,
             "extensions": self.extensions,
             "clients": self.clients,
             "workers": self.workers,
@@ -1860,7 +1883,7 @@ class SchedulerState:
             self._set_duration_estimate(ts, ws)
             ts.processing_on = ws
             ts.state = "processing"
-            self.consume_resources(ts, ws)
+            self.acquire_resources(ts, ws)
             self.check_idle_saturated(ws)
             self.n_tasks += 1
 
@@ -2319,6 +2342,16 @@ class SchedulerState:
             else:
                 failing_ts = ts.exception_blame  # type: ignore
 
+            self.erred_tasks.appendleft(
+                ErredTask(
+                    ts.key,
+                    time(),
+                    ts.erred_on.copy(),
+                    exception_text or "",
+                    traceback_text or "",
+                )
+            )
+
             for dts in ts.dependents:
                 dts.exception_blame = failing_ts
                 recommendations[dts.key] = "erred"
@@ -2675,7 +2708,7 @@ class SchedulerState:
 
         return s
 
-    def consume_resources(self, ts: TaskState, ws: WorkerState):
+    def acquire_resources(self, ts: TaskState, ws: WorkerState):
         for r, required in ts.resource_restrictions.items():
             ws.used_resources[r] += required
 
@@ -5165,6 +5198,9 @@ class Scheduler(SchedulerState, ServerNode):
         with suppress(AttributeError):
             for c in self._worker_coroutines:
                 c.cancel()
+
+        self.erred_tasks.clear()
+        self.computations.clear()
 
         self.log_event([client, "all"], {"action": "restart", "client": client})
         while time() < start + timeout:

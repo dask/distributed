@@ -968,3 +968,12 @@ async def test_wait_for_stimulus(c, s, a):
 
     y = c.submit(inc, 1, key="y")
     await t2
+
+
+def test_ws_with_running_task(ws_with_running_task):
+    ws = ws_with_running_task
+    ts = ws.tasks["x"]
+    assert ts.resource_restrictions == {"R": 1}
+    assert ws.available_resources == {"R": 0}
+    assert ws.total_resources == {"R": 1}
+    assert ts.state in ("executing", "long-running")

@@ -22,6 +22,13 @@ from distributed.metrics import monotonic
 from distributed.spill import has_zict_210
 from distributed.utils_test import captured_logger, gen_cluster, inc
 from distributed.worker_memory import parse_memory_limit
+from distributed.worker_state_machine import (
+    ComputeTaskEvent,
+    ExecuteSuccessEvent,
+    GatherDep,
+    GatherDepSuccessEvent,
+    TaskErredMsg,
+)
 
 requires_zict_210 = pytest.mark.skipif(
     not has_zict_210,
@@ -97,10 +104,17 @@ async def assert_basic_futures(c: Client) -> None:
 
 
 @gen_cluster(client=True)
-async def test_fail_to_pickle_target_1(c, s, a, b):
-    """Test failure to serialize triggered by key which is individually larger
-    than target. The data is lost and the task is marked as failed;
-    the worker remains in usable condition.
+async def test_fail_to_pickle_execute_1(c, s, a, b):
+    """Test failure to serialize triggered by computing a key which is individually
+    larger than target. The data is lost and the task is marked as failed; the worker
+    remains in usable condition.
+
+    See also
+    --------
+    test_workerstate_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_flight
+    test_fail_to_pickle_execute_2
+    test_fail_to_pickle_spill
     """
     x = c.submit(FailToPickle, reported_size=100e9, key="x")
     await wait(x)
@@ -113,6 +127,70 @@ async def test_fail_to_pickle_target_1(c, s, a, b):
     await assert_basic_futures(c)
 
 
+class FailStoreDict(UserDict):
+    def __setitem__(self, key, value):
+        raise CustomError()
+
+
+def test_workerstate_fail_to_pickle_execute_1(ws_with_running_task):
+    """Same as test_fail_to_pickle_target_execute_1
+
+    See also
+    --------
+    test_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_flight
+    test_fail_to_pickle_execute_2
+    test_fail_to_pickle_spill
+    """
+    ws = ws_with_running_task
+    assert not ws.data
+    ws.data = FailStoreDict()
+
+    instructions = ws.handle_stimulus(
+        ExecuteSuccessEvent.dummy("x", None, stimulus_id="s1")
+    )
+    assert instructions == [TaskErredMsg.match(key="x", stimulus_id="s1")]
+    assert ws.tasks["x"].state == "error"
+
+
+@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/6705")
+def test_workerstate_fail_to_pickle_flight(ws):
+    """Same as test_workerstate_fail_to_pickle_execute_1, but the task was
+    computed on another host and for whatever reason it did not fail to pickle when it
+    was sent over the network.
+
+    See also
+    --------
+    test_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_execute_1
+    test_fail_to_pickle_execute_2
+    test_fail_to_pickle_spill
+
+    See also test_worker_state_machine.py::test_gather_dep_failure, where the task
+    instead fails to unpickle when leaving the network stack.
+    """
+    assert not ws.data
+    ws.data = FailStoreDict()
+    ws.total_resources = {"R": 1}
+    ws.available_resources = {"R": 1}
+    ws2 = "127.0.0.1:2"
+
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "y", who_has={"x": [ws2]}, resource_restrictions={"R": 1}, stimulus_id="s1"
+        ),
+        GatherDepSuccessEvent(
+            worker=ws2, total_nbytes=1, data={"x": 123}, stimulus_id="s2"
+        ),
+    )
+    assert instructions == [
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
+        TaskErredMsg.match(key="x", stimulus_id="s2"),
+    ]
+    assert ws.tasks["x"].state == "error"
+    assert ws.tasks["y"].state == "waiting"  # Not constrained
+
+
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
@@ -123,10 +201,17 @@ async def test_fail_to_pickle_target_1(c, s, a, b):
         "distributed.worker.memory.pause": False,
     },
 )
-async def test_fail_to_pickle_target_2(c, s, a):
-    """Test failure to spill triggered by key which is individually smaller
-    than target, so it is not spilled immediately. The data is retained and
-    the task is NOT marked as failed; the worker remains in usable condition.
+async def test_fail_to_pickle_execute_2(c, s, a):
+    """Test failure to spill triggered by computing a key which is individually smaller
+    than target, so it is not spilled immediately. The data is retained and the task is
+    NOT marked as failed; the worker remains in usable condition.
+
+    See also
+    --------
+    test_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_flight
+    test_fail_to_pickle_spill
     """
     x = c.submit(FailToPickle, reported_size=256, key="x")
     await wait(x)
@@ -157,7 +242,15 @@ async def test_fail_to_pickle_target_2(c, s, a):
     },
 )
 async def test_fail_to_pickle_spill(c, s, a):
-    """Test failure to evict a key, triggered by the spill threshold"""
+    """Test failure to evict a key, triggered by the spill threshold.
+
+    See also
+    --------
+    test_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_flight
+    test_fail_to_pickle_execute_2
+    """
     a.monitor.get_process_memory = lambda: 701 if a.data.fast else 0
 
     with captured_logger(logging.getLogger("distributed.spill")) as logs:

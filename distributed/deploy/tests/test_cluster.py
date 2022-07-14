@@ -35,16 +35,3 @@ async def test_logs_deprecated():
     async with Cluster(asynchronous=True) as cluster:
         with pytest.warns(FutureWarning, match="get_logs"):
             cluster.logs()
-
-
-@gen_test()
-async def test_cluster_info(loop_in_thread):
-    class FooCluster(Cluster):
-        def __init__(self):
-            self._cluster_info["foo"] = "bar"
-            super().__init__(asynchronous=False, loop=loop_in_thread)
-
-    cluster = FooCluster()
-    assert "foo" in cluster._cluster_info  # exists before start() called
-    with cluster:  # start and stop the cluster to avoid a resource warning
-        pass

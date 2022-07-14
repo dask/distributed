@@ -6,6 +6,7 @@ import importlib
 import logging
 import os
 import sys
+import tempfile
 import threading
 import traceback
 import warnings
@@ -32,6 +33,7 @@ from distributed import (
     Client,
     Event,
     Nanny,
+    WorkerPlugin,
     default_client,
     get_client,
     get_worker,
@@ -578,6 +580,15 @@ async def test_run_dask_worker(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_run_dask_worker_kwonlyarg(c, s, a, b):
+    def f(*, dask_worker=None):
+        return dask_worker.id
+
+    response = await c._run(f)
+    assert response == {a.address: a.id, b.address: b.id}
+
+
+@gen_cluster(client=True)
 async def test_run_coroutine_dask_worker(c, s, a, b):
     async def f(dask_worker=None):
         await asyncio.sleep(0.001)
@@ -925,25 +936,27 @@ async def test_heartbeats(c, s, a, b):
 
 
 @pytest.mark.parametrize("worker", [Worker, Nanny])
-def test_worker_dir(worker):
-    with tmpfile() as fn:
+def test_worker_dir(worker, tmpdir):
+    @gen_cluster(client=True, worker_kwargs={"local_directory": str(tmpdir)})
+    async def test_worker_dir(c, s, a, b):
+        directories = [w.local_directory for w in s.workers.values()]
+        assert all(d.startswith(str(tmpdir)) for d in directories)
+        assert len(set(directories)) == 2  # distinct
 
-        @gen_cluster(client=True, worker_kwargs={"local_directory": fn})
-        async def test_worker_dir(c, s, a, b):
-            directories = [w.local_directory for w in s.workers.values()]
-            assert all(d.startswith(fn) for d in directories)
-            assert len(set(directories)) == 2  # distinct
-
-        test_worker_dir()
+    test_worker_dir()
 
 
-@gen_cluster(nthreads=[], config={"temporary-directory": None})
-async def test_false_worker_dir(s):
-    async with Worker(s.address, local_directory="") as w:
-        local_directory = w.local_directory
+@gen_cluster(client=True, nthreads=[], config={"temporary-directory": None})
+async def test_default_worker_dir(c, s):
+    expect = os.path.join(tempfile.gettempdir(), "dask-worker-space")
 
-    cwd = os.getcwd()
-    assert os.path.dirname(local_directory) == os.path.join(cwd, "dask-worker-space")
+    async with Worker(s.address) as w:
+        assert os.path.dirname(w.local_directory) == expect
+
+    async with Nanny(s.address) as n:
+        assert n.local_directory == expect
+        results = await c.run(lambda dask_worker: dask_worker.local_directory)
+        assert os.path.dirname(results[n.worker_address]) == expect
 
 
 @gen_cluster(client=True)
@@ -3286,41 +3299,6 @@ async def test_gather_dep_no_longer_in_flight_tasks(c, s, a):
         assert not any("missing-dep" in msg for msg in f2_story)
 
 
-@pytest.mark.parametrize("intermediate_state", ["resumed", "cancelled"])
-@pytest.mark.parametrize("close_worker", [False, True])
-@gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "500ms"})
-async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
-    c, s, a, x, intermediate_state, close_worker
-):
-    """If a task was transitioned to in-flight, the gather-dep coroutine was
-    scheduled but a cancel request came in before gather_data_from_worker was
-    issued this might corrupt the state machine if the cancelled key is not
-    properly handled
-    """
-    fut1 = c.submit(slowinc, 1, workers=[a.address], key="f1")
-    fut1B = c.submit(slowinc, 2, workers=[x.address], key="f1B")
-    fut2 = c.submit(sum, [fut1, fut1B], workers=[x.address], key="f2")
-    await fut2
-
-    async with BlockedGatherDep(s.address, name="b") as b:
-        fut3 = c.submit(inc, fut2, workers=[b.address], key="f3")
-
-        await wait_for_state(fut2.key, "flight", b)
-
-        s.set_restrictions(worker={fut1B.key: a.address, fut2.key: b.address})
-
-        await b.in_gather_dep.wait()
-
-        await s.remove_worker(
-            address=x.address, safe=True, close=close_worker, stimulus_id="test"
-        )
-
-        await wait_for_state(fut2.key, intermediate_state, b, interval=0)
-
-        b.block_gather_dep.set()
-        await fut3
-
-
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_Worker__to_dict(c, s, a):
     x = c.submit(inc, 1, key="x")
@@ -3502,3 +3480,21 @@ async def test_reconnect_argument_deprecated(s):
         warnings.simplefilter("error")
         async with Worker(s.address):
             pass
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_worker_running_before_running_plugins(c, s, caplog):
+    class InitWorkerNewThread(WorkerPlugin):
+        name: str = "init_worker_new_thread"
+        setup_status: Status | None = None
+
+        def setup(self, worker):
+            self.setup_status = worker.status
+
+        def teardown(self, worker):
+            pass
+
+    await c.register_worker_plugin(InitWorkerNewThread())
+    async with Worker(s.address) as worker:
+        assert await c.submit(inc, 1) == 2
+        assert worker.plugins[InitWorkerNewThread.name].setup_status is Status.running
