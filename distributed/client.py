@@ -3322,7 +3322,7 @@ class Client(SyncMethodMixin):
 
     async def _restart(self, timeout=no_default):
         if timeout == no_default:
-            timeout = self._timeout * 2
+            timeout = self._timeout * 4
         if timeout is not None:
             timeout = parse_timedelta(timeout, "s")
 

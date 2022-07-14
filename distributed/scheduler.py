@@ -5181,10 +5181,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             resps = await asyncio.wait_for(
                 asyncio.gather(
-                    *(
-                        nanny.restart(close=True, timeout=timeout * 0.8)
-                        for nanny in nannies
-                    )
+                    *(nanny.restart(close=True, timeout=timeout) for nanny in nannies)
                 ),
                 timeout,
             )

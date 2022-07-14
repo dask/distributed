@@ -668,6 +668,7 @@ async def test_restart_not_all_workers_return(c, s, a, b):
         await c.restart(timeout="1s")
 
 
+@pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny)
 async def test_restart_some_nannies_some_not(c, s, a, b):
     original_procs = {a.process.process, b.process.process}
@@ -675,8 +676,9 @@ async def test_restart_some_nannies_some_not(c, s, a, b):
     async with Worker(s.address, nthreads=1) as w:
         await c.wait_for_workers(3)
 
-        with pytest.raises(TimeoutError, match="after 5s, only 2 have returned"):
-            await c.restart(timeout="5s")
+        # FIXME how to make this not always take 20s if the nannies do restart quickly?
+        with pytest.raises(TimeoutError, match="after 20s, only 2 have returned"):
+            await c.restart(timeout="20s")
 
         assert w.status == Status.closed
 
