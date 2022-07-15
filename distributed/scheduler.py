@@ -5119,7 +5119,7 @@ class Scheduler(SchedulerState, ServerNode):
     @log_errors
     async def restart(self, client=None, timeout=30):
         """
-        Restart all workers. Reset local state.
+        Restart all workers. Reset local state. Wait for workers to return.
 
         Workers without nannies are shut down, hoping an external deployment system
         will restart them. Therefore, if not using nannies and your deployment system

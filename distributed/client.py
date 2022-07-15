@@ -3330,7 +3330,7 @@ class Client(SyncMethodMixin):
         return self
 
     def restart(self, timeout=no_default):
-        """Restart the distributed network
+        """Clear all tasks, restart all workers, and wait for them to return.
 
         This kills all active work, deletes all data on the network, and
         restarts the worker processes.
