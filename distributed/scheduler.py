@@ -5131,13 +5131,7 @@ class Scheduler(SchedulerState, ServerNode):
         stimulus_id = f"restart-{time()}"
         n_workers = len(self.workers)
 
-        for plugin in list(self.plugins.values()):
-            try:
-                plugin.restart(self)
-            except Exception as e:
-                logger.exception(e)
-
-        logger.info("Send lost future signal to clients")
+        logger.info("Releasing all requested keys")
         for cs in self.clients.values():
             self.client_releases_keys(
                 keys=[ts.key for ts in cs.wants_what],
@@ -5147,6 +5141,12 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.clear_task_state()
         self.report({"op": "restart"})
+
+        for plugin in list(self.plugins.values()):
+            try:
+                plugin.restart(self)
+            except Exception as e:
+                logger.exception(e)
 
         start = time()
 
