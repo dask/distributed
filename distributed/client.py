@@ -3329,13 +3329,20 @@ class Client(SyncMethodMixin):
         await self.scheduler.restart(timeout=timeout)
         return self
 
-    def restart(self, **kwargs):
+    def restart(self, timeout=no_default):
         """Restart the distributed network
 
         This kills all active work, deletes all data on the network, and
         restarts the worker processes.
+
+        Workers without nannies are shut down, hoping an external deployment system
+        will restart them. Therefore, if not using nannies and your deployment system
+        does not automatically restart workers, ``restart`` will just shut down all
+        workers, then time out!
+
+        Raises `TimeoutError` if not all workers come back within ``timeout`` seconds.
         """
-        return self.sync(self._restart, **kwargs)
+        return self.sync(self._restart, timeout=timeout)
 
     async def _upload_large_file(self, local_filename, remote_filename=None):
         if remote_filename is None:

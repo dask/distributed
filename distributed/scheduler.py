@@ -5121,10 +5121,10 @@ class Scheduler(SchedulerState, ServerNode):
         """
         Restart all workers. Reset local state.
 
-        Workers without nannies are shut down (assuming an external deployment system
-        may restart them). Therefore, if not using nannies and your deployment system
+        Workers without nannies are shut down, hoping an external deployment system
+        will restart them. Therefore, if not using nannies and your deployment system
         does not automatically restart workers, ``restart`` will just shut down all
-        workers!
+        workers, then time out!
 
         Raises `TimeoutError` if not all workers come back within ``timeout`` seconds.
         """
