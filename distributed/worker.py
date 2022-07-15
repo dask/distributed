@@ -1520,10 +1520,7 @@ class Worker(BaseWorker, ServerNode):
                         # otherwise
                         c.close()
 
-        logger.info(f"{self.address} - Clients closed")
-
         await self.scheduler.close_rpc()
-        logger.info(f"{self.address} - Scheduler RPC closed")
         self._workdir.release()
 
         self.stop_services()
@@ -1541,32 +1538,26 @@ class Worker(BaseWorker, ServerNode):
             with suppress(TimeoutError):
                 await self.batched_stream.close(timedelta(seconds=timeout))
 
-        logger.info(f"{self.address} - Batched stream to scheduler closed")
-
         for executor in self.executors.values():
             if executor is utils._offload_executor:
                 continue  # Never shutdown the offload executor
 
             def _close(wait):
-                logger.info(f"{self.address} - Closing {executor}, {wait=}, {timeout=}")
                 if isinstance(executor, ThreadPoolExecutor):
                     executor._work_queue.queue.clear()
                     executor.shutdown(wait=wait, timeout=timeout)
                 else:
                     executor.shutdown(wait=wait)
-                logger.info(f"{self.address} - {executor} closed")
 
             # Waiting for the shutdown can block the event loop causing
             # weird deadlocks particularly if the task that is executing in
             # the thread is waiting for a server reply, e.g. when using
             # worker clients, semaphores, etc.
             if is_python_shutting_down():
-                logger.info(f"{self.address} - Python is shutting down")
                 # If we're shutting down there is no need to wait for daemon
                 # threads to finish
                 _close(wait=False)
             else:
-                logger.info(f"{self.address} - Python is not shutting down")
                 try:
                     await to_thread(_close, wait=executor_wait)
                 except RuntimeError:  # Are we shutting down the process?
@@ -1578,15 +1569,12 @@ class Worker(BaseWorker, ServerNode):
                     _close(wait=executor_wait)  # Just run it directly
 
         self.stop()
-        logger.info(f"{self.address} - Server stop")
         await self.rpc.close()
-        logger.info(f"{self.address} - RPC closed")
 
         self.status = Status.closed
         await ServerNode.close(self)
 
         setproctitle("dask-worker [closed]")
-        logger.info(f"{self.address} - Worker closed successfully")
         return "OK"
 
     async def close_gracefully(self, restart=None):

@@ -642,10 +642,8 @@ class WorkerProcess:
         """
         enable_proctitle_on_children()
         if self.status == Status.running:
-            logger.info(f"{self.worker_address} - Start called when already running")
             return self.status
         if self.status == Status.starting:
-            logger.info(f"{self.worker_address} - Start called when already starting")
             await self.running.wait()
             return self.status
 
@@ -678,9 +676,7 @@ class WorkerProcess:
         os.environ.update(self.env)
 
         try:
-            logger.info(f"{self.worker_address} - Starting worker process")
             await self.process.start()
-            logger.info(f"{self.worker_address} - Worker process started")
         except OSError:
             logger.exception("Nanny failed to start process", exc_info=True)
             self.process.terminate()
@@ -688,7 +684,6 @@ class WorkerProcess:
             return self.status
         try:
             msg = await self._wait_until_connected(uid)
-            logger.info(f"{self.worker_address} - Connected to worker")
         except Exception:
             logger.exception("Failed to connect to process")
             self.status = Status.failed
