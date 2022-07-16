@@ -3004,7 +3004,8 @@ class Scheduler(SchedulerState, ServerNode):
             distributed.dashboard.scheduler.connect(
                 self.http_application, self.http_server, self, prefix=http_prefix
             )
-        if jupyter:
+        self.jupyter = jupyter
+        if self.jupyter:
             from jupyter_server.serverapp import ServerApp
             from traitlets.config import Config
 
@@ -3405,9 +3406,11 @@ class Scheduler(SchedulerState, ServerNode):
             except Exception:
                 logger.exception("Failed to start preload")
 
-        import os
-
-        os.environ["DASK_SCHEDULER_ADDRESS"] = self.address
+        if self.jupyter:
+            # Allow insecure communications from local users
+            if self.address.startswith("tls://"):
+                await self.listen("tcp://localhost:0")
+            os.environ["DASK_SCHEDULER_ADDRESS"] = self.listeners[-1].contact_address
 
         await asyncio.gather(
             *[plugin.start(self) for plugin in list(self.plugins.values())]
@@ -3484,7 +3487,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         await asyncio.gather(*futures)
 
-        if hasattr(self, "_jupyter_server_application"):
+        if self.jupyter:
             await self._jupyter_server_application._cleanup()
 
         for comm in self.client_comms.values():
