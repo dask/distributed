@@ -67,6 +67,10 @@ setup(
         dask-ssh=distributed.cli.dask_ssh:main
         dask-scheduler=distributed.cli.dask_scheduler:main
         dask-worker=distributed.cli.dask_worker:main
+        [dask_cli]
+        scheduler=distributed.cli.dask_scheduler:main
+        worker=distributed.cli.dask_worker:main
+        ssh=distributed.cli.dask_ssh:main
       """,
     # https://mypy.readthedocs.io/en/latest/installed_packages.html
     zip_safe=False,

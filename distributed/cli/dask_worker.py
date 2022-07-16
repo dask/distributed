@@ -35,7 +35,7 @@ logger = logging.getLogger("distributed.dask_worker")
 pem_file_option_type = click.Path(exists=True, resolve_path=True)
 
 
-@click.command(context_settings=dict(ignore_unknown_options=True))
+@click.command(name="worker", context_settings=dict(ignore_unknown_options=True))
 @click.argument("scheduler", type=str, required=False)
 @click.option(
     "--tls-ca-file",
