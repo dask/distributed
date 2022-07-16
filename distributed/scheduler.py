@@ -3009,7 +3009,15 @@ class Scheduler(SchedulerState, ServerNode):
             from traitlets.config import Config
 
             j = ServerApp.instance(
-                config=Config({"ServerApp": {"base_url": "jupyter", "token": ""}})
+                config=Config(
+                    {
+                        "ServerApp": {
+                            "base_url": "jupyter",
+                            "token": "",
+                            "allow_remote_access": True,
+                        }
+                    }
+                )
             )
             j.initialize(
                 new_httpserver=False,
