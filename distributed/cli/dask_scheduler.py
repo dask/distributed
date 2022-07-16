@@ -80,6 +80,13 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     required=False,
     help="Deprecated.  See --dashboard/--no-dashboard.",
 )
+@click.option(
+    "--jupyter/--no-jupyter",
+    "jupyter",
+    default=False,
+    required=False,
+    help="Start a Jupyter Server in the same process",
+)
 @click.option("--show/--no-show", default=False, help="Show web UI [default: --show]")
 @click.option(
     "--dashboard-prefix", type=str, default="", help="Prefix for the dashboard app"
@@ -132,6 +139,7 @@ def main(
     tls_cert,
     tls_key,
     dashboard_address,
+    jupyter,
     **kwargs,
 ):
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
@@ -195,6 +203,7 @@ def main(
             dashboard=dashboard,
             dashboard_address=dashboard_address,
             http_prefix=dashboard_prefix,
+            jupyter=jupyter,
             **kwargs,
         )
         logger.info("-" * 47)

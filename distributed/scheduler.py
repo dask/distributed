@@ -2916,6 +2916,7 @@ class Scheduler(SchedulerState, ServerNode):
         plugins=(),
         contact_address=None,
         transition_counter_max=False,
+        jupyter=False,
         **kwargs,
     ):
         if loop is not None:
@@ -3003,6 +3004,19 @@ class Scheduler(SchedulerState, ServerNode):
             distributed.dashboard.scheduler.connect(
                 self.http_application, self.http_server, self, prefix=http_prefix
             )
+        if jupyter:
+            from jupyter_server.serverapp import ServerApp
+            from traitlets.config import Config
+
+            j = ServerApp.instance(
+                config=Config({"ServerApp": {"base_url": "jupyter", "token": ""}})
+            )
+            j.initialize(
+                new_httpserver=False,
+                argv=["--ServerApp.base_url=jupyter"],
+            )
+            self._jupyter_server_application = j
+            self.http_application.add_application(j.web_app)
 
         # Communication state
         self.client_comms = {}
@@ -3383,6 +3397,10 @@ class Scheduler(SchedulerState, ServerNode):
             except Exception:
                 logger.exception("Failed to start preload")
 
+        import os
+
+        os.environ["DASK_SCHEDULER_ADDRESS"] = self.address
+
         await asyncio.gather(
             *[plugin.start(self) for plugin in list(self.plugins.values())]
         )
@@ -3457,6 +3475,9 @@ class Scheduler(SchedulerState, ServerNode):
                 futures.append(comm.close())
 
         await asyncio.gather(*futures)
+
+        if hasattr(self, "_jupyter_server_application"):
+            await self._jupyter_server_application._cleanup()
 
         for comm in self.client_comms.values():
             comm.abort()
