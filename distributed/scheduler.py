@@ -5123,6 +5123,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         Raises `TimeoutError` if not all workers come back within ``timeout`` seconds
         after being shut down.
+
+        After `restart`, all connected workers are new, regardless of whether `TimeoutError`
+        was raised.
         """
         stimulus_id = f"restart-{time()}"
 
@@ -5174,7 +5177,11 @@ class Scheduler(SchedulerState, ServerNode):
             resps = await asyncio.gather(
                 *(
                     asyncio.wait_for(
-                        nanny.restart(close=True, timeout=timeout), timeout
+                        # FIXME does not raise if the process fails to shut down,
+                        # see https://github.com/dask/distributed/pull/6427/files#r894917424
+                        # NOTE: Nanny will automatically restart worker process when it's killed
+                        nanny.kill(timeout=timeout),
+                        timeout,
                     )
                     for nanny in nannies
                 ),
@@ -5183,9 +5190,21 @@ class Scheduler(SchedulerState, ServerNode):
             # NOTE: the `WorkerState` entries for these workers will be removed
             # naturally when they disconnect from the scheduler.
 
-            if n_failed := sum(resp != "OK" for resp in resps):
+            # Remove any workers that failed to shut down, so we can guarantee
+            # that after `restart`, there are no old workers around.
+            bad_nannies = [
+                addr for addr, resp in zip(nanny_workers, resps) if resp is not None
+            ]
+            if bad_nannies:
+                await asyncio.gather(
+                    *(
+                        self.remove_worker(addr, stimulus_id=stimulus_id)
+                        for addr in bad_nannies
+                    )
+                )
+
                 raise TimeoutError(
-                    f"{n_failed}/{len(nannies)} worker(s) did not restart within {timeout}s"
+                    f"{len(bad_nannies)}/{len(nannies)} worker(s) did not shut down within {timeout}s"
                 )
 
         self.log_event([client, "all"], {"action": "restart", "client": client})

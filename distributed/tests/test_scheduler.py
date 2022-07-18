@@ -650,22 +650,21 @@ async def test_restart_waits_for_new_workers(c, s, *workers):
     assert set(s.workers.values()).isdisjoint(original_workers.values())
 
 
-class SlowRestartNanny(Nanny):
+class SlowKillNanny(Nanny):
     def __init__(self, *args, **kwargs):
-        self.restart_proceed = asyncio.Event()
-        self.restart_called = asyncio.Event()
+        self.kill_proceed = asyncio.Event()
+        self.kill_called = asyncio.Event()
         super().__init__(*args, **kwargs)
 
-    async def restart(self, *, timeout):
-        self.restart_called.set()
-        try:
-            await asyncio.wait_for(self.restart_proceed.wait(), timeout)
-        except TimeoutError:
-            return "timed out"
-        return await super().restart(timeout=timeout)
+    async def kill(self, *, timeout):
+        self.kill_called.set()
+        print("kill called")
+        await asyncio.wait_for(self.kill_proceed.wait(), timeout)
+        print("kill proceed")
+        return await super().kill(timeout=timeout)
 
 
-@gen_cluster(client=True, Worker=SlowRestartNanny, nthreads=[("", 1)] * 2)
+@gen_cluster(client=True, Worker=SlowKillNanny, nthreads=[("", 1)] * 2)
 async def test_restart_nanny_timeout_exceeded(c, s, a, b):
     f = c.submit(div, 1, 0)
     fr = c.submit(inc, 1, resources={"FOO": 1})
@@ -676,12 +675,13 @@ async def test_restart_nanny_timeout_exceeded(c, s, a, b):
     assert s.tasks
 
     with pytest.raises(
-        TimeoutError, match=r"2/2 worker\(s\) did not restart within 1s"
+        TimeoutError, match=r"2/2 worker\(s\) did not shut down within 1s"
     ):
         await c.restart(timeout="1s")
-    assert a.restart_called.is_set()
-    assert b.restart_called.is_set()
+    assert a.kill_called.is_set()
+    assert b.kill_called.is_set()
 
+    assert not s.workers
     assert not s.erred_tasks
     assert not s.computations
     assert not s.unrunnable
@@ -723,7 +723,7 @@ async def test_restart_some_nannies_some_not(c, s, a, b):
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
-    Worker=SlowRestartNanny,
+    Worker=SlowKillNanny,
     worker_kwargs={"heartbeat_interval": "1ms"},
 )
 async def test_restart_heartbeat_before_closing(c, s, n):
@@ -734,13 +734,13 @@ async def test_restart_heartbeat_before_closing(c, s, n):
     prev_workers = dict(s.workers)
     restart_task = asyncio.create_task(s.restart())
 
-    await n.restart_called.wait()
+    await n.kill_called.wait()
     await asyncio.sleep(0.5)  # significantly longer than the heartbeat interval
 
     # WorkerState should not be removed yet, because the worker hasn't been told to close
     assert s.workers
 
-    n.restart_proceed.set()
+    n.kill_proceed.set()
     # Wait until the worker has left (possibly until it's come back too)
     while s.workers == prev_workers:
         await asyncio.sleep(0.01)
