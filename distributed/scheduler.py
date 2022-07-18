@@ -5139,6 +5139,8 @@ class Scheduler(SchedulerState, ServerNode):
             )
 
         self.clear_task_state()
+        self.erred_tasks.clear()
+        self.computations.clear()
         self.report({"op": "restart"})
 
         for plugin in list(self.plugins.values()):
@@ -5184,9 +5186,6 @@ class Scheduler(SchedulerState, ServerNode):
             with suppress(AttributeError):
                 for c in self._worker_coroutines:
                     c.cancel()
-
-            self.erred_tasks.clear()
-            self.computations.clear()
 
             self.log_event([client, "all"], {"action": "restart", "client": client})
             while len(self.workers) < n_workers:

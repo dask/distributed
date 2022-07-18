@@ -656,12 +656,29 @@ class SlowRestartNanny(Nanny):
 
 @gen_cluster(client=True, Worker=SlowRestartNanny, nthreads=[("", 1)] * 2)
 async def test_restart_nanny_timeout_exceeded(c, s, a, b):
+    f = c.submit(div, 1, 0)
+    fr = c.submit(inc, 1, resources={"FOO": 1})
+    await wait(f)
+    assert s.erred_tasks
+    assert s.computations
+    assert s.unrunnable
+    assert s.tasks
+
     with pytest.raises(
         TimeoutError, match="Restarting 2 workers did not complete in 1s"
     ):
         await c.restart(timeout="1s")
     assert a.restart_called.is_set()
     assert b.restart_called.is_set()
+
+    assert not s.erred_tasks
+    assert not s.computations
+    assert not s.unrunnable
+    assert not s.tasks
+
+    assert not c.futures
+    assert f.status == "cancelled"
+    assert fr.status == "cancelled"
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
