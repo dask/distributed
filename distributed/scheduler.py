@@ -5193,10 +5193,6 @@ class Scheduler(SchedulerState, ServerNode):
                     f"{n_failed}/{len(nannies)} worker(s) did not restart within {timeout}s"
                 )
 
-        with suppress(AttributeError):
-            for c in self._worker_coroutines:
-                c.cancel()
-
         self.log_event([client, "all"], {"action": "restart", "client": client})
         while monotonic() < start + timeout:
             if len(self.workers) >= n_workers:
