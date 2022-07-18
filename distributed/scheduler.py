@@ -5168,12 +5168,14 @@ class Scheduler(SchedulerState, ServerNode):
         async def _restart():
             logger.debug("Send kill signal to nannies: %s", nanny_workers)
             async with contextlib.AsyncExitStack() as stack:
-                nannies = [
-                    await stack.enter_async_context(
-                        rpc(nanny_address, connection_args=self.connection_args)
+                nannies = await asyncio.gather(
+                    *(
+                        stack.enter_async_context(
+                            rpc(nanny_address, connection_args=self.connection_args)
+                        )
+                        for nanny_address in nanny_workers.values()
                     )
-                    for nanny_address in nanny_workers.values()
-                ]
+                )
 
                 resps = await asyncio.gather(
                     *(nanny.restart(close=True, timeout=timeout) for nanny in nannies)
