@@ -702,6 +702,17 @@ async def test_restart_not_all_workers_return(c, s, a, b):
     assert b.status in (Status.closed, Status.closing)
 
 
+@gen_cluster(client=True, nthreads=[("", 1)] * 2)
+async def test_restart_no_wait_for_workers(c, s, a, b):
+    await c.restart(timeout="1s", wait_for_workers=False)
+
+    assert not s.workers
+    # Workers are not immediately closed because of https://github.com/dask/distributed/issues/6390
+    # (the message is still waiting in the BatchedSend)
+    await a.finished()
+    await b.finished()
+
+
 @pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny)
 async def test_restart_some_nannies_some_not(c, s, a, b):

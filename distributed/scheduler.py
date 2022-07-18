@@ -5112,20 +5112,30 @@ class Scheduler(SchedulerState, ServerNode):
             collection.clear()
 
     @log_errors
-    async def restart(self, client=None, timeout=30):
+    async def restart(self, client=None, timeout=30, wait_for_workers=True):
         """
-        Restart all workers. Reset local state. Wait for workers to return.
+        Restart all workers. Reset local state. Optionally wait for workers to return.
 
         Workers without nannies are shut down, hoping an external deployment system
         will restart them. Therefore, if not using nannies and your deployment system
         does not automatically restart workers, ``restart`` will just shut down all
         workers, then time out!
 
-        Raises `TimeoutError` if not all workers come back within ``timeout`` seconds
-        after being shut down.
-
         After `restart`, all connected workers are new, regardless of whether `TimeoutError`
-        was raised.
+        was raised. Any workers that failed to shut down in time are removed, and
+        may or many not shut down on their own in the future.
+
+        Parameters
+        ----------
+        timeout:
+            How long to wait for workers to shut down and come back, if `wait_for_workers`
+            is True, otherwise just how long to wait for workers to shut down.
+            Raises `asyncio.TimeoutError` if this is exceeded.
+        wait_for_workers:
+            Whether to wait for all workers to reconnect, or just for them to shut down
+            (default True). Use ``restart(wait_for_workers=False)`` combined with
+            `Client.wait_for_workers` for granular control over how many workers to
+            wait for.
         """
         stimulus_id = f"restart-{time()}"
 
@@ -5208,25 +5218,28 @@ class Scheduler(SchedulerState, ServerNode):
                 )
 
         self.log_event([client, "all"], {"action": "restart", "client": client})
-        while monotonic() < start + timeout:
-            if len(self.workers) >= n_workers:
-                return
-            await asyncio.sleep(0.01)
-        else:
-            msg = (
-                f"Waited for {n_workers} worker(s) to reconnect after restarting, "
-                f"but after {timeout}s, only {len(self.workers)} have returned."
-            )
 
-            if (n_nanny := len(nanny_workers)) < n_workers:
-                msg += (
-                    f" The {n_workers - n_nanny} worker(s) not using Nannies were just shut "
-                    "down instead of restarted (restart is only possible with Nannies). If "
-                    "your deployment system does not automatically re-launch terminated "
-                    "processes, then those workers will never back, and `Client.restart` "
-                    "will always time out. Do not use `Client.restart` in that case."
+        if wait_for_workers:
+            while monotonic() < start + timeout:
+                if len(self.workers) >= n_workers:
+                    return
+                await asyncio.sleep(0.01)
+            else:
+                msg = (
+                    f"Waited for {n_workers} worker(s) to reconnect after restarting, "
+                    f"but after {timeout}s, only {len(self.workers)} have returned. "
+                    "Consider a longer timeout, or `wait_for_workers=False`."
                 )
-            raise TimeoutError(msg) from None
+
+                if (n_nanny := len(nanny_workers)) < n_workers:
+                    msg += (
+                        f" The {n_workers - n_nanny} worker(s) not using Nannies were just shut "
+                        "down instead of restarted (restart is only possible with Nannies). If "
+                        "your deployment system does not automatically re-launch terminated "
+                        "processes, then those workers will never come back, and `Client.restart` "
+                        "will always time out. Do not use `Client.restart` in that case."
+                    )
+                raise TimeoutError(msg) from None
 
     async def broadcast(
         self,
