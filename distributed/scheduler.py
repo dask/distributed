@@ -3007,7 +3007,6 @@ class Scheduler(SchedulerState, ServerNode):
         # Communication state
         self.client_comms = {}
         self.stream_comms = {}
-        self._worker_coroutines = []
 
         # Task state
         tasks = {}
@@ -3334,10 +3333,6 @@ class Scheduler(SchedulerState, ServerNode):
         enable_gc_diagnosis()
 
         self.clear_task_state()
-
-        with suppress(AttributeError):
-            for c in self._worker_coroutines:
-                c.cancel()
 
         for addr in self._start_address:
             await self.listen(
