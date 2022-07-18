@@ -632,11 +632,22 @@ async def test_restart(c, s, a, b):
 @pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny, nthreads=[("", 1)] * 5)
 async def test_restart_waits_for_new_workers(c, s, *workers):
-    n_initial_workers = len(s.workers)
+    original_procs = {n.process.process for n in workers}
+    original_workers = dict(s.workers)
+
     await c.restart()
-    assert len(s.workers) == n_initial_workers
+    assert len(s.workers) == len(original_workers)
     for w in workers:
         assert w.address not in s.workers
+
+    # Confirm they restarted
+    # NOTE: == for `psutil.Process` compares PID and creation time
+    new_procs = {n.process.process for n in workers}
+    assert new_procs != original_procs
+    # The workers should have new addresses
+    assert s.workers.keys().isdisjoint(original_workers.keys())
+    # The old WorkerState instances should be replaced
+    assert set(s.workers.values()).isdisjoint(original_workers.values())
 
 
 class SlowRestartNanny(Nanny):
@@ -694,8 +705,7 @@ async def test_restart_not_all_workers_return(c, s, a, b):
 @pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny)
 async def test_restart_some_nannies_some_not(c, s, a, b):
-    original_procs = {a.process.process, b.process.process}
-    original_workers = dict(s.workers)
+    original_addrs = set(s.workers)
     async with Worker(s.address, nthreads=1) as w:
         await c.wait_for_workers(3)
 
@@ -706,14 +716,8 @@ async def test_restart_some_nannies_some_not(c, s, a, b):
         assert w.status == Status.closed
 
         assert len(s.workers) == 2
-        # Confirm they restarted
-        # NOTE: == for `psutil.Process` compares PID and creation time
-        new_procs = {a.process.process, b.process.process}
-        assert new_procs != original_procs
-        # The workers should have new addresses
-        assert s.workers.keys().isdisjoint(original_workers.keys())
-        # The old WorkerState instances should be replaced
-        assert set(s.workers.values()).isdisjoint(original_workers.values())
+        assert set(s.workers).isdisjoint(original_addrs)
+        assert w.address not in s.workers
 
 
 @gen_cluster(
