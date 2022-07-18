@@ -5126,8 +5126,12 @@ class Scheduler(SchedulerState, ServerNode):
         does not automatically restart workers, ``restart`` will just shut down all
         workers, then time out!
 
-        Raises `TimeoutError` if not all workers come back within ``timeout`` seconds
-        after being shut down.
+        Raises `TimeoutError` if the restart process takes longer than ``timeout``
+        seconds. This could mean not all workers came back within ``timeout`` seconds,
+        or that they didn't shut down in time, or even that connecting to all Nannies
+        took too long. After a `TimeoutError`, the cluster is still usable, but
+        non-restarted workers may still be connected to the cluster, and they may
+        shut themselves down at some point in the future.
         """
         stimulus_id = f"restart-{time()}"
 
