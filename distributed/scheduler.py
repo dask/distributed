@@ -5126,7 +5126,8 @@ class Scheduler(SchedulerState, ServerNode):
         does not automatically restart workers, ``restart`` will just shut down all
         workers, then time out!
 
-        Raises `TimeoutError` if not all workers come back within ``timeout`` seconds.
+        Raises `TimeoutError` if not all workers come back within ``timeout`` seconds
+        after being shut down.
         """
         stimulus_id = f"restart-{time()}"
 
@@ -5153,18 +5154,18 @@ class Scheduler(SchedulerState, ServerNode):
         nanny_workers = {
             addr: ws.nanny for addr, ws in self.workers.items() if ws.nanny
         }
+        # Close non-Nanny workers. We have no way to restart them, so we just let them go,
+        # and assume a deployment system is going to restart them for us.
+        # Don't apply timeout here, since `remove_worker` doesn't block on connections.
+        await asyncio.gather(
+            *(
+                self.remove_worker(address=addr, stimulus_id=stimulus_id)
+                for addr in self.workers
+                if addr not in nanny_workers
+            )
+        )
 
         async def _restart():
-            # Close non-Nanny workers. We have no way to restart them, so we just let them go,
-            # and assume a deployment system is going to restart them for us.
-            await asyncio.gather(
-                *(
-                    self.remove_worker(address=addr, stimulus_id=stimulus_id)
-                    for addr in self.workers
-                    if addr not in nanny_workers
-                )
-            )
-
             logger.debug("Send kill signal to nannies: %s", nanny_workers)
             async with contextlib.AsyncExitStack() as stack:
                 nannies = [
