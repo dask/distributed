@@ -665,7 +665,7 @@ async def test_restart_nanny_timeout_exceeded(c, s, a, b):
     assert s.tasks
 
     with pytest.raises(
-        TimeoutError, match="Restarting 2 workers did not complete in 1s"
+        TimeoutError, match=r"2/2 worker\(s\) did not restart within 1s"
     ):
         await c.restart(timeout="1s")
     assert a.restart_called.is_set()
@@ -683,10 +683,12 @@ async def test_restart_nanny_timeout_exceeded(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_restart_not_all_workers_return(c, s, a, b):
-    with pytest.raises(
-        TimeoutError, match="Restarting 2 workers did not complete in 1s"
-    ):
+    with pytest.raises(TimeoutError, match="Waited for 2 worker"):
         await c.restart(timeout="1s")
+
+    assert not s.workers
+    assert a.status in (Status.closed, Status.closing)
+    assert b.status in (Status.closed, Status.closing)
 
 
 @pytest.mark.slow
@@ -698,9 +700,7 @@ async def test_restart_some_nannies_some_not(c, s, a, b):
         await c.wait_for_workers(3)
 
         # FIXME how to make this not always take 20s if the nannies do restart quickly?
-        with pytest.raises(
-            TimeoutError, match="Restarting 3 workers did not complete in 20s"
-        ):
+        with pytest.raises(TimeoutError, match=r"The 1 worker\(s\) not using Nannies"):
             await c.restart(timeout="20s")
 
         assert w.status == Status.closed
