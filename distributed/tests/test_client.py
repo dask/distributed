@@ -92,7 +92,6 @@ from distributed.utils_test import (
     double,
     gen_cluster,
     gen_test,
-    geninc,
     get_cert,
     inc,
     map_varying,
@@ -2662,13 +2661,13 @@ def test_run_sync(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_run_coroutine(c, s, a, b):
-    results = await c.run(geninc, 1, delay=0.05)
+    results = await c.run(asyncinc, 1, delay=0.05)
     assert results == {a.address: 2, b.address: 2}
 
-    results = await c.run(geninc, 1, delay=0.05, workers=[a.address])
+    results = await c.run(asyncinc, 1, delay=0.05, workers=[a.address])
     assert results == {a.address: 2}
 
-    results = await c.run(geninc, 1, workers=[])
+    results = await c.run(asyncinc, 1, workers=[])
     assert results == {}
 
     with pytest.raises(RuntimeError, match="hello"):
@@ -2679,14 +2678,14 @@ async def test_run_coroutine(c, s, a, b):
 
 
 def test_run_coroutine_sync(c, s, a, b):
-    result = c.run(geninc, 2, delay=0.01)
+    result = c.run(asyncinc, 2, delay=0.01)
     assert result == {a["address"]: 3, b["address"]: 3}
 
-    result = c.run(geninc, 2, workers=[a["address"]])
+    result = c.run(asyncinc, 2, workers=[a["address"]])
     assert result == {a["address"]: 3}
 
     t1 = time()
-    result = c.run(geninc, 2, delay=10, wait=False)
+    result = c.run(asyncinc, 2, delay=10, wait=False)
     t2 = time()
     assert result is None
     assert t2 - t1 <= 1.0
