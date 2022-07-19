@@ -379,7 +379,7 @@ class Nanny(ServerNode):
         informed
         """
         if self.process is None:
-            return "OK"
+            return
 
         deadline = time() + timeout
         await self.process.kill(timeout=0.8 * (deadline - time()))
