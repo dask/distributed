@@ -6,6 +6,7 @@ import sys
 import warnings
 import weakref
 from json import dumps
+from typing import Any
 
 import dask
 import dask.config
@@ -37,8 +38,10 @@ class Process(ProcessInterface):
         await super().start()
 
     async def close(self):
-        self.proc.kill()  # https://github.com/ronf/asyncssh/issues/112
-        self.connection.close()
+        if self.proc:
+            self.proc.kill()  # https://github.com/ronf/asyncssh/issues/112
+        if self.connection:
+            self.connection.close()
         await super().close()
 
 
@@ -62,7 +65,7 @@ class Worker(Process):
         dask.distributed.Worker class
     """
 
-    def __init__(
+    def __init__(  # type: ignore[no-untyped-def]
         self,
         scheduler: str,
         address: str,
@@ -206,14 +209,18 @@ class Scheduler(Process):
     """
 
     def __init__(
-        self, address: str, connect_options: dict, kwargs: dict, remote_python=None
+        self,
+        address: str,
+        connect_options: dict,
+        kwargs: dict,
+        remote_python: str | None = None,
     ):
         super().__init__()
 
         self.address = address
         self.kwargs = kwargs
         self.connect_options = connect_options
-        self.remote_python = remote_python
+        self.remote_python = remote_python or sys.executable
 
     async def start(self):
         try:
@@ -243,9 +250,6 @@ class Scheduler(Process):
                 raise Exception(
                     "Scheduler failed to set DASK_INTERNAL_INHERIT_CONFIG variable "
                 )
-
-        if not self.remote_python:
-            self.remote_python = sys.executable
 
         cmd = " ".join(
             [
@@ -300,8 +304,8 @@ def SSHCluster(
     worker_module: str = "deprecated",
     worker_class: str = "distributed.Nanny",
     remote_python: str | list[str] | None = None,
-    **kwargs,
-):
+    **kwargs: Any,
+) -> SpecCluster:
     """Deploy a Dask cluster using SSH
 
     The SSHCluster function deploys a Dask Scheduler and Workers for you on a
@@ -404,7 +408,7 @@ def SSHCluster(
             "This will be removed in the future"
         )
         kwargs.setdefault("worker_addrs", hosts)
-        return OldSSHCluster(**kwargs)
+        return OldSSHCluster(**kwargs)  # type: ignore
 
     if not hosts:
         raise ValueError(

@@ -2,21 +2,34 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Mapping
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Any, Awaitable, Callable, Collection, Literal
+from typing import (
+    IO,
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Collection,
+    Iterator,
+    Literal,
+)
 
 import fsspec
 import msgpack
 
+from distributed._stories import msg_with_datetime
+from distributed._stories import scheduler_story as _scheduler_story
+from distributed._stories import worker_story as _worker_story
 from distributed.compatibility import to_thread
-from distributed.stories import msg_with_datetime
-from distributed.stories import scheduler_story as _scheduler_story
-from distributed.stories import worker_story as _worker_story
 
 if TYPE_CHECKING:
     import yaml
+
+DEFAULT_CLUSTER_DUMP_FORMAT: Literal["msgpack" | "yaml"] = "msgpack"
+DEFAULT_CLUSTER_DUMP_EXCLUDE: Collection[str] = ("run_spec",)
 
 
 def _tuple_to_list(node):
@@ -31,7 +44,7 @@ def _tuple_to_list(node):
 async def write_state(
     get_state: Callable[[], Awaitable[Any]],
     url: str,
-    format: Literal["msgpack", "yaml"],
+    format: Literal["msgpack", "yaml"] = DEFAULT_CLUSTER_DUMP_FORMAT,
     **storage_options: dict[str, Any],
 ) -> None:
     "Await a cluster dump, then serialize and write it to a path"
@@ -49,7 +62,7 @@ async def write_state(
         if not url.endswith(suffix):
             url += suffix
 
-        def writer(state: dict, f: IO):
+        def writer(state: dict, f: IO) -> None:
             # YAML adds unnecessary `!!python/tuple` tags; convert tuples to lists to avoid them.
             # Unnecessary for msgpack, since tuples and lists are encoded the same.
             yaml.dump(_tuple_to_list(state), f)
@@ -68,7 +81,7 @@ async def write_state(
         await to_thread(writer, state, f)
 
 
-def load_cluster_dump(url: str, **kwargs) -> dict:
+def load_cluster_dump(url: str, **kwargs: Any) -> dict:
     """Loads a cluster dump from a disk artefact
 
     Parameters
@@ -116,7 +129,7 @@ class DumpArtefact(Mapping):
         self.dump = state
 
     @classmethod
-    def from_url(cls, url: str, **kwargs) -> DumpArtefact:
+    def from_url(cls, url: str, **kwargs: Any) -> DumpArtefact:
         """Loads a cluster dump from a disk artefact
 
         Parameters
@@ -143,7 +156,7 @@ class DumpArtefact(Mapping):
     def __len__(self):
         return len(self.dump)
 
-    def _extract_tasks(self, state: str | None, context: dict):
+    def _extract_tasks(self, state: str | None, context: dict[str, dict]) -> list[dict]:
         if state:
             return [v for v in context.values() if v["state"] == state]
         else:
@@ -278,7 +291,7 @@ class DumpArtefact(Mapping):
             or not isinstance(responsive_workers[w], dict)
         ]
 
-    def _compact_state(self, state: dict, expand_keys: set[str]):
+    def _compact_state(self, state: dict, expand_keys: set[str]) -> dict[str, Any]:
         """Compacts ``state`` keys into a general key,
         unless the key is in ``expand_keys``"""
         assert "general" not in state
@@ -318,7 +331,7 @@ class DumpArtefact(Mapping):
         ),
         background: bool = False,
         log: bool | None = None,
-    ):
+    ) -> None | threading.Thread:
         """
         Splits the Dump Artefact into a tree of yaml files with
         ``root_dir`` as it's base.
@@ -354,8 +367,6 @@ class DumpArtefact(Mapping):
             False if ``background`` is True, and True otherwise.
         """
         if background:
-            import threading
-
             t = threading.Thread(
                 target=self.to_yamls,
                 name="to-yamls",
@@ -431,15 +442,16 @@ class DumpArtefact(Mapping):
             with open(filename, "w") as fd:
                 with _block_literals(dumper) if name == "logs" else nullcontext():
                     yaml.dump(_logs, fd, Dumper=dumper)
+        return None
 
 
 @contextmanager
-def _block_literals(dumper: type[yaml.Dumper | yaml.CDumper]):
+def _block_literals(dumper: type[yaml.Dumper | yaml.CDumper]) -> Iterator[None]:
     "Contextmanager to use literal-block YAML syntax for multiline strings. Not thread-safe."
     # based on https://stackoverflow.com/a/33300001/17100540
     original_respresenter = dumper.yaml_representers[str]
 
-    def represent_str(self, data: str):
+    def represent_str(self, data):
         if "\n" in data:
             return self.represent_scalar("tag:yaml.org,2002:str", data, style="|")
         return self.represent_scalar("tag:yaml.org,2002:str", data)

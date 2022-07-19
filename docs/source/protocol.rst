@@ -109,6 +109,15 @@ bytes rather than obscure Python functions.
 *Note: we actually call some combination of pickle and cloudpickle, depending
 on the situation.  This is for performance reasons.*
 
+CloudPickle can serialize objects by both reference (referring to them by
+their module and name) or by value (serializing the actual code for the object).
+By default, it serializes by reference if it can, but starting with CloudPickle 2.0
+you can register a module to be serialized by value. This can be useful if you
+want to send an object in a module that doesn't exist on the receiving end::
+
+   import mymodule
+   cloudpickle.register_pickle_by_value(mymodule)
+
 Cross Language Specialization
 -----------------------------
 
@@ -135,13 +144,11 @@ the scheduler may differ.**
 This has a few advantages:
 
 1.  The Scheduler is protected from unpickling unsafe code
-2.  The Scheduler can be run under ``pypy`` for improved performance.  This is
-    only useful for larger clusters.
-3.  We could conceivably implement workers and clients for other languages
+2.  We could conceivably implement workers and clients for other languages
     (like R or Julia) and reuse the Python scheduler.  The worker and client
     code is fairly simple and much easier to reimplement than the scheduler,
     which is complex.
-4.  The scheduler might some day be rewritten in more heavily optimized C or Go
+3.  The scheduler might some day be rewritten in more heavily optimized C or Go
 
 Compression
 -----------

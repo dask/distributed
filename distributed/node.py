@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import logging
+import ssl
 import warnings
 import weakref
 from contextlib import suppress
@@ -77,15 +80,16 @@ class ServerNode(Server):
     def service_ports(self):
         return {k: v.port for k, v in self.services.items()}
 
-    def _setup_logging(self, logger):
+    def _setup_logging(self, *loggers):
         self._deque_handler = DequeHandler(
             n=dask.config.get("distributed.admin.log-length")
         )
         self._deque_handler.setFormatter(
             logging.Formatter(dask.config.get("distributed.admin.log-format"))
         )
-        logger.addHandler(self._deque_handler)
-        weakref.finalize(self, logger.removeHandler, self._deque_handler)
+        for logger in loggers:
+            logger.addHandler(self._deque_handler)
+            weakref.finalize(self, logger.removeHandler, self._deque_handler)
 
     def get_logs(self, start=0, n=None, timestamps=False):
         """
@@ -128,15 +132,10 @@ class ServerNode(Server):
         tls_cert = dask.config.get("distributed.scheduler.dashboard.tls.cert")
         tls_ca_file = dask.config.get("distributed.scheduler.dashboard.tls.ca-file")
         if tls_cert:
-            import ssl
-
             ssl_options = ssl.create_default_context(
-                cafile=tls_ca_file, purpose=ssl.Purpose.SERVER_AUTH
+                cafile=tls_ca_file, purpose=ssl.Purpose.CLIENT_AUTH
             )
             ssl_options.load_cert_chain(tls_cert, keyfile=tls_key)
-            # We don't care about auth here, just encryption
-            ssl_options.check_hostname = False
-            ssl_options.verify_mode = ssl.CERT_NONE
 
         self.http_server = HTTPServer(self.http_application, ssl_options=ssl_options)
 

@@ -1,11 +1,13 @@
+from __future__ import annotations
+
 from urllib.parse import urljoin
 
+from tlz import memoize
 from tornado import web
 from tornado.ioloop import IOLoop
 
-from distributed.dashboard.components.nvml import gpu_doc  # noqa: 1708
 from distributed.dashboard.components.nvml import (
-    NVML_ENABLED,
+    gpu_doc,
     gpu_memory_doc,
     gpu_utilization_doc,
 )
@@ -16,6 +18,8 @@ from distributed.dashboard.components.scheduler import (
     ClusterMemory,
     ComputePerKey,
     CurrentLoad,
+    EventLoop,
+    ExceptionsTable,
     MemoryByKey,
     Occupancy,
     SystemMonitor,
@@ -29,12 +33,15 @@ from distributed.dashboard.components.scheduler import (
     WorkersMemory,
     WorkerTable,
     events_doc,
+    exceptions_doc,
     graph_doc,
+    hardware_doc,
     individual_doc,
     individual_profile_doc,
     individual_profile_server_doc,
     profile_doc,
     profile_server_doc,
+    shuffling_doc,
     status_doc,
     stealing_doc,
     systemmonitor_doc,
@@ -47,8 +54,10 @@ from distributed.dashboard.worker import counters_doc
 
 applications = {
     "/system": systemmonitor_doc,
+    "/shuffle": shuffling_doc,
     "/stealing": stealing_doc,
     "/workers": workers_doc,
+    "/exceptions": exceptions_doc,
     "/events": events_doc,
     "/counters": counters_doc,
     "/tasks": tasks_doc,
@@ -56,6 +65,7 @@ applications = {
     "/profile": profile_doc,
     "/profile-server": profile_server_doc,
     "/graph": graph_doc,
+    "/hardware": hardware_doc,
     "/groups": tg_graph_doc,
     "/gpu": gpu_doc,
     "/individual-task-stream": individual_doc(
@@ -73,6 +83,7 @@ applications = {
     ),
     "/individual-occupancy": individual_doc(Occupancy, 100),
     "/individual-workers": individual_doc(WorkerTable, 500),
+    "/individual-exceptions": individual_doc(ExceptionsTable, 1000),
     "/individual-bandwidth-types": individual_doc(BandwidthTypes, 500),
     "/individual-bandwidth-workers": individual_doc(BandwidthWorkers, 500),
     "/individual-workers-network": individual_doc(
@@ -97,6 +108,7 @@ applications = {
     "/individual-compute-time-per-key": individual_doc(ComputePerKey, 500),
     "/individual-aggregate-time-per-action": individual_doc(AggregateAction, 500),
     "/individual-scheduler-system": individual_doc(SystemMonitor, 500),
+    "/individual-event-loop": individual_doc(EventLoop, 500),
     "/individual-profile": individual_profile_doc,
     "/individual-profile-server": individual_profile_server_doc,
     "/individual-gpu-memory": gpu_memory_doc,
@@ -104,27 +116,44 @@ applications = {
 }
 
 
-template_variables = {
-    "pages": [
-        "status",
-        "workers",
-        "tasks",
-        "system",
-        "profile",
-        "graph",
-        "groups",
-        "info",
-    ],
-    "plots": [x.replace("/", "") for x in applications if "individual" in x],
-}
+@memoize
+def template_variables():
+    from distributed.diagnostics.nvml import device_get_count
 
-if NVML_ENABLED:
-    template_variables["pages"].insert(4, "gpu")
+    template_variables: dict = {
+        "pages": [
+            "status",
+            "workers",
+            "tasks",
+            "system",
+            *(["gpu"] if device_get_count() > 0 else []),
+            "profile",
+            "graph",
+            "groups",
+            "info",
+        ],
+        "plots": [
+            {
+                "url": x.strip("/"),
+                "name": " ".join(x.strip("/").split("-")[1:])
+                .title()
+                .replace("Cpu", "CPU")
+                .replace("Gpu", "GPU"),
+            }
+            for x in applications
+            if "individual" in x
+        ]
+        + [{"url": "hardware", "name": "Hardware"}],
+    }
+    template_variables["plots"] = sorted(
+        template_variables["plots"], key=lambda d: d["name"]
+    )
+    return template_variables
 
 
 def connect(application, http_server, scheduler, prefix=""):
     bokeh_app = BokehApplication(
-        applications, scheduler, prefix=prefix, template_variables=template_variables
+        applications, scheduler, prefix=prefix, template_variables=template_variables()
     )
     application.add_application(bokeh_app)
     bokeh_app.initialize(IOLoop.current())

@@ -25,12 +25,11 @@ optional_packages = [
     ("numpy", lambda p: p.__version__),
     ("pandas", lambda p: p.__version__),
     ("lz4", lambda p: p.__version__),
-    ("blosc", lambda p: p.__version__),
 ]
 
 
 # only these scheduler packages will be checked for version mismatch
-scheduler_relevant_packages = {pkg for pkg, _ in required_packages} | {"lz4", "blosc"}
+scheduler_relevant_packages = {pkg for pkg, _ in required_packages} | {"lz4"}
 
 
 # notes to be displayed for mismatch packages
@@ -74,16 +73,16 @@ def version_of_package(pkg: ModuleType) -> str | None:
     from contextlib import suppress
 
     with suppress(AttributeError):
-        return pkg.__version__  # type: ignore
+        return pkg.__version__
     with suppress(AttributeError):
-        return str(pkg.version)  # type: ignore
+        return str(pkg.version)
     with suppress(AttributeError):
-        return ".".join(map(str, pkg.version_info))  # type: ignore
+        return ".".join(map(str, pkg.version_info))
     return None
 
 
 def get_package_info(
-    pkgs: Iterable[str | tuple[str, Callable[[ModuleType], str | None]]]
+    pkgs: Iterable[str | tuple[str, Callable[[ModuleType], str | None] | None]]
 ) -> dict[str, str | None]:
     """get package versions for the passed required & optional packages"""
 

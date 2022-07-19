@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 from datetime import timedelta
 from time import sleep
@@ -6,6 +8,7 @@ import pytest
 
 from distributed import Client, Nanny, Queue, TimeoutError, wait, worker_client
 from distributed.metrics import time
+from distributed.utils import open_port
 from distributed.utils_test import div, gen_cluster, inc, popen
 
 
@@ -145,18 +148,18 @@ async def test_same_futures(c, s, a, b):
     for i in range(5):
         await q.put(future)
 
-    assert s.wants_what["queue-x"] == {future.key}
+    assert {ts.key for ts in s.clients["queue-x"].wants_what} == {future.key}
 
     for i in range(4):
         future2 = await q.get()
-        assert s.wants_what["queue-x"] == {future.key}
+        assert {ts.key for ts in s.clients["queue-x"].wants_what} == {future.key}
         await asyncio.sleep(0.05)
-        assert s.wants_what["queue-x"] == {future.key}
+        assert {ts.key for ts in s.clients["queue-x"].wants_what} == {future.key}
 
     await q.get()
 
     start = time()
-    while s.wants_what["queue-x"]:
+    while "queue-x" in s.clients and s.clients["queue-x"].wants_what:
         await asyncio.sleep(0.01)
         assert time() - start < 2
 
@@ -278,11 +281,18 @@ async def test_2220(c, s, a, b):
 
 
 def test_queue_in_task(loop):
+    port = open_port()
     # Ensure that we can create a Queue inside a task on a
     # worker in a separate Python process than the client
-    with popen(["dask-scheduler", "--no-dashboard"]):
-        with popen(["dask-worker", "127.0.0.1:8786"]):
-            with Client("tcp://127.0.0.1:8786", loop=loop) as c:
+    with popen(
+        [
+            "dask-scheduler",
+            "--no-dashboard",
+            f"--port={port}",
+        ]
+    ):
+        with popen(["dask-worker", f"127.0.0.1:{port}"]):
+            with Client(f"tcp://127.0.0.1:{port}", loop=loop) as c:
                 c.wait_for_workers(1)
 
                 x = Queue("x")

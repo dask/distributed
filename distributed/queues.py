@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import uuid
@@ -41,8 +43,6 @@ class QueueExtension:
         self.scheduler.stream_handlers.update(
             {"queue-future-release": self.future_release, "queue_release": self.release}
         )
-
-        self.scheduler.extensions["queues"] = self
 
     def create(self, name=None, client=None, maxsize=0):
         logger.debug(f"Queue name: {name}")

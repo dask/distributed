@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import netCDF4
 
 from distributed.protocol.serialize import (

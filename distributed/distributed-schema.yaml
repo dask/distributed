@@ -43,6 +43,17 @@ properties:
 
               For a list of handlers see the `dask.distributed.Scheduler.handlers` attribute.
 
+          contact-address:
+            type:
+            - string
+            - "null"
+            description: |
+              The address that the scheduler advertises to workers for communication with it.
+
+              To be specified when the address to which the scheduler binds cannot be the same
+              as the address that workers use to contact the scheduler (e.g. because the former
+              is private and the scheduler is in a different network than the workers).
+
           default-data-size:
             type:
             - string
@@ -394,6 +405,10 @@ properties:
               This data gets collected into statistical profiling information,
               which is then periodically bundled together and sent along to the scheduler.
             properties:
+              enabled:
+                type: boolean
+                description: |
+                  Whether or not to enable profiling
               interval:
                 type: string
                 description: |
@@ -510,7 +525,7 @@ properties:
                   - {type: number, minimum: 0}
                   - enum: [false]
                 description: >-
-                  Limit of number of bytes to be spilled on disk. 
+                  Limit of number of bytes to be spilled on disk.
 
               monitor-interval:
                 type: string
@@ -687,7 +702,7 @@ properties:
             description: |
               The compression algorithm to use
 
-              This could be one of lz4, snappy, zstd, or blosc
+              This could be one of lz4, snappy, zstd
 
           offload:
             type:
@@ -924,6 +939,14 @@ properties:
                   A list of modules which are ignored when trying to collect the
                   code context when submitting a computation. Accepts regular
                   expressions.
+          erred-tasks:
+            type: object
+            properties:
+              max-history:
+                type: integer
+                minimum: 0
+                description: |
+                  The maximum number of erred tasks to remember.
 
       dashboard:
         type: object
@@ -976,6 +999,9 @@ properties:
               limit :
                 type: string
                 description: The time allowed before triggering a warning
+              cycle :
+                type: string
+                description: The time in between verifying event loop speed
 
           max-error-length:
             type: integer
@@ -1021,6 +1047,9 @@ properties:
               interval:
                 type: string
                 description: Polling time to query cpu/memory statistics default 500ms
+              disk:
+                type: boolean
+                description: Should we include disk metrics?  (they can cause issues in some systems)
 
       rmm:
         type: object

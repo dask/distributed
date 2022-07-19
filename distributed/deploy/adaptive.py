@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from inspect import isawaitable
 
@@ -158,7 +160,7 @@ class Adaptive(AdaptiveCore):
 
         return await super().recommendations(target)
 
-    async def workers_to_close(self, target: int):
+    async def workers_to_close(self, target: int) -> list[str]:
         """
         Determine which, if any, workers should potentially be removed from
         the cluster.
@@ -183,22 +185,23 @@ class Adaptive(AdaptiveCore):
             **self._workers_to_close_kwargs,
         )
 
+    @log_errors
     async def scale_down(self, workers):
         if not workers:
             return
-        with log_errors():
-            logger.info("Retiring workers %s", workers)
-            # Ask scheduler to cleanly retire workers
-            await self.scheduler.retire_workers(
-                names=workers,
-                remove=True,
-                close_workers=True,
-            )
 
-            # close workers more forcefully
-            f = self.cluster.scale_down(workers)
-            if isawaitable(f):
-                await f
+        logger.info("Retiring workers %s", workers)
+        # Ask scheduler to cleanly retire workers
+        await self.scheduler.retire_workers(
+            names=workers,
+            remove=True,
+            close_workers=True,
+        )
+
+        # close workers more forcefully
+        f = self.cluster.scale_down(workers)
+        if isawaitable(f):
+            await f
 
     async def scale_up(self, n):
         f = self.cluster.scale(n)

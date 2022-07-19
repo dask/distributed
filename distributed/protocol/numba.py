@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import weakref
 
 import numba.cuda

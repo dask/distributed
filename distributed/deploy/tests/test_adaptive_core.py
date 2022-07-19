@@ -1,10 +1,10 @@
-import asyncio
+from __future__ import annotations
 
-import pytest
+import asyncio
 
 from distributed.deploy.adaptive_core import AdaptiveCore
 from distributed.metrics import time
-from distributed.utils_test import captured_logger
+from distributed.utils_test import captured_logger, gen_test
 
 
 class MyAdaptive(AdaptiveCore):
@@ -25,7 +25,7 @@ class MyAdaptive(AdaptiveCore):
                 collection.discard(w)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_safe_target():
     adapt = MyAdaptive(minimum=1, maximum=4)
     assert await adapt.safe_target() == 1
@@ -33,7 +33,7 @@ async def test_safe_target():
     assert await adapt.safe_target() == 4
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_scale_up():
     adapt = MyAdaptive(minimum=1, maximum=4)
     await adapt.adapt()
@@ -46,7 +46,7 @@ async def test_scale_up():
     assert adapt.plan == {0, 1, 2, 3}
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_scale_down():
     adapt = MyAdaptive(minimum=1, maximum=4, wait_count=2)
     adapt._target = 10
@@ -72,7 +72,7 @@ async def test_scale_down():
     assert list(adapt.log) == old
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_interval():
     adapt = MyAdaptive(interval="5 ms")
     assert not adapt.plan
@@ -92,7 +92,7 @@ async def test_interval():
     assert len(adapt.plan) == 1  # last value from before, unchanged
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_adapt_oserror_safe_target():
     class BadAdaptive(MyAdaptive):
         """AdaptiveCore subclass which raises an OSError when attempting to adapt
@@ -113,7 +113,7 @@ async def test_adapt_oserror_safe_target():
     assert not adapt.periodic_callback
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_adapt_oserror_scale():
     """
     FIXME:
@@ -147,7 +147,7 @@ async def test_adapt_oserror_scale():
     adapt.stop()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_adapt_stop_del():
     adapt = MyAdaptive(interval="100ms")
     pc = adapt.periodic_callback

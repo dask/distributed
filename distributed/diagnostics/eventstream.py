@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 
 from distributed.core import coerce_to_address, connect

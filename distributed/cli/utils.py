@@ -1,50 +1,12 @@
-import click
-from packaging.version import parse as parse_version
+from __future__ import annotations
+
+import warnings
+
 from tornado.ioloop import IOLoop
 
-CLICK_VERSION = parse_version(click.__version__)
-
-py3_err_msg = """
-Warning: Your terminal does not set locales.
-
-If you use unicode text inputs for command line options then this may cause
-undesired behavior.  This is rare.
-
-If you don't use unicode characters in command line options then you can safely
-ignore this message.  This is the common case.
-
-You can support unicode inputs by specifying encoding environment variables,
-though exact solutions may depend on your system:
-
-    $ export LC_ALL=C.UTF-8
-    $ export LANG=C.UTF-8
-
-For more information see: http://click.pocoo.org/5/python3/
-""".lstrip()
-
-
-def check_python_3():
-    """Ensures that the environment is good for unicode on Python 3."""
-    # https://github.com/pallets/click/issues/448#issuecomment-246029304
-    import click.core
-
-    # TODO: Remove use of internal click functions
-    if CLICK_VERSION < parse_version("8.0.0"):
-        click.core._verify_python3_env = lambda: None
-    else:
-        click.core._verify_python_env = lambda: None
-
-    try:
-        from click import _unicodefun
-
-        if CLICK_VERSION < parse_version("8.0.0"):
-            _unicodefun._verify_python3_env()
-        else:
-            _unicodefun._verify_python_env()
-    except (TypeError, RuntimeError):
-        import click
-
-        click.echo(py3_err_msg, err=True)
+warnings.warn(
+    "the distributed.cli.utils module is deprecated", DeprecationWarning, stacklevel=2
+)
 
 
 def install_signal_handlers(loop=None, cleanup=None):

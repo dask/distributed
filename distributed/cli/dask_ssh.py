@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import sys
 import warnings
@@ -5,7 +7,6 @@ from textwrap import dedent
 
 import click
 
-from distributed.cli.utils import check_python_3
 from distributed.deploy.old_ssh import SSHCluster
 
 logger = logging.getLogger("distributed.dask_ssh")
@@ -223,10 +224,5 @@ def main(
     print("[ dask-ssh ]: Remote processes have been terminated. Exiting.")
 
 
-def go():
-    check_python_3()
-    main()
-
-
 if __name__ == "__main__":
-    go()  # pragma: no cover
+    main()  # pragma: no cover

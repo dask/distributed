@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from time import sleep
 
 from distributed.diagnostics.progressbar import TextProgressBar, progress
@@ -7,7 +9,7 @@ from distributed.utils_test import div, gen_cluster, inc
 
 def test_text_progressbar(capsys, client):
     futures = client.map(inc, range(10))
-    p = TextProgressBar(futures, interval=0.01, complete=True)
+    p = TextProgressBar(futures, interval=0.01, complete=True, loop=client.loop)
     client.gather(futures)
 
     start = time()
@@ -57,10 +59,10 @@ def test_progress_function(client, capsys):
     f = client.submit(lambda: 1)
     g = client.submit(lambda: 2)
 
-    progress([[f], [[g]]], notebook=False)
+    progress([[f], [[g]]], notebook=False, loop=client.loop)
     check_bar_completed(capsys)
 
-    progress(f)
+    progress(f, loop=client.loop)
     check_bar_completed(capsys)
 
 
@@ -68,5 +70,5 @@ def test_progress_function_w_kwargs(client, capsys):
     f = client.submit(lambda: 1)
     g = client.submit(lambda: 2)
 
-    progress(f, interval="20ms")
+    progress(f, interval="20ms", loop=client.loop)
     check_bar_completed(capsys)

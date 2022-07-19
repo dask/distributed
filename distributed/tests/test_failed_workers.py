@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import os
 import random
@@ -10,13 +12,13 @@ from tlz import first, partition_all
 
 from dask import delayed
 
-from distributed import Client, Nanny, wait
+from distributed import Client, Nanny, profile, wait
 from distributed.comm import CommClosedError
 from distributed.compatibility import MACOS
 from distributed.metrics import time
-from distributed.scheduler import COMPILED
 from distributed.utils import CancelledError, sync
 from distributed.utils_test import (
+    BlockedGatherDep,
     captured_logger,
     cluster,
     div,
@@ -25,7 +27,7 @@ from distributed.utils_test import (
     slowadd,
     slowinc,
 )
-from distributed.worker_state_machine import TaskState
+from distributed.worker_state_machine import FreeKeysEvent
 
 pytestmark = pytest.mark.ci1
 
@@ -42,32 +44,30 @@ def test_submit_after_failed_worker_sync(loop):
 
 
 @pytest.mark.slow()
-@gen_cluster(client=True, timeout=60, active_rpc_timeout=10)
-async def test_submit_after_failed_worker_async(c, s, a, b):
-    n = await Nanny(s.address, nthreads=2, loop=s.loop)
-    while len(s.workers) < 3:
-        await asyncio.sleep(0.1)
+@pytest.mark.parametrize("compute_on_failed", [False, True])
+@gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "500ms"})
+async def test_submit_after_failed_worker_async(c, s, a, b, compute_on_failed):
+    async with Nanny(s.address, nthreads=2) as n:
+        await c.wait_for_workers(3)
 
-    L = c.map(inc, range(10))
-    await wait(L)
+        L = c.map(inc, range(10))
+        await wait(L)
 
-    s.loop.add_callback(n.kill)
-    total = c.submit(sum, L)
-    result = await total
-    assert result == sum(map(inc, range(10)))
-
-    await n.close()
+        kill_task = asyncio.create_task(n.kill())
+        compute_addr = n.worker_address if compute_on_failed else a.address
+        total = c.submit(sum, L, workers=[compute_addr], allow_other_workers=True)
+        assert await total == sum(range(1, 11))
+        await kill_task
 
 
 @gen_cluster(client=True, timeout=60)
 async def test_submit_after_failed_worker(c, s, a, b):
     L = c.map(inc, range(10))
     await wait(L)
-    await a.close()
 
+    await a.close()
     total = c.submit(sum, L)
-    result = await total
-    assert result == sum(map(inc, range(10)))
+    assert await total == sum(range(1, 11))
 
 
 @pytest.mark.slow
@@ -102,17 +102,16 @@ async def test_gather_then_submit_after_failed_workers(c, s, w, x, y, z):
         assert result == [sum(map(inc, range(20)))]
 
 
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(Worker=Nanny, client=True, timeout=60)
 async def test_restart(c, s, a, b):
-    assert s.nthreads == {a.worker_address: 1, b.worker_address: 2}
-
     x = c.submit(inc, 1)
     y = c.submit(inc, x)
     z = c.submit(div, 1, 0)
     await y
 
-    assert set(s.who_has) == {x.key, y.key}
+    assert s.tasks[x.key].state == "memory"
+    assert s.tasks[y.key].state == "memory"
+    assert s.tasks[z.key].state != "memory"
 
     f = await c.restart()
     assert f is c
@@ -120,18 +119,16 @@ async def test_restart(c, s, a, b):
     assert len(s.workers) == 2
     assert not any(ws.occupancy for ws in s.workers.values())
 
-    assert not s.who_has
+    assert not s.tasks
 
     assert x.cancelled()
     assert y.cancelled()
     assert z.cancelled()
-    assert z.key not in s.exceptions
 
-    assert not s.who_wants
+    assert not s.tasks
     assert not any(cs.wants_what for cs in s.clients.values())
 
 
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(Worker=Nanny, client=True, timeout=60)
 async def test_restart_cleared(c, s, a, b):
     x = 2 * delayed(1) + 1
@@ -144,19 +141,6 @@ async def test_restart_cleared(c, s, a, b):
         assert not coll
 
 
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
-def test_restart_sync_no_center(loop):
-    with cluster(nanny=True) as (s, [a, b]):
-        with Client(s["address"], loop=loop) as c:
-            x = c.submit(inc, 1)
-            c.restart()
-            assert x.cancelled()
-            y = c.submit(inc, 2)
-            assert y.result() == 3
-            assert len(c.nthreads()) == 2
-
-
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 def test_restart_sync(loop):
     with cluster(nanny=True) as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
@@ -176,7 +160,6 @@ def test_restart_sync(loop):
             assert y.result() == 1 / 3
 
 
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(Worker=Nanny, client=True, timeout=60)
 async def test_restart_fast(c, s, a, b):
     L = c.map(sleep, range(10))
@@ -184,7 +167,7 @@ async def test_restart_fast(c, s, a, b):
     start = time()
     await c.restart()
     assert time() - start < 10
-    assert len(s.nthreads) == 2
+    assert len(s.workers) == 2
 
     assert all(x.status == "cancelled" for x in L)
 
@@ -193,7 +176,6 @@ async def test_restart_fast(c, s, a, b):
     assert result == 2
 
 
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 def test_worker_doesnt_await_task_completion(loop):
     with cluster(nanny=True, nworkers=1) as (s, [w]):
         with Client(s["address"], loop=loop) as c:
@@ -205,7 +187,6 @@ def test_worker_doesnt_await_task_completion(loop):
             assert stop - start < 20
 
 
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 def test_restart_fast_sync(loop):
     with cluster(nanny=True) as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
@@ -222,7 +203,6 @@ def test_restart_fast_sync(loop):
             assert x.result() == 2
 
 
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(Worker=Nanny, client=True, timeout=60)
 async def test_fast_kill(c, s, a, b):
     L = c.map(sleep, range(10))
@@ -238,7 +218,6 @@ async def test_fast_kill(c, s, a, b):
     assert result == 2
 
 
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(Worker=Nanny, timeout=60)
 async def test_multiple_clients_restart(s, a, b):
     c1 = await Client(s.address, asynchronous=True)
@@ -265,14 +244,14 @@ async def test_multiple_clients_restart(s, a, b):
 
 @gen_cluster(Worker=Nanny, timeout=60)
 async def test_restart_scheduler(s, a, b):
-    assert len(s.nthreads) == 2
+    assert len(s.workers) == 2
     pids = (a.pid, b.pid)
     assert pids[0]
     assert pids[1]
 
     await s.restart()
 
-    assert len(s.nthreads) == 2
+    assert len(s.workers) == 2
     pids2 = (a.pid, b.pid)
     assert pids2[0]
     assert pids2[1]
@@ -285,9 +264,10 @@ async def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
     await c.restart()
     y = c.submit(inc, 1)
     del x
-    import gc
 
-    gc.collect()
+    # Ensure that the profiler has stopped and released all references to x so that it can be garbage-collected
+    with profile.lock:
+        pass
     await asyncio.sleep(0.1)
     await y
 
@@ -297,46 +277,42 @@ async def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
 @gen_cluster(client=True, timeout=60, active_rpc_timeout=10)
 async def test_broken_worker_during_computation(c, s, a, b):
     s.allowed_failures = 100
-    n = await Nanny(s.address, nthreads=2, loop=s.loop)
+    async with Nanny(s.address, nthreads=2) as n:
+        start = time()
+        while len(s.workers) < 3:
+            await asyncio.sleep(0.01)
+            assert time() < start + 5
 
-    start = time()
-    while len(s.nthreads) < 3:
-        await asyncio.sleep(0.01)
-        assert time() < start + 5
+        N = 256
+        expected_result = N * (N + 1) // 2
+        i = 0
+        L = c.map(inc, range(N), key=["inc-%d-%d" % (i, j) for j in range(N)])
+        while len(L) > 1:
+            i += 1
+            L = c.map(
+                slowadd,
+                *zip(*partition_all(2, L)),
+                key=["add-%d-%d" % (i, j) for j in range(len(L) // 2)],
+            )
 
-    N = 256
-    expected_result = N * (N + 1) // 2
-    i = 0
-    L = c.map(inc, range(N), key=["inc-%d-%d" % (i, j) for j in range(N)])
-    while len(L) > 1:
-        i += 1
-        L = c.map(
-            slowadd,
-            *zip(*partition_all(2, L)),
-            key=["add-%d-%d" % (i, j) for j in range(len(L) // 2)],
-        )
+        await asyncio.sleep(random.random() / 20)
+        with suppress(CommClosedError):  # comm will be closed abrupty
+            await c.run(os._exit, 1, workers=[n.worker_address])
 
-    await asyncio.sleep(random.random() / 20)
-    with suppress(CommClosedError):  # comm will be closed abrupty
-        await c._run(os._exit, 1, workers=[n.worker_address])
+        await asyncio.sleep(random.random() / 20)
+        while len(s.workers) < 3:
+            await asyncio.sleep(0.01)
 
-    await asyncio.sleep(random.random() / 20)
-    while len(s.workers) < 3:
-        await asyncio.sleep(0.01)
+        with suppress(
+            CommClosedError, EnvironmentError
+        ):  # perhaps new worker can't be contacted yet
+            await c.run(os._exit, 1, workers=[n.worker_address])
 
-    with suppress(
-        CommClosedError, EnvironmentError
-    ):  # perhaps new worker can't be contacted yet
-        await c._run(os._exit, 1, workers=[n.worker_address])
-
-    [result] = await c.gather(L)
-    assert isinstance(result, int)
-    assert result == expected_result
-
-    await n.close()
+        [result] = await c.gather(L)
+        assert isinstance(result, int)
+        assert result == expected_result
 
 
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(client=True, Worker=Nanny, timeout=60)
 async def test_restart_during_computation(c, s, a, b):
     xs = [delayed(slowinc)(i, delay=0.01) for i in range(50)]
@@ -346,11 +322,10 @@ async def test_restart_during_computation(c, s, a, b):
     result = c.compute(total)
 
     await asyncio.sleep(0.5)
-    assert s.rprocessing
+    assert any(ws.processing for ws in s.workers.values())
     await c.restart()
-    assert not s.rprocessing
+    assert not any(ws.processing for ws in s.workers.values())
 
-    assert len(s.nthreads) == 2
     assert not s.tasks
 
 
@@ -373,46 +348,46 @@ class SlowTransmitData:
         return parse_bytes(dask.config.get("distributed.comm.offload")) + 1
 
 
+@pytest.mark.slow
 @gen_cluster(client=True)
 async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     """This test is very sensitive to cluster state consistency. Timeouts often
     indicate subtle deadlocks. Be mindful when marking flaky/repeat/etc."""
-    n = await Nanny(s.address, nthreads=2, loop=s.loop)
+    async with Nanny(s.address, nthreads=2) as n:
+        while len(s.workers) < 3:
+            await asyncio.sleep(0.01)
 
-    while len(s.nthreads) < 3:
-        await asyncio.sleep(0.01)
+        def slow_ser(x, delay):
+            return SlowTransmitData(x, delay=delay)
 
-    def slow_ser(x, delay):
-        return SlowTransmitData(x, delay=delay)
+        n_worker_address = n.worker_address
+        futures = c.map(
+            slow_ser,
+            range(20),
+            delay=0.1,
+            key=["f%d" % i for i in range(20)],
+            workers=[n_worker_address],
+            allow_other_workers=True,
+        )
 
-    n_worker_address = n.worker_address
-    futures = c.map(
-        slow_ser,
-        range(20),
-        delay=0.1,
-        key=["f%d" % i for i in range(20)],
-        workers=[n_worker_address],
-        allow_other_workers=True,
-    )
+        def sink(*args):
+            pass
 
-    def sink(*args):
-        pass
+        await wait(futures)
+        result_fut = c.submit(sink, futures, workers=a.address)
 
-    await wait(futures)
-    result_fut = c.submit(sink, futures, workers=a.address)
+        with suppress(CommClosedError):
+            await c.run(os._exit, 1, workers=[n_worker_address])
 
-    with suppress(CommClosedError):
-        await c._run(os._exit, 1, workers=[n_worker_address])
+        while len(s.workers) > 2:
+            await asyncio.sleep(0.01)
 
-    while len(s.workers) > 2:
-        await asyncio.sleep(0.01)
+        await result_fut
 
-    await result_fut
-
-    assert not a.has_what.get(n_worker_address)
-    assert not any(n_worker_address in s for ts in a.tasks.values() for s in ts.who_has)
-
-    await n.close()
+        assert not a.state.has_what.get(n_worker_address)
+        assert not any(
+            n_worker_address in s for ts in a.state.tasks.values() for s in ts.who_has
+        )
 
 
 @gen_cluster(
@@ -454,7 +429,9 @@ async def test_worker_same_host_replicas_missing(c, s, a, b, x):
         # artificially, without notifying the scheduler.
         # This can only succeed if B handles the missing data properly by
         # removing A from the known sources of keys
-        a.handle_free_keys(keys=["f1"], stimulus_id="Am I evil?")  # Yes, I am!
+        a.handle_stimulus(
+            FreeKeysEvent(keys=["f1"], stimulus_id="Am I evil?")
+        )  # Yes, I am!
         result_fut = c.submit(sink, futures, workers=x.address)
 
         await result_fut
@@ -477,38 +454,46 @@ async def test_restart_timeout_on_long_running_task(c, s, a):
 async def test_worker_time_to_live(c, s, a, b):
     from distributed.scheduler import heartbeat_interval
 
-    # worker removal is also controlled by 10 * heartbeat
     assert set(s.workers) == {a.address, b.address}
-    interval = 10 * heartbeat_interval(len(s.workers)) + 0.5
 
     a.periodic_callbacks["heartbeat"].stop()
-    await asyncio.sleep(0.010)
-    assert set(s.workers) == {a.address, b.address}
+    while a.heartbeat_active:
+        await asyncio.sleep(0.01)
 
     start = time()
     while set(s.workers) == {a.address, b.address}:
-        await asyncio.sleep(interval)
-        assert time() < start + interval + 0.1
+        await asyncio.sleep(0.01)
+    assert set(s.workers) == {b.address}
 
-    set(s.workers) == {b.address}
+    # Worker removal is triggered after 10 * heartbeat
+    # This is 10 * 0.5s at the moment of writing.
+    interval = 10 * heartbeat_interval(len(s.workers))
+    # Currently observing an extra 0.3~0.6s on top of the interval.
+    # Adding some padding to prevent flakiness.
+    assert time() - start < interval + 2.0
 
 
-@gen_cluster()
-async def test_forget_data_not_supposed_to_have(s, a, b):
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_forget_data_not_supposed_to_have(c, s, a):
     """If a dependency fetch finishes on a worker after the scheduler already released
     everything, the worker might be stuck with a redundant replica which is never
     cleaned up.
     """
-    # FIXME: Replace with "blackbox test" which shows an actual example where
-    #        this situation is provoked if this is even possible.
-    ts = TaskState("key", state="flight")
-    a.tasks["key"] = ts
-    recommendations = {ts: ("memory", 123)}
-    a.transitions(recommendations, stimulus_id="test")
+    async with BlockedGatherDep(s.address) as b:
+        x = c.submit(inc, 1, key="x", workers=[a.address])
+        y = c.submit(inc, x, key="y", workers=[b.address])
 
-    assert a.data
-    while a.data:
-        await asyncio.sleep(0.001)
+        await b.in_gather_dep.wait()
+        assert b.state.tasks["x"].state == "flight"
+
+        x.release()
+        y.release()
+        while s.tasks:
+            await asyncio.sleep(0.01)
+
+        b.block_gather_dep.set()
+        while b.state.tasks:
+            await asyncio.sleep(0.01)
 
 
 @gen_cluster(

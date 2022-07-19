@@ -1,5 +1,10 @@
+from __future__ import annotations
+
 import asyncio
 import os
+import signal
+import subprocess
+import sys
 from multiprocessing import cpu_count
 from time import sleep
 
@@ -8,38 +13,204 @@ from click.testing import CliRunner
 
 from dask.utils import tmpfile
 
-import distributed.cli.dask_worker
 from distributed import Client
-from distributed.compatibility import LINUX, to_thread
+from distributed.cli.dask_worker import _apportion_ports, main
+from distributed.compatibility import LINUX, WINDOWS
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
-from distributed.utils_test import gen_cluster, popen, requires_ipv6
+from distributed.utils import open_port
+from distributed.utils_test import gen_cluster, popen, requires_ipv6, wait_for_log_line
+
+
+@pytest.mark.parametrize(
+    # args: (worker_port, nanny_port, n_workers, nanny)
+    # Passing *args tuple instead of single args is to improve readability with black
+    "args,expect",
+    [
+        # Single worker
+        (
+            (None, None, 1, False),
+            [{"port": None}],
+        ),
+        (
+            (None, None, 1, True),
+            [{"port": None, "worker_port": None}],
+        ),
+        (("123", None, 1, False), [{"port": 123}]),
+        (
+            ("123", None, 1, True),
+            [{"port": None, "worker_port": 123}],
+        ),
+        (
+            (None, "456", 1, True),
+            [{"port": 456, "worker_port": None}],
+        ),
+        (
+            ("123", "456", 1, True),
+            [{"port": 456, "worker_port": 123}],
+        ),
+        # port=None or 0 and multiple workers
+        (
+            (None, None, 2, False),
+            [
+                {"port": None},
+                {"port": None},
+            ],
+        ),
+        (
+            (None, None, 2, True),
+            [
+                {"port": None, "worker_port": None},
+                {"port": None, "worker_port": None},
+            ],
+        ),
+        (
+            (0, "0", 2, True),
+            [
+                {"port": 0, "worker_port": 0},
+                {"port": 0, "worker_port": 0},
+            ],
+        ),
+        (
+            ("0", None, 2, True),
+            [
+                {"port": None, "worker_port": 0},
+                {"port": None, "worker_port": 0},
+            ],
+        ),
+        # port ranges
+        (
+            ("100:103", None, 1, False),
+            [{"port": [100, 101, 102, 103]}],
+        ),
+        (
+            ("100:103", None, 2, False),
+            [
+                {"port": [100, 102]},  # Round robin apportion
+                {"port": [101, 103]},
+            ],
+        ),
+        # port range is not an exact multiple of n_workers
+        (
+            ("100:107", None, 3, False),
+            [
+                {"port": [100, 103, 106]},
+                {"port": [101, 104, 107]},
+                {"port": [102, 105]},
+            ],
+        ),
+        (
+            ("100:103", None, 2, True),
+            [
+                {"port": None, "worker_port": [100, 102]},
+                {"port": None, "worker_port": [101, 103]},
+            ],
+        ),
+        (
+            (None, "110:113", 2, True),
+            [
+                {"port": [110, 112], "worker_port": None},
+                {"port": [111, 113], "worker_port": None},
+            ],
+        ),
+        # port ranges have different length between nannies and workers
+        (
+            ("100:103", "110:114", 2, True),
+            [
+                {"port": [110, 112, 114], "worker_port": [100, 102]},
+                {"port": [111, 113], "worker_port": [101, 103]},
+            ],
+        ),
+        # identical port ranges
+        (
+            ("100:103", "100:103", 2, True),
+            [
+                {"port": 101, "worker_port": 100},
+                {"port": 103, "worker_port": 102},
+            ],
+        ),
+        # overlapping port ranges
+        (
+            ("100:105", "104:106", 2, True),
+            [
+                {"port": [104, 106], "worker_port": [100, 102]},
+                {"port": 105, "worker_port": [101, 103]},
+            ],
+        ),
+    ],
+)
+def test_apportion_ports(args, expect):
+    assert _apportion_ports(*args) == expect
+
+
+def test_apportion_ports_bad():
+    with pytest.raises(ValueError, match="Not enough ports in range"):
+        _apportion_ports("100:102", None, 4, False)
+    with pytest.raises(ValueError, match="Not enough ports in range"):
+        _apportion_ports(None, "100:102", 4, False)
+    with pytest.raises(ValueError, match="Not enough ports in range"):
+        _apportion_ports("100:102", "100:102", 3, True)
+    with pytest.raises(ValueError, match="Not enough ports in range"):
+        _apportion_ports("100:102", "102:104", 3, True)
+    with pytest.raises(ValueError, match="port_stop must be greater than port_start"):
+        _apportion_ports("102:100", None, 4, False)
+    with pytest.raises(ValueError, match="invalid literal for int"):
+        _apportion_ports("foo", None, 1, False)
+    with pytest.raises(ValueError, match="too many values to unpack"):
+        _apportion_ports("100:101:102", None, 1, False)
 
 
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[])
 async def test_nanny_worker_ports(c, s):
+    worker_port = open_port()
+    nanny_port = open_port()
     with popen(
         [
             "dask-worker",
             s.address,
             "--host",
             "127.0.0.1",
-            "--worker-port",
-            "9684",
-            "--nanny-port",
-            "5273",
+            f"--worker-port={worker_port}",
+            f"--nanny-port={nanny_port}",
             "--no-dashboard",
         ]
     ):
         await c.wait_for_workers(1)
         d = await c.scheduler.identity()
-        assert d["workers"]["tcp://127.0.0.1:9684"]["nanny"] == "tcp://127.0.0.1:5273"
+        assert (
+            d["workers"][f"tcp://127.0.0.1:{worker_port}"]["nanny"]
+            == f"tcp://127.0.0.1:{nanny_port}"
+        )
 
 
 @pytest.mark.slow
+@pytest.mark.flaky(
+    LINUX and sys.version_info[:2] == (3, 9),
+    reason="Race condition in Nanny.process.start? "
+    "See https://github.com/dask/distributed/issues/6045",
+)
 @gen_cluster(client=True, nthreads=[])
 async def test_nanny_worker_port_range(c, s):
+    async def assert_ports(min_: int, max_: int, nanny: bool) -> None:
+        port_ranges = await c.run(
+            lambda dask_worker: dask_worker._start_port, nanny=nanny
+        )
+
+        for a in port_ranges.values():
+            assert isinstance(a, list)
+            assert len(a) in (333, 334)
+            assert all(min_ <= i <= max_ for i in a)
+
+            # Test no overlap
+            for b in port_ranges.values():
+                assert a is b or not set(a) & set(b)
+
+        ports = await c.run(lambda dask_worker: dask_worker.port, nanny=nanny)
+        assert all(min_ <= p <= max_ for p in ports.values())
+        for addr, range in port_ranges.items():
+            assert ports[addr] in range
+
     with popen(
         [
             "dask-worker",
@@ -56,10 +227,8 @@ async def test_nanny_worker_port_range(c, s):
         ]
     ):
         await c.wait_for_workers(3)
-        worker_ports = await c.run(lambda dask_worker: dask_worker.port)
-        assert all(10000 <= p <= 11000 for p in worker_ports.values())
-        nanny_ports = await c.run(lambda dask_worker: dask_worker.port, nanny=True)
-        assert all(11000 <= p <= 12000 for p in nanny_ports.values())
+        await assert_ports(10000, 10999, nanny=False)
+        await assert_ports(11000, 12000, nanny=True)
 
 
 @gen_cluster(nthreads=[])
@@ -78,9 +247,9 @@ async def test_nanny_worker_port_range_too_many_workers_raises(s):
             "9686:9687",
             "--no-dashboard",
         ],
-        flush_output=False,
+        capture_output=True,
     ) as worker:
-        assert any(b"Could not start" in worker.stdout.readline() for _ in range(100))
+        wait_for_log_line(b"Not enough ports in range", worker.stdout, max_lines=100)
 
 
 @pytest.mark.slow
@@ -108,56 +277,22 @@ async def test_no_nanny(c, s):
         await c.wait_for_workers(1)
 
 
-@pytest.mark.slow
-@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 @gen_cluster(client=True, nthreads=[])
-async def test_no_reconnect(c, s, nanny):
+async def test_reconnect_deprecated(c, s):
     with popen(
-        [
-            "dask-worker",
-            s.address,
-            "--no-reconnect",
-            nanny,
-            "--no-dashboard",
-        ]
+        ["dask-worker", s.address, "--reconnect"],
+        capture_output=True,
     ) as worker:
-        # roundtrip works
-        assert await c.submit(lambda x: x + 1, 10) == 11
+        wait_for_log_line(b"`--reconnect` option has been removed", worker.stdout)
+        assert worker.wait() == 1
 
-        (comm,) = s.stream_comms.values()
-        comm.abort()
-
-        # worker terminates as soon as the connection is aborted
-        await to_thread(worker.wait, timeout=5)
-        assert worker.returncode == 0
-
-
-@pytest.mark.slow
-@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
-@gen_cluster(client=True, nthreads=[])
-async def test_reconnect(c, s, nanny):
     with popen(
-        [
-            "dask-worker",
-            s.address,
-            "--reconnect",
-            nanny,
-            "--no-dashboard",
-        ]
+        ["dask-worker", s.address, "--no-reconnect"],
+        capture_output=True,
     ) as worker:
-        # roundtrip works
-        assert await c.submit(lambda x: x + 1, 10) == 11
-
-        (comm,) = s.stream_comms.values()
-        comm.abort()
-
-        # roundtrip still works, which means the worker reconnected
-        assert await c.submit(lambda x: x + 1, 11) == 12
-
-        # closing the scheduler cleanly does terminate the worker
-        await s.close()
-        await to_thread(worker.wait, timeout=5)
-        assert worker.returncode == 0
+        wait_for_log_line(b"flag is deprecated, and will be removed", worker.stdout)
+        await c.wait_for_workers(1)
+        await c.shutdown()
 
 
 @pytest.mark.slow
@@ -215,8 +350,10 @@ def test_scheduler_file(loop, nanny):
 
 @pytest.mark.slow
 def test_scheduler_address_env(loop, monkeypatch):
-    monkeypatch.setenv("DASK_SCHEDULER_ADDRESS", "tcp://127.0.0.1:8786")
-    with popen(["dask-scheduler", "--no-dashboard"]):
+    port = open_port()
+    monkeypatch.setenv("DASK_SCHEDULER_ADDRESS", f"tcp://127.0.0.1:{port}")
+    # The env var is only picked up by the dask-worker command
+    with popen(["dask-scheduler", "--no-dashboard", "--port", str(port)]):
         with popen(["dask-worker", "--no-dashboard"]):
             with Client(os.environ["DASK_SCHEDULER_ADDRESS"], loop=loop) as c:
                 start = time()
@@ -229,11 +366,9 @@ def test_scheduler_address_env(loop, monkeypatch):
 async def test_nworkers_requires_nanny(s):
     with popen(
         ["dask-worker", s.address, "--nworkers=2", "--no-nanny"],
-        flush_output=False,
+        capture_output=True,
     ) as worker:
-        assert any(
-            b"Failed to launch worker" in worker.stdout.readline() for _ in range(15)
-        )
+        wait_for_log_line(b"Failed to launch worker", worker.stdout, max_lines=15)
 
 
 @pytest.mark.slow
@@ -270,34 +405,29 @@ async def test_nworkers_expands_name(c, s):
 async def test_worker_cli_nprocs_renamed_to_nworkers(c, s):
     with popen(
         ["dask-worker", s.address, "--nprocs=2"],
-        flush_output=False,
+        capture_output=True,
     ) as worker:
         await c.wait_for_workers(2)
-        assert any(
-            b"renamed to --nworkers" in worker.stdout.readline() for _ in range(15)
-        )
+        wait_for_log_line(b"renamed to --nworkers", worker.stdout, max_lines=15)
 
 
 @gen_cluster(nthreads=[])
 async def test_worker_cli_nworkers_with_nprocs_is_an_error(s):
     with popen(
         ["dask-worker", s.address, "--nprocs=2", "--nworkers=2"],
-        flush_output=False,
+        capture_output=True,
     ) as worker:
-        assert any(
-            b"Both --nprocs and --nworkers" in worker.stdout.readline()
-            for _ in range(15)
-        )
+        wait_for_log_line(b"Both --nprocs and --nworkers", worker.stdout, max_lines=15)
 
 
 @pytest.mark.slow
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
-@pytest.mark.parametrize(
-    "listen_address", ["tcp://0.0.0.0:39837", "tcp://127.0.0.2:39837"]
-)
+@pytest.mark.parametrize("listen_address", ["tcp://0.0.0.0:", "tcp://127.0.0.2:"])
 @gen_cluster(client=True, nthreads=[])
 async def test_contact_listen_address(c, s, nanny, listen_address):
+    port = open_port()
+    listen_address += str(port)
     with popen(
         [
             "dask-worker",
@@ -305,14 +435,14 @@ async def test_contact_listen_address(c, s, nanny, listen_address):
             nanny,
             "--no-dashboard",
             "--contact-address",
-            "tcp://127.0.0.2:39837",
+            f"tcp://127.0.0.2:{port}",
             "--listen-address",
             listen_address,
         ]
     ):
         await c.wait_for_workers(1)
         info = c.scheduler_info()
-        assert info["workers"].keys() == {"tcp://127.0.0.2:39837"}
+        assert info["workers"].keys() == {f"tcp://127.0.0.2:{port}"}
 
         # roundtrip works
         assert await c.submit(lambda x: x + 1, 10) == 11
@@ -320,15 +450,17 @@ async def test_contact_listen_address(c, s, nanny, listen_address):
         def func(dask_worker):
             return dask_worker.listener.listen_address
 
-        assert await c.run(func) == {"tcp://127.0.0.2:39837": listen_address}
+        assert await c.run(func) == {f"tcp://127.0.0.2:{port}": listen_address}
 
 
 @pytest.mark.slow
 @requires_ipv6
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
-@pytest.mark.parametrize("listen_address", ["tcp://:39838", "tcp://[::1]:39838"])
+@pytest.mark.parametrize("listen_address", ["tcp://:", "tcp://[::1]:"])
 @gen_cluster(client=True, nthreads=[])
 async def test_listen_address_ipv6(c, s, nanny, listen_address):
+    port = open_port()
+    listen_address += str(port)
     with popen(
         [
             "dask-worker",
@@ -343,8 +475,8 @@ async def test_listen_address_ipv6(c, s, nanny, listen_address):
         # listening only on IPv6.
         bind_all = "[::1]" not in listen_address
         expected_ip = "127.0.0.1" if bind_all else "[::1]"
-        expected_name = f"tcp://{expected_ip}:39838"
-        expected_listen = "tcp://0.0.0.0:39838" if bind_all else listen_address
+        expected_name = f"tcp://{expected_ip}:{port}"
+        expected_listen = f"tcp://0.0.0.0:{port}" if bind_all else listen_address
 
         await c.wait_for_workers(1)
         info = c.scheduler_info()
@@ -380,7 +512,7 @@ async def test_respect_host_listen_address(c, s, nanny, host):
 @gen_cluster(
     client=True, nthreads=[], scheduler_kwargs={"dashboard_address": "localhost:8787"}
 )
-async def test_dashboard_non_standard_ports(c, s):
+async def test_dashboard_non_standard_ports(c, s, requires_default_ports):
     pytest.importorskip("bokeh")
     requests = pytest.importorskip("requests")
 
@@ -416,7 +548,7 @@ async def test_dashboard_non_standard_ports(c, s):
 
 def test_version_option():
     runner = CliRunner()
-    result = runner.invoke(distributed.cli.dask_worker.main, ["--version"])
+    result = runner.invoke(main, ["--version"])
     assert result.exit_code == 0
 
 
@@ -427,8 +559,8 @@ def test_worker_timeout(no_nanny):
     args = ["192.168.1.100:7777", "--death-timeout=1"]
     if no_nanny:
         args.append("--no-nanny")
-    result = runner.invoke(distributed.cli.dask_worker.main, args)
-    assert result.exit_code != 0
+    result = runner.invoke(main, args)
+    assert result.exit_code == 1
 
 
 def test_bokeh_deprecation():
@@ -437,14 +569,14 @@ def test_bokeh_deprecation():
     runner = CliRunner()
     with pytest.warns(UserWarning, match="dashboard"):
         try:
-            runner.invoke(distributed.cli.dask_worker.main, ["--bokeh"])
+            runner.invoke(main, ["--bokeh"])
         except ValueError:
             # didn't pass scheduler
             pass
 
     with pytest.warns(UserWarning, match="dashboard"):
         try:
-            runner.invoke(distributed.cli.dask_worker.main, ["--no-bokeh"])
+            runner.invoke(main, ["--no-bokeh"])
         except ValueError:
             # didn't pass scheduler
             pass
@@ -517,3 +649,81 @@ def dask_setup(worker):
         await c.wait_for_workers(1)
         [foo] = (await c.run(lambda dask_worker: dask_worker.foo)).values()
         assert foo == "setup"
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
+def test_timeout(nanny):
+    worker = subprocess.run(
+        [
+            "python",
+            "-m",
+            "distributed.cli.dask_worker",
+            "192.168.1.100:7777",
+            nanny,
+            "--death-timeout=1",
+        ],
+        text=True,
+        encoding="utf8",
+        capture_output=True,
+    )
+
+    assert "timed out starting worker" in worker.stderr.lower()
+    assert "end worker" in worker.stderr.lower()
+    assert worker.returncode == 1
+
+
+@pytest.mark.skipif(WINDOWS, reason="POSIX only")
+@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
+@pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM])
+@gen_cluster(client=True, nthreads=[])
+async def test_signal_handling(c, s, nanny, sig):
+    with subprocess.Popen(
+        ["python", "-m", "distributed.cli.dask_worker", s.address, nanny],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    ) as worker:
+        await c.wait_for_workers(1)
+
+        worker.send_signal(sig)
+        stdout, stderr = worker.communicate()
+        logs = stdout.decode().lower()
+        assert stderr is None
+        assert sig.name.lower() in logs
+        assert worker.returncode == 0
+        if nanny == "--nanny":
+            assert "closing nanny" in logs
+            assert "stopping worker" in logs
+        else:
+            assert "nanny" not in logs
+        assert "end worker" in logs
+        assert "timed out" not in logs
+        assert "error" not in logs
+        assert "exception" not in logs
+
+
+@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
+def test_error_during_startup(monkeypatch, nanny, loop):
+    # see https://github.com/dask/distributed/issues/6320
+    scheduler_port = open_port()
+    scheduler_addr = f"tcp://127.0.0.1:{scheduler_port}"
+
+    monkeypatch.setenv("DASK_SCHEDULER_ADDRESS", scheduler_addr)
+    with popen(
+        [
+            "dask-scheduler",
+            f"--port={scheduler_port}",
+            "--dashboard-address=:0",
+        ],
+    ):
+        with Client(scheduler_addr, loop=loop) as c:
+            with popen(
+                [
+                    "dask-worker",
+                    scheduler_addr,
+                    nanny,
+                    # This should clash due to a port conflict
+                    f"--worker-port={scheduler_port}",
+                ],
+            ) as worker:
+                assert worker.wait(10) == 1

@@ -1,13 +1,25 @@
-import gc
+from __future__ import annotations
+
 import pickle
+import sys
 import weakref
 from functools import partial
 from operator import add
 
+import cloudpickle
 import pytest
 
+from dask.utils import tmpdir
+
+from distributed import profile
 from distributed.protocol import deserialize, serialize
-from distributed.protocol.pickle import HIGHEST_PROTOCOL, dumps, loads
+from distributed.protocol.pickle import (
+    CLOUDPICKLE_GTE_20,
+    HIGHEST_PROTOCOL,
+    dumps,
+    loads,
+)
+from distributed.utils_test import save_sys_modules
 
 
 class MemoryviewHolder:
@@ -181,7 +193,30 @@ def test_pickle_functions(protocol):
         assert func3(1) == func(1)
 
         del func, func2, func3
-        gc.collect()
-        assert wr() is None
-        assert wr2() is None
-        assert wr3() is None
+        with profile.lock:
+            assert wr() is None
+            assert wr2() is None
+            assert wr3() is None
+
+
+@pytest.mark.skipif(
+    not CLOUDPICKLE_GTE_20, reason="Pickle by value registration not supported"
+)
+def test_pickle_by_value_when_registered():
+    with save_sys_modules():
+        with tmpdir() as d:
+            try:
+                sys.path.insert(0, d)
+                module = f"{d}/mymodule.py"
+                with open(module, "w") as f:
+                    f.write("def myfunc(x):\n    return x + 1")
+                import mymodule  # noqa
+
+                assert dumps(
+                    mymodule.myfunc, protocol=HIGHEST_PROTOCOL
+                ) == pickle.dumps(mymodule.myfunc, protocol=HIGHEST_PROTOCOL)
+                cloudpickle.register_pickle_by_value(mymodule)
+                assert len(dumps(mymodule.myfunc)) > len(pickle.dumps(mymodule.myfunc))
+
+            finally:
+                sys.path.pop(0)

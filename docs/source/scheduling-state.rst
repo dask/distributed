@@ -79,7 +79,7 @@ kept and updated about each task.  Individual task state is stored in an
 object named :class:`TaskState` and consists of the following information:
 
 .. autoclass:: TaskState
-
+    :members:
 
 The scheduler keeps track of all the :class:`TaskState` objects (those
 not in the "forgotten" state) using several containers:
@@ -108,7 +108,7 @@ This information is involved in deciding
 :ref:`which worker to run a task on <decide-worker>`.
 
 .. autoclass:: WorkerState
-
+    :members:
 
 In addition to individual worker state, the scheduler maintains two
 containers to help with scheduling tasks:
@@ -139,6 +139,7 @@ Information about each individual client of the scheduler is kept
 in a :class:`ClientState` object:
 
 .. autoclass:: ClientState
+    :members:
 
 
 .. XXX list invariants somewhere?
@@ -315,3 +316,6 @@ API
    :inherited-members:
 
 .. autofunction:: decide_worker
+
+.. autoclass:: MemoryState
+    :members:
