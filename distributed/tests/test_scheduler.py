@@ -675,7 +675,7 @@ async def test_restart_nanny_timeout_exceeded(c, s, a, b):
     assert s.tasks
 
     with pytest.raises(
-        TimeoutError, match=r"2/2 worker\(s\) did not shut down within 1s"
+        TimeoutError, match=r"2/2 nanny worker\(s\) did not shut down within 1s"
     ):
         await c.restart(timeout="1s")
     assert a.kill_called.is_set()
