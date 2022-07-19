@@ -166,6 +166,13 @@ class DumpArtefact(Mapping):
     def _slugify_addr(addr: str) -> str:
         return addr.replace("://", "-").replace("/", "_")
 
+    def processing_on(self) -> dict[str, str]:
+        "Tasks currently in ``processing`` on the scheduler, and which worker they're processing on"
+        return {
+            t["key"]: t["processing_on"]
+            for t in self.scheduler_tasks_in_state("processing")
+        }
+
     def scheduler_tasks_in_state(self, state: str | None = None) -> list:
         """
         Parameters
