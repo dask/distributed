@@ -5136,6 +5136,9 @@ class Scheduler(SchedulerState, ServerNode):
             (default True). Use ``restart(wait_for_workers=False)`` combined with
             `Client.wait_for_workers` for granular control over how many workers to
             wait for.
+        See also
+        ----------
+        Client.restart
         """
         stimulus_id = f"restart-{time()}"
 
@@ -5214,7 +5217,7 @@ class Scheduler(SchedulerState, ServerNode):
                 )
 
                 raise TimeoutError(
-                    f"{len(bad_nannies)}/{len(nannies)} worker(s) did not shut down within {timeout}s"
+                    f"{len(bad_nannies)}/{len(nannies)} nanny worker(s) did not shut down within {timeout}s"
                 )
 
         self.log_event([client, "all"], {"action": "restart", "client": client})

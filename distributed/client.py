@@ -3340,7 +3340,7 @@ class Client(SyncMethodMixin):
 
         After `restart`, all connected workers are new, regardless of whether `TimeoutError`
         was raised. Any workers that failed to shut down in time are removed, and
-        may or many not shut down on their own in the future.
+        may or may not shut down on their own in the future.
 
         Parameters
         ----------
@@ -3353,6 +3353,9 @@ class Client(SyncMethodMixin):
             (default True). Use ``restart(wait_for_workers=False)`` combined with
             `Client.wait_for_workers` for granular control over how many workers to
             wait for.
+        See also
+        ----------
+        Scheduler.restart
         """
         return self.sync(
             self._restart, timeout=timeout, wait_for_workers=wait_for_workers
