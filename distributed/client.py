@@ -1469,8 +1469,9 @@ class Client(SyncMethodMixin):
         for state in self.futures.values():
             state.cancel()
         self.futures.clear()
-        with suppress(AttributeError):
-            self._restart_event.set()
+        self.generation += 1
+        with self._refcount_lock:
+            self.refcount.clear()
 
     def _handle_error(self, exception=None):
         logger.warning("Scheduler exception:")
@@ -3319,32 +3320,46 @@ class Client(SyncMethodMixin):
         else:
             return result
 
-    async def _restart(self, timeout=no_default):
+    async def _restart(self, timeout=no_default, wait_for_workers=True):
         if timeout == no_default:
-            timeout = self._timeout * 2
+            timeout = self._timeout * 4
         if timeout is not None:
             timeout = parse_timedelta(timeout, "s")
 
-        self._send_to_scheduler({"op": "restart", "timeout": timeout})
-        self._restart_event = asyncio.Event()
-        try:
-            await asyncio.wait_for(self._restart_event.wait(), timeout)
-        except TimeoutError:
-            logger.error("Restart timed out after %.2f seconds", timeout)
-
-        self.generation += 1
-        with self._refcount_lock:
-            self.refcount.clear()
-
+        await self.scheduler.restart(timeout=timeout, wait_for_workers=wait_for_workers)
         return self
 
-    def restart(self, **kwargs):
-        """Restart the distributed network
-
-        This kills all active work, deletes all data on the network, and
-        restarts the worker processes.
+    def restart(self, timeout=no_default, wait_for_workers=True):
         """
-        return self.sync(self._restart, **kwargs)
+        Restart all workers. Reset local state. Optionally wait for workers to return.
+
+        Workers without nannies are shut down, hoping an external deployment system
+        will restart them. Therefore, if not using nannies and your deployment system
+        does not automatically restart workers, ``restart`` will just shut down all
+        workers, then time out!
+
+        After `restart`, all connected workers are new, regardless of whether `TimeoutError`
+        was raised. Any workers that failed to shut down in time are removed, and
+        may or may not shut down on their own in the future.
+
+        Parameters
+        ----------
+        timeout:
+            How long to wait for workers to shut down and come back, if `wait_for_workers`
+            is True, otherwise just how long to wait for workers to shut down.
+            Raises `asyncio.TimeoutError` if this is exceeded.
+        wait_for_workers:
+            Whether to wait for all workers to reconnect, or just for them to shut down
+            (default True). Use ``restart(wait_for_workers=False)`` combined with
+            `Client.wait_for_workers` for granular control over how many workers to
+            wait for.
+        See also
+        ----------
+        Scheduler.restart
+        """
+        return self.sync(
+            self._restart, timeout=timeout, wait_for_workers=wait_for_workers
+        )
 
     async def _upload_large_file(self, local_filename, remote_filename=None):
         if remote_filename is None:
