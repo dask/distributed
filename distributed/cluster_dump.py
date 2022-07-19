@@ -209,7 +209,7 @@ class DumpArtefact(Mapping):
 
         return tasks
 
-    def scheduler_story(self, *key_or_stimulus_id: str) -> list:
+    def scheduler_story(self, *key_or_stimulus_id: str, datetimes: bool = True) -> list:
         """
         Returns
         -------
@@ -217,9 +217,12 @@ class DumpArtefact(Mapping):
             A list of events for the keys/stimulus ID's in ``*key_or_stimulus_id``.
         """
         keys = set(key_or_stimulus_id)
-        return _scheduler_story(
-            keys, self.dump["scheduler"]["transition_log"], datetimes=True
-        )
+        return [
+            tuple(s)
+            for s in _scheduler_story(
+                keys, self.dump["scheduler"]["transition_log"], datetimes=datetimes
+            )
+        ]
 
     def scheduler_short_story(self, *key_or_stimulus_id: str) -> list[str]:
         """
@@ -243,7 +246,7 @@ class DumpArtefact(Mapping):
             if s
         }
 
-    def worker_stories(self, *key_or_stimulus_id: str) -> dict:
+    def worker_stories(self, *key_or_stimulus_id: str, datetimes: bool = True) -> dict:
         """
         Returns
         -------
@@ -253,7 +256,7 @@ class DumpArtefact(Mapping):
         """
         keys = set(key_or_stimulus_id)
         return {
-            addr: _worker_story(keys, wlog, datetimes=True)
+            addr: [tuple(s) for s in _worker_story(keys, wlog, datetimes=datetimes)]
             for addr, worker_dump in self.dump["workers"].items()
             if isinstance(worker_dump, dict) and (wlog := worker_dump.get("log"))
         }
@@ -279,7 +282,7 @@ class DumpArtefact(Mapping):
 
             print(f"Dumping story {i:>3}/{len(stories)} to {path}")
             with open(path, "w") as f:
-                yaml.dump(story, f, Dumper=yaml.CSafeDumper)
+                yaml.dump([list(s) for s in story], f, Dumper=yaml.CSafeDumper)
 
     def missing_workers(self) -> list:
         """
