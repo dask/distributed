@@ -5123,7 +5123,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         After `restart`, all connected workers are new, regardless of whether `TimeoutError`
         was raised. Any workers that failed to shut down in time are removed, and
-        may or many not shut down on their own in the future.
+        may or may not shut down on their own in the future.
 
         Parameters
         ----------
