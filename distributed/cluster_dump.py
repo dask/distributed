@@ -28,7 +28,7 @@ from distributed.compatibility import to_thread
 if TYPE_CHECKING:
     import yaml
 
-DEFAULT_CLUSTER_DUMP_FORMAT: Literal["msgpack" | "yaml"] = "msgpack"
+DEFAULT_CLUSTER_DUMP_FORMAT: Literal["msgpack", "yaml"] = "msgpack"
 DEFAULT_CLUSTER_DUMP_EXCLUDE: Collection[str] = ("run_spec",)
 
 
