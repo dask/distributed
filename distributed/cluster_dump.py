@@ -262,7 +262,7 @@ class DumpArtefact(Mapping):
         root_dir = Path(root_dir) if root_dir else Path.cwd()
 
         stories = self.worker_stories(*key_or_stimulus_id)
-        for i, (addr, story) in enumerate(stories.items()):
+        for i, (addr, story) in enumerate(stories.items(), 1):
             worker_dir = root_dir / self._slugify_addr(addr)
             worker_dir.mkdir(parents=True, exist_ok=True)
             path = (
@@ -270,7 +270,7 @@ class DumpArtefact(Mapping):
                 / f"story-{key_or_stimulus_id[0] if len(key_or_stimulus_id) == 1 else key_or_stimulus_id}.yaml"
             )
 
-            print(f"Dumping story {i+1:>3}/{len(stories)} to {path}")
+            print(f"Dumping story {i:>3}/{len(stories)} to {path}")
             with open(path, "w") as f:
                 yaml.dump(story, f, Dumper=yaml.CSafeDumper)
 
@@ -393,17 +393,17 @@ class DumpArtefact(Mapping):
         worker_expand_keys = set(worker_expand_keys)
 
         workers = self.dump["workers"]
-        for i, (addr, info) in enumerate(workers.items()):
+        for i, (addr, info) in enumerate(workers.items(), 1):
             if not isinstance(info, dict):
                 if log:
-                    print(f"Skipping worker {i+1:>3}/{len(workers)} - {info}")
+                    print(f"Skipping worker {i:>3}/{len(workers)} - {info}")
                 continue
 
             log_dir = root_dir / self._slugify_addr(addr)
             log_dir.mkdir(parents=True, exist_ok=True)
 
             if log:
-                print(f"Dumping worker {i+1:>4}/{len(workers)} to {log_dir}")
+                print(f"Dumping worker {i:>4}/{len(workers)} to {log_dir}")
 
             worker_state = self._compact_state(info, worker_expand_keys)
 
@@ -425,10 +425,10 @@ class DumpArtefact(Mapping):
 
         # Compact smaller keys into a general dict
         scheduler_state = self._compact_state(self.dump[context], scheduler_expand_keys)
-        for i, (name, _logs) in enumerate(scheduler_state.items()):
+        for i, (name, _logs) in enumerate(scheduler_state.items(), 1):
             filename = str(log_dir / f"{name}.yaml")
             if log:
-                print(f"    Dumping {i+1:>2}/{len(scheduler_state)} {filename}")
+                print(f"    Dumping {i:>2}/{len(scheduler_state)} {filename}")
 
             if name == "transition_log":
                 _logs = [msg_with_datetime(e) for e in _logs]
