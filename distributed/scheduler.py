@@ -5224,6 +5224,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         if wait_for_workers:
             while monotonic() < start + timeout:
+                # NOTE: if new (unrelated) workers join while we're waiting, we may return before
+                # our shut-down workers have come back up. That's fine; workers are interchangeable.
                 if len(self.workers) >= n_workers:
                     return
                 await asyncio.sleep(0.01)
