@@ -5228,7 +5228,7 @@ class Scheduler(SchedulerState, ServerNode):
                 # our shut-down workers have come back up. That's fine; workers are interchangeable.
                 if len(self.workers) >= n_workers:
                     return
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.2)
             else:
                 msg = (
                     f"Waited for {n_workers} worker(s) to reconnect after restarting, "
