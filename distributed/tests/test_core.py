@@ -114,11 +114,8 @@ async def test_async_task_group_call_later_executes_delayed_task_in_background()
     group = AsyncTaskGroup()
     ev = asyncio.Event()
 
-    async def set_event():
-        ev.set()
-
     start = timemod.monotonic()
-    assert group.call_later(1, set_event) is None
+    assert group.call_later(1, ev.set) is None
     assert len(group) == 1
     await ev.wait()
     end = timemod.monotonic()
