@@ -19,6 +19,7 @@ from distributed.metrics import time
 from distributed.utils import CancelledError, sync
 from distributed.utils_test import (
     BlockedGatherDep,
+    async_wait_for,
     captured_logger,
     cluster,
     div,
@@ -237,6 +238,23 @@ async def test_multiple_clients_restart(s, a, b):
     while not y.cancelled():
         await asyncio.sleep(0.01)
         assert time() < start + 5
+
+    assert not c1.futures
+    assert not c2.futures
+
+    # Ensure both clients still work after restart.
+    # Reusing a previous key has no effect.
+    x2 = c1.submit(inc, 1, key=x.key)
+    y2 = c2.submit(inc, 2, key=y.key)
+
+    assert x2._generation != x._generation
+    assert y2._generation != y._generation
+
+    assert await x2 == 2
+    assert await y2 == 3
+
+    del x2, y2
+    await async_wait_for(lambda: not s.tasks, timeout=5)
 
     await c1.close()
     await c2.close()

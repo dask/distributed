@@ -32,8 +32,11 @@ from distributed.worker_state_machine import (
     ExecuteSuccessEvent,
     FreeKeysEvent,
     GatherDep,
+    GatherDepFailureEvent,
     GatherDepSuccessEvent,
     Instruction,
+    InvalidTaskState,
+    InvalidTransition,
     PauseEvent,
     RecommendationsConflict,
     RefreshWhoHasEvent,
@@ -43,11 +46,27 @@ from distributed.worker_state_machine import (
     SecedeEvent,
     SerializedTask,
     StateMachineEvent,
+    TaskErredMsg,
     TaskState,
+    TransitionCounterMaxExceeded,
     UnpauseEvent,
     UpdateDataEvent,
     merge_recs_instructions,
 )
+
+
+def test_instruction_match():
+    i = ReleaseWorkerDataMsg(key="x", stimulus_id="s1")
+    assert i == ReleaseWorkerDataMsg(key="x", stimulus_id="s1")
+    assert i != ReleaseWorkerDataMsg(key="y", stimulus_id="s1")
+    assert i != ReleaseWorkerDataMsg(key="x", stimulus_id="s2")
+    assert i != RescheduleMsg(key="x", stimulus_id="s1")
+
+    assert i == ReleaseWorkerDataMsg.match(key="x")
+    assert i == ReleaseWorkerDataMsg.match(stimulus_id="s1")
+    assert i != ReleaseWorkerDataMsg.match(key="y")
+    assert i != ReleaseWorkerDataMsg.match(stimulus_id="s2")
+    assert i != RescheduleMsg.match(key="x")
 
 
 def test_TaskState_tracking(cleanup):
@@ -99,6 +118,17 @@ def test_TaskState__to_dict():
             "priority": [0],
         },
     ]
+
+
+def test_TaskState_repr():
+    ts = TaskState("x")
+    assert str(ts) == "<TaskState 'x' released>"
+    ts.state = "cancelled"
+    ts.previous = "flight"
+    assert str(ts) == "<TaskState 'x' cancelled(flight)>"
+    ts.state = "resumed"
+    ts.next = "waiting"
+    assert str(ts) == "<TaskState 'x' resumed(flight->waiting)>"
 
 
 def test_WorkerState__to_dict(ws):
@@ -192,6 +222,32 @@ def test_WorkerState_pickle(ws):
     ws2 = pickle.loads(pickle.dumps(ws))
     assert ws2.tasks.keys() == {"x", "y"}
     assert ws2.data == {"y": 123}
+
+
+@pytest.mark.parametrize(
+    "cls,kwargs",
+    [
+        (
+            InvalidTransition,
+            dict(key="x", start="released", finish="waiting", story=[]),
+        ),
+        (
+            TransitionCounterMaxExceeded,
+            dict(key="x", start="released", finish="waiting", story=[]),
+        ),
+        (InvalidTaskState, dict(key="x", state="released", story=[])),
+    ],
+)
+@pytest.mark.parametrize("positional", [False, True])
+def test_pickle_exceptions(cls, kwargs, positional):
+    if positional:
+        e = cls(*kwargs.values())
+    else:
+        e = cls(**kwargs)
+    e2 = pickle.loads(pickle.dumps(e))
+    assert type(e2) is type(e)
+    for k, v in kwargs.items():
+        assert getattr(e2, k) == v
 
 
 def traverse_subclasses(cls: type) -> Iterator[type]:
@@ -961,19 +1017,16 @@ async def test_deprecated_worker_attributes(s, a, b):
     ],
 )
 def test_aggregate_gather_deps(ws, nbytes, n_in_flight):
+    ws2 = "127.0.0.1:2"
     instructions = ws.handle_stimulus(
         AcquireReplicasEvent(
-            who_has={
-                "x1": ["127.0.0.1:1235"],
-                "x2": ["127.0.0.1:1235"],
-                "x3": ["127.0.0.1:1235"],
-            },
+            who_has={"x1": [ws2], "x2": [ws2], "x3": [ws2]},
             nbytes={"x1": nbytes, "x2": nbytes, "x3": nbytes},
-            stimulus_id="test",
+            stimulus_id="s1",
         )
     )
-    assert len(instructions) == 1
-    assert isinstance(instructions[0], GatherDep)
+    assert instructions == [GatherDep.match(worker=ws2, stimulus_id="s1")]
+    assert len(instructions[0].to_gather) == n_in_flight
     assert len(ws.in_flight_tasks) == n_in_flight
 
 
@@ -1120,7 +1173,7 @@ def test_task_with_dependencies_acquires_resources(ws):
         (ExecuteSuccessEvent, "memory"),
         pytest.param(
             ExecuteFailureEvent,
-            "error",
+            "flight",
             marks=pytest.mark.xfail(
                 reason="distributed#6682,distributed#6689,distributed#6693"
             ),
@@ -1196,7 +1249,7 @@ def test_done_task_not_in_all_running_tasks(
         (ExecuteSuccessEvent, "memory"),
         pytest.param(
             ExecuteFailureEvent,
-            "error",
+            "flight",
             marks=pytest.mark.xfail(reason="distributed#6689"),
         ),
     ],
@@ -1215,3 +1268,26 @@ def test_done_resumed_task_not_in_all_running_tasks(
     ts = ws.tasks["x"]
     assert ts.state == done_status
     assert ts not in ws.all_running_tasks
+
+
+@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/6705")
+def test_gather_dep_failure(ws):
+    """Simulate a task failing to unpickle when it reaches the destination worker after
+    a flight.
+
+    See also test_worker_memory.py::test_workerstate_fail_to_pickle_flight,
+    where the task instead is gathered successfully, but fails to spill.
+    """
+    ws2 = "127.0.0.1:2"
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s1"),
+        GatherDepFailureEvent.from_exception(
+            Exception(), worker=ws2, total_nbytes=1, stimulus_id="s2"
+        ),
+    )
+    assert instructions == [
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
+        TaskErredMsg.match(key="x", stimulus_id="s2"),
+    ]
+    assert ws.tasks["x"].state == "error"
+    assert ws.tasks["y"].state == "waiting"  # Not ready
