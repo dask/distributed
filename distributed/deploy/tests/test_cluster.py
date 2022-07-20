@@ -70,4 +70,3 @@ async def test_cluster_wait_for_worker(loop):
             ]
         )
         assert len(cluster.scheduler.workers) == 10
-
