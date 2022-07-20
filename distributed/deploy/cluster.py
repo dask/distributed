@@ -321,6 +321,22 @@ class Cluster(SyncMethodMixin):
     def logs(self, *args, **kwargs):
         return self.get_logs(*args, **kwargs)
 
+    def get_client(self):
+        """Return client for the cluster
+
+        If a client has already been initialized for the cluster, return that
+        otherwise initialize a new client object.
+        """
+        from distributed.client import Client
+
+        try:
+            current_client = Client.current()
+            if current_client and current_client.cluster == self:
+                return current_client
+        except ValueError:
+            pass
+        return Client(self)
+
     @property
     def dashboard_link(self):
         try:

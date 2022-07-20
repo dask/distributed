@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from distributed.client import Client
 from distributed.deploy.cluster import Cluster
 from distributed.utils_test import gen_test
 
@@ -35,3 +36,22 @@ async def test_logs_deprecated():
     async with Cluster(asynchronous=True) as cluster:
         with pytest.warns(FutureWarning, match="get_logs"):
             cluster.logs()
+
+
+@gen_test()
+async def test_cluster_get_client():
+    async with Cluster(asynchronous=True, name="A") as clusterA, Cluster(
+        asynchronous=True, name="B"
+    ) as clusterB:
+        clientA1 = clusterA.get_client()
+
+        assert isinstance(clientA1, Client)
+        assert clientA1.cluster == clusterA
+        assert clientA1 == clusterA.get_client()
+
+        clientB1 = clusterB.get_client()
+        assert clientB1 != clientA1
+
+        clientB2 = Client(clusterB)
+        assert clientB1 != clientB2
+        assert clientB2 == clusterB.get_client()
