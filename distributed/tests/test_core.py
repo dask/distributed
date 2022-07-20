@@ -120,16 +120,12 @@ async def test_async_task_group_call_later_executes_delayed_task_in_background()
     start = timemod.monotonic()
     assert group.call_later(1, set_event) is None
     assert len(group) == 1
-
     await ev.wait()
     end = timemod.monotonic()
     # the task must be removed in exactly 1 event loop cycle
     await _wait_for_n_loop_cycles(2)
     assert len(group) == 0
-    duration = end - start
-    clock_resolution = timemod.get_clock_info("monotonic").resolution
-    assert duration > 1 - clock_resolution
-    assert duration < 1.01 + clock_resolution
+    assert end - start > 1 - timemod.get_clock_info("monotonic").resolution
 
 
 def test_async_task_group_close_closes():
