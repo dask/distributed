@@ -73,6 +73,9 @@ class ServerNode(Server):
                 )
 
     def stop_services(self):
+        for application in self.http_application.applications:
+            if hasattr(application, "stop") and callable(application.stop):
+                application.stop()
         for service in self.services.values():
             service.stop()
 
