@@ -164,13 +164,8 @@ distributed:
   nanny:
     preload: []             # Run custom modules with Nanny
     preload-argv: []        # See https://docs.dask.org/en/latest/how-to/customize-initialization.html
-
-    # Override environment variables. Read important caveats at
-    # https://distributed.dask.org/en/stable/worker.html#nanny.
     environ:
-      # See https://distributed.dask.org/en/stable/worker-memory.html#automatically-trim-memory
       MALLOC_TRIM_THRESHOLD_: 65536
-      # Numpy configuration
       OMP_NUM_THREADS: 1
       MKL_NUM_THREADS: 1
 
