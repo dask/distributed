@@ -161,22 +161,6 @@ def test_restart_sync(loop):
             assert y.result() == 1 / 3
 
 
-@gen_cluster(Worker=Nanny, client=True, timeout=60)
-async def test_restart_fast(c, s, a, b):
-    L = c.map(sleep, range(10))
-
-    start = time()
-    await c.restart()
-    assert time() - start < 10
-    assert len(s.workers) == 2
-
-    assert all(x.status == "cancelled" for x in L)
-
-    x = c.submit(inc, 1)
-    result = await x
-    assert result == 2
-
-
 def test_worker_doesnt_await_task_completion(loop):
     with cluster(nanny=True, nworkers=1) as (s, [w]):
         with Client(s["address"], loop=loop) as c:
@@ -186,37 +170,6 @@ def test_worker_doesnt_await_task_completion(loop):
             c.restart()
             stop = time()
             assert stop - start < 20
-
-
-def test_restart_fast_sync(loop):
-    with cluster(nanny=True) as (s, [a, b]):
-        with Client(s["address"], loop=loop) as c:
-            L = c.map(sleep, range(10))
-
-            start = time()
-            c.restart()
-            assert time() - start < 10
-            assert len(c.nthreads()) == 2
-
-            assert all(x.status == "cancelled" for x in L)
-
-            x = c.submit(inc, 1)
-            assert x.result() == 2
-
-
-@gen_cluster(Worker=Nanny, client=True, timeout=60)
-async def test_fast_kill(c, s, a, b):
-    L = c.map(sleep, range(10))
-
-    start = time()
-    await c.restart()
-    assert time() - start < 10
-
-    assert all(x.status == "cancelled" for x in L)
-
-    x = c.submit(inc, 1)
-    result = await x
-    assert result == 2
 
 
 @gen_cluster(Worker=Nanny, timeout=60)
