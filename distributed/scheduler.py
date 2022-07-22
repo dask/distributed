@@ -3006,7 +3006,13 @@ class Scheduler(SchedulerState, ServerNode):
             )
         self.jupyter = jupyter
         if self.jupyter:
-            from jupyter_server.serverapp import ServerApp
+            try:
+                from jupyter_server.serverapp import ServerApp
+            except ImportError:
+                raise ImportError(
+                    "In order to use the Dask jupyter option you "
+                    "need to have jupyterlab installed"
+                )
             from traitlets.config import Config
 
             j = ServerApp.instance(
