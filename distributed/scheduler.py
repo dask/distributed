@@ -3014,6 +3014,9 @@ class Scheduler(SchedulerState, ServerNode):
                     {
                         "ServerApp": {
                             "base_url": "jupyter",
+                            # SECURITY: in this context we expect this to be safe, as
+                            # if a client can connect to the scheduler they can already
+                            # run arbitrary code.
                             "token": "",
                             "allow_remote_access": True,
                         }
