@@ -430,11 +430,6 @@ def map_varying(itemslists):
     return apply, list(map(varying, itemslists))
 
 
-async def geninc(x, delay=0.02):
-    await asyncio.sleep(delay)
-    return x + 1
-
-
 async def asyncinc(x, delay=0.02):
     await asyncio.sleep(delay)
     return x + 1
