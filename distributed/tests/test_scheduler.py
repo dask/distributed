@@ -628,6 +628,10 @@ async def test_restart(c, s, a, b):
 
     assert not s.tasks
 
+    assert all(f.status == "cancelled" for f in futures)
+    x = c.submit(inc, 1)
+    assert await x == 2
+
 
 @pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny, nthreads=[("", 1)] * 5)
