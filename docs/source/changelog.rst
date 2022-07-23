@@ -1,6 +1,48 @@
 Changelog
 =========
 
+.. _v2022.7.1:
+
+2022.7.1
+--------
+
+Released on July 22, 2022
+
+New Features
+^^^^^^^^^^^^
+- Dashboard for failed tasks (:pr:`6595`) `Ian Rose`_
+
+Enhancements
+^^^^^^^^^^^^
+- Wait for workers to return in ``Client.restart`` (:pr:`6714`) `Gabe Joseph`_
+- Remove global mutable ``Cluster._cluster_info`` (:pr:`6487`) `Thomas Grainger`_
+
+Bug Fixes
+^^^^^^^^^
+- Fix: nvml no early init (:pr:`6678`) `Lawrence Mitchell`_
+- Fix bug when restarting client  (:pr:`6654`) `Iain Dorrington`_
+- Failure to spill breaks available resources (:pr:`6703`) `crusaderky`_
+- Fix resource allocation for tasks with dependencies (:pr:`6676`) `Hendrik Makait`_
+
+Maintenance
+^^^^^^^^^^^
+- Revert "Set ``MALLOC_TRIM_THRESHOLD_`` before interpreter start" (:pr:`6777`) `Gabe Joseph`_
+- Fix mypy lint in CI (:pr:`6779`) `jakirkham`_
+- Remove ``test_restart_fast_sync``, ``test_fast_kill`` (:pr:`6750`) `Gabe Joseph`_
+- Fix flaky ``test_async_task_group_call_later_executes_delayed_task_in_background`` (:pr:`6744`) `Hendrik Makait`_
+- Drop redundant ``geninc`` (:pr:`6740`) `Hendrik Makait`_
+- Remove unused ``worker_coroutines`` (:pr:`6739`) `Gabe Joseph`_
+- Store ready and constrained tasks in heapsets (:pr:`6711`) `crusaderky`_
+- Improve tests for cancelled state (:pr:`6717`) `crusaderky`_
+- Future-proof Bokeh value import (:pr:`6707`) `Bryan Van de Ven`_
+- Revert temporary stress test (:pr:`6712`) `crusaderky`_
+- Validate constrained tasks (:pr:`6698`) `crusaderky`_
+- Minor quality-of-life tweaks to cancelled state (:pr:`6701`) `crusaderky`_
+- Pickle worker state machine exceptions (:pr:`6702`) `crusaderky`_
+- Partial matches for worker state machine instructions (:pr:`6704`) `crusaderky`_
+- Automatically mark all WorkerState tests (:pr:`6706`) `crusaderky`_
+
+
 .. _v2022.7.0:
 
 2022.7.0
@@ -3937,3 +3979,4 @@ significantly without many new features.
 .. _`Thomas A Caswell`: https://github.com/tacaswell
 .. _`hhuuggoo`: https://github.com/hhuuggoo
 .. _`Lawrence Mitchell`: https://github.com/wence-
+.. _`Iain Dorrington`: https://github.com/idorrington92

@@ -531,7 +531,7 @@ def split_by_worker(
     unique_codes = codes[splits]
     out = {
         # FIXME https://github.com/pandas-dev/pandas-stubs/issues/43
-        worker_for.cat.categories[code]: shard  # type: ignore
+        worker_for.cat.categories[code]: shard
         for code, shard in zip(unique_codes, shards)
     }
     assert sum(map(len, out.values())) == nrows
