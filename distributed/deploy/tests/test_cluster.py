@@ -39,19 +39,6 @@ async def test_logs_deprecated():
 
 
 @gen_test()
-async def test_cluster_info(loop_in_thread):
-    class FooCluster(Cluster):
-        def __init__(self):
-            self._cluster_info["foo"] = "bar"
-            super().__init__(asynchronous=False, loop=loop_in_thread)
-
-    cluster = FooCluster()
-    assert "foo" in cluster._cluster_info  # exists before start() called
-    with cluster:  # start and stop the cluster to avoid a resource warning
-        pass
-
-
-@gen_test()
 async def test_cluster_wait_for_worker(loop):
     with LocalCluster(n_workers=3, loop=loop) as cluster:
         assert all(
