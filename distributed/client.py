@@ -1300,7 +1300,7 @@ class Client(SyncMethodMixin):
     async def _wait_for_workers(
         self,
         n_workers: int = 0,
-        timeout: int = None,
+        timeout: int | None = None,
         mode: WORKER_WAIT_MODE = "at least",
     ):
         info = await self.scheduler.identity()
@@ -1320,25 +1320,30 @@ class Client(SyncMethodMixin):
             )
 
         if mode == "at least":
-            stop_condition = lambda: running_workers(info) >= n_workers
+
+            def stop_condition(n_workers, info):
+                return running_workers(info) >= n_workers
+
         elif mode == "exactly":
-            stop_condition = (
-                lambda: running_workers(
-                    info, status_list=[Status.running, Status.paused]
+
+            def stop_condition(n_workers, info):
+                return (
+                    running_workers(info, status_list=[Status.running, Status.paused])
+                    == n_workers
                 )
-                == n_workers
-            )
+
         elif mode == "at most":
-            stop_condition = (
-                lambda: running_workers(
-                    info, status_list=[Status.running, Status.paused]
+
+            def stop_condition(n_workers, info):
+                return (
+                    running_workers(info, status_list=[Status.running, Status.paused])
+                    <= n_workers
                 )
-                <= n_workers
-            )
+
         else:
             raise NotImplementedError(f"{mode} is not handled.")
 
-        while not stop_condition():
+        while not stop_condition(n_workers, info):
             if deadline and time() > deadline:
                 raise TimeoutError(
                     "Had %d/%d workers after %s and needed %s %d"
