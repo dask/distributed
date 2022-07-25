@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import warnings
 
@@ -42,7 +44,7 @@ class MyPlugin(WorkerPlugin):
 async def test_create_with_client(c, s):
     await c.register_worker_plugin(MyPlugin(123))
 
-    worker = await Worker(s.address, loop=s.loop)
+    worker = await Worker(s.address)
     assert worker._my_plugin_status == "setup"
     assert worker._my_plugin_data == 123
 
@@ -55,7 +57,7 @@ async def test_remove_with_client(c, s):
     await c.register_worker_plugin(MyPlugin(123), name="foo")
     await c.register_worker_plugin(MyPlugin(546), name="bar")
 
-    worker = await Worker(s.address, loop=s.loop)
+    worker = await Worker(s.address)
     # remove the 'foo' plugin
     await c.unregister_worker_plugin("foo")
     assert worker._my_plugin_status == "teardown"
@@ -79,7 +81,7 @@ async def test_remove_with_client(c, s):
 async def test_remove_with_client_raises(c, s):
     await c.register_worker_plugin(MyPlugin(123), name="foo")
 
-    worker = await Worker(s.address, loop=s.loop)
+    worker = await Worker(s.address)
     with pytest.raises(ValueError, match="bar"):
         await c.unregister_worker_plugin("bar")
 
@@ -106,7 +108,7 @@ async def test_normal_task_transitions_called(c, s, w):
 
     await c.register_worker_plugin(plugin)
     await c.submit(lambda x: x, 1, key="task")
-    await async_wait_for(lambda: not w.tasks, timeout=10)
+    await async_wait_for(lambda: not w.state.tasks, timeout=10)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
@@ -137,6 +139,7 @@ async def test_failing_task_transitions_called(c, s, w):
 async def test_superseding_task_transitions_called(c, s, w):
     expected_notifications = [
         {"key": "task", "start": "released", "finish": "waiting"},
+        {"key": "task", "start": "waiting", "finish": "ready"},
         {"key": "task", "start": "waiting", "finish": "constrained"},
         {"key": "task", "start": "constrained", "finish": "executing"},
         {"key": "task", "start": "executing", "finish": "memory"},
@@ -148,7 +151,7 @@ async def test_superseding_task_transitions_called(c, s, w):
 
     await c.register_worker_plugin(plugin)
     await c.submit(lambda x: x, 1, key="task", resources={"X": 1})
-    await async_wait_for(lambda: not w.tasks, timeout=10)
+    await async_wait_for(lambda: not w.state.tasks, timeout=10)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
@@ -174,7 +177,7 @@ async def test_dependent_tasks(c, s, w):
 
     await c.register_worker_plugin(plugin)
     await c.get(dsk, "task", sync=False)
-    await async_wait_for(lambda: not w.tasks, timeout=10)
+    await async_wait_for(lambda: not w.state.tasks, timeout=10)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
@@ -196,32 +199,6 @@ async def test_default_name(c, s, w):
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
-async def test_release_key_deprecated(c, s, a):
-    class ReleaseKeyDeprecated(WorkerPlugin):
-        def __init__(self):
-            self._called = False
-
-        def release_key(self, key, state, cause, reason, report):
-            # Ensure that the handler still works
-            self._called = True
-            assert state == "memory"
-            assert key == "task"
-
-        def teardown(self, worker):
-            assert self._called
-            return super().teardown(worker)
-
-    await c.register_worker_plugin(ReleaseKeyDeprecated())
-
-    with pytest.warns(
-        FutureWarning, match="The `WorkerPlugin.release_key` hook is deprecated"
-    ):
-        assert await c.submit(inc, 1, key="x") == 2
-        while "x" in a.tasks:
-            await asyncio.sleep(0.01)
-
-
-@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_assert_no_warning_no_overload(c, s, a):
     """Assert we do not receive a deprecation warning if we do not overload any
     methods
@@ -233,7 +210,7 @@ async def test_assert_no_warning_no_overload(c, s, a):
     with warnings.catch_warnings(record=True) as record:
         await c.register_worker_plugin(Dummy())
         assert await c.submit(inc, 1, key="x") == 2
-        while "x" in a.tasks:
+        while "x" in a.state.tasks:
             await asyncio.sleep(0.01)
 
     assert not record
@@ -261,7 +238,7 @@ async def test_WorkerPlugin_overwrite(c, s, w):
     await c.submit(inc, 0)
     assert w.foo == 123
 
-    while s.tasks or w.tasks:
+    while s.tasks or w.state.tasks:
         await asyncio.sleep(0.01)
 
     class MyCustomPlugin(WorkerPlugin):

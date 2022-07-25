@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import random
 import threading
@@ -270,8 +272,6 @@ def test_secede_without_stealing_issue_1262():
     c, s, a, b, f = secede_test()
 
     assert f == 2
-    # ensure no workers had errors
-    assert all([f.exception() is None for f in s._worker_coroutines])
 
 
 @gen_cluster(client=True)

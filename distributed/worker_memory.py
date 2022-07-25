@@ -38,6 +38,7 @@ from dask.system import CPU_COUNT
 from dask.utils import format_bytes, parse_bytes, parse_timedelta
 
 from distributed import system
+from distributed.compatibility import WINDOWS
 from distributed.core import Status
 from distributed.metrics import monotonic
 from distributed.spill import ManualEvictProto, SpillBuffer
@@ -53,7 +54,7 @@ logger = logging.getLogger(__name__)
 
 
 class WorkerMemoryManager:
-    data: MutableMapping[str, Any]  # {task key: task payload}
+    data: MutableMapping[str, object]  # {task key: task payload}
     memory_limit: int | None
     memory_target_fraction: float | Literal[False]
     memory_spill_fraction: float | Literal[False]
@@ -67,6 +68,7 @@ class WorkerMemoryManager:
         self,
         worker: Worker,
         *,
+        nthreads: int,
         memory_limit: str | float = "auto",
         # This should be None most of the times, short of a power user replacing the
         # SpillBuffer with their own custom dict-like
@@ -83,7 +85,7 @@ class WorkerMemoryManager:
         memory_spill_fraction: float | Literal[False] | None = None,
         memory_pause_fraction: float | Literal[False] | None = None,
     ):
-        self.memory_limit = parse_memory_limit(memory_limit, worker.nthreads)
+        self.memory_limit = parse_memory_limit(memory_limit, nthreads)
 
         self.memory_target_fraction = _parse_threshold(
             "distributed.worker.memory.target",
@@ -144,8 +146,7 @@ class WorkerMemoryManager:
             pc = PeriodicCallback(
                 # Don't store worker as self.worker to avoid creating a circular
                 # dependency. We could have alternatively used a weakref.
-                # FIXME annotations: https://github.com/tornadoweb/tornado/issues/3117
-                partial(self.memory_monitor, worker),  # type: ignore
+                partial(self.memory_monitor, worker),
                 self.memory_monitor_interval * 1000,
             )
             worker.periodic_callbacks["memory_monitor"] = pc
@@ -292,12 +293,8 @@ class WorkerMemoryManager:
             )
 
     def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
-        info = {
-            k: v
-            for k, v in self.__dict__.items()
-            if not k.startswith("_") and k != "data" and k not in exclude
-        }
-        info["data"] = list(self.data)
+        info = {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
+        info["data"] = dict.fromkeys(self.data)
         return info
 
 
@@ -333,25 +330,24 @@ class NannyMemoryManager:
 
     def memory_monitor(self, nanny: Nanny) -> None:
         """Track worker's memory. Restart if it goes above terminate fraction."""
-        if nanny.status != Status.running:
+        if (
+            nanny.status != Status.running
+            or nanny.process is None
+            or nanny.process.process is None
+            or nanny.process.process.pid is None
+        ):
             return  # pragma: nocover
-        if nanny.process is None or nanny.process.process is None:
-            return  # pragma: nocover
+
         process = nanny.process.process
         try:
-            proc = nanny._psutil_process
-            memory = proc.memory_info().rss
+            memory = psutil.Process(process.pid).memory_info().rss
         except (ProcessLookupError, psutil.NoSuchProcess, psutil.AccessDenied):
             return  # pragma: nocover
 
-        if process.pid in (self._last_terminated_pid, None):
-            # We already sent SIGTERM to the worker, but its handler is still running
-            # since the previous iteration of the memory_monitor - for example, it
-            # may be taking a long time deleting all the spilled data from disk.
+        if memory / self.memory_limit <= self.memory_terminate_fraction:
             return
-        self._last_terminated_pid = -1
 
-        if memory / self.memory_limit > self.memory_terminate_fraction:
+        if self._last_terminated_pid != process.pid:
             logger.warning(
                 f"Worker {nanny.worker_address} (pid={process.pid}) exceeded "
                 f"{self.memory_terminate_fraction * 100:.0f}% memory budget. "
@@ -359,10 +355,33 @@ class NannyMemoryManager:
             )
             self._last_terminated_pid = process.pid
             process.terminate()
+        else:
+            # We already sent SIGTERM to the worker, but the process is still alive
+            # since the previous iteration of the memory_monitor - for example, some
+            # user code may have tampered with signal handlers.
+            # Send SIGKILL for immediate termination.
+            #
+            # Note that this should not be a disk-related issue. Unlike in a regular
+            # worker shutdown, where the worker cleans up its own spill directory, in
+            # case of SIGTERM no atexit or weakref.finalize callback is triggered
+            # whatsoever; instead, the nanny cleans up the spill directory *after* the
+            # worker has been shut down and before starting a new one.
+            # This is important, as spill directory cleanup may potentially take tens of
+            # seconds and, if the worker did it, any task that was running and leaking
+            # would continue to do so for the whole duration of the cleanup, increasing
+            # the risk of going beyond 100%.
+            logger.warning(
+                f"Worker {nanny.worker_address} (pid={process.pid}) is slow to %s",
+                # On Windows, kill() is an alias to terminate()
+                "terminate; trying again"
+                if WINDOWS
+                else "accept SIGTERM; sending SIGKILL",
+            )
+            process.kill()
 
 
 def parse_memory_limit(
-    memory_limit: str | float, nthreads: int, total_cores: int = CPU_COUNT
+    memory_limit: str | float | None, nthreads: int, total_cores: int = CPU_COUNT
 ) -> int | None:
     if memory_limit is None:
         return None
@@ -415,20 +434,20 @@ class DeprecatedMemoryManagerAttribute:
     def __set_name__(self, owner: type, name: str) -> None:
         self.name = name
 
-    def __get__(self, instance: Nanny | Worker | None, _):
+    def __get__(self, instance: Nanny | Worker | None, owner: type) -> Any:
         if instance is None:
             # This is triggered by Sphinx
             return None  # pragma: nocover
         _warn_deprecated(instance, self.name)
         return getattr(instance.memory_manager, self.name)
 
-    def __set__(self, instance: Nanny | Worker, value) -> None:
+    def __set__(self, instance: Nanny | Worker, value: Any) -> None:
         _warn_deprecated(instance, self.name)
         setattr(instance.memory_manager, self.name, value)
 
 
 class DeprecatedMemoryMonitor:
-    def __get__(self, instance: Nanny | Worker | None, owner):
+    def __get__(self, instance: Nanny | Worker | None, owner: type) -> Any:
         if instance is None:
             # This is triggered by Sphinx
             return None  # pragma: nocover

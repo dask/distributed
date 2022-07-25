@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import math
 import os
@@ -5,20 +7,19 @@ import os
 from bokeh.core.properties import without_property_validation
 from bokeh.layouts import column, row
 from bokeh.models import (
-    BoxZoomTool,
     ColumnDataSource,
     DataRange1d,
     HoverTool,
     NumeralTickFormatter,
     PanTool,
     ResetTool,
-    Select,
     WheelZoomTool,
 )
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.palettes import RdBu
 from bokeh.plotting import figure
 from bokeh.themes import Theme
+from jinja2 import Environment, FileSystemLoader
 from tlz import merge, partition_all
 
 from dask.utils import format_bytes, format_time
@@ -31,14 +32,10 @@ from distributed.dashboard.components.shared import (
     SystemMonitor,
 )
 from distributed.dashboard.utils import transpose, update
-from distributed.diagnostics.progress_stream import color_of
 from distributed.metrics import time
-from distributed.utils import key_split, log_errors
+from distributed.utils import log_errors
 
 logger = logging.getLogger(__name__)
-
-from jinja2 import Environment, FileSystemLoader
-
 env = Environment(
     loader=FileSystemLoader(
         os.path.join(os.path.dirname(__file__), "..", "..", "http", "templates")
@@ -49,7 +46,7 @@ BOKEH_THEME = Theme(
     filename=os.path.join(os.path.dirname(__file__), "..", "theme.yaml")
 )
 
-template_variables = {"pages": ["status", "system", "profile", "crossfilter"]}
+template_variables = {"pages": ["status", "system", "profile"]}
 
 
 def standard_doc(title, active_page, *, template="simple.html"):
@@ -91,10 +88,10 @@ class StateTable(DashboardComponent):
         w = self.worker
         d = {
             "Stored": [len(w.data)],
-            "Executing": ["%d / %d" % (w.executing_count, w.nthreads)],
-            "Ready": [len(w.ready)],
-            "Waiting": [w.waiting_for_data_count],
-            "Connections": [len(w.in_flight_workers)],
+            "Executing": ["%d / %d" % (w.state.executing_count, w.state.nthreads)],
+            "Ready": [len(w.state.ready)],
+            "Waiting": [w.state.waiting_for_data_count],
+            "Connections": [len(w.state.in_flight_workers)],
             "Serving": [len(w._comms)],
         }
         update(self.source, d)
@@ -228,7 +225,7 @@ class CommunicatingTimeSeries(DashboardComponent):
         fig = figure(
             title="Communication History",
             x_axis_type="datetime",
-            y_range=[-0.1, worker.total_out_connections + 0.5],
+            y_range=[-0.1, worker.state.total_out_connections + 0.5],
             height=150,
             tools="",
             x_range=x_range,
@@ -250,7 +247,7 @@ class CommunicatingTimeSeries(DashboardComponent):
             {
                 "x": [time() * 1000],
                 "out": [len(self.worker._comms)],
-                "in": [len(self.worker.in_flight_workers)],
+                "in": [len(self.worker.state.in_flight_workers)],
             },
             10000,
         )
@@ -266,7 +263,7 @@ class ExecutingTimeSeries(DashboardComponent):
         fig = figure(
             title="Executing History",
             x_axis_type="datetime",
-            y_range=[-0.1, worker.nthreads + 0.1],
+            y_range=[-0.1, worker.state.nthreads + 0.1],
             height=150,
             tools="",
             x_range=x_range,
@@ -284,150 +281,8 @@ class ExecutingTimeSeries(DashboardComponent):
     @log_errors
     def update(self):
         self.source.stream(
-            {"x": [time() * 1000], "y": [self.worker.executing_count]}, 1000
+            {"x": [time() * 1000], "y": [self.worker.state.executing_count]}, 1000
         )
-
-
-class CrossFilter(DashboardComponent):
-    @log_errors
-    def __init__(self, worker, **kwargs):
-        self.worker = worker
-
-        quantities = ["nbytes", "duration", "bandwidth", "count", "start", "stop"]
-        colors = ["inout-color", "type-color", "key-color"]
-
-        # self.source = ColumnDataSource({name: [] for name in names})
-        self.source = ColumnDataSource(
-            {
-                "nbytes": [1, 2],
-                "duration": [0.01, 0.02],
-                "bandwidth": [0.01, 0.02],
-                "count": [1, 2],
-                "type": ["int", "str"],
-                "inout-color": ["blue", "red"],
-                "type-color": ["blue", "red"],
-                "key": ["add", "inc"],
-                "start": [1, 2],
-                "stop": [1, 2],
-            }
-        )
-
-        self.x = Select(title="X-Axis", value="nbytes", options=quantities)
-        self.x.on_change("value", self.update_figure)
-
-        self.y = Select(title="Y-Axis", value="bandwidth", options=quantities)
-        self.y.on_change("value", self.update_figure)
-
-        self.color = Select(
-            title="Color", value="inout-color", options=["black"] + colors
-        )
-        self.color.on_change("value", self.update_figure)
-
-        if "sizing_mode" in kwargs:
-            kw = {"sizing_mode": kwargs["sizing_mode"]}
-        else:
-            kw = {}
-
-        self.control = column([self.x, self.y, self.color], width=200, **kw)
-
-        self.last_outgoing = 0
-        self.last_incoming = 0
-        self.kwargs = kwargs
-
-        self.layout = row(self.control, self.create_figure(**self.kwargs), **kw)
-
-        self.root = self.layout
-
-    @without_property_validation
-    @log_errors
-    def update(self):
-        outgoing = self.worker.outgoing_transfer_log
-        n = self.worker.outgoing_count - self.last_outgoing
-        n = min(n, 1000)
-        outgoing = [outgoing[-i].copy() for i in range(1, n)]
-        self.last_outgoing = self.worker.outgoing_count
-
-        incoming = self.worker.incoming_transfer_log
-        n = self.worker.incoming_count - self.last_incoming
-        n = min(n, 1000)
-        incoming = [incoming[-i].copy() for i in range(1, n)]
-        self.last_incoming = self.worker.incoming_count
-
-        out = []
-
-        for msg in incoming:
-            if msg["keys"]:
-                d = self.process_msg(msg)
-                d["inout-color"] = "red"
-                out.append(d)
-
-        for msg in outgoing:
-            if msg["keys"]:
-                d = self.process_msg(msg)
-                d["inout-color"] = "blue"
-                out.append(d)
-
-        if out:
-            out = transpose(out)
-            if (
-                len(self.source.data["stop"])
-                and min(out["start"]) > self.source.data["stop"][-1] + 10
-            ):
-                update(self.source, out)
-            else:
-                self.source.stream(out, rollover=1000)
-
-    @log_errors
-    def create_figure(self, **kwargs):
-        fig = figure(title="", tools="", **kwargs)
-        fig.circle(
-            source=self.source,
-            x=self.x.value,
-            y=self.y.value,
-            color=self.color.value,
-            size=10,
-            alpha=0.5,
-            hover_alpha=1,
-        )
-        fig.xaxis.axis_label = self.x.value
-        fig.yaxis.axis_label = self.y.value
-
-        fig.add_tools(
-            # self.hover,
-            ResetTool(),
-            PanTool(),
-            WheelZoomTool(),
-            BoxZoomTool(),
-        )
-        return fig
-
-    @without_property_validation
-    @log_errors
-    def update_figure(self, attr, old, new):
-        fig = self.create_figure(**self.kwargs)
-        self.layout.children[1] = fig
-
-    def process_msg(self, msg):
-        try:
-            status_key = max(msg["keys"], key=lambda x: msg["keys"].get(x, 0))
-            typ = self.worker.types.get(status_key, object).__name__
-            keyname = key_split(status_key)
-            d = {
-                "nbytes": msg["total"],
-                "duration": msg["duration"],
-                "bandwidth": msg["bandwidth"],
-                "count": len(msg["keys"]),
-                "type": typ,
-                "type-color": color_of(typ),
-                "key": keyname,
-                "key-color": color_of(keyname),
-                "start": msg["start"],
-                "stop": msg["stop"],
-            }
-            return d
-        except Exception as e:
-            logger.exception(e)
-            raise
 
 
 class Counters(DashboardComponent):
@@ -583,15 +438,6 @@ def status_doc(worker, extra, doc):
             sizing_mode="scale_width",
         )
     )
-
-
-@standard_doc("Dask Worker Cross-filter", active_page="crossfilter")
-def crossfilter_doc(worker, extra, doc):
-    statetable = StateTable(worker)
-    crossfilter = CrossFilter(worker)
-    add_periodic_callback(doc, statetable, 500)
-    add_periodic_callback(doc, crossfilter, 500)
-    doc.add_root(column(statetable.root, crossfilter.root))
 
 
 @standard_doc("Dask Worker Monitor", active_page="system")

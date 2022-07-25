@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import pickle
+import signal
 from datetime import timedelta
 from time import sleep
 
@@ -127,13 +130,13 @@ async def test_async_ctx(s, a, b):
 
 
 @pytest.mark.slow
-def test_worker_dies():
+def test_worker_dies(loop):
     with cluster(
         config={
             "distributed.scheduler.locks.lease-timeout": "0.1s",
         }
     ) as (scheduler, workers):
-        with Client(scheduler["address"]) as client:
+        with Client(scheduler["address"], loop=loop) as client:
             sem = Semaphore(name="x", max_leases=1)
 
             def f(x, sem, kill_address):
@@ -144,7 +147,7 @@ def test_worker_dies():
                     if worker.address == kill_address:
                         import os
 
-                        os.kill(os.getpid(), 15)
+                        os.kill(os.getpid(), signal.SIGTERM)
                     return x
 
             futures = client.map(
@@ -479,7 +482,7 @@ async def test_metrics(c, s, a, b):
     assert actual == expected
 
 
-def test_threadpoolworkers_pick_correct_ioloop(cleanup):
+def test_threadpoolworkers_pick_correct_ioloop(cleanup, loop):
     # gh4057
 
     # About picking appropriate values for the various timings
@@ -502,9 +505,10 @@ def test_threadpoolworkers_pick_correct_ioloop(cleanup):
         }
     ):
         with Client(
-            processes=False, dashboard_address=":0", threads_per_worker=4
+            processes=False, dashboard_address=":0", threads_per_worker=4, loop=loop
         ) as client:
-            sem = Semaphore(max_leases=1, name="database")
+            sem = Semaphore(max_leases=1, name="database", loop=None)
+            assert sem.loop is loop
             protected_resource = []
 
             def access_limited(val, sem):
@@ -518,6 +522,7 @@ def test_threadpoolworkers_pick_correct_ioloop(cleanup):
                     protected_resource.remove(val)
 
             client.gather(client.map(access_limited, range(10), sem=sem))
+            assert sem.refresh_callback.io_loop is loop
 
 
 @gen_cluster(client=True)

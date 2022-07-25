@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import atexit
 import copy
-import errno
 import inspect
 import json
 import logging
@@ -24,7 +23,7 @@ from contextvars import ContextVar
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
 
@@ -51,6 +50,7 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import PeriodicCallback
 
+import distributed.utils
 from distributed import cluster_dump, preloading
 from distributed import versions as version_module
 from distributed.batched import BatchedSend
@@ -80,8 +80,6 @@ from distributed.security import Security
 from distributed.sizeof import sizeof
 from distributed.threadpoolexecutor import rejoin
 from distributed.utils import (
-    All,
-    Any,
     CancelledError,
     LoopRunner,
     NoOpAwaitable,
@@ -1166,23 +1164,11 @@ class Client(SyncMethodMixin):
         elif self._start_arg is None:
             from distributed.deploy import LocalCluster
 
-            try:
-                self.cluster = await LocalCluster(
-                    loop=self.loop,
-                    asynchronous=self._asynchronous,
-                    **self._startup_kwargs,
-                )
-            except OSError as e:
-                if e.errno != errno.EADDRINUSE:
-                    raise
-                # The default port was taken, use a random one
-                self.cluster = await LocalCluster(
-                    scheduler_port=0,
-                    loop=self.loop,
-                    asynchronous=True,
-                    **self._startup_kwargs,
-                )
-
+            self.cluster = await LocalCluster(
+                loop=self.loop,
+                asynchronous=self._asynchronous,
+                **self._startup_kwargs,
+            )
             address = self.cluster.scheduler_address
 
         self._gather_semaphore = asyncio.Semaphore(5)
@@ -1516,8 +1502,9 @@ class Client(SyncMethodMixin):
         for state in self.futures.values():
             state.cancel()
         self.futures.clear()
-        with suppress(AttributeError):
-            self._restart_event.set()
+        self.generation += 1
+        with self._refcount_lock:
+            self.refcount.clear()
 
     def _handle_error(self, exception=None):
         logger.warning("Scheduler exception:")
@@ -1663,7 +1650,7 @@ class Client(SyncMethodMixin):
         else:
             with suppress(CommClosedError):
                 self.status = "closing"
-                await self.scheduler.terminate(close_workers=True)
+                await self.scheduler.terminate()
 
     def shutdown(self):
         """Shut down the connected scheduler and workers
@@ -2061,7 +2048,7 @@ class Client(SyncMethodMixin):
             logger.debug("Waiting on futures to clear before gather")
 
             with suppress(AllExit):
-                await All(
+                await distributed.utils.All(
                     [wait(key) for key in keys if key in self.futures],
                     quiet_exceptions=AllExit,
                 )
@@ -3366,32 +3353,46 @@ class Client(SyncMethodMixin):
         else:
             return result
 
-    async def _restart(self, timeout=no_default):
+    async def _restart(self, timeout=no_default, wait_for_workers=True):
         if timeout == no_default:
-            timeout = self._timeout * 2
+            timeout = self._timeout * 4
         if timeout is not None:
             timeout = parse_timedelta(timeout, "s")
 
-        self._send_to_scheduler({"op": "restart", "timeout": timeout})
-        self._restart_event = asyncio.Event()
-        try:
-            await asyncio.wait_for(self._restart_event.wait(), timeout)
-        except TimeoutError:
-            logger.error("Restart timed out after %.2f seconds", timeout)
-
-        self.generation += 1
-        with self._refcount_lock:
-            self.refcount.clear()
-
+        await self.scheduler.restart(timeout=timeout, wait_for_workers=wait_for_workers)
         return self
 
-    def restart(self, **kwargs):
-        """Restart the distributed network
-
-        This kills all active work, deletes all data on the network, and
-        restarts the worker processes.
+    def restart(self, timeout=no_default, wait_for_workers=True):
         """
-        return self.sync(self._restart, **kwargs)
+        Restart all workers. Reset local state. Optionally wait for workers to return.
+
+        Workers without nannies are shut down, hoping an external deployment system
+        will restart them. Therefore, if not using nannies and your deployment system
+        does not automatically restart workers, ``restart`` will just shut down all
+        workers, then time out!
+
+        After `restart`, all connected workers are new, regardless of whether `TimeoutError`
+        was raised. Any workers that failed to shut down in time are removed, and
+        may or may not shut down on their own in the future.
+
+        Parameters
+        ----------
+        timeout:
+            How long to wait for workers to shut down and come back, if `wait_for_workers`
+            is True, otherwise just how long to wait for workers to shut down.
+            Raises `asyncio.TimeoutError` if this is exceeded.
+        wait_for_workers:
+            Whether to wait for all workers to reconnect, or just for them to shut down
+            (default True). Use ``restart(wait_for_workers=False)`` combined with
+            `Client.wait_for_workers` for granular control over how many workers to
+            wait for.
+        See also
+        ----------
+        Scheduler.restart
+        """
+        return self.sync(
+            self._restart, timeout=timeout, wait_for_workers=wait_for_workers
+        )
 
     async def _upload_large_file(self, local_filename, remote_filename=None):
         if remote_filename is None:
@@ -3547,7 +3548,7 @@ class Client(SyncMethodMixin):
 
         Examples
         --------
-        >>> c.threads()  # doctest: +SKIP
+        >>> c.nthreads()  # doctest: +SKIP
         {'192.168.1.141:46784': 8,
          '192.167.1.142:47548': 8,
          '192.167.1.143:47329': 8,
@@ -4086,12 +4087,12 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self.scheduler.benchmark_hardware)
 
-    def log_event(self, topic, msg):
+    def log_event(self, topic: str | Collection[str], msg: Any):
         """Log an event under a given topic
 
         Parameters
         ----------
-        topic : str, list
+        topic : str, list[str]
             Name of the topic under which to log an event. To log the same
             event under multiple topics, pass a list of topic names.
         msg
@@ -4104,7 +4105,7 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self.scheduler.log_event, topic=topic, msg=msg)
 
-    def get_events(self, topic: str = None):
+    def get_events(self, topic: str | None = None):
         """Retrieve structured topic logs
 
         Parameters
@@ -4319,11 +4320,13 @@ class Client(SyncMethodMixin):
         """Convert many collections into a single dask graph, after optimization"""
         return collections_to_dsk(collections, *args, **kwargs)
 
-    async def _story(self, keys=(), on_error="raise"):
+    async def _story(self, *keys_or_stimuli: str, on_error="raise"):
         assert on_error in ("raise", "ignore")
 
         try:
-            flat_stories = await self.scheduler.get_story(keys=keys)
+            flat_stories = await self.scheduler.get_story(
+                keys_or_stimuli=keys_or_stimuli
+            )
             flat_stories = [("scheduler", *msg) for msg in flat_stories]
         except Exception:
             if on_error == "raise":
@@ -4334,15 +4337,16 @@ class Client(SyncMethodMixin):
                 raise ValueError(f"on_error not in {'raise', 'ignore'}")
 
         responses = await self.scheduler.broadcast(
-            msg={"op": "get_story", "keys": keys}, on_error=on_error
+            msg={"op": "get_story", "keys_or_stimuli": keys_or_stimuli},
+            on_error=on_error,
         )
         for worker, stories in responses.items():
             flat_stories.extend((worker, *msg) for msg in stories)
         return flat_stories
 
-    def story(self, *keys_or_stimulus_ids, on_error="raise"):
-        """Returns a cluster-wide story for the given keys or simtulus_id's"""
-        return self.sync(self._story, keys=keys_or_stimulus_ids, on_error=on_error)
+    def story(self, *keys_or_stimuli, on_error="raise"):
+        """Returns a cluster-wide story for the given keys or stimulus_id's"""
+        return self.sync(self._story, *keys_or_stimuli, on_error=on_error)
 
     def get_task_stream(
         self,
@@ -4681,9 +4685,9 @@ async def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
         )
     fs = futures_of(fs)
     if return_when == ALL_COMPLETED:
-        wait_for = All
+        wait_for = distributed.utils.All
     elif return_when == FIRST_COMPLETED:
-        wait_for = Any
+        wait_for = distributed.utils.Any
     else:
         raise NotImplementedError(
             "Only return_when='ALL_COMPLETED' and 'FIRST_COMPLETED' are supported"

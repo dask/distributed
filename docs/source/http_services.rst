@@ -80,6 +80,7 @@ Individual bokeh plots
 - ``/individual-nprocessing``
 - ``/individual-occupancy``
 - ``/individual-workers``
+- ``/individual-exceptions``
 - ``/individual-bandwidth-types``
 - ``/individual-bandwidth-workers``
 - ``/individual-workers-network``
@@ -100,7 +101,6 @@ Worker HTTP
 
 - ``/status``:
 - ``/counters``:
-- ``/crossfilter``:
 - ``/sitemap.json``: list of available endpoints
 - ``/system``:
 - ``/health``: check server is alive

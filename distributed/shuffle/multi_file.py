@@ -9,6 +9,7 @@ import shutil
 import time
 import weakref
 from collections import defaultdict
+from collections.abc import Iterator
 
 from dask.sizeof import sizeof
 from dask.utils import parse_bytes
@@ -99,7 +100,7 @@ class MultiFile:
             MultiFile._queues[self._loop] = queue
             return queue
 
-    async def put(self, data: dict[str, list[object]]):
+    async def put(self, data: dict[str, list[object]]) -> None:
         """
         Writes many objects into the local buffers, blocks until ready for more
 
@@ -169,7 +170,7 @@ class MultiFile:
                 async with self.condition:
                     self.condition.notify()
 
-    async def process(self, id: str, shards: list, size: int):
+    async def process(self, id: str, shards: list, size: int) -> None:
         """Write one buffer to file
 
         This function was built to offload the disk IO, but since then we've
@@ -273,7 +274,7 @@ class MultiFile:
         self.close()
 
     @contextlib.contextmanager
-    def time(self, name: str):
+    def time(self, name: str) -> Iterator[None]:
         start = time.time()
         yield
         stop = time.time()

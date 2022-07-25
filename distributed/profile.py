@@ -44,6 +44,9 @@ from dask.utils import format_time, parse_timedelta
 from distributed.metrics import time
 from distributed.utils import color_of
 
+#: This lock can be acquired to ensure that no instance of watch() is concurrently holding references to frames
+lock = threading.Lock()
+
 
 def identifier(frame: FrameType | None) -> str:
     """A string identifier from a frame
@@ -105,7 +108,7 @@ def info_frame(frame: FrameType) -> dict[str, Any]:
 
 def process(
     frame: FrameType,
-    child,
+    child: object | None,
     state: dict[str, Any],
     *,
     stop: str | None = None,
@@ -314,18 +317,6 @@ def plot_data(state, profile_interval=0.010):
     }
 
 
-_watch_running: set[int] = set()
-
-
-def wait_profiler() -> None:
-    """Wait until a moment when no instances of watch() are sampling the frames.
-    You must call this function whenever you would otherwise expect an object to be
-    immediately released after it's descoped.
-    """
-    while _watch_running:
-        sleep(0.0001)
-
-
 def _watch(
     thread_id: int,
     log: deque[tuple[float, dict[str, Any]]],  # [(timestamp, output of create()), ...]
@@ -337,24 +328,20 @@ def _watch(
 
     recent = create()
     last = time()
-    watch_id = threading.get_ident()
 
     while not stop():
-        _watch_running.add(watch_id)
-        try:
-            if time() > last + cycle:
+        if time() > last + cycle:
+            recent = create()
+            with lock:
                 log.append((time(), recent))
-                recent = create()
                 last = time()
-            try:
-                frame = sys._current_frames()[thread_id]
-            except KeyError:
-                return
+                try:
+                    frame = sys._current_frames()[thread_id]
+                except KeyError:
+                    return
 
-            process(frame, None, recent, omit=omit)
-            del frame
-        finally:
-            _watch_running.remove(watch_id)
+                process(frame, None, recent, omit=omit)
+                del frame
         sleep(interval)
 
 
@@ -534,7 +521,11 @@ def _remove_py_stack(frames):
         yield entry
 
 
-def llprocess(frames, child, state: dict[str, Any] | None) -> dict[str, Any] | None:
+def llprocess(  # type: ignore[no-untyped-def]
+    frames,
+    child: object | None,
+    state: dict[str, Any] | None,
+) -> dict[str, Any] | None:
     """Add counts from low level profile information onto existing state
 
     This uses the ``stacktrace`` module to collect low level stack trace

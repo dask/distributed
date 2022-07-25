@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import logging
 from collections import deque
+from typing import Any
 
 from tornado import gen, locks
 from tornado.ioloop import IOLoop
@@ -128,7 +131,7 @@ class BatchedSend:
         self.stopped.set()
         self.abort()
 
-    def send(self, *msgs) -> None:
+    def send(self, *msgs: Any) -> None:
         """Schedule a message for sending to the other side
 
         This completes quickly and synchronously
