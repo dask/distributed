@@ -1338,24 +1338,16 @@ class Client(SyncMethodMixin):
                 ]
             )
 
-        need_exact = lambda: (
-            running_workers(info, status_list=[Status.running, Status.paused])
-            != n_workers
-            and mode == WorkerWaitMode.exactly
-        )
-        need_min = lambda: (
-            n_workers
-            and running_workers(info) < n_workers
-            and mode == WorkerWaitMode.min
-        )
-        need_max = lambda: (
-            n_workers
-            and running_workers(info, status_list=[Status.running, Status.paused])
-            > n_workers
-            and mode == WorkerWaitMode.max
-        )
+        if mode is WorkerWaitMode.min:
+            stop_condition = lambda: running_workers(info) >= n_workers
+        elif mode is WorkerWaitMode.exactly:
+            stop_condition = lambda: running_workers(info, status_list=[Status.running, Status.paused]) == n_workers
+        elif mode is WorkerWaitMode.max:
+            stop_condition = lambda: running_workers(info, status_list=[Status.running, Status.paused]) <= n_workers
+        else:
+            raise NotImplementedError(f"{mode} is not handled.")
 
-        while need_exact() or need_min() or need_max():
+        while not stop_condition():
             if deadline and time() > deadline:
                 raise TimeoutError(
                     "Had %d/%d workers after %s and needed %s %d"
