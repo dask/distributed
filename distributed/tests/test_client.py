@@ -6139,6 +6139,12 @@ async def test_wait_for_workers_exactly(c, s, a, b):
     assert time() < start + 1
 
 
+@gen_cluster(client=True)
+async def test_wait_for_workers_bad_mode(c, s, a, b):
+    with pytest.raises(NotImplementedError):
+        await c.wait_for_workers(n_workers=1, timeout="1 ms", mode="foo")
+
+
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
 @gen_test()

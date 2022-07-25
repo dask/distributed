@@ -21,7 +21,6 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
-from enum import Enum
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
@@ -123,6 +122,9 @@ DEFAULT_EXTENSIONS = {
 # Placeholder used in the get_dataset function(s)
 NO_DEFAULT_PLACEHOLDER = "_no_default_"
 
+# Mode to use when waiting for workers.
+WORKER_WAIT_MODE = Literal["at least", "at most", "exactly"]
+
 
 def _get_global_client() -> Client | None:
     L = sorted(list(_global_clients), reverse=True)
@@ -148,14 +150,6 @@ def _del_global_client(c: Client) -> None:
                 del _global_clients[k]
         except KeyError:  # pragma: no cover
             pass
-
-
-class WorkerWaitMode(Enum):
-    """Mode to use when waiting for workers."""
-
-    min = "at least"
-    max = "at most"
-    exactly = "exactly"
 
 
 class Future(WrappedKey):
@@ -1318,10 +1312,11 @@ class Client(SyncMethodMixin):
             logger.debug("Not able to query scheduler for identity")
 
     async def _wait_for_workers(
-        self, n_workers=0, timeout=None, mode=WorkerWaitMode.min
+        self,
+        n_workers: int = 0,
+        timeout: int = None,
+        mode: WORKER_WAIT_MODE = "at least",
     ):
-        if isinstance(mode, str):
-            mode = WorkerWaitMode(mode)
         info = await self.scheduler.identity()
         self._scheduler_identity = SchedulerInfo(info)
         if timeout:
@@ -1338,12 +1333,22 @@ class Client(SyncMethodMixin):
                 ]
             )
 
-        if mode is WorkerWaitMode.min:
+        if mode == "at least":
             stop_condition = lambda: running_workers(info) >= n_workers
-        elif mode is WorkerWaitMode.exactly:
-            stop_condition = lambda: running_workers(info, status_list=[Status.running, Status.paused]) == n_workers
-        elif mode is WorkerWaitMode.max:
-            stop_condition = lambda: running_workers(info, status_list=[Status.running, Status.paused]) <= n_workers
+        elif mode == "exactly":
+            stop_condition = (
+                lambda: running_workers(
+                    info, status_list=[Status.running, Status.paused]
+                )
+                == n_workers
+            )
+        elif mode == "at most":
+            stop_condition = (
+                lambda: running_workers(
+                    info, status_list=[Status.running, Status.paused]
+                )
+                <= n_workers
+            )
         else:
             raise NotImplementedError(f"{mode} is not handled.")
 
@@ -1357,7 +1362,9 @@ class Client(SyncMethodMixin):
             info = await self.scheduler.identity()
             self._scheduler_identity = SchedulerInfo(info)
 
-    def wait_for_workers(self, n_workers=0, timeout=None, mode=WorkerWaitMode.min):
+    def wait_for_workers(
+        self, n_workers=0, timeout=None, mode: WORKER_WAIT_MODE = "at least"
+    ):
         """Blocking call to wait for n workers before continuing
 
         Parameters
