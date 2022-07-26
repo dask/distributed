@@ -10,6 +10,7 @@ import os
 import pathlib
 import random
 import sys
+import tempfile
 import threading
 import warnings
 import weakref
@@ -439,7 +440,6 @@ class Worker(BaseWorker, ServerNode):
         scheduler_file: str | None = None,
         nthreads: int | None = None,
         loop: IOLoop | None = None,  # Deprecated
-        local_dir: None = None,  # Deprecated, use local_directory instead
         local_directory: str | None = None,
         services: dict | None = None,
         name: Any | None = None,
@@ -560,14 +560,10 @@ class Worker(BaseWorker, ServerNode):
 
         self._setup_logging(logger, wsm_logger)
 
-        if local_dir is not None:
-            warnings.warn(  # type: ignore[unreachable]
-                "The local_dir keyword has moved to local_directory"
-            )
-            local_directory = local_dir
-
         if not local_directory:
-            local_directory = dask.config.get("temporary-directory") or os.getcwd()
+            local_directory = (
+                dask.config.get("temporary-directory") or tempfile.gettempdir()
+            )
 
         os.makedirs(local_directory, exist_ok=True)
         local_directory = os.path.join(local_directory, "dask-worker-space")
@@ -936,14 +932,12 @@ class Worker(BaseWorker, ServerNode):
         Also handles pausing/unpausing.
         """
         prev_status = self.status
-        if prev_status == value:
-            return
 
         ServerNode.status.__set__(self, value)  # type: ignore
         stimulus_id = f"worker-status-change-{time()}"
         self._send_worker_status_change(stimulus_id)
 
-        if prev_status == Status.running:
+        if prev_status == Status.running and value != Status.running:
             self.handle_stimulus(PauseEvent(stimulus_id=stimulus_id))
         elif value == Status.running and prev_status in (
             Status.paused,
@@ -1122,7 +1116,7 @@ class Worker(BaseWorker, ServerNode):
                 middle = (_start + _end) / 2
                 self._update_latency(_end - start)
                 self.scheduler_delay = response["time"] - middle
-                # self.status = Status.running
+                self.status = Status.running
                 break
             except OSError:
                 logger.info("Waiting to connect to: %26s", self.scheduler.address)
@@ -1881,7 +1875,7 @@ class Worker(BaseWorker, ServerNode):
         return {
             "executing": ts.state == "executing",
             "waiting_for_data": bool(ts.waiting_for_data),
-            "heap": key in pluck(1, self.state.ready),
+            "heap": ts in self.state.ready or ts in self.state.constrained,
             "data": key in self.data,
         }
 
@@ -3090,13 +3084,8 @@ async def run(server, comm, function, args=(), kwargs=None, wait=True):
 
 _global_workers = Worker._instances
 
-try:
-    if nvml.device_get_count() < 1:
-        raise RuntimeError
-except (Exception, RuntimeError):
-    pass
-else:
 
+def add_gpu_metrics():
     async def gpu_metric(worker):
         result = await offload(nvml.real_time)
         return result

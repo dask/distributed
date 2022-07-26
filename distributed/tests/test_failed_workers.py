@@ -19,6 +19,7 @@ from distributed.metrics import time
 from distributed.utils import CancelledError, sync
 from distributed.utils_test import (
     BlockedGatherDep,
+    async_wait_for,
     captured_logger,
     cluster,
     div,
@@ -160,22 +161,6 @@ def test_restart_sync(loop):
             assert y.result() == 1 / 3
 
 
-@gen_cluster(Worker=Nanny, client=True, timeout=60)
-async def test_restart_fast(c, s, a, b):
-    L = c.map(sleep, range(10))
-
-    start = time()
-    await c.restart()
-    assert time() - start < 10
-    assert len(s.workers) == 2
-
-    assert all(x.status == "cancelled" for x in L)
-
-    x = c.submit(inc, 1)
-    result = await x
-    assert result == 2
-
-
 def test_worker_doesnt_await_task_completion(loop):
     with cluster(nanny=True, nworkers=1) as (s, [w]):
         with Client(s["address"], loop=loop) as c:
@@ -185,37 +170,6 @@ def test_worker_doesnt_await_task_completion(loop):
             c.restart()
             stop = time()
             assert stop - start < 20
-
-
-def test_restart_fast_sync(loop):
-    with cluster(nanny=True) as (s, [a, b]):
-        with Client(s["address"], loop=loop) as c:
-            L = c.map(sleep, range(10))
-
-            start = time()
-            c.restart()
-            assert time() - start < 10
-            assert len(c.nthreads()) == 2
-
-            assert all(x.status == "cancelled" for x in L)
-
-            x = c.submit(inc, 1)
-            assert x.result() == 2
-
-
-@gen_cluster(Worker=Nanny, client=True, timeout=60)
-async def test_fast_kill(c, s, a, b):
-    L = c.map(sleep, range(10))
-
-    start = time()
-    await c.restart()
-    assert time() - start < 10
-
-    assert all(x.status == "cancelled" for x in L)
-
-    x = c.submit(inc, 1)
-    result = await x
-    assert result == 2
 
 
 @gen_cluster(Worker=Nanny, timeout=60)
@@ -237,6 +191,23 @@ async def test_multiple_clients_restart(s, a, b):
     while not y.cancelled():
         await asyncio.sleep(0.01)
         assert time() < start + 5
+
+    assert not c1.futures
+    assert not c2.futures
+
+    # Ensure both clients still work after restart.
+    # Reusing a previous key has no effect.
+    x2 = c1.submit(inc, 1, key=x.key)
+    y2 = c2.submit(inc, 2, key=y.key)
+
+    assert x2._generation != x._generation
+    assert y2._generation != y._generation
+
+    assert await x2 == 2
+    assert await y2 == 3
+
+    del x2, y2
+    await async_wait_for(lambda: not s.tasks, timeout=5)
 
     await c1.close()
     await c2.close()

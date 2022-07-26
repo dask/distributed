@@ -401,11 +401,6 @@ def map_varying(itemslists):
     return apply, list(map(varying, itemslists))
 
 
-async def geninc(x, delay=0.02):
-    await asyncio.sleep(delay)
-    return x + 1
-
-
 async def asyncinc(x, delay=0.02):
     await asyncio.sleep(delay)
     return x + 1
@@ -2433,7 +2428,6 @@ def ws_with_running_task(ws, request):
             SecedeEvent(key="x", compute_duration=1.0, stimulus_id="secede")
         )
     assert ws.tasks["x"].state == request.param
-    assert ws.available_resources == {"R": 0}
     yield ws
 
 
