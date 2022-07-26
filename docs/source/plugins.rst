@@ -1,9 +1,9 @@
 Plugins
 ~~~~~~~
 
-Plugins enable you to run custom Python code for certain events. You can use plugins
-that are specific to the scheduler, the workers, or the nanny. A worker plugin, for example,
-allows you to run custom Python code on all your workers at any event in the worker's lifecycle.
+Dask's plugin system enables you to run custom Python code for certain events. You can use plugins
+that are specific to schedulers, workers, or nannies. A worker plugin, for example,
+allows you to run custom Python code on all your workers at certain event in the worker's lifecycle (e.g. when the worker process is started).
 In each section below, you'll see how to create your own plugin or use a Dask-provided built-in
 plugin.
 
