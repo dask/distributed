@@ -6147,26 +6147,19 @@ async def test_wait_for_workers_max(c, s, a, b):
     await future
     assert time() < start + 1
 
-    with pytest.raises(TimeoutError) as info:
+    with pytest.raises(TimeoutError, match="3 workers after 1 ms and needed at most 1"):
         await c.wait_for_workers(n_workers=1, timeout="1 ms", mode="at most")
-
-    assert "3/1" in str(info.value).replace(" ", "")
-    assert "1 ms" in str(info.value)
 
 
 @gen_cluster(client=True)
 async def test_wait_for_workers_exactly(c, s, a, b):
-    with pytest.raises(TimeoutError) as info:
+    with pytest.raises(TimeoutError, match="2 workers after 1 ms and needed exactly 1"):
         await c.wait_for_workers(n_workers=1, timeout="1 ms", mode="exactly")
-    assert "2/1" in str(info.value).replace(" ", "")
 
     w = await Worker(s.address)
 
-    with pytest.raises(TimeoutError) as info:
+    with pytest.raises(TimeoutError, match="3 workers after 1m and needed exactly 10"):
         await c.wait_for_workers(n_workers=10, timeout="1 ms", mode="exactly")
-
-    assert "3/10" in str(info.value).replace(" ", "")
-    assert "1 ms" in str(info.value)
 
     future = asyncio.ensure_future(c.wait_for_workers(n_workers=2, mode="exactly"))
     await asyncio.sleep(0.22)  # 2 chances

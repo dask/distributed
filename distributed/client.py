@@ -1346,8 +1346,8 @@ class Client(SyncMethodMixin):
         while not stop_condition(n_workers, info):
             if deadline and time() > deadline:
                 raise TimeoutError(
-                    "Had %d/%d workers after %s and needed %s %d"
-                    % (running_workers(info), n_workers, timeout, mode, n_workers)
+                    "Had %d workers after %s and needed %s %d"
+                    % (running_workers(info), timeout, mode, n_workers)
                 )
             await asyncio.sleep(0.1)
             info = await self.scheduler.identity()
@@ -1365,10 +1365,10 @@ class Client(SyncMethodMixin):
         timeout : number, optional
             Time in seconds after which to raise a
             ``dask.distributed.TimeoutError``
-        mode : WorkerWaitMode | str, optional
+        mode : "at least" | "at most" | "exactly", optional
             Mode to use when waiting for workers.
-            Default ``WorkerWaitMode.min`` or ``"at least"``, waits for at least ``n_workers``.
-            Other options include ``"at most"`` and ``"exactly"``.
+            Default ``"at least"``, waits for at least ``n_workers``.
+            One can also specify waiting for ``"at most"`` or ``"exactly"`` ``n_workers``.
         """
         return self.sync(self._wait_for_workers, n_workers, timeout=timeout, mode=mode)
 
