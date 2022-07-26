@@ -16,6 +16,7 @@ from unittest import mock
 
 import pytest
 import yaml
+from _pytest.outcomes import Failed
 from tornado import gen
 
 import dask.config
@@ -34,6 +35,7 @@ from distributed.utils_test import (
     assert_story,
     captured_logger,
     check_process_leak,
+    check_thread_leak,
     cluster,
     dump_cluster_state,
     freeze_batched_send,
@@ -753,6 +755,47 @@ def test_raises_with_cause():
     with pytest.raises(AssertionError):
         with raises_with_cause(RuntimeError, "foo", ValueError, "cause"):
             raise RuntimeError("exception") from ValueError("cause")
+
+
+@pytest.mark.slow
+def test_check_thread_leak():
+    event = threading.Event()
+
+    t1 = threading.Thread(target=lambda: (event.wait(), "one"))
+    t1.start()
+
+    t2 = t3 = None
+    try:
+        with pytest.raises(Failed, match=r"2 thread\(s\) were leaked") as exc:
+            with check_thread_leak():
+                t2 = threading.Thread(target=lambda: (event.wait(), "two"))
+                t2.start()
+                t3 = threading.Thread(target=lambda: (event.wait(), "three"))
+                t3.start()
+
+        msg = exc.value.msg
+        assert msg
+        print(msg)  # For reference, if test fails
+
+        # First, outer thread is ignored
+        assert msg.count("Call stack of leaked thread") == 2
+        assert "one" not in msg
+
+        # Make sure we can see the full traceback, not just the last line
+        assert msg.count(__file__) == 2
+        assert 'target=lambda: (event.wait(), "two")' in msg
+        assert 'target=lambda: (event.wait(), "three")' in msg
+
+        # Ensure there aren't too many or too few newlines
+        exc.match(r'event.wait\(\), "three"\)\)\n +File')
+    finally:
+        # Clean up
+        event.set()
+        t1.join(5)
+        if t2:
+            t2.join(5)
+        if t3:
+            t3.join(5)
 
 
 @pytest.mark.parametrize("sync", [True, False])
