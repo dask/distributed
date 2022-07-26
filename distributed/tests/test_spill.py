@@ -59,7 +59,7 @@ def test_psize(tmpdir):
     assert 100 < sizeof(a) < 200
     buf["a"] = a
     memory_size, disk_size = psize(tmpdir, a=a)
-    memory_size != disk_size
+    assert memory_size != disk_size
 
 
 def test_spillbuffer(tmpdir):
