@@ -9,9 +9,9 @@ import tempfile
 import weakref
 from typing import ClassVar
 
-import dask
+import locket
 
-from . import locket
+import dask
 
 logger = logging.getLogger(__name__)
 

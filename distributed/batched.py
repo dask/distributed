@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import logging
 from collections import deque
+from typing import Any
 
 from tornado import gen, locks
 from tornado.ioloop import IOLoop
@@ -7,8 +10,8 @@ from tornado.ioloop import IOLoop
 import dask
 from dask.utils import parse_timedelta
 
-from .core import CommClosedError
-from .metrics import time
+from distributed.core import CommClosedError
+from distributed.metrics import time
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +131,7 @@ class BatchedSend:
         self.stopped.set()
         self.abort()
 
-    def send(self, *msgs):
+    def send(self, *msgs: Any) -> None:
         """Schedule a message for sending to the other side
 
         This completes quickly and synchronously

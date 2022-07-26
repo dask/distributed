@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 from time import sleep
 
@@ -10,7 +12,7 @@ import dask
 from distributed import Client
 from distributed.comm.ucx import _scrub_ucx_config
 from distributed.utils import get_ip
-from distributed.utils_test import popen
+from distributed.utils_test import gen_test, popen
 
 try:
     HOST = get_ip()
@@ -21,8 +23,8 @@ ucp = pytest.importorskip("ucp")
 rmm = pytest.importorskip("rmm")
 
 
-@pytest.mark.asyncio
-async def test_ucx_config(cleanup):
+@gen_test()
+async def test_ucx_config(ucx_loop, cleanup):
     ucx = {
         "nvlink": True,
         "infiniband": True,
@@ -79,7 +81,7 @@ async def test_ucx_config(cleanup):
     reruns=10,
     reruns_delay=5,
 )
-def test_ucx_config_w_env_var(cleanup, loop):
+def test_ucx_config_w_env_var(ucx_loop, cleanup, loop):
     env = os.environ.copy()
     env["DASK_RMM__POOL_SIZE"] = "1000.00 MB"
 

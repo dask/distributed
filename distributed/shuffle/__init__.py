@@ -1,9 +1,8 @@
-from .shuffle import rearrange_by_column_p2p
-from .shuffle_extension import ShuffleId, ShuffleMetadata, ShuffleWorkerExtension
+from __future__ import annotations
 
-__all__ = [
-    "rearrange_by_column_p2p",
-    "ShuffleId",
-    "ShuffleMetadata",
-    "ShuffleWorkerExtension",
-]
+from distributed.shuffle.shuffle import rearrange_by_column_p2p
+from distributed.shuffle.shuffle_extension import (
+    ShuffleId,
+    ShuffleSchedulerExtension,
+    ShuffleWorkerExtension,
+)

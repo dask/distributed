@@ -1,17 +1,15 @@
 from __future__ import annotations
 
 import logging
-import platform
 import sys
 
 logging_names: dict[str | int, int | str] = {}
 logging_names.update(logging._levelToName)  # type: ignore
 logging_names.update(logging._nameToLevel)  # type: ignore
 
-PYPY = platform.python_implementation().lower() == "pypy"
 LINUX = sys.platform == "linux"
 MACOS = sys.platform == "darwin"
-WINDOWS = sys.platform.startswith("win")
+WINDOWS = sys.platform == "win32"
 
 
 if sys.version_info >= (3, 9):
@@ -37,3 +35,19 @@ else:
         ctx = contextvars.copy_context()
         func_call = functools.partial(ctx.run, func, *args, **kwargs)
         return await loop.run_in_executor(None, func_call)
+
+
+if sys.version_info >= (3, 9):
+    from random import randbytes
+else:
+    try:
+        import numpy
+
+        def randbytes(size):
+            return numpy.random.randint(255, size=size, dtype="u8").tobytes()
+
+    except ImportError:
+        import secrets
+
+        def randbytes(size):
+            return secrets.token_bytes(size)

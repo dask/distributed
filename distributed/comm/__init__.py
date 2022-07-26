@@ -1,4 +1,6 @@
-from .addressing import (
+from __future__ import annotations
+
+from distributed.comm.addressing import (
     get_address_host,
     get_address_host_port,
     get_local_address_for,
@@ -9,25 +11,25 @@ from .addressing import (
     unparse_address,
     unparse_host_port,
 )
-from .core import Comm, CommClosedError, connect, listen
-from .registry import backends
-from .utils import get_tcp_server_address, get_tcp_server_addresses
+from distributed.comm.core import Comm, CommClosedError, connect, listen
+from distributed.comm.registry import backends
+from distributed.comm.utils import get_tcp_server_address, get_tcp_server_addresses
 
 
 def _register_transports():
     import dask.config
 
-    from . import inproc, ws
+    from distributed.comm import inproc, ws
 
     tcp_backend = dask.config.get("distributed.comm.tcp.backend")
 
     if tcp_backend == "asyncio":
-        from . import asyncio_tcp
+        from distributed.comm import asyncio_tcp
 
         backends["tcp"] = asyncio_tcp.TCPBackend()
         backends["tls"] = asyncio_tcp.TLSBackend()
     elif tcp_backend == "tornado":
-        from . import tcp
+        from distributed.comm import tcp
 
         backends["tcp"] = tcp.TCPBackend()
         backends["tls"] = tcp.TLSBackend()
@@ -38,7 +40,7 @@ def _register_transports():
         )
 
     try:
-        from . import ucx
+        from distributed.comm import ucx
     except ImportError:
         pass
 

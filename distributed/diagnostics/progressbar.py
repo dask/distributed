@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import html
 import logging
 import sys
@@ -10,11 +12,16 @@ from tornado.ioloop import IOLoop
 
 import dask
 
-from ..client import default_client, futures_of
-from ..core import CommClosedError, clean_exception, coerce_to_address, connect
-from ..protocol.pickle import dumps
-from ..utils import LoopRunner, is_kernel, key_split
-from .progress import MultiProgress, Progress, format_time
+from distributed.client import default_client, futures_of
+from distributed.core import (
+    CommClosedError,
+    clean_exception,
+    coerce_to_address,
+    connect,
+)
+from distributed.diagnostics.progress import MultiProgress, Progress, format_time
+from distributed.protocol.pickle import dumps
+from distributed.utils import LoopRunner, is_kernel, key_split
 
 logger = logging.getLogger(__name__)
 

@@ -1,8 +1,13 @@
+from __future__ import annotations
+
 import dask
 from dask.utils import typename
 
-from . import pickle
-from .serialize import ObjectDictSerializer, register_serialization_family
+from distributed.protocol import pickle
+from distributed.protocol.serialize import (
+    ObjectDictSerializer,
+    register_serialization_family,
+)
 
 cuda_serialize = dask.utils.Dispatch("cuda_serialize")
 cuda_deserialize = dask.utils.Dispatch("cuda_deserialize")

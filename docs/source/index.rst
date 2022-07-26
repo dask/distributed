@@ -100,6 +100,7 @@ Contents
    scheduling-policies
    scheduling-state
    worker
+   worker-memory
    work-stealing
    killed
 
@@ -109,7 +110,6 @@ Contents
 
    actors
    asynchronous
-   ipython
    http_services
    publish
    resources

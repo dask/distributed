@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import toolz
 
 from distributed.http.prometheus import PrometheusCollector
+from distributed.http.scheduler.prometheus.semaphore import SemaphoreMetricCollector
 from distributed.http.utils import RequestHandler
 from distributed.scheduler import ALL_TASK_STATES
-
-from .semaphore import SemaphoreMetricCollector
 
 
 class SchedulerMetricCollector(PrometheusCollector):

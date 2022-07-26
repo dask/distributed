@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 import logging
 
-from ..core import coerce_to_address, connect
-from ..worker import dumps_function
-from .plugin import SchedulerPlugin
+from distributed.core import coerce_to_address, connect
+from distributed.diagnostics.plugin import SchedulerPlugin
+from distributed.worker import dumps_function
 
 logger = logging.getLogger(__name__)
 

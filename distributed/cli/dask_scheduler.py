@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import asyncio
 import atexit
 import gc
 import logging
@@ -7,10 +10,9 @@ import sys
 import warnings
 
 import click
-from tornado.ioloop import IOLoop
 
 from distributed import Scheduler
-from distributed.cli.utils import check_python_3, install_signal_handlers
+from distributed._signals import wait_for_signals
 from distributed.preloading import validate_preload_argv
 from distributed.proctitle import (
     enable_proctitle_on_children,
@@ -183,39 +185,50 @@ def main(
         limit = max(soft, hard // 2)
         resource.setrlimit(resource.RLIMIT_NOFILE, (limit, hard))
 
-    loop = IOLoop.current()
-    logger.info("-" * 47)
-
-    scheduler = Scheduler(
-        loop=loop,
-        security=sec,
-        host=host,
-        port=port,
-        dashboard=dashboard,
-        dashboard_address=dashboard_address,
-        http_prefix=dashboard_prefix,
-        **kwargs,
-    )
-    logger.info("-" * 47)
-
-    install_signal_handlers(loop)
-
     async def run():
-        await scheduler
-        await scheduler.finished()
+        logger.info("-" * 47)
+
+        scheduler = Scheduler(
+            security=sec,
+            host=host,
+            port=port,
+            dashboard=dashboard,
+            dashboard_address=dashboard_address,
+            http_prefix=dashboard_prefix,
+            **kwargs,
+        )
+        logger.info("-" * 47)
+
+        async def wait_for_scheduler_to_finish():
+            """Wait for the scheduler to initialize and finish"""
+            await scheduler
+            await scheduler.finished()
+
+        async def wait_for_signals_and_close():
+            """Wait for SIGINT or SIGTERM and close the scheduler upon receiving one of those signals"""
+            await wait_for_signals()
+            await scheduler.close()
+
+        wait_for_signals_and_close_task = asyncio.create_task(
+            wait_for_signals_and_close()
+        )
+        wait_for_scheduler_to_finish_task = asyncio.create_task(
+            wait_for_scheduler_to_finish()
+        )
+
+        done, _ = await asyncio.wait(
+            [wait_for_signals_and_close_task, wait_for_scheduler_to_finish_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        # Re-raise exceptions from done tasks
+        [task.result() for task in done]
+        logger.info("Stopped scheduler at %r", scheduler.address)
 
     try:
-        loop.run_sync(run)
+        asyncio.run(run())
     finally:
-        scheduler.stop()
-
-        logger.info("End scheduler at %r", scheduler.address)
-
-
-def go():
-    check_python_3()
-    main()
+        logger.info("End scheduler")
 
 
 if __name__ == "__main__":
-    go()  # pragma: no cover
+    main()  # pragma: no cover

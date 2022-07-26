@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import argparse
 import html
 import io
 import os
 import re
+import shelve
+import sys
 import zipfile
+from collections.abc import Iterator
+from typing import Any
 
 import altair
 import altair_saver
@@ -22,7 +27,56 @@ COLORS = {
 }
 
 
-def get_from_github(url, params={}):
+def parse_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument(
+        "--repo",
+        default="dask/distributed",
+        help="github repository",
+    )
+    parser.add_argument(
+        "--branch",
+        default="main",
+        help="git branch",
+    )
+    parser.add_argument(
+        "--events",
+        nargs="+",
+        default=["push", "schedule"],
+        help="github events",
+    )
+    parser.add_argument(
+        "--days",
+        "-d",
+        type=int,
+        default=90,
+        help="Number of days to look back from now",
+    )
+    parser.add_argument(
+        "--max-workflows",
+        type=int,
+        default=50,
+        help="Maximum number of workflows to fetch regardless of days",
+    )
+    parser.add_argument(
+        "--nfails",
+        "-n",
+        type=int,
+        default=1,
+        help="Show test if it failed more than this many times",
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        default="test_report.html",
+        help="Output file name",
+    )
+    return parser.parse_args(argv)
+
+
+def get_from_github(url: str, params: dict[str, Any]) -> requests.Response:
     """
     Make an authenticated request to the GitHub REST API.
     """
@@ -31,7 +85,7 @@ def get_from_github(url, params={}):
     return r
 
 
-def maybe_get_next_page_path(response):
+def maybe_get_next_page_path(response: requests.Response) -> str | None:
     """
     If a response is paginated, get the url for the next page.
     """
@@ -48,11 +102,11 @@ def maybe_get_next_page_path(response):
     return next_page_path
 
 
-def get_workflow_listing(repo="dask/distributed", branch="main", event="push"):
+def get_workflow_listing(repo: str, branch: str, event: str, days: int) -> list[dict]:
     """
     Get a list of workflow runs from GitHub actions.
     """
-    since = str((pandas.Timestamp.now(tz="UTC") - pandas.Timedelta(days=90)).date())
+    since = (pandas.Timestamp.now(tz="UTC") - pandas.Timedelta(days=days)).date()
     params = {"per_page": 100, "branch": branch, "event": event, "created": f">{since}"}
     r = get_from_github(
         f"https://api.github.com/repos/{repo}/actions/runs", params=params
@@ -60,14 +114,14 @@ def get_workflow_listing(repo="dask/distributed", branch="main", event="push"):
     workflows = r.json()["workflow_runs"]
     next_page = maybe_get_next_page_path(r)
     while next_page:
-        r = get_from_github(next_page)
-        workflows = workflows + r.json()["workflow_runs"]
+        r = get_from_github(next_page, params)
+        workflows += r.json()["workflow_runs"]
         next_page = maybe_get_next_page_path(r)
 
     return workflows
 
 
-def get_artifacts_for_workflow(run_id, repo="dask/distributed"):
+def get_artifacts_for_workflow(run_id: str, repo: str) -> list:
     """
     Get a list of artifacts from GitHub actions
     """
@@ -79,14 +133,14 @@ def get_artifacts_for_workflow(run_id, repo="dask/distributed"):
     artifacts = r.json()["artifacts"]
     next_page = maybe_get_next_page_path(r)
     while next_page:
-        r = get_from_github(next_page)
-        artifacts = workflows + r.json()["workflow_runs"]
+        r = get_from_github(next_page, params=params)
+        artifacts += r.json()["artifacts"]
         next_page = maybe_get_next_page_path(r)
 
     return artifacts
 
 
-def suite_from_name(name: str):
+def suite_from_name(name: str) -> str:
     """
     Get a test suite name from an artifact name. The artifact
     can have matrix partitions, pytest marks, etc. Basically,
@@ -95,12 +149,12 @@ def suite_from_name(name: str):
     return "-".join(name.split("-")[:3])
 
 
-def download_and_parse_artifact(url):
+def download_and_parse_artifact(url: str) -> junitparser.JUnitXml | None:
     """
     Download the artifact at the url parse it.
     """
     try:
-        r = get_from_github(url)
+        r = get_from_github(url, params={})
         f = zipfile.ZipFile(io.BytesIO(r.content))
         run = junitparser.JUnitXml.fromstring(f.read(f.filelist[0].filename))
         return run
@@ -109,7 +163,7 @@ def download_and_parse_artifact(url):
         return None
 
 
-def dataframe_from_jxml(run):
+def dataframe_from_jxml(run: list) -> pandas.DataFrame:
     """
     Turn a parsed JXML into a pandas dataframe
     """
@@ -161,13 +215,16 @@ def dataframe_from_jxml(run):
     return df.groupby(["file", "test"]).agg(dedup)
 
 
-if __name__ == "__main__":
-    if not TOKEN:
-        raise RuntimeError("Failed to find a GitHub Token")
-    print("Getting all recent workflows...")
-    workflows = get_workflow_listing(event="push") + get_workflow_listing(
-        event="schedule"
-    )
+def download_and_parse_artifacts(
+    repo: str, branch: str, events: list[str], days: int, max_workflows: int
+) -> Iterator[pandas.DataFrame]:
+
+    print("Getting workflows list...")
+    workflows = []
+    for event in events:
+        workflows += get_workflow_listing(
+            repo=repo, branch=branch, event=event, days=days
+        )
 
     # Filter the workflows listing to be in the retention period,
     # and only be test runs (i.e., no linting) that completed.
@@ -176,19 +233,20 @@ if __name__ == "__main__":
         for w in workflows
         if (
             pandas.to_datetime(w["created_at"])
-            > pandas.Timestamp.now(tz="UTC") - pandas.Timedelta(days=90)
+            > pandas.Timestamp.now(tz="UTC") - pandas.Timedelta(days=days)
             and w["conclusion"] != "cancelled"
             and w["name"].lower() == "tests"
         )
     ]
+    print(f"Found {len(workflows)} workflows")
     # Each workflow processed takes ~10-15 API requests. To avoid being
     # rate limited by GitHub (1000 requests per hour) we choose just the
     # most recent N runs. This also keeps the viz size from blowing up.
-    workflows = sorted(workflows, key=lambda w: w["created_at"])[-50:]
+    workflows = sorted(workflows, key=lambda w: w["created_at"])[-max_workflows:]
+    print(f"Fetching artifact listing for the {len(workflows)} most recent workflows")
 
-    print("Getting the artifact listing for each workflow...")
     for w in workflows:
-        artifacts = get_artifacts_for_workflow(w["id"])
+        artifacts = get_artifacts_for_workflow(w["id"], repo=repo)
         # We also upload timeout reports as artifacts, but we don't want them here.
         w["artifacts"] = [
             a
@@ -196,38 +254,70 @@ if __name__ == "__main__":
             if "timeouts" not in a["name"] and "cluster_dumps" not in a["name"]
         ]
 
-    print("Downloading and parsing artifacts...")
-    for w in workflows:
-        w["dfs"] = []
-        for a in w["artifacts"]:
-            xml = download_and_parse_artifact(a["archive_download_url"])
-            df = dataframe_from_jxml(xml) if xml else None
-            # Note: we assign a column with the workflow timestamp rather than the
-            # artifact timestamp so that artifacts triggered under the same workflow
-            # can be aligned according to the same trigger time.
-            if df is not None:
-                df = df.assign(
-                    name=a["name"],
-                    suite=suite_from_name(a["name"]),
-                    date=w["created_at"],
-                    url=w["html_url"],
-                )
-                w["dfs"].append(df)
+    nartifacts = sum(len(w["artifacts"]) for w in workflows)
+    ndownloaded = 0
+    print(f"Downloading and parsing {nartifacts} artifacts...")
 
-    # Make a top-level dict of dataframes, mapping test name to a dataframe
-    # of all check suites that ran that test.
-    # Note: we drop **all** tests which did not have at least one failure.
+    cache: shelve.Shelf[pandas.DataFrame | None]
+    # FIXME https://github.com/python/typeshed/pull/8190
+    with shelve.open("test_report") as cache:  # type: ignore[assignment]
+        for w in workflows:
+            w["dfs"] = []
+            for a in w["artifacts"]:
+                url = a["archive_download_url"]
+                df: pandas.DataFrame | None
+                try:
+                    df = cache[url]
+                except KeyError:
+                    xml = download_and_parse_artifact(url)
+                    if xml:
+                        df = dataframe_from_jxml(xml)
+                        # Note: we assign a column with the workflow timestamp rather
+                        # than the artifact timestamp so that artifacts triggered under
+                        # the same workflow can be aligned according to the same trigger
+                        # time.
+                        df = df.assign(
+                            name=a["name"],
+                            suite=suite_from_name(a["name"]),
+                            date=w["created_at"],
+                            url=w["html_url"],
+                        )
+                    else:
+                        df = None
+                    cache[url] = df
+
+                if df is not None:
+                    yield df
+
+                ndownloaded += 1
+                if ndownloaded and not ndownloaded % 20:
+                    print(f"{ndownloaded}... ", end="")
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
+    if not TOKEN:
+        raise RuntimeError("Failed to find a GitHub Token")
+
+    # Note: we drop **all** tests which did not have at least <nfails> failures.
     # This is because, as nice as a block of green tests can be, there are
     # far too many tests to visualize at once, so we only want to look at
     # flaky tests. If the test suite has been doing well, this chart should
     # dwindle to nothing!
-    dfs = []
-    for w in workflows:
-        dfs.extend([df for df in w["dfs"]])
+    dfs = list(
+        download_and_parse_artifacts(
+            repo=args.repo,
+            branch=args.branch,
+            events=args.events,
+            days=args.days,
+            max_workflows=args.max_workflows,
+        )
+    )
+
     total = pandas.concat(dfs, axis=0)
     grouped = (
         total.groupby(total.index)
-        .filter(lambda g: (g.status == "x").any())
+        .filter(lambda g: (g.status == "x").sum() >= args.nfails)
         .reset_index()
         .assign(test=lambda df: df.file + "." + df.test)
         .groupby("test")
@@ -299,11 +389,17 @@ if __name__ == "__main__":
         .configure_title(anchor="start")
         .resolve_scale(x="shared")  # enforce aligned x axes
     )
+    chart.title = " ".join(argv if argv is not None else sys.argv)
+
     altair_saver.save(
         chart,
-        "test_report.html",
+        args.output,
         embed_options={
             "renderer": "svg",  # Makes the text searchable
             "loader": {"target": "_blank"},  # Open hrefs in a new window
         },
     )
+
+
+if __name__ == "__main__":
+    main()

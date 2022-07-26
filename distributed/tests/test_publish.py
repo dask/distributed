@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 
 import pytest
@@ -60,7 +62,9 @@ async def test_publish_roundtrip(s, a, b):
     data = await c.scatter([0, 1, 2])
     await c.publish_dataset(data=data)
 
-    assert "published-data" in s.who_wants[data[0].key]
+    assert any(
+        cs.client_key == "published-data" for cs in s.tasks[data[0].key].who_wants
+    )
     result = await f.get_dataset(name="data")
 
     assert len(result) == len(data)
@@ -90,7 +94,7 @@ async def test_unpublish(c, s, a, b):
     assert "data" not in s.extensions["publish"].datasets
 
     start = time()
-    while key in s.who_wants:
+    while key in s.tasks:
         await asyncio.sleep(0.01)
         assert time() < start + 5
 

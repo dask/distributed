@@ -1,12 +1,16 @@
+from __future__ import annotations
+
 from collections import deque
 
 import psutil
 
-from .compatibility import WINDOWS
-from .metrics import time
+import dask
+
+from distributed.compatibility import WINDOWS
+from distributed.metrics import time
 
 try:
-    from .diagnostics import nvml
+    from distributed.diagnostics import nvml
 except Exception:
     nvml = None  # type: ignore
 
@@ -40,7 +44,9 @@ class SystemMonitor:
         except Exception:
             self._collect_disk_io_counters = False
         else:
-            if disk_ioc is None:  # diskless machine
+            if disk_ioc is None or not dask.config.get(  # diskless machine
+                "distributed.admin.system-monitor.disk"
+            ):
                 self._collect_disk_io_counters = False
             else:
                 self.last_time_disk = time()
@@ -116,20 +122,23 @@ class SystemMonitor:
             except Exception:
                 pass
             else:
-                last_disk = self._last_disk_io_counters
-                duration_disk = now - self.last_time_disk
-                read_bytes_disk = (disk_ioc.read_bytes - last_disk.read_bytes) / (
-                    duration_disk or 0.5
-                )
-                write_bytes_disk = (disk_ioc.write_bytes - last_disk.write_bytes) / (
-                    duration_disk or 0.5
-                )
-                self.last_time_disk = now
-                self._last_disk_io_counters = disk_ioc
-                self.read_bytes_disk.append(read_bytes_disk)
-                self.write_bytes_disk.append(write_bytes_disk)
-                result["read_bytes_disk"] = read_bytes_disk
-                result["write_bytes_disk"] = write_bytes_disk
+                if disk_ioc is None:  # diskless machine
+                    self._collect_disk_io_counters = False
+                else:
+                    last_disk = self._last_disk_io_counters
+                    duration_disk = now - self.last_time_disk
+                    read_bytes_disk = (disk_ioc.read_bytes - last_disk.read_bytes) / (
+                        duration_disk or 0.5
+                    )
+                    write_bytes_disk = (
+                        disk_ioc.write_bytes - last_disk.write_bytes
+                    ) / (duration_disk or 0.5)
+                    self.last_time_disk = now
+                    self._last_disk_io_counters = disk_ioc
+                    self.read_bytes_disk.append(read_bytes_disk)
+                    self.write_bytes_disk.append(write_bytes_disk)
+                    result["read_bytes_disk"] = read_bytes_disk
+                    result["write_bytes_disk"] = write_bytes_disk
 
         if not WINDOWS:
             num_fds = self.proc.num_fds()

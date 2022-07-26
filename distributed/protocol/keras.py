@@ -1,6 +1,13 @@
+from __future__ import annotations
+
 import keras
 
-from .serialize import dask_deserialize, dask_serialize, deserialize, serialize
+from distributed.protocol.serialize import (
+    dask_deserialize,
+    dask_serialize,
+    deserialize,
+    serialize,
+)
 
 
 @dask_serialize.register(keras.Model)

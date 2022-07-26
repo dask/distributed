@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import threading
@@ -6,10 +8,10 @@ from collections import defaultdict, deque
 
 from dask.utils import parse_timedelta
 
-from .core import CommClosedError
-from .metrics import time
-from .protocol.serialize import to_serialize
-from .utils import TimeoutError, sync
+from distributed.core import CommClosedError
+from distributed.metrics import time
+from distributed.protocol.serialize import to_serialize
+from distributed.utils import TimeoutError, sync
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +35,6 @@ class PubSubSchedulerExtension:
                 "pubsub-msg": self.handle_message,
             }
         )
-
-        self.scheduler.extensions["pubsub"] = self
 
     def add_publisher(self, name=None, worker=None):
         logger.debug("Add publisher: %s %s", name, worker)
@@ -178,7 +178,6 @@ class PubSubClientExtension:
         self.client._stream_handlers.update({"pubsub-msg": self.handle_message})
 
         self.subscribers = defaultdict(weakref.WeakSet)
-        self.client.extensions["pubsub"] = self  # TODO: circular reference
 
     async def handle_message(self, name=None, msg=None):
         for sub in self.subscribers[name]:

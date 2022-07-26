@@ -1,4 +1,6 @@
 # https://pytest.org/latest/example/simple.html#control-skipping-of-tests-according-to-command-line-option
+from __future__ import annotations
+
 import pytest
 
 # Uncomment to enable more logging and checks
@@ -32,6 +34,9 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "slow" in item.keywords:
             item.add_marker(skip_slow)
+
+        if "ws" in item.fixturenames:
+            item.add_marker(pytest.mark.workerstate)
 
 
 pytest_plugins = ["distributed.pytest_resourceleaks"]

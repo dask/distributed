@@ -1,22 +1,25 @@
+from __future__ import annotations
+
 import asyncio
 import atexit
 import gc
 import logging
 import os
-import signal
 import sys
 import warnings
+from collections.abc import Iterator
 from contextlib import suppress
+from typing import Any
 
 import click
 from tlz import valmap
-from tornado.ioloop import IOLoop, TimeoutError
+from tornado.ioloop import TimeoutError
 
 import dask
 from dask.system import CPU_COUNT
 
 from distributed import Nanny
-from distributed.cli.utils import check_python_3, install_signal_handlers
+from distributed._signals import wait_for_signals
 from distributed.comm import get_address_host_port
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.preloading import validate_preload_argv
@@ -24,7 +27,7 @@ from distributed.proctitle import (
     enable_proctitle_on_children,
     enable_proctitle_on_current,
 )
-from distributed.utils import import_term
+from distributed.utils import import_term, parse_ports
 
 logger = logging.getLogger("distributed.dask_worker")
 
@@ -166,8 +169,8 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 )
 @click.option(
     "--reconnect/--no-reconnect",
-    default=True,
-    help="Reconnect to scheduler if disconnected [default: --reconnect]",
+    default=None,
+    help="Deprecated, has no effect. Passing --reconnect is an error. [default: --no-reconnect]",
 )
 @click.option(
     "--nanny/--no-nanny",
@@ -251,13 +254,13 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     'like "foo.bar" or "/path/to/foo.py"',
 )
 @click.version_option()
-def main(
+def main(  # type: ignore[no-untyped-def]
     scheduler,
     host,
-    worker_port,
+    worker_port: str | None,
     listen_address,
     contact_address,
-    nanny_port,
+    nanny_port: str | None,
     nthreads,
     nprocs,
     n_workers,
@@ -276,6 +279,7 @@ def main(
     dashboard_address,
     worker_class,
     preload_nanny,
+    reconnect,
     **kwargs,
 ):
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
@@ -295,6 +299,20 @@ def main(
             "The --bokeh/--no-bokeh flag has been renamed to --dashboard/--no-dashboard. "
         )
         dashboard = bokeh
+    if reconnect is not None:
+        if reconnect:
+            logger.error(
+                "The `--reconnect` option has been removed. "
+                "To improve cluster stability, workers now always shut down in the face of network disconnects. "
+                "For details, or if this is an issue for you, see https://github.com/dask/distributed/issues/6350."
+            )
+            sys.exit(1)
+        else:
+            logger.warning(
+                "The `--no-reconnect/--reconnect` flag is deprecated, and will be removed in a future release. "
+                "Worker reconnection is now always disabled, so `--no-reconnect` is unnecessary. "
+                "See https://github.com/dask/distributed/issues/6350 for details.",
+            )
 
     sec = {
         k: v
@@ -364,7 +382,8 @@ def main(
 
     try:
         if listen_address:
-            (host, worker_port) = get_address_host_port(listen_address, strict=True)
+            host, _ = get_address_host_port(listen_address, strict=True)
+            worker_port = str(_)
             if ":" in host:
                 # IPv6 -- bracket to pass as user args
                 host = f"[{host}]"
@@ -378,11 +397,6 @@ def main(
     except ValueError as e:  # pragma: no cover
         logger.error("Failed to launch worker. " + str(e))
         sys.exit(1)
-
-    if nanny:
-        port = nanny_port
-    else:
-        port = worker_port
 
     if not nthreads:
         nthreads = CPU_COUNT // n_workers
@@ -404,19 +418,17 @@ def main(
     else:
         resources = None
 
-    loop = IOLoop.current()
-
     worker_class = import_term(worker_class)
+
+    port_kwargs = _apportion_ports(worker_port, nanny_port, n_workers, nanny)
+    assert len(port_kwargs) == n_workers
+
     if nanny:
         kwargs["worker_class"] = worker_class
         kwargs["preload_nanny"] = preload_nanny
-
-    if nanny:
-        kwargs.update({"worker_port": worker_port, "listen_address": listen_address})
+        kwargs["listen_address"] = listen_address
         t = Nanny
     else:
-        if nanny_port:
-            kwargs["service_ports"] = {"nanny": nanny_port}
         t = worker_class
 
     if (
@@ -432,64 +444,151 @@ def main(
     with suppress(TypeError, ValueError):
         name = int(name)
 
-    nannies = [
-        t(
-            scheduler,
-            scheduler_file=scheduler_file,
-            nthreads=nthreads,
-            loop=loop,
-            resources=resources,
-            security=sec,
-            contact_address=contact_address,
-            host=host,
-            port=port,
-            dashboard=dashboard,
-            dashboard_address=dashboard_address,
-            name=name
-            if n_workers == 1 or name is None or name == ""
-            else str(name) + "-" + str(i),
-            **kwargs,
-        )
-        for i in range(n_workers)
-    ]
-
-    async def close_all():
-        # Unregister all workers from scheduler
-        if nanny:
-            await asyncio.gather(*(n.close(timeout=2) for n in nannies))
-
     signal_fired = False
 
-    def on_signal(signum):
-        nonlocal signal_fired
-        signal_fired = True
-        if signum != signal.SIGINT:
-            logger.info("Exiting on signal %d", signum)
-        return asyncio.ensure_future(close_all())
-
     async def run():
-        await asyncio.gather(*nannies)
-        await asyncio.gather(*(n.finished() for n in nannies))
+        nannies = [
+            t(
+                scheduler,
+                scheduler_file=scheduler_file,
+                nthreads=nthreads,
+                resources=resources,
+                security=sec,
+                contact_address=contact_address,
+                host=host,
+                dashboard=dashboard,
+                dashboard_address=dashboard_address,
+                name=name
+                if n_workers == 1 or name is None or name == ""
+                else str(name) + "-" + str(i),
+                **kwargs,
+                **port_kwargs_i,
+            )
+            for i, port_kwargs_i in enumerate(port_kwargs)
+        ]
 
-    install_signal_handlers(loop, cleanup=on_signal)
+        async def wait_for_nannies_to_finish():
+            """Wait for all nannies to initialize and finish"""
+            await asyncio.gather(*nannies)
+            await asyncio.gather(*(n.finished() for n in nannies))
+
+        async def wait_for_signals_and_close():
+            """Wait for SIGINT or SIGTERM and close all nannies upon receiving one of those signals"""
+            nonlocal signal_fired
+            await wait_for_signals()
+
+            signal_fired = True
+            if nanny:
+                # Unregister all workers from scheduler
+                await asyncio.gather(*(n.close(timeout=10) for n in nannies))
+
+        wait_for_signals_and_close_task = asyncio.create_task(
+            wait_for_signals_and_close()
+        )
+        wait_for_nannies_to_finish_task = asyncio.create_task(
+            wait_for_nannies_to_finish()
+        )
+
+        done, _ = await asyncio.wait(
+            [wait_for_signals_and_close_task, wait_for_nannies_to_finish_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        # Re-raise exceptions from done tasks
+        [task.result() for task in done]
 
     try:
-        loop.run_sync(run)
-    except TimeoutError:
+        asyncio.run(run())
+    except (TimeoutError, asyncio.TimeoutError):
         # We already log the exception in nanny / worker. Don't do it again.
         if not signal_fired:
             logger.info("Timed out starting worker")
         sys.exit(1)
-    except KeyboardInterrupt:  # pragma: no cover
-        pass
     finally:
         logger.info("End worker")
 
 
-def go():
-    check_python_3()
-    main()
+def _apportion_ports(
+    worker_port: str | None, nanny_port: str | None, n_workers: int, nanny: bool
+) -> list[dict[str, Any]]:
+    """Spread out evenly --worker-port and/or --nanny-port ranges to the workers and
+    nannies, avoiding overlap.
+
+    Returns
+    =======
+    List of kwargs to pass to the Worker or Nanny construtors
+    """
+    seen = set()
+
+    def parse_unique(s: str | None) -> Iterator[int | None]:
+        ports = parse_ports(s)
+        if ports in ([0], [None]):
+            for _ in range(n_workers):
+                yield ports[0]
+        else:
+            for port in ports:
+                if port not in seen:
+                    seen.add(port)
+                    yield port
+
+    worker_ports_iter = parse_unique(worker_port)
+    nanny_ports_iter = parse_unique(nanny_port)
+
+    # [(worker ports, nanny ports), ...]
+    ports: list[tuple[set[int | None], set[int | None]]] = [
+        (set(), set()) for _ in range(n_workers)
+    ]
+
+    ports_iter = iter(ports)
+    more_wps = True
+    more_nps = True
+    while more_wps or more_nps:
+        try:
+            worker_ports_i, nanny_ports_i = next(ports_iter)
+        except StopIteration:
+            # Start again in round-robin
+            ports_iter = iter(ports)
+            continue
+
+        try:
+            worker_ports_i.add(next(worker_ports_iter))
+        except StopIteration:
+            more_wps = False
+        try:
+            nanny_ports_i.add(next(nanny_ports_iter))
+        except StopIteration:
+            more_nps = False
+
+    kwargs = []
+    for worker_ports_i, nanny_ports_i in ports:
+        if not worker_ports_i or not nanny_ports_i:
+            if nanny:
+                raise ValueError(
+                    f"Not enough ports in range --worker_port {worker_port} "
+                    f"--nanny_port {nanny_port} for {n_workers} workers"
+                )
+            else:
+                raise ValueError(
+                    f"Not enough ports in range --worker_port {worker_port} "
+                    f"for {n_workers} workers"
+                )
+
+        # None and int can't be sorted together,
+        # but None and 0 are guaranteed to be alone
+        wp: Any = sorted(worker_ports_i)
+        if len(wp) == 1:
+            wp = wp[0]
+        if nanny:
+            np: Any = sorted(nanny_ports_i)
+            if len(np) == 1:
+                np = np[0]
+            kwargs_i = {"port": np, "worker_port": wp}
+        else:
+            kwargs_i = {"port": wp}
+
+        kwargs.append(kwargs_i)
+
+    return kwargs
 
 
 if __name__ == "__main__":
-    go()  # pragma: no cover
+    main()  # pragma: no cover

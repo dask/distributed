@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import os
 import socket
@@ -11,7 +13,7 @@ from time import sleep
 from tlz import merge
 from tornado import gen
 
-from ..metrics import time
+from distributed.metrics import time
 
 logger = logging.getLogger(__name__)
 
@@ -507,5 +509,5 @@ class SSHCluster:
     def __enter__(self):
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type, exc_value, traceback):
         self.shutdown()

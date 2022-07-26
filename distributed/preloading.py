@@ -6,22 +6,22 @@ import logging
 import os
 import shutil
 import sys
-import urllib.request
 from collections.abc import Iterable
 from importlib import import_module
 from types import ModuleType
 from typing import TYPE_CHECKING, cast
 
 import click
+import urllib3
 
 from dask.utils import tmpfile
 
-from .core import Server
-from .utils import import_file
+from distributed.core import Server
+from distributed.utils import import_file
 
 if TYPE_CHECKING:
     # This has to be inside this guard to avoid a circular import
-    from .client import Client
+    from distributed.client import Client
 
 logger = logging.getLogger(__name__)
 
@@ -131,9 +131,17 @@ def _download_module(url: str) -> ModuleType:
     logger.info("Downloading preload at %s", url)
     assert is_webaddress(url)
 
-    request = urllib.request.Request(url, method="GET")
-    response = urllib.request.urlopen(request)
-    source = response.read().decode()
+    with urllib3.PoolManager() as http:
+        response = http.request(
+            method="GET",
+            url=url,
+            retries=urllib3.util.Retry(
+                status_forcelist=[429, 504, 503, 502],
+                backoff_factor=0.2,
+            ),
+        )
+
+        source = response.data
 
     compiled = compile(source, url, "exec")
     module = ModuleType(url)
@@ -175,6 +183,8 @@ class Preload:
         self.argv = list(argv)
         self.file_dir = file_dir
 
+        logger.info("Creating preload: %s", self.name)
+
         if is_webaddress(name):
             self.module = _download_module(name)
         else:
@@ -185,6 +195,7 @@ class Preload:
         dask_setup = getattr(self.module, "dask_setup", None)
 
         if dask_setup:
+            logger.info("Run preload setup: %s", self.name)
             if isinstance(dask_setup, click.Command):
                 context = dask_setup.make_context(
                     "dask_setup", self.argv, allow_extra_args=False
@@ -194,17 +205,16 @@ class Preload:
                 )
                 if inspect.isawaitable(result):
                     await result
-                logger.info("Run preload setup click command: %s", self.name)
             else:
                 future = dask_setup(self.dask_object)
                 if inspect.isawaitable(future):
                     await future
-                logger.info("Run preload setup function: %s", self.name)
 
     async def teardown(self):
         """Run when the server starts its close method"""
         dask_teardown = getattr(self.module, "dask_teardown", None)
         if dask_teardown:
+            logger.info("Run preload teardown: %s", self.name)
             future = dask_teardown(self.dask_object)
             if inspect.isawaitable(future):
                 await future

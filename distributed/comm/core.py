@@ -8,16 +8,16 @@ import sys
 import weakref
 from abc import ABC, abstractmethod
 from contextlib import suppress
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import dask
 from dask.utils import parse_timedelta
 
-from ..metrics import time
-from ..protocol import pickle
-from ..protocol.compression import get_default_compression
-from . import registry
-from .addressing import parse_address
+from distributed.comm import registry
+from distributed.comm.addressing import parse_address
+from distributed.metrics import time
+from distributed.protocol import pickle
+from distributed.protocol.compression import get_default_compression
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +202,7 @@ class Listener(ABC):
         await self.start()
         return self
 
-    async def __aexit__(self, *exc):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         future = self.stop()
         if inspect.isawaitable(future):
             await future
@@ -214,7 +214,9 @@ class Listener(ABC):
 
         return _().__await__()
 
-    async def on_connection(self, comm: Comm, handshake_overrides=None):
+    async def on_connection(
+        self, comm: Comm, handshake_overrides: dict[str, Any] | None = None
+    ) -> None:
         local_info = {**comm.handshake_info(), **(handshake_overrides or {})}
 
         timeout = dask.config.get("distributed.comm.timeouts.connect")

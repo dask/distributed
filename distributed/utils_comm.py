@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import random
@@ -11,8 +13,8 @@ import dask.config
 from dask.optimization import SubgraphCallable
 from dask.utils import parse_timedelta, stringify
 
-from .core import rpc
-from .utils import All
+from distributed.core import rpc
+from distributed.utils import All
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +35,7 @@ async def gather_from_workers(who_has, rpc, close=True, serializers=None, who=No
     gather
     _gather
     """
-    from .worker import get_data_from_worker
+    from distributed.worker import get_data_from_worker
 
     bad_addresses = set()
     missing_workers = set()
@@ -57,38 +59,33 @@ async def gather_from_workers(who_has, rpc, close=True, serializers=None, who=No
                 bad_keys.add(key)
         if bad_keys:
             all_bad_keys |= bad_keys
-
-        rpcs = {addr: rpc(addr) for addr in d}
-        try:
-            coroutines = {
-                address: asyncio.ensure_future(
-                    get_data_from_worker(
-                        rpc,
-                        keys,
-                        address,
-                        who=who,
-                        serializers=serializers,
-                        max_connections=False,
-                    )
+        coroutines = {
+            address: asyncio.create_task(
+                get_data_from_worker(
+                    rpc,
+                    keys,
+                    address,
+                    who=who,
+                    serializers=serializers,
+                    max_connections=False,
+                ),
+                name=f"get-data-from-{address}",
+            )
+            for address, keys in d.items()
+        }
+        response = {}
+        for worker, c in coroutines.items():
+            try:
+                r = await c
+            except OSError:
+                missing_workers.add(worker)
+            except ValueError as e:
+                logger.info(
+                    "Got an unexpected error while collecting from workers: %s", e
                 )
-                for address, keys in d.items()
-            }
-            response = {}
-            for worker, c in coroutines.items():
-                try:
-                    r = await c
-                except OSError:
-                    missing_workers.add(worker)
-                except ValueError as e:
-                    logger.info(
-                        "Got an unexpected error while collecting from workers: %s", e
-                    )
-                    missing_workers.add(worker)
-                else:
-                    response.update(r["data"])
-        finally:
-            for r in rpcs.values():
-                await r.close_rpc()
+                missing_workers.add(worker)
+            else:
+                response.update(r["data"])
 
         bad_addresses |= {v for k, v in rev.items() if k not in response}
         results.update(response)
