@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from tempfile import TemporaryDirectory
 
 import numpy as np
 import py
@@ -131,25 +130,26 @@ def test_disk_size_calculation(tmpdir):
 
 
 @requires_zict_210
-def test_spillbuffer_maxlim(tmpdir):
-    buf = SpillBuffer(str(tmpdir), target=200, max_spill=600, min_log_interval=0)
+def test_spillbuffer_maxlim(tmpdir_factory):
+    buf_dir = tmpdir_factory.mktemp("buf")
+    buf = SpillBuffer(str(buf_dir), target=200, max_spill=600, min_log_interval=0)
 
     a, b, c, d, e = "a" * 200, "b" * 100, "c" * 99, "d" * 199, "e" * 98
 
     # size of a is bigger than target and is smaller than max_spill;
     # key should be in slow
     buf["a"] = a
-    assert_buf(buf, tmpdir, {}, {"a": a})
+    assert_buf(buf, buf_dir, {}, {"a": a})
     assert buf["a"] == a
 
     # size of b is smaller than target key should be in fast
     buf["b"] = b
-    assert_buf(buf, tmpdir, {"b": b}, {"a": a})
+    assert_buf(buf, buf_dir, {"b": b}, {"a": a})
 
     # size of c is smaller than target but b+c > target, c should stay in fast and b
     # move to slow since the max_spill limit has not been reached yet
     buf["c"] = c
-    assert_buf(buf, tmpdir, {"c": c}, {"a": a, "b": b})
+    assert_buf(buf, buf_dir, {"c": c}, {"a": a, "b": b})
 
     # size of e < target but e+c > target, this will trigger movement of c to slow
     # but the max spill limit prevents it. Resulting in e remaining in fast
@@ -158,7 +158,7 @@ def test_spillbuffer_maxlim(tmpdir):
         buf["e"] = e
 
     assert "disk reached capacity" in logs_e.getvalue()
-    assert_buf(buf, tmpdir, {"c": c, "e": e}, {"a": a, "b": b})
+    assert_buf(buf, buf_dir, {"c": c, "e": e}, {"a": a, "b": b})
 
     # size of d > target, d should go to slow but slow reached the max_spill limit then
     # d will end up on fast with c (which can't be move to slow because it won't fit
@@ -167,22 +167,24 @@ def test_spillbuffer_maxlim(tmpdir):
         buf["d"] = d
 
     assert "disk reached capacity" in logs_d.getvalue()
-    assert_buf(buf, tmpdir, {"c": c, "d": d, "e": e}, {"a": a, "b": b})
+    assert_buf(buf, buf_dir, {"c": c, "d": d, "e": e}, {"a": a, "b": b})
 
     # Overwrite a key that was in slow, but the size of the new key is larger than
     # max_spill
 
     a_large = "a" * 500
-    with TemporaryDirectory() as spill_dir:
-        larger_buf = SpillBuffer(spill_dir, target=0)
-        larger_buf["a_large"] = a_large
-        assert psize(spill_dir, a_large=a_large)[1] > 600  # size of max_spill
+
+    # Assert precondition that a_large is larger than max_spill when written to disk
+    unlimited_buf_dir = tmpdir_factory.mktemp("unlimited_buf")
+    unlimited_buf = SpillBuffer(unlimited_buf_dir, target=0)
+    unlimited_buf["a_large"] = a_large
+    assert psize(unlimited_buf_dir, a_large=a_large)[1] > 600
 
     with captured_logger(logging.getLogger("distributed.spill")) as logs_alarge:
         buf["a"] = a_large
 
     assert "disk reached capacity" in logs_alarge.getvalue()
-    assert_buf(buf, tmpdir, {"a": a_large, "d": d, "e": e}, {"b": b, "c": c})
+    assert_buf(buf, buf_dir, {"a": a_large, "d": d, "e": e}, {"b": b, "c": c})
 
     # Overwrite a key that was in fast, but the size of the new key is larger than
     # max_spill
@@ -192,7 +194,7 @@ def test_spillbuffer_maxlim(tmpdir):
         buf["d"] = d_large
 
     assert "disk reached capacity" in logs_dlarge.getvalue()
-    assert_buf(buf, tmpdir, {"a": a_large, "d": d_large, "e": e}, {"b": b, "c": c})
+    assert_buf(buf, buf_dir, {"a": a_large, "d": d_large, "e": e}, {"b": b, "c": c})
 
 
 class MyError(Exception):
