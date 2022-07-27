@@ -34,7 +34,10 @@ scheduler_relevant_packages = {pkg for pkg, _ in required_packages} | {"lz4"}
 
 # notes to be displayed for mismatch packages
 notes_mismatch_package = {
-    "msgpack": "Variation is ok, as long as everything is above 0.6"
+    "msgpack": "Variation is ok, as long as everything is above 0.6",
+    "python": "Variation in python versions can cause hard to debug serialization errors, we highly recommend using the same version of python everywhere",
+    "dask": "Variation in dask versions can cause unexpected behaviour, we highly recommend using the same version of dask everywhere",
+    "distributed": "Variation in distributed versions can cause hard to debug connection errors, we highly recommend using the same version of distributed everywhere",
 }
 
 
@@ -148,15 +151,19 @@ def error_message(scheduler, workers, client, client_name="client"):
         elif len(worker_versions) == 0:
             worker_versions = None
 
-        errs.append((pkg, client_version, scheduler_version, worker_versions))
+        level = "Critical" if pkg in ["python", "dask", "distributed"] else "Warning"
+
+        errs.append((pkg, client_version, scheduler_version, worker_versions, level))
         if pkg in notes_mismatch_package.keys():
             notes.append(f"-  {pkg}: {notes_mismatch_package[pkg]}")
 
     out = {"warning": "", "error": ""}
 
     if errs:
-        err_table = asciitable(["Package", client_name, "scheduler", "workers"], errs)
-        err_msg = f"Mismatched versions found\n\n{err_table}"
+        err_table = asciitable(
+            ["Package", client_name, "scheduler", "workers", "level"], errs
+        )
+        err_msg = f"We recommend fixing any critical mismatches before continuing.\n\n{err_table}"
         if notes:
             err_msg += "\nNotes: \n{}".format("\n".join(notes))
         out["warning"] += err_msg
