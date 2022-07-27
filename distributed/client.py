@@ -117,9 +117,6 @@ DEFAULT_EXTENSIONS = {
     "pubsub": PubSubClientExtension,
 }
 
-# Placeholder used in the get_dataset function(s)
-NO_DEFAULT_PLACEHOLDER = "_no_default_"
-
 
 def _get_global_client() -> Client | None:
     L = sorted(list(_global_clients), reverse=True)
@@ -2554,18 +2551,18 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self.scheduler.publish_list, **kwargs)
 
-    async def _get_dataset(self, name, default=NO_DEFAULT_PLACEHOLDER):
+    async def _get_dataset(self, name, default=no_default):
         with self.as_current():
             out = await self.scheduler.publish_get(name=name, client=self.id)
 
         if out is None:
-            if default is NO_DEFAULT_PLACEHOLDER:
+            if default is no_default:
                 raise KeyError(f"Dataset '{name}' not found")
             else:
                 return default
         return out["data"]
 
-    def get_dataset(self, name, default=NO_DEFAULT_PLACEHOLDER, **kwargs):
+    def get_dataset(self, name, default=no_default, **kwargs):
         """
         Get named dataset from the scheduler if present.
         Return the default or raise a KeyError if not present.
