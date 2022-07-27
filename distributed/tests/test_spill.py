@@ -6,6 +6,7 @@ import uuid
 from tempfile import TemporaryDirectory
 
 import numpy as np
+import py
 import pytest
 
 from dask.sizeof import sizeof
@@ -33,7 +34,7 @@ def psize(tmpdir: str, **objs: object) -> tuple[int, int]:
 
 
 def assert_buf(
-    buf: SpillBuffer, tmpdir: str, expect_fast: dict, expect_slow: dict
+    buf: SpillBuffer, tmpdir: py.path.local, expect_fast: dict, expect_slow: dict
 ) -> None:
     # assertions on fast
     assert dict(buf.fast) == expect_fast
@@ -46,9 +47,9 @@ def assert_buf(
     assert set(buf.slow) == expect_slow.keys()
     slow = buf.slow.data if has_zict_220 else buf.slow  # type: ignore
     assert slow.weight_by_key == {
-        k: psize(tmpdir, **{k: v}) for k, v in expect_slow.items()
+        k: psize(str(tmpdir), **{k: v}) for k, v in expect_slow.items()
     }
-    total_weight = psize(tmpdir, **expect_slow)
+    total_weight = psize(str(tmpdir), **expect_slow)
     assert slow.total_weight == total_weight
     assert buf.spilled_total == total_weight
 
