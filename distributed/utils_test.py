@@ -1879,7 +1879,7 @@ def check_instances():
 
 
 @pytest.fixture(autouse=True)
-def autoconfigure_test():
+def autoconfigure():
     reset_config()
 
     with dask.config.set(
