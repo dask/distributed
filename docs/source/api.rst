@@ -7,6 +7,23 @@ API
 
 **Client**
 
+The dask distributed client is the main entry point to working with a dask cluster. It offers
+its own API for submitting and dealing with work, as well as getting information about the
+cluster it is connected to. Simply creating a client may be all that a users needs to do,
+since it will implicitly become the default engine for any dask ``compute()`` calls.
+
+There are three main ways in which ``Client`` can be called:
+- with the address of an existing scheduler, or scheduler information file; in this case,
+  the cluster has been configured elsewhere (e.g., command line, helm)
+- with a cluster instance which has been created in the current python session; in this case,
+  you have control over the cluster object (which may point to Kubernetes, for example), and
+  you may call methos on it to, for instance, scale.
+- without any connection argument; in this case, a :class:`distributed.LocalCluster` will be
+  created for you automaticlly, with defaults that are reasonable for a one-machine cluster.
+  You can still override these default by passing any of the arguments accespted by ``LocalCluster``,
+  see its own documentation. The createdcluster instance will be available as the attribute
+  ``.cluster``.
+
 The client connects to and submits computation to a Dask cluster (such as a :class:`distributed.LocalCluster`)
 
 .. autosummary::
