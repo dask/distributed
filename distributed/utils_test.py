@@ -697,7 +697,7 @@ def cluster(
     ws = weakref.WeakSet()
     enable_proctitle_on_children()
 
-    with check_process_leak(check=True), check_instances():
+    with check_process_leak(check=True), check_instances(), _reconfigure():
         if nanny:
             _run_worker = run_nanny
         else:
@@ -1878,8 +1878,8 @@ def check_instances():
     DequeHandler.clear_all_instances()
 
 
-@pytest.fixture(autouse=True)
-def autoconfigure():
+@contextmanager
+def _reconfigure():
     reset_config()
 
     with dask.config.set(
@@ -2495,3 +2495,9 @@ def requires_default_ports(name_of_test):
         raise TimeoutError(f"Default ports didn't open up in time for {name_of_test}")
 
     yield
+
+
+@pytest.fixture(autouse=True)
+def autoconfigure():
+    with _reconfigure():
+        yield
