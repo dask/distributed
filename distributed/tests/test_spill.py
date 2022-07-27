@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import array
 import logging
 import os
+import random
 import uuid
 
-import numpy as np
 import py
 import pytest
 
@@ -123,7 +124,7 @@ def test_spillbuffer(tmpdir):
 def test_disk_size_calculation(tmpdir):
     buf = SpillBuffer(str(tmpdir), target=0)
     a = "a" * 100
-    b = np.random.random((100,))
+    b = array.array("d", (random.random() for _ in range(100)))
     buf["a"] = a
     buf["b"] = b
     assert_buf(buf, tmpdir, {}, {"a": a, "b": b})
