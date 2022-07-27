@@ -23,7 +23,7 @@ from contextvars import ContextVar
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import Any, ClassVar, Literal, Sequence
+from typing import Any, ClassVar, Coroutine, Literal, Sequence, TypedDict
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
 
@@ -656,6 +656,12 @@ def _maybe_call_security_loader(address):
             ) from exc
         return security_loader({"address": address})
     return None
+
+
+class VersionsDict(TypedDict):
+    scheduler: dict[str, dict[str, Any]]
+    workers: dict[str, dict[str, dict[str, Any]]]
+    client: dict[str, dict[str, Any]]
 
 
 class Client(SyncMethodMixin):
@@ -4217,7 +4223,9 @@ class Client(SyncMethodMixin):
             key = (key,)
         return self.sync(self.scheduler.set_metadata, keys=key, value=value)
 
-    def get_versions(self, check: bool = False, packages: Sequence[str] | None = None):
+    def get_versions(
+        self, check: bool = False, packages: Sequence[str] | None = None
+    ) -> VersionsDict | Coroutine[Any, Any, VersionsDict]:
         """Return version info for the scheduler, all workers and myself
 
         Parameters
@@ -4238,7 +4246,7 @@ class Client(SyncMethodMixin):
 
     async def _get_versions(
         self, check: bool = False, packages: Sequence[str] | None = None
-    ):
+    ) -> VersionsDict:
         packages = packages or []
         client = version_module.get_versions(packages=packages)
         scheduler = await self.scheduler.versions(packages=packages)
@@ -4246,7 +4254,7 @@ class Client(SyncMethodMixin):
             msg={"op": "versions", "packages": packages},
             on_error="ignore",
         )
-        result = {"scheduler": scheduler, "workers": workers, "client": client}
+        result = VersionsDict(scheduler=scheduler, workers=workers, client=client)
 
         if check:
             msg = version_module.error_message(scheduler, workers, client)
