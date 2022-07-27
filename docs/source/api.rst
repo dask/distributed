@@ -22,7 +22,8 @@ There are three main ways in which ``Client`` can be called:
   created for you automatically, with defaults that are reasonable for a one-machine cluster.
   You can still override these default by passing any of the arguments accepted by ``LocalCluster``,
   see its own documentation. The created cluster instance will be available as the attribute
-  ``.cluster``.
+  ``.cluster``. Many dask examples have ``client = Client()`` a the top of a script/notebook
+  for this reason.
 
 The client connects to and submits computation to a Dask cluster (such as a :class:`distributed.LocalCluster`)
 
