@@ -85,7 +85,9 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "jupyter",
     default=False,
     required=False,
-    help="Start a Jupyter Server in the same process",
+    help="Start a Jupyter Server in the same process.  Warning: This will make"
+    "it possible for anyone with access to your dashboard address to run"
+    "Python code",
 )
 @click.option("--show/--no-show", default=False, help="Show web UI [default: --show]")
 @click.option(
