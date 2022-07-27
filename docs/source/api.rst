@@ -17,11 +17,11 @@ There are three main ways in which ``Client`` can be called:
   the cluster has been configured elsewhere (e.g., command line, helm)
 - with a cluster instance which has been created in the current python session; in this case,
   you have control over the cluster object (which may point to Kubernetes, for example), and
-  you may call methos on it to, for instance, scale.
+  you may call methods on it to, for instance, scale.
 - without any connection argument; in this case, a :class:`distributed.LocalCluster` will be
-  created for you automaticlly, with defaults that are reasonable for a one-machine cluster.
-  You can still override these default by passing any of the arguments accespted by ``LocalCluster``,
-  see its own documentation. The createdcluster instance will be available as the attribute
+  created for you automatically, with defaults that are reasonable for a one-machine cluster.
+  You can still override these default by passing any of the arguments accepted by ``LocalCluster``,
+  see its own documentation. The created cluster instance will be available as the attribute
   ``.cluster``.
 
 The client connects to and submits computation to a Dask cluster (such as a :class:`distributed.LocalCluster`)
