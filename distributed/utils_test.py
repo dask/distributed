@@ -697,7 +697,7 @@ def cluster(
     ws = weakref.WeakSet()
     enable_proctitle_on_children()
 
-    with check_process_leak(check=True), check_instances(), _reconfigure():
+    with check_process_leak(check=True), check_instances():
         if nanny:
             _run_worker = run_nanny
         else:
@@ -1878,8 +1878,8 @@ def check_instances():
     DequeHandler.clear_all_instances()
 
 
-@contextmanager
-def _reconfigure():
+@pytest.fixture(autouse=True)
+def autoconfigure_test():
     reset_config()
 
     with dask.config.set(
@@ -1904,8 +1904,7 @@ def clean(threads=True, instances=True, processes=True):
     with check_thread_leak() if threads else nullcontext():
         with check_process_leak(check=processes):
             with check_instances() if instances else nullcontext():
-                with _reconfigure():
-                    yield
+                yield
 
 
 @pytest.fixture
