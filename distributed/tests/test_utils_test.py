@@ -16,7 +16,6 @@ from unittest import mock
 
 import pytest
 import yaml
-from _pytest.outcomes import Failed
 from tornado import gen
 
 import dask.config
@@ -766,7 +765,9 @@ def test_check_thread_leak():
 
     t2 = t3 = None
     try:
-        with pytest.raises(Failed, match=r"2 thread\(s\) were leaked") as exc:
+        with pytest.raises(
+            pytest.fail.Exception, match=r"2 thread\(s\) were leaked"
+        ) as exc:
             with check_thread_leak():
                 t2 = threading.Thread(target=lambda: (event.wait(), "two"))
                 t2.start()
