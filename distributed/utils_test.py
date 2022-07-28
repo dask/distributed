@@ -32,7 +32,7 @@ from typing import IO, Any, Generator, Iterator, Literal
 
 import pytest
 import yaml
-from tlz import memoize, merge
+from tlz import assoc, memoize, merge
 from tornado.ioloop import IOLoop
 
 import dask
@@ -556,6 +556,40 @@ def client(loop, cluster_fixture):
 
 # Compatibility. A lot of tests simply use `c` as fixture name
 c = client
+
+
+@pytest.fixture
+def client_secondary(loop, cluster_fixture):
+    scheduler, workers = cluster_fixture
+    with Client(scheduler["address"], loop=loop) as client:
+        yield client
+
+
+@contextmanager
+def tls_cluster_context(
+    worker_kwargs=None, scheduler_kwargs=None, security=None, **kwargs
+):
+    security = security or tls_only_security()
+    worker_kwargs = assoc(worker_kwargs or {}, "security", security)
+    scheduler_kwargs = assoc(scheduler_kwargs or {}, "security", security)
+
+    with cluster(
+        worker_kwargs=worker_kwargs, scheduler_kwargs=scheduler_kwargs, **kwargs
+    ) as (s, workers):
+        yield s, workers
+
+
+@pytest.fixture
+def tls_cluster(loop, security):
+    with tls_cluster_context(security=security) as (scheduler, workers):
+        yield (scheduler, workers)
+
+
+@pytest.fixture
+def tls_client(tls_cluster, loop, security):
+    s, workers = tls_cluster
+    with Client(s["address"], security=security, loop=loop) as client:
+        yield client
 
 
 @pytest.fixture
