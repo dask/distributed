@@ -221,7 +221,7 @@ async def test_executing_cancelled_error(c, s, w):
 
     assert await f2 == 2
     # Everything should still be executing as usual after this
-    await c.submit(sum, c.map(inc, range(10))) == sum(map(inc, range(10)))
+    assert await c.submit(sum, c.map(inc, range(10))) == sum(map(inc, range(10)))
 
     # Everything above this line should be generically true, regardless of
     # refactoring. Below verifies some implementation specific test assumptions

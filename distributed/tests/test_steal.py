@@ -982,7 +982,7 @@ async def test_parse_stealing_interval(s, interval, expected):
         ctx = contextlib.nullcontext()
     with ctx:
         ws = WorkStealing(s)
-        s.periodic_callbacks["stealing"].callback_time == expected
+        assert s.periodic_callbacks["stealing"].callback_time == expected
 
 
 @gen_cluster(client=True)

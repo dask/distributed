@@ -264,7 +264,7 @@ def _listen(delay=0):
 def test_new_config():
     c = config.copy()
     with new_config({"xyzzy": 5}):
-        config["xyzzy"] == 5
+        assert config["xyzzy"] == 5
 
     assert config == c
     assert "xyzzy" not in config
@@ -287,7 +287,7 @@ def test_lingering_client_2(loop):
 
 
 def test_tls_cluster(tls_client):
-    tls_client.submit(lambda x: x + 1, 10).result() == 11
+    assert tls_client.submit(lambda x: x + 1, 10).result() == 11
     assert tls_client.security
 
 
