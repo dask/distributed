@@ -112,21 +112,16 @@ async def test_async_task_group_call_soon_executes_task_in_background():
 @gen_test()
 async def test_async_task_group_call_later_executes_delayed_task_in_background():
     group = AsyncTaskGroup()
-    flag = False
-
-    async def set_flag():
-        nonlocal flag
-        flag = True
+    ev = asyncio.Event()
 
     start = timemod.monotonic()
-    assert group.call_later(1, set_flag) is None
+    assert group.call_later(1, ev.set) is None
     assert len(group) == 1
-    # the task must complete in exactly 1 event loop cycle
-    await asyncio.sleep(1)
-    await _wait_for_n_loop_cycles(2)
+    await ev.wait()
     end = timemod.monotonic()
+    # the task must be removed in exactly 1 event loop cycle
+    await _wait_for_n_loop_cycles(2)
     assert len(group) == 0
-    assert flag
     assert end - start > 1 - timemod.get_clock_info("monotonic").resolution
 
 

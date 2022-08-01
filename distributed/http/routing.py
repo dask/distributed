@@ -7,7 +7,11 @@ import tornado.routing
 from tornado import web
 
 
-def _descend_routes(router, routers=set(), out=set()):
+def _descend_routes(router, routers=None, out=None):
+    if routers is None:
+        routers = set()
+    if out is None:
+        out = set()
     if router in routers:
         return
     routers.add(router)

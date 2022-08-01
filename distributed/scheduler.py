@@ -73,7 +73,7 @@ from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
 from distributed.http import get_handlers
 from distributed.lock import LockExtension
-from distributed.metrics import time
+from distributed.metrics import monotonic, time
 from distributed.multi_lock import MultiLockExtension
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
@@ -3007,7 +3007,6 @@ class Scheduler(SchedulerState, ServerNode):
         # Communication state
         self.client_comms = {}
         self.stream_comms = {}
-        self._worker_coroutines = []
 
         # Task state
         tasks = {}
@@ -3078,7 +3077,6 @@ class Scheduler(SchedulerState, ServerNode):
             "client-releases-keys": self.client_releases_keys,
             "heartbeat-client": self.client_heartbeat,
             "close-client": self.remove_client,
-            "restart": self.restart,
             "subscribe-topic": self.subscribe_topic,
             "unsubscribe-topic": self.unsubscribe_topic,
         }
@@ -3115,6 +3113,7 @@ class Scheduler(SchedulerState, ServerNode):
             "rebalance": self.rebalance,
             "replicate": self.replicate,
             "run_function": self.run_function,
+            "restart": self.restart,
             "update_data": self.update_data,
             "set_resources": self.add_resources,
             "retire_workers": self.retire_workers,
@@ -3334,10 +3333,6 @@ class Scheduler(SchedulerState, ServerNode):
         enable_gc_diagnosis()
 
         self.clear_task_state()
-
-        with suppress(AttributeError):
-            for c in self._worker_coroutines:
-                c.cancel()
 
         for addr in self._start_address:
             await self.listen(
@@ -5117,12 +5112,37 @@ class Scheduler(SchedulerState, ServerNode):
             collection.clear()
 
     @log_errors
-    async def restart(self, client=None, timeout=30):
-        """Restart all workers. Reset local state."""
-        stimulus_id = f"restart-{time()}"
-        n_workers = len(self.workers)
+    async def restart(self, client=None, timeout=30, wait_for_workers=True):
+        """
+        Restart all workers. Reset local state. Optionally wait for workers to return.
 
-        logger.info("Send lost future signal to clients")
+        Workers without nannies are shut down, hoping an external deployment system
+        will restart them. Therefore, if not using nannies and your deployment system
+        does not automatically restart workers, ``restart`` will just shut down all
+        workers, then time out!
+
+        After `restart`, all connected workers are new, regardless of whether `TimeoutError`
+        was raised. Any workers that failed to shut down in time are removed, and
+        may or may not shut down on their own in the future.
+
+        Parameters
+        ----------
+        timeout:
+            How long to wait for workers to shut down and come back, if `wait_for_workers`
+            is True, otherwise just how long to wait for workers to shut down.
+            Raises `asyncio.TimeoutError` if this is exceeded.
+        wait_for_workers:
+            Whether to wait for all workers to reconnect, or just for them to shut down
+            (default True). Use ``restart(wait_for_workers=False)`` combined with
+            `Client.wait_for_workers` for granular control over how many workers to
+            wait for.
+        See also
+        ----------
+        Client.restart
+        """
+        stimulus_id = f"restart-{time()}"
+
+        logger.info("Releasing all requested keys")
         for cs in self.clients.values():
             self.client_releases_keys(
                 keys=[ts.key for ts in cs.wants_what],
@@ -5130,10 +5150,21 @@ class Scheduler(SchedulerState, ServerNode):
                 stimulus_id=stimulus_id,
             )
 
+        self.clear_task_state()
+        self.erred_tasks.clear()
+        self.computations.clear()
+        self.report({"op": "restart"})
+
+        for plugin in list(self.plugins.values()):
+            try:
+                plugin.restart(self)
+            except Exception as e:
+                logger.exception(e)
+
+        n_workers = len(self.workers)
         nanny_workers = {
             addr: ws.nanny for addr, ws in self.workers.items() if ws.nanny
         }
-
         # Close non-Nanny workers. We have no way to restart them, so we just let them go,
         # and assume a deployment system is going to restart them for us.
         await asyncio.gather(
@@ -5144,63 +5175,76 @@ class Scheduler(SchedulerState, ServerNode):
             )
         )
 
-        self.clear_task_state()
-
-        for plugin in list(self.plugins.values()):
-            try:
-                plugin.restart(self)
-            except Exception as e:
-                logger.exception(e)
-
         logger.debug("Send kill signal to nannies: %s", nanny_workers)
         async with contextlib.AsyncExitStack() as stack:
-            nannies = [
-                await stack.enter_async_context(
-                    rpc(nanny_address, connection_args=self.connection_args)
-                )
-                for nanny_address in nanny_workers.values()
-            ]
-
-            try:
-                resps = await asyncio.wait_for(
-                    asyncio.gather(
-                        *(
-                            nanny.restart(close=True, timeout=timeout * 0.8)
-                            for nanny in nannies
-                        )
-                    ),
-                    timeout,
-                )
-                # NOTE: the `WorkerState` entries for these workers will be removed
-                # naturally when they disconnect from the scheduler.
-            except TimeoutError:
-                logger.error(
-                    "Nannies didn't report back restarted within "
-                    "timeout.  Continuing with restart process"
-                )
-            else:
-                if not all(resp == "OK" for resp in resps):
-                    logger.error(
-                        "Not all workers responded positively: %s",
-                        resps,
-                        exc_info=True,
+            nannies = await asyncio.gather(
+                *(
+                    stack.enter_async_context(
+                        rpc(nanny_address, connection_args=self.connection_args)
                     )
+                    for nanny_address in nanny_workers.values()
+                )
+            )
 
-        self.clear_task_state()
+            start = monotonic()
+            resps = await asyncio.gather(
+                *(
+                    asyncio.wait_for(
+                        # FIXME does not raise if the process fails to shut down,
+                        # see https://github.com/dask/distributed/pull/6427/files#r894917424
+                        # NOTE: Nanny will automatically restart worker process when it's killed
+                        nanny.kill(timeout=timeout),
+                        timeout,
+                    )
+                    for nanny in nannies
+                ),
+                return_exceptions=True,
+            )
+            # NOTE: the `WorkerState` entries for these workers will be removed
+            # naturally when they disconnect from the scheduler.
 
-        with suppress(AttributeError):
-            for c in self._worker_coroutines:
-                c.cancel()
+            # Remove any workers that failed to shut down, so we can guarantee
+            # that after `restart`, there are no old workers around.
+            bad_nannies = [
+                addr for addr, resp in zip(nanny_workers, resps) if resp is not None
+            ]
+            if bad_nannies:
+                await asyncio.gather(
+                    *(
+                        self.remove_worker(addr, stimulus_id=stimulus_id)
+                        for addr in bad_nannies
+                    )
+                )
 
-        self.erred_tasks.clear()
-        self.computations.clear()
+                raise TimeoutError(
+                    f"{len(bad_nannies)}/{len(nannies)} nanny worker(s) did not shut down within {timeout}s"
+                )
 
         self.log_event([client, "all"], {"action": "restart", "client": client})
-        start = time()
-        while time() < start + 10 and len(self.workers) < n_workers:
-            await asyncio.sleep(0.01)
 
-        self.report({"op": "restart"})
+        if wait_for_workers:
+            while monotonic() < start + timeout:
+                # NOTE: if new (unrelated) workers join while we're waiting, we may return before
+                # our shut-down workers have come back up. That's fine; workers are interchangeable.
+                if len(self.workers) >= n_workers:
+                    return
+                await asyncio.sleep(0.2)
+            else:
+                msg = (
+                    f"Waited for {n_workers} worker(s) to reconnect after restarting, "
+                    f"but after {timeout}s, only {len(self.workers)} have returned. "
+                    "Consider a longer timeout, or `wait_for_workers=False`."
+                )
+
+                if (n_nanny := len(nanny_workers)) < n_workers:
+                    msg += (
+                        f" The {n_workers - n_nanny} worker(s) not using Nannies were just shut "
+                        "down instead of restarted (restart is only possible with Nannies). If "
+                        "your deployment system does not automatically re-launch terminated "
+                        "processes, then those workers will never come back, and `Client.restart` "
+                        "will always time out. Do not use `Client.restart` in that case."
+                    )
+                raise TimeoutError(msg) from None
 
     async def broadcast(
         self,
