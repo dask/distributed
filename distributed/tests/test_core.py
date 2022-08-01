@@ -430,7 +430,10 @@ async def test_server_listen():
         await assert_cannot_connect(inproc_addr2)
 
 
-async def check_rpc(listen_addr, rpc_addr=None, listen_args={}, connection_args={}):
+async def check_rpc(listen_addr, rpc_addr=None, listen_args=None, connection_args=None):
+    listen_args = listen_args or {}
+    connection_args = connection_args or {}
+
     async with Server({"ping": pingpong}) as server:
         await server.listen(listen_addr, **listen_args)
         if rpc_addr is None:

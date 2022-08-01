@@ -81,7 +81,9 @@ tls_kwargs = dict(
 )
 
 
-async def get_comm_pair(listen_addr, listen_args={}, connect_args={}, **kwargs):
+async def get_comm_pair(listen_addr, listen_args=None, connect_args=None, **kwargs):
+    listen_args = listen_args or {}
+    connect_args = connect_args or {}
     q = asyncio.Queue()
 
     async def handle_comm(comm):
@@ -489,8 +491,8 @@ async def check_client_server(
     addr,
     check_listen_addr=None,
     check_contact_addr=None,
-    listen_args={},
-    connect_args={},
+    listen_args=None,
+    connect_args=None,
 ):
     """
     Abstract client / server test.
@@ -740,7 +742,12 @@ async def test_tls_reject_certificate(tcp):
 #
 
 
-async def check_comm_closed_implicit(addr, delay=None, listen_args={}, connect_args={}):
+async def check_comm_closed_implicit(
+    addr, delay=None, listen_args=None, connect_args=None
+):
+    listen_args = listen_args or {}
+    connect_args = connect_args or {}
+
     async def handle_comm(comm):
         await comm.close()
 
@@ -771,7 +778,9 @@ async def test_inproc_comm_closed_implicit():
     await check_comm_closed_implicit(inproc.new_address())
 
 
-async def check_comm_closed_explicit(addr, listen_args={}, connect_args={}):
+async def check_comm_closed_explicit(addr, listen_args=None, connect_args=None):
+    listen_args = listen_args or {}
+    connect_args = connect_args or {}
     a, b = await get_comm_pair(addr, listen_args=listen_args, connect_args=connect_args)
     a_read = a.read()
     b_read = b.read()
