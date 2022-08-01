@@ -29,7 +29,7 @@ from distributed.core import CommClosedError, Status
 from distributed.diagnostics import SchedulerPlugin
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
-from distributed.utils import TimeoutError, parse_ports
+from distributed.utils import TimeoutError, get_mp_context, parse_ports
 from distributed.utils_test import (
     captured_logger,
     gen_cluster,
@@ -595,7 +595,7 @@ class BlockClose(WorkerPlugin):
 @pytest.mark.slow
 @gen_cluster(nthreads=[])
 async def test_close_joins(s):
-    close_happened = mp.Event()
+    close_happened = get_mp_context().Event()
 
     nanny = Nanny(s.address, plugins=[BlockClose(close_happened)])
     async with nanny:
