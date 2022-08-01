@@ -31,6 +31,7 @@ import psutil
 import pytest
 import yaml
 from tlz import concat, first, identity, isdistinct, merge, pluck, valmap
+from tornado.ioloop import IOLoop
 
 import dask
 import dask.bag as db
@@ -2873,6 +2874,7 @@ async def test_startup_close_startup(s, a, b):
     await c.close()
 
 
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
 def test_startup_close_startup_sync(loop):
     with cluster() as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
@@ -5532,13 +5534,18 @@ async def test_future_auto_inform(c, s, a, b):
     await client.close()
 
 
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
 def test_client_async_before_loop_starts(cleanup):
     async def close():
         async with client:
             pass
 
     with pristine_loop() as loop:
-        client = Client(asynchronous=True, loop=loop)
+        with pytest.warns(
+            DeprecationWarning,
+            match=r"Constructing LoopRunner\(loop=loop\) without a running loop is deprecated",
+        ):
+            client = Client(asynchronous=True, loop=loop)
         assert client.asynchronous
         assert isinstance(client.close(), NoOpAwaitable)
         loop.run_sync(close)  # TODO: client.close() does not unset global client
@@ -6837,6 +6844,7 @@ async def test_workers_collection_restriction(c, s, a, b):
     assert a.data and not b.data
 
 
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_get_client_functions_spawn_clusters(c, s, a):
     # see gh4565
@@ -7550,3 +7558,21 @@ def test_quiet_close_process(processes, tmp_path):
 
     assert not out
     assert not err
+
+
+@gen_cluster(client=False, nthreads=[])
+async def test_deprecated_loop_properties(s):
+    class ExampleClient(Client):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.loop = self.io_loop = IOLoop.current()
+
+    with pytest.warns(DeprecationWarning) as warninfo:
+        async with ExampleClient(s.address, asynchronous=True, loop=IOLoop.current()):
+            pass
+
+    assert [(w.category, *w.message.args) for w in warninfo] == [
+        (DeprecationWarning, "setting the loop property is deprecated"),
+        (DeprecationWarning, "The io_loop property is deprecated"),
+        (DeprecationWarning, "setting the loop property is deprecated"),
+    ]
