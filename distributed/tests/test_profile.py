@@ -198,12 +198,15 @@ def test_watch():
             stop_called.set()
         return time() > start + 0.500
 
-    log = watch(interval="10ms", cycle="50ms", stop=stop)
+    try:
+        log = watch(interval="10ms", cycle="50ms", stop=stop)
 
-    stop_called.wait(2)
-    sleep(0.5)
-    assert 1 < len(log) < 10
-    watch_thread.join(2)
+        stop_called.wait(2)
+        sleep(0.5)
+        assert 1 < len(log) < 10
+    finally:
+        stop_called.wait()
+        watch_thread.join()
 
 
 def test_watch_requires_lock_to_run():
@@ -232,21 +235,25 @@ def test_watch_requires_lock_to_run():
     # Block the lock over the entire duration of watch
     blocking_thread = threading.Thread(target=block_lock, name="Block Lock")
     blocking_thread.daemon = True
-    blocking_thread.start()
 
-    log = watch(interval="10ms", cycle="50ms", stop=stop_profiling)
+    try:
+        blocking_thread.start()
 
-    start = time()  # wait until thread starts up
-    while threading.active_count() < start_threads + 2:
-        assert time() < start + 2
-        sleep(0.01)
+        log = watch(interval="10ms", cycle="50ms", stop=stop_profiling)
 
-    sleep(0.5)
-    assert len(log) == 0
-    release_lock.set()
+        start = time()  # wait until thread starts up
+        while threading.active_count() < start_threads + 2:
+            assert time() < start + 2
+            sleep(0.01)
 
-    profiling_thread.join(2)
-    blocking_thread.join(2)
+        sleep(0.5)
+        assert len(log) == 0
+        release_lock.set()
+    finally:
+        release_lock.set()
+        stop_profiling_called.wait()
+        blocking_thread.join()
+        profiling_thread.join()
 
 
 @dataclasses.dataclass(frozen=True)
