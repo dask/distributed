@@ -1269,12 +1269,13 @@ def test_localcluster_start_exception(loop):
             pass
 
 
-def test_localcluster_get_client():
+def test_localcluster_get_client(loop):
     with LocalCluster(
-        n_workers=0, asynchronous=False, dashboard_address=":0"
+        n_workers=0, asynchronous=False, dashboard_address=":0", loop=loop
     ) as cluster:
-        client1 = cluster.get_client()
-        assert client1.cluster == cluster
-        client2 = Client(cluster)
-        assert client1 != client2
-        assert client2 == cluster.get_client()
+        with cluster.get_client() as client1:
+            assert client1.cluster == cluster
+
+            with Client(cluster) as client2:
+                assert client1 != client2
+                assert client2 == cluster.get_client()
