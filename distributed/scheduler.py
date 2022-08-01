@@ -2916,6 +2916,7 @@ class Scheduler(SchedulerState, ServerNode):
         plugins=(),
         contact_address=None,
         transition_counter_max=False,
+        jupyter=False,
         **kwargs,
     ):
         if loop is not None:
@@ -3003,6 +3004,36 @@ class Scheduler(SchedulerState, ServerNode):
             distributed.dashboard.scheduler.connect(
                 self.http_application, self.http_server, self, prefix=http_prefix
             )
+        self.jupyter = jupyter
+        if self.jupyter:
+            try:
+                from jupyter_server.serverapp import ServerApp
+            except ImportError:
+                raise ImportError(
+                    "In order to use the Dask jupyter option you "
+                    "need to have jupyterlab installed"
+                )
+            from traitlets.config import Config
+
+            j = ServerApp.instance(
+                config=Config(
+                    {
+                        "ServerApp": {
+                            "base_url": "jupyter",
+                            # SECURITY: in this context we expect this to be safe, as
+                            # if a client can connect to the scheduler they can already
+                            # run arbitrary code.
+                            "token": "",
+                            "allow_remote_access": True,
+                        }
+                    }
+                )
+            )
+            j.initialize(
+                new_httpserver=False,
+            )
+            self._jupyter_server_application = j
+            self.http_application.add_application(j.web_app)
 
         # Communication state
         self.client_comms = {}
@@ -3378,6 +3409,12 @@ class Scheduler(SchedulerState, ServerNode):
             except Exception:
                 logger.exception("Failed to start preload")
 
+        if self.jupyter:
+            # Allow insecure communications from local users
+            if self.address.startswith("tls://"):
+                await self.listen("tcp://localhost:0")
+            os.environ["DASK_SCHEDULER_ADDRESS"] = self.listeners[-1].contact_address
+
         await asyncio.gather(
             *[plugin.start(self) for plugin in list(self.plugins.values())]
         )
@@ -3452,6 +3489,9 @@ class Scheduler(SchedulerState, ServerNode):
                 futures.append(comm.close())
 
         await asyncio.gather(*futures)
+
+        if self.jupyter:
+            await self._jupyter_server_application._cleanup()
 
         for comm in self.client_comms.values():
             comm.abort()
