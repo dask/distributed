@@ -1025,11 +1025,14 @@ async def test_errors_dont_block(c, s, w):
     assert result == [2, 3]
 
 
+def assert_list(x, z=None):
+    if z is None:
+        z = []
+    return isinstance(x, list) and isinstance(z, list)
+
+
 @gen_cluster(client=True)
 async def test_submit_quotes(c, s, a, b):
-    def assert_list(x, z=[]):
-        return isinstance(x, list) and isinstance(z, list)
-
     x = c.submit(assert_list, [1, 2, 3])
     result = await x
     assert result
@@ -1047,9 +1050,6 @@ async def test_submit_quotes(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_map_quotes(c, s, a, b):
-    def assert_list(x, z=[]):
-        return isinstance(x, list) and isinstance(z, list)
-
     L = c.map(assert_list, [[1, 2, 3], [4]])
     result = await c.gather(L)
     assert all(result)
