@@ -6282,7 +6282,7 @@ class Scheduler(SchedulerState, ServerNode):
         elif key is None:
             key = ts.key
         else:
-            assert False, (key, ts)
+            raise ValueError(f"ts or key must be None, received key={key!r}, ts={ts!r}")
 
         if ts is not None:
             report_msg = _task_to_report_msg(ts)

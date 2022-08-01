@@ -1768,7 +1768,7 @@ def check_thread_leak():
 
             bad_thread = bad_threads[0]
             call_stacks = profile.call_stack(sys._current_frames()[bad_thread.ident])
-            assert False, (bad_thread, call_stacks)
+            assert False, (bad_thread, call_stacks)  # noqa: B011
 
 
 def wait_active_children(timeout: float) -> list[multiprocessing.Process]:
