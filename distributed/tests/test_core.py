@@ -252,7 +252,7 @@ async def test_server_assign_assign_enum_is_quiet():
 async def test_server_status_compare_enum_is_quiet():
     """That would be the default in user code"""
     server = Server({})
-    assert server.status == Status.running
+    server.status == Status.running
 
 
 @gen_test()
