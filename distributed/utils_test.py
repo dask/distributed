@@ -1737,9 +1737,23 @@ def check_thread_leak():
             # Raise an error with information about leaked threads
             from distributed import profile
 
-            bad_thread = bad_threads[0]
-            call_stacks = profile.call_stack(sys._current_frames()[bad_thread.ident])
-            assert False, (bad_thread, call_stacks)  # noqa: B011
+            frames = sys._current_frames()
+            try:
+                lines: list[str] = [
+                    f"{len(bad_threads)} thread(s) were leaked from test\n"
+                ]
+                for i, thread in enumerate(bad_threads, 1):
+                    lines.append(
+                        f"------ Call stack of leaked thread {i}/{len(bad_threads)}: {thread} ------"
+                    )
+                    lines.append(
+                        "".join(profile.call_stack(frames[thread.ident]))
+                        # NOTE: `call_stack` already adds newlines
+                    )
+            finally:
+                del frames
+
+            pytest.fail("\n".join(lines), pytrace=False)
 
 
 def wait_active_children(timeout: float) -> list[multiprocessing.Process]:
