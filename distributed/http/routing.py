@@ -20,7 +20,7 @@ def _descend_routes(router, routers=None, out=None):
             if issubclass(rule.target, tornado.web.StaticFileHandler):
                 prefix = rule.matcher.regex.pattern.rstrip("(.*)$").rstrip("/")
                 path = rule.target_kwargs["path"]
-                for d, dirs, files in os.walk(path):
+                for d, _, files in os.walk(path):
                     for fn in files:
                         fullpath = d + "/" + fn
                         ourpath = fullpath.replace(path, prefix).replace("\\", "/")

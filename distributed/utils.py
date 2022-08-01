@@ -1141,7 +1141,7 @@ def json_load_robust(fn, load=json.load):
     """Reads a JSON file from disk that may be being written as we read"""
     while not os.path.exists(fn):
         sleep(0.01)
-    for i in range(10):
+    for _ in range(10):
         try:
             with open(fn) as f:
                 cfg = load(f)

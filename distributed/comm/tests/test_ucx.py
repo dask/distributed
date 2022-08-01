@@ -300,7 +300,7 @@ async def test_stress(
             x = x.persist()
             await wait(x)
 
-            for i in range(10):
+            for _ in range(10):
                 x = x.rechunk((chunksize, -1))
                 x = x.rechunk((-1, chunksize))
                 x = x.persist()

@@ -48,7 +48,7 @@ def test_fractional_timer():
 
     timer = RandomTimer()
     ft = FractionalTimer(n_samples=N, timer=timer)
-    for i in range(N):
+    for _ in range(N):
         ft.start_timing()
         ft.stop_timing()
     assert len(timer.timings) == N * 2
@@ -60,7 +60,7 @@ def test_fractional_timer():
     assert ft.running_fraction is not None
     check_fraction(timer, ft)
 
-    for i in range(N * 10):
+    for _ in range(N * 10):
         ft.start_timing()
         ft.stop_timing()
         check_fraction(timer, ft)
@@ -90,7 +90,7 @@ def test_gc_diagnosis_cpu_time():
 
     with enable_gc_diagnosis_and_log(diag, level="WARN") as sio:
         # Spend some CPU time doing only full GCs
-        for i in range(diag.N_SAMPLES):
+        for _ in range(diag.N_SAMPLES):
             gc.collect()
         assert not sio.getvalue()
         gc.collect()
@@ -104,7 +104,7 @@ def test_gc_diagnosis_cpu_time():
 
     with enable_gc_diagnosis_and_log(diag, level="WARN") as sio:
         # Spend half the CPU time doing full GCs
-        for i in range(diag.N_SAMPLES + 1):
+        for _ in range(diag.N_SAMPLES + 1):
             t1 = thread_time()
             gc.collect()
             dt = thread_time() - t1
