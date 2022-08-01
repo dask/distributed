@@ -1399,7 +1399,7 @@ class ConnectionPool:
             self.active,
             len(self._connecting),
         )
-        for addr, comms in self.available.items():
+        for comms in self.available.values():
             for comm in comms:
                 IOLoop.current().add_callback(comm.close)
                 self.semaphore.release()

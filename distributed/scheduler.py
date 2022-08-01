@@ -2916,6 +2916,7 @@ class Scheduler(SchedulerState, ServerNode):
         plugins=(),
         contact_address=None,
         transition_counter_max=False,
+        jupyter=False,
         **kwargs,
     ):
         if loop is not None:
@@ -3003,6 +3004,36 @@ class Scheduler(SchedulerState, ServerNode):
             distributed.dashboard.scheduler.connect(
                 self.http_application, self.http_server, self, prefix=http_prefix
             )
+        self.jupyter = jupyter
+        if self.jupyter:
+            try:
+                from jupyter_server.serverapp import ServerApp
+            except ImportError:
+                raise ImportError(
+                    "In order to use the Dask jupyter option you "
+                    "need to have jupyterlab installed"
+                )
+            from traitlets.config import Config
+
+            j = ServerApp.instance(
+                config=Config(
+                    {
+                        "ServerApp": {
+                            "base_url": "jupyter",
+                            # SECURITY: in this context we expect this to be safe, as
+                            # if a client can connect to the scheduler they can already
+                            # run arbitrary code.
+                            "token": "",
+                            "allow_remote_access": True,
+                        }
+                    }
+                )
+            )
+            j.initialize(
+                new_httpserver=False,
+            )
+            self._jupyter_server_application = j
+            self.http_application.add_application(j.web_app)
 
         # Communication state
         self.client_comms = {}
@@ -3378,6 +3409,12 @@ class Scheduler(SchedulerState, ServerNode):
             except Exception:
                 logger.exception("Failed to start preload")
 
+        if self.jupyter:
+            # Allow insecure communications from local users
+            if self.address.startswith("tls://"):
+                await self.listen("tcp://localhost:0")
+            os.environ["DASK_SCHEDULER_ADDRESS"] = self.listeners[-1].contact_address
+
         await asyncio.gather(
             *[plugin.start(self) for plugin in list(self.plugins.values())]
         )
@@ -3452,6 +3489,9 @@ class Scheduler(SchedulerState, ServerNode):
                 futures.append(comm.close())
 
         await asyncio.gather(*futures)
+
+        if self.jupyter:
+            await self._jupyter_server_application._cleanup()
 
         for comm in self.client_comms.values():
             comm.abort()
@@ -6282,7 +6322,7 @@ class Scheduler(SchedulerState, ServerNode):
         elif key is None:
             key = ts.key
         else:
-            assert False, (key, ts)
+            raise ValueError(f"ts or key must be None, received key={key!r}, ts={ts!r}")
 
         if ts is not None:
             report_msg = _task_to_report_msg(ts)
@@ -6724,7 +6764,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     def remove_resources(self, worker):
         ws: WorkerState = self.workers[worker]
-        for resource, quantity in ws.resources.items():
+        for resource in ws.resources:
             dr: dict = self.resources.get(resource, None)
             if dr is None:
                 self.resources[resource] = dr = {}
@@ -6849,7 +6889,7 @@ class Scheduler(SchedulerState, ServerNode):
             tt = t // dt * dt
             if tt > last:
                 last = tt
-                for k, v in keys.items():
+                for v in keys.values():
                     v.append([tt, 0])
             for k, v in d.items():
                 keys[k][-1][1] += v
@@ -7107,7 +7147,7 @@ class Scheduler(SchedulerState, ServerNode):
                     workers: list = list(self.workers.values())
                     nworkers: int = len(workers)
                     i: int
-                    for i in range(nworkers):
+                    for _ in range(nworkers):
                         ws: WorkerState = workers[worker_index % nworkers]
                         worker_index += 1
                         try:

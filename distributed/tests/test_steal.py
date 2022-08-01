@@ -674,7 +674,7 @@ async def assert_balanced(inp, expected, c, s, *workers):
     while len([ts for ts in s.tasks.values() if ts.processing_on]) < len(futures):
         await asyncio.sleep(0.001)
 
-    for i in range(10):
+    for _ in range(10):
         steal.balance()
 
         while steal.in_flight:
@@ -955,7 +955,7 @@ async def test_cleanup_repeated_tasks(c, s, a, b):
 async def test_lose_task(c, s, a, b):
     with captured_logger("distributed.stealing") as log:
         s.periodic_callbacks["stealing"].interval = 1
-        for i in range(100):
+        for _ in range(100):
             futures = c.map(
                 slowinc,
                 range(10),

@@ -86,7 +86,7 @@ def test_async_task_group_initialization():
 
 
 async def _wait_for_n_loop_cycles(n):
-    for i in range(n):
+    for _ in range(n):
         await asyncio.sleep(0)
 
 
@@ -430,7 +430,10 @@ async def test_server_listen():
         await assert_cannot_connect(inproc_addr2)
 
 
-async def check_rpc(listen_addr, rpc_addr=None, listen_args={}, connection_args={}):
+async def check_rpc(listen_addr, rpc_addr=None, listen_args=None, connection_args=None):
+    listen_args = listen_args or {}
+    connection_args = connection_args or {}
+
     async with Server({"ping": pingpong}) as server:
         await server.listen(listen_addr, **listen_args)
         if rpc_addr is None:
@@ -538,14 +541,14 @@ async def test_rpc_message_lifetime_inproc():
 
 async def check_rpc_with_many_connections(listen_arg):
     async def g():
-        for i in range(10):
+        for _ in range(10):
             await remote.ping()
 
     server = await Server({"ping": pingpong})
     await server.listen(listen_arg)
 
     async with rpc(server.address) as remote:
-        for i in range(10):
+        for _ in range(10):
             await g()
 
         server.stop()
@@ -936,7 +939,7 @@ async def test_counters():
         await server.listen("tcp://")
 
         async with rpc(server.address) as r:
-            for i in range(2):
+            for _ in range(2):
                 await r.identity()
             with pytest.raises(ZeroDivisionError):
                 await r.div(x=1, y=0)

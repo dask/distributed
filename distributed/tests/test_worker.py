@@ -741,7 +741,7 @@ async def test_restrictions(c, s, a, b):
 @gen_cluster(client=True)
 async def test_clean_nbytes(c, s, a, b):
     L = [delayed(inc)(i) for i in range(10)]
-    for i in range(5):
+    for _ in range(5):
         L = [delayed(add)(x, y) for x, y in sliding_window(2, L)]
     total = delayed(sum)(L)
 

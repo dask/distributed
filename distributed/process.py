@@ -61,7 +61,9 @@ class AsyncProcess:
 
     _process: multiprocessing.Process
 
-    def __init__(self, loop=None, target=None, name=None, args=(), kwargs={}):
+    def __init__(self, loop=None, target=None, name=None, args=(), kwargs=None):
+        kwargs = kwargs or {}
+
         if not callable(target):
             raise TypeError(f"`target` needs to be callable, not {type(target)!r}")
         self._state = _ProcessState()

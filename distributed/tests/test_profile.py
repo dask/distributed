@@ -34,7 +34,7 @@ def test_basic():
         sleep(0.02)
 
     def test_f():
-        for i in range(100):
+        for _ in range(100):
             test_g()
             test_h()
 
@@ -44,7 +44,7 @@ def test_basic():
 
     state = create()
 
-    for i in range(100):
+    for _ in range(100):
         sleep(0.02)
         frame = sys._current_frames()[thread.ident]
         process(frame, None, state)
@@ -75,7 +75,7 @@ def test_basic_low_level():
 
     state = create()
 
-    for i in range(100):
+    for _ in range(100):
         sleep(0.02)
         frame = sys._current_frames()[threading.get_ident()]
         llframes = {threading.get_ident(): ll_get_stack(threading.get_ident())}

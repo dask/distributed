@@ -71,7 +71,6 @@ from distributed.utils import (
     iscoroutinefunction,
     log_errors,
     reset_logger_locks,
-    sync,
 )
 from distributed.worker import WORKER_ANY_RUNNING, Worker
 from distributed.worker_state_machine import (
@@ -144,36 +143,8 @@ async def cleanup_global_workers():
 
 
 @pytest.fixture
-def loop(cleanup):
-    with check_instances():
-        with pristine_loop() as loop:
-            # Monkey-patch IOLoop.start to wait for loop stop
-            orig_start = loop.start
-            is_stopped = threading.Event()
-            is_stopped.set()
-
-            def start():
-                is_stopped.clear()
-                try:
-                    orig_start()
-                finally:
-                    is_stopped.set()
-
-            loop.start = start
-
-            yield loop
-
-            # Stop the loop in case it's still running
-            try:
-                sync(loop, cleanup_global_workers, callback_timeout=0.500)
-                loop.add_callback(loop.stop)
-            except RuntimeError as e:
-                if not re.match("IOLoop is clos(ed|ing)", str(e)):
-                    raise
-            except asyncio.TimeoutError:
-                pass
-            else:
-                is_stopped.wait()
+def loop(loop_in_thread):
+    return loop_in_thread
 
 
 @pytest.fixture
@@ -491,10 +462,10 @@ def run_scheduler(q, nputs, config, port=0, **kwargs):
                     validate=True, host="127.0.0.1", port=port, **kwargs
                 )
             except Exception as exc:
-                for i in range(nputs):
+                for _ in range(nputs):
                     q.put(exc)
             else:
-                for i in range(nputs):
+                for _ in range(nputs):
                     q.put(scheduler.address)
                 await scheduler.finished()
 
@@ -688,12 +659,16 @@ def _close_queue(q):
 def cluster(
     nworkers=2,
     nanny=False,
-    worker_kwargs={},
+    worker_kwargs=None,
     active_rpc_timeout=10,
     disconnect_timeout=20,
-    scheduler_kwargs={},
-    config={},
+    scheduler_kwargs=None,
+    config=None,
 ):
+    worker_kwargs = worker_kwargs or {}
+    scheduler_kwargs = scheduler_kwargs or {}
+    config = config or {}
+
     ws = weakref.WeakSet()
     enable_proctitle_on_children()
 
@@ -830,7 +805,7 @@ async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
 
 def gen_test(
     timeout: float = _TEST_TIMEOUT,
-    clean_kwargs: dict[str, Any] = {},
+    clean_kwargs: dict[str, Any] | None = None,
 ) -> Callable[[Callable], Callable]:
     """Coroutine test
 
@@ -844,6 +819,7 @@ def gen_test(
     async def test_foo():
         await ...  # use tornado coroutines
     """
+    clean_kwargs = clean_kwargs or {}
     assert timeout, (
         "timeout should always be set and it should be smaller than the global one from"
         "pytest-timeout"
@@ -878,9 +854,12 @@ async def start_cluster(
     scheduler_addr: str,
     security: Security | dict[str, Any] | None = None,
     Worker: type[ServerNode] = Worker,
-    scheduler_kwargs: dict[str, Any] = {},
-    worker_kwargs: dict[str, Any] = {},
+    scheduler_kwargs: dict[str, Any] | None = None,
+    worker_kwargs: dict[str, Any] | None = None,
 ) -> tuple[Scheduler, list[ServerNode]]:
+    scheduler_kwargs = scheduler_kwargs or {}
+    worker_kwargs = worker_kwargs or {}
+
     s = await Scheduler(
         validate=True,
         security=security,
@@ -929,7 +908,7 @@ def check_invalid_worker_transitions(s: Scheduler) -> None:
     if not s.events.get("invalid-worker-transition"):
         return
 
-    for timestamp, msg in s.events["invalid-worker-transition"]:
+    for _, msg in s.events["invalid-worker-transition"]:
         worker = msg.pop("worker")
         print("Worker:", worker)
         print(InvalidTransition(**msg))
@@ -943,7 +922,7 @@ def check_invalid_task_states(s: Scheduler) -> None:
     if not s.events.get("invalid-worker-task-state"):
         return
 
-    for timestamp, msg in s.events["invalid-worker-task-state"]:
+    for _, msg in s.events["invalid-worker-task-state"]:
         print("Worker:", msg["worker"])
         print("State:", msg["state"])
         for line in msg["story"]:
@@ -956,7 +935,7 @@ def check_worker_fail_hard(s: Scheduler) -> None:
     if not s.events.get("worker-fail-hard"):
         return
 
-    for timestamp, msg in s.events["worker-fail-hard"]:
+    for _, msg in s.events["worker-fail-hard"]:
         msg = msg.copy()
         worker = msg.pop("worker")
         msg["exception"] = deserialize(msg["exception"].header, msg["exception"].frames)
@@ -983,21 +962,18 @@ async def end_cluster(s, workers):
 
 
 def gen_cluster(
-    nthreads: list[tuple[str, int] | tuple[str, int, dict]] = [
-        ("127.0.0.1", 1),
-        ("127.0.0.1", 2),
-    ],
+    nthreads: list[tuple[str, int] | tuple[str, int, dict]] | None = None,
     scheduler: str = "127.0.0.1",
     timeout: float = _TEST_TIMEOUT,
     security: Security | dict[str, Any] | None = None,
     Worker: type[ServerNode] = Worker,
     client: bool = False,
-    scheduler_kwargs: dict[str, Any] = {},
-    worker_kwargs: dict[str, Any] = {},
-    client_kwargs: dict[str, Any] = {},
+    scheduler_kwargs: dict[str, Any] | None = None,
+    worker_kwargs: dict[str, Any] | None = None,
+    client_kwargs: dict[str, Any] | None = None,
     active_rpc_timeout: float = 1,
-    config: dict[str, Any] = {},
-    clean_kwargs: dict[str, Any] = {},
+    config: dict[str, Any] | None = None,
+    clean_kwargs: dict[str, Any] | None = None,
     allow_unclosed: bool = False,
     cluster_dump_directory: str | Literal[False] = "test_cluster_dump",
 ) -> Callable[[Callable], Callable]:
@@ -1022,6 +998,17 @@ def gen_cluster(
         start
         end
     """
+    if nthreads is None:
+        nthreads = [
+            ("127.0.0.1", 1),
+            ("127.0.0.1", 2),
+        ]
+    scheduler_kwargs = scheduler_kwargs or {}
+    worker_kwargs = worker_kwargs or {}
+    client_kwargs = client_kwargs or {}
+    config = config or {}
+    clean_kwargs = clean_kwargs or {}
+
     assert timeout, (
         "timeout should always be set and it should be smaller than the global one from"
         "pytest-timeout"
@@ -1867,7 +1854,7 @@ def check_instances():
         assert time() < start + 10
     Worker._initialized_clients.clear()
 
-    for i in range(5):
+    for _ in range(5):
         if all(c.closed() for c in Comm._instances):
             break
         else:
