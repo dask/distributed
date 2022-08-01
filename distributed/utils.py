@@ -1227,7 +1227,7 @@ def command_has_keyword(cmd, k):
             except ImportError:
                 raise ImportError("Module for command %s is not available" % cmd)
 
-        if isinstance(getattr(cmd, "main"), click.core.Command):
+        if isinstance(cmd.main, click.core.Command):
             cmd = cmd.main
         if isinstance(cmd, click.core.Command):
             cmd_params = {

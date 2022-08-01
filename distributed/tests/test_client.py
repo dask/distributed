@@ -3866,8 +3866,8 @@ def test_get_versions_sync(c):
     assert v["scheduler"] is not None
     assert v["client"] is not None
     assert len(v["workers"]) == 2
-    for v in v["workers"].values():
-        assert v is not None
+    for wv in v["workers"].values():
+        assert wv is not None
 
     c.get_versions(check=True)
     # smoke test for versions

@@ -212,7 +212,7 @@ async def _force_close(self):
         await asyncio.wait_for(self.close(nanny=False, executor_wait=False), 30)
     except (KeyboardInterrupt, SystemExit):  # pragma: nocover
         raise
-    except (Exception, BaseException):  # pragma: nocover
+    except BaseException:  # pragma: nocover
         # Worker is in a very broken state if closing fails. We need to shut down
         # immediately, to ensure things don't get even worse and this worker potentially
         # deadlocks the cluster.
