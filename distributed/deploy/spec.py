@@ -453,7 +453,7 @@ class SpecCluster(Cluster):
         for name in ["nthreads", "ncores", "threads", "cores"]:
             with suppress(KeyError):
                 return self.new_spec["options"][name]
-        assert False, "unreachable"
+        raise RuntimeError("unreachable")
 
     def _memory_per_worker(self) -> int:
         """Return the memory limit per worker for new workers"""
