@@ -465,7 +465,7 @@ async def test_MultiWorker():
 
             adapt = cluster.adapt(minimum=0, maximum=4)
 
-            for i in range(adapt.wait_count):  # relax down to 0 workers
+            for _ in range(adapt.wait_count):  # relax down to 0 workers
                 await adapt.adapt()
             await cluster
             assert not s.workers

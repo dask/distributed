@@ -6764,7 +6764,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     def remove_resources(self, worker):
         ws: WorkerState = self.workers[worker]
-        for resource, quantity in ws.resources.items():
+        for resource in ws.resources:
             dr: dict = self.resources.get(resource, None)
             if dr is None:
                 self.resources[resource] = dr = {}
@@ -6889,7 +6889,7 @@ class Scheduler(SchedulerState, ServerNode):
             tt = t // dt * dt
             if tt > last:
                 last = tt
-                for k, v in keys.items():
+                for v in keys.values():
                     v.append([tt, 0])
             for k, v in d.items():
                 keys[k][-1][1] += v
@@ -7147,7 +7147,7 @@ class Scheduler(SchedulerState, ServerNode):
                     workers: list = list(self.workers.values())
                     nworkers: int = len(workers)
                     i: int
-                    for i in range(nworkers):
+                    for _ in range(nworkers):
                         ws: WorkerState = workers[worker_index % nworkers]
                         worker_index += 1
                         try:

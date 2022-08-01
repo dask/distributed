@@ -9,7 +9,7 @@ from distributed import metrics
 
 @pytest.mark.parametrize("name", ["time", "monotonic"])
 def test_wall_clock(name):
-    for i in range(3):
+    for _ in range(3):
         time.sleep(0.01)
         t = getattr(time, name)()
         samples = [getattr(metrics, name)() for _ in range(100)]

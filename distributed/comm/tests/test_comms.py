@@ -339,7 +339,7 @@ async def test_comm_failure_threading(tcp):
 
     async def sleep_for_60ms():
         max_thread_count = 0
-        for x in range(60):
+        for _ in range(60):
             await asyncio.sleep(0.001)
             thread_count = threading.active_count()
             if thread_count > max_thread_count:
@@ -381,7 +381,7 @@ async def check_inproc_specific(run_client):
         try:
             assert comm.peer_address.startswith("inproc://" + addr_head)
             client_addresses.add(comm.peer_address)
-            for i in range(N_MSGS):
+            for _ in range(N_MSGS):
                 msg = await comm.read()
                 msg["op"] = "pong"
                 await comm.write(msg)
@@ -401,7 +401,7 @@ async def check_inproc_specific(run_client):
             comm = await connect(listener.contact_address)
             try:
                 assert comm.peer_address == "inproc://" + listener_addr
-                for i in range(N_MSGS):
+                for _ in range(N_MSGS):
                     await comm.write({"op": "ping", "data": key})
                     if delay:
                         await asyncio.sleep(delay)
@@ -1029,7 +1029,7 @@ async def check_many_listeners(addr):
     listeners = []
     N = 100
 
-    for i in range(N):
+    for _ in range(N):
         listener = await listen(addr, handle_comm)
         listeners.append(listener)
 
