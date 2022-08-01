@@ -194,7 +194,9 @@ class TCP(Comm):
         pass
 
     def _get_finalizer(self):
-        def finalize(stream=self.stream, r=repr(self)):
+        r = repr(self)
+
+        def finalize(stream=self.stream, r=r):
             # stream is None if a StreamClosedError is raised during interpreter
             # shutdown
             if stream is not None and not stream.closed():
