@@ -3020,9 +3020,11 @@ class Scheduler(SchedulerState, ServerNode):
                     {
                         "ServerApp": {
                             "base_url": "jupyter",
-                            # SECURITY: in this context we expect this to be safe, as
-                            # if a client can connect to the scheduler they can already
-                            # run arbitrary code.
+                            # SECURITY: We usually expect the dashboard to be a read-only view into
+                            # the scheduler activity. However, by adding an open Jupyter application
+                            # we are allowing arbitrary remote code execution on the scheduler via the
+                            # dashboard server. This option should only be used when the dashboard is
+                            # protected via other means, or when you don't care about cluster security.
                             "token": "",
                             "allow_remote_access": True,
                         }
