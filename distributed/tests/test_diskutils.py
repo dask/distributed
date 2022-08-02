@@ -24,7 +24,7 @@ from distributed.utils_test import captured_logger
 
 def assert_directory_contents(dir_path, expected, trials=2):
     expected = [os.path.join(dir_path, p) for p in expected]
-    for i in range(trials):
+    for _ in range(trials):
         actual = [
             os.path.join(dir_path, p)
             for p in os.listdir(dir_path)

@@ -176,7 +176,7 @@ async def test_num_fds(s):
 
     before = proc.num_fds()
 
-    for i in range(3):
+    for _ in range(3):
         async with Nanny(s.address):
             await asyncio.sleep(0.1)
 

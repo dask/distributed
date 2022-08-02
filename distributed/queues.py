@@ -110,7 +110,7 @@ class QueueExtension:
                         "integer batch sizes and timeouts"
                     )
                     raise NotImplementedError(msg)
-                for i in range(batch):
+                for _ in range(batch):
                     record = await q.get()
                     out.append(record)
             out = [process(o) for o in out]

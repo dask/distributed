@@ -206,7 +206,7 @@ def test_dont_override_default_get(loop):
         loop=loop, processes=False, set_as_default=True, dashboard_address=":0"
     ) as c:
         assert dask.base.get_scheduler() == c.get
-        for i in range(2):
+        for _ in range(2):
             b2.compute()
 
         assert dask.base.get_scheduler() == c.get
