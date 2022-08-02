@@ -475,6 +475,11 @@ def test_version_option():
     assert result.exit_code == 0
 
 
+@pytest.mark.filterwarnings(
+    "ignore"
+    ":The profiler was enabled in .* running the profiler in tests is not recommended"
+    ":RuntimeWarning"
+)
 @pytest.mark.slow
 def test_idle_timeout():
     start = time()
@@ -483,8 +488,8 @@ def test_idle_timeout():
         distributed.cli.dask_scheduler.main, ["--idle-timeout", "1s"]
     )
     stop = time()
-    assert 1 < stop - start < 10
     assert result.exit_code == 0
+    assert 1 < stop - start < 10
 
 
 @pytest.mark.slow

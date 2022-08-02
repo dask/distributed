@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import os
 import sys
 import threading
 import traceback
@@ -356,6 +357,15 @@ class Server:
 
         if not hasattr(self.io_loop, "profile"):
             if dask.config.get("distributed.worker.profile.enabled"):
+                current_test = os.environ.get("PYTEST_CURRENT_TEST")
+                if current_test:
+                    warnings.warn(
+                        f"The profiler was enabled in {current_test}."
+                        " running the profiler in tests is not recommended.",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+
                 ref = weakref.ref(self.io_loop)
 
                 def stop() -> bool:
