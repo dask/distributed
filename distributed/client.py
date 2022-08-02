@@ -117,9 +117,6 @@ DEFAULT_EXTENSIONS = {
     "pubsub": PubSubClientExtension,
 }
 
-# Placeholder used in the get_dataset function(s)
-NO_DEFAULT_PLACEHOLDER = "_no_default_"
-
 # Mode to use when waiting for workers.
 WORKER_WAIT_MODE = Literal["at least", "at most", "exactly"]
 
