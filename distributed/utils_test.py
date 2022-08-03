@@ -152,7 +152,7 @@ def loop_in_thread(cleanup):
     loop_started = concurrent.futures.Future()
     with concurrent.futures.ThreadPoolExecutor(
         1, thread_name_prefix="test IOLoop"
-    ) as tpe:
+    ) as tpe, set_default_test_config():
 
         async def run():
             io_loop = IOLoop.current()
@@ -1039,7 +1039,7 @@ def gen_cluster(
             raise RuntimeError("gen_cluster only works for coroutine functions.")
 
         @functools.wraps(func)
-        @set_default_test_config()
+        @set_default_test_config(**{"distributed.comm.timeouts.connect": "5s"})
         @clean(**clean_kwargs)
         def test_func(*outer_args, **kwargs):
             async def async_fn():
@@ -1882,16 +1882,16 @@ def check_instances():
 
 
 @contextmanager
-def set_default_test_config():
+def set_default_test_config(**extra_config):
     reset_config()
 
     with dask.config.set(
         {
             "local_directory": tempfile.gettempdir(),
-            "distributed.comm.timeouts.connect": "5s",
             "distributed.admin.tick.interval": "500 ms",
             "distributed.worker.profile.enabled": False,
-        }
+        },
+        **extra_config,
     ):
         # Restore default logging levels
         # XXX use pytest hooks/fixtures instead?
