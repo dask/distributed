@@ -71,7 +71,6 @@ from distributed.utils import (
     iscoroutinefunction,
     log_errors,
     reset_logger_locks,
-    sync,
 )
 from distributed.worker import WORKER_ANY_RUNNING, Worker
 from distributed.worker_state_machine import (
@@ -144,36 +143,8 @@ async def cleanup_global_workers():
 
 
 @pytest.fixture
-def loop(cleanup):
-    with check_instances():
-        with pristine_loop() as loop:
-            # Monkey-patch IOLoop.start to wait for loop stop
-            orig_start = loop.start
-            is_stopped = threading.Event()
-            is_stopped.set()
-
-            def start():
-                is_stopped.clear()
-                try:
-                    orig_start()
-                finally:
-                    is_stopped.set()
-
-            loop.start = start
-
-            yield loop
-
-            # Stop the loop in case it's still running
-            try:
-                sync(loop, cleanup_global_workers, callback_timeout=0.500)
-                loop.add_callback(loop.stop)
-            except RuntimeError as e:
-                if not re.match("IOLoop is clos(ed|ing)", str(e)):
-                    raise
-            except asyncio.TimeoutError:
-                pass
-            else:
-                is_stopped.wait()
+def loop(loop_in_thread):
+    return loop_in_thread
 
 
 @pytest.fixture
@@ -491,10 +462,10 @@ def run_scheduler(q, nputs, config, port=0, **kwargs):
                     validate=True, host="127.0.0.1", port=port, **kwargs
                 )
             except Exception as exc:
-                for i in range(nputs):
+                for _ in range(nputs):
                     q.put(exc)
             else:
-                for i in range(nputs):
+                for _ in range(nputs):
                     q.put(scheduler.address)
                 await scheduler.finished()
 
@@ -937,7 +908,7 @@ def check_invalid_worker_transitions(s: Scheduler) -> None:
     if not s.events.get("invalid-worker-transition"):
         return
 
-    for timestamp, msg in s.events["invalid-worker-transition"]:
+    for _, msg in s.events["invalid-worker-transition"]:
         worker = msg.pop("worker")
         print("Worker:", worker)
         print(InvalidTransition(**msg))
@@ -951,7 +922,7 @@ def check_invalid_task_states(s: Scheduler) -> None:
     if not s.events.get("invalid-worker-task-state"):
         return
 
-    for timestamp, msg in s.events["invalid-worker-task-state"]:
+    for _, msg in s.events["invalid-worker-task-state"]:
         print("Worker:", msg["worker"])
         print("State:", msg["state"])
         for line in msg["story"]:
@@ -964,7 +935,7 @@ def check_worker_fail_hard(s: Scheduler) -> None:
     if not s.events.get("worker-fail-hard"):
         return
 
-    for timestamp, msg in s.events["worker-fail-hard"]:
+    for _, msg in s.events["worker-fail-hard"]:
         msg = msg.copy()
         worker = msg.pop("worker")
         msg["exception"] = deserialize(msg["exception"].header, msg["exception"].frames)
@@ -1766,9 +1737,23 @@ def check_thread_leak():
             # Raise an error with information about leaked threads
             from distributed import profile
 
-            bad_thread = bad_threads[0]
-            call_stacks = profile.call_stack(sys._current_frames()[bad_thread.ident])
-            assert False, (bad_thread, call_stacks)
+            frames = sys._current_frames()
+            try:
+                lines: list[str] = [
+                    f"{len(bad_threads)} thread(s) were leaked from test\n"
+                ]
+                for i, thread in enumerate(bad_threads, 1):
+                    lines.append(
+                        f"------ Call stack of leaked thread {i}/{len(bad_threads)}: {thread} ------"
+                    )
+                    lines.append(
+                        "".join(profile.call_stack(frames[thread.ident]))
+                        # NOTE: `call_stack` already adds newlines
+                    )
+            finally:
+                del frames
+
+            pytest.fail("\n".join(lines), pytrace=False)
 
 
 def wait_active_children(timeout: float) -> list[multiprocessing.Process]:
@@ -1869,7 +1854,7 @@ def check_instances():
         assert time() < start + 10
     Worker._initialized_clients.clear()
 
-    for i in range(5):
+    for _ in range(5):
         if all(c.closed() for c in Comm._instances):
             break
         else:

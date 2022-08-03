@@ -48,7 +48,7 @@ try:
 except ImportError:
     single_key = first
 from tornado import gen
-from tornado.ioloop import PeriodicCallback
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import distributed.utils
 from distributed import cluster_dump, preloading
@@ -763,6 +763,7 @@ class Client(SyncMethodMixin):
     _default_event_handlers = {"print": _handle_print, "warn": _handle_warn}
 
     preloads: list[preloading.Preload]
+    __loop: IOLoop | None = None
 
     def __init__(
         self,
@@ -875,7 +876,6 @@ class Client(SyncMethodMixin):
 
         self._asynchronous = asynchronous
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
-        self.io_loop = self.loop = self._loop_runner.loop
         self._connecting_to_scheduler = False
 
         self._gather_keys = None
@@ -946,6 +946,38 @@ class Client(SyncMethodMixin):
         from distributed.recreate_tasks import ReplayTaskClient
 
         ReplayTaskClient(self)
+
+    @property
+    def io_loop(self) -> IOLoop | None:
+        warnings.warn(
+            "The io_loop property is deprecated", DeprecationWarning, stacklevel=2
+        )
+        return self.loop
+
+    @io_loop.setter
+    def io_loop(self, value: IOLoop) -> None:
+        warnings.warn(
+            "The io_loop property is deprecated", DeprecationWarning, stacklevel=2
+        )
+        self.loop = value
+
+    @property
+    def loop(self) -> IOLoop | None:
+        loop = self.__loop
+        if loop is None:
+            # If the loop is not running when this is called, the LoopRunner.loop
+            # property will raise a DeprecationWarning
+            # However subsequent calls might occur - eg atexit, where a stopped
+            # loop is still acceptable - so we cache access to the loop.
+            self.__loop = loop = self._loop_runner.loop
+        return loop
+
+    @loop.setter
+    def loop(self, value: IOLoop) -> None:
+        warnings.warn(
+            "setting the loop property is deprecated", DeprecationWarning, stacklevel=2
+        )
+        self.__loop = value
 
     @contextmanager
     def as_current(self):
@@ -1153,7 +1185,7 @@ class Client(SyncMethodMixin):
         elif self.scheduler_file is not None:
             while not os.path.exists(self.scheduler_file):
                 await asyncio.sleep(0.01)
-            for i in range(10):
+            for _ in range(10):
                 try:
                     with open(self.scheduler_file) as f:
                         cfg = json.load(f)
@@ -1359,7 +1391,7 @@ class Client(SyncMethodMixin):
     def __del__(self):
         # If the loop never got assigned, we failed early in the constructor,
         # nothing to do
-        if hasattr(self, "loop"):
+        if self.__loop is not None:
             self.close()
 
     def _inc_ref(self, key):

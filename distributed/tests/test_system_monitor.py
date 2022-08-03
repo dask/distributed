@@ -29,7 +29,7 @@ def test_count():
     sm.update()
     assert sm.count == 2
 
-    for i in range(10):
+    for _ in range(10):
         sm.update()
 
     assert sm.count == 12
@@ -50,7 +50,7 @@ def test_range_query():
     assert all(len(v) == 4 for v in sm.range_query(0).values())
     assert all(len(v) == 3 for v in sm.range_query(1).values())
 
-    for i in range(10):
+    for _ in range(10):
         sm.update()
 
     assert all(len(v) == 4 for v in sm.range_query(10).values())

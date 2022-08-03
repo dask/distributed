@@ -236,7 +236,7 @@ def test_processing_chain():
 
     filesystem = defaultdict(io.BytesIO)
 
-    for worker, partitions in splits_by_worker.items():
+    for partitions in splits_by_worker.values():
         for partition, batches in partitions.items():
             for batch in batches:
                 dump_batch(batch, filesystem[partition], schema)
