@@ -5265,28 +5265,27 @@ class Scheduler(SchedulerState, ServerNode):
         self.log_event([client, "all"], {"action": "restart", "client": client})
 
         if wait_for_workers:
-            while monotonic() < start + timeout:
+            while len(self.workers) < n_workers:
                 # NOTE: if new (unrelated) workers join while we're waiting, we may return before
                 # our shut-down workers have come back up. That's fine; workers are interchangeable.
-                if len(self.workers) >= n_workers:
-                    return
-                await asyncio.sleep(0.2)
-            else:
-                msg = (
-                    f"Waited for {n_workers} worker(s) to reconnect after restarting, "
-                    f"but after {timeout}s, only {len(self.workers)} have returned. "
-                    "Consider a longer timeout, or `wait_for_workers=False`."
-                )
-
-                if (n_nanny := len(nanny_workers)) < n_workers:
-                    msg += (
-                        f" The {n_workers - n_nanny} worker(s) not using Nannies were just shut "
-                        "down instead of restarted (restart is only possible with Nannies). If "
-                        "your deployment system does not automatically re-launch terminated "
-                        "processes, then those workers will never come back, and `Client.restart` "
-                        "will always time out. Do not use `Client.restart` in that case."
+                if monotonic() < start + timeout:
+                    await asyncio.sleep(0.2)
+                else:
+                    msg = (
+                        f"Waited for {n_workers} worker(s) to reconnect after restarting, "
+                        f"but after {timeout}s, only {len(self.workers)} have returned. "
+                        "Consider a longer timeout, or `wait_for_workers=False`."
                     )
-                raise TimeoutError(msg) from None
+
+                    if (n_nanny := len(nanny_workers)) < n_workers:
+                        msg += (
+                            f" The {n_workers - n_nanny} worker(s) not using Nannies were just shut "
+                            "down instead of restarted (restart is only possible with Nannies). If "
+                            "your deployment system does not automatically re-launch terminated "
+                            "processes, then those workers will never come back, and `Client.restart` "
+                            "will always time out. Do not use `Client.restart` in that case."
+                        )
+                    raise TimeoutError(msg) from None
 
     async def broadcast(
         self,
