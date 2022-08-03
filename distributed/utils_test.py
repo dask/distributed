@@ -672,7 +672,7 @@ def cluster(
     ws = weakref.WeakSet()
     enable_proctitle_on_children()
 
-    with check_process_leak(check=True), check_instances(), _reconfigure():
+    with check_process_leak(check=True), check_instances(), set_default_test_config():
         if nanny:
             _run_worker = run_nanny
         else:
@@ -835,6 +835,7 @@ def gen_test(
 
     def _(func):
         @functools.wraps(func)
+        @set_default_test_config()
         @clean(**clean_kwargs)
         def test_func(*args, **kwargs):
             if not iscoroutinefunction(func):
@@ -1038,6 +1039,7 @@ def gen_cluster(
             raise RuntimeError("gen_cluster only works for coroutine functions.")
 
         @functools.wraps(func)
+        @set_default_test_config()
         @clean(**clean_kwargs)
         def test_func(*outer_args, **kwargs):
             async def async_fn():
@@ -1880,7 +1882,7 @@ def check_instances():
 
 
 @contextmanager
-def _reconfigure():
+def set_default_test_config():
     reset_config()
 
     with dask.config.set(
@@ -1905,8 +1907,7 @@ def clean(threads=True, instances=True, processes=True):
     with check_thread_leak() if threads else nullcontext():
         with check_process_leak(check=processes):
             with check_instances() if instances else nullcontext():
-                with _reconfigure():
-                    yield
+                yield
 
 
 @pytest.fixture
