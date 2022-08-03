@@ -787,7 +787,9 @@ async def disconnect(addr, timeout=3, rpc_kwargs=None):
     rpc_kwargs = rpc_kwargs or {}
 
     async def do_disconnect():
+        logger.info(f"Disconnecting {addr}")
         async with rpc(addr, **rpc_kwargs) as w:
+            logger.info(f"Disconnecting {addr} - RPC connected")
             # If the worker was killed hard (e.g. sigterm) during test runtime,
             # we do not know at this point and may not be able to connect
             with suppress(EnvironmentError, CommClosedError):
@@ -795,11 +797,13 @@ async def disconnect(addr, timeout=3, rpc_kwargs=None):
                 # worker before a reply can be made and we will always trigger
                 # the timeout
                 await w.terminate(reply=False)
+                logger.info(f"Disconnecting {addr} - sent terminate")
 
     await asyncio.wait_for(do_disconnect(), timeout=timeout)
 
 
 async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
+    logger.info(f"Disconnecting {addresses}")
     await asyncio.gather(*(disconnect(addr, timeout, rpc_kwargs) for addr in addresses))
 
 
