@@ -42,6 +42,7 @@ def test_submit_after_failed_worker_sync(loop):
             a["proc"]().terminate()
             total = c.submit(sum, L)
             assert total.result() == sum(map(inc, range(10)))
+    assert False
 
 
 @pytest.mark.slow()
