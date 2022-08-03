@@ -111,32 +111,6 @@ _TEST_TIMEOUT = 30
 _offload_executor.submit(lambda: None).result()  # create thread during import
 
 
-@pytest.fixture(scope="session")
-def valid_python_script(tmpdir_factory):
-    local_file = tmpdir_factory.mktemp("data").join("file.py")
-    local_file.write("print('hello world!')")
-    return local_file
-
-
-@pytest.fixture(scope="session")
-def client_contract_script(tmpdir_factory):
-    local_file = tmpdir_factory.mktemp("data").join("distributed_script.py")
-    lines = (
-        "from distributed import Client",
-        "e = Client('127.0.0.1:8989')",
-        "print(e)",
-    )
-    local_file.write("\n".join(lines))
-    return local_file
-
-
-@pytest.fixture(scope="session")
-def invalid_python_script(tmpdir_factory):
-    local_file = tmpdir_factory.mktemp("data").join("file.py")
-    local_file.write("a+1")
-    return local_file
-
-
 async def cleanup_global_workers():
     for worker in Worker._instances:
         await worker.close(executor_wait=False)
@@ -177,15 +151,6 @@ def loop_in_thread(cleanup):
                 # the loop failed to close and we need to raise the exception
                 ran.result()
                 return
-
-
-@pytest.fixture
-def zmq_ctx():
-    import zmq
-
-    ctx = zmq.Context.instance()
-    yield ctx
-    ctx.destroy(linger=0)
 
 
 @contextmanager
@@ -267,13 +232,6 @@ def mul(x, y):
 
 def div(x, y):
     return x / y
-
-
-def deep(n):
-    if n > 0:
-        return deep(n - 1)
-    else:
-        return True
 
 
 def throws(x):
@@ -404,39 +362,6 @@ def map_varying(itemslists):
 async def asyncinc(x, delay=0.02):
     await asyncio.sleep(delay)
     return x + 1
-
-
-_readone_queues: dict[Any, asyncio.Queue] = {}
-
-
-async def readone(comm):
-    """
-    Read one message at a time from a comm that reads lists of
-    messages.
-    """
-    try:
-        q = _readone_queues[comm]
-    except KeyError:
-        q = _readone_queues[comm] = asyncio.Queue()
-
-        async def background_read():
-            while True:
-                try:
-                    messages = await comm.read()
-                except CommClosedError:
-                    break
-                for msg in messages:
-                    q.put_nowait(msg)
-            q.put_nowait(None)
-            del _readone_queues[comm]
-
-        background_read()
-
-    msg = await q.get()
-    if msg is None:
-        raise CommClosedError
-    else:
-        return msg
 
 
 def _run_and_close_tornado(async_fn, /, *args, **kwargs):
@@ -1251,14 +1176,6 @@ def validate_state(*servers: Scheduler | Worker | Nanny) -> None:
             s.validate_state()
 
 
-def raises(func, exc=Exception):
-    try:
-        func()
-        return False
-    except exc:
-        return True
-
-
 def _terminate_process(proc: subprocess.Popen, terminate_timeout: float) -> None:
     if proc.poll() is None:
         if sys.platform.startswith("win"):
@@ -1561,17 +1478,6 @@ def new_config(new_config):
         config.clear()
         config.update(orig_config)
         initialize_logging(config)
-
-
-@contextmanager
-def new_environment(changes):
-    saved_environ = os.environ.copy()
-    os.environ.update(changes)
-    try:
-        yield
-    finally:
-        os.environ.clear()
-        os.environ.update(saved_environ)
 
 
 @contextmanager
