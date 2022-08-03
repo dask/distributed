@@ -152,7 +152,7 @@ def loop_in_thread(cleanup):
     loop_started = concurrent.futures.Future()
     with concurrent.futures.ThreadPoolExecutor(
         1, thread_name_prefix="test IOLoop"
-    ) as tpe, set_default_test_config():
+    ) as tpe, default_test_config():
 
         async def run():
             io_loop = IOLoop.current()
@@ -672,7 +672,7 @@ def cluster(
     ws = weakref.WeakSet()
     enable_proctitle_on_children()
 
-    with check_process_leak(check=True), check_instances(), set_default_test_config():
+    with check_process_leak(check=True), check_instances(), default_test_config():
         if nanny:
             _run_worker = run_nanny
         else:
@@ -835,7 +835,7 @@ def gen_test(
 
     def _(func):
         @functools.wraps(func)
-        @set_default_test_config()
+        @default_test_config()
         @clean(**clean_kwargs)
         def test_func(*args, **kwargs):
             if not iscoroutinefunction(func):
@@ -1039,7 +1039,7 @@ def gen_cluster(
             raise RuntimeError("gen_cluster only works for coroutine functions.")
 
         @functools.wraps(func)
-        @set_default_test_config(**{"distributed.comm.timeouts.connect": "5s"})
+        @default_test_config(**{"distributed.comm.timeouts.connect": "5s"})
         @clean(**clean_kwargs)
         def test_func(*outer_args, **kwargs):
             async def async_fn():
@@ -1882,7 +1882,7 @@ def check_instances():
 
 
 @contextmanager
-def set_default_test_config(**extra_config):
+def default_test_config(**extra_config):
     reset_config()
 
     with dask.config.set(
