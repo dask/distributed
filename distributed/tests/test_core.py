@@ -252,6 +252,8 @@ async def test_server_assign_assign_enum_is_quiet():
 async def test_server_status_compare_enum_is_quiet():
     """That would be the default in user code"""
     server = Server({})
+    # Note: We only want to check whether this comparison
+    # raises an error/warning, we do not want to assert it.
     server.status == Status.running  # noqa: B015
 
 
