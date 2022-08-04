@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import random
 from contextlib import suppress
@@ -36,6 +37,7 @@ pytestmark = pytest.mark.ci1
 @pytest.mark.slow()
 def test_submit_after_failed_worker_sync(loop):
     with cluster() as (s, [a, b]):
+        logging.getLogger("distributed").setLevel("DEBUG")
         with Client(s["address"], loop=loop) as c:
             L = c.map(inc, range(10))
             wait(L)
@@ -74,6 +76,7 @@ async def test_submit_after_failed_worker(c, s, a, b):
 @pytest.mark.slow
 def test_gather_after_failed_worker(loop):
     with cluster() as (s, [a, b]):
+        logging.getLogger("distributed").setLevel("DEBUG")
         with Client(s["address"], loop=loop) as c:
             L = c.map(inc, range(10))
             wait(L)
@@ -144,6 +147,7 @@ async def test_restart_cleared(c, s, a, b):
 
 def test_restart_sync(loop):
     with cluster(nanny=True) as (s, [a, b]):
+        logging.getLogger("distributed").setLevel("DEBUG")
         with Client(s["address"], loop=loop) as c:
             x = c.submit(div, 1, 2)
             x.result()
@@ -163,6 +167,7 @@ def test_restart_sync(loop):
 
 def test_worker_doesnt_await_task_completion(loop):
     with cluster(nanny=True, nworkers=1) as (s, [w]):
+        logging.getLogger("distributed").setLevel("DEBUG")
         with Client(s["address"], loop=loop) as c:
             future = c.submit(sleep, 100)
             sleep(0.1)
