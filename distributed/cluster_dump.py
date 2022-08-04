@@ -261,6 +261,26 @@ class DumpArtefact(Mapping):
             if isinstance(worker_dump, dict) and (wlog := worker_dump.get("log"))
         }
 
+    def worker_short_stories(self, key_or_stimulus_id: str) -> dict[str, list[str]]:
+        """
+        Returns
+        -------
+        stories : dict
+            A dict of the short story for the key or stimulus ID, for each worker.
+            Workers missing from the logs are dropped.
+        """
+        return {
+            addr: [
+                x[2]
+                for x in story
+                if x[0] == key_or_stimulus_id or x[-1] == key_or_stimulus_id
+            ]
+            for addr, story in self.worker_stories(
+                key_or_stimulus_id, datetimes=False
+            ).items()
+            if story
+        }
+
     def worker_stories_to_yamls(
         self, root_dir: str | Path | None = None, *key_or_stimulus_id: str
     ) -> None:
