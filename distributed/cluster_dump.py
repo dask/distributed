@@ -322,11 +322,13 @@ class DumpArtefact(Mapping):
         root_dir: str | Path | None = None,
         worker_expand_keys: Collection[str] = (
             "config",
+            "data",
             "incoming_transfer_log",
             "outgoing_transfer_log",
             "pending_data_per_worker",
             "log",
             "logs",
+            "stimulus_log",
             "tasks",
         ),
         scheduler_expand_keys: Collection[str] = (

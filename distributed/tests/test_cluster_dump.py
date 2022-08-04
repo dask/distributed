@@ -168,10 +168,12 @@ async def test_cluster_dump_to_yamls(c, s, a, b, tmp_path):
 
     worker_files = {
         "config.yaml",
+        "data.yaml",
         "general.yaml",
         "incoming_transfer_log.yaml",
         "log.yaml",
         "logs.yaml",
+        "stimulus_log.yaml",
         "outgoing_transfer_log.yaml",
         "tasks.yaml",
     }
