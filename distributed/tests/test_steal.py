@@ -972,17 +972,20 @@ async def test_lose_task(c, s, a, b):
 
 
 @pytest.mark.parametrize("interval, expected", [(None, 100), ("500ms", 500), (2, 2)])
-@gen_cluster(nthreads=[])
+@gen_cluster(nthreads=[], config={"distributed.scheduler.work-stealing": False})
 async def test_parse_stealing_interval(s, interval, expected):
     from distributed.scheduler import WorkStealing
 
     if interval:
-        ctx = dask.config.set({"distributed.scheduler.work-stealing-interval": "500ms"})
+        ctx = dask.config.set(
+            {"distributed.scheduler.work-stealing-interval": interval}
+        )
     else:
         ctx = contextlib.nullcontext()
     with ctx:
         ws = WorkStealing(s)
-        s.periodic_callbacks["stealing"].callback_time == expected
+        await ws.start()
+        assert s.periodic_callbacks["stealing"].callback_time == expected
 
 
 @gen_cluster(client=True)
