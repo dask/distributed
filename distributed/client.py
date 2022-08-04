@@ -836,8 +836,8 @@ class Client(SyncMethodMixin):
         elif isinstance(getattr(address, "scheduler_address", None), str):
             # It's a LocalCluster or LocalCluster-compatible object
             self.cluster = address
-            status = getattr(self.cluster, "status")
-            if status and status in [Status.closed, Status.closing]:
+            status = self.cluster.status
+            if status in (Status.closed, Status.closing):
                 raise RuntimeError(
                     f"Trying to connect to an already closed or closing Cluster {self.cluster}."
                 )
