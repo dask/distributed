@@ -689,26 +689,6 @@ def cluster(
             client.close()
 
 
-async def disconnect(addr, timeout=3, rpc_kwargs=None):
-    rpc_kwargs = rpc_kwargs or {}
-
-    async def do_disconnect():
-        async with rpc(addr, **rpc_kwargs) as w:
-            # If the worker was killed hard (e.g. sigterm) during test runtime,
-            # we do not know at this point and may not be able to connect
-            with suppress(EnvironmentError, CommClosedError):
-                # Do not request a reply since comms will be closed by the
-                # worker before a reply can be made and we will always trigger
-                # the timeout
-                await w.terminate(reply=False)
-
-    await asyncio.wait_for(do_disconnect(), timeout=timeout)
-
-
-async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
-    await asyncio.gather(*(disconnect(addr, timeout, rpc_kwargs) for addr in addresses))
-
-
 def gen_test(
     timeout: float = _TEST_TIMEOUT,
     clean_kwargs: dict[str, Any] | None = None,
