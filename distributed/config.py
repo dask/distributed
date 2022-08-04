@@ -80,7 +80,7 @@ def _initialize_logging_old_style(config):
         }
     """
     loggers = {  # default values
-        "distributed": "debug",
+        "distributed": "info",
         "distributed.client": "warning",
         "bokeh": "error",
         "tornado": "critical",
