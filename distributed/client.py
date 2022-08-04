@@ -837,7 +837,7 @@ class Client(SyncMethodMixin):
             # It's a LocalCluster or LocalCluster-compatible object
             self.cluster = address
             status = self.cluster.status
-            if status and status in [Status.closed, Status.closing]:
+            if status in (Status.closed, Status.closing):
                 raise RuntimeError(
                     f"Trying to connect to an already closed or closing Cluster {self.cluster}."
                 )
