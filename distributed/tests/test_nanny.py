@@ -13,6 +13,8 @@ from unittest import mock
 import psutil
 import pytest
 
+from distributed.diagnostics.plugin import WorkerPlugin
+
 pytestmark = pytest.mark.gpu
 
 from tlz import first, valmap
@@ -27,7 +29,7 @@ from distributed.core import CommClosedError, Status
 from distributed.diagnostics import SchedulerPlugin
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
-from distributed.utils import TimeoutError, parse_ports
+from distributed.utils import TimeoutError, get_mp_context, parse_ports
 from distributed.utils_test import (
     captured_logger,
     gen_cluster,
@@ -474,21 +476,29 @@ async def test_nanny_closed_by_keyboard_interrupt(ucx_loop, protocol):
             assert "remove-worker" in str(s.events)
 
 
-class StartException(Exception):
-    pass
-
-
 class BrokenWorker(worker.Worker):
-    async def start(self):
-        raise StartException("broken")
+    async def start_unsafe(self):
+        raise ValueError("broken")
 
 
 @gen_cluster(nthreads=[])
 async def test_worker_start_exception(s):
-    # make sure this raises the right Exception:
-    with raises_with_cause(RuntimeError, None, StartException, None):
-        async with Nanny(s.address, worker_class=BrokenWorker) as n:
-            pass
+    nanny = Nanny(s.address, worker_class=BrokenWorker)
+    with captured_logger(logger="distributed.nanny", level=logging.WARNING) as logs:
+        with raises_with_cause(
+            RuntimeError,
+            "Nanny failed to start",
+            RuntimeError,
+            "BrokenWorker failed to start",
+        ):
+            async with nanny:
+                pass
+    assert nanny.status == Status.failed
+    # ^ NOTE: `Nanny.close` sets it to `closed`, then `Server.start._close_on_failure` sets it to `failed`
+    assert nanny.process is None
+    assert "Restarting worker" not in logs.getvalue()
+    # Avoid excessive spewing. (It's also printed once extra within the subprocess, which is okay.)
+    assert logs.getvalue().count("ValueError: broken") == 1, logs.getvalue()
 
 
 @gen_cluster(nthreads=[])
@@ -569,6 +579,44 @@ async def test_restart_memory(c, s, n):
 
     while not s.workers:
         await asyncio.sleep(0.1)
+
+
+class BlockClose(WorkerPlugin):
+    def __init__(self, close_happened):
+        self.close_happened = close_happened
+
+    async def teardown(self, worker):
+        # Never let the worker cleanly shut down, so it has to be killed
+        self.close_happened.set()
+        while True:
+            await asyncio.sleep(10)
+
+
+@pytest.mark.slow
+@gen_cluster(nthreads=[])
+async def test_close_joins(s):
+    close_happened = get_mp_context().Event()
+
+    nanny = Nanny(s.address, plugins=[BlockClose(close_happened)])
+    async with nanny:
+        p = nanny.process
+        assert p
+        close_t = asyncio.create_task(nanny.close())
+
+        while not close_happened.wait(0):
+            await asyncio.sleep(0.01)
+
+        assert not close_t.done()
+        assert nanny.status == Status.closing
+        assert nanny.process and nanny.process.status == Status.stopping
+
+        await close_t
+
+        assert nanny.status == Status.closed
+        assert not nanny.process
+
+        assert p.status == Status.stopped
+        assert not p.process
 
 
 @gen_cluster(Worker=Nanny, nthreads=[("", 1)])
