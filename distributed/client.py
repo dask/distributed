@@ -22,6 +22,7 @@ from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from functools import partial
 from numbers import Number
+from operator import gt, lt, ne
 from queue import Queue as pyQueue
 from typing import Any, ClassVar, Coroutine, Literal, Sequence, TypedDict
 
@@ -1354,31 +1355,16 @@ class Client(SyncMethodMixin):
                 ]
             )
 
-        if mode == "at least":
-
-            def stop_condition(n_workers, info):
-                return running_workers(info) >= n_workers
-
-        elif mode == "exactly":
-
-            def stop_condition(n_workers, info):
-                return (
-                    running_workers(info, status_list=[Status.running, Status.paused])
-                    == n_workers
-                )
-
-        elif mode == "at most":
-
-            def stop_condition(n_workers, info):
-                return (
-                    running_workers(info, status_list=[Status.running, Status.paused])
-                    <= n_workers
-                )
-
-        else:
+        try:
+            op, required_status = {
+                "at least": (lt, [Status.running]),
+                "exactly": (ne, [Status.running, Status.paused]),
+                "at most": (gt, [Status.running, Status.paused]),
+            }[mode]
+        except KeyError:
             raise NotImplementedError(f"{mode} is not handled.")
 
-        while not stop_condition(n_workers, info):
+        while op(running_workers(info, status_list=required_status), n_workers):
             if deadline and time() > deadline:
                 raise TimeoutError(
                     "Had %d workers after %s and needed %s %d"
