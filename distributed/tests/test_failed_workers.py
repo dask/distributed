@@ -168,9 +168,9 @@ def test_worker_doesnt_await_task_completion(loop):
             future = c.submit(sleep, 100)
             sleep(0.1)
             start = time()
-            c.restart()
+            c.restart(timeout="5s", wait_for_workers=False)
             stop = time()
-            assert stop - start < 20
+            assert stop - start < 10
 
 
 @gen_cluster(Worker=Nanny, timeout=60)

@@ -126,7 +126,7 @@ def loop_in_thread(cleanup):
     loop_started = concurrent.futures.Future()
     with concurrent.futures.ThreadPoolExecutor(
         1, thread_name_prefix="test IOLoop"
-    ) as tpe:
+    ) as tpe, config_for_cluster_tests():
 
         async def run():
             io_loop = IOLoop.current()
@@ -597,7 +597,7 @@ def cluster(
     ws = weakref.WeakSet()
     enable_proctitle_on_children()
 
-    with check_process_leak(check=True), check_instances(), _reconfigure():
+    with check_process_leak(check=True), check_instances(), config_for_cluster_tests():
         if nanny:
             _run_worker = run_nanny
         else:
@@ -760,6 +760,7 @@ def gen_test(
 
     def _(func):
         @functools.wraps(func)
+        @config_for_cluster_tests()
         @clean(**clean_kwargs)
         def test_func(*args, **kwargs):
             if not iscoroutinefunction(func):
@@ -963,6 +964,7 @@ def gen_cluster(
             raise RuntimeError("gen_cluster only works for coroutine functions.")
 
         @functools.wraps(func)
+        @config_for_cluster_tests(**{"distributed.comm.timeouts.connect": "5s"})
         @clean(**clean_kwargs)
         def test_func(*outer_args, **kwargs):
             async def async_fn():
@@ -1786,16 +1788,17 @@ def check_instances():
 
 
 @contextmanager
-def _reconfigure():
+def config_for_cluster_tests(**extra_config):
+    "Set recommended config values for tests that create or interact with clusters."
     reset_config()
 
     with dask.config.set(
         {
             "local_directory": tempfile.gettempdir(),
-            "distributed.comm.timeouts.connect": "5s",
             "distributed.admin.tick.interval": "500 ms",
             "distributed.worker.profile.enabled": False,
-        }
+        },
+        **extra_config,
     ):
         # Restore default logging levels
         # XXX use pytest hooks/fixtures instead?
@@ -1811,8 +1814,7 @@ def clean(threads=True, instances=True, processes=True):
     with check_thread_leak() if threads else nullcontext():
         with check_process_leak(check=processes):
             with check_instances() if instances else nullcontext():
-                with _reconfigure():
-                    yield
+                yield
 
 
 @pytest.fixture
