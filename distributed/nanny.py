@@ -398,7 +398,7 @@ class Nanny(ServerNode):
             self.process = WorkerProcess(
                 worker_kwargs=worker_kwargs,
                 silence_logs=self.silence_logs,
-                on_exit=self._on_exit_sync,
+                on_exit=self._on_worker_exit_sync,
                 worker=self.Worker,
                 env=self.env,
                 config=self.config,
@@ -490,19 +490,20 @@ class Nanny(ServerNode):
     def run(self, comm, *args, **kwargs):
         return run(self, comm, *args, **kwargs)
 
-    def _on_exit_sync(self, exitcode):
+    def _on_worker_exit_sync(self, exitcode):
         try:
-            self._ongoing_background_tasks.call_soon(self._on_exit, exitcode)
+            self._ongoing_background_tasks.call_soon(self._on_worker_exit, exitcode)
         except AsyncTaskGroupClosedError:  # Async task group has already been closed, so the nanny is already clos(ed|ing).
             pass
 
     @log_errors
-    async def _on_exit(self, exitcode):
+    async def _on_worker_exit(self, exitcode):
         if self.status not in (
             Status.init,
             Status.closing,
             Status.closed,
             Status.closing_gracefully,
+            Status.failed,
         ):
             try:
                 await self._unregister()
@@ -517,6 +518,7 @@ class Nanny(ServerNode):
                 Status.closing,
                 Status.closed,
                 Status.closing_gracefully,
+                Status.failed,
             ):
                 logger.warning("Restarting worker")
                 await self.instantiate()
@@ -577,7 +579,7 @@ class Nanny(ServerNode):
             if self.process is not None:
                 await self.kill(timeout=timeout)
         except Exception:
-            pass
+            logger.exception("Error in Nanny killing Worker subprocess")
         self.process = None
         await self.rpc.close()
         self.status = Status.closed
@@ -662,15 +664,15 @@ class WorkerProcess:
             await self.process.start()
         except OSError:
             logger.exception("Nanny failed to start process", exc_info=True)
-            self.process.terminate()
+            # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
+            await self.process.terminate()
             self.status = Status.failed
-            return self.status
         try:
             msg = await self._wait_until_connected(uid)
         except Exception:
-            logger.exception("Failed to connect to process")
+            # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
+            await self.process.terminate()
             self.status = Status.failed
-            self.process.terminate()
             raise
         if not msg:
             return self.status
@@ -731,7 +733,12 @@ class WorkerProcess:
     async def kill(self, timeout: float = 2, executor_wait: bool = True) -> None:
         """
         Ensure the worker process is stopped, waiting at most
-        *timeout* seconds before terminating it abruptly.
+        ``timeout * 0.8`` seconds before killing it abruptly.
+
+        When `kill` returns, the worker process has been joined.
+
+        If the worker process does not terminate within ``timeout`` seconds,
+        even after being killed, `asyncio.TimeoutError` is raised.
         """
         deadline = time() + timeout
 
@@ -740,32 +747,38 @@ class WorkerProcess:
         if self.status == Status.stopping:
             await self.stopped.wait()
             return
-        assert self.status in (Status.starting, Status.running)
+        assert self.status in (
+            Status.starting,
+            Status.running,
+            Status.failed,  # process failed to start, but hasn't been joined yet
+        ), self.status
         self.status = Status.stopping
         logger.info("Nanny asking worker to close")
 
         process = self.process
+        assert self.process
+        wait_timeout = timeout * 0.8
         self.child_stop_q.put(
             {
                 "op": "stop",
-                "timeout": max(0, deadline - time()) * 0.8,
+                "timeout": wait_timeout,
                 "executor_wait": executor_wait,
             }
         )
         await asyncio.sleep(0)  # otherwise we get broken pipe errors
         self.child_stop_q.close()
 
-        while process.is_alive() and time() < deadline:
-            await asyncio.sleep(0.05)
+        try:
+            await process.join(wait_timeout)
+            return
+        except asyncio.TimeoutError:
+            pass
 
-        if process.is_alive():
-            logger.warning(
-                f"Worker process still alive after {timeout} seconds, killing"
-            )
-            try:
-                await process.terminate()
-            except Exception as e:
-                logger.error("Failed to kill worker process: %s", e)
+        logger.warning(
+            f"Worker process still alive after {wait_timeout} seconds, killing"
+        )
+        await process.kill()
+        await process.join(max(0, deadline - time()))
 
     async def _wait_until_connected(self, uid):
         while True:
@@ -783,9 +796,6 @@ class WorkerProcess:
                 continue
 
             if "exception" in msg:
-                logger.error(
-                    "Failed while trying to start worker process: %s", msg["exception"]
-                )
                 raise msg["exception"]
             else:
                 return msg

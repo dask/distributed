@@ -122,7 +122,7 @@ def test_rejoin_idempotent():
 
         def f():
             secede()
-            for i in range(5):
+            for _ in range(5):
                 rejoin()
             return 1
 

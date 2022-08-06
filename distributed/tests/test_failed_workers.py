@@ -19,6 +19,7 @@ from distributed.metrics import time
 from distributed.utils import CancelledError, sync
 from distributed.utils_test import (
     BlockedGatherDep,
+    BlockedGetData,
     async_wait_for,
     captured_logger,
     cluster,
@@ -167,9 +168,9 @@ def test_worker_doesnt_await_task_completion(loop):
             future = c.submit(sleep, 100)
             sleep(0.1)
             start = time()
-            c.restart()
+            c.restart(timeout="5s", wait_for_workers=False)
             stop = time()
-            assert stop - start < 20
+            assert stop - start < 10
 
 
 @gen_cluster(Worker=Nanny, timeout=60)
@@ -320,22 +321,18 @@ class SlowTransmitData:
 
 
 @pytest.mark.slow
-@gen_cluster(client=True)
+@gen_cluster(client=True, config={"distributed.scheduler.work-stealing": False})
 async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     """This test is very sensitive to cluster state consistency. Timeouts often
     indicate subtle deadlocks. Be mindful when marking flaky/repeat/etc."""
-    async with Nanny(s.address, nthreads=2) as n:
+    async with Nanny(s.address, nthreads=2, worker_class=BlockedGetData) as n:
         while len(s.workers) < 3:
             await asyncio.sleep(0.01)
 
-        def slow_ser(x, delay):
-            return SlowTransmitData(x, delay=delay)
-
         n_worker_address = n.worker_address
         futures = c.map(
-            slow_ser,
+            inc,
             range(20),
-            delay=0.1,
             key=["f%d" % i for i in range(20)],
             workers=[n_worker_address],
             allow_other_workers=True,
@@ -347,9 +344,7 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
         await wait(futures)
         result_fut = c.submit(sink, futures, workers=a.address)
 
-        with suppress(CommClosedError):
-            await c.run(os._exit, 1, workers=[n_worker_address])
-
+        await n.kill(timeout=1)
         while len(s.workers) > 2:
             await asyncio.sleep(0.01)
 

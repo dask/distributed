@@ -1,6 +1,59 @@
 Changelog
 =========
 
+.. _v2022.8.0:
+
+2022.8.0
+--------
+
+Released on August 5, 2022
+
+New Features
+^^^^^^^^^^^^
+- Add Jupyter Server to Dask Scheduler (:pr:`6737`) `Matthew Rocklin`_
+
+Enhancements
+^^^^^^^^^^^^
+- Human-readable formatting for disk I/O and renaming to diff net and disk (:pr:`6835`) `Hendrik Makait`_
+- Add ``Cluster.get_client()`` method (:pr:`6745`) `Julia Signell`_
+- Start bokeh app to activate bokeh's clean session callbacks (:pr:`6728`) `Martí Zamora`_
+
+Bug Fixes
+^^^^^^^^^
+- Ensure Nanny doesn't restart workers that fail to start, and joins subprocess (:pr:`6427`) `Gabe Joseph`_
+- Don't connect to cluster subprocesses at shutdown (:pr:`6829`) `Gabe Joseph`_
+- Fix ``restart`` wait for workers edge case (:pr:`6823`) `Gabe Joseph`_
+- Fix spilled size calculation in ``Slow`` (:pr:`6789`) `Hendrik Makait`_
+
+Deprecations
+^^^^^^^^^^^^
+- Deprecate passing stopped loops to ``LoopRunner`` (and therefore Client/Cluster) (:pr:`6680`) `Thomas Grainger`_
+
+Documentation
+^^^^^^^^^^^^^
+- Add text to top of API docs to make sure that users are exposed to ``LocalCluster`` early (:pr:`6793`) `Julia Signell`_
+- Change title for plugins documentation (:pr:`6733`) `Sarah Charlotte Johnson`_
+
+Maintenance
+^^^^^^^^^^^
+- Only set 5s connect timeout in ``gen_cluster`` tests (:pr:`6822`) `Gabe Joseph`_
+- Fix flaky ``test_worker_who_has_clears_after_failed_connection`` (:pr:`6832`) `Gabe Joseph`_
+- Add missing skips for pyarrow (:pr:`6787`) `Elliott Sales de Andrade`_
+- Miscellaneous ``flake8-bugbear`` issues (:pr:`6814`) `Hendrik Makait`_
+- Assert otherwise pointless comparisons (`B015`) (:pr:`6811`) `Hendrik Makait`_
+- Remove unused functions from ``utils_test.py`` (:pr:`6807`) `Hendrik Makait`_
+- Fix Jupyter security note (:pr:`6818`) `Jacob Tomlinson`_
+- Improve ``check_thread_leak`` output (:pr:`6797`) `Gabe Joseph`_
+- Use contextmanager to ensure clients are closed and do not leak (:pr:`6817`) `Hendrik Makait`_
+- Robust thread termination in ``test_watch`` and ``test_watch_requires_lock_to_run`` (:pr:`6788`) `Hendrik Makait`_
+- Avoid unused loop control variable or name them ``_`` (:pr:`6813`) `Hendrik Makait`_
+- Replace ``assert False`` where an exception should always be thrown (:pr:`6815`) `Hendrik Makait`_
+- Avoid mutable argument defaults in tests (:pr:`6810`) `Hendrik Makait`_
+- Avoid mutable argument defaults outside of tests (:pr:`6665`) `Hendrik Makait`_
+- Update gpuCI ``RAPIDS_VER`` to ``22.10`` (:pr:`6798`)
+- Use same Python for dask worker tests (:pr:`6786`) `Elliott Sales de Andrade`_
+
+
 .. _v2022.7.1:
 
 2022.7.1
@@ -3980,3 +4033,4 @@ significantly without many new features.
 .. _`hhuuggoo`: https://github.com/hhuuggoo
 .. _`Lawrence Mitchell`: https://github.com/wence-
 .. _`Iain Dorrington`: https://github.com/idorrington92
+.. _`Martí Zamora`: https://github.com/z4m0

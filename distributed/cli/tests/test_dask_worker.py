@@ -656,7 +656,7 @@ def dask_setup(worker):
 def test_timeout(nanny):
     worker = subprocess.run(
         [
-            "python",
+            sys.executable,
             "-m",
             "distributed.cli.dask_worker",
             "192.168.1.100:7777",
@@ -679,7 +679,7 @@ def test_timeout(nanny):
 @gen_cluster(client=True, nthreads=[])
 async def test_signal_handling(c, s, nanny, sig):
     with subprocess.Popen(
-        ["python", "-m", "distributed.cli.dask_worker", s.address, nanny],
+        [sys.executable, "-m", "distributed.cli.dask_worker", s.address, nanny],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     ) as worker:

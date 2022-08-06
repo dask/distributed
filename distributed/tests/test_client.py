@@ -31,6 +31,7 @@ import psutil
 import pytest
 import yaml
 from tlz import concat, first, identity, isdistinct, merge, pluck, valmap
+from tornado.ioloop import IOLoop
 
 import dask
 import dask.bag as db
@@ -1025,11 +1026,14 @@ async def test_errors_dont_block(c, s, w):
     assert result == [2, 3]
 
 
+def assert_list(x, z=None):
+    if z is None:
+        z = []
+    return isinstance(x, list) and isinstance(z, list)
+
+
 @gen_cluster(client=True)
 async def test_submit_quotes(c, s, a, b):
-    def assert_list(x, z=[]):
-        return isinstance(x, list) and isinstance(z, list)
-
     x = c.submit(assert_list, [1, 2, 3])
     result = await x
     assert result
@@ -1047,9 +1051,6 @@ async def test_submit_quotes(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_map_quotes(c, s, a, b):
-    def assert_list(x, z=[]):
-        return isinstance(x, list) and isinstance(z, list)
-
     L = c.map(assert_list, [[1, 2, 3], [4]])
     result = await c.gather(L)
     assert all(result)
@@ -2119,7 +2120,7 @@ async def test_forget_in_flight(e, s, A, B):
     x, y = e.compute([ac, acab])
     s.validate_state()
 
-    for i in range(5):
+    for _ in range(5):
         await asyncio.sleep(0.01)
         s.validate_state()
 
@@ -2855,7 +2856,7 @@ def test_client_num_fds(loop):
         proc = psutil.Process()
         with Client(s["address"], loop=loop) as c:  # first client to start loop
             before = proc.num_fds()  # measure
-            for i in range(4):
+            for _ in range(4):
                 with Client(s["address"], loop=loop):  # start more clients
                     pass
             start = time()
@@ -2873,6 +2874,7 @@ async def test_startup_close_startup(s, a, b):
     await c.close()
 
 
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
 def test_startup_close_startup_sync(loop):
     with cluster() as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
@@ -3266,16 +3268,13 @@ async def test_scheduler_saturates_cores(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 20)] * 2)
 async def test_scheduler_saturates_cores_random(c, s, a, b):
-    for delay in [0, 0.01, 0.1]:
-        futures = c.map(randominc, range(100), scale=0.1)
-        while not s.tasks:
-            if s.tasks:
-                assert all(
-                    len(p) >= 20
-                    for w in s.workers.values()
-                    for p in w.processing.values()
-                )
-            await asyncio.sleep(0.01)
+    futures = c.map(randominc, range(100), scale=0.1)
+    while not s.tasks:
+        if s.tasks:
+            assert all(
+                len(p) >= 20 for w in s.workers.values() for p in w.processing.values()
+            )
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4)
@@ -3739,7 +3738,7 @@ def test_open_close_many_workers(loop, worker, count, repeat):
         status = True
 
         async def start_worker(sleep, duration, repeat=1):
-            for i in range(repeat):
+            for _ in range(repeat):
                 await asyncio.sleep(sleep)
                 if not status:
                     return
@@ -3755,7 +3754,7 @@ def test_open_close_many_workers(loop, worker, count, repeat):
                 await asyncio.sleep(0)
             done.release()
 
-        for i in range(count):
+        for _ in range(count):
             loop.add_callback(
                 start_worker, random.random() / 5, random.random() / 5, repeat=repeat
             )
@@ -3763,7 +3762,7 @@ def test_open_close_many_workers(loop, worker, count, repeat):
         with Client(s["address"], loop=loop) as c:
             sleep(1)
 
-            for i in range(count):
+            for _ in range(count):
                 done.acquire(timeout=5)
                 gc.collect()
                 if not running:
@@ -3867,8 +3866,8 @@ def test_get_versions_sync(c):
     assert v["scheduler"] is not None
     assert v["client"] is not None
     assert len(v["workers"]) == 2
-    for k, v in v["workers"].items():
-        assert v is not None
+    for wv in v["workers"].values():
+        assert wv is not None
 
     c.get_versions(check=True)
     # smoke test for versions
@@ -4970,7 +4969,7 @@ async def test_close(s, a, b):
 def test_threadsafe(c):
     def f(_):
         d = deque(maxlen=50)
-        for i in range(100):
+        for _ in range(100):
             future = c.submit(inc, random.randint(0, 100))
             d.append(future)
             sleep(0.001)
@@ -4993,7 +4992,7 @@ def test_threadsafe_get(c):
 
     def f(_):
         total = 0
-        for i in range(20):
+        for _ in range(20):
             total += (x + random.randint(0, 20)).sum().compute()
             sleep(0.001)
         return total
@@ -5012,7 +5011,7 @@ def test_threadsafe_compute(c):
 
     def f(_):
         total = 0
-        for i in range(20):
+        for _ in range(20):
             future = c.compute((x + random.randint(0, 20)).sum())
             total += future.result()
             sleep(0.001)
@@ -5532,13 +5531,18 @@ async def test_future_auto_inform(c, s, a, b):
     await client.close()
 
 
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
 def test_client_async_before_loop_starts(cleanup):
     async def close():
         async with client:
             pass
 
     with pristine_loop() as loop:
-        client = Client(asynchronous=True, loop=loop)
+        with pytest.warns(
+            DeprecationWarning,
+            match=r"Constructing LoopRunner\(loop=loop\) without a running loop is deprecated",
+        ):
+            client = Client(asynchronous=True, loop=loop)
         assert client.asynchronous
         assert isinstance(client.close(), NoOpAwaitable)
         loop.run_sync(close)  # TODO: client.close() does not unset global client
@@ -6837,6 +6841,7 @@ async def test_workers_collection_restriction(c, s, a, b):
     assert a.data and not b.data
 
 
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_get_client_functions_spawn_clusters(c, s, a):
     # see gh4565
@@ -7383,7 +7388,7 @@ async def test_dump_cluster_state_exclude_default(c, s, a, b, tmp_path):
 
     assert "workers" in state
     assert len(state["workers"]) == len(s.workers)
-    for worker, worker_dump in state["workers"].items():
+    for worker_dump in state["workers"].values():
         for k, task_dump in worker_dump["tasks"].items():
             assert not any(blocked in task_dump for blocked in excluded_by_default)
             assert k in s.tasks
@@ -7406,7 +7411,7 @@ async def test_dump_cluster_state_exclude_default(c, s, a, b, tmp_path):
 
     assert "workers" in state
     assert len(state["workers"]) == len(s.workers)
-    for worker, worker_dump in state["workers"].items():
+    for worker_dump in state["workers"].values():
         for k, task_dump in worker_dump["tasks"].items():
             assert all(blocked in task_dump for blocked in excluded_by_default)
             assert k in s.tasks
@@ -7550,3 +7555,21 @@ def test_quiet_close_process(processes, tmp_path):
 
     assert not out
     assert not err
+
+
+@gen_cluster(client=False, nthreads=[])
+async def test_deprecated_loop_properties(s):
+    class ExampleClient(Client):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.loop = self.io_loop = IOLoop.current()
+
+    with pytest.warns(DeprecationWarning) as warninfo:
+        async with ExampleClient(s.address, asynchronous=True, loop=IOLoop.current()):
+            pass
+
+    assert [(w.category, *w.message.args) for w in warninfo] == [
+        (DeprecationWarning, "setting the loop property is deprecated"),
+        (DeprecationWarning, "The io_loop property is deprecated"),
+        (DeprecationWarning, "setting the loop property is deprecated"),
+    ]

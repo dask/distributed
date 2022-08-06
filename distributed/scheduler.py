@@ -2916,6 +2916,7 @@ class Scheduler(SchedulerState, ServerNode):
         plugins=(),
         contact_address=None,
         transition_counter_max=False,
+        jupyter=False,
         **kwargs,
     ):
         if loop is not None:
@@ -3003,6 +3004,38 @@ class Scheduler(SchedulerState, ServerNode):
             distributed.dashboard.scheduler.connect(
                 self.http_application, self.http_server, self, prefix=http_prefix
             )
+        self.jupyter = jupyter
+        if self.jupyter:
+            try:
+                from jupyter_server.serverapp import ServerApp
+            except ImportError:
+                raise ImportError(
+                    "In order to use the Dask jupyter option you "
+                    "need to have jupyterlab installed"
+                )
+            from traitlets.config import Config
+
+            j = ServerApp.instance(
+                config=Config(
+                    {
+                        "ServerApp": {
+                            "base_url": "jupyter",
+                            # SECURITY: We usually expect the dashboard to be a read-only view into
+                            # the scheduler activity. However, by adding an open Jupyter application
+                            # we are allowing arbitrary remote code execution on the scheduler via the
+                            # dashboard server. This option should only be used when the dashboard is
+                            # protected via other means, or when you don't care about cluster security.
+                            "token": "",
+                            "allow_remote_access": True,
+                        }
+                    }
+                )
+            )
+            j.initialize(
+                new_httpserver=False,
+            )
+            self._jupyter_server_application = j
+            self.http_application.add_application(j.web_app)
 
         # Communication state
         self.client_comms = {}
@@ -3378,6 +3411,12 @@ class Scheduler(SchedulerState, ServerNode):
             except Exception:
                 logger.exception("Failed to start preload")
 
+        if self.jupyter:
+            # Allow insecure communications from local users
+            if self.address.startswith("tls://"):
+                await self.listen("tcp://localhost:0")
+            os.environ["DASK_SCHEDULER_ADDRESS"] = self.listeners[-1].contact_address
+
         await asyncio.gather(
             *[plugin.start(self) for plugin in list(self.plugins.values())]
         )
@@ -3452,6 +3491,9 @@ class Scheduler(SchedulerState, ServerNode):
                 futures.append(comm.close())
 
         await asyncio.gather(*futures)
+
+        if self.jupyter:
+            await self._jupyter_server_application._cleanup()
 
         for comm in self.client_comms.values():
             comm.abort()
@@ -5223,28 +5265,27 @@ class Scheduler(SchedulerState, ServerNode):
         self.log_event([client, "all"], {"action": "restart", "client": client})
 
         if wait_for_workers:
-            while monotonic() < start + timeout:
+            while len(self.workers) < n_workers:
                 # NOTE: if new (unrelated) workers join while we're waiting, we may return before
                 # our shut-down workers have come back up. That's fine; workers are interchangeable.
-                if len(self.workers) >= n_workers:
-                    return
-                await asyncio.sleep(0.2)
-            else:
-                msg = (
-                    f"Waited for {n_workers} worker(s) to reconnect after restarting, "
-                    f"but after {timeout}s, only {len(self.workers)} have returned. "
-                    "Consider a longer timeout, or `wait_for_workers=False`."
-                )
-
-                if (n_nanny := len(nanny_workers)) < n_workers:
-                    msg += (
-                        f" The {n_workers - n_nanny} worker(s) not using Nannies were just shut "
-                        "down instead of restarted (restart is only possible with Nannies). If "
-                        "your deployment system does not automatically re-launch terminated "
-                        "processes, then those workers will never come back, and `Client.restart` "
-                        "will always time out. Do not use `Client.restart` in that case."
+                if monotonic() < start + timeout:
+                    await asyncio.sleep(0.2)
+                else:
+                    msg = (
+                        f"Waited for {n_workers} worker(s) to reconnect after restarting, "
+                        f"but after {timeout}s, only {len(self.workers)} have returned. "
+                        "Consider a longer timeout, or `wait_for_workers=False`."
                     )
-                raise TimeoutError(msg) from None
+
+                    if (n_nanny := len(nanny_workers)) < n_workers:
+                        msg += (
+                            f" The {n_workers - n_nanny} worker(s) not using Nannies were just shut "
+                            "down instead of restarted (restart is only possible with Nannies). If "
+                            "your deployment system does not automatically re-launch terminated "
+                            "processes, then those workers will never come back, and `Client.restart` "
+                            "will always time out. Do not use `Client.restart` in that case."
+                        )
+                    raise TimeoutError(msg) from None
 
     async def broadcast(
         self,
@@ -6282,7 +6323,7 @@ class Scheduler(SchedulerState, ServerNode):
         elif key is None:
             key = ts.key
         else:
-            assert False, (key, ts)
+            raise ValueError(f"ts or key must be None, received key={key!r}, ts={ts!r}")
 
         if ts is not None:
             report_msg = _task_to_report_msg(ts)
@@ -6724,7 +6765,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     def remove_resources(self, worker):
         ws: WorkerState = self.workers[worker]
-        for resource, quantity in ws.resources.items():
+        for resource in ws.resources:
             dr: dict = self.resources.get(resource, None)
             if dr is None:
                 self.resources[resource] = dr = {}
@@ -6849,7 +6890,7 @@ class Scheduler(SchedulerState, ServerNode):
             tt = t // dt * dt
             if tt > last:
                 last = tt
-                for k, v in keys.items():
+                for v in keys.values():
                     v.append([tt, 0])
             for k, v in d.items():
                 keys[k][-1][1] += v
@@ -7107,7 +7148,7 @@ class Scheduler(SchedulerState, ServerNode):
                     workers: list = list(self.workers.values())
                     nworkers: int = len(workers)
                     i: int
-                    for i in range(nworkers):
+                    for _ in range(nworkers):
                         ws: WorkerState = workers[worker_index % nworkers]
                         worker_index += 1
                         try:

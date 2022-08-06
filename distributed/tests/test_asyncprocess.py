@@ -80,7 +80,8 @@ async def test_simple():
     assert proc.exitcode is None
 
     t1 = time()
-    await proc.join(timeout=0.02)
+    with pytest.raises(asyncio.TimeoutError):
+        await proc.join(timeout=0.02)
     dt = time() - t1
     assert 0.2 >= dt >= 0.001
     assert proc.is_alive()

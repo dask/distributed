@@ -74,7 +74,7 @@ async def test_adaptive_local_cluster_multi_workers():
                 await asyncio.sleep(0.01)
 
             # no workers for a while
-            for i in range(10):
+            for _ in range(10):
                 assert not cluster.scheduler.workers
                 await asyncio.sleep(0.05)
 
@@ -236,7 +236,7 @@ async def test_adapt_quickly():
 
         # Don't scale up for large sequential computations
         x = await client.scatter(1)
-        for i in range(100):
+        for _ in range(100):
             x = client.submit(slowinc, x)
 
         await asyncio.sleep(0.1)
@@ -289,6 +289,7 @@ async def test_no_more_workers_than_tasks():
                 assert len(cluster.scheduler.workers) <= 1
 
 
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
 def test_basic_no_loop(cleanup):
     loop = None
     try:

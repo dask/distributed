@@ -1440,7 +1440,7 @@ class AggregateAction(DashboardComponent):
     def update(self):
         agg_times = defaultdict(float)
 
-        for key, ts in self.scheduler.task_prefixes.items():
+        for ts in self.scheduler.task_prefixes.values():
             for action, t in ts.all_durations.items():
                 agg_times[action] += t
 
@@ -2539,7 +2539,7 @@ class TaskGroupGraph(DashboardComponent):
 
         durations = set()
         nbytes = set()
-        for key, tg in self.scheduler.task_groups.items():
+        for tg in self.scheduler.task_groups.values():
 
             if tg.duration and tg.nbytes_total:
                 durations.add(tg.duration)
@@ -3366,8 +3366,10 @@ class WorkerTable(DashboardComponent):
             "memory_unmanaged_recent": "unmanaged recent",
             "memory_spilled": "spilled",
             "num_fds": "# fds",
-            "read_bytes": "read",
-            "write_bytes": "write",
+            "read_bytes": "net read",
+            "write_bytes": "net write",
+            "read_bytes_disk": "disk read",
+            "write_bytes_disk": "disk write",
         }
 
         self.source = ColumnDataSource({k: [] for k in self.names})
@@ -3390,6 +3392,8 @@ class WorkerTable(DashboardComponent):
             "write_bytes": NumberFormatter(format="0 b"),
             "num_fds": NumberFormatter(format="0"),
             "nthreads": NumberFormatter(format="0"),
+            "read_bytes_disk": NumberFormatter(format="0 b"),
+            "write_bytes_disk": NumberFormatter(format="0 b"),
         }
 
         table = DataTable(
@@ -3419,6 +3423,12 @@ class WorkerTable(DashboardComponent):
             width=width,
             index_position=None,
         )
+
+        for name in extra_names:
+            if name in formatters:
+                extra_table.columns[extra_names.index(name)].formatter = formatters[
+                    name
+                ]
 
         hover = HoverTool(
             point_policy="follow_mouse",
@@ -3495,8 +3505,8 @@ class WorkerTable(DashboardComponent):
     @without_property_validation
     def update(self):
         data = {name: [] for name in self.names + self.extra_names}
-        for i, (addr, ws) in enumerate(
-            sorted(self.scheduler.workers.items(), key=lambda kv: str(kv[1].name))
+        for i, ws in enumerate(
+            sorted(self.scheduler.workers.values(), key=lambda ws: str(ws.name))
         ):
             minfo = ws.memory
 

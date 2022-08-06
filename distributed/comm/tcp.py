@@ -519,7 +519,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         self.tcp_server = TCPServer(max_buffer_size=MAX_BUFFER_SIZE, **self.server_args)
         self.tcp_server.handle_stream = self._handle_stream
         backlog = int(dask.config.get("distributed.comm.socket-backlog"))
-        for i in range(5):
+        for _ in range(5):
             try:
                 # When shuffling data between workers, there can
                 # really be O(cluster size) connection requests

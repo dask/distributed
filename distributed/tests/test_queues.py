@@ -145,12 +145,12 @@ async def test_same_futures(c, s, a, b):
     q = Queue("x")
     future = await c.scatter(123)
 
-    for i in range(5):
+    for _ in range(5):
         await q.put(future)
 
     assert {ts.key for ts in s.clients["queue-x"].wants_what} == {future.key}
 
-    for i in range(4):
+    for _ in range(4):
         future2 = await q.get()
         assert {ts.key for ts in s.clients["queue-x"].wants_what} == {future.key}
         await asyncio.sleep(0.05)

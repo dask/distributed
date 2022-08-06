@@ -200,7 +200,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         # Check that each chunk-row of the array is (mostly) stored on the same worker
         primary_worker_key_fractions = []
         secondary_worker_key_fractions = []
-        for i, keys in enumerate(x.__dask_keys__()):
+        for keys in x.__dask_keys__():
             # Iterate along rows of the array.
             keys = {stringify(k) for k in keys}
 
@@ -428,7 +428,7 @@ async def test_feed(s, a, b):
     comm = await connect(s.address)
     await comm.write({"op": "feed", "function": dumps(func), "interval": 0.01})
 
-    for i in range(5):
+    for _ in range(5):
         response = await comm.read()
         expected = dict(s.workers)
         assert cloudpickle.loads(response) == expected
@@ -459,7 +459,7 @@ async def test_feed_setup_teardown(s, a, b):
         }
     )
 
-    for i in range(5):
+    for _ in range(5):
         response = await comm.read()
         assert response == "OK"
 
@@ -483,7 +483,7 @@ async def test_feed_large_bytestring(s, a, b):
     comm = await connect(s.address)
     await comm.write({"op": "feed", "function": dumps(func), "interval": 0.05})
 
-    for i in range(5):
+    for _ in range(5):
         response = await comm.read()
         assert response is True
 
@@ -704,6 +704,43 @@ async def test_restart_not_all_workers_return(c, s, a, b):
     assert not s.workers
     assert a.status in (Status.closed, Status.closing)
     assert b.status in (Status.closed, Status.closing)
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_restart_worker_rejoins_after_timeout_expired(c, s, a):
+    """
+    We don't want to see an error message like:
+
+    ``Waited for 1 worker(s) to reconnect after restarting, but after 0s, only 1 have returned.``
+
+    If a worker rejoins after our last poll for new workers, but before we raise the error,
+    we shouldn't raise the error.
+    """
+    # We'll use a 0s timeout on the restart, so it always expires.
+    # And we'll use a plugin to block the restart process, and spin up a new worker
+    # in the middle of it.
+
+    class Plugin(SchedulerPlugin):
+        removed = asyncio.Event()
+        proceed = asyncio.Event()
+
+        async def remove_worker(self, *args, **kwargs):
+            self.removed.set()
+            await self.proceed.wait()
+
+    s.add_plugin(Plugin())
+
+    task = asyncio.create_task(c.restart(timeout=0))
+    await Plugin.removed.wait()
+    assert not s.workers
+
+    async with Worker(s.address, nthreads=1) as w:
+        assert len(s.workers) == 1
+        Plugin.proceed.set()
+
+        # New worker has joined, but the timeout has expired (since it was 0).
+        # Still, we should not time out.
+        await task
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
@@ -1125,7 +1162,7 @@ async def test_file_descriptors(c, s):
     await c.close()
 
     assert not s.rpc.open
-    for addr, occ in c.rpc.occupied.items():
+    for occ in c.rpc.occupied.values():
         for comm in occ:
             assert comm.closed() or comm.peer_address != s.address, comm
     assert not s.stream_comms
@@ -1330,7 +1367,7 @@ async def test_close_nanny(s, a, b):
     assert not a.is_alive()
     assert a.pid is None
 
-    for i in range(10):
+    for _ in range(10):
         await asyncio.sleep(0.1)
         assert len(s.workers) == 1
         assert not a.is_alive()
@@ -2401,7 +2438,7 @@ async def test_retire_state_change(c, s, a, b):
     y = c.map(lambda x: x**2, range(10))
     await c.scatter(y)
     coros = []
-    for x in range(2):
+    for _ in range(2):
         v = c.map(lambda i: i * np.random.randint(1000), y)
         k = c.map(lambda i: i * np.random.randint(1000), v)
         foo = c.map(lambda j: j * 6, k)

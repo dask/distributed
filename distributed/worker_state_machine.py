@@ -3070,9 +3070,11 @@ class WorkerState:
                 for w, tss in self.data_needed.items()
             },
             "executing": {ts.key for ts in self.executing},
+            "has_what": dict(self.has_what),
             "long_running": {ts.key for ts in self.long_running},
             "in_flight_tasks": {ts.key for ts in self.in_flight_tasks},
             "in_flight_workers": self.in_flight_workers,
+            "missing_dep_flight": [ts.key for ts in self.missing_dep_flight],
             "busy_workers": self.busy_workers,
             "log": self.log,
             "stimulus_log": self.stimulus_log,
