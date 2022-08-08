@@ -28,7 +28,6 @@ class SchedulerInfo(dict):
 
     def _repr_html_(self):
         def _format_dashboard_address(server):
-            # breakpoint()
             try:
                 host = (
                     server["host"]
