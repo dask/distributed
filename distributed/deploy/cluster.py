@@ -567,7 +567,9 @@ class Cluster(SyncMethodMixin):
         return id(self)
 
     async def _wait_for_workers(self, n_workers=0, timeout=None):
-        info = self.scheduler.identity()
+        self.scale(n_workers)
+
+        info = self.scheduler_info
         self._scheduler_identity = SchedulerInfo(info)
         if timeout:
             deadline = time() + parse_timedelta(timeout)
@@ -591,7 +593,7 @@ class Cluster(SyncMethodMixin):
                 )
             await asyncio.sleep(0.1)
 
-            info = self.scheduler.identity()
+            info = self.scheduler_info
             self._scheduler_identity = SchedulerInfo(info)
 
     def wait_for_workers(self, n_workers=0, timeout=None):
