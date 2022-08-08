@@ -569,7 +569,7 @@ properties:
             type: object
             description: |
               Environment variables to set on all worker processes started by nannies.
-              These variables are set after spawning the worker process.
+              These variables are set in the worker process after it has started.
 
           pre-spawn-environ:
             type: object
