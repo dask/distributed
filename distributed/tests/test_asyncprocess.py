@@ -7,14 +7,11 @@ import signal
 import sys
 import threading
 import weakref
-from datetime import timedelta
 from time import sleep
 
 import psutil
 import pytest
-from tornado import gen
 from tornado.ioloop import IOLoop
-from tornado.locks import Event
 
 from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.metrics import time
@@ -239,13 +236,9 @@ async def test_close():
 async def test_exit_callback():
     to_child = get_mp_context().Queue()
     from_child = get_mp_context().Queue()
-    evt = Event()
+    evt = asyncio.Event()
 
-    # FIXME: this breaks if changed to async def...
-    @gen.coroutine
     def on_stop(_proc):
-        assert _proc is proc
-        yield gen.moment
         evt.set()
 
     # Normal process exit
@@ -260,7 +253,7 @@ async def test_exit_callback():
     assert not evt.is_set()
 
     to_child.put(None)
-    await evt.wait(timedelta(seconds=5))
+    await asyncio.wait_for(evt.wait(), 5)
     assert evt.is_set()
     assert not proc.is_alive()
 
@@ -276,7 +269,7 @@ async def test_exit_callback():
     assert not evt.is_set()
 
     await proc.terminate()
-    await evt.wait(timedelta(seconds=5))
+    await asyncio.wait_for(evt.wait(), 5)
     assert evt.is_set()
 
 
