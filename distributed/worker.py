@@ -2164,7 +2164,7 @@ class Worker(BaseWorker, ServerNode):
         try:
             if self.state.validate:
                 assert not ts.waiting_for_data
-                assert ts.state == "executing"
+                assert ts.state == "executing", ts.state
                 assert ts.run_spec is not None
 
             args2, kwargs2 = self._prepare_args_for_execution(ts, args, kwargs)
