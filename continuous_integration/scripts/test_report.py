@@ -440,12 +440,22 @@ def main(argv: list[str] | None = None) -> None:
     # Concat the sub-charts and output to file
     chart = (
         altair.vconcat(*charts)
+        .properties(
+            title={
+                "text": [f"{args.repo} {args.title}"],
+                "subtitle": [" ".join(argv if argv is not None else sys.argv)],
+            }
+        )
         .configure_axis(labelLimit=1000)  # test names are long
-        .configure_title(anchor="start")
+        .configure_title(
+            anchor="start",
+            fontSize=18,
+            subtitleFontSize=14,
+            subtitleFontWeight="bold",
+            subtitleFont="monospace",
+        )
         .resolve_scale(x="shared")  # enforce aligned x axes
     )
-    chart.title = f"{args.repo} {args.title}"
-    chart.subtitle = " ".join(argv if argv is not None else sys.argv)
 
     altair_saver.save(
         chart,
