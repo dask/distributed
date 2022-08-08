@@ -19,9 +19,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
 
-    env:
-      CONDA_FILE: continuous_integration/environment-${{ matrix.python-version }}.yaml
-
     strategy:
       fail-fast: false
       matrix:
@@ -47,6 +44,7 @@ jobs:
         # run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
     env:
+      CONDA_FILE: continuous_integration/environment-${{ matrix.python-version }}.yaml
       TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}
       # TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}-${{ matrix.run }}
 
