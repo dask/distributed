@@ -1124,7 +1124,6 @@ class rpc:
                     comm.abort()
             _warn(f"unclosed rpc {self_r}", ResourceWarning, source=self)
 
-
     def __repr__(self):
         return "<rpc to %r, %d comms>" % (self.address, len(self.comms))
 
