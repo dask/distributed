@@ -69,12 +69,20 @@ jobs:
         shell: bash -l {0}
         run: conda config --show
 
+      - name: Check if caching is enabled
+        uses: xarray-contrib/ci-trigger@v1.1
+        id: skip-caching
+        with:
+          keyword: "[skip-caching]"
+
       - name: Get Date
+        if: steps.skip-caching.outputs.triggered != 'true'
         id: get-date
         run: echo "::set-output name=today::$(/bin/date -u '+%Y%m%d')"
         shell: bash
 
       - name: Cache Conda env
+        if: steps.skip-caching.outputs.triggered != 'true'
         uses: actions/cache@v2
         with:
           path: ${{ env.CONDA }}/envs
@@ -86,7 +94,7 @@ jobs:
 
       - name: Update environment
         run: mamba env update -n dask-distributed -f ${{ env.CONDA_FILE }}
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.skip-caching.outputs.triggered == 'true' || steps.cache.outputs.cache-hit != 'true'
 
       - name: Install
         shell: bash -l {0}
