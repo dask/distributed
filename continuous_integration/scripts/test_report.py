@@ -103,22 +103,17 @@ def maybe_get_next_page_path(response: requests.Response) -> str | None:
 
 
 def get_jobs(workflow):
-    page = 1
-    total_count = None
     with shelve.open("test_report_jobs") as cache:
         url = workflow["jobs_url"]
         try:
             jobs = cache[url]
         except KeyError:
-            jobs = []
-            while total_count is None or len(jobs) < total_count:
-                resp = get_from_github(
-                    workflow["jobs_url"], {"per_page": 100, "page": page}
-                ).json()
-                if total_count is None:
-                    total_count = resp["total_count"]
-                jobs.extend(resp["jobs"])
-                page += 1
+            params = {"per_page": 100}
+            r = get_from_github(workflow["jobs_url"], params)
+            jobs = r.json()["jobs"]
+            while next_page := maybe_get_next_page_path(r):
+                r = get_from_github(next_page, params=params)
+                jobs.extend(r.json()["jobs"])
             cache[url] = jobs
 
     df_jobs = pandas.DataFrame.from_records(jobs)
@@ -195,10 +190,9 @@ def download_and_parse_artifact(url: str) -> junitparser.JUnitXml | None:
         try:
             xml_raw = cache[url]
         except KeyError:
-            cache[url] = xml_raw
             r = get_from_github(url, params={})
             f = zipfile.ZipFile(io.BytesIO(r.content))
-            xml_raw = f.read(f.filelist[0].filename)
+            cache[url] = xml_raw = f.read(f.filelist[0].filename)
     try:
         return junitparser.JUnitXml.fromstring(xml_raw)
     except Exception:
@@ -309,7 +303,6 @@ def download_and_parse_artifacts(
     ndownloaded = 0
     print(f"Downloading and parsing {nartifacts} artifacts...")
 
-    # FIXME https://github.com/python/typeshed/pull/8190
     for w in workflows:
         jobs_df = get_jobs(w)
         w["dfs"] = []
@@ -324,12 +317,17 @@ def download_and_parse_artifacts(
             # than the artifact timestamp so that artifacts triggered under
             # the same workflow can be aligned according to the same trigger
             # time.
-            job = jobs_df[jobs_df["suite_name"] == a["name"]]
+            html_url = jobs_df[jobs_df["suite_name"] == a["name"]].html_url.unique()
+            assert (
+                len(html_url) == 1
+            ), f"Artifact suit name {a['name']} did not match any jobs dataframe {jobs_df['suite_name'].unique()}"
+            html_url = html_url[0]
+            assert html_url is not None
             df2 = df.assign(
                 name=a["name"],
                 suite=suite_from_name(a["name"]),
                 date=w["created_at"],
-                html_url=job["html_url"].unique()[0],
+                html_url=html_url,
             )
 
             if df2 is not None:
