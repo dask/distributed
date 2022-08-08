@@ -17,6 +17,7 @@ from queue import Empty
 from time import sleep as sync_sleep
 from typing import TYPE_CHECKING, ClassVar
 
+from toolz import merge
 from tornado import gen
 from tornado.ioloop import IOLoop
 
@@ -82,11 +83,26 @@ class Nanny(ServerNode):
         ensured to be set in the Worker process as well. This argument allows to
         overwrite or otherwise set environment variables for the Worker. It is
         also possible to set environment variables using the option
-        `distributed.nanny.environ`. Precedence as follows
+        ``distributed.nanny.environ``. Precedence as follows
 
             1. Nanny arguments
             2. Existing environment variables
             3. Dask configuration
+
+        Note
+        ----
+        Some environment variables, like ``OMP_NUM_THREADS``, must be set before
+        importing numpy to have effect. Others, like ``MALLOC_TRIM_THRESHOLD_`` (see
+        :ref:`memtrim`), must be set before starting the Linux process. Such variables
+        would be ineffective if set here or in ``distributed.nanny.environ``; they
+        must be set in ``distributed.nanny.pre-spawn-environ`` so that they are set
+        before spawning the subprocess, even if this means poisoning the
+        process running the Nanny.
+
+        For the same reason, be warned that changing
+        ``distributed.worker.multiprocessing-method`` from ``spawn`` to ``fork`` or
+        ``forkserver`` may inhibit some environment variables; if you do, you should
+        set the variables yourself in the shell before you start ``dask-worker``.
 
     See Also
     --------
@@ -96,6 +112,9 @@ class Nanny(ServerNode):
     _instances: ClassVar[weakref.WeakSet[Nanny]] = weakref.WeakSet()
     process = None
     memory_manager: NannyMemoryManager
+
+    env: dict[str, str]
+    pre_spawn_env: dict[str, str]
 
     # Inputs to parse_ports()
     _given_worker_port: int | str | Collection[int] | None
@@ -204,19 +223,14 @@ class Nanny(ServerNode):
         self.death_timeout = parse_timedelta(death_timeout)
 
         self.Worker = Worker if worker_class is None else worker_class
-        config_environ = dask.config.get("distributed.nanny.environ", {})
-        if not isinstance(config_environ, dict):
-            raise TypeError(
-                "distributed.nanny.environ configuration must be of type dict. "
-                f"Instead got {type(config_environ)}"
-            )
-        self.env = config_environ.copy()
-        for k in self.env:
-            if k in os.environ:
-                self.env[k] = os.environ[k]
-        if env:
-            self.env.update(env)
-        self.env = {k: str(v) for k, v in self.env.items()}
+
+        self.pre_spawn_env = _get_env_variables("distributed.nanny.pre-spawn-environ")
+        self.env = merge(
+            self.pre_spawn_env,
+            _get_env_variables("distributed.nanny.environ"),
+            {k: str(v) for k, v in env.items()} if env else {},
+        )
+
         self.config = config or dask.config.config
         worker_kwargs.update(
             {
@@ -401,6 +415,7 @@ class Nanny(ServerNode):
                 on_exit=self._on_worker_exit_sync,
                 worker=self.Worker,
                 env=self.env,
+                pre_spawn_env=self.pre_spawn_env,
                 config=self.config,
             )
 
@@ -600,6 +615,9 @@ class WorkerProcess:
     running: asyncio.Event
     stopped: asyncio.Event
 
+    env: dict[str, str]
+    pre_spawn_env: dict[str, str]
+
     # The interval how often to check the msg queue for init
     _init_msg_interval = 0.05
 
@@ -610,6 +628,7 @@ class WorkerProcess:
         on_exit,
         worker,
         env,
+        pre_spawn_env,
         config,
     ):
         self.status = Status.init
@@ -619,6 +638,7 @@ class WorkerProcess:
         self.process = None
         self.Worker = worker
         self.env = env
+        self.pre_spawn_env = pre_spawn_env
         self.config = config
 
         # Initialized when worker is ready
@@ -659,6 +679,10 @@ class WorkerProcess:
         self.running = asyncio.Event()
         self.stopped = asyncio.Event()
         self.status = Status.starting
+
+        # Set selected environment variables before spawning the subprocess.
+        # See note in Nanny docstring.
+        os.environ.update(self.pre_spawn_env)
 
         try:
             await self.process.start()
@@ -922,3 +946,14 @@ class WorkerProcess:
                     child_stop_q.close()  # usually redundant
                 child_stop_q.join_thread()
                 thread.join(timeout=2)
+
+
+def _get_env_variables(config_key: str) -> dict[str, str]:
+    cfg = dask.config.get(config_key)
+    if not isinstance(cfg, dict):
+        raise TypeError(  # pragma: nocover
+            f"{config_key} configuration must be of type dict. Instead got {type(cfg)}"
+        )
+    # Override dask config with explicitly defined env variables from the OS
+    cfg = {k: os.environ.get(k, str(v)) for k, v in cfg.items()}
+    return cfg

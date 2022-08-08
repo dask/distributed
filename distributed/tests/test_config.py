@@ -337,7 +337,12 @@ def test_schema_is_complete():
     with open(schema_fn) as f:
         schema = yaml.safe_load(f)
 
-    skip = {"default-task-durations", "bokeh-application", "environ"}
+    skip = {
+        "default-task-durations",
+        "bokeh-application",
+        "environ",
+        "pre-spawn-environ",
+    }
 
     def test_matches(c, s):
         if set(c) != set(s["properties"]):
