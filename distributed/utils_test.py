@@ -722,7 +722,7 @@ def gen_test(
     def _(func):
         @functools.wraps(func)
         @config_for_cluster_tests()
-        @clean(**clean_kwargs)
+        @_check_clean(**clean_kwargs)
         def test_func(*args, **kwargs):
             if not iscoroutinefunction(func):
                 raise RuntimeError("gen_test only works for coroutine functions.")
@@ -926,7 +926,7 @@ def gen_cluster(
 
         @functools.wraps(func)
         @config_for_cluster_tests(**{"distributed.comm.timeouts.connect": "5s"})
-        @clean(**clean_kwargs)
+        @_check_clean(**clean_kwargs)
         def test_func(*outer_args, **kwargs):
             async def async_fn():
                 result = None
@@ -1770,7 +1770,8 @@ def config_for_cluster_tests(**extra_config):
 
 
 @contextmanager
-def clean(threads=True, instances=True, processes=True):
+def _check_clean(threads=True, instances=True, processes=True):
+    "Verify resources were not leaked. Use the `cleanup` fixture instead."
     asyncio.set_event_loop(None)
     with check_thread_leak() if threads else nullcontext():
         with check_process_leak(check=processes):
@@ -1780,7 +1781,7 @@ def clean(threads=True, instances=True, processes=True):
 
 @pytest.fixture
 def cleanup():
-    with clean():
+    with _check_clean():
         yield
 
 
