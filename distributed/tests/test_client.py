@@ -4017,7 +4017,7 @@ async def test_serialize_future(s, a, b):
     result = await future
 
     for ci in (c1, c2):
-        for ctxman in ci.as_current, temp_default_client:
+        for ctxman in lambda ci: ci.as_current(), lambda ci: temp_default_client(ci):
             with ctxman(ci):
                 future2 = pickle.loads(pickle.dumps(future))
                 assert future2.client is ci
