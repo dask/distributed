@@ -414,18 +414,22 @@ class RequireEncryptionMixin:
             )
 
 
+_NUMERIC_ONLY = socket.AI_NUMERICHOST | socket.AI_NUMERICSERV
+
+
 async def _getaddrinfo(host, port, *, family, type=socket.SOCK_STREAM):
     # If host and port are numeric, then getaddrinfo doesn't block and we can
-    # skip the whole thread thing, which seems worthwhile. So we try first
-    # with the _NUMERIC_ONLY flags set, and then only spawn a thread if that
-    # fails with EAI_NONAME:
+    # skip get_running_loop().getaddrinfo which is implemented by running in
+    # a ThreadPoolExecutor.
+    # So we try first with the _NUMERIC_ONLY flags set, and then only use the
+    # threadpool if that fails with EAI_NONAME:
     try:
         return socket.getaddrinfo(
             host,
             port,
             family=family,
             type=type,
-            socket.AI_NUMERICHOST | socket.AI_NUMERICSERV,
+            flags=_NUMERIC_ONLY,
         )
     except socket.gaierror as e:
         if e.errno != socket.EAI_NONAME:
