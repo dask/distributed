@@ -44,16 +44,16 @@ async def test_cluster_wait_for_worker(loop):
     with LocalCluster(n_workers=3, loop=loop) as cluster:
         assert all(
             [
-                worker['status'] == "running"
-                for _, worker in cluster.scheduler_info['workers'].items()
+                worker["status"] == "running"
+                for _, worker in cluster.scheduler_info["workers"].items()
             ]
         )
         assert len(cluster.scheduler.workers) == 3
         cluster.wait_for_workers(10)
         assert all(
             [
-                worker['status'] == "running"
-                for _, worker in cluster.scheduler_info['workers'].items()
+                worker["status"] == "running"
+                for _, worker in cluster.scheduler_info["workers"].items()
             ]
         )
         assert len(cluster.scheduler.workers) == 10
