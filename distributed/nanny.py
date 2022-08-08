@@ -95,7 +95,7 @@ class Nanny(ServerNode):
         importing numpy to have effect. Others, like ``MALLOC_TRIM_THRESHOLD_`` (see
         :ref:`memtrim`), must be set before starting the Linux process. Such variables
         would be ineffective if set here or in ``distributed.nanny.environ``; they
-        must be set in ``distributed.nanny.pre-spown-environ`` so that they are set
+        must be set in ``distributed.nanny.pre-spawn-environ`` so that they are set
         before spawning the subprocess, even if this means poisoning the
         process running the Nanny.
 
