@@ -414,11 +414,40 @@ class RequireEncryptionMixin:
             )
 
 
+async def _getaddrinfo(host, port, family, type=socket.SOCK_STREAM):
+    # If host and port are numeric, then getaddrinfo doesn't block and we can
+    # skip the whole thread thing, which seems worthwhile. So we try first
+    # with the _NUMERIC_ONLY flags set, and then only spawn a thread if that
+    # fails with EAI_NONAME:
+    try:
+        return socket.getaddrinfo(
+            host,
+            port,
+            family,
+            type,
+            socket.AI_NUMERICHOST | socket.AI_NUMERICSERV,
+        )
+    except socket.gaierror as e:
+        if e.errno != socket.EAI_NONAME:
+            raise
+
+    # That failed; it's a real hostname. We better use a thread.
+    return await asyncio.get_running_loop().getaddrinfo(
+        host, port, family=family, type=socket.SOCK_STREAM
+    )
+
+
 class _DefaultLoopResolver(netutil.Resolver):
     """
     Resolver implementation using `asyncio.loop.getaddrinfo`.
     backport from Tornado 6.2+
     https://github.com/tornadoweb/tornado/blob/3de78b7a15ba7134917a18b0755ea24d7f8fde94/tornado/netutil.py#L416-L432
+
+    With an additional optimization based on
+    https://github.com/python-trio/trio/blob/4edfd41bd5519a2e626e87f6c6ca9fb32b90a6f4/trio/_socket.py#L125-L192
+    (Copyright Contributors to the Trio project.)
+
+    And proposed to cpython in https://github.com/python/cpython/pull/31497/
     """
 
     async def resolve(
@@ -431,7 +460,7 @@ class _DefaultLoopResolver(netutil.Resolver):
         # so the addresses we return should still be usable with SOCK_DGRAM.
         return [
             (fam, address)
-            for fam, _, _, _, address in await asyncio.get_running_loop().getaddrinfo(
+            for fam, _, _, _, address in await _getaddrinfo(
                 host, port, family=family, type=socket.SOCK_STREAM
             )
         ]
