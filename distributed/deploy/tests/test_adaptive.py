@@ -290,7 +290,7 @@ async def test_no_more_workers_than_tasks():
 
 
 @pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
-def test_basic_no_loop(cleanup):
+def test_basic_no_loop(gonna_run_dask):
     loop = None
     try:
         with LocalCluster(
