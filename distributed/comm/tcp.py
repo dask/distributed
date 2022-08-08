@@ -414,7 +414,7 @@ class RequireEncryptionMixin:
             )
 
 
-async def _getaddrinfo(host, port, family, type=socket.SOCK_STREAM):
+async def _getaddrinfo(host, port, *, family, type=socket.SOCK_STREAM):
     # If host and port are numeric, then getaddrinfo doesn't block and we can
     # skip the whole thread thing, which seems worthwhile. So we try first
     # with the _NUMERIC_ONLY flags set, and then only spawn a thread if that
@@ -423,8 +423,8 @@ async def _getaddrinfo(host, port, family, type=socket.SOCK_STREAM):
         return socket.getaddrinfo(
             host,
             port,
-            family,
-            type,
+            family=family,
+            type=type,
             socket.AI_NUMERICHOST | socket.AI_NUMERICSERV,
         )
     except socket.gaierror as e:
