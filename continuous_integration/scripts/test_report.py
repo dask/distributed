@@ -449,9 +449,6 @@ def main(argv: list[str] | None = None) -> None:
         .configure_axis(labelLimit=1000)  # test names are long
         .configure_title(
             anchor="start",
-            fontSize=18,
-            subtitleFontSize=14,
-            subtitleFontWeight="bold",
             subtitleFont="monospace",
         )
         .resolve_scale(x="shared")  # enforce aligned x axes
