@@ -1542,7 +1542,7 @@ class Worker(BaseWorker, ServerNode):
             if executor is utils._offload_executor:
                 continue  # Never shutdown the offload executor
 
-            def _close(wait):
+            def _close(executor, wait):
                 if isinstance(executor, ThreadPoolExecutor):
                     executor._work_queue.queue.clear()
                     executor.shutdown(wait=wait, timeout=timeout)
@@ -1556,17 +1556,19 @@ class Worker(BaseWorker, ServerNode):
             if is_python_shutting_down():
                 # If we're shutting down there is no need to wait for daemon
                 # threads to finish
-                _close(wait=False)
+                _close(executor=executor, wait=False)
             else:
                 try:
-                    await to_thread(_close, wait=executor_wait)
+                    await to_thread(_close, executor=executor, wait=executor_wait)
                 except RuntimeError:  # Are we shutting down the process?
                     logger.error(
                         "Could not close executor %r by dispatching to thread. Trying synchronously.",
                         executor,
                         exc_info=True,
                     )
-                    _close(wait=executor_wait)  # Just run it directly
+                    _close(
+                        executor=executor, wait=executor_wait
+                    )  # Just run it directly
 
         self.stop()
         await self.rpc.close()
@@ -2164,7 +2166,7 @@ class Worker(BaseWorker, ServerNode):
         try:
             if self.state.validate:
                 assert not ts.waiting_for_data
-                assert ts.state == "executing"
+                assert ts.state == "executing", ts.state
                 assert ts.run_spec is not None
 
             args2, kwargs2 = self._prepare_args_for_execution(ts, args, kwargs)
