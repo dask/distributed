@@ -1789,13 +1789,13 @@ def cleanup():
         " * `loop` + `popen` to call the dask CLIs yourself, and connect a Client to it using the `loop`\n"
         "These methods all will check for resource leaks and set up default config values for you. "
         "If none of these methods work, and you want to continue launching dask your own (likely deprecated) "
-        "way in tests (like calling `Client(..., loop=None)`, then use the `gonna_run_dask` fixture to "
+        "way in tests (like calling `Client(..., loop=None)`, then use the `gonna_run_distributed` fixture to "
         "set config values for tests, and check for resource leaks."
     )
 
 
 @pytest.fixture
-def gonna_run_dask():
+def gonna_run_distributed():
     """
     Fixture for tests which will launch schedulers/workers/clients without other helpers.
 

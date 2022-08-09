@@ -5532,7 +5532,7 @@ async def test_future_auto_inform(c, s, a, b):
 
 
 @pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
-def test_client_async_before_loop_starts(gonna_run_dask):
+def test_client_async_before_loop_starts(gonna_run_distributed):
     async def close():
         async with client:
             pass
