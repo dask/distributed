@@ -74,13 +74,13 @@ jobs:
           keyword: "[skip-caching]"
 
       - name: Get Date
-        if: steps.skip-caching.outputs.triggered != 'true'
+        if: steps.skip-caching.outputs.trigger-found != 'true'
         id: get-date
         run: echo "::set-output name=today::$(/bin/date -u '+%Y%m%d')"
         shell: bash
 
       - name: Cache Conda env
-        if: steps.skip-caching.outputs.triggered != 'true'
+        if: steps.skip-caching.outputs.trigger-found != 'true'
         uses: actions/cache@v2
         with:
           path: ${{ env.CONDA }}/envs
@@ -92,7 +92,7 @@ jobs:
 
       - name: Update environment
         run: mamba env update -n dask-distributed -f ${{ env.CONDA_FILE }}
-        if: steps.skip-caching.outputs.triggered == 'true' || steps.cache.outputs.cache-hit != 'true'
+        if: steps.skip-caching.outputs.trigger-found == 'true' || steps.cache.outputs.cache-hit != 'true'
 
       - name: Install
         shell: bash -l {0}
