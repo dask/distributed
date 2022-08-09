@@ -7551,7 +7551,7 @@ def test_quiet_close_process(processes, tmp_path):
         f.write(client_script % processes)
 
     with popen([sys.executable, tmp_path / "script.py"], capture_output=True) as proc:
-        out, err = proc.communicate(timeout=10)
+        out, err = proc.communicate(timeout=60)
 
     assert not out
     assert not err
