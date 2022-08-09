@@ -567,8 +567,6 @@ class Cluster(SyncMethodMixin):
         return id(self)
 
     async def _wait_for_workers(self, n_workers=0, timeout=None):
-        self.scale(n_workers)
-
         info = self.scheduler_info
         self._scheduler_identity = SchedulerInfo(info)
         if timeout:
