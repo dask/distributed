@@ -3896,10 +3896,10 @@ def test_threaded_get_within_distributed(c):
 
     for get in [dask.local.get_sync, dask.multiprocessing.get, dask.threaded.get]:
 
-        def f():
+        def f(get):
             return get({"x": (lambda: 1,)}, "x")
 
-        future = c.submit(f)
+        future = c.submit(f, get)
         assert future.result() == 1
 
 
@@ -4017,8 +4017,8 @@ async def test_serialize_future(s, a, b):
     result = await future
 
     for ci in (c1, c2):
-        for ctxman in ci.as_current, lambda: temp_default_client(ci):
-            with ctxman():
+        for ctxman in lambda ci: ci.as_current(), lambda ci: temp_default_client(ci):
+            with ctxman(ci):
                 future2 = pickle.loads(pickle.dumps(future))
                 assert future2.client is ci
                 assert stringify(future2.key) in ci.futures
