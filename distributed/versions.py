@@ -105,7 +105,7 @@ def get_package_info(
     return pversions
 
 
-def error_message(scheduler, workers, source, source_name="client"):
+def error_message(scheduler, workers, source, source_name="Client"):
     from distributed.utils import asciitable
 
     source = source.get("packages") if source else "UNKNOWN"
@@ -155,7 +155,7 @@ def error_message(scheduler, workers, source, source_name="client"):
     out = {"warning": "", "error": ""}
 
     if errs:
-        err_table = asciitable(["Package", source_name, "scheduler", "workers"], errs)
+        err_table = asciitable(["Package", source_name, "Scheduler", "Workers"], errs)
         err_msg = f"Mismatched versions found\n\n{err_table}"
         if notes:
             err_msg += "\nNotes: \n{}".format("\n".join(notes))

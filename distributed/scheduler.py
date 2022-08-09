@@ -3754,7 +3754,7 @@ class Scheduler(SchedulerState, ServerNode):
             version_module.get_versions(),
             {w: ws.versions for w, ws in self.workers.items()},
             versions,
-            source_name=f"worker {ws.server_id}",
+            source_name=f"Current worker: {ws.server_id}",
         )
         msg.update(version_warning)
 
