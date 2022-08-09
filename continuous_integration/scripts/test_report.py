@@ -136,7 +136,9 @@ def get_jobs(run):
     return df_jobs
 
 
-def get_workflow_run_listing(repo: str, branch: str, event: str, days: int) -> list[dict]:
+def get_workflow_run_listing(
+    repo: str, branch: str, event: str, days: int
+) -> list[dict]:
     """
     Get a list of workflow runs from GitHub actions.
     """
