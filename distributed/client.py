@@ -1383,7 +1383,7 @@ class Client(SyncMethodMixin):
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        await self._close()
+        await self._close(fast=exc_type is not None)
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
