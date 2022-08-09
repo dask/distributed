@@ -996,8 +996,8 @@ def gen_cluster(
 
                             if cluster_dump_directory:
                                 await dump_cluster_state(
-                                    s,
-                                    ws,
+                                    s=s,
+                                    ws=workers,
                                     output_dir=cluster_dump_directory,
                                     func_name=func.__name__,
                                 )
@@ -1028,15 +1028,15 @@ def gen_cluster(
                                 test_func, "xfail"
                             ):
                                 await dump_cluster_state(
-                                    s,
-                                    ws,
+                                    s=s,
+                                    ws=workers,
                                     output_dir=cluster_dump_directory,
                                     func_name=func.__name__,
                                 )
                             raise
 
                     try:
-                        c = await default_client()
+                        c = default_client()
                     except ValueError:
                         pass
                     else:
