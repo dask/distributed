@@ -59,6 +59,7 @@ async def test_cluster_wait_for_worker(loop):
         assert len(cluster.scheduler.workers) == 10
 
 
+@gen_test()
 async def test_deprecated_loop_properties():
     class ExampleCluster(Cluster):
         def __init__(self, *args, **kwargs):
