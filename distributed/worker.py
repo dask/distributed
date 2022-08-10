@@ -1370,6 +1370,9 @@ class Worker(BaseWorker, ServerNode):
 
         logger.info("      Start worker at: %26s", self.address)
         logger.info("         Listening to: %26s", listening_address)
+        if self.name != self.address_safe:
+            # only if name was not None
+            logger.info("          Worker name: %26s", self.name)
         for k, v in self.service_ports.items():
             logger.info("  {:>16} at: {:>26}".format(k, self.ip + ":" + str(v)))
         logger.info("Waiting to connect to: %26s", self.scheduler.address)
