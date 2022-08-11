@@ -917,12 +917,6 @@ class CancelComputeEvent(StateMachineEvent):
     key: str
 
 
-@dataclass
-class AlreadyCancelledEvent(StateMachineEvent):
-    __slots__ = ("key",)
-    key: str
-
-
 # Not to be confused with RescheduleMsg above or the distributed.Reschedule Exception
 @dataclass
 class RescheduleEvent(StateMachineEvent):
@@ -2932,16 +2926,6 @@ class WorkerState:
         return {ts: "released"}, []
 
     @_handle_event.register
-    def _handle_already_cancelled(self, ev: AlreadyCancelledEvent) -> RecsInstrs:
-        """Task is already cancelled by the time execute() runs"""
-        # key *must* be still in tasks. Releasing it directly is forbidden
-        # without going through cancelled
-        ts = self.tasks.get(ev.key)
-        assert ts, self.story(ev.key)
-        ts.done = True
-        return {ts: "released"}, []
-
-    @_handle_event.register
     def _handle_execute_success(self, ev: ExecuteSuccessEvent) -> RecsInstrs:
         """Task completed successfully"""
         # key *must* be still in tasks. Releasing it directly is forbidden
@@ -3332,18 +3316,16 @@ class BaseWorker(abc.ABC):
         self.state = state
         self._async_instructions = set()
 
-    def _handle_stimulus_from_task(
-        self, task: asyncio.Task[StateMachineEvent | None]
-    ) -> None:
+    def _handle_stimulus_from_task(self, task: asyncio.Task[StateMachineEvent]) -> None:
         """An asynchronous instruction just completed; process the returned stimulus."""
         self._async_instructions.remove(task)
         try:
             # This *should* never raise any other exceptions
             stim = task.result()
         except asyncio.CancelledError:
+            # This should exclusively happen in Worker.close()
             return
-        if stim:
-            self.handle_stimulus(stim)
+        self.handle_stimulus(stim)
 
     def handle_stimulus(self, *stims: StateMachineEvent) -> None:
         """Forward one or more external stimuli to :meth:`WorkerState.handle_stimulus`
@@ -3432,7 +3414,7 @@ class BaseWorker(abc.ABC):
         total_nbytes: int,
         *,
         stimulus_id: str,
-    ) -> StateMachineEvent | None:
+    ) -> StateMachineEvent:
         """Gather dependencies for a task from a worker who has them
 
         Parameters
@@ -3449,12 +3431,12 @@ class BaseWorker(abc.ABC):
         ...
 
     @abc.abstractmethod
-    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent | None:
+    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
         """Execute a task"""
         ...
 
     @abc.abstractmethod
-    async def retry_busy_worker_later(self, worker: str) -> StateMachineEvent | None:
+    async def retry_busy_worker_later(self, worker: str) -> StateMachineEvent:
         """Wait some time, then take a peer worker out of busy state"""
         ...
 

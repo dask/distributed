@@ -2154,6 +2154,7 @@ class BlockedGatherDep(Worker):
     See also
     --------
     BlockedGetData
+    BlockedExecute
     """
 
     def __init__(self, *args, **kwargs):
@@ -2175,6 +2176,7 @@ class BlockedGetData(Worker):
     See also
     --------
     BlockedGatherDep
+    BlockedExecute
     """
 
     def __init__(self, *args, **kwargs):
@@ -2186,6 +2188,69 @@ class BlockedGetData(Worker):
         self.in_get_data.set()
         await self.block_get_data.wait()
         return await super().get_data(comm, *args, **kwargs)
+
+
+class BlockedExecute(Worker):
+    """A Worker that sets event `in_execute` the first time it enters the execute
+    method and then does not proceed, thus leaving the task in executing state
+    indefinitely, until the test sets `block_execute`.
+
+    After that, the worker sets `in_deserialize_task` to simulate the moment when a
+    large run_spec is being deserialized in a separate thread. The worker will block
+    again until the test sets `block_deserialize_task`.
+
+    Finally, the worker sets `in_execute_exit` when execute() terminates, but before the
+    worker state has processed its exit callback. The worker will block one last time
+    until the test sets `block_execute_exit`.
+
+    Note
+    ----
+    In the vast majority of the test cases, it is simpler and more readable to just
+    submit to a regular Worker a task that blocks on a distributed.Event:
+
+    .. code-block:: python
+
+        def f(in_task, block_task):
+            in_task.set()
+            block_task.wait()
+
+        in_task = distributed.Event()
+        block_task = distributed.Event()
+        fut = c.submit(f, in_task, block_task)
+        await in_task.wait()
+        await block_task.set()
+
+    See also
+    --------
+    BlockedGatherDep
+    BlockedGetData
+    """
+
+    def __init__(self, *args, **kwargs):
+        self.in_execute = asyncio.Event()
+        self.block_execute = asyncio.Event()
+        self.in_deserialize_task = asyncio.Event()
+        self.block_deserialize_task = asyncio.Event()
+        self.in_execute_exit = asyncio.Event()
+        self.block_execute_exit = asyncio.Event()
+
+        super().__init__(*args, **kwargs)
+
+    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
+        self.in_execute.set()
+        await self.block_execute.wait()
+        try:
+            return await super().execute(key, stimulus_id=stimulus_id)
+        finally:
+            self.in_execute_exit.set()
+            await self.block_execute_exit.wait()
+
+    async def _maybe_deserialize_task(
+        self, ts: WorkerTaskState
+    ) -> tuple[Callable, tuple, dict[str, Any]]:
+        self.in_deserialize_task.set()
+        await self.block_deserialize_task.wait()
+        return await super()._maybe_deserialize_task(ts)
 
 
 @contextmanager
