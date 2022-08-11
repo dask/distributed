@@ -1918,7 +1918,10 @@ class WorkerState:
         *,
         stimulus_id: str,
     ) -> RecsInstrs:
-        assert ts.previous in ("executing", "long-running")
+        assert ts.previous in (
+            "executing",
+            "long-running",
+        ), f"Expected 'executing' or 'long-running'; got '{ts.previous}'"
         recs, instructions = self._transition_executing_error(
             ts,
             exception,
