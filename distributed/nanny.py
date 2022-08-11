@@ -68,7 +68,7 @@ logger = logging.getLogger(__name__)
 class Nanny(ServerNode):
     """A process to manage worker processes
 
-    The nanny spins up Worker processes, watches then, and kills or restarts
+    The nanny spins up Worker processes, watches them, and kills or restarts
     them as necessary. It is necessary if you want to use the
     ``Client.restart`` method, or to restart the worker automatically if
     it gets to the terminate fraction of its memory limit.
