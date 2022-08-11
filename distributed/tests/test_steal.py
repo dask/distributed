@@ -85,18 +85,18 @@ async def test_steal_cheap_data_slow_computation(c, s, a, b):
     assert abs(len(a.data) - len(b.data)) <= 5
 
 
-@pytest.mark.avoid_ci
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
+@pytest.mark.slow
+@gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_steal_expensive_data_slow_computation(c, s, a, b):
     np = pytest.importorskip("numpy")
 
-    x = c.submit(slowinc, 100, delay=0.2, workers=a.address)
+    x = c.submit(slowinc, 1, delay=0.2, workers=a.address)
     await wait(x)  # learn that slowinc is slow
 
-    x = c.submit(np.arange, 1000000, workers=a.address)  # put expensive data
+    x = c.submit(np.arange, 1_000_000, workers=a.address)  # put expensive data
     await wait(x)
 
-    slow = [c.submit(slowinc, x, delay=0.1, pure=False) for i in range(20)]
+    slow = [c.submit(slowinc, x, delay=0.1, pure=False) for _ in range(20)]
     await wait(slow)
     assert len(s.tasks[x.key].who_has) > 1
 
