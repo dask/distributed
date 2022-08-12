@@ -926,11 +926,24 @@ def gen_cluster(
         @config_for_cluster_tests(**{"distributed.comm.timeouts.connect": "5s"})
         @clean(**clean_kwargs)
         def test_func(*outer_args, **kwargs):
-            async def async_fn():
-                result = None
-                with dask.config.set(config):
-                    workers = []
-                    s = False
+            @contextlib.asynccontextmanager
+            async def _client_factory(s):
+                if client:
+                    async with Client(
+                        s.address,
+                        security=security,
+                        asynchronous=True,
+                        **client_kwargs,
+                    ) as c:
+                        yield c
+                else:
+                    yield
+
+            @contextlib.asynccontextmanager
+            async def _cluster_factory():
+                workers = []
+                s = False
+                try:
 
                     for _ in range(60):
                         try:
@@ -951,81 +964,79 @@ def gen_cluster(
                             await asyncio.sleep(1)
                         else:
                             workers[:] = ws
-                            args = [s] + workers
                             break
                     if s is False:
                         raise Exception("Could not start cluster")
-                    if client:
-                        c = await Client(
-                            s.address,
-                            security=security,
-                            asynchronous=True,
-                            **client_kwargs,
-                        )
-                        args = [c] + args
+                    yield s, workers
+                finally:
+                    await end_cluster(s, workers)
+                    await asyncio.wait_for(cleanup_global_workers(), 1)
+
+            async def async_fn():
+                result = None
+                with dask.config.set(config):
+                    async with _cluster_factory() as (s, workers), _client_factory(
+                        s
+                    ) as c:
+                        args = [s] + workers
+                        if c is not None:
+                            args = [c] + args
+                        try:
+                            coro = func(*args, *outer_args, **kwargs)
+                            task = asyncio.create_task(coro)
+                            coro2 = asyncio.wait_for(asyncio.shield(task), timeout)
+                            result = await coro2
+                            validate_state(s, *workers)
+
+                        except asyncio.TimeoutError:
+                            assert task
+                            buffer = io.StringIO()
+                            # This stack indicates where the coro/test is suspended
+                            task.print_stack(file=buffer)
+
+                            if cluster_dump_directory:
+                                await dump_cluster_state(
+                                    s=s,
+                                    ws=workers,
+                                    output_dir=cluster_dump_directory,
+                                    func_name=func.__name__,
+                                )
+
+                            task.cancel()
+                            while not task.cancelled():
+                                await asyncio.sleep(0.01)
+
+                            # Hopefully, the hang has been caused by inconsistent
+                            # state, which should be much more meaningful than the
+                            # timeout
+                            validate_state(s, *workers)
+
+                            # Remove as much of the traceback as possible; it's
+                            # uninteresting boilerplate from utils_test and asyncio
+                            # and not from the code being tested.
+                            raise asyncio.TimeoutError(
+                                f"Test timeout after {timeout}s.\n"
+                                "========== Test stack trace starts here ==========\n"
+                                f"{buffer.getvalue()}"
+                            ) from None
+
+                        except pytest.xfail.Exception:
+                            raise
+
+                        except Exception:
+                            if cluster_dump_directory and not has_pytestmark(
+                                test_func, "xfail"
+                            ):
+                                await dump_cluster_state(
+                                    s=s,
+                                    ws=workers,
+                                    output_dir=cluster_dump_directory,
+                                    func_name=func.__name__,
+                                )
+                            raise
 
                     try:
-                        coro = func(*args, *outer_args, **kwargs)
-                        task = asyncio.create_task(coro)
-                        coro2 = asyncio.wait_for(asyncio.shield(task), timeout)
-                        result = await coro2
-                        validate_state(s, *workers)
-
-                    except asyncio.TimeoutError:
-                        assert task
-                        buffer = io.StringIO()
-                        # This stack indicates where the coro/test is suspended
-                        task.print_stack(file=buffer)
-
-                        if cluster_dump_directory:
-                            await dump_cluster_state(
-                                s,
-                                ws,
-                                output_dir=cluster_dump_directory,
-                                func_name=func.__name__,
-                            )
-
-                        task.cancel()
-                        while not task.cancelled():
-                            await asyncio.sleep(0.01)
-
-                        # Hopefully, the hang has been caused by inconsistent
-                        # state, which should be much more meaningful than the
-                        # timeout
-                        validate_state(s, *workers)
-
-                        # Remove as much of the traceback as possible; it's
-                        # uninteresting boilerplate from utils_test and asyncio
-                        # and not from the code being tested.
-                        raise asyncio.TimeoutError(
-                            f"Test timeout after {timeout}s.\n"
-                            "========== Test stack trace starts here ==========\n"
-                            f"{buffer.getvalue()}"
-                        ) from None
-
-                    except pytest.xfail.Exception:
-                        raise
-
-                    except Exception:
-                        if cluster_dump_directory and not has_pytestmark(
-                            test_func, "xfail"
-                        ):
-                            await dump_cluster_state(
-                                s,
-                                ws,
-                                output_dir=cluster_dump_directory,
-                                func_name=func.__name__,
-                            )
-                        raise
-
-                    finally:
-                        if client and c.status not in ("closing", "closed"):
-                            await c._close(fast=s.status == Status.closed)
-                        await end_cluster(s, workers)
-                        await asyncio.wait_for(cleanup_global_workers(), 1)
-
-                    try:
-                        c = await default_client()
+                        c = default_client()
                     except ValueError:
                         pass
                     else:
