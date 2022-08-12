@@ -9,7 +9,6 @@ from urllib.parse import urlparse
 
 import pytest
 from tornado.httpclient import AsyncHTTPClient
-from tornado.ioloop import IOLoop
 
 from dask.system import CPU_COUNT
 
