@@ -1,6 +1,7 @@
 {% set major_minor_patch = environ.get('GIT_DESCRIBE_TAG', '0.0.0.dev').split('.') %}
 {% set new_patch = major_minor_patch[2] | int + 1 %}
-{% set version = (major_minor_patch[:2] + [new_patch]) | join('.') + environ.get('VERSION_SUFFIX', '') %}
+{% set next_release_version = (major_minor_patch[:2] + [new_patch]) | join('.') %}
+{% set version = next_release_version + environ.get('VERSION_SUFFIX', '') %}
 {% set dask_version = environ.get('DASK_CORE_VERSION', '0.0.0.dev') %}
 
 
@@ -31,7 +32,7 @@ requirements:
     - click >=6.6
     - cloudpickle >=1.5.0
     - cytoolz >=0.8.2
-    - dask-core >={{ dask_version }}
+    - dask-core >={{ dask_version }},<{{ next_release_version }}
     - jinja2
     - locket >=1.0
     - msgpack-python >=0.6.0
