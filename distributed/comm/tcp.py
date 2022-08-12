@@ -137,7 +137,7 @@ def convert_stream_closed_error(obj, exc):
         # The stream was closed because of an underlying OS error
         exc = exc.real_error
         if isinstance(exc, ssl.SSLError):
-            if "UNKNOWN_CA" in exc.reason:
+            if exc.reason and "UNKNOWN_CA" in exc.reason:
                 raise FatalCommClosedError(f"in {obj}: {exc.__class__.__name__}: {exc}")
         raise CommClosedError(f"in {obj}: {exc.__class__.__name__}: {exc}") from exc
     else:
