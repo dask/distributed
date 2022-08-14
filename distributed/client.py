@@ -1368,7 +1368,6 @@ class Client(SyncMethodMixin):
             ``dask.distributed.TimeoutError``
         """
         try:
-            self.scale(n_workers)
             return self.cluster.wait_for_workers(n_workers, timeout)
         except AttributeError:
             # Most likely, either self.cluster is None, or the cluster has not
