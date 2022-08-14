@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from tornado.ioloop import IOLoop
 
-from distributed import LocalCluster
+from distributed import LocalCluster, Status
 from distributed.deploy.cluster import Cluster
 from distributed.utils_test import gen_test
 
@@ -42,17 +42,12 @@ async def test_logs_deprecated():
 @gen_test()
 async def test_cluster_wait_for_worker(loop):
     with LocalCluster(n_workers=3, loop=loop) as cluster:
-        assert all(
-            [
-                worker["status"] == "running"
-                for _, worker in cluster.scheduler_info["workers"].items()
-            ]
-        )
         assert len(cluster.scheduler.workers) == 3
+        cluster.scale(10)
         cluster.wait_for_workers(10)
         assert all(
             [
-                worker["status"] == "running"
+                worker["status"] == Status.running.name
                 for _, worker in cluster.scheduler_info["workers"].items()
             ]
         )
