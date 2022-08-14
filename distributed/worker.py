@@ -108,7 +108,6 @@ from distributed.worker_memory import (
 from distributed.worker_state_machine import (
     NO_VALUE,
     AcquireReplicasEvent,
-    AlreadyCancelledEvent,
     BaseWorker,
     CancelComputeEvent,
     ComputeTaskEvent,
@@ -1370,6 +1369,9 @@ class Worker(BaseWorker, ServerNode):
 
         logger.info("      Start worker at: %26s", self.address)
         logger.info("         Listening to: %26s", listening_address)
+        if self.name != self.address_safe:
+            # only if name was not None
+            logger.info("          Worker name: %26s", self.name)
         for k, v in self.service_ports.items():
             logger.info("  {:>16} at: {:>26}".format(k, self.ip + ":" + str(v)))
         logger.info("Waiting to connect to: %26s", self.scheduler.address)
@@ -1844,9 +1846,7 @@ class Worker(BaseWorker, ServerNode):
         return _
 
     @fail_hard
-    def _handle_stimulus_from_task(
-        self, task: asyncio.Task[StateMachineEvent | None]
-    ) -> None:
+    def _handle_stimulus_from_task(self, task: asyncio.Task[StateMachineEvent]) -> None:
         """Override BaseWorker method for added validation
 
         See also
@@ -1965,7 +1965,7 @@ class Worker(BaseWorker, ServerNode):
         total_nbytes: int,
         *,
         stimulus_id: str,
-    ) -> StateMachineEvent | None:
+    ) -> StateMachineEvent:
         """Implements BaseWorker abstract method
 
         See also
@@ -1973,7 +1973,14 @@ class Worker(BaseWorker, ServerNode):
         distributed.worker_state_machine.BaseWorker.gather_dep
         """
         if self.status not in WORKER_ANY_RUNNING:
-            return None
+            # This is only for the sake of coherence of the WorkerState;
+            # it should never actually reach the scheduler.
+            return GatherDepFailureEvent.from_exception(
+                RuntimeError("Worker is shutting down"),
+                worker=worker,
+                total_nbytes=total_nbytes,
+                stimulus_id=f"worker-closing-{time()}",
+            )
 
         try:
             self.state.log.append(
@@ -2041,7 +2048,7 @@ class Worker(BaseWorker, ServerNode):
                 stimulus_id=f"gather-dep-failure-{time()}",
             )
 
-    async def retry_busy_worker_later(self, worker: str) -> StateMachineEvent | None:
+    async def retry_busy_worker_later(self, worker: str) -> StateMachineEvent:
         """Wait some time, then take a peer worker out of busy state.
         Implements BaseWorker abstract method.
 
@@ -2134,24 +2141,21 @@ class Worker(BaseWorker, ServerNode):
         return function, args, kwargs
 
     @fail_hard
-    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent | None:
+    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
         """Execute a task. Implements BaseWorker abstract method.
 
         See also
         --------
         distributed.worker_state_machine.BaseWorker.execute
         """
-        if self.status in {Status.closing, Status.closed, Status.closing_gracefully}:
-            return None
-        ts = self.state.tasks.get(key)
-        if not ts:
-            return None
-        if ts.state == "cancelled":
-            logger.debug(
-                "Trying to execute task %s which is not in executing state anymore",
-                ts,
-            )
-            return AlreadyCancelledEvent(key=ts.key, stimulus_id=stimulus_id)
+        if self.status not in WORKER_ANY_RUNNING:
+            # This is just for internal coherence of the WorkerState; the reschedule
+            # message should not ever reach the Scheduler.
+            # It is still OK if it does though.
+            return RescheduleEvent(key=key, stimulus_id=f"worker-closing-{time()}")
+
+        # The key *must* be in the worker state thanks to the cancelled state
+        ts = self.state.tasks[key]
 
         try:
             function, args, kwargs = await self._maybe_deserialize_task(ts)
@@ -2166,7 +2170,7 @@ class Worker(BaseWorker, ServerNode):
         try:
             if self.state.validate:
                 assert not ts.waiting_for_data
-                assert ts.state == "executing", ts.state
+                assert ts.state in ("executing", "cancelled", "resumed"), ts
                 assert ts.run_spec is not None
 
             args2, kwargs2 = self._prepare_args_for_execution(ts, args, kwargs)

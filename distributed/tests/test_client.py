@@ -78,6 +78,7 @@ from distributed.utils import (
     NoOpAwaitable,
     get_mp_context,
     is_valid_xml,
+    open_port,
     sync,
     tmp_text,
 )
@@ -3608,10 +3609,9 @@ async def test_scatter_raises_if_no_workers(c, s):
         await c.scatter(1, timeout=0.5)
 
 
-@pytest.mark.flaky(reruns=2)  # due to random port
 @gen_test()
 async def test_reconnect():
-    port = random.randint(10000, 50000)
+    port = open_port()
 
     async def hard_stop(s):
         for pc in s.periodic_callbacks.values():
@@ -4556,14 +4556,13 @@ async def test_scatter_dict_workers(c, s, a, b):
     assert "a" in a.data or "a" in b.data
 
 
-@pytest.mark.flaky(reruns=2)
 @pytest.mark.slow
 @gen_test()
 async def test_client_timeout():
     """`await Client(...)` keeps retrying for 10 seconds if it can't find the Scheduler
     straight away
     """
-    port = random.randint(10000, 50000)
+    port = open_port()
     with dask.config.set({"distributed.comm.timeouts.connect": "10s"}):
         c = Client(f"127.0.0.1:{port}", asynchronous=True)
         client_start_fut = asyncio.ensure_future(c)
@@ -5725,10 +5724,9 @@ async def test_dashboard_link_inproc():
             assert "/" not in c.dashboard_link
 
 
-@pytest.mark.flaky(reruns=2)
 @gen_test()
 async def test_client_timeout_2():
-    port = random.randint(10000, 50000)
+    port = open_port()
     with dask.config.set({"distributed.comm.timeouts.connect": "10ms"}):
         start = time()
         c = Client(f"127.0.0.1:{port}", asynchronous=True)
@@ -7551,7 +7549,7 @@ def test_quiet_close_process(processes, tmp_path):
         f.write(client_script % processes)
 
     with popen([sys.executable, tmp_path / "script.py"], capture_output=True) as proc:
-        out, err = proc.communicate(timeout=10)
+        out, err = proc.communicate(timeout=60)
 
     assert not out
     assert not err

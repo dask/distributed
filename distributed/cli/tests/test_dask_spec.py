@@ -1,19 +1,17 @@
 from __future__ import annotations
 
-import random
 import sys
 
-import pytest
 import yaml
 
 from distributed import Client
+from distributed.utils import open_port
 from distributed.utils_test import gen_cluster, gen_test, popen
 
 
-@pytest.mark.flaky(reruns=2)
 @gen_test(timeout=120)
 async def test_text():
-    port = random.randint(10000, 50000)
+    port = open_port()
     with popen(
         [
             sys.executable,

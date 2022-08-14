@@ -3752,12 +3752,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         version_warning = version_module.error_message(
             version_module.get_versions(),
-            merge(
-                {w: ws.versions for w, ws in self.workers.items()},
-                {c: cs.versions for c, cs in self.clients.items() if cs.versions},
-            ),
+            {w: ws.versions for w, ws in self.workers.items()},
             versions,
-            client_name="This Worker",
+            source_name=str(ws.server_id),
         )
         msg.update(version_warning)
 

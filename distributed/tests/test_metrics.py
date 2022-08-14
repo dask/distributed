@@ -16,7 +16,7 @@ def test_wall_clock(name):
         # Resolution
         deltas = [sj - si for si, sj in zip(samples[:-1], samples[1:])]
         assert min(deltas) >= 0.0, deltas
-        assert max(deltas) <= 0.001, deltas
+        assert max(deltas) <= 0.005, deltas
         assert any(0.0 < d < 0.0001 for d in deltas), deltas
         # Close to time.time() / time.monotonic()
         assert t - 0.5 < samples[0] < t + 0.5
