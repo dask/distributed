@@ -567,8 +567,8 @@ class Cluster(SyncMethodMixin):
         return id(self)
 
     async def _wait_for_workers(self, n_workers=0, timeout=None):
-        info = self.scheduler_info
-        self._scheduler_identity = SchedulerInfo(info)
+        info = await self.get_worker_status()
+        self._scheduler_identity = info
         if timeout:
             deadline = time() + parse_timedelta(timeout)
         else:
@@ -591,8 +591,15 @@ class Cluster(SyncMethodMixin):
                 )
             await asyncio.sleep(0.1)
 
-            info = self.scheduler_info
-            self._scheduler_identity = SchedulerInfo(info)
+            info = await self.get_worker_status()
+            self._scheduler_identity = info
+
+    async def get_worker_status(self):
+        comm = await self.scheduler_comm.live_comm()
+        comm.name = "Cluster worker status"
+        await comm.write({"op": "identity"})
+        self.scheduler_info = await comm.read()
+        return SchedulerInfo(self.scheduler_info)
 
     def wait_for_workers(self, n_workers=0, timeout=None):
         """Blocking call to wait for n workers before continuing
