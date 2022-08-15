@@ -32,7 +32,7 @@ class LocalCluster(SpecCluster):
         Number of workers to start
     memory_limit: str, float, int, or None, default "auto"
         Sets the memory limit *per worker*.
-        Notes regarding argument data type: 
+        Notes regarding argument data type:
         If None or 0, no limit is applied.
         If "auto", the total system memory is split evenly between the workers.
         If a float, that fraction of the system memory is used *per worker*.
@@ -110,6 +110,7 @@ class LocalCluster(SpecCluster):
     def __init__(
         self,
         name=None,
+        memory_limit=None,
         n_workers=None,
         threads_per_worker=None,
         processes=None,
