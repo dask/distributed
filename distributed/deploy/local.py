@@ -32,7 +32,8 @@ class LocalCluster(SpecCluster):
         Number of workers to start
     memory_limit: str, float, int, or None, default "auto"
         Sets the memory limit *per worker*.
-        Notes regarding argument data type: If None or 0, no limit is applied.
+        Notes regarding argument data type: 
+        If None or 0, no limit is applied.
         If "auto", the total system memory is split evenly between the workers.
         If a float, that fraction of the system memory is used *per worker*.
         If a string giving a number of bytes (like ``"1GiB"``), that amount is used *per worker*.
