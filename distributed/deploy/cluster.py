@@ -15,7 +15,7 @@ import dask.config
 from dask.utils import _deprecated, format_bytes, parse_timedelta, typename
 from dask.widgets import get_template
 
-from distributed.comm.tcp import TCP
+from distributed.comm import Comm
 from distributed.core import Status
 from distributed.deploy.adaptive import Adaptive
 from distributed.metrics import time
@@ -600,7 +600,7 @@ class Cluster(SyncMethodMixin):
             info = SchedulerInfo(self.scheduler_info)
             self._scheduler_identity = info
 
-    async def update_scheduler_info(self, comm_name: str, op: str) -> TCP:
+    async def update_scheduler_info(self, comm_name: str, op: str) -> Comm:
         """Send comm to scheduler requesting information and update scheduler_info accordingly
 
         Parameters
