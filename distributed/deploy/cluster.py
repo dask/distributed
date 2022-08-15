@@ -15,6 +15,7 @@ import dask.config
 from dask.utils import _deprecated, format_bytes, parse_timedelta, typename
 from dask.widgets import get_template
 
+from distributed.comm.tcp import TCP
 from distributed.core import Status
 from distributed.deploy.adaptive import Adaptive
 from distributed.metrics import time
@@ -119,10 +120,9 @@ class Cluster(SyncMethodMixin):
         self._cluster_info["name"] = name
 
     async def _start(self):
-        comm = await self.scheduler_comm.live_comm()
-        comm.name = "Cluster worker status"
-        await comm.write({"op": "subscribe_worker_status"})
-        self.scheduler_info = SchedulerInfo(await comm.read())
+        comm = await self.update_scheduler_info(
+            comm_name="Cluster worker status", op="subscribe_worker_status"
+        )
         self._watch_worker_status_comm = comm
         self._watch_worker_status_task = asyncio.ensure_future(
             self._watch_worker_status(comm)
@@ -567,7 +567,10 @@ class Cluster(SyncMethodMixin):
         return id(self)
 
     async def _wait_for_workers(self, n_workers=0, timeout=None):
-        info = await self.get_worker_status()
+        await self.update_scheduler_info(
+            comm_name="Cluster worker status", op="identity"
+        )
+        info = SchedulerInfo(self.scheduler_info)
         self._scheduler_identity = info
         if timeout:
             deadline = time() + parse_timedelta(timeout)
@@ -591,15 +594,32 @@ class Cluster(SyncMethodMixin):
                 )
             await asyncio.sleep(0.1)
 
-            info = await self.get_worker_status()
+            await self.update_scheduler_info(
+                comm_name="Cluster worker status", op="identity"
+            )
+            info = SchedulerInfo(self.scheduler_info)
             self._scheduler_identity = info
 
-    async def get_worker_status(self):
+    async def update_scheduler_info(self, comm_name: str, op: str) -> TCP:
+        """Send comm to scheduler requesting information and update scheduler_info accordingly
+
+        Parameters
+        ----------
+        comm_name : string
+            Name of communication, e.g. "Cluster worker status"
+        op : string
+            Name of operation, e.g. "identity"
+
+        Returns
+        -------
+        comm : distributed.comm.tcp.TCP
+            Comm to the scheduler
+        """
         comm = await self.scheduler_comm.live_comm()
-        comm.name = "Cluster worker status"
-        await comm.write({"op": "identity"})
+        comm.name = comm_name
+        await comm.write({"op": op})
         self.scheduler_info = await comm.read()
-        return SchedulerInfo(self.scheduler_info)
+        return comm
 
     def wait_for_workers(self, n_workers=0, timeout=None):
         """Blocking call to wait for n workers before continuing
