@@ -4,6 +4,7 @@ import asyncio
 import concurrent.futures
 import contextlib
 import copy
+import errno
 import functools
 import gc
 import inspect
@@ -15,6 +16,7 @@ import os
 import re
 import signal
 import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -58,25 +60,28 @@ from distributed.nanny import Nanny
 from distributed.node import ServerNode
 from distributed.proctitle import enable_proctitle_on_children
 from distributed.protocol import deserialize
+from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.security import Security
 from distributed.utils import (
     DequeHandler,
     _offload_executor,
     get_ip,
     get_ipv6,
+    get_mp_context,
     iscoroutinefunction,
     log_errors,
-    mp_context,
     reset_logger_locks,
-    sync,
 )
 from distributed.worker import WORKER_ANY_RUNNING, Worker
-from distributed.worker_state_machine import InvalidTransition
-
-try:
-    import ssl
-except ImportError:
-    ssl = None  # type: ignore
+from distributed.worker_state_machine import (
+    ComputeTaskEvent,
+    Execute,
+    InvalidTransition,
+    SecedeEvent,
+    StateMachineEvent,
+)
+from distributed.worker_state_machine import TaskState as WorkerTaskState
+from distributed.worker_state_machine import WorkerState
 
 try:
     import dask.array  # register config
@@ -106,68 +111,14 @@ _TEST_TIMEOUT = 30
 _offload_executor.submit(lambda: None).result()  # create thread during import
 
 
-@pytest.fixture(scope="session")
-def valid_python_script(tmpdir_factory):
-    local_file = tmpdir_factory.mktemp("data").join("file.py")
-    local_file.write("print('hello world!')")
-    return local_file
-
-
-@pytest.fixture(scope="session")
-def client_contract_script(tmpdir_factory):
-    local_file = tmpdir_factory.mktemp("data").join("distributed_script.py")
-    lines = (
-        "from distributed import Client",
-        "e = Client('127.0.0.1:8989')",
-        "print(e)",
-    )
-    local_file.write("\n".join(lines))
-    return local_file
-
-
-@pytest.fixture(scope="session")
-def invalid_python_script(tmpdir_factory):
-    local_file = tmpdir_factory.mktemp("data").join("file.py")
-    local_file.write("a+1")
-    return local_file
-
-
 async def cleanup_global_workers():
     for worker in Worker._instances:
         await worker.close(executor_wait=False)
 
 
 @pytest.fixture
-def loop(cleanup):
-    with check_instances():
-        with pristine_loop() as loop:
-            # Monkey-patch IOLoop.start to wait for loop stop
-            orig_start = loop.start
-            is_stopped = threading.Event()
-            is_stopped.set()
-
-            def start():
-                is_stopped.clear()
-                try:
-                    orig_start()
-                finally:
-                    is_stopped.set()
-
-            loop.start = start
-
-            yield loop
-
-            # Stop the loop in case it's still running
-            try:
-                sync(loop, cleanup_global_workers, callback_timeout=0.500)
-                loop.add_callback(loop.stop)
-            except RuntimeError as e:
-                if not re.match("IOLoop is clos(ed|ing)", str(e)):
-                    raise
-            except asyncio.TimeoutError:
-                pass
-            else:
-                is_stopped.wait()
+def loop(loop_in_thread):
+    return loop_in_thread
 
 
 @pytest.fixture
@@ -175,7 +126,7 @@ def loop_in_thread(cleanup):
     loop_started = concurrent.futures.Future()
     with concurrent.futures.ThreadPoolExecutor(
         1, thread_name_prefix="test IOLoop"
-    ) as tpe:
+    ) as tpe, config_for_cluster_tests():
 
         async def run():
             io_loop = IOLoop.current()
@@ -200,15 +151,6 @@ def loop_in_thread(cleanup):
                 # the loop failed to close and we need to raise the exception
                 ran.result()
                 return
-
-
-@pytest.fixture
-def zmq_ctx():
-    import zmq
-
-    ctx = zmq.Context.instance()
-    yield ctx
-    ctx.destroy(linger=0)
 
 
 @contextmanager
@@ -292,13 +234,6 @@ def div(x, y):
     return x / y
 
 
-def deep(n):
-    if n > 0:
-        return deep(n - 1)
-    else:
-        return True
-
-
 def throws(x):
     raise RuntimeError("hello!")
 
@@ -346,6 +281,11 @@ def slowidentity(*args, **kwargs):
         return args[0]
     else:
         return args
+
+
+def lock_inc(x, lock):
+    with lock:
+        return x + 1
 
 
 class _UnhashableCallable:
@@ -419,47 +359,9 @@ def map_varying(itemslists):
     return apply, list(map(varying, itemslists))
 
 
-async def geninc(x, delay=0.02):
-    await asyncio.sleep(delay)
-    return x + 1
-
-
 async def asyncinc(x, delay=0.02):
     await asyncio.sleep(delay)
     return x + 1
-
-
-_readone_queues: dict[Any, asyncio.Queue] = {}
-
-
-async def readone(comm):
-    """
-    Read one message at a time from a comm that reads lists of
-    messages.
-    """
-    try:
-        q = _readone_queues[comm]
-    except KeyError:
-        q = _readone_queues[comm] = asyncio.Queue()
-
-        async def background_read():
-            while True:
-                try:
-                    messages = await comm.read()
-                except CommClosedError:
-                    break
-                for msg in messages:
-                    q.put_nowait(msg)
-            q.put_nowait(None)
-            del _readone_queues[comm]
-
-        background_read()
-
-    msg = await q.get()
-    if msg is None:
-        raise CommClosedError
-    else:
-        return msg
 
 
 def _run_and_close_tornado(async_fn, /, *args, **kwargs):
@@ -485,10 +387,10 @@ def run_scheduler(q, nputs, config, port=0, **kwargs):
                     validate=True, host="127.0.0.1", port=port, **kwargs
                 )
             except Exception as exc:
-                for i in range(nputs):
+                for _ in range(nputs):
                     q.put(exc)
             else:
-                for i in range(nputs):
+                for _ in range(nputs):
                     q.put(scheduler.address)
                 await scheduler.finished()
 
@@ -666,9 +568,13 @@ def security():
     return tls_only_security()
 
 
-def _terminate_join(proc):
-    proc.terminate()
-    proc.join()
+def _kill_join(proc, timeout):
+    proc.kill()
+    proc.join(timeout)
+    if proc.is_alive():
+        raise multiprocessing.TimeoutError(
+            f"Process {proc} did not shut down within {timeout}s"
+        )
     proc.close()
 
 
@@ -678,33 +584,24 @@ def _close_queue(q):
     q._writer.close()  # https://bugs.python.org/issue42752
 
 
-class _SafeTemporaryDirectory(tempfile.TemporaryDirectory):
-    def __exit__(self, exc_type, exc_value, traceback):
-        try:
-            return super().__exit__(exc_type, exc_value, traceback)
-        except (PermissionError, NotADirectoryError):
-            # It appears that we either have a process still interacting with
-            # the tmpdirs of the workers or that win process are not releasing
-            # their lock in time. We are receiving PermissionErrors during
-            # teardown
-            # See also https://github.com/dask/distributed/pull/5825
-            pass
-
-
 @contextmanager
 def cluster(
     nworkers=2,
     nanny=False,
-    worker_kwargs={},
+    worker_kwargs=None,
     active_rpc_timeout=10,
-    disconnect_timeout=20,
-    scheduler_kwargs={},
-    config={},
+    shutdown_timeout=20,
+    scheduler_kwargs=None,
+    config=None,
 ):
+    worker_kwargs = worker_kwargs or {}
+    scheduler_kwargs = scheduler_kwargs or {}
+    config = config or {}
+
     ws = weakref.WeakSet()
     enable_proctitle_on_children()
 
-    with check_process_leak(check=True), check_instances(), _reconfigure():
+    with check_process_leak(check=True), check_instances(), config_for_cluster_tests():
         if nanny:
             _run_worker = run_nanny
         else:
@@ -712,11 +609,11 @@ def cluster(
 
         with contextlib.ExitStack() as stack:
             # The scheduler queue will receive the scheduler's address
-            scheduler_q = mp_context.Queue()
+            scheduler_q = get_mp_context().Queue()
             stack.callback(_close_queue, scheduler_q)
 
             # Launch scheduler
-            scheduler = mp_context.Process(
+            scheduler = get_mp_context().Process(
                 name="Dask cluster test: Scheduler",
                 target=run_scheduler,
                 args=(scheduler_q, nworkers + 1, config),
@@ -725,25 +622,21 @@ def cluster(
             )
             ws.add(scheduler)
             scheduler.start()
-            stack.callback(_terminate_join, scheduler)
+            stack.callback(_kill_join, scheduler, shutdown_timeout)
 
             # Launch workers
             workers_by_pid = {}
-            q = mp_context.Queue()
+            q = get_mp_context().Queue()
             stack.callback(_close_queue, q)
             for _ in range(nworkers):
-                tmpdirname = stack.enter_context(
-                    _SafeTemporaryDirectory(prefix="_dask_test_worker")
-                )
                 kwargs = merge(
                     {
                         "nthreads": 1,
-                        "local_directory": tmpdirname,
                         "memory_limit": system.MEMORY_LIMIT,
                     },
                     worker_kwargs,
                 )
-                proc = mp_context.Process(
+                proc = get_mp_context().Process(
                     name="Dask cluster test: Worker",
                     target=_run_worker,
                     args=(q, scheduler_q, config),
@@ -751,7 +644,7 @@ def cluster(
                 )
                 ws.add(proc)
                 proc.start()
-                stack.callback(_terminate_join, proc)
+                stack.callback(_kill_join, proc, shutdown_timeout)
                 workers_by_pid[proc.pid] = {"proc": proc}
 
             saddr_or_exception = scheduler_q.get()
@@ -767,50 +660,27 @@ def cluster(
 
             start = time()
             try:
-                try:
-                    security = scheduler_kwargs["security"]
-                    rpc_kwargs = {
-                        "connection_args": security.get_connection_args("client")
-                    }
-                except KeyError:
-                    rpc_kwargs = {}
+                security = scheduler_kwargs["security"]
+                rpc_kwargs = {"connection_args": security.get_connection_args("client")}
+            except KeyError:
+                rpc_kwargs = {}
 
-                async def wait_for_workers():
-                    async with rpc(saddr, **rpc_kwargs) as s:
-                        while True:
-                            nthreads = await s.ncores_running()
-                            if len(nthreads) == nworkers:
-                                break
-                            if time() - start > 5:
-                                raise Exception("Timeout on cluster creation")
+            async def wait_for_workers():
+                async with rpc(saddr, **rpc_kwargs) as s:
+                    while True:
+                        nthreads = await s.ncores_running()
+                        if len(nthreads) == nworkers:
+                            break
+                        if time() - start > 5:
+                            raise Exception("Timeout on cluster creation")
 
-                _run_and_close_tornado(wait_for_workers)
+            _run_and_close_tornado(wait_for_workers)
 
-                # avoid sending processes down to function
-                yield {"address": saddr}, [
-                    {"address": w["address"], "proc": weakref.ref(w["proc"])}
-                    for w in workers_by_pid.values()
-                ]
-            finally:
-
-                async def close():
-                    logger.debug("Closing out test cluster")
-                    alive_workers = [
-                        w["address"]
-                        for w in workers_by_pid.values()
-                        if w["proc"].is_alive()
-                    ]
-                    await disconnect_all(
-                        alive_workers,
-                        timeout=disconnect_timeout,
-                        rpc_kwargs=rpc_kwargs,
-                    )
-                    if scheduler.is_alive():
-                        await disconnect(
-                            saddr, timeout=disconnect_timeout, rpc_kwargs=rpc_kwargs
-                        )
-
-                _run_and_close_tornado(close)
+            # avoid sending processes down to function
+            yield {"address": saddr}, [
+                {"address": w["address"], "proc": weakref.ref(w["proc"])}
+                for w in workers_by_pid.values()
+            ]
         try:
             client = default_client()
         except ValueError:
@@ -819,29 +689,9 @@ def cluster(
             client.close()
 
 
-async def disconnect(addr, timeout=3, rpc_kwargs=None):
-    rpc_kwargs = rpc_kwargs or {}
-
-    async def do_disconnect():
-        async with rpc(addr, **rpc_kwargs) as w:
-            # If the worker was killed hard (e.g. sigterm) during test runtime,
-            # we do not know at this point and may not be able to connect
-            with suppress(EnvironmentError, CommClosedError):
-                # Do not request a reply since comms will be closed by the
-                # worker before a reply can be made and we will always trigger
-                # the timeout
-                await w.terminate(reply=False)
-
-    await asyncio.wait_for(do_disconnect(), timeout=timeout)
-
-
-async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
-    await asyncio.gather(*(disconnect(addr, timeout, rpc_kwargs) for addr in addresses))
-
-
 def gen_test(
     timeout: float = _TEST_TIMEOUT,
-    clean_kwargs: dict[str, Any] = {},
+    clean_kwargs: dict[str, Any] | None = None,
 ) -> Callable[[Callable], Callable]:
     """Coroutine test
 
@@ -855,6 +705,7 @@ def gen_test(
     async def test_foo():
         await ...  # use tornado coroutines
     """
+    clean_kwargs = clean_kwargs or {}
     assert timeout, (
         "timeout should always be set and it should be smaller than the global one from"
         "pytest-timeout"
@@ -870,6 +721,7 @@ def gen_test(
 
     def _(func):
         @functools.wraps(func)
+        @config_for_cluster_tests()
         @clean(**clean_kwargs)
         def test_func(*args, **kwargs):
             if not iscoroutinefunction(func):
@@ -889,9 +741,12 @@ async def start_cluster(
     scheduler_addr: str,
     security: Security | dict[str, Any] | None = None,
     Worker: type[ServerNode] = Worker,
-    scheduler_kwargs: dict[str, Any] = {},
-    worker_kwargs: dict[str, Any] = {},
+    scheduler_kwargs: dict[str, Any] | None = None,
+    worker_kwargs: dict[str, Any] | None = None,
 ) -> tuple[Scheduler, list[ServerNode]]:
+    scheduler_kwargs = scheduler_kwargs or {}
+    worker_kwargs = worker_kwargs or {}
+
     s = await Scheduler(
         validate=True,
         security=security,
@@ -940,7 +795,7 @@ def check_invalid_worker_transitions(s: Scheduler) -> None:
     if not s.events.get("invalid-worker-transition"):
         return
 
-    for timestamp, msg in s.events["invalid-worker-transition"]:
+    for _, msg in s.events["invalid-worker-transition"]:
         worker = msg.pop("worker")
         print("Worker:", worker)
         print(InvalidTransition(**msg))
@@ -954,7 +809,7 @@ def check_invalid_task_states(s: Scheduler) -> None:
     if not s.events.get("invalid-worker-task-state"):
         return
 
-    for timestamp, msg in s.events["invalid-worker-task-state"]:
+    for _, msg in s.events["invalid-worker-task-state"]:
         print("Worker:", msg["worker"])
         print("State:", msg["state"])
         for line in msg["story"]:
@@ -967,13 +822,14 @@ def check_worker_fail_hard(s: Scheduler) -> None:
     if not s.events.get("worker-fail-hard"):
         return
 
-    for timestamp, msg in s.events["worker-fail-hard"]:
+    for _, msg in s.events["worker-fail-hard"]:
         msg = msg.copy()
         worker = msg.pop("worker")
         msg["exception"] = deserialize(msg["exception"].header, msg["exception"].frames)
         msg["traceback"] = deserialize(msg["traceback"].header, msg["traceback"].frames)
         print("Failed worker", worker)
-        typ, exc, tb = clean_exception(**msg)
+        _, exc, tb = clean_exception(**msg)
+        assert exc
         raise exc.with_traceback(tb)
 
 
@@ -993,21 +849,18 @@ async def end_cluster(s, workers):
 
 
 def gen_cluster(
-    nthreads: list[tuple[str, int] | tuple[str, int, dict]] = [
-        ("127.0.0.1", 1),
-        ("127.0.0.1", 2),
-    ],
-    scheduler="127.0.0.1",
+    nthreads: list[tuple[str, int] | tuple[str, int, dict]] | None = None,
+    scheduler: str = "127.0.0.1",
     timeout: float = _TEST_TIMEOUT,
     security: Security | dict[str, Any] | None = None,
     Worker: type[ServerNode] = Worker,
     client: bool = False,
-    scheduler_kwargs: dict[str, Any] = {},
-    worker_kwargs: dict[str, Any] = {},
-    client_kwargs: dict[str, Any] = {},
+    scheduler_kwargs: dict[str, Any] | None = None,
+    worker_kwargs: dict[str, Any] | None = None,
+    client_kwargs: dict[str, Any] | None = None,
     active_rpc_timeout: float = 1,
-    config: dict[str, Any] = {},
-    clean_kwargs: dict[str, Any] = {},
+    config: dict[str, Any] | None = None,
+    clean_kwargs: dict[str, Any] | None = None,
     allow_unclosed: bool = False,
     cluster_dump_directory: str | Literal[False] = "test_cluster_dump",
 ) -> Callable[[Callable], Callable]:
@@ -1032,6 +885,17 @@ def gen_cluster(
         start
         end
     """
+    if nthreads is None:
+        nthreads = [
+            ("127.0.0.1", 1),
+            ("127.0.0.1", 2),
+        ]
+    scheduler_kwargs = scheduler_kwargs or {}
+    worker_kwargs = worker_kwargs or {}
+    client_kwargs = client_kwargs or {}
+    config = config or {}
+    clean_kwargs = clean_kwargs or {}
+
     assert timeout, (
         "timeout should always be set and it should be smaller than the global one from"
         "pytest-timeout"
@@ -1061,148 +925,145 @@ def gen_cluster(
             raise RuntimeError("gen_cluster only works for coroutine functions.")
 
         @functools.wraps(func)
+        @config_for_cluster_tests(**{"distributed.comm.timeouts.connect": "5s"})
         @clean(**clean_kwargs)
         def test_func(*outer_args, **kwargs):
             async def async_fn():
                 result = None
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    config2 = merge({"temporary-directory": tmpdir}, config)
-                    with dask.config.set(config2):
-                        workers = []
-                        s = False
+                with dask.config.set(config):
+                    workers = []
+                    s = False
 
-                        for _ in range(60):
-                            try:
-                                s, ws = await start_cluster(
-                                    nthreads,
-                                    scheduler,
-                                    security=security,
-                                    Worker=Worker,
-                                    scheduler_kwargs=scheduler_kwargs,
-                                    worker_kwargs=worker_kwargs,
-                                )
-                            except Exception as e:
-                                logger.error(
-                                    "Failed to start gen_cluster: "
-                                    f"{e.__class__.__name__}: {e}; retrying",
-                                    exc_info=True,
-                                )
-                                await asyncio.sleep(1)
-                            else:
-                                workers[:] = ws
-                                args = [s] + workers
-                                break
-                        if s is False:
-                            raise Exception("Could not start cluster")
-                        if client:
-                            c = await Client(
-                                s.address,
+                    for _ in range(60):
+                        try:
+                            s, ws = await start_cluster(
+                                nthreads,
+                                scheduler,
                                 security=security,
-                                asynchronous=True,
-                                **client_kwargs,
+                                Worker=Worker,
+                                scheduler_kwargs=scheduler_kwargs,
+                                worker_kwargs=worker_kwargs,
                             )
-                            args = [c] + args
-
-                        try:
-                            coro = func(*args, *outer_args, **kwargs)
-                            task = asyncio.create_task(coro)
-                            coro2 = asyncio.wait_for(asyncio.shield(task), timeout)
-                            result = await coro2
-                            validate_state(s, *workers)
-
-                        except asyncio.TimeoutError:
-                            assert task
-                            buffer = io.StringIO()
-                            # This stack indicates where the coro/test is suspended
-                            task.print_stack(file=buffer)
-
-                            if cluster_dump_directory:
-                                await dump_cluster_state(
-                                    s,
-                                    ws,
-                                    output_dir=cluster_dump_directory,
-                                    func_name=func.__name__,
-                                )
-
-                            task.cancel()
-                            while not task.cancelled():
-                                await asyncio.sleep(0.01)
-
-                            # Hopefully, the hang has been caused by inconsistent
-                            # state, which should be much more meaningful than the
-                            # timeout
-                            validate_state(s, *workers)
-
-                            # Remove as much of the traceback as possible; it's
-                            # uninteresting boilerplate from utils_test and asyncio
-                            # and not from the code being tested.
-                            raise asyncio.TimeoutError(
-                                f"Test timeout after {timeout}s.\n"
-                                "========== Test stack trace starts here ==========\n"
-                                f"{buffer.getvalue()}"
-                            ) from None
-
-                        except pytest.xfail.Exception:
-                            raise
-
-                        except Exception:
-                            if cluster_dump_directory and not has_pytestmark(
-                                test_func, "xfail"
-                            ):
-                                await dump_cluster_state(
-                                    s,
-                                    ws,
-                                    output_dir=cluster_dump_directory,
-                                    func_name=func.__name__,
-                                )
-                            raise
-
-                        finally:
-                            if client and c.status not in ("closing", "closed"):
-                                await c._close(fast=s.status == Status.closed)
-                            await end_cluster(s, workers)
-                            await asyncio.wait_for(cleanup_global_workers(), 1)
-
-                        try:
-                            c = await default_client()
-                        except ValueError:
-                            pass
+                        except Exception as e:
+                            logger.error(
+                                "Failed to start gen_cluster: "
+                                f"{e.__class__.__name__}: {e}; retrying",
+                                exc_info=True,
+                            )
+                            await asyncio.sleep(1)
                         else:
-                            await c._close(fast=True)
+                            workers[:] = ws
+                            args = [s] + workers
+                            break
+                    if s is False:
+                        raise Exception("Could not start cluster")
+                    if client:
+                        c = await Client(
+                            s.address,
+                            security=security,
+                            asynchronous=True,
+                            **client_kwargs,
+                        )
+                        args = [c] + args
 
-                        def get_unclosed():
-                            return [c for c in Comm._instances if not c.closed()] + [
-                                c
-                                for c in _global_clients.values()
-                                if c.status != "closed"
-                            ]
+                    try:
+                        coro = func(*args, *outer_args, **kwargs)
+                        task = asyncio.create_task(coro)
+                        coro2 = asyncio.wait_for(asyncio.shield(task), timeout)
+                        result = await coro2
+                        validate_state(s, *workers)
 
-                        try:
-                            start = time()
-                            while time() < start + 60:
-                                gc.collect()
-                                if not get_unclosed():
-                                    break
-                                await asyncio.sleep(0.05)
+                    except asyncio.TimeoutError:
+                        assert task
+                        buffer = io.StringIO()
+                        # This stack indicates where the coro/test is suspended
+                        task.print_stack(file=buffer)
+
+                        if cluster_dump_directory:
+                            await dump_cluster_state(
+                                s,
+                                ws,
+                                output_dir=cluster_dump_directory,
+                                func_name=func.__name__,
+                            )
+
+                        task.cancel()
+                        while not task.cancelled():
+                            await asyncio.sleep(0.01)
+
+                        # Hopefully, the hang has been caused by inconsistent
+                        # state, which should be much more meaningful than the
+                        # timeout
+                        validate_state(s, *workers)
+
+                        # Remove as much of the traceback as possible; it's
+                        # uninteresting boilerplate from utils_test and asyncio
+                        # and not from the code being tested.
+                        raise asyncio.TimeoutError(
+                            f"Test timeout after {timeout}s.\n"
+                            "========== Test stack trace starts here ==========\n"
+                            f"{buffer.getvalue()}"
+                        ) from None
+
+                    except pytest.xfail.Exception:
+                        raise
+
+                    except Exception:
+                        if cluster_dump_directory and not has_pytestmark(
+                            test_func, "xfail"
+                        ):
+                            await dump_cluster_state(
+                                s,
+                                ws,
+                                output_dir=cluster_dump_directory,
+                                func_name=func.__name__,
+                            )
+                        raise
+
+                    finally:
+                        if client and c.status not in ("closing", "closed"):
+                            await c._close(fast=s.status == Status.closed)
+                        await end_cluster(s, workers)
+                        await asyncio.wait_for(cleanup_global_workers(), 1)
+
+                    try:
+                        c = await default_client()
+                    except ValueError:
+                        pass
+                    else:
+                        await c._close(fast=True)
+
+                    def get_unclosed():
+                        return [c for c in Comm._instances if not c.closed()] + [
+                            c for c in _global_clients.values() if c.status != "closed"
+                        ]
+
+                    try:
+                        start = time()
+                        while time() < start + 60:
+                            gc.collect()
+                            if not get_unclosed():
+                                break
+                            await asyncio.sleep(0.05)
+                        else:
+                            if allow_unclosed:
+                                print(f"Unclosed Comms: {get_unclosed()}")
                             else:
-                                if allow_unclosed:
-                                    print(f"Unclosed Comms: {get_unclosed()}")
-                                else:
-                                    raise RuntimeError("Unclosed Comms", get_unclosed())
-                        finally:
-                            Comm._instances.clear()
-                            _global_clients.clear()
+                                raise RuntimeError("Unclosed Comms", get_unclosed())
+                    finally:
+                        Comm._instances.clear()
+                        _global_clients.clear()
 
-                            for w in workers:
-                                if getattr(w, "data", None):
-                                    try:
-                                        w.data.clear()
-                                    except OSError:
-                                        # zict backends can fail if their storage directory
-                                        # was already removed
-                                        pass
+                        for w in workers:
+                            if getattr(w, "data", None):
+                                try:
+                                    w.data.clear()
+                                except OSError:
+                                    # zict backends can fail if their storage directory
+                                    # was already removed
+                                    pass
 
-                        return result
+                    return result
 
             async def async_fn_outer():
                 async with _acheck_active_rpc(active_rpc_timeout=active_rpc_timeout):
@@ -1278,22 +1139,14 @@ def validate_state(*servers: Scheduler | Worker | Nanny) -> None:
             s.validate_state()
 
 
-def raises(func, exc=Exception):
-    try:
-        func()
-        return False
-    except exc:
-        return True
-
-
-def _terminate_process(proc: subprocess.Popen) -> None:
+def _terminate_process(proc: subprocess.Popen, terminate_timeout: float) -> None:
     if proc.poll() is None:
         if sys.platform.startswith("win"):
             proc.send_signal(signal.CTRL_BREAK_EVENT)
         else:
             proc.send_signal(signal.SIGINT)
         try:
-            proc.communicate(timeout=30)
+            proc.communicate(timeout=terminate_timeout)
         finally:
             # Make sure we don't leave the process lingering around
             with suppress(OSError):
@@ -1302,7 +1155,11 @@ def _terminate_process(proc: subprocess.Popen) -> None:
 
 @contextmanager
 def popen(
-    args: list[str], capture_output: bool = False, **kwargs
+    args: list[str],
+    capture_output: bool = False,
+    terminate_timeout: float = 30,
+    kill_timeout: float = 10,
+    **kwargs: Any,
 ) -> Iterator[subprocess.Popen[bytes]]:
     """Start a shell command in a subprocess.
     Yields a subprocess.Popen object.
@@ -1328,6 +1185,21 @@ def popen(
         Note that ``proc.communicate`` is called automatically when the
         contextmanager exits. Calling code must not call ``proc.communicate``
         in a separate thread, since it's not thread-safe.
+
+        When captured, the stdout/stderr of the process is always printed
+        when the process exits for easier test debugging.
+    terminate_timeout: optional, default 30
+        When the contextmanager exits, SIGINT is sent to the subprocess.
+        ``terminate_timeout`` sets how many seconds to wait for the subprocess
+        to terminate after that. If the timeout expires, SIGKILL is sent to
+        the subprocess (which cannot be blocked); see ``kill_timeout``.
+        If this timeout expires, `subprocess.TimeoutExpired` is raised.
+    kill_timeout: optional, default 10
+        When the contextmanger exits, if the subprocess does not shut down
+        after ``terminate_timeout`` seconds in response to SIGINT, SIGKILL
+        is sent to the subprocess (which cannot be blocked). ``kill_timeout``
+        controls how long to wait after SIGKILL to join the process.
+        If this timeout expires, `subprocess.TimeoutExpired` is raised.
     kwargs: optional
         optional arguments to subprocess.Popen
     """
@@ -1349,9 +1221,16 @@ def popen(
         try:
             yield proc
         finally:
-            _terminate_process(proc)
-            out, err = proc.communicate()
-            assert not err
+            try:
+                _terminate_process(proc, terminate_timeout)
+            finally:
+                out, err = proc.communicate(timeout=kill_timeout)
+                if out:
+                    print(f"------ stdout: returncode {proc.returncode}, {args} ------")
+                    print(out.decode() if isinstance(out, bytes) else out)
+                if err:
+                    print(f"------ stderr: returncode {proc.returncode}, {args} ------")
+                    print(err.decode() if isinstance(err, bytes) else err)
 
 
 def wait_for(predicate, timeout, fail_func=None, period=0.05):
@@ -1565,17 +1444,6 @@ def new_config(new_config):
 
 
 @contextmanager
-def new_environment(changes):
-    saved_environ = os.environ.copy()
-    os.environ.update(changes)
-    try:
-        yield
-    finally:
-        os.environ.clear()
-        os.environ.update(saved_environ)
-
-
-@contextmanager
 def new_config_file(c):
     """
     Temporarily change configuration file to match dictionary *c*.
@@ -1738,21 +1606,35 @@ def check_thread_leak():
             # Raise an error with information about leaked threads
             from distributed import profile
 
-            bad_thread = bad_threads[0]
-            call_stacks = profile.call_stack(sys._current_frames()[bad_thread.ident])
-            assert False, (bad_thread, call_stacks)
+            frames = sys._current_frames()
+            try:
+                lines: list[str] = [
+                    f"{len(bad_threads)} thread(s) were leaked from test\n"
+                ]
+                for i, thread in enumerate(bad_threads, 1):
+                    lines.append(
+                        f"------ Call stack of leaked thread {i}/{len(bad_threads)}: {thread} ------"
+                    )
+                    lines.append(
+                        "".join(profile.call_stack(frames[thread.ident]))
+                        # NOTE: `call_stack` already adds newlines
+                    )
+            finally:
+                del frames
+
+            pytest.fail("\n".join(lines), pytrace=False)
 
 
 def wait_active_children(timeout: float) -> list[multiprocessing.Process]:
-    """Wait until timeout for mp_context.active_children() to terminate.
+    """Wait until timeout for get_mp_context().active_children() to terminate.
     Return list of active subprocesses after the timeout expired.
     """
     t0 = time()
     while True:
         # Do not sample the subprocesses once at the beginning with
-        # `for proc in mp_context.active_children: ...`, assume instead that new
+        # `for proc in get_mp_context().active_children: ...`, assume instead that new
         # children processes may be spawned before the timeout expires.
-        children = mp_context.active_children()
+        children = get_mp_context().active_children()
         if not children:
             return []
         join_timeout = timeout - time() + t0
@@ -1762,10 +1644,10 @@ def wait_active_children(timeout: float) -> list[multiprocessing.Process]:
 
 
 def term_or_kill_active_children(timeout: float) -> None:
-    """Send SIGTERM to mp_context.active_children(), wait up to 3 seconds for processes
+    """Send SIGTERM to get_mp_context().active_children(), wait up to 3 seconds for processes
     to die, then send SIGKILL to the survivors
     """
-    children = mp_context.active_children()
+    children = get_mp_context().active_children()
     for proc in children:
         proc.terminate()
 
@@ -1783,7 +1665,7 @@ def term_or_kill_active_children(timeout: float) -> None:
 @contextmanager
 def check_process_leak(
     check: bool = True, check_timeout: float = 40, term_timeout: float = 3
-):
+) -> Iterator[None]:
     """Terminate any currently-running subprocesses at both the beginning and end of this context
 
     Parameters
@@ -1813,9 +1695,8 @@ def check_instances():
     Scheduler._instances.clear()
     SpecCluster._instances.clear()
     Worker._initialized_clients.clear()
-    # assert all(n.status == "closed" for n in Nanny._instances), {
-    #     n: n.status for n in Nanny._instances
-    # }
+    SchedulerTaskState._instances.clear()
+    WorkerTaskState._instances.clear()
     Nanny._instances.clear()
     _global_clients.clear()
     Comm._instances.clear()
@@ -1842,7 +1723,7 @@ def check_instances():
         assert time() < start + 10
     Worker._initialized_clients.clear()
 
-    for i in range(5):
+    for _ in range(5):
         if all(c.closed() for c in Comm._instances):
             break
         else:
@@ -1868,15 +1749,17 @@ def check_instances():
 
 
 @contextmanager
-def _reconfigure():
+def config_for_cluster_tests(**extra_config):
+    "Set recommended config values for tests that create or interact with clusters."
     reset_config()
 
     with dask.config.set(
         {
-            "distributed.comm.timeouts.connect": "5s",
+            "local_directory": tempfile.gettempdir(),
             "distributed.admin.tick.interval": "500 ms",
             "distributed.worker.profile.enabled": False,
-        }
+        },
+        **extra_config,
     ):
         # Restore default logging levels
         # XXX use pytest hooks/fixtures instead?
@@ -1892,8 +1775,7 @@ def clean(threads=True, instances=True, processes=True):
     with check_thread_leak() if threads else nullcontext():
         with check_process_leak(check=processes):
             with check_instances() if instances else nullcontext():
-                with _reconfigure():
-                    yield
+                yield
 
 
 @pytest.fixture
@@ -1906,10 +1788,10 @@ class TaskStateMetadataPlugin(WorkerPlugin):
     """WorkPlugin to populate TaskState.metadata"""
 
     def setup(self, worker):
-        self.worker = worker
+        self.tasks = worker.state.tasks
 
     def transition(self, key, start, finish, **kwargs):
-        ts = self.worker.tasks[key]
+        ts = self.tasks[key]
 
         if start == "ready" and finish == "executing":
             ts.metadata["start_time"] = time()
@@ -2272,6 +2154,7 @@ class BlockedGatherDep(Worker):
     See also
     --------
     BlockedGetData
+    BlockedExecute
     """
 
     def __init__(self, *args, **kwargs):
@@ -2293,6 +2176,7 @@ class BlockedGetData(Worker):
     See also
     --------
     BlockedGatherDep
+    BlockedExecute
     """
 
     def __init__(self, *args, **kwargs):
@@ -2306,8 +2190,71 @@ class BlockedGetData(Worker):
         return await super().get_data(comm, *args, **kwargs)
 
 
+class BlockedExecute(Worker):
+    """A Worker that sets event `in_execute` the first time it enters the execute
+    method and then does not proceed, thus leaving the task in executing state
+    indefinitely, until the test sets `block_execute`.
+
+    After that, the worker sets `in_deserialize_task` to simulate the moment when a
+    large run_spec is being deserialized in a separate thread. The worker will block
+    again until the test sets `block_deserialize_task`.
+
+    Finally, the worker sets `in_execute_exit` when execute() terminates, but before the
+    worker state has processed its exit callback. The worker will block one last time
+    until the test sets `block_execute_exit`.
+
+    Note
+    ----
+    In the vast majority of the test cases, it is simpler and more readable to just
+    submit to a regular Worker a task that blocks on a distributed.Event:
+
+    .. code-block:: python
+
+        def f(in_task, block_task):
+            in_task.set()
+            block_task.wait()
+
+        in_task = distributed.Event()
+        block_task = distributed.Event()
+        fut = c.submit(f, in_task, block_task)
+        await in_task.wait()
+        await block_task.set()
+
+    See also
+    --------
+    BlockedGatherDep
+    BlockedGetData
+    """
+
+    def __init__(self, *args, **kwargs):
+        self.in_execute = asyncio.Event()
+        self.block_execute = asyncio.Event()
+        self.in_deserialize_task = asyncio.Event()
+        self.block_deserialize_task = asyncio.Event()
+        self.in_execute_exit = asyncio.Event()
+        self.block_execute_exit = asyncio.Event()
+
+        super().__init__(*args, **kwargs)
+
+    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
+        self.in_execute.set()
+        await self.block_execute.wait()
+        try:
+            return await super().execute(key, stimulus_id=stimulus_id)
+        finally:
+            self.in_execute_exit.set()
+            await self.block_execute_exit.wait()
+
+    async def _maybe_deserialize_task(
+        self, ts: WorkerTaskState
+    ) -> tuple[Callable, tuple, dict[str, Any]]:
+        self.in_deserialize_task.set()
+        await self.block_deserialize_task.wait()
+        return await super()._maybe_deserialize_task(ts)
+
+
 @contextmanager
-def freeze_data_fetching(w: Worker, *, jump_start: bool = False):
+def freeze_data_fetching(w: Worker, *, jump_start: bool = False) -> Iterator[None]:
     """Prevent any task from transitioning from fetch to flight on the worker while
     inside the context, simulating a situation where the worker's network comms are
     saturated.
@@ -2365,3 +2312,122 @@ def freeze_batched_send(bcomm: BatchedSend) -> Iterator[LockedComm]:
     finally:
         write_event.set()
         bcomm.comm = orig_comm
+
+
+async def wait_for_state(
+    key: str, state: str, dask_worker: Worker | Scheduler, *, interval: float = 0.01
+) -> None:
+    """Wait for a task to appear on a Worker or on the Scheduler and to be in a specific
+    state.
+    """
+    if isinstance(dask_worker, Worker):
+        tasks = dask_worker.state.tasks
+    elif isinstance(dask_worker, Scheduler):
+        tasks = dask_worker.tasks
+    else:
+        raise TypeError(dask_worker)  # pragma: nocover
+
+    try:
+        while key not in tasks or tasks[key].state != state:
+            await asyncio.sleep(interval)
+    except (asyncio.CancelledError, asyncio.TimeoutError):
+        if key in tasks:
+            msg = (
+                f"tasks[{key}].state={tasks[key].state!r} on {dask_worker.address}; "
+                f"expected {state=}"
+            )
+        else:
+            msg = f"tasks[{key}] not found on {dask_worker.address}"
+        # 99% of the times this is triggered by @gen_cluster timeout, so raising the
+        # message as an exception wouldn't work.
+        print(msg)
+        raise
+
+
+async def wait_for_stimulus(
+    type_: type[StateMachineEvent] | tuple[type[StateMachineEvent], ...],
+    dask_worker: Worker,
+    *,
+    interval: float = 0.01,
+    **matches: Any,
+) -> StateMachineEvent:
+    """Wait for a specific stimulus to appear in the log of the WorkerState."""
+    log = dask_worker.state.stimulus_log
+    last_ev = None
+    while True:
+        if log and log[-1] is not last_ev:
+            last_ev = log[-1]
+            for ev in log:
+                if not isinstance(ev, type_):
+                    continue
+                if all(getattr(ev, k) == v for k, v in matches.items()):
+                    return ev
+        await asyncio.sleep(interval)
+
+
+@pytest.fixture
+def ws():
+    """An empty WorkerState"""
+    state = WorkerState(address="127.0.0.1:1", transition_counter_max=50_000)
+    yield state
+    state.validate_state()
+
+
+@pytest.fixture(params=["executing", "long-running"])
+def ws_with_running_task(ws, request):
+    """A WorkerState running a single task 'x' with resources {R: 1}.
+
+    The task may or may not raise secede(); the tests using this fixture runs twice.
+    """
+    ws.available_resources = {"R": 1}
+    ws.total_resources = {"R": 1}
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            key="x", resource_restrictions={"R": 1}, stimulus_id="compute"
+        )
+    )
+    assert instructions == [Execute(key="x", stimulus_id="compute")]
+    if request.param == "long-running":
+        ws.handle_stimulus(
+            SecedeEvent(key="x", compute_duration=1.0, stimulus_id="secede")
+        )
+    assert ws.tasks["x"].state == request.param
+    yield ws
+
+
+@pytest.fixture()
+def name_of_test(request):
+    return f"{request.node.nodeid}"
+
+
+@pytest.fixture()
+def requires_default_ports(name_of_test):
+    start = time()
+
+    @contextmanager
+    def _bind_port(port):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind(("", port))
+            s.listen(1)
+            yield s
+
+    default_ports = [8786]
+
+    while time() - start < _TEST_TIMEOUT:
+        try:
+            with contextlib.ExitStack() as stack:
+                for port in default_ports:
+                    stack.enter_context(_bind_port(port=port))
+                break
+        except OSError as err:
+            if err.errno == errno.EADDRINUSE:
+                print(
+                    f"Address already in use. Waiting before running test {name_of_test}"
+                )
+                sleep(1)
+                continue
+    else:
+        raise TimeoutError(f"Default ports didn't open up in time for {name_of_test}")
+
+    yield

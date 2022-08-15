@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Mapping, MutableMapping, Sized
+from collections.abc import Iterator, Mapping, MutableMapping, Sized
 from contextlib import contextmanager
 from functools import partial
 from typing import Any, Literal, NamedTuple, Protocol, cast
@@ -109,7 +109,7 @@ class SpillBuffer(zict.Buffer):
         self.logged_pickle_errors = set()  # keys logged with pickle error
 
     @contextmanager
-    def handle_errors(self, key: str | None):
+    def handle_errors(self, key: str | None) -> Iterator[None]:
         try:
             yield
         except MaxSpillExceeded as e:
@@ -287,7 +287,10 @@ class Slow(zict.Func):
             # which will then unwrap it.
             raise PickleError(key, e)
 
-        pickled_size = sum(len(frame) for frame in pickled)
+        pickled_size = sum(
+            frame.nbytes if isinstance(frame, memoryview) else len(frame)
+            for frame in pickled
+        )
 
         if has_zict_210:
             # Thanks to Buffer.__setitem__, we never update existing

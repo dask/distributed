@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import weakref
 
 from bokeh.core.properties import without_property_validation

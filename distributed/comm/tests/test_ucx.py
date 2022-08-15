@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 
 import pytest
@@ -29,8 +31,10 @@ def test_registered(ucx_loop):
 
 
 async def get_comm_pair(
-    listen_addr="ucx://" + HOST, listen_args={}, connect_args={}, **kwargs
+    listen_addr="ucx://" + HOST, listen_args=None, connect_args=None, **kwargs
 ):
+    listen_args = listen_args or {}
+    connect_args = connect_args or {}
     q = asyncio.queues.Queue()
 
     async def handle_comm(comm):
@@ -298,7 +302,7 @@ async def test_stress(
             x = x.persist()
             await wait(x)
 
-            for i in range(10):
+            for _ in range(10):
                 x = x.rechunk((chunksize, -1))
                 x = x.rechunk((-1, chunksize))
                 x = x.persist()

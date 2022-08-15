@@ -17,7 +17,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 
-from distributed.utils import TimeoutError, mp_context
+from distributed.utils import get_mp_context
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,9 @@ class AsyncProcess:
 
     _process: multiprocessing.Process
 
-    def __init__(self, loop=None, target=None, name=None, args=(), kwargs={}):
+    def __init__(self, loop=None, target=None, name=None, args=(), kwargs=None):
+        kwargs = kwargs or {}
+
         if not callable(target):
             raise TypeError(f"`target` needs to be callable, not {type(target)!r}")
         self._state = _ProcessState()
@@ -76,9 +78,9 @@ class AsyncProcess:
         # monitor from the child and exit when the parent goes away unexpectedly
         # (for example due to SIGKILL). This variable is otherwise unused except
         # for the assignment here.
-        parent_alive_pipe, self._keep_child_alive = mp_context.Pipe(duplex=False)
+        parent_alive_pipe, self._keep_child_alive = get_mp_context().Pipe(duplex=False)
 
-        self._process = mp_context.Process(
+        self._process = get_mp_context().Process(
             target=self._run,
             name=name,
             args=(
@@ -186,7 +188,7 @@ class AsyncProcess:
         target(*args, **kwargs)
 
     @classmethod
-    def _watch_message_queue(
+    def _watch_message_queue(  # type: ignore[no-untyped-def]
         cls, selfref, process: multiprocessing.Process, loop, state, q, exit_future
     ):
         # As multiprocessing.Process is not thread-safe, we run all
@@ -232,9 +234,11 @@ class AsyncProcess:
     def _watch_process(cls, selfref, process, state, q):
         r = repr(selfref())
         process.join()
-        exitcode = process.exitcode
-        assert exitcode is not None
-        logger.debug("[%s] process %r exited with code %r", r, state.pid, exitcode)
+        exitcode = original_exit_code = process.exitcode
+        if exitcode is None:
+            # The child process is already reaped
+            # (may happen if waitpid() is called elsewhere).
+            exitcode = 255
         state.is_alive = False
         state.exitcode = exitcode
         # Make sure the process is removed from the global list
@@ -246,6 +250,16 @@ class AsyncProcess:
                 _loop_add_callback(self._loop, self._on_exit, exitcode)
         finally:
             self = None  # lose reference
+
+        # logging may fail - defer calls to after the callback is added
+        if original_exit_code is None:
+            logger.warning(
+                "[%s] process %r exit status was already read will report exitcode 255",
+                r,
+                state.pid,
+            )
+        else:
+            logger.debug("[%s] process %r exited with code %r", r, state.pid, exitcode)
 
     def start(self):
         """
@@ -297,15 +311,9 @@ class AsyncProcess:
         assert self._state.pid is not None, "can only join a started process"
         if self._state.exitcode is not None:
             return
-        if timeout is None:
-            await self._exit_future
-        else:
-            try:
-                # Shield otherwise the timeout cancels the future and our
-                # on_exit callback will try to set a result on a canceled future
-                await asyncio.wait_for(asyncio.shield(self._exit_future), timeout)
-            except TimeoutError:
-                pass
+        # Shield otherwise the timeout cancels the future and our
+        # on_exit callback will try to set a result on a canceled future
+        await asyncio.wait_for(asyncio.shield(self._exit_future), timeout)
 
     def close(self):
         """

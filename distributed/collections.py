@@ -53,6 +53,22 @@ class HeapSet(MutableSet[T]):
     def __repr__(self) -> str:
         return f"<{type(self).__name__}: {len(self)} items>"
 
+    def __reduce__(self) -> tuple[Callable, tuple]:
+        heap = [(k, i, v) for k, i, vref in self._heap if (v := vref()) in self._data]
+        return HeapSet._unpickle, (self.key, self._inc, heap)
+
+    @staticmethod
+    def _unpickle(
+        key: Callable[[T], Any], inc: int, heap: list[tuple[Any, int, T]]
+    ) -> HeapSet[T]:
+        self = object.__new__(HeapSet)
+        self.key = key  # type: ignore
+        self._data = {v for _, _, v in heap}
+        self._inc = inc
+        self._heap = [(k, i, weakref.ref(v)) for k, i, v in heap]
+        heapq.heapify(self._heap)
+        return self
+
     def __contains__(self, value: object) -> bool:
         return value in self._data
 
@@ -74,7 +90,7 @@ class HeapSet(MutableSet[T]):
             self._heap.clear()
 
     def peek(self) -> T:
-        """Get the smallest element without removing it"""
+        """Return the smallest element without removing it"""
         if not self._data:
             raise KeyError("peek into empty set")
         while True:
@@ -88,6 +104,31 @@ class HeapSet(MutableSet[T]):
             raise KeyError("pop from an empty set")
         while True:
             _, _, vref = heapq.heappop(self._heap)
+            value = vref()
+            if value in self._data:
+                self._data.discard(value)
+                return value
+
+    def peekright(self) -> T:
+        """Return one of the largest elements (not necessarily the largest!) without
+        removing it. It's guaranteed that ``self.peekright() >= self.peek()``.
+        """
+        if not self._data:
+            raise KeyError("peek into empty set")
+        while True:
+            value = self._heap[-1][2]()
+            if value in self._data:
+                return value
+            del self._heap[-1]
+
+    def popright(self) -> T:
+        """Remove and return one of the largest elements (not necessarily the largest!)
+        It's guaranteed that ``self.popright() >= self.peek()``.
+        """
+        if not self._data:
+            raise KeyError("pop from an empty set")
+        while True:
+            _, _, vref = self._heap.pop()
             value = vref()
             if value in self._data:
                 self._data.discard(value)

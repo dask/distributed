@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pytest
 
 import dask
@@ -117,6 +119,27 @@ def test_maybe_compress(lib, compression):
         rc, rd = maybe_compress(f(payload), compression=compression)
         assert rc == compression
         assert compressions[rc]["decompress"](rd) == payload
+
+
+@pytest.mark.parametrize(
+    "lib,compression",
+    [(None, None), ("zlib", "zlib"), ("lz4", "lz4"), ("zstandard", "zstd")],
+)
+def test_maybe_compress_config_default(lib, compression):
+    if lib:
+        pytest.importorskip(lib)
+
+    try_converters = [bytes, memoryview]
+
+    with dask.config.set({"distributed.comm.compression": compression}):
+        for f in try_converters:
+            payload = b"123"
+            assert maybe_compress(f(payload)) == (None, payload)
+
+            payload = b"0" * 10000
+            rc, rd = maybe_compress(f(payload))
+            assert rc == compression
+            assert compressions[rc]["decompress"](rd) == payload
 
 
 def test_maybe_compress_sample():

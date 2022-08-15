@@ -568,7 +568,17 @@ properties:
           environ:
             type: object
             description: |
-              Environment variables to set on all worker processes started by nannies
+              Environment variables to set on all worker processes started by nannies.
+              These variables are set in the worker process after it has started.
+
+          pre-spawn-environ:
+            type: object
+            description: |
+              Environment variables to set on all worker processes started by nannies.
+              These variables are set within the Nanny process,
+              before spawning the worker process.
+              Should be used for variables that must be set before
+              process startup, interpreter startup, or imports.
 
       client:
         type: object
@@ -939,6 +949,14 @@ properties:
                   A list of modules which are ignored when trying to collect the
                   code context when submitting a computation. Accepts regular
                   expressions.
+          erred-tasks:
+            type: object
+            properties:
+              max-history:
+                type: integer
+                minimum: 0
+                description: |
+                  The maximum number of erred tasks to remember.
 
       dashboard:
         type: object

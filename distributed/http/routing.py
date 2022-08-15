@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 
 import tornado.httputil
@@ -5,7 +7,11 @@ import tornado.routing
 from tornado import web
 
 
-def _descend_routes(router, routers=set(), out=set()):
+def _descend_routes(router, routers=None, out=None):
+    if routers is None:
+        routers = set()
+    if out is None:
+        out = set()
     if router in routers:
         return
     routers.add(router)
@@ -14,7 +20,7 @@ def _descend_routes(router, routers=set(), out=set()):
             if issubclass(rule.target, tornado.web.StaticFileHandler):
                 prefix = rule.matcher.regex.pattern.rstrip("(.*)$").rstrip("/")
                 path = rule.target_kwargs["path"]
-                for d, dirs, files in os.walk(path):
+                for d, _, files in os.walk(path):
                     for fn in files:
                         fullpath = d + "/" + fn
                         ourpath = fullpath.replace(path, prefix).replace("\\", "/")
@@ -46,7 +52,9 @@ class RoutingApplication(web.Application):
         self.applications = []
         self.add_handlers(".*$", [(r"/sitemap.json", DirectoryHandler)])
 
-    def find_handler(self, request: tornado.httputil.HTTPServerRequest, **kwargs):
+    def find_handler(  # type: ignore[no-untyped-def]
+        self, request: tornado.httputil.HTTPServerRequest, **kwargs
+    ):
         handler = super().find_handler(request, **kwargs)
         if handler and not issubclass(handler.handler_class, web.ErrorHandler):
             return handler
@@ -57,5 +65,5 @@ class RoutingApplication(web.Application):
                     break
             return handler
 
-    def add_application(self, application: web.Application):
+    def add_application(self, application: web.Application) -> None:
         self.applications.append(application)

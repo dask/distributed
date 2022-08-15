@@ -10,6 +10,7 @@ import os
 import pathlib
 import random
 import sys
+import tempfile
 import threading
 import warnings
 import weakref
@@ -26,7 +27,7 @@ from concurrent.futures import Executor
 from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeVar, cast
 
 from tlz import first, keymap, pluck
 from tornado.ioloop import IOLoop, PeriodicCallback
@@ -84,6 +85,7 @@ from distributed.utils import (
     has_arg,
     import_file,
     in_async_call,
+    is_python_shutting_down,
     iscoroutinefunction,
     json_load_robust,
     key_split,
@@ -106,7 +108,6 @@ from distributed.worker_memory import (
 from distributed.worker_state_machine import (
     NO_VALUE,
     AcquireReplicasEvent,
-    AlreadyCancelledEvent,
     BaseWorker,
     CancelComputeEvent,
     ComputeTaskEvent,
@@ -135,10 +136,16 @@ from distributed.worker_state_machine import (
 from distributed.worker_state_machine import logger as wsm_logger
 
 if TYPE_CHECKING:
+    # FIXME import from typing (needs Python >=3.10)
+    from typing_extensions import ParamSpec
+
+    # Circular imports
     from distributed.client import Client
     from distributed.diagnostics.plugin import WorkerPlugin
     from distributed.nanny import Nanny
 
+    P = ParamSpec("P")
+    T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
@@ -160,16 +167,16 @@ WORKER_ANY_RUNNING = {
 }
 
 
-def fail_hard(method):
+def fail_hard(method: Callable[P, T]) -> Callable[P, T]:
     """
     Decorator to close the worker if this method encounters an exception.
     """
     if iscoroutinefunction(method):
 
         @functools.wraps(method)
-        async def wrapper(self, *args, **kwargs):
+        async def wrapper(self, *args: P.args, **kwargs: P.kwargs) -> Any:
             try:
-                return await method(self, *args, **kwargs)
+                return await method(self, *args, **kwargs)  # type: ignore
             except Exception as e:
                 if self.status not in (Status.closed, Status.closing):
                     self.log_event("worker-fail-hard", error_message(e))
@@ -180,7 +187,7 @@ def fail_hard(method):
     else:
 
         @functools.wraps(method)
-        def wrapper(self, *args, **kwargs):
+        def wrapper(self, *args: P.args, **kwargs: P.kwargs) -> T:
             try:
                 return method(self, *args, **kwargs)
             except Exception as e:
@@ -190,7 +197,7 @@ def fail_hard(method):
                 self.loop.add_callback(_force_close, self)
                 raise
 
-    return wrapper
+    return wrapper  # type: ignore
 
 
 async def _force_close(self):
@@ -204,7 +211,7 @@ async def _force_close(self):
         await asyncio.wait_for(self.close(nanny=False, executor_wait=False), 30)
     except (KeyboardInterrupt, SystemExit):  # pragma: nocover
         raise
-    except (Exception, BaseException):  # pragma: nocover
+    except BaseException:  # pragma: nocover
         # Worker is in a very broken state if closing fails. We need to shut down
         # immediately, to ensure things don't get even worse and this worker potentially
         # deadlocks the cluster.
@@ -399,7 +406,6 @@ class Worker(BaseWorker, ServerNode):
     _dashboard_address: str | None
     _dashboard: bool
     _http_prefix: str
-    total_resources: dict[str, float]
     death_timeout: float | None
     lifetime: float | None
     lifetime_stagger: float | None
@@ -433,7 +439,6 @@ class Worker(BaseWorker, ServerNode):
         scheduler_file: str | None = None,
         nthreads: int | None = None,
         loop: IOLoop | None = None,  # Deprecated
-        local_dir: None = None,  # Deprecated, use local_directory instead
         local_directory: str | None = None,
         services: dict | None = None,
         name: Any | None = None,
@@ -473,7 +478,14 @@ class Worker(BaseWorker, ServerNode):
         memory_limit: str | float = "auto",
         # Allow overriding the dict-like that stores the task outputs.
         # This is meant for power users only. See WorkerMemoryManager for details.
-        data=None,
+        data: (
+            MutableMapping[str, Any]  # pre-initialised
+            | Callable[[], MutableMapping[str, Any]]  # constructor
+            | tuple[
+                Callable[..., MutableMapping[str, Any]], dict[str, Any]
+            ]  # (constructor, kwargs to constructor)
+            | None  # create internally
+        ) = None,
         # Deprecated parameters; please use dask config instead.
         memory_target_fraction: float | Literal[False] | None = None,
         memory_spill_fraction: float | Literal[False] | None = None,
@@ -548,19 +560,17 @@ class Worker(BaseWorker, ServerNode):
 
         self._setup_logging(logger, wsm_logger)
 
-        if local_dir is not None:
-            warnings.warn("The local_dir keyword has moved to local_directory")
-            local_directory = local_dir
-
         if not local_directory:
-            local_directory = dask.config.get("temporary-directory") or os.getcwd()
+            local_directory = (
+                dask.config.get("temporary-directory") or tempfile.gettempdir()
+            )
 
         os.makedirs(local_directory, exist_ok=True)
         local_directory = os.path.join(local_directory, "dask-worker-space")
 
         with warn_on_duration(
             "1s",
-            "Creating scratch directories is taking a surprisingly long time. "
+            "Creating scratch directories is taking a surprisingly long time. ({duration:.2f}s) "
             "This is often due to running workers on a network file system. "
             "Consider specifying a local-directory to point workers to write "
             "scratch data to a local disk.",
@@ -613,7 +623,6 @@ class Worker(BaseWorker, ServerNode):
         if resources is None:
             resources = dask.config.get("distributed.worker.resources")
             assert isinstance(resources, dict)
-        self.total_resources = resources.copy()
 
         self.death_timeout = parse_timedelta(death_timeout)
 
@@ -741,7 +750,7 @@ class Worker(BaseWorker, ServerNode):
             data=self.memory_manager.data,
             threads=self.threads,
             plugins=self.plugins,
-            resources=self.total_resources,
+            resources=resources,
             total_out_connections=total_out_connections,
             validate=validate,
             transition_counter_max=transition_counter_max,
@@ -756,8 +765,7 @@ class Worker(BaseWorker, ServerNode):
         }
 
         self.heartbeat_interval = parse_timedelta(heartbeat_interval, default="ms")
-        # FIXME https://github.com/tornadoweb/tornado/issues/3117
-        pc = PeriodicCallback(self.heartbeat, self.heartbeat_interval * 1000)  # type: ignore
+        pc = PeriodicCallback(self.heartbeat, self.heartbeat_interval * 1000)
         self.periodic_callbacks["heartbeat"] = pc
 
         pc = PeriodicCallback(lambda: self.batched_send({"op": "keep-alive"}), 60000)
@@ -847,8 +855,7 @@ class Worker(BaseWorker, ServerNode):
     comm_nbytes = DeprecatedWorkerStateAttribute()
     comm_threshold_bytes = DeprecatedWorkerStateAttribute()
     constrained = DeprecatedWorkerStateAttribute()
-    data_needed = DeprecatedWorkerStateAttribute()
-    data_needed_per_worker = DeprecatedWorkerStateAttribute()
+    data_needed_per_worker = DeprecatedWorkerStateAttribute(target="data_needed")
     executed_count = DeprecatedWorkerStateAttribute()
     executing_count = DeprecatedWorkerStateAttribute()
     generation = DeprecatedWorkerStateAttribute()
@@ -865,11 +872,21 @@ class Worker(BaseWorker, ServerNode):
     tasks = DeprecatedWorkerStateAttribute()
     target_message_size = DeprecatedWorkerStateAttribute()
     total_out_connections = DeprecatedWorkerStateAttribute()
+    total_resources = DeprecatedWorkerStateAttribute()
     transition_counter = DeprecatedWorkerStateAttribute()
     transition_counter_max = DeprecatedWorkerStateAttribute()
     validate = DeprecatedWorkerStateAttribute()
     validate_task = DeprecatedWorkerStateAttribute()
     waiting_for_data_count = DeprecatedWorkerStateAttribute()
+
+    @property
+    def data_needed(self) -> set[TaskState]:
+        warnings.warn(
+            "The `Worker.data_needed` attribute has been removed; "
+            "use `Worker.state.data_needed[address]`",
+            FutureWarning,
+        )
+        return {ts for tss in self.state.data_needed.values() for ts in tss}
 
     ##################
     # Administrative #
@@ -912,17 +929,22 @@ class Worker(BaseWorker, ServerNode):
         return self.executors["default"]
 
     @ServerNode.status.setter  # type: ignore
-    def status(self, value):
+    def status(self, value: Status) -> None:
         """Override Server.status to notify the Scheduler of status changes.
         Also handles pausing/unpausing.
         """
         prev_status = self.status
-        ServerNode.status.__set__(self, value)
+
+        ServerNode.status.__set__(self, value)  # type: ignore
         stimulus_id = f"worker-status-change-{time()}"
         self._send_worker_status_change(stimulus_id)
-        if prev_status == Status.running:
+
+        if prev_status == Status.running and value != Status.running:
             self.handle_stimulus(PauseEvent(stimulus_id=stimulus_id))
-        elif value == Status.running:
+        elif value == Status.running and prev_status in (
+            Status.paused,
+            Status.closing_gracefully,
+        ):
             self.handle_stimulus(UnpauseEvent(stimulus_id=stimulus_id))
 
     def _send_worker_status_change(self, stimulus_id: str) -> None:
@@ -1072,7 +1094,7 @@ class Worker(BaseWorker, ServerNode):
                         },
                         types={k: typename(v) for k, v in self.data.items()},
                         now=time(),
-                        resources=self.total_resources,
+                        resources=self.state.total_resources,
                         memory_limit=self.memory_manager.memory_limit,
                         local_directory=self.local_directory,
                         services=self.service_ports,
@@ -1082,6 +1104,7 @@ class Worker(BaseWorker, ServerNode):
                         metrics=await self.get_metrics(),
                         extra=await self.get_startup_information(),
                         stimulus_id=f"worker-connect-{time()}",
+                        server_id=self.id,
                     ),
                     serializers=["msgpack"],
                 )
@@ -1095,7 +1118,7 @@ class Worker(BaseWorker, ServerNode):
                 middle = (_start + _end) / 2
                 self._update_latency(_end - start)
                 self.scheduler_delay = response["time"] - middle
-                # self.status = Status.running
+                self.status = Status.running
                 break
             except OSError:
                 logger.info("Waiting to connect to: %26s", self.scheduler.address)
@@ -1122,7 +1145,7 @@ class Worker(BaseWorker, ServerNode):
         self.periodic_callbacks["heartbeat"].start()
         self.loop.add_callback(self.handle_scheduler, comm)
 
-    def _update_latency(self, latency) -> None:
+    def _update_latency(self, latency: float) -> None:
         self.latency = latency * 0.05 + self.latency * 0.95
         if self.digests is not None:
             self.digests["latency"].add(latency)
@@ -1349,6 +1372,9 @@ class Worker(BaseWorker, ServerNode):
 
         logger.info("      Start worker at: %26s", self.address)
         logger.info("         Listening to: %26s", listening_address)
+        if self.name != self.address_safe:
+            # only if name was not None
+            logger.info("          Worker name: %26s", self.name)
         for k, v in self.service_ports.items():
             logger.info("  {:>16} at: {:>26}".format(k, self.ip + ":" + str(v)))
         logger.info("Waiting to connect to: %26s", self.scheduler.address)
@@ -1521,21 +1547,33 @@ class Worker(BaseWorker, ServerNode):
             if executor is utils._offload_executor:
                 continue  # Never shutdown the offload executor
 
-            def _close():
+            def _close(executor, wait):
                 if isinstance(executor, ThreadPoolExecutor):
                     executor._work_queue.queue.clear()
-                    executor.shutdown(wait=executor_wait, timeout=timeout)
+                    executor.shutdown(wait=wait, timeout=timeout)
                 else:
-                    executor.shutdown(wait=executor_wait)
+                    executor.shutdown(wait=wait)
 
             # Waiting for the shutdown can block the event loop causing
             # weird deadlocks particularly if the task that is executing in
             # the thread is waiting for a server reply, e.g. when using
             # worker clients, semaphores, etc.
-            try:
-                await to_thread(_close)
-            except RuntimeError:  # Are we shutting down the process?
-                _close()  # Just run it directly
+            if is_python_shutting_down():
+                # If we're shutting down there is no need to wait for daemon
+                # threads to finish
+                _close(executor=executor, wait=False)
+            else:
+                try:
+                    await to_thread(_close, executor=executor, wait=executor_wait)
+                except RuntimeError:  # Are we shutting down the process?
+                    logger.error(
+                        "Could not close executor %r by dispatching to thread. Trying synchronously.",
+                        executor,
+                        exc_info=True,
+                    )
+                    _close(
+                        executor=executor, wait=executor_wait
+                    )  # Just run it directly
 
         self.stop()
         await self.rpc.close()
@@ -1596,7 +1634,7 @@ class Worker(BaseWorker, ServerNode):
 
                 bcomm.start(comm)
 
-            self.loop.add_callback(batched_send_connect)
+            self._ongoing_background_tasks.call_soon(batched_send_connect)
 
         self.stream_comms[address].send(msg)
 
@@ -1702,7 +1740,7 @@ class Worker(BaseWorker, ServerNode):
         self,
         data: dict[str, object],
         report: bool = True,
-        stimulus_id: str = None,
+        stimulus_id: str | None = None,
     ) -> dict[str, Any]:
         self.handle_stimulus(
             UpdateDataEvent(
@@ -1713,17 +1751,19 @@ class Worker(BaseWorker, ServerNode):
         )
         return {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
 
-    async def set_resources(self, **resources) -> None:
+    async def set_resources(self, **resources: float) -> None:
         for r, quantity in resources.items():
-            if r in self.total_resources:
-                self.state.available_resources[r] += quantity - self.total_resources[r]
+            if r in self.state.total_resources:
+                self.state.available_resources[r] += (
+                    quantity - self.state.total_resources[r]
+                )
             else:
                 self.state.available_resources[r] = quantity
-            self.total_resources[r] = quantity
+            self.state.total_resources[r] = quantity
 
         await retry_operation(
             self.scheduler.set_resources,
-            resources=self.total_resources,
+            resources=self.state.total_resources,
             worker=self.contact_address,
         )
 
@@ -1809,9 +1849,7 @@ class Worker(BaseWorker, ServerNode):
         return _
 
     @fail_hard
-    def _handle_stimulus_from_task(
-        self, task: asyncio.Task[StateMachineEvent | None]
-    ) -> None:
+    def _handle_stimulus_from_task(self, task: asyncio.Task[StateMachineEvent]) -> None:
         """Override BaseWorker method for added validation
 
         See also
@@ -1821,7 +1859,7 @@ class Worker(BaseWorker, ServerNode):
         super()._handle_stimulus_from_task(task)
 
     @fail_hard
-    def handle_stimulus(self, stim: StateMachineEvent) -> None:
+    def handle_stimulus(self, *stims: StateMachineEvent) -> None:
         """Override BaseWorker method for added validation
 
         See also
@@ -1830,7 +1868,7 @@ class Worker(BaseWorker, ServerNode):
         distributed.worker_state_machine.WorkerState.handle_stimulus
         """
         try:
-            super().handle_stimulus(stim)
+            super().handle_stimulus(*stims)
         except Exception as e:
             if hasattr(e, "to_event"):
                 topic, msg = e.to_event()  # type: ignore
@@ -1842,12 +1880,12 @@ class Worker(BaseWorker, ServerNode):
         return {
             "executing": ts.state == "executing",
             "waiting_for_data": bool(ts.waiting_for_data),
-            "heap": key in pluck(1, self.state.ready),
+            "heap": ts in self.state.ready or ts in self.state.constrained,
             "data": key in self.data,
         }
 
-    async def get_story(self, keys=None):
-        return self.story(*keys)
+    async def get_story(self, keys_or_stimuli: Iterable[str]) -> list[tuple]:
+        return self.state.story(*keys_or_stimuli)
 
     ##########################
     # Dependencies gathering #
@@ -1876,7 +1914,7 @@ class Worker(BaseWorker, ServerNode):
         self,
         start: float,
         stop: float,
-        data: dict[str, Any],
+        data: dict[str, object],
         cause: TaskState,
         worker: str,
     ) -> None:
@@ -1930,7 +1968,7 @@ class Worker(BaseWorker, ServerNode):
         total_nbytes: int,
         *,
         stimulus_id: str,
-    ) -> StateMachineEvent | None:
+    ) -> StateMachineEvent:
         """Implements BaseWorker abstract method
 
         See also
@@ -1938,7 +1976,14 @@ class Worker(BaseWorker, ServerNode):
         distributed.worker_state_machine.BaseWorker.gather_dep
         """
         if self.status not in WORKER_ANY_RUNNING:
-            return None
+            # This is only for the sake of coherence of the WorkerState;
+            # it should never actually reach the scheduler.
+            return GatherDepFailureEvent.from_exception(
+                RuntimeError("Worker is shutting down"),
+                worker=worker,
+                total_nbytes=total_nbytes,
+                stimulus_id=f"worker-closing-{time()}",
+            )
 
         try:
             self.state.log.append(
@@ -2006,7 +2051,7 @@ class Worker(BaseWorker, ServerNode):
                 stimulus_id=f"gather-dep-failure-{time()}",
             )
 
-    async def retry_busy_worker_later(self, worker: str) -> StateMachineEvent | None:
+    async def retry_busy_worker_later(self, worker: str) -> StateMachineEvent:
         """Wait some time, then take a peer worker out of busy state.
         Implements BaseWorker abstract method.
 
@@ -2099,24 +2144,21 @@ class Worker(BaseWorker, ServerNode):
         return function, args, kwargs
 
     @fail_hard
-    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent | None:
+    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
         """Execute a task. Implements BaseWorker abstract method.
 
         See also
         --------
         distributed.worker_state_machine.BaseWorker.execute
         """
-        if self.status in {Status.closing, Status.closed, Status.closing_gracefully}:
-            return None
-        ts = self.state.tasks.get(key)
-        if not ts:
-            return None
-        if ts.state == "cancelled":
-            logger.debug(
-                "Trying to execute task %s which is not in executing state anymore",
-                ts,
-            )
-            return AlreadyCancelledEvent(key=ts.key, stimulus_id=stimulus_id)
+        if self.status not in WORKER_ANY_RUNNING:
+            # This is just for internal coherence of the WorkerState; the reschedule
+            # message should not ever reach the Scheduler.
+            # It is still OK if it does though.
+            return RescheduleEvent(key=key, stimulus_id=f"worker-closing-{time()}")
+
+        # The key *must* be in the worker state thanks to the cancelled state
+        ts = self.state.tasks[key]
 
         try:
             function, args, kwargs = await self._maybe_deserialize_task(ts)
@@ -2131,7 +2173,7 @@ class Worker(BaseWorker, ServerNode):
         try:
             if self.state.validate:
                 assert not ts.waiting_for_data
-                assert ts.state == "executing"
+                assert ts.state in ("executing", "cancelled", "resumed"), ts
                 assert ts.run_spec is not None
 
             args2, kwargs2 = self._prepare_args_for_execution(ts, args, kwargs)
@@ -2197,7 +2239,7 @@ class Worker(BaseWorker, ServerNode):
                 )
 
             if isinstance(result["actual-exception"], Reschedule):
-                return RescheduleEvent(key=ts.key, stimulus_id=stimulus_id)
+                return RescheduleEvent(key=ts.key, stimulus_id=f"reschedule-{time()}")
 
             logger.warning(
                 "Compute Failed\n"
@@ -3031,7 +3073,7 @@ async def run(server, comm, function, args=(), kwargs=None, wait=True):
             if wait:
                 result = await function(*args, **kwargs)
             else:
-                server.loop.add_callback(function, *args, **kwargs)
+                server._ongoing_background_tasks.call_soon(function, *args, **kwargs)
                 result = None
 
     except Exception as e:
@@ -3051,13 +3093,8 @@ async def run(server, comm, function, args=(), kwargs=None, wait=True):
 
 _global_workers = Worker._instances
 
-try:
-    if nvml.device_get_count() < 1:
-        raise RuntimeError
-except (Exception, RuntimeError):
-    pass
-else:
 
+def add_gpu_metrics():
     async def gpu_metric(worker):
         result = await offload(nvml.real_time)
         return result

@@ -7,6 +7,7 @@ import logging
 import os
 import time
 from collections import defaultdict
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, NewType
 
@@ -40,14 +41,14 @@ class Shuffle:
 
     def __init__(
         self,
-        column,
+        column: str,
         worker_for: dict[int, str],
         output_workers: set,
         schema: pa.Schema,
         id: ShuffleId,
         worker: Worker,
         executor: ThreadPoolExecutor,
-    ) -> None:
+    ):
 
         import pandas as pd
 
@@ -98,7 +99,7 @@ class Shuffle:
         self._exception: Exception | None = None
 
     @contextlib.contextmanager
-    def time(self, name: str):
+    def time(self, name: str) -> Iterator[None]:
         start = time.time()
         yield
         stop = time.time()
@@ -279,8 +280,8 @@ class ShuffleWorkerExtension:
         self,
         data: pd.DataFrame,
         shuffle_id: ShuffleId,
-        npartitions: int = None,
-        column=None,
+        npartitions: int | None = None,
+        column: str | None = None,
     ) -> None:
         shuffle = self.get_shuffle(
             shuffle_id, empty=data, npartitions=npartitions, column=column
@@ -320,25 +321,24 @@ class ShuffleWorkerExtension:
         """
         shuffle = self.get_shuffle(shuffle_id)
         output = shuffle.get_output_partition(output_partition)
-        if shuffle.done():
-            shuffle = self.shuffles.pop(shuffle_id, None)
-            # key missing if another thread got to it first
-            if shuffle:
-                shuffle.close()
-                sync(
-                    self.worker.loop,
-                    self.worker.scheduler.shuffle_register_complete,
-                    id=shuffle_id,
-                    worker=self.worker.address,
-                )
+        # key missing if another thread got to it first
+        if shuffle.done() and shuffle_id in self.shuffles:
+            shuffle = self.shuffles.pop(shuffle_id)
+            shuffle.close()
+            sync(
+                self.worker.loop,
+                self.worker.scheduler.shuffle_register_complete,
+                id=shuffle_id,
+                worker=self.worker.address,
+            )
         return output
 
     async def _get_shuffle(
         self,
         shuffle_id: ShuffleId,
         empty: pd.DataFrame | None = None,
-        column=None,
-        npartitions: int = None,
+        column: str | None = None,
+        npartitions: int | None = None,
     ) -> Shuffle:
         "Get a shuffle by ID; raise ValueError if it's not registered."
         import pyarrow as pa
@@ -383,9 +383,9 @@ class ShuffleWorkerExtension:
         self,
         shuffle_id: ShuffleId,
         empty: pd.DataFrame | None = None,
-        column=None,
-        npartitions: int = None,
-    ):
+        column: str | None = None,
+        npartitions: int | None = None,
+    ) -> Shuffle:
         return sync(
             self.worker.loop, self._get_shuffle, shuffle_id, empty, column, npartitions
         )
@@ -418,18 +418,22 @@ class ShuffleSchedulerExtension:
             }
         )
         self.heartbeats = defaultdict(lambda: defaultdict(dict))
-        self.worker_for = dict()
-        self.schemas = dict()
-        self.columns = dict()
-        self.output_workers = dict()
-        self.completed_workers = dict()
+        self.worker_for = {}
+        self.schemas = {}
+        self.columns = {}
+        self.output_workers = {}
+        self.completed_workers = {}
 
     def heartbeat(self, ws, data):
         for shuffle_id, d in data.items():
             self.heartbeats[shuffle_id][ws.address].update(d)
 
     def get(
-        self, id: ShuffleId, schema: bytes | None, column, npartitions: int | None
+        self,
+        id: ShuffleId,
+        schema: bytes | None,
+        column: str | None,
+        npartitions: int | None,
     ) -> dict:
         if id not in self.worker_for:
             assert schema is not None
@@ -466,7 +470,7 @@ class ShuffleSchedulerExtension:
             "output_workers": self.output_workers[id],
         }
 
-    def register_complete(self, id: ShuffleId, worker: str):
+    def register_complete(self, id: ShuffleId, worker: str) -> None:
         """Learn from a worker that it has completed all reads of a shuffle"""
         if id not in self.completed_workers:
             logger.info("Worker shuffle reported complete after shuffle was removed")
@@ -526,6 +530,7 @@ def split_by_worker(
 
     unique_codes = codes[splits]
     out = {
+        # FIXME https://github.com/pandas-dev/pandas-stubs/issues/43
         worker_for.cat.categories[code]: shard
         for code, shard in zip(unique_codes, shards)
     }

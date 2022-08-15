@@ -122,9 +122,9 @@ class Actor(WrappedKey):
     @property
     def _io_loop(self):
         if self._worker:
-            return self._worker.io_loop
+            return self._worker.loop
         else:
-            return self._client.io_loop
+            return self._client.loop
 
     @property
     def _scheduler_rpc(self):
@@ -290,7 +290,7 @@ class EagerActorFuture(BaseActorFuture[_T]):
 
     def __await__(self) -> Generator[object, None, _T]:
         return self._result
-        yield
+        yield  # type: ignore[unreachable]
 
     def result(self, timeout: object = None) -> _T:
         return self._result

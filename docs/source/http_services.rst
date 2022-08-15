@@ -80,6 +80,7 @@ Individual bokeh plots
 - ``/individual-nprocessing``
 - ``/individual-occupancy``
 - ``/individual-workers``
+- ``/individual-exceptions``
 - ``/individual-bandwidth-types``
 - ``/individual-bandwidth-workers``
 - ``/individual-workers-network``

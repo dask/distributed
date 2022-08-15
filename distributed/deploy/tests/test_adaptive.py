@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import math
 from time import sleep
@@ -17,7 +19,7 @@ from distributed import (
 )
 from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.metrics import time
-from distributed.utils_test import async_wait_for, clean, gen_test, slowinc
+from distributed.utils_test import async_wait_for, gen_test, slowinc
 
 
 def test_adaptive_local_cluster(loop):
@@ -72,7 +74,7 @@ async def test_adaptive_local_cluster_multi_workers():
                 await asyncio.sleep(0.01)
 
             # no workers for a while
-            for i in range(10):
+            for _ in range(10):
                 assert not cluster.scheduler.workers
                 await asyncio.sleep(0.05)
 
@@ -225,12 +227,16 @@ async def test_adapt_quickly():
 
         await cluster
 
-        while len(cluster.scheduler.workers) > 1 or len(cluster.worker_spec) > 1:
+        while (
+            len(cluster.scheduler.workers) > 1
+            or len(cluster.worker_spec) > 1
+            or len(cluster.workers) > 1
+        ):
             await asyncio.sleep(0.01)
 
         # Don't scale up for large sequential computations
         x = await client.scatter(1)
-        for i in range(100):
+        for _ in range(100):
             x = client.submit(slowinc, x)
 
         await asyncio.sleep(0.1)
@@ -283,18 +289,20 @@ async def test_no_more_workers_than_tasks():
                 assert len(cluster.scheduler.workers) <= 1
 
 
-def test_basic_no_loop(loop):
-    with clean(threads=False):
-        try:
-            with LocalCluster(
-                n_workers=0, silence_logs=False, dashboard_address=":0"
-            ) as cluster:
-                with Client(cluster) as client:
-                    cluster.adapt()
-                    future = client.submit(lambda x: x + 1, 1)
-                    assert future.result() == 2
-                loop = cluster.loop
-        finally:
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
+def test_basic_no_loop(cleanup):
+    loop = None
+    try:
+        with LocalCluster(
+            n_workers=0, silence_logs=False, dashboard_address=":0", loop=None
+        ) as cluster:
+            with Client(cluster) as client:
+                cluster.adapt()
+                future = client.submit(lambda x: x + 1, 1)
+                assert future.result() == 2
+            loop = cluster.loop
+    finally:
+        if loop is not None:
             loop.add_callback(loop.stop)
 
 

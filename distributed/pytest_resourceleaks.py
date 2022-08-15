@@ -82,7 +82,7 @@ def pytest_addoption(parser):
     )
 
 
-def pytest_configure(config) -> None:
+def pytest_configure(config: pytest.Config) -> None:
     leaks = config.getvalue("leaks")
     if not leaks:
         return
@@ -295,7 +295,7 @@ class TracemallocMemoryChecker(ResourceChecker, name="tracemalloc"):
         self,
         before: tuple[int, tracemalloc.Snapshot],
         after: tuple[int, tracemalloc.Snapshot],
-    ):
+    ) -> bool:
         return after[0] > before[0] + self.LEAK_THRESHOLD
 
     def format(

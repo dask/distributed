@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import pytest
 
 pd = pytest.importorskip("pandas")
@@ -15,16 +13,13 @@ from distributed.shuffle.shuffle_extension import (
 )
 from distributed.utils_test import gen_cluster
 
-if TYPE_CHECKING:
-    from distributed import Scheduler, Worker
-
 
 @gen_cluster([("", 1)])
-async def test_installation(s: Scheduler, worker: Worker):
-    ext = worker.extensions["shuffle"]
+async def test_installation(s, a):
+    ext = a.extensions["shuffle"]
     assert isinstance(ext, ShuffleWorkerExtension)
-    assert worker.handlers["shuffle_receive"] == ext.shuffle_receive
-    assert worker.handlers["shuffle_inputs_done"] == ext.shuffle_inputs_done
+    assert a.handlers["shuffle_receive"] == ext.shuffle_receive
+    assert a.handlers["shuffle_inputs_done"] == ext.shuffle_inputs_done
 
 
 @pytest.mark.skip
@@ -66,7 +61,7 @@ def test_split_by_worker_many_workers():
 
 
 def test_split_by_partition():
-    import pyarrow as pa
+    pa = pytest.importorskip("pyarrow")
 
     df = pd.DataFrame(
         {
