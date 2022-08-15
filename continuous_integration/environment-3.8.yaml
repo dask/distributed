@@ -34,6 +34,7 @@ dependencies:
   - pytest-rerunfailures
   - pytest-timeout
   - requests
+  - setuptools<65  # FIXME https://github.com/jcrist/crick/issues/24
   - s3fs
   - scikit-learn
   - scipy
