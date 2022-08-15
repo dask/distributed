@@ -32,7 +32,6 @@ class LocalCluster(SpecCluster):
         Number of workers to start
     memory_limit: str, float, int, or None, default "auto"
         Sets the memory limit *per worker*.
-        
         Note that the limit will only be enforced when ``processes=True``, and the limit is only
         enforced on a best-effort basis — it's still possible for workers to exceed this limit.
     processes: bool
