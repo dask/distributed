@@ -2304,7 +2304,6 @@ class SchedulerState:
         traceback=None,
         exception_text: str | None = None,
         traceback_text: str | None = None,
-        worker: str | None = None,
         **kwargs,
     ):
         ws: WorkerState
