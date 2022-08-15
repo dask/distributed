@@ -482,15 +482,10 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
 
         try:
             # server_hostname option (for SNI) only works with tornado.iostream.IOStream
-            if "server_hostname" in kwargs:
-                plain_stream = await self.client.connect(
-                    ip, port, max_buffer_size=MAX_BUFFER_SIZE
-                )
-                stream = await plain_stream.start_tls(False, **kwargs)
-            else:
-                stream = await self.client.connect(
-                    ip, port, max_buffer_size=MAX_BUFFER_SIZE, **kwargs
-                )
+            stream = await self.client.connect(
+                ip, port, max_buffer_size=MAX_BUFFER_SIZE
+            )
+            stream = await stream.start_tls(False, **kwargs)
 
             # Under certain circumstances tornado will have a closed connnection with an
             # error and not raise a StreamClosedError.

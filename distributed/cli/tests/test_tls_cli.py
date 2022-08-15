@@ -42,19 +42,20 @@ def test_basic(loop, requires_default_ports):
 
 
 def test_sni(loop):
-    with popen(["dask-scheduler", "--no-dashboard"] + tls_args) as s:
+    port = open_port()
+    with popen(["dask-scheduler", "--no-dashboard", f"--port={port}"] + tls_args) as s:
         with popen(
             [
                 "dask-worker",
                 "--no-dashboard",
                 "--scheduler-sni",
                 "localhost",
-                "tls://127.0.0.1:8786",
+                f"tls://127.0.0.1:{port}",
             ]
             + tls_args
         ) as w:
             with Client(
-                "tls://127.0.0.1:8786", loop=loop, security=tls_security()
+                f"tls://127.0.0.1:{port}", loop=loop, security=tls_security()
             ) as c:
                 wait_for_cores(c)
 
