@@ -7844,7 +7844,7 @@ def validate_task_state(ts: TaskState) -> None:
             str(dts),
             str(dts.dependents),
         )
-        if ts.state in ("waiting", "processing", "no-worker"):
+        if ts.state in ("waiting", "queued", "processing", "no-worker"):
             assert dts in ts.waiting_on or dts.who_has, (
                 "dep missing",
                 str(ts),
@@ -7853,7 +7853,7 @@ def validate_task_state(ts: TaskState) -> None:
         assert dts.state != "forgotten"
 
     for dts in ts.waiters:
-        assert dts.state in ("waiting", "processing", "no-worker"), (
+        assert dts.state in ("waiting", "queued", "processing", "no-worker"), (
             "waiter not in play",
             str(ts),
             str(dts),
