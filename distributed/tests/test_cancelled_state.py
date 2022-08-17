@@ -16,20 +16,22 @@ from distributed.utils_test import (
     gen_cluster,
     inc,
     lock_inc,
-    slowinc,
     wait_for_state,
     wait_for_stimulus,
 )
 from distributed.worker_state_machine import (
+    AddKeysMsg,
     ComputeTaskEvent,
     Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
     FreeKeysEvent,
     GatherDep,
+    GatherDepFailureEvent,
     GatherDepNetworkFailureEvent,
     GatherDepSuccessEvent,
     TaskFinishedMsg,
+    UpdateDataEvent,
 )
 
 
@@ -231,53 +233,30 @@ async def test_executing_cancelled_error(c, s, w):
         w.state.story(f1.key),
         [
             (f1.key, "executing", "released", "cancelled", {}),
-            (
-                f1.key,
-                "cancelled",
-                "error",
-                "error",
-                {f2.key: "executing", f1.key: "released"},
-            ),
-            (f1.key, "error", "released", "released", {f1.key: "forgotten"}),
+            (f1.key, "cancelled", "error", "released", {f1.key: "forgotten"}),
             (f1.key, "released", "forgotten", "forgotten", {}),
         ],
     )
 
 
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_flight_cancelled_error(c, s, b):
-    """One worker with one thread. We provoke an flight->cancelled transition
-    and let the task err."""
-    lock = asyncio.Lock()
-    await lock.acquire()
+def test_flight_cancelled_error(ws):
+    """Test flight -> cancelled -> error transition loop.
+    This can be caused by an issue while (un)pickling or a bug in the network stack.
 
-    class BrokenWorker(Worker):
-        block_get_data = True
-
-        async def get_data(self, comm, *args, **kwargs):
-            if self.block_get_data:
-                async with lock:
-                    comm.abort()
-            return await super().get_data(comm, *args, **kwargs)
-
-    async with BrokenWorker(s.address) as a:
-        await c.wait_for_workers(2)
-        fut1 = c.submit(inc, 1, workers=[a.address], allow_other_workers=True)
-        fut2 = c.submit(inc, fut1, workers=[b.address])
-        await wait_for_state(fut1.key, "flight", b)
-        fut2.release()
-        fut1.release()
-        await wait_for_state(fut1.key, "cancelled", b)
-        lock.release()
-        # At this point we do not fetch the result of the future since the
-        # future itself would raise a cancelled exception. At this point we're
-        # concerned about the worker. The task should transition over error to
-        # be eventually forgotten since we no longer hold a ref.
-        while fut1.key in b.state.tasks:
-            await asyncio.sleep(0.01)
-        a.block_get_data = False
-        # Everything should still be executing as usual after this
-        assert await c.submit(sum, c.map(inc, range(10))) == sum(map(inc, range(10)))
+    See https://github.com/dask/distributed/issues/6877
+    """
+    ws2 = "127.0.0.1:2"
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s1"),
+        FreeKeysEvent(keys=["y", "x"], stimulus_id="s2"),
+        GatherDepFailureEvent.from_exception(
+            Exception(), worker=ws2, total_nbytes=1, stimulus_id="s3"
+        ),
+    )
+    assert instructions == [
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1")
+    ]
+    assert not ws.tasks
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -332,6 +311,7 @@ async def test_in_flight_lost_after_resumed(c, s, b):
             (fut1.key, "resumed", "released", "cancelled", {}),
             # After gather_dep receives the data, the task is forgotten
             (fut1.key, "cancelled", "memory", "released", {fut1.key: "forgotten"}),
+            (fut1.key, "released", "forgotten", "forgotten", {}),
         ],
     )
 
@@ -369,7 +349,8 @@ async def test_cancelled_error(c, s, a, b):
         b.state.story(fut1.key),
         [
             (fut1.key, "executing", "released", "cancelled", {}),
-            (fut1.key, "cancelled", "error", "error", {fut1.key: "released"}),
+            (fut1.key, "cancelled", "error", "released", {fut1.key: "forgotten"}),
+            (fut1.key, "released", "forgotten", "forgotten", {}),
         ],
     )
 
@@ -533,7 +514,7 @@ async def test_resumed_cancelled_handle_compute(
 
     await lock_compute.release()
 
-    if not raise_error:
+    if not wait_for_processing and not raise_error:
         assert await f4 == 4 + 2
 
         assert_story(
@@ -546,9 +527,8 @@ async def test_resumed_cancelled_handle_compute(
             ],
         )
 
-    else:
-        with pytest.raises(RuntimeError, match="test error"):
-            await f3
+    elif not wait_for_processing and raise_error:
+        assert await f4 == 4 + 2
 
         assert_story(
             b.state.story(f3.key),
@@ -556,9 +536,46 @@ async def test_resumed_cancelled_handle_compute(
                 (f3.key, "ready", "executing", "executing", {}),
                 (f3.key, "executing", "released", "cancelled", {}),
                 (f3.key, "cancelled", "fetch", "resumed", {}),
-                (f3.key, "resumed", "error", "error", {}),
+                (f3.key, "resumed", "error", "released", {f3.key: "fetch"}),
+                (f3.key, "fetch", "flight", "flight", {}),
+                (f3.key, "flight", "missing", "missing", {}),
+                (f3.key, "missing", "waiting", "waiting", {f2.key: "fetch"}),
+                (f3.key, "waiting", "ready", "ready", {f3.key: "executing"}),
+                (f3.key, "ready", "executing", "executing", {}),
+                (f3.key, "executing", "memory", "memory", {}),
             ],
         )
+
+    elif wait_for_processing and not raise_error:
+        assert await f4 == 4 + 2
+
+        assert_story(
+            b.state.story(f3.key),
+            expect=[
+                (f3.key, "ready", "executing", "executing", {}),
+                (f3.key, "executing", "released", "cancelled", {}),
+                (f3.key, "cancelled", "fetch", "resumed", {}),
+                (f3.key, "resumed", "waiting", "executing", {}),
+                (f3.key, "executing", "memory", "memory", {}),
+            ],
+        )
+
+    elif wait_for_processing and raise_error:
+        with pytest.raises(RuntimeError, match="test error"):
+            await f3
+
+        assert_story(
+            b.state.story(f3.key),
+            [
+                (f3.key, "ready", "executing", "executing", {}),
+                (f3.key, "executing", "released", "cancelled", {}),
+                (f3.key, "cancelled", "fetch", "resumed", {}),
+                (f3.key, "resumed", "waiting", "executing", {}),
+                (f3.key, "executing", "error", "error", {}),
+            ],
+        )
+    else:
+        assert False, "unreachable"
 
 
 @pytest.mark.parametrize("intermediate_state", ["resumed", "cancelled"])
@@ -570,13 +587,9 @@ async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
     """If a task was transitioned to in-flight, the gather_dep coroutine was scheduled
     but a cancel request came in before gather_data_from_worker was issued. This might
     corrupt the state machine if the cancelled key is not properly handled.
-
-    See also
-    --------
-    test_workerstate_deadlock_cancelled_after_inflight_before_gather_from_worker
     """
-    fut1 = c.submit(slowinc, 1, workers=[a.address], key="f1")
-    fut1B = c.submit(slowinc, 2, workers=[x.address], key="f1B")
+    fut1 = c.submit(inc, 1, workers=[a.address], key="f1")
+    fut1B = c.submit(inc, 2, workers=[x.address], key="f1B")
     fut2 = c.submit(sum, [fut1, fut1B], workers=[x.address], key="f2")
     await fut2
 
@@ -661,14 +674,13 @@ def test_workerstate_executing_skips_fetch_on_success(ws_with_running_task):
         ExecuteSuccessEvent.dummy("x", 123, stimulus_id="s3"),
     )
     assert instructions == [
-        TaskFinishedMsg.match(key="x", stimulus_id="s3"),
+        AddKeysMsg(keys=["x"], stimulus_id="s3"),
         Execute(key="y", stimulus_id="s3"),
     ]
     assert ws.tasks["x"].state == "memory"
     assert ws.data["x"] == 123
 
 
-@pytest.mark.xfail(reason="distributed#6689")
 def test_workerstate_executing_failure_to_fetch(ws_with_running_task):
     """Test state loops:
 
@@ -887,3 +899,39 @@ async def test_execute_preamble_early_cancel(
 
         # Test that x does not get stuck.
         assert await fut == expect
+
+
+@pytest.mark.parametrize("release_dep", [False, True])
+@pytest.mark.parametrize("done_ev_cls", [ExecuteSuccessEvent, ExecuteFailureEvent])
+def test_cancel_with_dependencies_in_memory(ws, release_dep, done_ev_cls):
+    """Cancel an executing task y with an in-memory dependency x; then simulate that x
+    did not have any further dependents, so cancel x as well.
+
+    Test that x immediately transitions to released state and is forgotten as soon as
+    y finishes computing.
+
+    Read: https://github.com/dask/distributed/issues/6893"""
+    ws.handle_stimulus(
+        UpdateDataEvent(data={"x": 1}, report=False, stimulus_id="s1"),
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws.address]}, stimulus_id="s2"),
+    )
+    assert ws.tasks["x"].state == "memory"
+    assert ws.tasks["y"].state == "executing"
+
+    ws.handle_stimulus(FreeKeysEvent(keys=["y"], stimulus_id="s3"))
+    assert ws.tasks["x"].state == "memory"
+    assert ws.tasks["y"].state == "cancelled"
+
+    if release_dep:
+        # This will happen iff x has no dependents or waiters on the scheduler
+        ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="s4"))
+        assert ws.tasks["x"].state == "released"
+        assert ws.tasks["y"].state == "cancelled"
+
+        ws.handle_stimulus(done_ev_cls.dummy("y", stimulus_id="s5"))
+        assert "y" not in ws.tasks
+        assert "x" not in ws.tasks
+    else:
+        ws.handle_stimulus(done_ev_cls.dummy("y", stimulus_id="s5"))
+        assert "y" not in ws.tasks
+        assert ws.tasks["x"].state == "memory"
