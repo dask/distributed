@@ -150,6 +150,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         nthreads=nthreads,
         config={
             "distributed.scheduler.work-stealing": False,
+            "distributed.scheduler.worker-saturation": float("inf"),
         },
     )
     async def test_decide_worker_coschedule_order_neighbors_(c, s, *workers):
@@ -254,6 +255,9 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
 @gen_cluster(
     client=True,
     nthreads=[("", 1), ("", 1)],
+    config={
+        "distributed.scheduler.worker-saturation": float("inf"),
+    },
 )
 async def test_decide_worker_coschedule_order_binary_op(c, s, a, b, ngroups):
     roots = [[delayed(i, name=f"x-{n}-{i}") for i in range(8)] for n in range(ngroups)]
