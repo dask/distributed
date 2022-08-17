@@ -431,7 +431,8 @@ class SpecCluster(Cluster):
             else:
                 logger.warning("Cluster closed without starting up")
 
-            await self.scheduler.close()
+            if self.scheduler:
+                await self.scheduler.close()
             for w in self._created:
                 assert w.status in {
                     Status.closing,
