@@ -270,10 +270,6 @@ async def test_decide_worker_coschedule_order_binary_op(c, s, a, b, ngroups):
     nthreads=[("", 2)] * 2,
     worker_kwargs={"memory_limit": "1.0GiB"},
     Worker=Nanny,
-    scheduler_kwargs=dict(  # TODO remove
-        dashboard=True,
-        dashboard_address=":8787",
-    ),
     config={
         "distributed.scheduler.worker-saturation": 1.0,
         "distributed.worker.memory.target": False,
@@ -312,10 +308,6 @@ async def test_root_task_overproduction(c, s, *nannies):
     nthreads=[("", 2)] * 2,
     worker_kwargs={"memory_limit": "1.0 GiB"},
     Worker=Nanny,
-    scheduler_kwargs=dict(  # TODO remove
-        dashboard=True,
-        dashboard_address=":8787",
-    ),
     config={
         "distributed.scheduler.worker-saturation": 1.0,
         # With typical overhead, 1 task can be in memory but the second will trigger a pause
@@ -417,10 +409,6 @@ async def test_oversaturation_multiple_task_groups(c, s, a, b, saturation_factor
 @gen_cluster(
     client=True,
     nthreads=[("", 2)] * 2,
-    scheduler_kwargs=dict(  # TODO remove
-        dashboard=True,
-        dashboard_address=":8787",
-    ),
     config={"distributed.scheduler.worker-saturation": 1.0},
 )
 async def test_queued_tasks_rebalance(client, s, a, b):
