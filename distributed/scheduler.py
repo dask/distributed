@@ -1256,7 +1256,7 @@ class SchedulerState:
     * **workers:** ``{worker key: WorkerState}``
         Workers currently connected to the scheduler
     * **idle:** ``{WorkerState}``:
-        Set of workers that are not fully utilized
+        Set of workers that are currently in running state and not fully utilized
     * **saturated:** ``{WorkerState}``:
         Set of workers that are not over-utilized
     * **running:** ``{WorkerState}``:
