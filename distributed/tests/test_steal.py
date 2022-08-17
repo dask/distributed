@@ -1090,15 +1090,17 @@ async def test_steal_reschedule_reset_in_flight_occupancy(c, s, *workers):
     # https://github.com/dask/distributed/issues/5370
     steal = s.extensions["stealing"]
     w0 = workers[0]
-    futs1 = c.map(
-        slowinc,
-        range(10),
-        key=[f"f1-{ix}" for ix in range(10)],
+    roots = c.map(
+        inc,
+        range(6),
+        key=[f"r-{ix}" for ix in range(6)],
     )
-    while not w0.state.tasks:
+    futs1 = [c.submit(slowinc, f, key=f"f1-{ix}") for f in roots for ix in range(4)]
+    while not w0.state.ready:
         await asyncio.sleep(0.01)
 
     # ready is a heap but we don't need last, just not the next
+    print(w0.state.tasks)
     victim_key = w0.state.ready.peekright().key
     victim_ts = s.tasks[victim_key]
 
