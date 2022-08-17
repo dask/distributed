@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import operator
 import pickle
 import re
@@ -824,7 +825,17 @@ async def test_ready_remove_worker(s, a, b):
         dependencies={"x-%d" % i: [] for i in range(20)},
     )
 
-    assert all(len(w.processing) == w.nthreads for w in s.workers.values())
+    if s.WORKER_SATURATION == 1:
+        cmp = operator.eq
+    elif math.isinf(s.WORKER_SATURATION):
+        cmp = operator.gt
+    else:
+        pytest.fail(f"{s.WORKER_OVERSATURATION=}, must be 1 or inf")
+
+    assert all(cmp(len(w.processing), w.nthreads) for w in s.workers.values()), (
+        list(s.workers.values()),
+        s.WORKER_SATURATION,
+    )
     assert sum(len(w.processing) for w in s.workers.values()) + len(s.queued) == len(
         s.tasks
     )
@@ -832,7 +843,10 @@ async def test_ready_remove_worker(s, a, b):
     await s.remove_worker(address=a.address, stimulus_id="test")
 
     assert set(s.workers) == {b.address}
-    assert all(len(w.processing) == w.nthreads for w in s.workers.values())
+    assert all(cmp(len(w.processing), w.nthreads) for w in s.workers.values()), (
+        list(s.workers.values()),
+        s.WORKER_SATURATION,
+    )
     assert sum(len(w.processing) for w in s.workers.values()) + len(s.queued) == len(
         s.tasks
     )
