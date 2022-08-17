@@ -359,7 +359,7 @@ async def test_queued_paused_released(c, s, a, b, withhold):
         (2.0, (4, 2)),
         (1.0, (2, 1)),
         (-1.0, (1, 1)),
-        (float("inf"), (7, 3))
+        (float("inf"), (6, 4))
         # ^ depends on root task assignment logic; ok if changes, just needs to add up to 10
     ],
 )
