@@ -8,6 +8,7 @@ import distributed
 from distributed import Event, Lock, Worker
 from distributed.client import wait
 from distributed.utils_test import (
+    BlockedExecute,
     BlockedGatherDep,
     BlockedGetData,
     _LockedCommPool,
@@ -221,7 +222,7 @@ async def test_executing_cancelled_error(c, s, w):
 
     assert await f2 == 2
     # Everything should still be executing as usual after this
-    await c.submit(sum, c.map(inc, range(10))) == sum(map(inc, range(10)))
+    assert await c.submit(sum, c.map(inc, range(10))) == sum(map(inc, range(10)))
 
     # Everything above this line should be generically true, regardless of
     # refactoring. Below verifies some implementation specific test assumptions
@@ -822,3 +823,67 @@ def test_workerstate_resumed_waiting_to_flight(ws):
         GatherDep(worker=ws2, to_gather={"x"}, stimulus_id="s1", total_nbytes=1),
     ]
     assert ws.tasks["x"].state == "flight"
+
+
+@pytest.mark.parametrize("critical_section", ["execute", "deserialize_task"])
+@pytest.mark.parametrize("resume_inside_critical_section", [False, True])
+@pytest.mark.parametrize("resumed_status", ["executing", "resumed"])
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_execute_preamble_early_cancel(
+    c, s, b, critical_section, resume_inside_critical_section, resumed_status
+):
+    """Test multiple race conditions in the preamble of Worker.execute(), which used to
+    cause a task to remain permanently in resumed state or to crash the worker through
+    `fail_hard` in case of very tight timings when resuming a task.
+
+    See also
+    --------
+    https://github.com/dask/distributed/issues/6869
+    https://github.com/dask/dask/issues/9330
+    test_worker.py::test_execute_preamble_abort_retirement
+    """
+    async with BlockedExecute(s.address, validate=True) as a:
+        if critical_section == "execute":
+            in_ev = a.in_execute
+            block_ev = a.block_execute
+            a.block_deserialize_task.set()
+        else:
+            assert critical_section == "deserialize_task"
+            in_ev = a.in_deserialize_task
+            block_ev = a.block_deserialize_task
+            a.block_execute.set()
+
+        async def resume():
+            if resumed_status == "executing":
+                x = c.submit(inc, 1, key="x", workers=[a.address])
+                await wait_for_state("x", "executing", a)
+                return x, 2
+            else:
+                assert resumed_status == "resumed"
+                x = c.submit(inc, 1, key="x", workers=[b.address])
+                y = c.submit(inc, x, key="y", workers=[a.address])
+                await wait_for_state("x", "resumed", a)
+                return y, 3
+
+        x = c.submit(inc, 1, key="x", workers=[a.address])
+        await in_ev.wait()
+
+        x.release()
+        await wait_for_state("x", "cancelled", a)
+
+        if resume_inside_critical_section:
+            fut, expect = await resume()
+
+        # Unblock Worker.execute. At the moment of writing this test, the method
+        # would detect the cancelled status and perform an early exit.
+        block_ev.set()
+        await a.in_execute_exit.wait()
+
+        if not resume_inside_critical_section:
+            fut, expect = await resume()
+
+        # Finally let the done_callback of Worker.execute run
+        a.block_execute_exit.set()
+
+        # Test that x does not get stuck.
+        assert await fut == expect

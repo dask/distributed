@@ -184,7 +184,9 @@ class InProc(Comm):
         self._initialized = True
 
     def _get_finalizer(self):
-        def finalize(write_q=self._write_q, write_loop=self._write_loop, r=repr(self)):
+        r = repr(self)
+
+        def finalize(write_q=self._write_q, write_loop=self._write_loop, r=r):
             logger.warning(f"Closing dangling queue in {r}")
             write_loop.add_callback(write_q.put_nowait, _EOF)
 

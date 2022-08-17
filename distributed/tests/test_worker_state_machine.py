@@ -155,6 +155,7 @@ def test_WorkerState__to_dict(ws):
         "data": {"y": None},
         "data_needed": {},
         "executing": [],
+        "has_what": {"127.0.0.1:1235": ["x"]},
         "in_flight_tasks": ["x"],
         "in_flight_workers": {"127.0.0.1:1235": ["x"]},
         "log": [
@@ -166,6 +167,7 @@ def test_WorkerState__to_dict(ws):
             ["y", "receive-from-scatter", "s2"],
         ],
         "long_running": [],
+        "missing_dep_flight": [],
         "nthreads": 1,
         "ready": [],
         "running": True,

@@ -28,7 +28,7 @@ def kwargs_matching():
     return dict(
         scheduler=get_versions(),
         workers={f"worker-{i}": get_versions() for i in range(3)},
-        client=get_versions(),
+        source=get_versions(),
     )
 
 
@@ -36,7 +36,7 @@ def test_versions_match(kwargs_matching):
     assert error_message(**kwargs_matching)["warning"] == ""
 
 
-@pytest.fixture(params=["client", "scheduler", "worker-1"])
+@pytest.fixture(params=["source", "scheduler", "worker-1"])
 def node(request):
     """Node affected by version mismatch."""
     return request.param
@@ -76,7 +76,7 @@ def pattern(effect):
 
 
 def test_version_mismatch(node, effect, kwargs_not_matching, pattern):
-    column_matching = {"client": 1, "scheduler": 2, "workers": 3}
+    column_matching = {"source": 1, "scheduler": 2, "workers": 3}
     msg = error_message(**kwargs_not_matching)
     i = column_matching.get(node, 3)
     assert "Mismatched versions found" in msg["warning"]
@@ -95,7 +95,7 @@ def test_version_mismatch(node, effect, kwargs_not_matching, pattern):
 def test_scheduler_mismatched_irrelevant_package(kwargs_matching):
     """An irrelevant package on the scheduler can have any version."""
     kwargs_matching["scheduler"]["packages"]["numpy"] = "0.0.0"
-    assert "numpy" in kwargs_matching["client"]["packages"]
+    assert "numpy" in kwargs_matching["source"]["packages"]
 
     assert error_message(**kwargs_matching)["warning"] == ""
 
@@ -108,7 +108,7 @@ def test_scheduler_additional_irrelevant_package(kwargs_matching):
 
 
 def test_python_mismatch(kwargs_matching):
-    kwargs_matching["client"]["packages"]["python"] = "0.0.0"
+    kwargs_matching["source"]["packages"]["python"] = "0.0.0"
     msg = error_message(**kwargs_matching)
     assert "Mismatched versions found" in msg["warning"]
     assert "python" in msg["warning"]
@@ -134,7 +134,8 @@ async def test_version_warning_in_cluster(s, a, b):
     assert any("0.0.0" in str(r.message) for r in record)
 
     async with Worker(s.address) as w:
-        assert any("workers" in line.message for line in w.logs)
+        assert any(w.id in line.message for line in w.logs)
+        assert any("Workers" in line.message for line in w.logs)
         assert any("dask" in line.message for line in w.logs)
         assert any("0.0.0" in line.message in line.message for line in w.logs)
 

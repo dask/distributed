@@ -674,7 +674,7 @@ async def assert_balanced(inp, expected, c, s, *workers):
     while len([ts for ts in s.tasks.values() if ts.processing_on]) < len(futures):
         await asyncio.sleep(0.001)
 
-    for i in range(10):
+    for _ in range(10):
         steal.balance()
 
         while steal.in_flight:
@@ -955,7 +955,7 @@ async def test_cleanup_repeated_tasks(c, s, a, b):
 async def test_lose_task(c, s, a, b):
     with captured_logger("distributed.stealing") as log:
         s.periodic_callbacks["stealing"].interval = 1
-        for i in range(100):
+        for _ in range(100):
             futures = c.map(
                 slowinc,
                 range(10),
@@ -972,17 +972,20 @@ async def test_lose_task(c, s, a, b):
 
 
 @pytest.mark.parametrize("interval, expected", [(None, 100), ("500ms", 500), (2, 2)])
-@gen_cluster(nthreads=[])
+@gen_cluster(nthreads=[], config={"distributed.scheduler.work-stealing": False})
 async def test_parse_stealing_interval(s, interval, expected):
     from distributed.scheduler import WorkStealing
 
     if interval:
-        ctx = dask.config.set({"distributed.scheduler.work-stealing-interval": "500ms"})
+        ctx = dask.config.set(
+            {"distributed.scheduler.work-stealing-interval": interval}
+        )
     else:
         ctx = contextlib.nullcontext()
     with ctx:
         ws = WorkStealing(s)
-        s.periodic_callbacks["stealing"].callback_time == expected
+        await ws.start()
+        assert s.periodic_callbacks["stealing"].callback_time == expected
 
 
 @gen_cluster(client=True)

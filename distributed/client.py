@@ -23,7 +23,7 @@ from contextvars import ContextVar
 from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Coroutine, Literal, Sequence, TypedDict
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
 
@@ -48,7 +48,7 @@ try:
 except ImportError:
     single_key = first
 from tornado import gen
-from tornado.ioloop import PeriodicCallback
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import distributed.utils
 from distributed import cluster_dump, preloading
@@ -116,9 +116,6 @@ _current_client = ContextVar("_current_client", default=None)
 DEFAULT_EXTENSIONS = {
     "pubsub": PubSubClientExtension,
 }
-
-# Placeholder used in the get_dataset function(s)
-NO_DEFAULT_PLACEHOLDER = "_no_default_"
 
 
 def _get_global_client() -> Client | None:
@@ -661,6 +658,12 @@ def _maybe_call_security_loader(address):
     return None
 
 
+class VersionsDict(TypedDict):
+    scheduler: dict[str, dict[str, Any]]
+    workers: dict[str, dict[str, dict[str, Any]]]
+    client: dict[str, dict[str, Any]]
+
+
 class Client(SyncMethodMixin):
     """Connect to and submit computation to a Dask cluster
 
@@ -760,6 +763,7 @@ class Client(SyncMethodMixin):
     _default_event_handlers = {"print": _handle_print, "warn": _handle_warn}
 
     preloads: list[preloading.Preload]
+    __loop: IOLoop | None = None
 
     def __init__(
         self,
@@ -832,8 +836,8 @@ class Client(SyncMethodMixin):
         elif isinstance(getattr(address, "scheduler_address", None), str):
             # It's a LocalCluster or LocalCluster-compatible object
             self.cluster = address
-            status = getattr(self.cluster, "status")
-            if status and status in [Status.closed, Status.closing]:
+            status = self.cluster.status
+            if status in (Status.closed, Status.closing):
                 raise RuntimeError(
                     f"Trying to connect to an already closed or closing Cluster {self.cluster}."
                 )
@@ -872,7 +876,6 @@ class Client(SyncMethodMixin):
 
         self._asynchronous = asynchronous
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
-        self.io_loop = self.loop = self._loop_runner.loop
         self._connecting_to_scheduler = False
 
         self._gather_keys = None
@@ -943,6 +946,38 @@ class Client(SyncMethodMixin):
         from distributed.recreate_tasks import ReplayTaskClient
 
         ReplayTaskClient(self)
+
+    @property
+    def io_loop(self) -> IOLoop | None:
+        warnings.warn(
+            "The io_loop property is deprecated", DeprecationWarning, stacklevel=2
+        )
+        return self.loop
+
+    @io_loop.setter
+    def io_loop(self, value: IOLoop) -> None:
+        warnings.warn(
+            "The io_loop property is deprecated", DeprecationWarning, stacklevel=2
+        )
+        self.loop = value
+
+    @property
+    def loop(self) -> IOLoop | None:
+        loop = self.__loop
+        if loop is None:
+            # If the loop is not running when this is called, the LoopRunner.loop
+            # property will raise a DeprecationWarning
+            # However subsequent calls might occur - eg atexit, where a stopped
+            # loop is still acceptable - so we cache access to the loop.
+            self.__loop = loop = self._loop_runner.loop
+        return loop
+
+    @loop.setter
+    def loop(self, value: IOLoop) -> None:
+        warnings.warn(
+            "setting the loop property is deprecated", DeprecationWarning, stacklevel=2
+        )
+        self.__loop = value
 
     @contextmanager
     def as_current(self):
@@ -1150,7 +1185,7 @@ class Client(SyncMethodMixin):
         elif self.scheduler_file is not None:
             while not os.path.exists(self.scheduler_file):
                 await asyncio.sleep(0.01)
-            for i in range(10):
+            for _ in range(10):
                 try:
                     with open(self.scheduler_file) as f:
                         cfg = json.load(f)
@@ -1356,7 +1391,7 @@ class Client(SyncMethodMixin):
     def __del__(self):
         # If the loop never got assigned, we failed early in the constructor,
         # nothing to do
-        if hasattr(self, "loop"):
+        if self.__loop is not None:
             self.close()
 
     def _inc_ref(self, key):
@@ -1469,8 +1504,9 @@ class Client(SyncMethodMixin):
         for state in self.futures.values():
             state.cancel()
         self.futures.clear()
-        with suppress(AttributeError):
-            self._restart_event.set()
+        self.generation += 1
+        with self._refcount_lock:
+            self.refcount.clear()
 
     def _handle_error(self, exception=None):
         logger.warning("Scheduler exception:")
@@ -2553,18 +2589,18 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self.scheduler.publish_list, **kwargs)
 
-    async def _get_dataset(self, name, default=NO_DEFAULT_PLACEHOLDER):
+    async def _get_dataset(self, name, default=no_default):
         with self.as_current():
             out = await self.scheduler.publish_get(name=name, client=self.id)
 
         if out is None:
-            if default is NO_DEFAULT_PLACEHOLDER:
+            if default is no_default:
                 raise KeyError(f"Dataset '{name}' not found")
             else:
                 return default
         return out["data"]
 
-    def get_dataset(self, name, default=NO_DEFAULT_PLACEHOLDER, **kwargs):
+    def get_dataset(self, name, default=no_default, **kwargs):
         """
         Get named dataset from the scheduler if present.
         Return the default or raise a KeyError if not present.
@@ -3319,32 +3355,46 @@ class Client(SyncMethodMixin):
         else:
             return result
 
-    async def _restart(self, timeout=no_default):
+    async def _restart(self, timeout=no_default, wait_for_workers=True):
         if timeout == no_default:
-            timeout = self._timeout * 2
+            timeout = self._timeout * 4
         if timeout is not None:
             timeout = parse_timedelta(timeout, "s")
 
-        self._send_to_scheduler({"op": "restart", "timeout": timeout})
-        self._restart_event = asyncio.Event()
-        try:
-            await asyncio.wait_for(self._restart_event.wait(), timeout)
-        except TimeoutError:
-            logger.error("Restart timed out after %.2f seconds", timeout)
-
-        self.generation += 1
-        with self._refcount_lock:
-            self.refcount.clear()
-
+        await self.scheduler.restart(timeout=timeout, wait_for_workers=wait_for_workers)
         return self
 
-    def restart(self, **kwargs):
-        """Restart the distributed network
-
-        This kills all active work, deletes all data on the network, and
-        restarts the worker processes.
+    def restart(self, timeout=no_default, wait_for_workers=True):
         """
-        return self.sync(self._restart, **kwargs)
+        Restart all workers. Reset local state. Optionally wait for workers to return.
+
+        Workers without nannies are shut down, hoping an external deployment system
+        will restart them. Therefore, if not using nannies and your deployment system
+        does not automatically restart workers, ``restart`` will just shut down all
+        workers, then time out!
+
+        After `restart`, all connected workers are new, regardless of whether `TimeoutError`
+        was raised. Any workers that failed to shut down in time are removed, and
+        may or may not shut down on their own in the future.
+
+        Parameters
+        ----------
+        timeout:
+            How long to wait for workers to shut down and come back, if `wait_for_workers`
+            is True, otherwise just how long to wait for workers to shut down.
+            Raises `asyncio.TimeoutError` if this is exceeded.
+        wait_for_workers:
+            Whether to wait for all workers to reconnect, or just for them to shut down
+            (default True). Use ``restart(wait_for_workers=False)`` combined with
+            `Client.wait_for_workers` for granular control over how many workers to
+            wait for.
+        See also
+        ----------
+        Scheduler.restart
+        """
+        return self.sync(
+            self._restart, timeout=timeout, wait_for_workers=wait_for_workers
+        )
 
     async def _upload_large_file(self, local_filename, remote_filename=None):
         if remote_filename is None:
@@ -4205,15 +4255,17 @@ class Client(SyncMethodMixin):
             key = (key,)
         return self.sync(self.scheduler.set_metadata, keys=key, value=value)
 
-    def get_versions(self, check=False, packages=[]):
+    def get_versions(
+        self, check: bool = False, packages: Sequence[str] | None = None
+    ) -> VersionsDict | Coroutine[Any, Any, VersionsDict]:
         """Return version info for the scheduler, all workers and myself
 
         Parameters
         ----------
-        check : boolean, default False
+        check
             raise ValueError if all required & optional packages
             do not match
-        packages : List[str]
+        packages
             Extra package names to check
 
         Examples
@@ -4222,16 +4274,19 @@ class Client(SyncMethodMixin):
 
         >>> c.get_versions(packages=['sklearn', 'geopandas'])  # doctest: +SKIP
         """
-        return self.sync(self._get_versions, check=check, packages=packages)
+        return self.sync(self._get_versions, check=check, packages=packages or [])
 
-    async def _get_versions(self, check=False, packages=[]):
+    async def _get_versions(
+        self, check: bool = False, packages: Sequence[str] | None = None
+    ) -> VersionsDict:
+        packages = packages or []
         client = version_module.get_versions(packages=packages)
         scheduler = await self.scheduler.versions(packages=packages)
         workers = await self.scheduler.broadcast(
             msg={"op": "versions", "packages": packages},
             on_error="ignore",
         )
-        result = {"scheduler": scheduler, "workers": workers, "client": client}
+        result = VersionsDict(scheduler=scheduler, workers=workers, client=client)
 
         if check:
             msg = version_module.error_message(scheduler, workers, client)

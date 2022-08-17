@@ -25,7 +25,6 @@ from distributed.utils_test import (
     assert_can_connect_locally_4,
     assert_cannot_connect,
     captured_logger,
-    clean,
     gen_test,
     inc,
     raises_with_cause,
@@ -997,10 +996,9 @@ def test_dont_select_closed_worker(loop):
 
 
 def test_client_cluster_synchronous(loop):
-    with clean(threads=False):
-        with Client(loop=loop, processes=False, dashboard_address=":0") as c:
-            assert not c.asynchronous
-            assert not c.cluster.asynchronous
+    with Client(loop=loop, processes=False, dashboard_address=":0") as c:
+        assert not c.asynchronous
+        assert not c.cluster.asynchronous
 
 
 @gen_test()
@@ -1267,3 +1265,15 @@ def test_localcluster_start_exception(loop):
             loop=loop,
         ):
             pass
+
+
+def test_localcluster_get_client(loop):
+    with LocalCluster(
+        n_workers=0, asynchronous=False, dashboard_address=":0", loop=loop
+    ) as cluster:
+        with cluster.get_client() as client1:
+            assert client1.cluster == cluster
+
+            with Client(cluster) as client2:
+                assert client1 != client2
+                assert client2 == cluster.get_client()

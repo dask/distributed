@@ -168,3 +168,5 @@ def connect(application, http_server, scheduler, prefix=""):
             )
         ],
     )
+
+    bokeh_app.start()

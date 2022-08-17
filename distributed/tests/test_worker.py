@@ -49,6 +49,7 @@ from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
 from distributed.utils_test import (
+    BlockedExecute,
     BlockedGatherDep,
     BlockedGetData,
     TaskStateMetadataPlugin,
@@ -741,7 +742,7 @@ async def test_restrictions(c, s, a, b):
 @gen_cluster(client=True)
 async def test_clean_nbytes(c, s, a, b):
     L = [delayed(inc)(i) for i in range(10)]
-    for i in range(5):
+    for _ in range(5):
         L = [delayed(add)(x, y) for x, y in sliding_window(2, L)]
     total = delayed(sum)(L)
 
@@ -3327,9 +3328,11 @@ async def test_Worker__to_dict(c, s, a):
         "nthreads",
         "running",
         "ready",
+        "has_what",
         "constrained",
         "executing",
         "long_running",
+        "missing_dep_flight",
         "in_flight_tasks",
         "in_flight_workers",
         "busy_workers",
@@ -3498,3 +3501,57 @@ async def test_worker_running_before_running_plugins(c, s, caplog):
     async with Worker(s.address) as worker:
         assert await c.submit(inc, 1) == 2
         assert worker.plugins[InitWorkerNewThread.name].setup_status is Status.running
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[],
+    config={
+        # This is just to make Scheduler.retire_worker more reactive to changes
+        "distributed.scheduler.active-memory-manager.start": True,
+        "distributed.scheduler.active-memory-manager.interval": "50ms",
+    },
+)
+async def test_execute_preamble_abort_retirement(c, s):
+    """Test race condition in the preamble of Worker.execute(), which used to cause a
+    task to remain permanently in executing state in case of very tight timings when
+    exiting the closing_gracefully status.
+
+    See also
+    --------
+    https://github.com/dask/distributed/issues/6867
+    test_cancelled_state.py::test_execute_preamble_early_cancel
+    """
+    async with BlockedExecute(s.address) as a:
+        await c.wait_for_workers(1)
+        a.block_deserialize_task.set()  # Uninteresting in this test
+
+        x = await c.scatter({"x": 1}, workers=[a.address])
+        y = c.submit(inc, 1, key="y", workers=[a.address])
+        await a.in_execute.wait()
+
+        async with BlockedGatherDep(s.address) as b:
+            await c.wait_for_workers(2)
+            retire_fut = asyncio.create_task(c.retire_workers([a.address]))
+            while a.status != Status.closing_gracefully:
+                await asyncio.sleep(0.01)
+            # The Active Memory Manager will send to b the message
+            # {op: acquire-replicas, who_has: {x: [a.address]}}
+            await b.in_gather_dep.wait()
+
+            # Run Worker.execute. At the moment of writing this test, the method would
+            # detect the closing_gracefully status and perform an early exit.
+            a.block_execute.set()
+            await a.in_execute_exit.wait()
+
+        # b has shut down. There's nowhere to replicate x to anymore, so retire_workers
+        # will give up and reinstate a to running status.
+        assert await retire_fut == {}
+        while a.status != Status.running:
+            await asyncio.sleep(0.01)
+
+        # Finally let the done_callback of Worker.execute run
+        a.block_execute_exit.set()
+
+        # Test that y does not get stuck.
+        assert await y == 2
