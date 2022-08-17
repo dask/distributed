@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import itertools
 import logging
+import math
 import random
 import weakref
 from operator import mul
@@ -800,9 +801,14 @@ async def test_steal_twice(c, s, a, b):
 
     while len(s.tasks) < 100:  # tasks are all allocated
         await asyncio.sleep(0.01)
-    # Wait for b to start stealing tasks
-    while len(b.state.tasks) < 30:
-        await asyncio.sleep(0.01)
+    if math.isinf(s.WORKER_SATURATION):
+        # Wait for b to start stealing tasks
+        while len(b.state.tasks) < 30:
+            await asyncio.sleep(0.01)
+    else:
+        # Wait for b to complete some tasks
+        while len(b.data) < 8:
+            await asyncio.sleep(0.01)
 
     # Army of new workers arrives to help
     workers = await asyncio.gather(*(Worker(s.address) for _ in range(20)))
@@ -816,6 +822,8 @@ async def test_steal_twice(c, s, a, b):
     ), f"Too many workers without keys ({len(empty_workers)} out of {len(s.workers)})"
     # This also tests that some tasks were stolen from b
     # (see `while len(b.state.tasks) < 30` above)
+    # If queuing is enabled, then there was nothing to steal from b,
+    # so this just tests the queue was balanced not-terribly.
     assert max(len(ws.has_what) for ws in s.workers.values()) < 30
 
     assert a.state.in_flight_tasks_count == 0
