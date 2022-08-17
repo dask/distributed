@@ -27,6 +27,7 @@ from distributed.worker_state_machine import (
     ExecuteSuccessEvent,
     GatherDep,
     GatherDepSuccessEvent,
+    RescheduleMsg,
     TaskErredMsg,
 )
 
@@ -153,7 +154,6 @@ def test_workerstate_fail_to_pickle_execute_1(ws_with_running_task):
     assert ws.tasks["x"].state == "error"
 
 
-@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/6705")
 def test_workerstate_fail_to_pickle_flight(ws):
     """Same as test_workerstate_fail_to_pickle_execute_1, but the task was
     computed on another host and for whatever reason it did not fail to pickle when it
@@ -186,9 +186,10 @@ def test_workerstate_fail_to_pickle_flight(ws):
     assert instructions == [
         GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
         TaskErredMsg.match(key="x", stimulus_id="s2"),
+        RescheduleMsg(key="y", stimulus_id="s2"),
     ]
     assert ws.tasks["x"].state == "error"
-    assert ws.tasks["y"].state == "waiting"  # Not constrained
+    assert "y" not in ws.tasks
 
 
 @gen_cluster(

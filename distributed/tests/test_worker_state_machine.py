@@ -126,9 +126,6 @@ def test_TaskState_repr():
     ts.state = "cancelled"
     ts.previous = "flight"
     assert str(ts) == "<TaskState 'x' cancelled(flight)>"
-    ts.state = "resumed"
-    ts.next = "waiting"
-    assert str(ts) == "<TaskState 'x' resumed(flight->waiting)>"
 
 
 def test_WorkerState__to_dict(ws):
@@ -1169,40 +1166,50 @@ def test_task_with_dependencies_acquires_resources(ws):
     assert ws.available_resources == {"R": 0}
 
 
+@pytest.mark.parametrize("cancel", [False, True])
 @pytest.mark.parametrize(
-    "done_ev_cls,done_status",
+    "resume_ev",
     [
-        (ExecuteSuccessEvent, "memory"),
-        pytest.param(
-            ExecuteFailureEvent,
-            "flight",
-            marks=pytest.mark.xfail(
-                reason="distributed#6682,distributed#6689,distributed#6693"
-            ),
+        ComputeTaskEvent.dummy("x", resource_restrictions={"R": 1}, stimulus_id="s1"),
+        ComputeTaskEvent.dummy("x", resource_restrictions={"S": 1}, stimulus_id="s1"),
+        ComputeTaskEvent.dummy(
+            "x", resource_restrictions={"R": 1, "S": 1}, stimulus_id="s1"
         ),
+        ComputeTaskEvent.dummy("x", stimulus_id="s1"),
+        ComputeTaskEvent.dummy("y", who_has={"x": ["127.0.0.1:2"]}, stimulus_id="s1"),
+    ],
+)
+@pytest.mark.parametrize(
+    "done_ev,done_state",
+    [
+        (ExecuteSuccessEvent.dummy("x", stimulus_id="s2"), "memory"),
+        (ExecuteFailureEvent.dummy("x", stimulus_id="s2"), "error"),
     ],
 )
 def test_resumed_task_releases_resources(
-    ws_with_running_task, done_ev_cls, done_status
+    ws_with_running_task, cancel, resume_ev, done_ev, done_state
 ):
     ws = ws_with_running_task
-    assert ws.available_resources == {"R": 0}
-    ws2 = "127.0.0.1:2"
+    ws.total_resources["S"] = 1
+    ws.available_resources["S"] = 1
+    assert ws.available_resources == {"R": 0, "S": 1}
+    prev_state = ws.tasks["x"].state
 
-    ws.handle_stimulus(FreeKeysEvent("cancel", ["x"]))
-    assert ws.tasks["x"].state == "cancelled"
-    assert ws.available_resources == {"R": 0}
+    if cancel:
+        instructions = ws.handle_stimulus(FreeKeysEvent("cancel", ["x"]))
+        assert not instructions
+        assert ws.tasks["x"].state == "cancelled"
+        assert ws.available_resources == {"R": 0, "S": 1}
 
-    instructions = ws.handle_stimulus(
-        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="compute")
-    )
+    instructions = ws.handle_stimulus(resume_ev)
     assert not instructions
-    assert ws.tasks["x"].state == "resumed"
-    assert ws.available_resources == {"R": 0}
+    assert ws.tasks["x"].state == prev_state
+    assert ws.tasks["x"].resource_restrictions == {"R": 1}
+    assert ws.available_resources == {"R": 0, "S": 1}
 
-    ws.handle_stimulus(done_ev_cls.dummy("x", stimulus_id="s2"))
-    assert ws.tasks["x"].state == done_status
-    assert ws.available_resources == {"R": 1}
+    ws.handle_stimulus(done_ev)
+    assert ws.tasks["x"].state == done_state
+    assert ws.available_resources == {"R": 1, "S": 1}
 
 
 @gen_cluster()
@@ -1217,6 +1224,7 @@ def test_running_task_in_all_running_tasks(ws_with_running_task):
     ws2 = "127.0.0.1:2"
     ts = ws.tasks["x"]
     assert ts in ws.all_running_tasks
+    prev_state = ts.state
 
     ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="s1"))
     assert ts.state == "cancelled"
@@ -1225,7 +1233,7 @@ def test_running_task_in_all_running_tasks(ws_with_running_task):
     ws.handle_stimulus(
         ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s2")
     )
-    assert ts.state == "resumed"
+    assert ts.state == prev_state
     assert ts in ws.all_running_tasks
 
 
@@ -1247,14 +1255,7 @@ def test_done_task_not_in_all_running_tasks(
 
 @pytest.mark.parametrize(
     "done_ev_cls,done_status",
-    [
-        (ExecuteSuccessEvent, "memory"),
-        pytest.param(
-            ExecuteFailureEvent,
-            "flight",
-            marks=pytest.mark.xfail(reason="distributed#6689"),
-        ),
-    ],
+    [(ExecuteSuccessEvent, "memory"), (ExecuteFailureEvent, "error")],
 )
 def test_done_resumed_task_not_in_all_running_tasks(
     ws_with_running_task, done_ev_cls, done_status
@@ -1272,7 +1273,6 @@ def test_done_resumed_task_not_in_all_running_tasks(
     assert ts not in ws.all_running_tasks
 
 
-@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/6705")
 def test_gather_dep_failure(ws):
     """Simulate a task failing to unpickle when it reaches the destination worker after
     a flight.
@@ -1290,6 +1290,7 @@ def test_gather_dep_failure(ws):
     assert instructions == [
         GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
         TaskErredMsg.match(key="x", stimulus_id="s2"),
+        RescheduleMsg(key="y", stimulus_id="s2"),
     ]
     assert ws.tasks["x"].state == "error"
-    assert ws.tasks["y"].state == "waiting"  # Not ready
+    assert "y" not in ws.tasks

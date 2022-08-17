@@ -851,7 +851,7 @@ async def end_cluster(s, workers):
 def gen_cluster(
     nthreads: list[tuple[str, int] | tuple[str, int, dict]] | None = None,
     scheduler: str = "127.0.0.1",
-    timeout: float = _TEST_TIMEOUT,
+    timeout: float = 2,
     security: Security | dict[str, Any] | None = None,
     Worker: type[ServerNode] = Worker,
     client: bool = False,
