@@ -282,6 +282,7 @@ def main(  # type: ignore[no-untyped-def]
     reconnect,
     **kwargs,
 ):
+    """Launch a distributed worker attached to an existing SCHEDULER."""
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
     gc.set_threshold(g0 * 3, g1 * 3, g2 * 3)
 
