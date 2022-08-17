@@ -100,7 +100,7 @@ def test_TaskState__to_dict():
     a short repr and always appear in full directly under Worker.state.tasks.
     Uninteresting fields are omitted.
     """
-    x = TaskState("x", state="memory", done=True)
+    x = TaskState("x", state="memory")
     y = TaskState("y", priority=(0,), dependencies={x})
     x.dependents.add(y)
     actual = recursive_to_dict([x, y])
@@ -108,7 +108,6 @@ def test_TaskState__to_dict():
         {
             "key": "x",
             "state": "memory",
-            "done": True,
             "dependents": ["<TaskState 'y' released>"],
         },
         {
@@ -123,12 +122,6 @@ def test_TaskState__to_dict():
 def test_TaskState_repr():
     ts = TaskState("x")
     assert str(ts) == "<TaskState 'x' released>"
-    ts.state = "cancelled"
-    ts.previous = "flight"
-    assert str(ts) == "<TaskState 'x' cancelled(flight)>"
-    ts.state = "resumed"
-    ts.next = "waiting"
-    assert str(ts) == "<TaskState 'x' resumed(flight->waiting)>"
 
 
 def test_WorkerState__to_dict(ws):
@@ -760,6 +753,7 @@ def test_new_replica_while_all_workers_in_flight(ws):
     assert ws.tasks["y"].state == "flight"
 
 
+# TODO before merge: move to test_cancelled_state.py
 @gen_cluster(client=True)
 async def test_cancelled_while_in_flight(c, s, a, b):
     event = asyncio.Event()
@@ -769,7 +763,7 @@ async def test_cancelled_while_in_flight(c, s, a, b):
     y = c.submit(inc, x, key="y", workers=[a.address])
     await wait_for_state("x", "flight", a)
     y.release()
-    await wait_for_state("x", "cancelled", a)
+    await wait_for_state("x", "released", a)
 
     # Let the comm from b to a return the result
     event.set()
@@ -1112,8 +1106,8 @@ def test_gather_priority(ws):
     ]
 
 
-@pytest.mark.parametrize("state", ["executing", "long-running"])
-def test_task_acquires_resources(ws, state):
+@pytest.mark.parametrize("secede", [False, True])
+def test_task_acquires_resources(ws, secede):
     ws.available_resources = {"R": 1}
     ws.total_resources = {"R": 1}
 
@@ -1122,11 +1116,11 @@ def test_task_acquires_resources(ws, state):
             key="x", resource_restrictions={"R": 1}, stimulus_id="compute"
         )
     )
-    if state == "long-running":
+    if secede:
         ws.handle_stimulus(
             SecedeEvent(key="x", compute_duration=1.0, stimulus_id="secede")
         )
-    assert ws.tasks["x"].state == state
+    assert ws.tasks["x"].state == "executing"
     assert ws.available_resources == {"R": 0}
 
 
@@ -1169,39 +1163,30 @@ def test_task_with_dependencies_acquires_resources(ws):
     assert ws.available_resources == {"R": 0}
 
 
-@pytest.mark.parametrize(
-    "done_ev_cls,done_status",
-    [
-        (ExecuteSuccessEvent, "memory"),
-        pytest.param(
-            ExecuteFailureEvent,
-            "flight",
-            marks=pytest.mark.xfail(
-                reason="distributed#6682,distributed#6689,distributed#6693"
-            ),
-        ),
-    ],
-)
-def test_resumed_task_releases_resources(
-    ws_with_running_task, done_ev_cls, done_status
-):
+# TODO before merge: move to test_cancelled_state.py
+@pytest.mark.parametrize("done_ev_cls", [ExecuteSuccessEvent, ExecuteFailureEvent])
+def test_resumed_task_releases_resources(ws_with_running_task, done_ev_cls):
     ws = ws_with_running_task
     assert ws.available_resources == {"R": 0}
     ws2 = "127.0.0.1:2"
 
-    ws.handle_stimulus(FreeKeysEvent("cancel", ["x"]))
-    assert ws.tasks["x"].state == "cancelled"
+    instructions = ws.handle_stimulus(FreeKeysEvent("cancel", ["x"]))
+    assert not instructions
+    assert ws.tasks["x"].state == "released"
     assert ws.available_resources == {"R": 0}
 
     instructions = ws.handle_stimulus(
         ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="compute")
     )
-    assert not instructions
-    assert ws.tasks["x"].state == "resumed"
+    assert instructions == [
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="compute")
+    ]
+    assert ws.tasks["x"].state == "flight"
     assert ws.available_resources == {"R": 0}
 
-    ws.handle_stimulus(done_ev_cls.dummy("x", stimulus_id="s2"))
-    assert ws.tasks["x"].state == done_status
+    instructions = ws.handle_stimulus(done_ev_cls.dummy("x", stimulus_id="s2"))
+    assert not instructions
+    assert ws.tasks["x"].state == "flight"
     assert ws.available_resources == {"R": 1}
 
 
@@ -1219,13 +1204,13 @@ def test_running_task_in_all_running_tasks(ws_with_running_task):
     assert ts in ws.all_running_tasks
 
     ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="s1"))
-    assert ts.state == "cancelled"
+    assert ts.state == "released"
     assert ts in ws.all_running_tasks
 
     ws.handle_stimulus(
         ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s2")
     )
-    assert ts.state == "resumed"
+    assert ts.state == "flight"
     assert ts in ws.all_running_tasks
 
 
@@ -1249,11 +1234,7 @@ def test_done_task_not_in_all_running_tasks(
     "done_ev_cls,done_status",
     [
         (ExecuteSuccessEvent, "memory"),
-        pytest.param(
-            ExecuteFailureEvent,
-            "flight",
-            marks=pytest.mark.xfail(reason="distributed#6689"),
-        ),
+        (ExecuteFailureEvent, "flight"),
     ],
 )
 def test_done_resumed_task_not_in_all_running_tasks(
@@ -1268,7 +1249,7 @@ def test_done_resumed_task_not_in_all_running_tasks(
         done_ev_cls.dummy("x", stimulus_id="s3"),
     )
     ts = ws.tasks["x"]
-    assert ts.state == done_status
+    assert ts.state == "flight"
     assert ts not in ws.all_running_tasks
 
 

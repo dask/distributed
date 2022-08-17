@@ -2236,11 +2236,15 @@ class BlockedExecute(Worker):
 
         super().__init__(*args, **kwargs)
 
-    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
+    async def execute(
+        self, key: str, *, priority: tuple[int, ...], stimulus_id: str
+    ) -> StateMachineEvent:
         self.in_execute.set()
         await self.block_execute.wait()
         try:
-            return await super().execute(key, stimulus_id=stimulus_id)
+            return await super().execute(
+                key, priority=priority, stimulus_id=stimulus_id
+            )
         finally:
             self.in_execute_exit.set()
             await self.block_execute_exit.wait()
@@ -2391,7 +2395,7 @@ def ws_with_running_task(ws, request):
         ws.handle_stimulus(
             SecedeEvent(key="x", compute_duration=1.0, stimulus_id="secede")
         )
-    assert ws.tasks["x"].state == request.param
+    assert ws.tasks["x"].state == "executing"
     yield ws
 
 

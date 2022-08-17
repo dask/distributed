@@ -1330,7 +1330,7 @@ def test_steal_worker_state(ws_with_running_task):
 
     ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="s1"))
     assert ws.available_resources == {"R": 0}
-    assert ws.tasks["x"].state == "cancelled"
+    assert ws.tasks["x"].state == "released"
 
     instructions = ws.handle_stimulus(ExecuteSuccessEvent.dummy("x", stimulus_id="s2"))
     assert not instructions

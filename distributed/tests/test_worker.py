@@ -3221,7 +3221,7 @@ async def test_gather_dep_cancelled_rescheduled(c, s):
             while fut4.key in b.state.tasks:
                 await asyncio.sleep(0)
 
-            assert b.state.tasks[fut2.key].state == "cancelled"
+            assert b.state.tasks[fut2.key].state == "released"
 
             b.block_gather_dep.set()
             await a.in_get_data.wait()
@@ -3259,7 +3259,7 @@ async def test_gather_dep_do_not_handle_response_of_not_requested_tasks(c, s, a)
         while fut4.key in b.state.tasks:
             await asyncio.sleep(0.01)
 
-        assert b.state.tasks[fut2.key].state == "cancelled"
+        assert b.state.tasks[fut2.key].state == "released"
 
         b.block_gather_dep.set()
 
@@ -3287,7 +3287,7 @@ async def test_gather_dep_no_longer_in_flight_tasks(c, s, a):
         while fut2.key in b.state.tasks:
             await asyncio.sleep(0.01)
 
-        assert b.state.tasks[fut1.key].state == "cancelled"
+        assert b.state.tasks[fut1.key].state == "released"
 
         b.block_gather_dep.set()
         while fut2.key in b.state.tasks:

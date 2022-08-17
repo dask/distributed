@@ -13,6 +13,7 @@ import pytest
 from distributed import Event, Reschedule, get_worker, secede, wait
 from distributed.utils_test import captured_logger, gen_cluster, slowinc
 from distributed.worker_state_machine import (
+    ComputeTaskEvent,
     FreeKeysEvent,
     RescheduleEvent,
     RescheduleMsg,
@@ -113,7 +114,7 @@ def test_cancelled_reschedule_worker_state(ws_with_running_task):
 
     instructions = ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="s1"))
     assert not instructions
-    assert ws.tasks["x"].state == "cancelled"
+    assert ws.tasks["x"].state == "released"
     assert ws.available_resources == {"R": 0}
 
     instructions = ws.handle_stimulus(RescheduleEvent(key="x", stimulus_id="s2"))
@@ -128,4 +129,33 @@ def test_reschedule_releases(ws_with_running_task):
     instructions = ws.handle_stimulus(RescheduleEvent(key="x", stimulus_id="s1"))
     assert instructions == [RescheduleMsg(stimulus_id="s1", key="x")]
     assert ws.available_resources == {"R": 1}
+    assert "x" not in ws.tasks
+
+
+def test_reschedule_cancelled(ws_with_running_task):
+    """Test state loop:
+
+    executing -> (cancel task) -> released -> rescheduled
+    """
+    ws = ws_with_running_task
+    instructions = ws.handle_stimulus(
+        FreeKeysEvent(keys=["x"], stimulus_id="s1"),
+        RescheduleEvent(key="x", stimulus_id="s2"),
+    )
+    assert not instructions
+    assert "x" not in ws.tasks
+
+
+def test_reschedule_resumed(ws_with_running_task):
+    """Test state loop:
+
+    executing -> (cancel task) -> released -> (resume task) -> executing -> rescheduled
+    """
+    ws = ws_with_running_task
+    instructions = ws.handle_stimulus(
+        FreeKeysEvent(keys=["x"], stimulus_id="s1"),
+        ComputeTaskEvent.dummy("x", stimulus_id="s2", resource_restrictions={"R": 1}),
+        RescheduleEvent(key="x", stimulus_id="s3"),
+    )
+    assert instructions == [RescheduleMsg(key="x", stimulus_id="s3")]
     assert "x" not in ws.tasks

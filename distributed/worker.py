@@ -2141,21 +2141,28 @@ class Worker(BaseWorker, ServerNode):
         return function, args, kwargs
 
     @fail_hard
-    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
+    async def execute(
+        self, key: str, *, priority: tuple[int, ...], stimulus_id: str
+    ) -> StateMachineEvent:
         """Execute a task. Implements BaseWorker abstract method.
 
         See also
         --------
         distributed.worker_state_machine.BaseWorker.execute
         """
+
+        def reschedule(reason: str) -> RescheduleEvent:
+            return RescheduleEvent(key=key, stimulus_id=f"{reason}-{time()}")
+
         if self.status not in WORKER_ANY_RUNNING:
             # This is just for internal coherence of the WorkerState; the reschedule
             # message should not ever reach the Scheduler.
             # It is still OK if it does though.
-            return RescheduleEvent(key=key, stimulus_id=f"worker-closing-{time()}")
+            return reschedule("worker-closing")
 
-        # The key *must* be in the worker state thanks to the cancelled state
-        ts = self.state.tasks[key]
+        ts = self.state.get_executing_task(key, priority)
+        if not ts:
+            return reschedule("early-cancel-or-resume")
 
         try:
             function, args, kwargs = await self._maybe_deserialize_task(ts)
@@ -2167,10 +2174,14 @@ class Worker(BaseWorker, ServerNode):
                 stimulus_id=f"run-spec-deserialize-failed-{time()}",
             )
 
+        ts = self.state.get_executing_task(key, priority)
+        if not ts:
+            return reschedule("early-cancel-or-resume")
+
         try:
             if self.state.validate:
                 assert not ts.waiting_for_data
-                assert ts.state in ("executing", "cancelled", "resumed"), ts
+                assert ts.state == "executing", ts
                 assert ts.run_spec is not None
 
             args2, kwargs2 = self._prepare_args_for_execution(ts, args, kwargs)
@@ -2236,7 +2247,7 @@ class Worker(BaseWorker, ServerNode):
                 )
 
             if isinstance(result["actual-exception"], Reschedule):
-                return RescheduleEvent(key=ts.key, stimulus_id=f"reschedule-{time()}")
+                return reschedule("user-raised-reschedule")
 
             logger.warning(
                 "Compute Failed\n"

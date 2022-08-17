@@ -33,14 +33,6 @@ from distributed.worker_state_machine import (
 )
 
 
-async def wait_for_cancelled(key, dask_worker):
-    while key in dask_worker.state.tasks:
-        if dask_worker.state.tasks[key].state == "cancelled":
-            return
-        await asyncio.sleep(0.005)
-    assert False
-
-
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_abort_execution_release(c, s, a):
     lock = Lock()
@@ -48,7 +40,7 @@ async def test_abort_execution_release(c, s, a):
         fut = c.submit(lock_inc, 1, lock=lock)
         await wait_for_state(fut.key, "executing", a)
         fut.release()
-        await wait_for_cancelled(fut.key, a)
+        await wait_for_state(fut.key, "released", a)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -58,7 +50,7 @@ async def test_abort_execution_reschedule(c, s, a):
         fut = c.submit(lock_inc, 1, lock=lock)
         await wait_for_state(fut.key, "executing", a)
         fut.release()
-        await wait_for_cancelled(fut.key, a)
+        await wait_for_state(fut.key, "released", a)
         fut = c.submit(lock_inc, 1, lock=lock)
     await fut
 
@@ -70,55 +62,45 @@ async def test_abort_execution_add_as_dependency(c, s, a):
         fut = c.submit(lock_inc, 1, lock=lock)
         await wait_for_state(fut.key, "executing", a)
         fut.release()
-        await wait_for_cancelled(fut.key, a)
+        await wait_for_state(fut.key, "released", a)
 
         fut = c.submit(lock_inc, 1, lock=lock)
         fut = c.submit(inc, fut)
     await fut
 
 
-@gen_cluster(client=True)
-async def test_abort_execution_to_fetch(c, s, a, b):
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_abort_execution_to_fetch(c, s, a):
     ev = Event()
 
     def f(ev):
         ev.wait()
         return 123
 
-    fut = c.submit(f, ev, key="f1", workers=[a.worker_address])
+    fut = c.submit(f, ev, key="f1", workers=[a.address])
     await wait_for_state(fut.key, "executing", a)
     fut.release()
-    await wait_for_cancelled(fut.key, a)
+    await wait_for_state(fut.key, "released", a)
 
-    # While the first worker is still trying to compute f1, we'll resubmit it to
-    # another worker with a smaller delay. The key is still the same
-    fut = c.submit(inc, 1, key="f1", workers=[b.worker_address])
-    # then, a must switch the execute to fetch. Instead of doing so, it will
-    # simply re-use the currently computing result.
-    fut = c.submit(inc, fut, workers=[a.worker_address], key="f2")
-    await wait_for_state("f2", "waiting", a)
-    await ev.set()
-    assert await fut == 124  # It would be 3 if the result was copied from b
-    del fut
-    while "f1" in a.state.tasks:
-        await asyncio.sleep(0.01)
+    async with BlockedGetData(s.address) as b:
+        # While the first worker is still trying to compute f1, we'll resubmit it to
+        # another worker. The key is still the same.
+        fut = c.submit(inc, 1, key="f1", workers=[b.address])
+        # Then, a must switch the task to fetch, albeit it's still executing in the
+        # background.
+        fut = c.submit(inc, fut, workers=[a.address], key="f2")
+        await wait_for_state("f1", "flight", a)
+        await ev.set()
+        # The completion of the original compute is ignored
+        await asyncio.sleep(0.1)
+        assert a.state.tasks["f1"].state == "flight"
+        b.block_get_data.set()
 
-    assert_story(
-        a.state.story("f1"),
-        [
-            ("f1", "compute-task", "released"),
-            ("f1", "released", "waiting", "waiting", {"f1": "ready"}),
-            ("f1", "waiting", "ready", "ready", {"f1": "executing"}),
-            ("f1", "ready", "executing", "executing", {}),
-            ("free-keys", ("f1",)),
-            ("f1", "executing", "released", "cancelled", {}),
-            ("f1", "cancelled", "fetch", "resumed", {}),
-            ("f1", "resumed", "memory", "memory", {"f2": "ready"}),
-            ("free-keys", ("f1",)),
-            ("f1", "memory", "released", "released", {}),
-            ("f1", "released", "forgotten", "forgotten", {}),
-        ],
-    )
+        # It would be 124 if the result was from the original compute
+        assert await fut == 3
+        del fut
+        while "f1" in a.state.tasks:
+            await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True)
@@ -179,16 +161,24 @@ async def test_flight_to_executing_via_cancelled_resumed(c, s, b):
 
         # Close in scheduler to ensure we transition and reschedule task properly
         await s.remove_worker(a.address, stimulus_id="test", close=False)
-        await wait_for_stimulus(ComputeTaskEvent, b, key=fut1.key)
+        await wait_for_stimulus(ComputeTaskEvent, b, key="fut1")
 
         block_get_data.release()
         await block_compute.release()
         assert await fut2 == 3
 
-        b_story = b.state.story(fut1.key)
-        assert any("receive-dep-failed" in msg for msg in b_story)
-        assert any("cancelled" in msg for msg in b_story)
-        assert any("resumed" in msg for msg in b_story)
+        assert_story(
+            b.state.story("fut1"),
+            [
+                ("fut1", "flight", "released", "released", {"fut1": "forgotten"}),
+                ("fut1", "released", "forgotten", "released", {}),
+                ("fut1", "released", "waiting", "waiting", {"fut1": "ready"}),
+                ("fut1", "waiting", "ready", "ready", {"fut1": "executing"}),
+                ("fut1", "ready", "executing", "executing", {}),
+                ("receive-dep-failed", a.address, {"fut1"}),
+                ("fut1", "executing", "memory", "memory", {}),
+            ],
+        )
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -210,7 +200,7 @@ async def test_executing_cancelled_error(c, s, w):
     await wait_for_state(f2.key, "ready", w)
 
     f1.release()
-    await wait_for_state(f1.key, "cancelled", w)
+    await wait_for_state(f1.key, "released", w)
     await lock.release()
 
     # At this point we do not fetch the result of the future since the future
@@ -230,15 +220,10 @@ async def test_executing_cancelled_error(c, s, w):
     assert_story(
         w.state.story(f1.key),
         [
-            (f1.key, "executing", "released", "cancelled", {}),
-            (
-                f1.key,
-                "cancelled",
-                "error",
-                "error",
-                {f2.key: "executing", f1.key: "released"},
-            ),
-            (f1.key, "error", "released", "released", {f1.key: "forgotten"}),
+            (f1.key, "executing", "released", "released", {f1.key: "forgotten"}),
+            # Task can't be released while it's still running
+            (f1.key, "released", "forgotten", "released", {}),
+            # Task completion event arrived
             (f1.key, "released", "forgotten", "forgotten", {}),
         ],
     )
@@ -246,8 +231,9 @@ async def test_executing_cancelled_error(c, s, w):
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_flight_cancelled_error(c, s, b):
-    """One worker with one thread. We provoke an flight->cancelled transition
-    and let the task err."""
+    """One worker with one thread. We provoke a flight->cancelled transition
+    and let the task err.
+    """
     lock = asyncio.Lock()
     await lock.acquire()
 
@@ -267,7 +253,7 @@ async def test_flight_cancelled_error(c, s, b):
         await wait_for_state(fut1.key, "flight", b)
         fut2.release()
         fut1.release()
-        await wait_for_state(fut1.key, "cancelled", b)
+        await wait_for_state(fut1.key, "released", b)
         lock.release()
         # At this point we do not fetch the result of the future since the
         # future itself would raise a cancelled exception. At this point we're
@@ -368,8 +354,9 @@ async def test_cancelled_error(c, s, a, b):
     assert_story(
         b.state.story(fut1.key),
         [
-            (fut1.key, "executing", "released", "cancelled", {}),
-            (fut1.key, "cancelled", "error", "error", {fut1.key: "released"}),
+            (fut1.key, "executing", "released", "released", {fut1.key: "forgotten"}),
+            (fut1.key, "released", "forgotten", "released", {}),
+            (fut1.key, "released", "forgotten", "forgotten", {}),
         ],
     )
 
@@ -430,8 +417,7 @@ async def test_cancelled_resumed_after_flight_with_dependencies(c, s, a):
         # channel, causing a.gather_dep() to raise OSError.
         await wait_for_stimulus(ComputeTaskEvent, a, key="x")
 
-    # b closed; a.gather_dep() fails. Note that, in the current implementation, x won't
-    # be recomputed on a until this happens.
+    # b closed; a.gather_dep() fails.
     assert await y == 3
 
 
@@ -448,16 +434,16 @@ def test_cancelled_resumed_after_flight_with_dependencies_workerstate(ws):
         # dependents. This also cancels x.
         FreeKeysEvent(keys=["y"], stimulus_id="s2"),
         # The scheduler reschedules x on another worker, which just happens to be one
-        # that was previously fetching it. This does not generate an Execute
-        # instruction, because the GatherDep instruction isn't complete yet.
+        # that was previously fetching it. This immediately generates an Execute
+        # instruction, even if the GatherDep instruction isn't complete yet.
         ComputeTaskEvent.dummy("x", stimulus_id="s3"),
         # After ~30s, the TCP socket with ws2 finally times out and collapses.
-        # This triggers the Execute instruction.
+        # This results in a no-op.
         GatherDepNetworkFailureEvent(worker=ws2, total_nbytes=1, stimulus_id="s4"),
     )
     assert instructions == [
         GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
-        Execute(key="x", stimulus_id="s4"),  # Note the stimulus_id!
+        Execute(key="x", stimulus_id="s3"),
     ]
     assert ws.tasks["x"].state == "executing"
 
@@ -513,14 +499,14 @@ async def test_resumed_cancelled_handle_compute(
             await asyncio.sleep(0.05)
 
     await release_all_futures()
-    await wait_for_state(f3.key, "cancelled", b)
+    await wait_for_state(f3.key, "released", b)
 
     f1 = c.submit(inc, 1, key="f1", workers=[a.address])
     f2 = c.submit(inc, f1, key="f2", workers=[a.address])
     f3 = c.submit(inc, f2, key="f3", workers=[a.address])
     f4 = c.submit(sum, [f1, f3], key="f4", workers=[b.address])
 
-    await wait_for_state(f3.key, "resumed", b)
+    await wait_for_state(f3.key, "memory", b)
     await release_all_futures()
 
     f1 = c.submit(inc, 1, key="f1", workers=[a.address])
@@ -642,14 +628,14 @@ def test_workerstate_flight_to_flight(ws):
     assert ws.tasks["x"].state == "flight"
 
 
-def test_workerstate_executing_skips_fetch_on_success(ws_with_running_task):
+def test_workerstate_executing_success_to_fetch(ws_with_running_task):
     """Test state loops:
 
-    - executing -> cancelled -> resumed(fetch) -> memory
-    - executing -> long-running -> cancelled -> resumed(fetch) -> memory
+    - executing -> cancelled -> resumed(fetch)
+    - executing -> long-running -> cancelled -> resumed(fetch)
 
     The task execution later terminates successfully.
-    Test that the task is never fetched and that dependents are unblocked.
+    Test that the task completion is ignored and the task transitions to flight
 
     See also: test_workerstate_executing_failure_to_fetch
     """
@@ -661,14 +647,11 @@ def test_workerstate_executing_skips_fetch_on_success(ws_with_running_task):
         ExecuteSuccessEvent.dummy("x", 123, stimulus_id="s3"),
     )
     assert instructions == [
-        TaskFinishedMsg.match(key="x", stimulus_id="s3"),
-        Execute(key="y", stimulus_id="s3"),
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s2")
     ]
-    assert ws.tasks["x"].state == "memory"
-    assert ws.data["x"] == 123
+    assert ws.tasks["x"].state == "flight"
 
 
-@pytest.mark.xfail(reason="distributed#6689")
 def test_workerstate_executing_failure_to_fetch(ws_with_running_task):
     """Test state loops:
 
@@ -693,7 +676,7 @@ def test_workerstate_executing_failure_to_fetch(ws_with_running_task):
         ExecuteFailureEvent.dummy("x", stimulus_id="s3"),
     )
     assert instructions == [
-        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s3")
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s2")
     ]
     assert ws.tasks["x"].state == "flight"
 
@@ -827,19 +810,22 @@ def test_workerstate_resumed_waiting_to_flight(ws):
 
 @pytest.mark.parametrize("critical_section", ["execute", "deserialize_task"])
 @pytest.mark.parametrize("resume_inside_critical_section", [False, True])
-@pytest.mark.parametrize("resumed_status", ["executing", "resumed"])
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_execute_preamble_early_cancel(
-    c, s, b, critical_section, resume_inside_critical_section, resumed_status
+@gen_cluster(client=True, nthreads=[])
+async def test_execute_preamble_early_cancel_1(
+    c, s, critical_section, resume_inside_critical_section
 ):
     """Test multiple race conditions in the preamble of Worker.execute(), which used to
     cause a task to remain permanently in resumed state or to crash the worker through
     `fail_hard` in case of very tight timings when resuming a task.
 
+    The task is resumed to executing state before Worker.execute() terminates.
+
     See also
     --------
     https://github.com/dask/distributed/issues/6869
     https://github.com/dask/dask/issues/9330
+    test_execute_preamble_early_cancel_2
+    test_execute_preamble_early_cancel_3
     test_worker.py::test_execute_preamble_abort_retirement
     """
     async with BlockedExecute(s.address, validate=True) as a:
@@ -853,37 +839,195 @@ async def test_execute_preamble_early_cancel(
             block_ev = a.block_deserialize_task
             a.block_execute.set()
 
-        async def resume():
-            if resumed_status == "executing":
-                x = c.submit(inc, 1, key="x", workers=[a.address])
-                await wait_for_state("x", "executing", a)
-                return x, 2
-            else:
-                assert resumed_status == "resumed"
-                x = c.submit(inc, 1, key="x", workers=[b.address])
-                y = c.submit(inc, x, key="y", workers=[a.address])
-                await wait_for_state("x", "resumed", a)
-                return y, 3
-
-        x = c.submit(inc, 1, key="x", workers=[a.address])
+        x = c.submit(inc, 1, key="x")
         await in_ev.wait()
 
         x.release()
-        await wait_for_state("x", "cancelled", a)
+        await wait_for_state("x", "released", a)
+
+        async def resume():
+            x = c.submit(inc, 1, key="x")
+            await wait_for_state("x", "executing", a)
+            return x
 
         if resume_inside_critical_section:
-            fut, expect = await resume()
+            x = await resume()
 
-        # Unblock Worker.execute. At the moment of writing this test, the method
-        # would detect the cancelled status and perform an early exit.
+        # Unblock Worker.execute().
+        # The method should detect the cancelled status and perform an early exit.
         block_ev.set()
         await a.in_execute_exit.wait()
 
         if not resume_inside_critical_section:
-            fut, expect = await resume()
+            x = await resume()
 
         # Finally let the done_callback of Worker.execute run
         a.block_execute_exit.set()
 
         # Test that x does not get stuck.
-        assert await fut == expect
+        assert await x == 2
+
+
+@pytest.mark.parametrize("critical_section", ["execute", "deserialize_task"])
+@gen_cluster(client=True, nthreads=[])
+async def test_execute_preamble_early_cancel_2(c, s, critical_section):
+    """Test multiple race conditions in the preamble of Worker.execute(), which used to
+    cause a task to remain permanently in resumed state or to crash the worker through
+    `fail_hard` in case of very tight timings when resuming a task.
+
+    The task is resumed to executing state before Worker.execute() terminates.
+    On the second execution, the run_spec changes, and some dependencies are no longer
+    in memory.
+
+    See also
+    --------
+    https://github.com/dask/distributed/issues/6869
+    https://github.com/dask/dask/issues/9330
+    test_execute_preamble_early_cancel_1
+    test_execute_preamble_early_cancel_3
+    test_worker.py::test_execute_preamble_abort_retirement
+    """
+    async with BlockedExecute(s.address, validate=True) as a:
+        a.block_execute_exit.set()  # Not interesting in this test
+        if critical_section == "execute":
+            in_ev = a.in_execute
+            block_ev = a.block_execute
+            a.block_deserialize_task.set()
+        else:
+            assert critical_section == "deserialize_task"
+            in_ev = a.in_deserialize_task
+            block_ev = a.block_deserialize_task
+            a.block_execute.set()
+
+        x = (await c.scatter({"x": 1}))["x"]
+        y = c.submit(inc, x, key="y")
+        x.release()
+        await in_ev.wait()
+        assert a.state.tasks["x"].state == "memory"
+        assert a.state.tasks["y"].state == "executing"
+
+        y.release()
+        while "x" in a.data:
+            await asyncio.sleep(0.01)
+        assert a.state.tasks["x"].state == "released"
+        assert a.state.tasks["y"].state == "released"
+        assert a.state.executing
+
+        y = c.submit(sum, [1], key="y")
+        await asyncio.sleep(0.5)
+        assert_story(a.state.log, [], strict=True)
+        await wait_for_state("y", "executing", a)
+
+        # Unblock Worker.execute().
+        # The method should detect that the task is in executing state, but from a
+        # different compute-task event, and perform an early exit.
+        block_ev.set()
+
+        # Test that the task does not get stuck and that Worker.execute() does not
+        # attempt reading x from a.state.data.
+        # The output is correct for the new tak that was submitted.
+        assert await y == 1
+
+        assert "x" not in a.state.tasks
+        assert a.state.tasks["y"].state == "memory"
+
+
+@pytest.mark.parametrize("critical_section", ["execute", "deserialize_task"])
+@pytest.mark.parametrize("resume_inside_critical_section", [False, True])
+@gen_cluster(client=True, nthreads=[])
+async def test_execute_preamble_early_cancel_3(
+    c, s, critical_section, resume_inside_critical_section
+):
+    """Test multiple race conditions in the preamble of Worker.execute(), which used to
+    cause a task to remain permanently in resumed state or to crash the worker through
+    `fail_hard` in case of very tight timings when resuming a task.
+
+    There is a recommendation to fetch, which starts Worker.gather_dep() and sends the
+    task into flight state before Worker.execute() terminates.
+
+    See also
+    --------
+    https://github.com/dask/distributed/issues/6869
+    https://github.com/dask/dask/issues/9330
+    test_execute_preamble_early_cancel_1
+    test_execute_preamble_early_cancel_2
+    test_worker.py::test_execute_preamble_abort_retirement
+    """
+    async with BlockedExecute(s.address, validate=True) as a, BlockedGetData(
+        s.address, validate=True
+    ) as b:
+        if critical_section == "execute":
+            in_ev = a.in_execute
+            block_ev = a.block_execute
+            a.block_deserialize_task.set()
+        else:
+            assert critical_section == "deserialize_task"
+            in_ev = a.in_deserialize_task
+            block_ev = a.block_deserialize_task
+            a.block_execute.set()
+
+        async def resume():
+            # Note: it's different from the first run on a
+            x = c.submit(inc, 2, key="x", workers=[b.address])
+            y = c.submit(inc, x, key="y", workers=[a.address])
+            await b.in_get_data.wait()
+            assert a.state.tasks["x"].state == "flight"
+            return y
+
+        x = c.submit(inc, 1, key="x", workers=[a.address])
+        await in_ev.wait()
+
+        x.release()
+        await wait_for_state("x", "released", a)
+
+        if resume_inside_critical_section:
+            y = await resume()
+
+        # Unblock Worker.execute().
+        # The method should detect the cancelled status and perform an early exit.
+        block_ev.set()
+        await a.in_execute_exit.wait()
+
+        if not resume_inside_critical_section:
+            y = await resume()
+
+        ts = a.state.tasks["x"]
+        assert a.state.executing == {ts}
+        assert a.state.in_flight_tasks == {ts}
+
+        # Finally let the done_callback of Worker.execute run
+        a.block_execute_exit.set()
+        while a.state.executing:
+            await asyncio.sleep(0.1)
+        assert a.state.in_flight_tasks == {ts}
+        assert ts.state == "flight"
+
+        b.block_get_data.set()
+
+        # Test that x does not get stuck.
+        # The output of y is 4 because x on b returned 2;
+        # if the output of the execution on a was used instead, it would be 3.
+        assert await y == 4
+
+
+@pytest.mark.parametrize("done_ev_cls", [ExecuteSuccessEvent, ExecuteFailureEvent])
+def test_double_release(ws_with_running_task, done_ev_cls):
+    """Test transition loop:
+
+    executing ->
+    (cancel task) -> released ->
+    (resume task) -> executing ->
+    (cancel task) -> released ->
+    (complete task)
+    """
+    ws = ws_with_running_task
+    ws2 = "127.0.0.1:2"
+    instructions = ws.handle_stimulus(
+        FreeKeysEvent(keys=["x"], stimulus_id="s1"),
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s2"),
+        FreeKeysEvent(keys=["y"], stimulus_id="s3"),
+        done_ev_cls.dummy("x", stimulus_id="s4"),
+    )
+    assert instructions == [
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s2")
+    ]
