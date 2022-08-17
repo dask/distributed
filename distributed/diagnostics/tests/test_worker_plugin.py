@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import warnings
 
@@ -137,6 +139,7 @@ async def test_failing_task_transitions_called(c, s, w):
 async def test_superseding_task_transitions_called(c, s, w):
     expected_notifications = [
         {"key": "task", "start": "released", "finish": "waiting"},
+        {"key": "task", "start": "waiting", "finish": "ready"},
         {"key": "task", "start": "waiting", "finish": "constrained"},
         {"key": "task", "start": "constrained", "finish": "executing"},
         {"key": "task", "start": "executing", "finish": "memory"},

@@ -4,11 +4,12 @@ import asyncio
 import datetime
 import logging
 import uuid
+import warnings
 from contextlib import suppress
 from inspect import isawaitable
 from typing import Any
 
-from tornado.ioloop import PeriodicCallback
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask.config
 from dask.utils import _deprecated, format_bytes, parse_timedelta, typename
@@ -54,7 +55,7 @@ class Cluster(SyncMethodMixin):
     """
 
     _supports_scaling = True
-    _cluster_info: dict = {}
+    __loop: IOLoop | None = None
 
     def __init__(
         self,
@@ -65,7 +66,6 @@ class Cluster(SyncMethodMixin):
         scheduler_sync_interval=1,
     ):
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
-        self.loop = self._loop_runner.loop
 
         self.scheduler_info = {"workers": {}}
         self.periodic_callbacks = {}
@@ -83,13 +83,31 @@ class Cluster(SyncMethodMixin):
         if name is None:
             name = str(uuid.uuid4())[:8]
 
-        # Mask class attribute with instance attribute
         self._cluster_info = {
             "name": name,
             "type": typename(type(self)),
-            **type(self)._cluster_info,
         }
         self.status = Status.created
+
+    @property
+    def loop(self) -> IOLoop | None:
+        loop = self.__loop
+        if loop is None:
+            # If the loop is not running when this is called, the LoopRunner.loop
+            # property will raise a DeprecationWarning
+            # However subsequent calls might occur - eg atexit, where a stopped
+            # loop is still acceptable - so we cache access to the loop.
+            self.__loop = loop = self._loop_runner.loop
+        return loop
+
+    @loop.setter
+    def loop(self, value: IOLoop) -> None:
+        warnings.warn(
+            "setting the loop property is deprecated", DeprecationWarning, stacklevel=2
+        )
+        if value is None:
+            raise ValueError("expected an IOLoop, got None")
+        self.__loop = value
 
     @property
     def name(self):
@@ -196,10 +214,13 @@ class Cluster(SyncMethodMixin):
         with suppress(RuntimeError):  # loop closed during process shutdown
             return self.sync(self._close, callback_timeout=timeout)
 
-    def __del__(self):
+    def __del__(self, _warn=warnings.warn):
         if getattr(self, "status", Status.closed) != Status.closed:
-            with suppress(AttributeError, RuntimeError):  # during closing
-                self.loop.add_callback(self.close)
+            try:
+                self_r = repr(self)
+            except Exception:
+                self_r = f"with a broken __repr__ {object.__repr__(self)}"
+            _warn(f"unclosed cluster {self_r}", ResourceWarning, source=self)
 
     async def _watch_worker_status(self, comm):
         """Listen to scheduler for updates on adding and removing workers"""
@@ -319,6 +340,22 @@ class Cluster(SyncMethodMixin):
     @_deprecated(use_instead="get_logs")
     def logs(self, *args, **kwargs):
         return self.get_logs(*args, **kwargs)
+
+    def get_client(self):
+        """Return client for the cluster
+
+        If a client has already been initialized for the cluster, return that
+        otherwise initialize a new client object.
+        """
+        from distributed.client import Client
+
+        try:
+            current_client = Client.current()
+            if current_client and current_client.cluster == self:
+                return current_client
+        except ValueError:
+            pass
+        return Client(self)
 
     @property
     def dashboard_link(self):
@@ -470,6 +507,10 @@ class Cluster(SyncMethodMixin):
 
     def __exit__(self, exc_type, exc_value, traceback):
         return self.sync(self.__aexit__, exc_type, exc_value, traceback)
+
+    def __await__(self):
+        return self
+        yield
 
     async def __aenter__(self):
         await self

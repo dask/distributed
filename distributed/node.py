@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import logging
+import ssl
 import warnings
 import weakref
 from contextlib import suppress
@@ -70,6 +73,10 @@ class ServerNode(Server):
                 )
 
     def stop_services(self):
+        if hasattr(self, "http_application"):
+            for application in self.http_application.applications:
+                if hasattr(application, "stop") and callable(application.stop):
+                    application.stop()
         for service in self.services.values():
             service.stop()
 
@@ -129,8 +136,6 @@ class ServerNode(Server):
         tls_cert = dask.config.get("distributed.scheduler.dashboard.tls.cert")
         tls_ca_file = dask.config.get("distributed.scheduler.dashboard.tls.ca-file")
         if tls_cert:
-            import ssl
-
             ssl_options = ssl.create_default_context(
                 cafile=tls_ca_file, purpose=ssl.Purpose.CLIENT_AUTH
             )

@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import asyncio
 import atexit
 import gc
 import logging
 import os
 import re
-import signal
 import sys
 import warnings
 
@@ -79,6 +80,15 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     required=False,
     help="Deprecated.  See --dashboard/--no-dashboard.",
 )
+@click.option(
+    "--jupyter/--no-jupyter",
+    "jupyter",
+    default=False,
+    required=False,
+    help="Start a Jupyter Server in the same process.  Warning: This will make"
+    "it possible for anyone with access to your dashboard address to run"
+    "Python code",
+)
 @click.option("--show/--no-show", default=False, help="Show web UI [default: --show]")
 @click.option(
     "--dashboard-prefix", type=str, default="", help="Prefix for the dashboard app"
@@ -131,6 +141,7 @@ def main(
     tls_cert,
     tls_key,
     dashboard_address,
+    jupyter,
     **kwargs,
 ):
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
@@ -194,6 +205,7 @@ def main(
             dashboard=dashboard,
             dashboard_address=dashboard_address,
             http_prefix=dashboard_prefix,
+            jupyter=jupyter,
             **kwargs,
         )
         logger.info("-" * 47)
@@ -205,7 +217,7 @@ def main(
 
         async def wait_for_signals_and_close():
             """Wait for SIGINT or SIGTERM and close the scheduler upon receiving one of those signals"""
-            await wait_for_signals([signal.SIGINT, signal.SIGTERM])
+            await wait_for_signals()
             await scheduler.close()
 
         wait_for_signals_and_close_task = asyncio.create_task(

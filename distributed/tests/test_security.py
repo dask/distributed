@@ -1,9 +1,7 @@
-from contextlib import contextmanager
+from __future__ import annotations
 
-try:
-    import ssl
-except ImportError:
-    ssl = None  # type: ignore
+import ssl
+from contextlib import contextmanager
 
 import pytest
 

@@ -5,16 +5,12 @@ import collections
 import logging
 import os
 import socket
+import ssl
 import struct
 import sys
 import weakref
 from itertools import islice
 from typing import Any
-
-try:
-    import ssl
-except ImportError:
-    ssl = None  # type: ignore
 
 import dask
 

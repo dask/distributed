@@ -1,3 +1,10 @@
+from __future__ import annotations
+
+import heapq
+import operator
+import pickle
+import random
+
 import pytest
 
 from distributed.collections import LRU, HeapSet
@@ -20,22 +27,23 @@ def test_lru():
     assert list(l.keys()) == ["c", "a", "d"]
 
 
+class C:
+    def __init__(self, k, i):
+        self.k = k
+        self.i = i
+
+    def __hash__(self):
+        return hash(self.k)
+
+    def __eq__(self, other):
+        return isinstance(other, C) and other.k == self.k
+
+    def __repr__(self):
+        return f"C({self.k}, {self.i})"
+
+
 def test_heapset():
-    class C:
-        def __init__(self, k, i):
-            self.k = k
-            self.i = i
-
-        def __hash__(self):
-            return hash(self.k)
-
-        def __eq__(self, other):
-            return isinstance(other, C) and other.k == self.k
-
-        def __repr__(self):
-            return f"C({self.k}, {self.i})"
-
-    heap = HeapSet(key=lambda c: c.i)
+    heap = HeapSet(key=operator.attrgetter("i"))
 
     cx = C("x", 2)
     cy = C("y", 1)
@@ -166,3 +174,66 @@ def test_heapset():
         heap.add(C("unsortable_key", None))
     assert len(heap) == 1
     assert set(heap) == {cx}
+
+
+@pytest.mark.parametrize("peek", [False, True])
+def test_heapset_popright(peek):
+    heap = HeapSet(key=operator.attrgetter("i"))
+    with pytest.raises(KeyError):
+        heap.peekright()
+    with pytest.raises(KeyError):
+        heap.popright()
+
+    # The heap contains broken weakrefs
+    for i in range(200):
+        c = C(f"y{i}", random.random())
+        heap.add(c)
+        if random.random() > 0.7:
+            heap.remove(c)
+
+    c0 = heap.peek()
+    while len(heap) > 1:
+        # These two code paths determine which of the two methods deals with the
+        # removal of broken weakrefs
+        if peek:
+            c1 = heap.peekright()
+            assert c1.i >= c0.i
+            assert heap.popright() is c1
+        else:
+            c1 = heap.popright()
+            assert c1.i >= c0.i
+
+        # Test that the heap hasn't been corrupted
+        h2 = heap._heap[:]
+        heapq.heapify(h2)
+        assert h2 == heap._heap
+
+    assert heap.peekright() is c0
+    assert heap.popright() is c0
+    assert not heap
+
+
+def test_heapset_pickle():
+    """Test pickle roundtrip for a HeapSet.
+
+    Note
+    ----
+    To make this test work with plain pickle and not need cloudpickle, we had to avoid
+    lambdas and local classes in our test. Here we're testing that HeapSet doesn't add
+    lambdas etc. of its own.
+    """
+    heap = HeapSet(key=operator.attrgetter("i"))
+
+    # The heap contains broken weakrefs
+    for i in range(200):
+        c = C(f"y{i}", random.random())
+        heap.add(c)
+        if random.random() > 0.7:
+            heap.remove(c)
+
+    heap2 = pickle.loads(pickle.dumps(heap))
+    assert len(heap) == len(heap2)
+    # Test that the heap has been re-heapified upon unpickle
+    assert len(heap2._heap) < len(heap._heap)
+    while heap:
+        assert heap.pop() == heap2.pop()

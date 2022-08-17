@@ -146,8 +146,7 @@ class WorkerMemoryManager:
             pc = PeriodicCallback(
                 # Don't store worker as self.worker to avoid creating a circular
                 # dependency. We could have alternatively used a weakref.
-                # FIXME annotations: https://github.com/tornadoweb/tornado/issues/3117
-                partial(self.memory_monitor, worker),  # type: ignore
+                partial(self.memory_monitor, worker),
                 self.memory_monitor_interval * 1000,
             )
             worker.periodic_callbacks["memory_monitor"] = pc

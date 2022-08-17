@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 
 from tlz import merge, valmap

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import copy
 import pickle
 from array import array
@@ -448,7 +450,7 @@ async def test_profile_nested_sizeof():
     original = outer = {}
     inner = {}
 
-    for i in range(n):
+    for _ in range(n):
         outer["children"] = inner
         outer, inner = inner, {}
 

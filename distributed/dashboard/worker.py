@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from tornado.ioloop import IOLoop
 
 from distributed.dashboard.components.worker import (
@@ -18,6 +20,7 @@ def connect(application, http_server, worker, prefix=""):
     )
     application.add_application(bokeh_app)
     bokeh_app.initialize(IOLoop.current())
+    bokeh_app.start()
 
 
 applications = {

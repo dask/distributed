@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import pickle
 from collections.abc import Iterator
 
 import pytest
@@ -15,7 +16,6 @@ from distributed.protocol.serialize import Serialize
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.utils import recursive_to_dict
 from distributed.utils_test import (
-    BlockedGetData,
     _LockedCommPool,
     assert_story,
     freeze_data_fetching,
@@ -25,21 +25,48 @@ from distributed.utils_test import (
 )
 from distributed.worker_state_machine import (
     AcquireReplicasEvent,
+    AddKeysMsg,
     ComputeTaskEvent,
+    Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
+    FreeKeysEvent,
+    GatherDep,
+    GatherDepFailureEvent,
+    GatherDepSuccessEvent,
     Instruction,
+    InvalidTaskState,
+    InvalidTransition,
+    PauseEvent,
     RecommendationsConflict,
     RefreshWhoHasEvent,
     ReleaseWorkerDataMsg,
     RescheduleEvent,
     RescheduleMsg,
+    SecedeEvent,
     SerializedTask,
     StateMachineEvent,
+    TaskErredMsg,
     TaskState,
+    TransitionCounterMaxExceeded,
+    UnpauseEvent,
     UpdateDataEvent,
     merge_recs_instructions,
 )
+
+
+def test_instruction_match():
+    i = ReleaseWorkerDataMsg(key="x", stimulus_id="s1")
+    assert i == ReleaseWorkerDataMsg(key="x", stimulus_id="s1")
+    assert i != ReleaseWorkerDataMsg(key="y", stimulus_id="s1")
+    assert i != ReleaseWorkerDataMsg(key="x", stimulus_id="s2")
+    assert i != RescheduleMsg(key="x", stimulus_id="s1")
+
+    assert i == ReleaseWorkerDataMsg.match(key="x")
+    assert i == ReleaseWorkerDataMsg.match(stimulus_id="s1")
+    assert i != ReleaseWorkerDataMsg.match(key="y")
+    assert i != ReleaseWorkerDataMsg.match(stimulus_id="s2")
+    assert i != RescheduleMsg.match(key="x")
 
 
 def test_TaskState_tracking(cleanup):
@@ -55,6 +82,17 @@ def test_TaskState_get_nbytes():
     assert TaskState("x", nbytes=123).get_nbytes() == 123
     # Default to distributed.scheduler.default-data-size
     assert TaskState("y").get_nbytes() == 1024
+
+
+def test_TaskState_eq():
+    """Test that TaskState objects are hashable and that two identical objects compare
+    as different. See comment in TaskState.__hash__ for why.
+    """
+    a = TaskState("x")
+    b = TaskState("x")
+    assert a != b
+    s = {a, b}
+    assert len(s) == 2
 
 
 def test_TaskState__to_dict():
@@ -82,6 +120,17 @@ def test_TaskState__to_dict():
     ]
 
 
+def test_TaskState_repr():
+    ts = TaskState("x")
+    assert str(ts) == "<TaskState 'x' released>"
+    ts.state = "cancelled"
+    ts.previous = "flight"
+    assert str(ts) == "<TaskState 'x' cancelled(flight)>"
+    ts.state = "resumed"
+    ts.next = "waiting"
+    assert str(ts) == "<TaskState 'x' resumed(flight->waiting)>"
+
+
 def test_WorkerState__to_dict(ws):
     ws.handle_stimulus(
         AcquireReplicasEvent(
@@ -104,18 +153,21 @@ def test_WorkerState__to_dict(ws):
         "busy_workers": [],
         "constrained": [],
         "data": {"y": None},
-        "data_needed": ["x"],
-        "data_needed_per_worker": {"127.0.0.1:1235": ["x"]},
+        "data_needed": {},
         "executing": [],
-        "in_flight_tasks": [],
-        "in_flight_workers": {},
+        "has_what": {"127.0.0.1:1235": ["x"]},
+        "in_flight_tasks": ["x"],
+        "in_flight_workers": {"127.0.0.1:1235": ["x"]},
         "log": [
             ["x", "ensure-task-exists", "released", "s1"],
             ["x", "released", "fetch", "fetch", {}, "s1"],
+            ["gather-dependencies", "127.0.0.1:1235", ["x"], "s1"],
+            ["x", "fetch", "flight", "flight", {}, "s1"],
             ["y", "put-in-memory", "s2"],
             ["y", "receive-from-scatter", "s2"],
         ],
         "long_running": [],
+        "missing_dep_flight": [],
         "nthreads": 1,
         "ready": [],
         "running": True,
@@ -135,10 +187,11 @@ def test_WorkerState__to_dict(ws):
         ],
         "tasks": {
             "x": {
+                "coming_from": "127.0.0.1:1235",
                 "key": "x",
                 "nbytes": 123,
                 "priority": [1],
-                "state": "fetch",
+                "state": "flight",
                 "who_has": ["127.0.0.1:1235"],
             },
             "y": {
@@ -147,9 +200,56 @@ def test_WorkerState__to_dict(ws):
                 "state": "memory",
             },
         },
-        "transition_counter": 1,
+        "transition_counter": 2,
     }
     assert actual == expect
+
+
+def test_WorkerState_pickle(ws):
+    """Test pickle round-trip.
+
+    Big caveat
+    ----------
+    WorkerState, on its own, can be serialized with pickle; it doesn't need cloudpickle.
+    A WorkerState extracted from a Worker might, as data contents may only be
+    serializable with cloudpickle. Some objects created externally and not designed
+    for network transfer - namely, the SpillBuffer - may not be serializable at all.
+    """
+    ws.handle_stimulus(
+        AcquireReplicasEvent(
+            who_has={"x": ["127.0.0.1:1235"]}, nbytes={"x": 123}, stimulus_id="s1"
+        )
+    )
+    ws.handle_stimulus(UpdateDataEvent(data={"y": 123}, report=False, stimulus_id="s"))
+    ws2 = pickle.loads(pickle.dumps(ws))
+    assert ws2.tasks.keys() == {"x", "y"}
+    assert ws2.data == {"y": 123}
+
+
+@pytest.mark.parametrize(
+    "cls,kwargs",
+    [
+        (
+            InvalidTransition,
+            dict(key="x", start="released", finish="waiting", story=[]),
+        ),
+        (
+            TransitionCounterMaxExceeded,
+            dict(key="x", start="released", finish="waiting", story=[]),
+        ),
+        (InvalidTaskState, dict(key="x", state="released", story=[])),
+    ],
+)
+@pytest.mark.parametrize("positional", [False, True])
+def test_pickle_exceptions(cls, kwargs, positional):
+    if positional:
+        e = cls(*kwargs.values())
+    else:
+        e = cls(**kwargs)
+    e2 = pickle.loads(pickle.dumps(e))
+    assert type(e2) is type(e)
+    for k, v in kwargs.items():
+        assert getattr(e2, k) == v
 
 
 def traverse_subclasses(cls: type) -> Iterator[type]:
@@ -209,7 +309,10 @@ def test_merge_recs_instructions():
         merge_recs_instructions(({x: "memory"}, []), ({x: "released"}, []))
 
 
-def test_event_to_dict():
+def test_event_to_dict_with_annotations():
+    """Test recursive_to_dict(ev), where ev is a subclass of StateMachineEvent that
+    defines its own annotations
+    """
     ev = RescheduleEvent(stimulus_id="test", key="x")
     ev2 = ev.to_loggable(handled=11.22)
     assert ev2 == ev
@@ -224,6 +327,23 @@ def test_event_to_dict():
     assert ev3 == ev
 
 
+def test_event_to_dict_without_annotations():
+    """Test recursive_to_dict(ev), where ev is a subclass of StateMachineEvent that
+    does not define its own annotations
+    """
+    ev = PauseEvent(stimulus_id="test")
+    ev2 = ev.to_loggable(handled=11.22)
+    assert ev2 == ev
+    d = recursive_to_dict(ev2)
+    assert d == {
+        "cls": "PauseEvent",
+        "stimulus_id": "test",
+        "handled": 11.22,
+    }
+    ev3 = StateMachineEvent.from_dict(d)
+    assert ev3 == ev
+
+
 def test_computetask_to_dict():
     """The potentially very large ComputeTaskEvent.run_spec is not stored in the log"""
     ev = ComputeTaskEvent(
@@ -232,12 +352,14 @@ def test_computetask_to_dict():
         nbytes={"y": 123},
         priority=(0,),
         duration=123.45,
-        # Automatically converted to SerializedTask on init
-        run_spec={"function": b"blob", "args": b"blob"},
+        run_spec=None,
         resource_restrictions={},
         actor=False,
         annotations={},
         stimulus_id="test",
+        function=b"blob",
+        args=b"blob",
+        kwargs=None,
     )
     assert ev.run_spec == SerializedTask(function=b"blob", args=b"blob")
     ev2 = ev.to_loggable(handled=11.22)
@@ -258,11 +380,37 @@ def test_computetask_to_dict():
         "annotations": {},
         "stimulus_id": "test",
         "handled": 11.22,
+        "function": None,
+        "args": None,
+        "kwargs": None,
     }
     ev3 = StateMachineEvent.from_dict(d)
     assert isinstance(ev3, ComputeTaskEvent)
     assert ev3.run_spec == SerializedTask(task=None)
     assert ev3.priority == (0,)  # List is automatically converted back to tuple
+
+
+def test_computetask_dummy():
+    ev = ComputeTaskEvent.dummy("x", stimulus_id="s")
+    assert ev == ComputeTaskEvent(
+        key="x",
+        who_has={},
+        nbytes={},
+        priority=(0,),
+        duration=1.0,
+        run_spec=None,
+        resource_restrictions={},
+        actor=False,
+        annotations={},
+        stimulus_id="s",
+        function=None,
+        args=None,
+        kwargs=None,
+    )
+
+    # nbytes is generated from who_has if omitted
+    ev2 = ComputeTaskEvent.dummy("x", who_has={"y": "127.0.0.1:2"}, stimulus_id="s")
+    assert ev2.nbytes == {"y": 1}
 
 
 def test_updatedata_to_dict():
@@ -326,6 +474,22 @@ def test_executesuccess_to_dict():
     assert ev3.type is None
 
 
+def test_executesuccess_dummy():
+    ev = ExecuteSuccessEvent.dummy("x", stimulus_id="s")
+    assert ev == ExecuteSuccessEvent(
+        key="x",
+        value=None,
+        start=0.0,
+        stop=1.0,
+        nbytes=1,
+        type=None,
+        stimulus_id="s",
+    )
+
+    ev2 = ExecuteSuccessEvent.dummy("x", 123, stimulus_id="s")
+    assert ev2.value == 123
+
+
 def test_executefailure_to_dict():
     ev = ExecuteFailureEvent(
         stimulus_id="test",
@@ -364,6 +528,20 @@ def test_executefailure_to_dict():
     assert ev3.traceback is None
     assert ev3.exception_text == "exc text"
     assert ev3.traceback_text == "tb text"
+
+
+def test_executefailure_dummy():
+    ev = ExecuteFailureEvent.dummy("x", stimulus_id="s")
+    assert ev == ExecuteFailureEvent(
+        key="x",
+        start=None,
+        stop=None,
+        exception=Serialize(None),
+        traceback=None,
+        exception_text="",
+        traceback_text="",
+        stimulus_id="s",
+    )
 
 
 @gen_cluster(client=True)
@@ -479,7 +657,7 @@ async def test_lose_replica_during_fetch(c, s, w1, w2, w3, as_deps):
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
-async def test_fetch_to_missing(c, s, a, b):
+async def test_fetch_to_missing_on_busy(c, s, a, b):
     """
     1. task x is a dependency of y
     2. scheduler calls handle_compute("y", who_has={"x": [b]}) on a
@@ -489,7 +667,12 @@ async def test_fetch_to_missing(c, s, a, b):
     6. the scheduler responds {"x": []}, because w1 in the meantime has lost the key.
     7. x is transitioned fetch -> missing
     """
-    x = await c.scatter({"x": 1}, workers=[b.address])
+    # Note: submit and scatter are different. If you lose all workers holding the
+    # replicas of a scattered key, the scheduler forgets the task, which in turn would
+    # trigger a free-keys response to request-refresh-who-has.
+    x = c.submit(inc, 1, key="x", workers=[b.address])
+    await x
+
     b.total_in_connections = 0
     # Crucially, unlike with `c.submit(inc, x, workers=[a.address])`, the scheduler
     # doesn't keep track of acquire-replicas requests, so it won't proactively inform a
@@ -526,9 +709,7 @@ async def test_fetch_to_missing(c, s, a, b):
     )
 
 
-@pytest.mark.skip(reason="https://github.com/dask/distributed/issues/6446")
-@gen_cluster(client=True)
-async def test_new_replica_while_all_workers_in_flight(c, s, w1, w2):
+def test_new_replica_while_all_workers_in_flight(ws):
     """A task is stuck in 'fetch' state because all workers that hold a replica are in
     flight. While in this state, a new replica appears on a different worker and the
     scheduler informs the waiting worker through a new acquire-replicas or
@@ -542,35 +723,41 @@ async def test_new_replica_while_all_workers_in_flight(c, s, w1, w2):
     Test that, when this happens, the task is immediately acquired from the new worker,
     without waiting for the original replica holders to get out of flight.
     """
-    # Make sure find_missing is not involved
-    w1.periodic_callbacks["find-missing"].stop()
-
-    async with BlockedGetData(s.address) as w3:
-        x = c.submit(inc, 1, key="x", workers=[w3.address])
-        y = c.submit(inc, 2, key="y", workers=[w3.address])
-        await wait([x, y])
-        s.request_acquire_replicas(w1.address, ["x"], stimulus_id="test")
-        await w3.in_get_data.wait()
-        assert w1.state.tasks["x"].state == "flight"
-        s.request_acquire_replicas(w1.address, ["y"], stimulus_id="test")
-        # This cannot progress beyond fetch because w3 is already in flight
-        await wait_for_state("y", "fetch", w1)
-
-        # Simulate that the AMM also requires that w2 acquires a replica of x.
-        # The replica lands on w2 soon afterwards, while w3->w1 comms remain blocked by
-        # unrelated transfers (x in our case).
-        w2.update_data({"y": 3}, report=True)
-        ws2 = s.workers[w2.address]
-        while ws2 not in s.tasks["y"].who_has:
-            await asyncio.sleep(0.01)
-
-        # 2 seconds later, the AMM reiterates that w1 should acquire a replica of y
-        s.request_acquire_replicas(w1.address, ["y"], stimulus_id="test")
-        await wait_for_state("y", "memory", w1)
-
-        # Finally let the other worker to get out of flight
-        w3.block_get_data.set()
-        await wait_for_state("x", "memory", w1)
+    ws2 = "127.0.0.1:2"
+    ws3 = "127.0.0.1:3"
+    instructions = ws.handle_stimulus(
+        AcquireReplicasEvent(
+            who_has={"x": [ws2]},
+            nbytes={"x": 1},
+            stimulus_id="s1",
+        ),
+        AcquireReplicasEvent(
+            who_has={"y": [ws2]},
+            nbytes={"y": 1},
+            stimulus_id="s2",
+        ),
+        AcquireReplicasEvent(
+            who_has={"y": [ws2, ws3]},
+            nbytes={"y": 1},
+            stimulus_id="s3",
+        ),
+    )
+    assert instructions == [
+        GatherDep(
+            worker=ws2,
+            to_gather={"x"},
+            total_nbytes=1,
+            stimulus_id="s1",
+        ),
+        GatherDep(
+            worker=ws3,
+            to_gather={"y"},
+            total_nbytes=1,
+            stimulus_id="s3",
+        ),
+    ]
+    assert ws.tasks["x"].state == "flight"
+    assert ws.tasks["y"].state == "flight"
 
 
 @gen_cluster(client=True)
@@ -817,3 +1004,292 @@ async def test_deprecated_worker_attributes(s, a, b):
     )
     with pytest.warns(FutureWarning, match=msg):
         assert a.in_flight_tasks == 0
+
+    with pytest.warns(FutureWarning, match="attribute has been removed"):
+        assert a.data_needed == set()
+
+
+@pytest.mark.parametrize(
+    "nbytes,n_in_flight",
+    [
+        # Note: target_message_size = 50e6 bytes
+        (int(10e6), 3),
+        (int(20e6), 2),
+        (int(30e6), 1),
+    ],
+)
+def test_aggregate_gather_deps(ws, nbytes, n_in_flight):
+    ws2 = "127.0.0.1:2"
+    instructions = ws.handle_stimulus(
+        AcquireReplicasEvent(
+            who_has={"x1": [ws2], "x2": [ws2], "x3": [ws2]},
+            nbytes={"x1": nbytes, "x2": nbytes, "x3": nbytes},
+            stimulus_id="s1",
+        )
+    )
+    assert instructions == [GatherDep.match(worker=ws2, stimulus_id="s1")]
+    assert len(instructions[0].to_gather) == n_in_flight
+    assert len(ws.in_flight_tasks) == n_in_flight
+
+
+def test_gather_priority(ws):
+    """Test that tasks are fetched in the following order:
+
+    1. by task priority
+    2. in case of tie, from local workers first
+    3. in case of tie, from the worker with the most tasks queued
+    4. in case of tie, from a random worker (which is actually deterministic).
+    """
+    ws.total_out_connections = 4
+
+    instructions = ws.handle_stimulus(
+        PauseEvent(stimulus_id="pause"),
+        # Note: tasks fetched by acquire-replicas always have priority=(1, )
+        AcquireReplicasEvent(
+            who_has={
+                # Remote + local
+                "x1": ["127.0.0.2:1", "127.0.0.1:2"],
+                # Remote. After getting x11 from .1, .2  will have less tasks than .3
+                "x2": ["127.0.0.2:1"],
+                "x3": ["127.0.0.3:1"],
+                "x4": ["127.0.0.3:1"],
+                # It will be a random choice between .2, .4, .5, .6, and .7
+                "x5": ["127.0.0.4:1"],
+                "x6": ["127.0.0.5:1"],
+                "x7": ["127.0.0.6:1"],
+                # This will be fetched first because it's on the same worker as y
+                "x8": ["127.0.0.7:1"],
+            },
+            # Substantial nbytes prevents total_out_connections to be overridden by
+            # comm_threshold_bytes, but it's less than target_message_size
+            nbytes={f"x{i}": 4 * 2**20 for i in range(1, 9)},
+            stimulus_id="compute1",
+        ),
+        # A higher-priority task, even if scheduled later, is fetched first
+        ComputeTaskEvent.dummy(
+            key="z",
+            who_has={"y": ["127.0.0.7:1"]},
+            priority=(0,),
+            stimulus_id="compute2",
+        ),
+        UnpauseEvent(stimulus_id="unpause"),
+    )
+
+    assert instructions == [
+        # Highest-priority task first. Lower priority tasks from the same worker are
+        # shoved into the same instruction (up to 50MB worth)
+        GatherDep(
+            stimulus_id="unpause",
+            worker="127.0.0.7:1",
+            to_gather={"y", "x8"},
+            total_nbytes=1 + 4 * 2**20,
+        ),
+        # Followed by local workers
+        GatherDep(
+            stimulus_id="unpause",
+            worker="127.0.0.1:2",
+            to_gather={"x1"},
+            total_nbytes=4 * 2**20,
+        ),
+        # Followed by remote workers with the most tasks
+        GatherDep(
+            stimulus_id="unpause",
+            worker="127.0.0.3:1",
+            to_gather={"x3", "x4"},
+            total_nbytes=8 * 2**20,
+        ),
+        # Followed by other remote workers, randomly.
+        # Determinism is guaranteed by a statically-seeded random number generator.
+        # FIXME It would have not been deterministic if we instead of multiple keys we
+        #       had used a single key with multiple workers, because sets
+        #       (like TaskState.who_has) change order at every interpreter restart.
+        GatherDep(
+            stimulus_id="unpause",
+            worker="127.0.0.4:1",
+            to_gather={"x5"},
+            total_nbytes=4 * 2**20,
+        ),
+    ]
+
+
+@pytest.mark.parametrize("state", ["executing", "long-running"])
+def test_task_acquires_resources(ws, state):
+    ws.available_resources = {"R": 1}
+    ws.total_resources = {"R": 1}
+
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            key="x", resource_restrictions={"R": 1}, stimulus_id="compute"
+        )
+    )
+    if state == "long-running":
+        ws.handle_stimulus(
+            SecedeEvent(key="x", compute_duration=1.0, stimulus_id="secede")
+        )
+    assert ws.tasks["x"].state == state
+    assert ws.available_resources == {"R": 0}
+
+
+@pytest.mark.parametrize(
+    "done_ev_cls,done_status",
+    [(ExecuteSuccessEvent, "memory"), (ExecuteFailureEvent, "error")],
+)
+def test_task_releases_resources(ws_with_running_task, done_ev_cls, done_status):
+    ws = ws_with_running_task
+    assert ws.available_resources == {"R": 0}
+
+    ws.handle_stimulus(done_ev_cls.dummy("x", stimulus_id="success"))
+    assert ws.tasks["x"].state == done_status
+    assert ws.available_resources == {"R": 1}
+
+
+def test_task_with_dependencies_acquires_resources(ws):
+    ws.available_resources = {"R": 1}
+    ws.total_resources = {"R": 1}
+    ws2 = "127.0.0.1:2"
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "y", who_has={"x": [ws2]}, resource_restrictions={"R": 1}, stimulus_id="s1"
+        )
+    )
+    assert ws.tasks["x"].state == "flight"
+    assert ws.tasks["y"].state == "waiting"
+    assert ws.available_resources == {"R": 1}
+
+    instructions = ws.handle_stimulus(
+        GatherDepSuccessEvent(
+            worker=ws2, data={"x": 123}, total_nbytes=8, stimulus_id="s2"
+        )
+    )
+    assert instructions == [
+        AddKeysMsg(keys=["x"], stimulus_id="s2"),
+        Execute(key="y", stimulus_id="s2"),
+    ]
+    assert ws.tasks["y"].state == "executing"
+    assert ws.available_resources == {"R": 0}
+
+
+@pytest.mark.parametrize(
+    "done_ev_cls,done_status",
+    [
+        (ExecuteSuccessEvent, "memory"),
+        pytest.param(
+            ExecuteFailureEvent,
+            "flight",
+            marks=pytest.mark.xfail(
+                reason="distributed#6682,distributed#6689,distributed#6693"
+            ),
+        ),
+    ],
+)
+def test_resumed_task_releases_resources(
+    ws_with_running_task, done_ev_cls, done_status
+):
+    ws = ws_with_running_task
+    assert ws.available_resources == {"R": 0}
+    ws2 = "127.0.0.1:2"
+
+    ws.handle_stimulus(FreeKeysEvent("cancel", ["x"]))
+    assert ws.tasks["x"].state == "cancelled"
+    assert ws.available_resources == {"R": 0}
+
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="compute")
+    )
+    assert not instructions
+    assert ws.tasks["x"].state == "resumed"
+    assert ws.available_resources == {"R": 0}
+
+    ws.handle_stimulus(done_ev_cls.dummy("x", stimulus_id="s2"))
+    assert ws.tasks["x"].state == done_status
+    assert ws.available_resources == {"R": 1}
+
+
+@gen_cluster()
+async def test_clean_log(s, a, b):
+    """Test that brand new workers start with a clean log"""
+    assert not a.state.log
+    assert not a.state.stimulus_log
+
+
+def test_running_task_in_all_running_tasks(ws_with_running_task):
+    ws = ws_with_running_task
+    ws2 = "127.0.0.1:2"
+    ts = ws.tasks["x"]
+    assert ts in ws.all_running_tasks
+
+    ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="s1"))
+    assert ts.state == "cancelled"
+    assert ts in ws.all_running_tasks
+
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s2")
+    )
+    assert ts.state == "resumed"
+    assert ts in ws.all_running_tasks
+
+
+@pytest.mark.parametrize(
+    "done_ev_cls,done_status",
+    [(ExecuteSuccessEvent, "memory"), (ExecuteFailureEvent, "error")],
+)
+def test_done_task_not_in_all_running_tasks(
+    ws_with_running_task, done_ev_cls, done_status
+):
+    ws = ws_with_running_task
+    ts = ws.tasks["x"]
+    assert ts in ws.all_running_tasks
+
+    ws.handle_stimulus(done_ev_cls.dummy("x", stimulus_id="s1"))
+    assert ts.state == done_status
+    assert ts not in ws.all_running_tasks
+
+
+@pytest.mark.parametrize(
+    "done_ev_cls,done_status",
+    [
+        (ExecuteSuccessEvent, "memory"),
+        pytest.param(
+            ExecuteFailureEvent,
+            "flight",
+            marks=pytest.mark.xfail(reason="distributed#6689"),
+        ),
+    ],
+)
+def test_done_resumed_task_not_in_all_running_tasks(
+    ws_with_running_task, done_ev_cls, done_status
+):
+    ws = ws_with_running_task
+    ws2 = "127.0.0.1:2"
+
+    ws.handle_stimulus(
+        FreeKeysEvent(keys=["x"], stimulus_id="s1"),
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s2"),
+        done_ev_cls.dummy("x", stimulus_id="s3"),
+    )
+    ts = ws.tasks["x"]
+    assert ts.state == done_status
+    assert ts not in ws.all_running_tasks
+
+
+@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/6705")
+def test_gather_dep_failure(ws):
+    """Simulate a task failing to unpickle when it reaches the destination worker after
+    a flight.
+
+    See also test_worker_memory.py::test_workerstate_fail_to_pickle_flight,
+    where the task instead is gathered successfully, but fails to spill.
+    """
+    ws2 = "127.0.0.1:2"
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s1"),
+        GatherDepFailureEvent.from_exception(
+            Exception(), worker=ws2, total_nbytes=1, stimulus_id="s2"
+        ),
+    )
+    assert instructions == [
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
+        TaskErredMsg.match(key="x", stimulus_id="s2"),
+    ]
+    assert ws.tasks["x"].state == "error"
+    assert ws.tasks["y"].state == "waiting"  # Not ready

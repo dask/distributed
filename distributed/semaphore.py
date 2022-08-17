@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import uuid
@@ -375,7 +377,7 @@ class Semaphore(SyncMethodMixin):
         except ValueError:
             client = get_client()
             self.scheduler = scheduler_rpc or client.scheduler
-            self.loop = loop or client.io_loop
+            self.loop = loop or client.loop
 
         self.name = name or "semaphore-" + uuid.uuid4().hex
         self.max_leases = max_leases

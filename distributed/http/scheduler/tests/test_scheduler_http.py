@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import re
@@ -13,42 +15,45 @@ from tornado.httpclient import AsyncHTTPClient, HTTPClientError
 import dask.config
 from dask.sizeof import sizeof
 
+from distributed import Lock
 from distributed.utils import is_valid_xml
-from distributed.utils_test import gen_cluster, inc, slowinc
+from distributed.utils_test import gen_cluster, inc, lock_inc, slowinc
 
 DEFAULT_ROUTES = dask.config.get("distributed.scheduler.http.routes")
 
 
 @gen_cluster(client=True)
 async def test_connect(c, s, a, b):
-    future = c.submit(lambda x: x + 1, 1)
-    x = c.submit(slowinc, 1, delay=1, retries=5)
-    await future
-    http_client = AsyncHTTPClient()
-    for suffix in [
-        "info/main/workers.html",
-        "info/worker/" + url_escape(a.address) + ".html",
-        "info/task/" + url_escape(future.key) + ".html",
-        "info/main/logs.html",
-        "info/logs/" + url_escape(a.address) + ".html",
-        "info/call-stack/" + url_escape(x.key) + ".html",
-        "info/call-stacks/" + url_escape(a.address) + ".html",
-        "json/counts.json",
-        "json/identity.json",
-        "json/index.html",
-        "individual-plots.json",
-        "sitemap.json",
-    ]:
-        response = await http_client.fetch(
-            "http://localhost:%d/%s" % (s.http_server.port, suffix)
-        )
-        assert response.code == 200
-        body = response.body.decode()
-        if suffix.endswith(".json"):
-            json.loads(body)
-        else:
-            assert is_valid_xml(body)
-            assert not re.search("href=./", body)  # no absolute links
+    lock = Lock()
+    async with lock:
+        future = c.submit(lambda x: x + 1, 1)
+        x = c.submit(lock_inc, 1, lock=lock, retries=5)
+        await future
+        http_client = AsyncHTTPClient()
+        for suffix in [
+            "info/main/workers.html",
+            "info/worker/" + url_escape(a.address) + ".html",
+            "info/task/" + url_escape(future.key) + ".html",
+            "info/main/logs.html",
+            "info/logs/" + url_escape(a.address) + ".html",
+            "info/call-stack/" + url_escape(x.key) + ".html",
+            "info/call-stacks/" + url_escape(a.address) + ".html",
+            "json/counts.json",
+            "json/identity.json",
+            "json/index.html",
+            "individual-plots.json",
+            "sitemap.json",
+        ]:
+            response = await http_client.fetch(
+                "http://localhost:%d/%s" % (s.http_server.port, suffix)
+            )
+            assert response.code == 200
+            body = response.body.decode()
+            if suffix.endswith(".json"):
+                json.loads(body)
+            else:
+                assert is_valid_xml(body)
+                assert not re.search("href=./", body)  # no absolute links
 
 
 @gen_cluster(client=True, nthreads=[])

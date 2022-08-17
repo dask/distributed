@@ -656,7 +656,7 @@ def dask_setup(worker):
 def test_timeout(nanny):
     worker = subprocess.run(
         [
-            "python",
+            sys.executable,
             "-m",
             "distributed.cli.dask_worker",
             "192.168.1.100:7777",
@@ -679,7 +679,7 @@ def test_timeout(nanny):
 @gen_cluster(client=True, nthreads=[])
 async def test_signal_handling(c, s, nanny, sig):
     with subprocess.Popen(
-        ["python", "-m", "distributed.cli.dask_worker", s.address, nanny],
+        [sys.executable, "-m", "distributed.cli.dask_worker", s.address, nanny],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     ) as worker:
@@ -703,7 +703,7 @@ async def test_signal_handling(c, s, nanny, sig):
 
 
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
-def test_error_during_startup(monkeypatch, nanny):
+def test_error_during_startup(monkeypatch, nanny, loop):
     # see https://github.com/dask/distributed/issues/6320
     scheduler_port = open_port()
     scheduler_addr = f"tcp://127.0.0.1:{scheduler_port}"
@@ -716,7 +716,7 @@ def test_error_during_startup(monkeypatch, nanny):
             "--dashboard-address=:0",
         ],
     ):
-        with Client(scheduler_addr) as c:
+        with Client(scheduler_addr, loop=loop) as c:
             with popen(
                 [
                     "dask-worker",

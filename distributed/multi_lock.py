@@ -140,10 +140,10 @@ class MultiLock:
 
     Parameters
     ----------
-    names: List[str]
+    names
         Names of the locks to acquire. Choosing the same name allows two
         disconnected processes to coordinate a lock.
-    client: Client (optional)
+    client
         Client to use for communication with the scheduler.  If not given, the
         default global client will be used.
 
@@ -155,14 +155,14 @@ class MultiLock:
     >>> lock.release()  # doctest: +SKIP
     """
 
-    def __init__(self, names=[], client=None):
+    def __init__(self, names: list[str] | None = None, client: Client | None = None):
         try:
             self.client = client or Client.current()
         except ValueError:
             # Initialise new client
             self.client = get_worker().client
 
-        self.names = names
+        self.names = names or []
         self.id = uuid.uuid4().hex
         self._locked = False
 

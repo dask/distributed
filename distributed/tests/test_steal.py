@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import itertools
@@ -30,7 +32,11 @@ from distributed.utils_test import (
     slowidentity,
     slowinc,
 )
-from distributed.worker_state_machine import StealRequestEvent
+from distributed.worker_state_machine import (
+    ExecuteSuccessEvent,
+    FreeKeysEvent,
+    StealRequestEvent,
+)
 
 pytestmark = pytest.mark.ci1
 
@@ -668,7 +674,7 @@ async def assert_balanced(inp, expected, c, s, *workers):
     while len([ts for ts in s.tasks.values() if ts.processing_on]) < len(futures):
         await asyncio.sleep(0.001)
 
-    for i in range(10):
+    for _ in range(10):
         steal.balance()
 
         while steal.in_flight:
@@ -949,7 +955,7 @@ async def test_cleanup_repeated_tasks(c, s, a, b):
 async def test_lose_task(c, s, a, b):
     with captured_logger("distributed.stealing") as log:
         s.periodic_callbacks["stealing"].interval = 1
-        for i in range(100):
+        for _ in range(100):
             futures = c.map(
                 slowinc,
                 range(10),
@@ -966,17 +972,20 @@ async def test_lose_task(c, s, a, b):
 
 
 @pytest.mark.parametrize("interval, expected", [(None, 100), ("500ms", 500), (2, 2)])
-@gen_cluster(nthreads=[])
+@gen_cluster(nthreads=[], config={"distributed.scheduler.work-stealing": False})
 async def test_parse_stealing_interval(s, interval, expected):
     from distributed.scheduler import WorkStealing
 
     if interval:
-        ctx = dask.config.set({"distributed.scheduler.work-stealing-interval": "500ms"})
+        ctx = dask.config.set(
+            {"distributed.scheduler.work-stealing-interval": interval}
+        )
     else:
         ctx = contextlib.nullcontext()
     with ctx:
         ws = WorkStealing(s)
-        s.periodic_callbacks["stealing"].callback_time == expected
+        await ws.start()
+        assert s.periodic_callbacks["stealing"].callback_time == expected
 
 
 @gen_cluster(client=True)
@@ -1057,12 +1066,12 @@ async def test_steal_concurrent_simple(c, s, *workers):
         await asyncio.sleep(0.1)
 
     # ready is a heap but we don't need last, just not the next
-    _, victim_key = w0.state.ready[-1]
+    victim_key = w0.state.ready.peekright().key
+    victim_ts = s.tasks[victim_key]
 
     ws0 = s.workers[w0.address]
     ws1 = s.workers[w1.address]
     ws2 = s.workers[w2.address]
-    victim_ts = s.tasks[victim_key]
     steal.move_task_request(victim_ts, ws0, ws1)
     steal.move_task_request(victim_ts, ws0, ws2)
 
@@ -1092,8 +1101,7 @@ async def test_steal_reschedule_reset_in_flight_occupancy(c, s, *workers):
         await asyncio.sleep(0.01)
 
     # ready is a heap but we don't need last, just not the next
-    _, victim_key = w0.state.ready[-1]
-
+    victim_key = w0.state.ready.peekright().key
     victim_ts = s.tasks[victim_key]
 
     wsA = victim_ts.processing_on
@@ -1102,7 +1110,7 @@ async def test_steal_reschedule_reset_in_flight_occupancy(c, s, *workers):
 
     steal.move_task_request(victim_ts, wsA, wsB)
 
-    s.reschedule(victim_key)
+    s.reschedule(victim_key, stimulus_id="test")
     await c.gather(futs1)
 
     del futs1
@@ -1151,8 +1159,8 @@ async def test_steal_worker_dies_same_ip(c, s, w0, w1):
     while not w0.active_keys:
         await asyncio.sleep(0.01)
 
-    victim_key = list(w0.state.ready)[-1][1]
-
+    # ready is a heap but we don't need last, just not the next
+    victim_key = w0.state.ready.peekright().key
     victim_ts = s.tasks[victim_key]
 
     wsA = victim_ts.processing_on
@@ -1236,7 +1244,7 @@ async def test_reschedule_concurrent_requests_deadlock(c, s, *workers):
     steal.move_task_request(victim_ts, wsA, wsB)
 
     s.set_restrictions(worker={victim_key: [wsB.address]})
-    s.reschedule(victim_key)
+    s.reschedule(victim_key, stimulus_id="test")
     assert wsB == victim_ts.processing_on
     # move_task_request is not responsible for respecting worker restrictions
     steal.move_task_request(victim_ts, wsB, wsC)
@@ -1315,3 +1323,17 @@ async def test_steal_stimulus_id_unique(c, s, a, b):
         stimulus_ids = {dct["stimulus_id"] for dct in steal.in_flight.values()}
         assert len(stimulus_ids) == num_futs
         await c.cancel(futures)
+
+
+def test_steal_worker_state(ws_with_running_task):
+    ws = ws_with_running_task
+
+    ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="s1"))
+    assert ws.available_resources == {"R": 0}
+    assert ws.tasks["x"].state == "cancelled"
+
+    instructions = ws.handle_stimulus(ExecuteSuccessEvent.dummy("x", stimulus_id="s2"))
+    assert not instructions
+    assert "x" not in ws.tasks
+    assert "x" not in ws.data
+    assert ws.available_resources == {"R": 1}

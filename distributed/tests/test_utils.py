@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import contextvars
 import functools
@@ -385,25 +387,48 @@ def assert_not_running(loop):
             q.get(timeout=0.02)
 
 
+_loop_not_running_property_warning = functools.partial(
+    pytest.warns,
+    DeprecationWarning,
+    match=r"Accessing the loop property while the loop is not running is deprecated",
+)
+_explicit_loop_is_not_running_warning = functools.partial(
+    pytest.warns,
+    DeprecationWarning,
+    match=r"Constructing LoopRunner\(loop=loop\) without a running loop is deprecated",
+)
+_implicit_loop_is_not_running_warning = functools.partial(
+    pytest.warns,
+    DeprecationWarning,
+    match=r"Constructing a LoopRunner\(asynchronous=True\) without a running loop is deprecated",
+)
+
+
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
 def test_loop_runner(loop_in_thread):
     # Implicit loop
     loop = IOLoop()
     loop.make_current()
     runner = LoopRunner()
-    assert runner.loop not in (loop, loop_in_thread)
+    with _loop_not_running_property_warning():
+        assert runner.loop not in (loop, loop_in_thread)
     assert not runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
     runner.start()
     assert runner.is_started()
     assert_running(runner.loop)
     runner.stop()
     assert not runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
 
     # Explicit loop
     loop = IOLoop()
-    runner = LoopRunner(loop=loop)
-    assert runner.loop is loop
+    with _explicit_loop_is_not_running_warning():
+        runner = LoopRunner(loop=loop)
+    with _loop_not_running_property_warning():
+        assert runner.loop is loop
     assert not runner.is_started()
     assert_not_running(loop)
     runner.start()
@@ -427,38 +452,51 @@ def test_loop_runner(loop_in_thread):
     # Implicit loop, asynchronous=True
     loop = IOLoop()
     loop.make_current()
-    runner = LoopRunner(asynchronous=True)
-    assert runner.loop is loop
+    with _implicit_loop_is_not_running_warning():
+        runner = LoopRunner(asynchronous=True)
+    with _loop_not_running_property_warning():
+        assert runner.loop is loop
     assert not runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
     runner.start()
     assert runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
     runner.stop()
     assert not runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
 
     # Explicit loop, asynchronous=True
     loop = IOLoop()
-    runner = LoopRunner(loop=loop, asynchronous=True)
-    assert runner.loop is loop
+    with _explicit_loop_is_not_running_warning():
+        runner = LoopRunner(loop=loop, asynchronous=True)
+    with _loop_not_running_property_warning():
+        assert runner.loop is loop
     assert not runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
     runner.start()
     assert runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
     runner.stop()
     assert not runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
 
 
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
 def test_two_loop_runners(loop_in_thread):
     # Loop runners tied to the same loop should cooperate
 
     # ABCCBA
     loop = IOLoop()
-    a = LoopRunner(loop=loop)
-    b = LoopRunner(loop=loop)
+    with _explicit_loop_is_not_running_warning():
+        a = LoopRunner(loop=loop)
+    with _explicit_loop_is_not_running_warning():
+        b = LoopRunner(loop=loop)
     assert_not_running(loop)
     a.start()
     assert_running(loop)
@@ -476,8 +514,10 @@ def test_two_loop_runners(loop_in_thread):
 
     # ABCABC
     loop = IOLoop()
-    a = LoopRunner(loop=loop)
-    b = LoopRunner(loop=loop)
+    with _explicit_loop_is_not_running_warning():
+        a = LoopRunner(loop=loop)
+    with _explicit_loop_is_not_running_warning():
+        b = LoopRunner(loop=loop)
     assert_not_running(loop)
     a.start()
     assert_running(loop)
@@ -550,7 +590,16 @@ def test_warn_on_duration():
             sleep(0.100)
 
     assert record
-    assert any("foo" in str(rec.message) for rec in record)
+
+    with pytest.warns(UserWarning) as record:
+        with warn_on_duration("1ms", "{duration:.4f}"):
+            start = time()
+            sleep(0.100)
+            measured = time() - start
+
+    assert record
+    assert len(record) == 1
+    assert float(str(record[0].message)) >= float(str(f"{measured:.4f}"))
 
 
 def test_logs():

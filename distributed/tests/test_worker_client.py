@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import random
 import threading
@@ -204,7 +206,7 @@ def test_dont_override_default_get(loop):
         loop=loop, processes=False, set_as_default=True, dashboard_address=":0"
     ) as c:
         assert dask.base.get_scheduler() == c.get
-        for i in range(2):
+        for _ in range(2):
             b2.compute()
 
         assert dask.base.get_scheduler() == c.get
@@ -270,8 +272,6 @@ def test_secede_without_stealing_issue_1262():
     c, s, a, b, f = secede_test()
 
     assert f == 2
-    # ensure no workers had errors
-    assert all([f.exception() is None for f in s._worker_coroutines])
 
 
 @gen_cluster(client=True)
