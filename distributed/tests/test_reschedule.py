@@ -21,6 +21,7 @@ from distributed.worker_state_machine import (
 )
 
 
+@pytest.mark.oversaturate_only
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 2,
