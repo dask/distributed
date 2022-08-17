@@ -131,6 +131,7 @@ def main(
     host,
     port,
     protocol,
+    interface,
     bokeh_port,
     show,
     dashboard,
@@ -162,6 +163,9 @@ def main(
             "The --bokeh/--no-bokeh flag has been renamed to --dashboard/--no-dashboard. "
         )
         dashboard = bokeh
+
+    if interface and "," in interface:
+        interface = interface.split(",")
 
     if protocol and "," in protocol:
         protocol = protocol.split(",")
@@ -222,6 +226,7 @@ def main(
             host=host,
             port=port,
             protocol=protocol,
+            interface=interface,
             dashboard=dashboard,
             dashboard_address=dashboard_address,
             http_prefix=dashboard_prefix,
