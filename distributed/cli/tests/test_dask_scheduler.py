@@ -131,6 +131,22 @@ def test_dashboard_non_standard_ports(loop):
         requests.get(f"http://localhost:{port2}/status/")
 
 
+def test_multiple_protocols(loop):
+    port1 = open_port()
+    port2 = open_port()
+    with popen(
+        [
+            "dask-scheduler",
+            "--protocol=tcp,ws",
+            f"--port={port1},{port2}",
+        ]
+    ) as _:
+        with Client(f"tcp://127.0.0.1:{port1}", loop=loop):
+            pass
+        with Client(f"ws://127.0.0.1:{port2}", loop=loop):
+            pass
+
+
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 def test_dashboard_allowlist(loop):
     pytest.importorskip("bokeh")
