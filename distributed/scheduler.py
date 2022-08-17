@@ -2304,6 +2304,7 @@ class SchedulerState:
         traceback=None,
         exception_text: str | None = None,
         traceback_text: str | None = None,
+        worker: str | None = None,
         **kwargs,
     ):
         ws: WorkerState
@@ -2318,6 +2319,7 @@ class SchedulerState:
             if self.validate:
                 assert cause or ts.exception_blame
                 assert ts.processing_on
+                assert ts.processing_on == worker
                 assert not ts.who_has
                 assert not ts.waiting_on
 
@@ -4180,7 +4182,7 @@ class Scheduler(SchedulerState, ServerNode):
         logger.debug("Stimulus task erred %s, %s", key, worker)
 
         ts: TaskState = self.tasks.get(key)
-        if ts is None or ts.state != "processing":
+        if ts is None or ts.state != "processing" or ts.processing_on != worker:
             return {}, {}, {}
 
         if ts.retries > 0:
