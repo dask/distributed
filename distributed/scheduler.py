@@ -3875,9 +3875,6 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.stream_comms[address] = BatchedSend(interval="5ms", loop=self.loop)
 
-        if ws.nthreads > len(ws.processing):
-            self.idle[ws.address] = ws
-
         for plugin in list(self.plugins.values()):
             try:
                 result = plugin.add_worker(scheduler=self, worker=address)
