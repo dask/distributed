@@ -4700,7 +4700,10 @@ class Scheduler(SchedulerState, ServerNode):
         if not (set(self.workers) == set(self.stream_comms)):
             raise ValueError("Workers not the same in all collections")
 
-        assert self.running.issuperset(self.idle.values())
+        assert self.running.issuperset(self.idle.values()), (
+            self.running,
+            list(self.idle.values()),
+        )
         for w, ws in self.workers.items():
             assert isinstance(w, str), (type(w), w)
             assert isinstance(ws, WorkerState), (type(ws), ws)
@@ -6333,6 +6336,7 @@ class Scheduler(SchedulerState, ServerNode):
                     prev_status = ws.status
                     ws.status = Status.closing_gracefully
                     self.running.discard(ws)
+                    self.idle.pop(ws.address, None)
                     # FIXME: We should send a message to the nanny first;
                     # eventually workers won't be able to close their own nannies.
                     self.stream_comms[ws.address].send(

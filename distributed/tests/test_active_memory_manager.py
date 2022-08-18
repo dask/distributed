@@ -782,6 +782,8 @@ async def test_RetireWorker_no_remove(c, s, a, b):
     while s.tasks["x"].who_has != {s.workers[b.address]}:
         await asyncio.sleep(0.01)
     assert a.address in s.workers
+    assert a.status == Status.closing_gracefully
+    assert s.workers[a.address].status == Status.closing_gracefully
     # Policy has been removed without waiting for worker to disappear from
     # Scheduler.workers
     assert not s.extensions["amm"].policies
