@@ -6,6 +6,8 @@ from tlz import memoize
 from tornado import web
 from tornado.ioloop import IOLoop
 
+import dask
+
 from distributed.dashboard.components.nvml import (
     gpu_doc,
     gpu_memory_doc,
@@ -126,7 +128,12 @@ def template_variables():
             "workers",
             "tasks",
             "system",
-            *(["gpu"] if device_get_count() > 0 else []),
+            *(
+                ["gpu"]
+                if dask.config.get("distributed.dashboard.always_show_gpu", False)
+                or device_get_count() > 0
+                else []
+            ),
             "profile",
             "graph",
             "groups",
