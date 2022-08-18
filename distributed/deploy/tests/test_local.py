@@ -642,14 +642,14 @@ def test_ipywidgets(loop):
         dashboard_address=":0",
         processes=False,
     ) as cluster:
-        cluster._repr_mimebundle_()
+        cluster._ipython_display_()
         box = cluster._cached_widget
         assert isinstance(box, ipywidgets.Widget)
 
 
 def test_ipywidgets_loop(loop):
     """
-    Previously cluster._repr_mimebundle_ attached the PeriodicCallback to the
+    Previously cluster._ipython_display_ attached the PeriodicCallback to the
     currently running loop, See https://github.com/dask/distributed/pull/6444
     """
     ipywidgets = pytest.importorskip("ipywidgets")
@@ -667,7 +667,7 @@ def test_ipywidgets_loop(loop):
             dashboard_address=":0",
             processes=False,
         ) as cluster:
-            cluster._repr_mimebundle_()
+            cluster._ipython_display_()
             assert cluster.sync(get_ioloop, cluster) is loop
             box = cluster._cached_widget
             assert isinstance(box, ipywidgets.Widget)
@@ -690,7 +690,7 @@ def test_no_ipywidgets(loop, monkeypatch):
         dashboard_address=":0",
         processes=False,
     ) as cluster:
-        cluster._repr_mimebundle_()
+        cluster._ipython_display_()
         args, kwargs = mock_display.display.call_args
         res = args[0]
         assert kwargs == {"raw": True}

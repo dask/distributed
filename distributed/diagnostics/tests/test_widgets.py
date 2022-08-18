@@ -38,12 +38,12 @@ undefined = object()
 def setup():
     _widget_attrs["_comm_default"] = getattr(Widget, "_comm_default", undefined)
     Widget._comm_default = lambda self: DummyComm()
-    _widget_attrs["_repr_mimebundle_"] = Widget._repr_mimebundle_
+    _widget_attrs["_ipython_display_"] = Widget._ipython_display_
 
     def raise_not_implemented(*args, **kwargs):
         raise NotImplementedError()
 
-    Widget._repr_mimebundle_ = raise_not_implemented
+    Widget._ipython_display_ = raise_not_implemented
 
 
 def teardown():

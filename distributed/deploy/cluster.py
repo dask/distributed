@@ -9,6 +9,7 @@ from contextlib import suppress
 from inspect import isawaitable
 from typing import Any
 
+from packaging.version import parse as parse_version
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask.config
@@ -492,12 +493,29 @@ class Cluster(SyncMethodMixin):
             cluster_status=cluster_status,
         )
 
-    def _repr_mimebundle_(self, **kwargs):
+    def _ipython_display_(self, **kwargs):
+        """Display the cluster rich IPython repr"""
+        # Note: it would be simpler to just implement _repr_mimebundle_,
+        # but we cannot do that until we drop ipywidgets 7 support, as
+        # it does not provide a public way to get the mimebundle for a
+        # widget. So instead we fall back on the more customizable _ipython_display_
+        # and display as a side-effect.
+        from IPython.display import display
+
         widget = self._widget()
-        mimebundle = widget._repr_mimebundle_(**kwargs) if widget is not None else {}
-        mimebundle["text/plain"] = repr(self)
-        mimebundle["text/html"] = self._repr_html_()
-        return mimebundle
+        if widget:
+            import ipywidgets
+
+            if parse_version(ipywidgets.__version__) >= parse_version("8.0.0"):
+                mimebundle = widget._repr_mimebundle_(**kwargs) or {}
+                mimebundle["text/plain"] = repr(self)
+                mimebundle["text/html"] = self._repr_html_()
+                display(mimebundle, raw=True)
+            else:
+                display(widget, **kwargs)
+        else:
+            mimebundle = {"text/plain": repr(self), "text/html": self._repr_html_()}
+            display(mimebundle, raw=True)
 
     def __enter__(self):
         return self.sync(self.__aenter__)
