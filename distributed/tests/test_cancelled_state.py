@@ -496,6 +496,12 @@ async def test_resumed_cancelled_handle_compute(
     -----------
     A `handle_compute` should properly restore state `executing` even after the
     task has transitioned through `cancelled` and `resumed(fetch)`.
+
+
+    See also
+    --------
+    test_worker_state_machine.py::test_executing_cancelled_fetch_executing
+    for minimal example
     """
 
     lock_compute = Lock()
