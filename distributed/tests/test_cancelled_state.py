@@ -461,14 +461,18 @@ async def test_resumed_cancelled_handle_compute(
     lock_compute = Lock()
     await lock_compute.acquire()
     enter_compute = Event()
+    exit_compute = Event()
 
-    def block(x, lock, enter_event):
+    def block(x, lock, enter_event, exit_event):
         enter_event.set()
-        with lock:
-            if raise_error:
-                raise RuntimeError("test error")
-            else:
-                return x + 1
+        try:
+            with lock:
+                if raise_error:
+                    raise RuntimeError("test error")
+                else:
+                    return x + 1
+        finally:
+            exit_event.set()
 
     f1 = c.submit(inc, 1, key="f1", workers=[a.address])
     f2 = c.submit(inc, f1, key="f2", workers=[a.address])
@@ -477,6 +481,7 @@ async def test_resumed_cancelled_handle_compute(
         f2,
         lock=lock_compute,
         enter_event=enter_compute,
+        exit_event=exit_compute,
         key="f3",
         workers=[b.address],
     )
@@ -504,6 +509,10 @@ async def test_resumed_cancelled_handle_compute(
     await wait_for_state(f3.key, "resumed", b)
     await release_all_futures()
 
+    if not wait_for_processing:
+        await lock_compute.release()
+        await exit_compute.wait()
+
     f1 = c.submit(inc, 1, key="f1", workers=[a.address])
     f2 = c.submit(inc, f1, key="f2", workers=[a.address])
     f3 = c.submit(inc, f2, key="f3", workers=[b.address])
@@ -511,8 +520,7 @@ async def test_resumed_cancelled_handle_compute(
 
     if wait_for_processing:
         await wait_for_state(f3.key, "processing", s)
-
-    await lock_compute.release()
+        await lock_compute.release()
 
     if not wait_for_processing and not raise_error:
         assert await f4 == 4 + 2

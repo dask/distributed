@@ -1880,13 +1880,13 @@ class WorkerState:
     ) -> RecsInstrs:
         """Note: this transition is triggered exclusively by a task raising the
         Reschedule() Exception; it is not involved in work stealing.
-        The task is always done.
         """
+        assert ts.done
         return merge_recs_instructions(
             ({}, [RescheduleMsg(key=ts.key, stimulus_id=stimulus_id)]),
             # Note: this is not the same as recommending {ts: "released"} on the
-            # previous line, as it would instead transition the task to cancelled - but
-            # a task that raised the Reschedule() exception is finished!
+            # previous line, as it would instead run the ("executing", "released")
+            # transition, which would need special code for ts.done=True.
             self._transition_generic_released(ts, stimulus_id=stimulus_id),
         )
 
