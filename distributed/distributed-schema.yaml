@@ -118,7 +118,7 @@ properties:
               How frequently to balance worker loads
 
           worker-saturation:
-            type: float
+            type: number
             description: |
               Controls how many root tasks are sent to workers (like a `readahead`).
 
