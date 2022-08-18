@@ -276,6 +276,7 @@ distributed:
     graph-max-items: 5000  # maximum number of tasks to try to plot in graph view
     prometheus:
       namespace: "dask"
+    always-show-gpu: False
 
   ##################
   # Administrative #
