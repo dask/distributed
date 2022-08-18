@@ -1171,16 +1171,7 @@ def test_task_with_dependencies_acquires_resources(ws):
 
 @pytest.mark.parametrize(
     "done_ev_cls,done_status",
-    [
-        (ExecuteSuccessEvent, "memory"),
-        pytest.param(
-            ExecuteFailureEvent,
-            "flight",
-            marks=pytest.mark.xfail(
-                reason="distributed#6682,distributed#6689,distributed#6693"
-            ),
-        ),
-    ],
+    [(ExecuteSuccessEvent, "memory"), (ExecuteFailureEvent, "flight")],
 )
 def test_resumed_task_releases_resources(
     ws_with_running_task, done_ev_cls, done_status
@@ -1247,14 +1238,7 @@ def test_done_task_not_in_all_running_tasks(
 
 @pytest.mark.parametrize(
     "done_ev_cls,done_status",
-    [
-        (ExecuteSuccessEvent, "memory"),
-        pytest.param(
-            ExecuteFailureEvent,
-            "flight",
-            marks=pytest.mark.xfail(reason="distributed#6689"),
-        ),
-    ],
+    [(ExecuteSuccessEvent, "memory"), (ExecuteFailureEvent, "flight")],
 )
 def test_done_resumed_task_not_in_all_running_tasks(
     ws_with_running_task, done_ev_cls, done_status
