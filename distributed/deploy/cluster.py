@@ -494,13 +494,10 @@ class Cluster(SyncMethodMixin):
 
     def _repr_mimebundle_(self, **kwargs):
         widget = self._widget()
-        if widget is not None:
-            return widget._repr_mimebundle_(**kwargs)
-        else:
-            from IPython.display import display
-
-            data = {"text/plain": repr(self), "text/html": self._repr_html_()}
-            display(data, raw=True)
+        mimebundle = widget._repr_mimebundle_(**kwargs) if widget is not None else {}
+        mimebundle["text/plain"] = repr(self)
+        mimebundle["text/html"] = self._repr_html_()
+        return mimebundle
 
     def __enter__(self):
         return self.sync(self.__aenter__)
