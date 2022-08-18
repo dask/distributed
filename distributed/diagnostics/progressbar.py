@@ -196,9 +196,9 @@ class ProgressWidget(ProgressBar):
         self.bar_widget = HBox([self.bar_text, self.bar])
         self.widget = VBox([self.elapsed_time, self.bar_widget])
 
-    def _ipython_display_(self, **kwargs):
+    def _repr_mimebundle_(self, **kwargs):
         IOLoop.current().add_callback(self.listen)
-        return self.widget._ipython_display_(**kwargs)
+        return self.widget._repr_mimebundle_(**kwargs)
 
     def _draw_stop(self, remaining, status, exception=None, **kwargs):
         if status == "error":
@@ -377,9 +377,9 @@ class MultiProgressWidget(MultiProgressBar):
         )
         self.widget.children = (self.elapsed_time, self.bar_widgets)
 
-    def _ipython_display_(self, **kwargs):
+    def _repr_mimebundle_(self, **kwargs):
         IOLoop.current().add_callback(self.listen)
-        return self.widget._ipython_display_(**kwargs)
+        return self.widget._repr_mimebundle_(**kwargs)
 
     def _draw_stop(self, remaining, status, exception=None, key=None, **kwargs):
         for k, v in remaining.items():

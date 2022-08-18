@@ -492,10 +492,10 @@ class Cluster(SyncMethodMixin):
             cluster_status=cluster_status,
         )
 
-    def _ipython_display_(self, **kwargs):
+    def _repr_mimebundle_(self, **kwargs):
         widget = self._widget()
         if widget is not None:
-            return widget._ipython_display_(**kwargs)
+            return widget._repr_mimebundle_(**kwargs)
         else:
             from IPython.display import display
 
