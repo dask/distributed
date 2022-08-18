@@ -17,7 +17,7 @@ def counts(scheduler, allprogress):
         {"all": valmap(len, allprogress.all), "nbytes": allprogress.nbytes},
         {
             state: valmap(len, allprogress.state[state])
-            for state in ["memory", "erred", "released", "processing"]
+            for state in ["memory", "erred", "released", "processing", "queued"]
         },
     )
 
