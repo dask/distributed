@@ -284,7 +284,7 @@ def test_lingering_client():
 
 
 def test_lingering_client_2(loop):
-    # assert where the client went
+    # TODO: assert where the client went
     with cluster() as (s, [a, b]):
         client = Client(s["address"], loop=loop)
 
