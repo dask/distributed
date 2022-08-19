@@ -16,7 +16,7 @@ dependencies:
   - filesystem-spec
   - h5py
   - ipykernel
-  - ipywidgets <8  # FIXME https://github.com/dask/distributed/issues/6909
+  - ipywidgets
   - jinja2
   - locket >=1.0
   - msgpack-python

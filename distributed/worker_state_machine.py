@@ -2705,8 +2705,17 @@ class WorkerState:
             ts.traceback_text = ""
             ts.priority = priority
             ts.duration = ev.duration
-            ts.resource_restrictions = ev.resource_restrictions
             ts.annotations = ev.annotations
+
+            # If we receive ComputeTaskEvent twice for the same task, resources may have
+            # changed, but the task is still running. Preserve the previous resource
+            # restrictions so that they can be properly released when it eventually
+            # completes.
+            if not (
+                ts.state in ("cancelled", "resumed")
+                and ts.previous in ("executing", "long-running")
+            ):
+                ts.resource_restrictions = ev.resource_restrictions
 
             if self.validate:
                 assert ev.who_has.keys() == ev.nbytes.keys()
