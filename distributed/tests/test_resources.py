@@ -17,6 +17,7 @@ from distributed.worker_state_machine import (
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
     FreeKeysEvent,
+    RescheduleEvent,
     TaskFinishedMsg,
 )
 
@@ -511,7 +512,9 @@ async def test_resources_from_python_override_config(c, s, a, b):
         assert info["workers"][worker.address]["resources"] == {"my_resources": 10}
 
 
-@pytest.mark.parametrize("done_ev_cls", [ExecuteSuccessEvent, ExecuteFailureEvent])
+@pytest.mark.parametrize(
+    "done_ev_cls", [ExecuteSuccessEvent, ExecuteFailureEvent, RescheduleEvent]
+)
 def test_cancelled_with_resources(ws_with_running_task, done_ev_cls):
     """Test transition loop of a task with resources:
 
@@ -528,7 +531,9 @@ def test_cancelled_with_resources(ws_with_running_task, done_ev_cls):
     assert "x" not in ws.tasks
 
 
-@pytest.mark.parametrize("done_ev_cls", [ExecuteSuccessEvent, ExecuteFailureEvent])
+@pytest.mark.parametrize(
+    "done_ev_cls", [ExecuteSuccessEvent, ExecuteFailureEvent, RescheduleEvent]
+)
 def test_resumed_with_resources(ws_with_running_task, done_ev_cls):
     """Test transition loop of a task with resources:
 
@@ -550,7 +555,9 @@ def test_resumed_with_resources(ws_with_running_task, done_ev_cls):
     assert ws.available_resources == {"R": 1}
 
 
-@pytest.mark.parametrize("done_ev_cls", [ExecuteSuccessEvent, ExecuteFailureEvent])
+@pytest.mark.parametrize(
+    "done_ev_cls", [ExecuteSuccessEvent, ExecuteFailureEvent, RescheduleEvent]
+)
 def test_resumed_with_different_resources(ws_with_running_task, done_ev_cls):
     """A task with resources is cancelled and then resumed to the same state, but with
     different resources. This is actually possible in case of manual cancellation from
