@@ -27,6 +27,7 @@ from operator import add
 from threading import Semaphore
 from time import sleep
 from typing import Any
+from unittest import mock
 
 import psutil
 import pytest
@@ -7538,3 +7539,21 @@ async def test_deprecated_loop_properties(s):
         (DeprecationWarning, "The io_loop property is deprecated"),
         (DeprecationWarning, "setting the loop property is deprecated"),
     ]
+
+
+@gen_cluster(client=False, nthreads=[])
+async def test_fast_close_on_aexit_failure(s):
+    class MyException(Exception):
+        pass
+
+    c = Client(s.address, asynchronous=True)
+    with mock.patch.object(c, "_close", wraps=c._close) as _close_proxy:
+        with pytest.raises(MyException):
+            async with c:
+                start = time()
+                raise MyException
+        stop = time()
+
+    assert _close_proxy.mock_calls == [mock.call(fast=True)]
+    assert c.status == "closed"
+    assert (stop - start) < 2
