@@ -924,6 +924,13 @@ class ExecuteFailureEvent(ExecuteDoneEvent):
 class RescheduleEvent(ExecuteDoneEvent):
     __slots__ = ()
 
+    @staticmethod
+    def dummy(key: str, *, stimulus_id: str) -> RescheduleEvent:
+        """Build an event. This method exists for compatibility with the other
+        ExecuteDoneEvent subclasses.
+        """
+        return RescheduleEvent(key=key, stimulus_id=stimulus_id)
+
 
 @dataclass
 class CancelComputeEvent(StateMachineEvent):
@@ -1962,6 +1969,24 @@ class WorkerState:
         ts.next = None
         return recs, []
 
+    def _transition_resumed_rescheduled(
+        self, ts: TaskState, *, stimulus_id: str
+    ) -> RecsInstrs:
+        """If the task raises the Reschedule() exception, but the scheduler already told
+        the worker to fetch it somewhere else, silently transition to fetch.
+
+        Note that this transition effectively duplicates the logic of
+        _transition_resumed_error.
+        """
+        assert ts.done
+        assert ts.previous in ("executing", "long-running")
+        assert ts.next == "fetch"
+        ts.state = "released"
+        ts.done = False
+        ts.previous = None
+        ts.next = None
+        return {ts: "fetch"}, []
+
     def _transition_resumed_fetch(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
@@ -2297,19 +2322,20 @@ class WorkerState:
     _TRANSITIONS_TABLE: ClassVar[
         Mapping[tuple[TaskStateState, TaskStateState], Callable[..., RecsInstrs]]
     ] = {
-        ("cancelled", "fetch"): _transition_cancelled_fetch,
         ("cancelled", "error"): _transition_cancelled_released,
+        ("cancelled", "fetch"): _transition_cancelled_fetch,
         ("cancelled", "memory"): _transition_cancelled_released,
         ("cancelled", "missing"): _transition_cancelled_released,
         ("cancelled", "released"): _transition_cancelled_released,
         ("cancelled", "rescheduled"): _transition_cancelled_released,
         ("cancelled", "waiting"): _transition_cancelled_waiting,
-        ("resumed", "memory"): _transition_resumed_memory,
         ("resumed", "error"): _transition_resumed_error,
-        ("resumed", "released"): _transition_resumed_released,
-        ("resumed", "waiting"): _transition_resumed_waiting,
         ("resumed", "fetch"): _transition_resumed_fetch,
+        ("resumed", "memory"): _transition_resumed_memory,
         ("resumed", "missing"): _transition_resumed_missing,
+        ("resumed", "released"): _transition_resumed_released,
+        ("resumed", "rescheduled"): _transition_resumed_rescheduled,
+        ("resumed", "waiting"): _transition_resumed_waiting,
         ("constrained", "executing"): _transition_constrained_executing,
         ("constrained", "released"): _transition_generic_released,
         ("error", "released"): _transition_generic_released,
@@ -2331,17 +2357,17 @@ class WorkerState:
         ("long-running", "rescheduled"): _transition_executing_rescheduled,
         ("long-running", "released"): _transition_executing_released,
         ("memory", "released"): _transition_memory_released,
+        ("missing", "error"): _transition_generic_error,
         ("missing", "fetch"): _transition_missing_fetch,
         ("missing", "released"): _transition_missing_released,
-        ("missing", "error"): _transition_generic_error,
         ("missing", "waiting"): _transition_missing_waiting,
         ("ready", "executing"): _transition_ready_executing,
         ("ready", "released"): _transition_generic_released,
         ("released", "error"): _transition_generic_error,
         ("released", "fetch"): _transition_released_fetch,
-        ("released", "missing"): _transition_generic_missing,
         ("released", "forgotten"): _transition_released_forgotten,
         ("released", "memory"): _transition_released_memory,
+        ("released", "missing"): _transition_generic_missing,
         ("released", "waiting"): _transition_released_waiting,
         ("waiting", "constrained"): _transition_waiting_constrained,
         ("waiting", "ready"): _transition_waiting_ready,

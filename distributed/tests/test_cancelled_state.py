@@ -30,6 +30,7 @@ from distributed.worker_state_machine import (
     GatherDepFailureEvent,
     GatherDepNetworkFailureEvent,
     GatherDepSuccessEvent,
+    RescheduleEvent,
     TaskFinishedMsg,
     UpdateDataEvent,
 )
@@ -910,7 +911,9 @@ async def test_execute_preamble_early_cancel(
 
 
 @pytest.mark.parametrize("release_dep", [False, True])
-@pytest.mark.parametrize("done_ev_cls", [ExecuteSuccessEvent, ExecuteFailureEvent])
+@pytest.mark.parametrize(
+    "done_ev_cls", [ExecuteSuccessEvent, ExecuteFailureEvent, RescheduleEvent]
+)
 def test_cancel_with_dependencies_in_memory(ws, release_dep, done_ev_cls):
     """Cancel an executing task y with an in-memory dependency x; then simulate that x
     did not have any further dependents, so cancel x as well.

@@ -1131,15 +1131,13 @@ def test_task_acquires_resources(ws, state):
 
 
 @pytest.mark.parametrize(
-    "done_ev_cls,done_status",
-    [(ExecuteSuccessEvent, "memory"), (ExecuteFailureEvent, "error")],
+    "done_ev_cls", [ExecuteSuccessEvent, ExecuteFailureEvent, RescheduleEvent]
 )
-def test_task_releases_resources(ws_with_running_task, done_ev_cls, done_status):
+def test_task_releases_resources(ws_with_running_task, done_ev_cls):
     ws = ws_with_running_task
     assert ws.available_resources == {"R": 0}
 
     ws.handle_stimulus(done_ev_cls.dummy("x", stimulus_id="success"))
-    assert ws.tasks["x"].state == done_status
     assert ws.available_resources == {"R": 1}
 
 
@@ -1170,12 +1168,9 @@ def test_task_with_dependencies_acquires_resources(ws):
 
 
 @pytest.mark.parametrize(
-    "done_ev_cls,done_status",
-    [(ExecuteSuccessEvent, "memory"), (ExecuteFailureEvent, "flight")],
+    "done_ev_cls", [ExecuteSuccessEvent, ExecuteFailureEvent, RescheduleEvent]
 )
-def test_resumed_task_releases_resources(
-    ws_with_running_task, done_ev_cls, done_status
-):
+def test_resumed_task_releases_resources(ws_with_running_task, done_ev_cls):
     ws = ws_with_running_task
     assert ws.available_resources == {"R": 0}
     ws2 = "127.0.0.1:2"
@@ -1192,7 +1187,6 @@ def test_resumed_task_releases_resources(
     assert ws.available_resources == {"R": 0}
 
     ws.handle_stimulus(done_ev_cls.dummy("x", stimulus_id="s2"))
-    assert ws.tasks["x"].state == done_status
     assert ws.available_resources == {"R": 1}
 
 
@@ -1221,28 +1215,21 @@ def test_running_task_in_all_running_tasks(ws_with_running_task):
 
 
 @pytest.mark.parametrize(
-    "done_ev_cls,done_status",
-    [(ExecuteSuccessEvent, "memory"), (ExecuteFailureEvent, "error")],
+    "done_ev_cls", [ExecuteSuccessEvent, ExecuteFailureEvent, RescheduleEvent]
 )
-def test_done_task_not_in_all_running_tasks(
-    ws_with_running_task, done_ev_cls, done_status
-):
+def test_done_task_not_in_all_running_tasks(ws_with_running_task, done_ev_cls):
     ws = ws_with_running_task
     ts = ws.tasks["x"]
     assert ts in ws.all_running_tasks
 
     ws.handle_stimulus(done_ev_cls.dummy("x", stimulus_id="s1"))
-    assert ts.state == done_status
     assert ts not in ws.all_running_tasks
 
 
 @pytest.mark.parametrize(
-    "done_ev_cls,done_status",
-    [(ExecuteSuccessEvent, "memory"), (ExecuteFailureEvent, "flight")],
+    "done_ev_cls", [ExecuteSuccessEvent, ExecuteFailureEvent, RescheduleEvent]
 )
-def test_done_resumed_task_not_in_all_running_tasks(
-    ws_with_running_task, done_ev_cls, done_status
-):
+def test_done_resumed_task_not_in_all_running_tasks(ws_with_running_task, done_ev_cls):
     ws = ws_with_running_task
     ws2 = "127.0.0.1:2"
 
@@ -1252,7 +1239,6 @@ def test_done_resumed_task_not_in_all_running_tasks(
         done_ev_cls.dummy("x", stimulus_id="s3"),
     )
     ts = ws.tasks["x"]
-    assert ts.state == done_status
     assert ts not in ws.all_running_tasks
 
 
