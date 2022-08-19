@@ -22,6 +22,7 @@ from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from functools import partial
 from numbers import Number
+from operator import gt, lt, ne
 from queue import Queue as pyQueue
 from typing import Any, ClassVar, Coroutine, Literal, Sequence, TypedDict
 
@@ -116,6 +117,9 @@ _current_client = ContextVar("_current_client", default=None)
 DEFAULT_EXTENSIONS = {
     "pubsub": PubSubClientExtension,
 }
+
+# Mode to use when waiting for workers.
+WORKER_WAIT_MODE = Literal["at least", "at most", "exactly"]
 
 
 def _get_global_client() -> Client | None:
@@ -1329,7 +1333,12 @@ class Client(SyncMethodMixin):
         except OSError:
             logger.debug("Not able to query scheduler for identity")
 
-    async def _wait_for_workers(self, n_workers=0, timeout=None):
+    async def _wait_for_workers(
+        self,
+        n_workers: int = 0,
+        timeout: int | None = None,
+        mode: WORKER_WAIT_MODE = "at least",
+    ):
         info = await self.scheduler.identity()
         self._scheduler_identity = SchedulerInfo(info)
         if timeout:
@@ -1337,26 +1346,37 @@ class Client(SyncMethodMixin):
         else:
             deadline = None
 
-        def running_workers(info):
+        def running_workers(info, status_list=[Status.running]):
             return len(
                 [
                     ws
                     for ws in info["workers"].values()
-                    if ws["status"] == Status.running.name
+                    if ws["status"] in [s.name for s in status_list]
                 ]
             )
 
-        while n_workers and running_workers(info) < n_workers:
+        try:
+            op, required_status = {
+                "at least": (lt, [Status.running]),
+                "exactly": (ne, [Status.running, Status.paused]),
+                "at most": (gt, [Status.running, Status.paused]),
+            }[mode]
+        except KeyError:
+            raise NotImplementedError(f"{mode} is not handled.")
+
+        while op(running_workers(info, status_list=required_status), n_workers):
             if deadline and time() > deadline:
                 raise TimeoutError(
-                    "Only %d/%d workers arrived after %s"
-                    % (running_workers(info), n_workers, timeout)
+                    "Had %d workers after %s and needed %s %d"
+                    % (running_workers(info), timeout, mode, n_workers)
                 )
             await asyncio.sleep(0.1)
             info = await self.scheduler.identity()
             self._scheduler_identity = SchedulerInfo(info)
 
-    def wait_for_workers(self, n_workers=0, timeout=None):
+    def wait_for_workers(
+        self, n_workers=0, timeout=None, mode: WORKER_WAIT_MODE = "at least"
+    ):
         """Blocking call to wait for n workers before continuing
 
         Parameters
@@ -1366,8 +1386,12 @@ class Client(SyncMethodMixin):
         timeout : number, optional
             Time in seconds after which to raise a
             ``dask.distributed.TimeoutError``
+        mode : "at least" | "at most" | "exactly", optional
+            Mode to use when waiting for workers.
+            Default ``"at least"``, waits for at least ``n_workers``.
+            One can also specify waiting for ``"at most"`` or ``"exactly"`` ``n_workers``.
         """
-        return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
+        return self.sync(self._wait_for_workers, n_workers, timeout=timeout, mode=mode)
 
     def _heartbeat(self):
         if self.scheduler_comm:

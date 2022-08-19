@@ -6113,21 +6113,62 @@ async def test_instances(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_wait_for_workers(c, s, a, b):
-    future = asyncio.ensure_future(c.wait_for_workers(n_workers=3))
+    await c.wait_for_workers(n_workers=1)
+
+    future = asyncio.create_task(c.wait_for_workers(n_workers=3))
     await asyncio.sleep(0.22)  # 2 chances
     assert not future.done()
 
-    w = await Worker(s.address)
-    start = time()
-    await future
-    assert time() < start + 1
-    await w.close()
+    async with Worker(s.address):
+        start = time()
+        await future
+        assert time() < start + 1
 
-    with pytest.raises(TimeoutError) as info:
-        await c.wait_for_workers(n_workers=10, timeout="1 ms")
+        with pytest.raises(
+            TimeoutError, match="3 workers after 1 ms and needed at least 10"
+        ) as info:
+            await c.wait_for_workers(n_workers=10, timeout="1 ms")
 
-    assert "2/10" in str(info.value).replace(" ", "")
-    assert "1 ms" in str(info.value)
+        future = asyncio.create_task(c.wait_for_workers(n_workers=2))
+        await asyncio.sleep(0.22)  # 2 chances
+        assert future.done()
+
+
+@gen_cluster(client=True)
+async def test_wait_for_workers_max(c, s, a, b):
+    with pytest.raises(TimeoutError, match="2 workers after 1 ms and needed at most 1"):
+        await c.wait_for_workers(n_workers=1, mode="at most", timeout="1 ms")
+
+    t = asyncio.create_task(c.wait_for_workers(n_workers=1, mode="at most"))
+    await asyncio.sleep(0.5)
+    assert not t.done()
+    await b.close()
+    await t
+
+    # already at target size; should be instant
+    await c.wait_for_workers(n_workers=1, mode="at most", timeout="1s")
+    await c.wait_for_workers(n_workers=2, mode="at most", timeout="1s")
+
+
+@gen_cluster(client=True)
+async def test_wait_for_workers_exactly(c, s, a, b):
+    with pytest.raises(TimeoutError, match="2 workers after 1 ms and needed exactly 1"):
+        await c.wait_for_workers(n_workers=1, mode="exactly", timeout="1 ms")
+
+    t = asyncio.create_task(c.wait_for_workers(n_workers=1, mode="exactly"))
+    await asyncio.sleep(0.5)
+    assert not t.done()
+    await b.close()
+    await t
+
+    # already at target size; should be instant
+    await c.wait_for_workers(n_workers=1, mode="exactly", timeout="1s")
+
+
+@gen_cluster(client=True)
+async def test_wait_for_workers_bad_mode(c, s, a, b):
+    with pytest.raises(NotImplementedError):
+        await c.wait_for_workers(n_workers=1, timeout="1 ms", mode="foo")
 
 
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
