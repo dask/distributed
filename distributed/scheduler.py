@@ -7402,19 +7402,29 @@ class Scheduler(SchedulerState, ServerNode):
         target_duration = parse_timedelta(target_duration)
 
         # CPU
+
+        # FIXME maintain a proper estimate of queued occupancy!!
+        # This is merely a hack intended to make queuing sorta work with adaptive scaling
+        # so people can try it out in the short term (at least the cluster should scale up
+        # when tasks are queued).
+        avg_duration = (
+            (self.total_occupancy / self.total_nthreads) if self.total_nthreads else 0
+        )
+        queued_occupancy = len(self.queued) * avg_duration
+
         cpu = math.ceil(
-            self.total_occupancy / target_duration
+            (self.total_occupancy + queued_occupancy) / target_duration
         )  # TODO: threads per worker
 
         # Avoid a few long tasks from asking for many cores
-        tasks_processing = len(self.queued)
+        tasks_ready = len(self.queued)
         for ws in self.workers.values():
-            tasks_processing += len(ws.processing)
+            tasks_ready += len(ws.processing)
 
-            if tasks_processing > cpu:
+            if tasks_ready > cpu:
                 break
         else:
-            cpu = min(tasks_processing, cpu)
+            cpu = min(tasks_ready, cpu)
 
         if self.unrunnable and not self.workers:
             cpu = max(1, cpu)
