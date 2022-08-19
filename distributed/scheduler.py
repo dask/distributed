@@ -2527,7 +2527,7 @@ class SchedulerState:
             worker_msgs: dict = {}
 
             if self.validate:
-                assert not ts.actor, "Actors can't be queued wat"
+                assert not ts.actor, f"Actors can't be queued: {ts}"
                 assert ts in self.queued
 
             _add_to_processing(self, ts, recommendations, worker_msgs)
