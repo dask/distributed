@@ -273,11 +273,9 @@ def test_new_config():
 def test_lingering_client():
     @gen_cluster()
     async def f(s, a, b):
-        with pytest.warns(
-            DeprecationWarning,
-            match=r"await Client\(\) is deprecated, use async with Client\(\)",
-        ):
-            await Client(s.address, asynchronous=True)
+        # TODO: force async-with here?
+        # see https://github.com/dask/distributed/issues/6616
+        await Client(s.address, asynchronous=True)
 
     f()
 
