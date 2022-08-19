@@ -3271,11 +3271,6 @@ class WorkerState:
             assert ts.state == "ready"
         for ts in self.constrained:
             assert ts.state == "constrained"
-        # FIXME https://github.com/dask/distributed/issues/6708
-        # for ts in self.in_flight_tasks:
-        #     assert ts.state == "flight" or (
-        #         ts.state in ("cancelled", "resumed") and ts.previous == "flight"
-        #     )
         for ts in self.executing:
             assert ts.state == "executing" or (
                 ts.state in ("cancelled", "resumed") and ts.previous == "executing"
