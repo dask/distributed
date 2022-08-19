@@ -151,6 +151,7 @@ def test_reschedule_cancelled(ws_with_running_task):
 def test_reschedule_resumed(ws_with_running_task):
     """Test state loop:
 
+    executing -> cancelled -> resumed(fetch) -> rescheduled
     executing -> long-running -> cancelled -> resumed(fetch) -> rescheduled
     """
     ws = ws_with_running_task
