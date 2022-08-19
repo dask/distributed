@@ -764,6 +764,7 @@ class Client(SyncMethodMixin):
 
     preloads: list[preloading.Preload]
     __loop: IOLoop | None = None
+    __aentering = False
 
     def __init__(
         self,
@@ -1133,6 +1134,12 @@ class Client(SyncMethodMixin):
             sync(self.loop, self._start, **kwargs)
 
     def __await__(self):
+        if not self.__aentering:
+            warnings.warn(
+                "await Client() is deprecated, use async with Client():",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         if hasattr(self, "_started"):
             return self._started.__await__()
         else:
@@ -1379,11 +1386,15 @@ class Client(SyncMethodMixin):
         return self
 
     async def __aenter__(self):
-        await self
+        self.__aentering = True
+        try:
+            await self
+        finally:
+            self.__aentering = False
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        await self._close()
+        await self._close(fast=exc_type is not None)
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()

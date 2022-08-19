@@ -273,7 +273,11 @@ def test_new_config():
 def test_lingering_client():
     @gen_cluster()
     async def f(s, a, b):
-        await Client(s.address, asynchronous=True)
+        with pytest.warns(
+            DeprecationWarning,
+            match=r"await Client\(\) is deprecated, use async with Client\(\)",
+        ):
+            await Client(s.address, asynchronous=True)
 
     f()
 
@@ -282,6 +286,7 @@ def test_lingering_client():
 
 
 def test_lingering_client_2(loop):
+    # assert where the client went
     with cluster() as (s, [a, b]):
         client = Client(s["address"], loop=loop)
 

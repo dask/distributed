@@ -1019,7 +1019,10 @@ def test_get_client_sync(client):
 @gen_cluster(client=True)
 async def test_get_client_coroutine(c, s, a, b):
     async def f():
-        client = await get_client()
+        # TODO: `await get_client()` raises a deprecation warning to use
+        # `async with get_client()` and that will kill the workers' client
+        # if you do that. We really don't want users to do that.
+        client = get_client()
         future = client.submit(inc, 10)
         result = await future
         return result
