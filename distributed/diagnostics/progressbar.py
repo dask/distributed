@@ -198,7 +198,9 @@ class ProgressWidget(ProgressBar):
 
     def _ipython_display_(self, **kwargs):
         IOLoop.current().add_callback(self.listen)
-        return self.widget._ipython_display_(**kwargs)
+        from IPython.display import display
+
+        display(self.widget, **kwargs)
 
     def _draw_stop(self, remaining, status, exception=None, **kwargs):
         if status == "error":
@@ -379,7 +381,9 @@ class MultiProgressWidget(MultiProgressBar):
 
     def _ipython_display_(self, **kwargs):
         IOLoop.current().add_callback(self.listen)
-        return self.widget._ipython_display_(**kwargs)
+        from IPython.display import display
+
+        display(self.widget, **kwargs)
 
     def _draw_stop(self, remaining, status, exception=None, key=None, **kwargs):
         for k, v in remaining.items():
