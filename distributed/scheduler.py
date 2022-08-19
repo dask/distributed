@@ -4710,6 +4710,7 @@ class Scheduler(SchedulerState, ServerNode):
             assert ws.address == w
             if ws.status != Status.running:
                 assert ws.address not in self.idle
+            assert ws.long_running.issubset(ws.processing)
             if not ws.processing:
                 assert not ws.occupancy
                 if ws.status == Status.running:
@@ -7978,7 +7979,9 @@ def task_slots_available(ws: WorkerState, saturation_factor: float) -> int:
     "Number of tasks that can be sent to this worker without oversaturating it"
     assert not math.isinf(saturation_factor)
     nthreads = ws.nthreads
-    return max(int(saturation_factor * nthreads), 1) - len(ws.processing)
+    return max(int(saturation_factor * nthreads), 1) - (
+        len(ws.processing) - len(ws.long_running)
+    )
 
 
 def worker_saturated(ws: WorkerState, saturation_factor: float) -> bool:
