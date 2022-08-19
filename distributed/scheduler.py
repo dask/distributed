@@ -2953,13 +2953,11 @@ class SchedulerState:
             valid = self.valid_workers(ts)
             if valid is None or ws in valid:
                 now_runnable.append(ts)
-        # These recommendations will generate {"op": "compute-task"} messages
-        # to the worker in reversed order
+        # Recommendations are processed LIFO, hence the reversed order
         now_runnable.sort(key=operator.attrgetter("priority"), reverse=True)
         for ts in now_runnable:
-            # TODO queued tasks will take precedence over newly-runnable tasks
-            # since waiting->processing will put them at the end of the transitions
-            # dict (since it's a `popitem` then `update`). Is that okay?
+            # TODO this assumes unrunnable tasks are always higher-priority than queued
+            # tasks. Should we sort all of the recommendations instead?
             recommendations[ts.key] = "waiting"
         return recommendations
 
