@@ -1811,14 +1811,17 @@ class SchedulerState:
             return None
 
         # Group is larger than cluster with few dependencies?
-        # Minimize future data transfers.
+        # This is a root task.
+        # Queue it, or if queuing is disabled, schedule near previous root task
+        # to minimize future data transfers.
         if (
             valid_workers is None
             and len(tg) > self.total_nthreads * 2
             and len(tg.dependencies) < 5
             and sum(map(len, tg.dependencies)) < 5
         ):
-            if math.isinf(self.WORKER_SATURATION):  # no scheduler-side queuing
+            # Queuing disabled case
+            if math.isinf(self.WORKER_SATURATION):
                 pool = self.idle.values() if self.idle else self.running
                 if not pool:
                     recommendations[ts.key] = "no-worker"
@@ -1844,6 +1847,7 @@ class SchedulerState:
                 self.last_root_worker_tasks_left -= 1
                 return ws
 
+            # Queuing enabled case
             if not self.idle:
                 # All workers busy? Task gets/stays queued.
                 if self.validate:
@@ -1870,6 +1874,7 @@ class SchedulerState:
                 recommendations[ts.key] = "no-worker"
                 return None
 
+            # If there were no restrictions, `valid_workers()`
             valid_workers = self.running
 
         if ts.dependencies or valid_workers is not None:
@@ -2779,7 +2784,9 @@ class SchedulerState:
         """Return set of currently valid workers for key
 
         If all workers are valid then this returns ``None``, in which case
-        any running worker can be used.
+        any *running* worker can be used.
+        Otherwise, the subset of running workers valid for this task
+        is returned.
         This checks tracks the following state:
 
         *  worker_restrictions
