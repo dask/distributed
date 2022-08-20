@@ -72,6 +72,7 @@ class Cluster(SyncMethodMixin):
         self.periodic_callbacks = {}
         self._watch_worker_status_comm = None
         self._watch_worker_status_task = None
+        self._scheduler_info_comm = None
         self._cluster_manager_logs = []
         self.quiet = quiet
         self.scheduler_comm = None
