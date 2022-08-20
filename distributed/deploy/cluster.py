@@ -15,7 +15,6 @@ import dask.config
 from dask.utils import _deprecated, format_bytes, parse_timedelta, typename
 from dask.widgets import get_template
 
-from distributed.comm import Comm
 from distributed.core import Status
 from distributed.deploy.adaptive import Adaptive
 from distributed.metrics import time
@@ -120,17 +119,16 @@ class Cluster(SyncMethodMixin):
         self._cluster_info["name"] = name
 
     async def _start(self):
-        comm = await self.scheduler_comm.live_comm()
-        comm.name = "Cluster worker status"
-        self._watch_worker_status_comm = comm
-        await comm.write({"op": "subscribe_worker_status"})
-        self.scheduler_info = await comm.read()
-        scheduler_info_comm = await self.scheduler_comm.live_comm()
-        scheduler_info_comm.name = "Scheduler info"
-        self._scheduler_info_comm = scheduler_info_comm
+        self._watch_worker_status_comm = await self.scheduler_comm.live_comm()
+        self._watch_worker_status_comm.name = "Cluster worker status"
+        await self._watch_worker_status_comm.write({"op": "subscribe_worker_status"})
+        self.scheduler_info = SchedulerInfo(await self._watch_worker_status_comm.read())
         self._watch_worker_status_task = asyncio.ensure_future(
-            self._watch_worker_status(comm)
+            self._watch_worker_status(self._watch_worker_status_comm)
         )
+
+        self._scheduler_info_comm = await self.scheduler_comm.live_comm()
+        self._scheduler_info_comm.name = "Scheduler info"
 
         info = await self.scheduler_comm.get_metadata(
             keys=["cluster-manager-info"], default={}
@@ -571,9 +569,7 @@ class Cluster(SyncMethodMixin):
         return id(self)
 
     async def _wait_for_workers(self, n_workers=0, timeout=None):
-        await self.update_scheduler_info("identity")
-        info = SchedulerInfo(self.scheduler_info)
-        self._scheduler_identity = info
+        await self.update_scheduler_info()
         if timeout:
             deadline = time() + parse_timedelta(timeout)
         else:
@@ -588,29 +584,20 @@ class Cluster(SyncMethodMixin):
                 ]
             )
 
-        while n_workers and running_workers(info) < n_workers:
+        while n_workers and running_workers(self.scheduler_info) < n_workers:
             if deadline and time() > deadline:
                 raise TimeoutError(
                     "Only %d/%d workers arrived after %s"
-                    % (running_workers(info), n_workers, timeout)
+                    % (running_workers(self.scheduler_info), n_workers, timeout)
                 )
             await asyncio.sleep(0.1)
 
-            await self.update_scheduler_info("identity")
-            info = SchedulerInfo(self.scheduler_info)
-            self._scheduler_identity = info
+            await self.update_scheduler_info()
 
-    async def update_scheduler_info(self, op: str) -> None:
-        """Send comm to scheduler requesting information and update scheduler_info accordingly
-
-        Parameters
-        ----------
-        op : string
-            Name of operation, e.g. "identity"
-        """
-        comm = self._scheduler_info_comm
-        await comm.write({"op": op})
-        self.scheduler_info = await comm.read()
+    async def update_scheduler_info(self) -> None:
+        """Send comm to scheduler requesting information and update scheduler_info accordingly"""
+        await self._scheduler_info_comm.write({"op": "identity"})
+        self.scheduler_info = SchedulerInfo(await self._scheduler_info_comm.read())
 
     def wait_for_workers(self, n_workers=0, timeout=None):
         """Blocking call to wait for n workers before continuing
