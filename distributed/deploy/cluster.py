@@ -188,6 +188,8 @@ class Cluster(SyncMethodMixin):
         with suppress(AttributeError):
             self._adaptive.stop()
 
+        if self._scheduler_info_comm:
+            await self._scheduler_info_comm.close()
         if self._watch_worker_status_comm:
             await self._watch_worker_status_comm.close()
         if self._watch_worker_status_task:
