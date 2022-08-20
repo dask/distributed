@@ -120,10 +120,14 @@ class Cluster(SyncMethodMixin):
         self._cluster_info["name"] = name
 
     async def _start(self):
-        comm = await self.update_scheduler_info(
-            comm_name="Cluster worker status", op="subscribe_worker_status"
-        )
+        comm = await self.scheduler_comm.live_comm()
+        comm.name = "Cluster worker status"
         self._watch_worker_status_comm = comm
+        await comm.write({"op": "subscribe_worker_status"})
+        self.scheduler_info = await comm.read()
+        scheduler_info_comm = await self.scheduler_comm.live_comm()
+        scheduler_info_comm.name = "Scheduler info"
+        self._scheduler_info_comm = scheduler_info_comm
         self._watch_worker_status_task = asyncio.ensure_future(
             self._watch_worker_status(comm)
         )
@@ -567,9 +571,7 @@ class Cluster(SyncMethodMixin):
         return id(self)
 
     async def _wait_for_workers(self, n_workers=0, timeout=None):
-        await self.update_scheduler_info(
-            comm_name="Cluster worker status", op="identity"
-        )
+        await self.update_scheduler_info("identity")
         info = SchedulerInfo(self.scheduler_info)
         self._scheduler_identity = info
         if timeout:
@@ -594,32 +596,21 @@ class Cluster(SyncMethodMixin):
                 )
             await asyncio.sleep(0.1)
 
-            await self.update_scheduler_info(
-                comm_name="Cluster worker status", op="identity"
-            )
+            await self.update_scheduler_info("identity")
             info = SchedulerInfo(self.scheduler_info)
             self._scheduler_identity = info
 
-    async def update_scheduler_info(self, comm_name: str, op: str) -> Comm:
+    async def update_scheduler_info(self, op: str) -> None:
         """Send comm to scheduler requesting information and update scheduler_info accordingly
 
         Parameters
         ----------
-        comm_name : string
-            Name of communication, e.g. "Cluster worker status"
         op : string
             Name of operation, e.g. "identity"
-
-        Returns
-        -------
-        comm : distributed.comm.tcp.TCP
-            Comm to the scheduler
         """
-        comm = await self.scheduler_comm.live_comm()
-        comm.name = comm_name
+        comm = self._scheduler_info_comm
         await comm.write({"op": op})
         self.scheduler_info = await comm.read()
-        return comm
 
     def wait_for_workers(self, n_workers=0, timeout=None):
         """Blocking call to wait for n workers before continuing
