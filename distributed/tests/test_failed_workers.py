@@ -175,43 +175,41 @@ def test_worker_doesnt_await_task_completion(loop):
 
 @gen_cluster(Worker=Nanny, timeout=60)
 async def test_multiple_clients_restart(s, a, b):
-    c1 = await Client(s.address, asynchronous=True)
-    c2 = await Client(s.address, asynchronous=True)
+    async with Client(s.address, asynchronous=True) as c1, Client(
+        s.address, asynchronous=True
+    ) as c2:
 
-    x = c1.submit(inc, 1)
-    y = c2.submit(inc, 2)
-    xx = await x
-    yy = await y
-    assert xx == 2
-    assert yy == 3
+        x = c1.submit(inc, 1)
+        y = c2.submit(inc, 2)
+        xx = await x
+        yy = await y
+        assert xx == 2
+        assert yy == 3
 
-    await c1.restart()
+        await c1.restart()
 
-    assert x.cancelled()
-    start = time()
-    while not y.cancelled():
-        await asyncio.sleep(0.01)
-        assert time() < start + 5
+        assert x.cancelled()
+        start = time()
+        while not y.cancelled():
+            await asyncio.sleep(0.01)
+            assert time() < start + 5
 
-    assert not c1.futures
-    assert not c2.futures
+        assert not c1.futures
+        assert not c2.futures
 
-    # Ensure both clients still work after restart.
-    # Reusing a previous key has no effect.
-    x2 = c1.submit(inc, 1, key=x.key)
-    y2 = c2.submit(inc, 2, key=y.key)
+        # Ensure both clients still work after restart.
+        # Reusing a previous key has no effect.
+        x2 = c1.submit(inc, 1, key=x.key)
+        y2 = c2.submit(inc, 2, key=y.key)
 
-    assert x2._generation != x._generation
-    assert y2._generation != y._generation
+        assert x2._generation != x._generation
+        assert y2._generation != y._generation
 
-    assert await x2 == 2
-    assert await y2 == 3
+        assert await x2 == 2
+        assert await y2 == 3
 
-    del x2, y2
-    await async_wait_for(lambda: not s.tasks, timeout=5)
-
-    await c1.close()
-    await c2.close()
+        del x2, y2
+        await async_wait_for(lambda: not s.tasks, timeout=5)
 
 
 @gen_cluster(Worker=Nanny, timeout=60)

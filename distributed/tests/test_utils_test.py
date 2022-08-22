@@ -273,6 +273,8 @@ def test_new_config():
 def test_lingering_client():
     @gen_cluster()
     async def f(s, a, b):
+        # TODO: force async-with here?
+        # see https://github.com/dask/distributed/issues/6616
         await Client(s.address, asynchronous=True)
 
     f()
@@ -282,6 +284,7 @@ def test_lingering_client():
 
 
 def test_lingering_client_2(loop):
+    # TODO: assert where the client went
     with cluster() as (s, [a, b]):
         client = Client(s["address"], loop=loop)
 

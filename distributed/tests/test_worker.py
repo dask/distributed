@@ -1019,7 +1019,11 @@ def test_get_client_sync(client):
 @gen_cluster(client=True)
 async def test_get_client_coroutine(c, s, a, b):
     async def f():
-        client = await get_client()
+        # TODO: the existence of `await get_client()` implies the possibility
+        # of `async with get_client()` and that will kill the workers' client
+        # if you do that. We really don't want users to do that.
+        # https://github.com/dask/distributed/pull/6921/
+        client = get_client()
         future = client.submit(inc, 10)
         result = await future
         return result
