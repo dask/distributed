@@ -46,16 +46,9 @@ logger = logging.getLogger("distributed.dask_ssh")
     ),
 )
 @click.option(
-    "--nprocs",
-    default=None,
-    show_default=True,
-    type=int,
-    help="Deprecated. Use --nworkers instead. Number of worker processes per host.",
-)
-@click.option(
     "--nworkers",
     "n_workers",  # This sets the Python argument name
-    default=None,
+    default=1
     show_default=True,
     type=int,
     help="Number of worker processes per host.",
@@ -140,7 +133,6 @@ def main(
     hostnames,
     hostfile,
     nthreads,
-    nprocs,
     n_workers,
     ssh_username,
     ssh_port,
@@ -167,21 +159,6 @@ def main(
     except IndexError:
         print(ctx.get_help())
         exit(1)
-
-    if nprocs is not None and n_workers is not None:
-        logger.error(
-            "Both --nprocs and --nworkers were specified. Use --nworkers only."
-        )
-        sys.exit(1)
-    elif nprocs is not None:
-        warnings.warn(
-            "The --nprocs flag will be removed in a future release. It has been "
-            "renamed to --nworkers.",
-            FutureWarning,
-        )
-        n_workers = nprocs
-    elif n_workers is None:
-        n_workers = 1
 
     c = SSHCluster(
         scheduler,

@@ -74,9 +74,6 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "will use ports 3000, 3001, ..., 3025, 3026.",
 )
 @click.option(
-    "--bokeh-port", type=int, default=None, help="Deprecated.  See --dashboard-address"
-)
-@click.option(
     "--dashboard-address",
     type=str,
     default=":0",
@@ -88,13 +85,6 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     default=True,
     required=False,
     help="Launch the Dashboard [default: --dashboard]",
-)
-@click.option(
-    "--bokeh/--no-bokeh",
-    "bokeh",
-    default=None,
-    help="Deprecated.  See --dashboard/--no-dashboard.",
-    required=False,
 )
 @click.option(
     "--listen-address",
@@ -128,15 +118,6 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 )
 @click.option("--nthreads", type=int, default=0, help="Number of threads per process.")
 @click.option(
-    "--nprocs",
-    type=str,
-    default=None,
-    show_default=True,
-    help="Deprecated. Use '--nworkers' instead. Number of worker processes to "
-    "launch. If negative, then (CPU_COUNT + 1 + nprocs) is used. "
-    "Set to 'auto' to set nprocs and nthreads dynamically based on CPU_COUNT",
-)
-@click.option(
     "--nworkers",
     "n_workers",  # This sets the Python argument name
     type=str,
@@ -166,11 +147,6 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     - a string (like 5GB or 5000M).
     - 'auto' for automatically computing the memory limit.
     """,
-)
-@click.option(
-    "--reconnect/--no-reconnect",
-    default=None,
-    help="Deprecated, has no effect. Passing --reconnect is an error. [default: --no-reconnect]",
 )
 @click.option(
     "--nanny/--no-nanny",
@@ -262,7 +238,6 @@ def main(  # type: ignore[no-untyped-def]
     contact_address,
     nanny_port: str | None,
     nthreads,
-    nprocs,
     n_workers,
     nanny,
     name,
@@ -279,7 +254,6 @@ def main(  # type: ignore[no-untyped-def]
     dashboard_address,
     worker_class,
     preload_nanny,
-    reconnect,
     **kwargs,
 ):
     """Launch a distributed worker attached to an existing SCHEDULER."""
@@ -288,32 +262,6 @@ def main(  # type: ignore[no-untyped-def]
 
     enable_proctitle_on_current()
     enable_proctitle_on_children()
-
-    if bokeh_port is not None:  # pragma: no cover
-        warnings.warn(
-            "The --bokeh-port flag has been renamed to --dashboard-address. "
-            "Consider adding ``--dashboard-address :%d`` " % bokeh_port
-        )
-        dashboard_address = bokeh_port
-    if bokeh is not None:
-        warnings.warn(
-            "The --bokeh/--no-bokeh flag has been renamed to --dashboard/--no-dashboard. "
-        )
-        dashboard = bokeh
-    if reconnect is not None:
-        if reconnect:
-            logger.error(
-                "The `--reconnect` option has been removed. "
-                "To improve cluster stability, workers now always shut down in the face of network disconnects. "
-                "For details, or if this is an issue for you, see https://github.com/dask/distributed/issues/6350."
-            )
-            sys.exit(1)
-        else:
-            logger.warning(
-                "The `--no-reconnect/--reconnect` flag is deprecated, and will be removed in a future release. "
-                "Worker reconnection is now always disabled, so `--no-reconnect` is unnecessary. "
-                "See https://github.com/dask/distributed/issues/6350 for details.",
-            )
 
     sec = {
         k: v
@@ -324,19 +272,6 @@ def main(  # type: ignore[no-untyped-def]
         ]
         if v is not None
     }
-
-    if nprocs is not None and n_workers is not None:
-        logger.error(
-            "Both --nprocs and --nworkers were specified. Use --nworkers only."
-        )
-        sys.exit(1)
-    elif nprocs is not None:
-        warnings.warn(
-            "The --nprocs flag will be removed in a future release. It has been "
-            "renamed to --nworkers.",
-            FutureWarning,
-        )
-        n_workers = nprocs
 
     if n_workers == "auto":
         n_workers, nthreads = nprocesses_nthreads()
