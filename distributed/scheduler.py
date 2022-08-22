@@ -31,7 +31,7 @@ from collections.abc import (
 from contextlib import suppress
 from functools import partial
 from numbers import Number
-from typing import Any, ClassVar, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 import psutil
 from sortedcontainers import SortedDict, SortedSet
@@ -106,6 +106,39 @@ from distributed.utils_comm import (
 from distributed.utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.variable import VariableExtension
 
+if TYPE_CHECKING:
+    # TODO import from typing (requires Python >=3.10)
+    from typing_extensions import TypeAlias
+
+    # TODO move out of TYPE_CHECKING (requires Python >=3.10)
+    # Not to be confused with distributed.worker_state_machine.TaskStateState
+    TaskStateState: TypeAlias = Literal[
+        "released",
+        "waiting",
+        "no-worker",
+        "processing",
+        "memory",
+        "erred",
+        "forgotten",
+    ]
+
+    # TODO remove quotes (requires Python >=3.9)
+    # {task key -> finish state}
+    # Not to be confused with distributed.worker_state_machine.Recs
+    Recs: TypeAlias = "dict[str, TaskStateState]"
+else:
+    TaskStateState = str
+
+ALL_TASK_STATES: set[TaskStateState] = {
+    "released",
+    "waiting",
+    "no-worker",
+    "processing",
+    "memory",
+    "erred",
+    "forgotten",
+}
+
 logger = logging.getLogger(__name__)
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 DEFAULT_DATA_SIZE = parse_bytes(
@@ -128,8 +161,6 @@ DEFAULT_EXTENSIONS = {
     "shuffle": ShuffleSchedulerExtension,
     "stealing": WorkStealing,
 }
-
-ALL_TASK_STATES = {"released", "waiting", "no-worker", "processing", "erred", "memory"}
 
 
 class ClientState:
@@ -799,7 +830,7 @@ class TaskGroup:
 
     #: The number of tasks in each state,
     #: like ``{"memory": 10, "processing": 3, "released": 4, ...}``
-    states: dict[str, int]
+    states: dict[TaskStateState, int]
 
     #: The other TaskGroups on which this one depends
     dependencies: set[TaskGroup]
@@ -831,8 +862,7 @@ class TaskGroup:
     def __init__(self, name: str):
         self.name = name
         self.prefix = None
-        self.states = {state: 0 for state in ALL_TASK_STATES}
-        self.states["forgotten"] = 0
+        self.states = dict.fromkeys(ALL_TASK_STATES, 0)
         self.dependencies = set()
         self.nbytes_total = 0
         self.duration = 0
@@ -922,7 +952,7 @@ class TaskState:
     priority: tuple[int, ...]
 
     # Attribute underlying the state property
-    _state: str
+    _state: TaskStateState
 
     #: The set of tasks this task depends on for proper execution. Only tasks still
     #: alive are listed in this set. If, for whatever reason, this task also depends on
@@ -1093,11 +1123,11 @@ class TaskState:
     # Instances not part of slots since class variable
     _instances: ClassVar[weakref.WeakSet[TaskState]] = weakref.WeakSet()
 
-    def __init__(self, key: str, run_spec: object):
+    def __init__(self, key: str, run_spec: object, state: TaskStateState):
         self.key = key
         self._hash = hash(key)
         self.run_spec = run_spec
-        self._state = None  # type: ignore
+        self._state = state
         self.exception = None
         self.exception_blame = None
         self.traceback = None
@@ -1136,8 +1166,8 @@ class TaskState:
         return isinstance(other, TaskState) and self.key == other.key
 
     @property
-    def state(self) -> str:
-        """This task's current state.  Valid states include ``released``, ``waiting``,
+    def state(self) -> TaskStateState:
+        """This task's current state.  Valid states are ``released``, ``waiting``,
         ``no-worker``, ``processing``, ``memory``, ``erred`` and ``forgotten``.  If it
         is ``forgotten``, the task isn't stored in the ``tasks`` dictionary anymore and
         will probably disappear soon from memory.
@@ -1145,7 +1175,7 @@ class TaskState:
         return self._state
 
     @state.setter
-    def state(self, value: str) -> None:
+    def state(self, value: TaskStateState) -> None:
         self.group.states[self._state] -= 1
         self.group.states[value] += 1
         self._state = value
@@ -1405,11 +1435,14 @@ class SchedulerState:
         }
 
     def new_task(
-        self, key: str, spec: object, state: str, computation: Computation | None = None
+        self,
+        key: str,
+        spec: object,
+        state: TaskStateState,
+        computation: Computation | None = None,
     ) -> TaskState:
         """Create a new task, and associated states"""
-        ts = TaskState(key, spec)
-        ts._state = state
+        ts = TaskState(key, spec, state)
 
         prefix_key = key_split(key)
         tp = self.task_prefixes.get(prefix_key)
@@ -1436,8 +1469,8 @@ class SchedulerState:
     #####################
 
     def _transition(
-        self, key: str, finish: str, stimulus_id: str, *args, **kwargs
-    ) -> tuple[dict, dict, dict]:
+        self, key: str, finish: TaskStateState, stimulus_id: str, *args, **kwargs
+    ) -> tuple[Recs, dict, dict]:
         """Transition a key from its current state to the finish state
 
         Examples
@@ -1561,15 +1594,10 @@ class SchedulerState:
                 if ts.state == "forgotten":
                     del self.tasks[ts.key]
 
-            tg: TaskGroup = ts.group
+            tg = ts.group
             if ts.state == "forgotten" and tg.name in self.task_groups:
                 # Remove TaskGroup if all tasks are in the forgotten state
-                all_forgotten: bool = True
-                for s in ALL_TASK_STATES:
-                    if tg.states.get(s):
-                        all_forgotten = False
-                        break
-                if all_forgotten:
+                if all(v == 0 or k == "forgotten" for k, v in tg.states.items()):
                     ts.prefix.groups.remove(tg)
                     del self.task_groups[tg.name]
 
@@ -1584,17 +1612,17 @@ class SchedulerState:
 
     def _transitions(
         self,
-        recommendations: dict,
+        recommendations: Recs,
         client_msgs: dict,
         worker_msgs: dict,
         stimulus_id: str,
-    ):
+    ) -> None:
         """Process transitions until none are left
 
         This includes feedback from previous transitions and continues until we
         reach a steady state
         """
-        keys: set = set()
+        keys: set[str] = set()
         recommendations = recommendations.copy()
 
         while recommendations:
@@ -2525,7 +2553,10 @@ class SchedulerState:
     #     ) -> (recommendations, client_msgs, worker_msgs)
     # }
     _TRANSITIONS_TABLE: ClassVar[
-        Mapping[tuple[str, str], Callable[..., tuple[dict, dict, dict]]]
+        Mapping[
+            tuple[TaskStateState, TaskStateState],
+            Callable[..., tuple[Recs, dict, dict]],
+        ]
     ] = {
         ("released", "waiting"): transition_released_waiting,
         ("waiting", "released"): transition_waiting_released,
@@ -6674,7 +6705,14 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return responses
 
-    def transition(self, key, finish: str, *args, stimulus_id: str, **kwargs):
+    def transition(
+        self,
+        key: str,
+        finish: TaskStateState,
+        *args: Any,
+        stimulus_id: str,
+        **kwargs: Any,
+    ) -> Recs:
         """Transition a key from its current state to the finish state
 
         Examples
@@ -7573,7 +7611,7 @@ def decide_worker(
 
 def validate_task_state(ts: TaskState) -> None:
     """Validate the given TaskState"""
-    assert ts.state in ALL_TASK_STATES or ts.state == "forgotten", ts
+    assert ts.state in ALL_TASK_STATES, ts
 
     if ts.waiting_on:
         assert ts.waiting_on.issubset(ts.dependencies), (
@@ -7787,8 +7825,15 @@ class CollectTaskMetaDataPlugin(SchedulerPlugin):
     ) -> None:
         self.keys.update(keys)
 
-    def transition(self, key: str, start: str, finish: str, *args, **kwargs) -> None:
-        if finish == "memory" or finish == "erred":
+    def transition(
+        self,
+        key: str,
+        start: TaskStateState,
+        finish: TaskStateState,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        if finish in ("memory", "erred"):
             ts = self.scheduler.tasks.get(key)
             if ts is not None and ts.key in self.keys:
                 self.metadata[key] = ts.metadata
