@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import pickle
 from typing import Any
 from urllib import parse
@@ -38,19 +37,15 @@ def _put_buffer(buf):
         buffer = memoryview(client.create(object_id, buf.nbytes))
         buffer[:] = buf.cast("b")[:]
         client.seal(object_id)
-        print("PUT", os.getpid(), buffer, object_id, sum(buffer))
     except PlasmaObjectExists:
         pass
     except PlasmaStoreFull:
         # warn?
         return buf
-    except Exception as e:
-        print("###########", type(e), e)
     return b"plasma:" + object_id.binary()
 
 
 def ser(x, context=None):
-    print("SER", x)
     from distributed.worker import get_worker
 
     plasma_size_limit = dask.config.get("distributed.protocol.shared.minsize", 1)
@@ -63,8 +58,7 @@ def ser(x, context=None):
         worker = None
 
     if worker and id(x) in worker.shared_data:
-        print("########## CACHE HIT")
-        print("####", worker.shared_data)
+        # cache hit
         return worker.shared_data[id(x)]
 
     def add_buf(buf):
@@ -105,7 +99,6 @@ def on_node(context, which="sender"):
 
 
 def deser(header, frames):
-    print("DESER", header, frames)
     from distributed.worker import get_worker
 
     try:
@@ -120,12 +113,13 @@ def deser(header, frames):
         if isinstance(buf, (bytes, memoryview)) and buf[:7] == b"plasma:":
             # probably faster to get all the buffers in a single call
             ob = ObjectID(bytes(buf)[7:])
-            print("GET", os.getpid(), ob, worker)
             bufs = client.get_buffers([ob])
             frames[i] = bufs[0]
     out = pickle.loads(frames[0], buffers=frames[1:])
     if worker and bufs:
         # "bufs" is a poor condition, maybe store in header
-        worker.shared_data[id(out)] = header, frames0  # save shared buffers
-    print(type(out))
+        worker.shared_data[id(out)] = (
+            header or {"serializer": "plasma"},
+            frames0,
+        )  # save shared buffers
     return out
