@@ -146,6 +146,12 @@ def main(
     remote_dask_worker,
     local_directory,
 ):
+    if "dask-ssh" in sys.argv[0]:
+        warnings.warn(
+            "dask-ssh is deprecated and will be removed in a future release; use `dask ssh`",
+            FutureWarning,
+        )
+
     try:
         hostnames = list(hostnames)
         if hostfile:

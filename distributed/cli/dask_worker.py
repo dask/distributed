@@ -244,8 +244,6 @@ def main(  # type: ignore[no-untyped-def]
     pid_file,
     resources,
     dashboard,
-    bokeh,
-    bokeh_port,
     scheduler_file,
     dashboard_prefix,
     tls_ca_file,
@@ -257,6 +255,13 @@ def main(  # type: ignore[no-untyped-def]
     **kwargs,
 ):
     """Launch a distributed worker attached to an existing SCHEDULER."""
+
+    if "dask-worker" in sys.argv[0]:
+        warnings.warn(
+            "dask-worker is deprecated and will be removed in a future release; use `dask worker`",
+            FutureWarning,
+        )
+
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
     gc.set_threshold(g0 * 3, g1 * 3, g2 * 3)
 

@@ -135,6 +135,13 @@ def main(
     **kwargs,
 ):
     """Launch a distributed scheduler."""
+
+    if "dask-scheduler" in sys.argv[0]:
+        warnings.warn(
+            "dask-scheduler is deprecated and will be removed in a future release; use `dask scheduler`",
+            FutureWarning,
+        )
+
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
     gc.set_threshold(g0 * 3, g1 * 3, g2 * 3)
 
