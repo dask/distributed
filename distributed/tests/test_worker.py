@@ -33,6 +33,7 @@ from distributed import (
     Client,
     Event,
     Nanny,
+    WorkerPlugin,
     default_client,
     get_client,
     get_worker,
@@ -48,6 +49,7 @@ from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
 from distributed.utils_test import (
+    BlockedExecute,
     BlockedGatherDep,
     BlockedGetData,
     TaskStateMetadataPlugin,
@@ -740,7 +742,7 @@ async def test_restrictions(c, s, a, b):
 @gen_cluster(client=True)
 async def test_clean_nbytes(c, s, a, b):
     L = [delayed(inc)(i) for i in range(10)]
-    for i in range(5):
+    for _ in range(5):
         L = [delayed(add)(x, y) for x, y in sliding_window(2, L)]
     total = delayed(sum)(L)
 
@@ -1017,7 +1019,11 @@ def test_get_client_sync(client):
 @gen_cluster(client=True)
 async def test_get_client_coroutine(c, s, a, b):
     async def f():
-        client = await get_client()
+        # TODO: the existence of `await get_client()` implies the possibility
+        # of `async with get_client()` and that will kill the workers' client
+        # if you do that. We really don't want users to do that.
+        # https://github.com/dask/distributed/pull/6921/
+        client = get_client()
         future = client.submit(inc, 10)
         result = await future
         return result
@@ -3298,41 +3304,6 @@ async def test_gather_dep_no_longer_in_flight_tasks(c, s, a):
         assert not any("missing-dep" in msg for msg in f2_story)
 
 
-@pytest.mark.parametrize("intermediate_state", ["resumed", "cancelled"])
-@pytest.mark.parametrize("close_worker", [False, True])
-@gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "500ms"})
-async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
-    c, s, a, x, intermediate_state, close_worker
-):
-    """If a task was transitioned to in-flight, the gather-dep coroutine was
-    scheduled but a cancel request came in before gather_data_from_worker was
-    issued this might corrupt the state machine if the cancelled key is not
-    properly handled
-    """
-    fut1 = c.submit(slowinc, 1, workers=[a.address], key="f1")
-    fut1B = c.submit(slowinc, 2, workers=[x.address], key="f1B")
-    fut2 = c.submit(sum, [fut1, fut1B], workers=[x.address], key="f2")
-    await fut2
-
-    async with BlockedGatherDep(s.address, name="b") as b:
-        fut3 = c.submit(inc, fut2, workers=[b.address], key="f3")
-
-        await wait_for_state(fut2.key, "flight", b)
-
-        s.set_restrictions(worker={fut1B.key: a.address, fut2.key: b.address})
-
-        await b.in_gather_dep.wait()
-
-        await s.remove_worker(
-            address=x.address, safe=True, close=close_worker, stimulus_id="test"
-        )
-
-        await wait_for_state(fut2.key, intermediate_state, b, interval=0)
-
-        b.block_gather_dep.set()
-        await fut3
-
-
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_Worker__to_dict(c, s, a):
     x = c.submit(inc, 1, key="x")
@@ -3361,9 +3332,11 @@ async def test_Worker__to_dict(c, s, a):
         "nthreads",
         "running",
         "ready",
+        "has_what",
         "constrained",
         "executing",
         "long_running",
+        "missing_dep_flight",
         "in_flight_tasks",
         "in_flight_workers",
         "busy_workers",
@@ -3514,3 +3487,75 @@ async def test_reconnect_argument_deprecated(s):
         warnings.simplefilter("error")
         async with Worker(s.address):
             pass
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_worker_running_before_running_plugins(c, s, caplog):
+    class InitWorkerNewThread(WorkerPlugin):
+        name: str = "init_worker_new_thread"
+        setup_status: Status | None = None
+
+        def setup(self, worker):
+            self.setup_status = worker.status
+
+        def teardown(self, worker):
+            pass
+
+    await c.register_worker_plugin(InitWorkerNewThread())
+    async with Worker(s.address) as worker:
+        assert await c.submit(inc, 1) == 2
+        assert worker.plugins[InitWorkerNewThread.name].setup_status is Status.running
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[],
+    config={
+        # This is just to make Scheduler.retire_worker more reactive to changes
+        "distributed.scheduler.active-memory-manager.start": True,
+        "distributed.scheduler.active-memory-manager.interval": "50ms",
+    },
+)
+async def test_execute_preamble_abort_retirement(c, s):
+    """Test race condition in the preamble of Worker.execute(), which used to cause a
+    task to remain permanently in executing state in case of very tight timings when
+    exiting the closing_gracefully status.
+
+    See also
+    --------
+    https://github.com/dask/distributed/issues/6867
+    test_cancelled_state.py::test_execute_preamble_early_cancel
+    """
+    async with BlockedExecute(s.address) as a:
+        await c.wait_for_workers(1)
+        a.block_deserialize_task.set()  # Uninteresting in this test
+
+        x = await c.scatter({"x": 1}, workers=[a.address])
+        y = c.submit(inc, 1, key="y", workers=[a.address])
+        await a.in_execute.wait()
+
+        async with BlockedGatherDep(s.address) as b:
+            await c.wait_for_workers(2)
+            retire_fut = asyncio.create_task(c.retire_workers([a.address]))
+            while a.status != Status.closing_gracefully:
+                await asyncio.sleep(0.01)
+            # The Active Memory Manager will send to b the message
+            # {op: acquire-replicas, who_has: {x: [a.address]}}
+            await b.in_gather_dep.wait()
+
+            # Run Worker.execute. At the moment of writing this test, the method would
+            # detect the closing_gracefully status and perform an early exit.
+            a.block_execute.set()
+            await a.in_execute_exit.wait()
+
+        # b has shut down. There's nowhere to replicate x to anymore, so retire_workers
+        # will give up and reinstate a to running status.
+        assert await retire_fut == {}
+        while a.status != Status.running:
+            await asyncio.sleep(0.01)
+
+        # Finally let the done_callback of Worker.execute run
+        a.block_execute_exit.set()
+
+        # Test that y does not get stuck.
+        assert await y == 2

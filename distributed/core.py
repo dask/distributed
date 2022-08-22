@@ -15,7 +15,7 @@ from collections.abc import Container, Coroutine
 from contextlib import suppress
 from enum import Enum
 from functools import partial
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, TypedDict, TypeVar, final
 
 import tblib
 from tlz import merge
@@ -462,6 +462,7 @@ class Server:
         await self.rpc.start()
         return self
 
+    @final
     async def start(self):
         async with self._startup_lock:
             if self.status == Status.failed:
@@ -1399,7 +1400,7 @@ class ConnectionPool:
             self.active,
             len(self._connecting),
         )
-        for addr, comms in self.available.items():
+        for comms in self.available.values():
             for comm in comms:
                 IOLoop.current().add_callback(comm.close)
                 self.semaphore.release()

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from time import sleep
 
+import pytest
+from tornado.ioloop import IOLoop
+
 from distributed.diagnostics.progressbar import TextProgressBar, progress
 from distributed.metrics import time
 from distributed.utils_test import div, gen_cluster, inc
@@ -72,3 +75,18 @@ def test_progress_function_w_kwargs(client, capsys):
 
     progress(f, interval="20ms", loop=client.loop)
     check_bar_completed(capsys)
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_deprecated_loop_properties(c, s):
+    class ExampleTextProgressBar(TextProgressBar):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.loop = self.io_loop = IOLoop.current()
+
+    with pytest.warns(DeprecationWarning) as warninfo:
+        ExampleTextProgressBar(client=c, keys=[], start=False, loop=IOLoop.current())
+
+    assert [(w.category, *w.message.args) for w in warninfo] == [
+        (DeprecationWarning, "setting the loop property is deprecated")
+    ]

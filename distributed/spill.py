@@ -287,7 +287,10 @@ class Slow(zict.Func):
             # which will then unwrap it.
             raise PickleError(key, e)
 
-        pickled_size = sum(len(frame) for frame in pickled)
+        pickled_size = sum(
+            frame.nbytes if isinstance(frame, memoryview) else len(frame)
+            for frame in pickled
+        )
 
         if has_zict_210:
             # Thanks to Buffer.__setitem__, we never update existing

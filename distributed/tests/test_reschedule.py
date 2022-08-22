@@ -13,7 +13,9 @@ import pytest
 from distributed import Event, Reschedule, get_worker, secede, wait
 from distributed.utils_test import captured_logger, gen_cluster, slowinc
 from distributed.worker_state_machine import (
+    ComputeTaskEvent,
     FreeKeysEvent,
+    GatherDep,
     RescheduleEvent,
     RescheduleMsg,
 )
@@ -78,6 +80,7 @@ async def test_raise_reschedule(c, s, a, b, state):
     await wait(futures)
     assert any(isinstance(ev, RescheduleEvent) for ev in a.state.stimulus_log)
     assert all(f.key in b.data for f in futures)
+    assert "x" not in a.state.tasks
 
 
 @pytest.mark.parametrize("state", ["executing", "long-running"])
@@ -128,3 +131,38 @@ def test_reschedule_releases(ws_with_running_task):
     assert instructions == [RescheduleMsg(stimulus_id="s1", key="x")]
     assert ws.available_resources == {"R": 1}
     assert "x" not in ws.tasks
+
+
+def test_reschedule_cancelled(ws_with_running_task):
+    """Test state loop:
+
+    executing -> cancelled -> rescheduled
+    executing -> long-running -> cancelled -> rescheduled
+    """
+    ws = ws_with_running_task
+    instructions = ws.handle_stimulus(
+        FreeKeysEvent(keys=["x"], stimulus_id="s1"),
+        RescheduleEvent(key="x", stimulus_id="s2"),
+    )
+    assert not instructions
+    assert "x" not in ws.tasks
+
+
+def test_reschedule_resumed(ws_with_running_task):
+    """Test state loop:
+
+    executing -> cancelled -> resumed(fetch) -> rescheduled
+    executing -> long-running -> cancelled -> resumed(fetch) -> rescheduled
+    """
+    ws = ws_with_running_task
+    ws2 = "127.0.0.1:2"
+
+    instructions = ws.handle_stimulus(
+        FreeKeysEvent(keys=["x"], stimulus_id="s1"),
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s2"),
+        RescheduleEvent(key="x", stimulus_id="s3"),
+    )
+    assert instructions == [
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s3")
+    ]
+    assert ws.tasks["x"].state == "flight"

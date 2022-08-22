@@ -61,7 +61,7 @@ def test_split_by_worker_many_workers():
 
 
 def test_split_by_partition():
-    import pyarrow as pa
+    pa = pytest.importorskip("pyarrow")
 
     df = pd.DataFrame(
         {

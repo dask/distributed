@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import pytest
+from packaging.version import parse as parse_version
 
-pytest.importorskip("ipywidgets")
+ipywidgets = pytest.importorskip("ipywidgets")
 
 from ipykernel.comm import Comm
 from ipywidgets import Widget
@@ -38,7 +39,11 @@ undefined = object()
 def setup():
     _widget_attrs["_comm_default"] = getattr(Widget, "_comm_default", undefined)
     Widget._comm_default = lambda self: DummyComm()
-    _widget_attrs["_ipython_display_"] = Widget._ipython_display_
+    if parse_version(ipywidgets.__version__) >= parse_version("8.0.0"):
+        display_attr = "_repr_mimebundle_"
+    else:
+        display_attr = "_ipython_display_"
+    _widget_attrs[display_attr] = getattr(Widget, display_attr)
 
     def raise_not_implemented(*args, **kwargs):
         raise NotImplementedError()

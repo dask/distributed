@@ -68,6 +68,23 @@ class Worker(RequestHandler):
         )
 
 
+class Exceptions(RequestHandler):
+    @log_errors
+    def get(self):
+        self.render(
+            "exceptions.html",
+            title="Exceptions",
+            scheduler=self.server,
+            **merge(
+                self.server.__dict__,
+                self.server.__pdict__,
+                ns,
+                self.extra,
+                rel_path_statics,
+            ),
+        )
+
+
 class Task(RequestHandler):
     @log_errors
     def get(self, task):
@@ -214,6 +231,7 @@ class EventstreamHandler(WebSocketHandler):
 routes: list[tuple] = [
     (r"info", redirect("info/main/workers.html"), {}),
     (r"info/main/workers.html", Workers, {}),
+    (r"info/main/exceptions.html", Exceptions, {}),
     (r"info/worker/(.*).html", Worker, {}),
     (r"info/task/(.*).html", Task, {}),
     (r"info/main/logs.html", Logs, {}),

@@ -1044,6 +1044,7 @@ async def test_prefix_bokeh(s, a, b):
 
 @gen_cluster(client=True, worker_kwargs={"dashboard": True})
 async def test_shuffling(c, s, a, b):
+    pytest.importorskip("pyarrow")
     dd = pytest.importorskip("dask.dataframe")
     ss = Shuffling(s)
 

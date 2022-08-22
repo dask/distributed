@@ -19,6 +19,8 @@ from distributed.metrics import time
 from distributed.utils import CancelledError, sync
 from distributed.utils_test import (
     BlockedGatherDep,
+    BlockedGetData,
+    async_wait_for,
     captured_logger,
     cluster,
     div,
@@ -160,86 +162,54 @@ def test_restart_sync(loop):
             assert y.result() == 1 / 3
 
 
-@gen_cluster(Worker=Nanny, client=True, timeout=60)
-async def test_restart_fast(c, s, a, b):
-    L = c.map(sleep, range(10))
-
-    start = time()
-    await c.restart()
-    assert time() - start < 10
-    assert len(s.workers) == 2
-
-    assert all(x.status == "cancelled" for x in L)
-
-    x = c.submit(inc, 1)
-    result = await x
-    assert result == 2
-
-
 def test_worker_doesnt_await_task_completion(loop):
     with cluster(nanny=True, nworkers=1) as (s, [w]):
         with Client(s["address"], loop=loop) as c:
             future = c.submit(sleep, 100)
             sleep(0.1)
             start = time()
-            c.restart()
+            c.restart(timeout="5s", wait_for_workers=False)
             stop = time()
-            assert stop - start < 20
-
-
-def test_restart_fast_sync(loop):
-    with cluster(nanny=True) as (s, [a, b]):
-        with Client(s["address"], loop=loop) as c:
-            L = c.map(sleep, range(10))
-
-            start = time()
-            c.restart()
-            assert time() - start < 10
-            assert len(c.nthreads()) == 2
-
-            assert all(x.status == "cancelled" for x in L)
-
-            x = c.submit(inc, 1)
-            assert x.result() == 2
-
-
-@gen_cluster(Worker=Nanny, client=True, timeout=60)
-async def test_fast_kill(c, s, a, b):
-    L = c.map(sleep, range(10))
-
-    start = time()
-    await c.restart()
-    assert time() - start < 10
-
-    assert all(x.status == "cancelled" for x in L)
-
-    x = c.submit(inc, 1)
-    result = await x
-    assert result == 2
+            assert stop - start < 10
 
 
 @gen_cluster(Worker=Nanny, timeout=60)
 async def test_multiple_clients_restart(s, a, b):
-    c1 = await Client(s.address, asynchronous=True)
-    c2 = await Client(s.address, asynchronous=True)
+    async with Client(s.address, asynchronous=True) as c1, Client(
+        s.address, asynchronous=True
+    ) as c2:
 
-    x = c1.submit(inc, 1)
-    y = c2.submit(inc, 2)
-    xx = await x
-    yy = await y
-    assert xx == 2
-    assert yy == 3
+        x = c1.submit(inc, 1)
+        y = c2.submit(inc, 2)
+        xx = await x
+        yy = await y
+        assert xx == 2
+        assert yy == 3
 
-    await c1.restart()
+        await c1.restart()
 
-    assert x.cancelled()
-    start = time()
-    while not y.cancelled():
-        await asyncio.sleep(0.01)
-        assert time() < start + 5
+        assert x.cancelled()
+        start = time()
+        while not y.cancelled():
+            await asyncio.sleep(0.01)
+            assert time() < start + 5
 
-    await c1.close()
-    await c2.close()
+        assert not c1.futures
+        assert not c2.futures
+
+        # Ensure both clients still work after restart.
+        # Reusing a previous key has no effect.
+        x2 = c1.submit(inc, 1, key=x.key)
+        y2 = c2.submit(inc, 2, key=y.key)
+
+        assert x2._generation != x._generation
+        assert y2._generation != y._generation
+
+        assert await x2 == 2
+        assert await y2 == 3
+
+        del x2, y2
+        await async_wait_for(lambda: not s.tasks, timeout=5)
 
 
 @gen_cluster(Worker=Nanny, timeout=60)
@@ -349,22 +319,18 @@ class SlowTransmitData:
 
 
 @pytest.mark.slow
-@gen_cluster(client=True)
+@gen_cluster(client=True, config={"distributed.scheduler.work-stealing": False})
 async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     """This test is very sensitive to cluster state consistency. Timeouts often
     indicate subtle deadlocks. Be mindful when marking flaky/repeat/etc."""
-    async with Nanny(s.address, nthreads=2) as n:
+    async with Nanny(s.address, nthreads=2, worker_class=BlockedGetData) as n:
         while len(s.workers) < 3:
             await asyncio.sleep(0.01)
 
-        def slow_ser(x, delay):
-            return SlowTransmitData(x, delay=delay)
-
         n_worker_address = n.worker_address
         futures = c.map(
-            slow_ser,
+            inc,
             range(20),
-            delay=0.1,
             key=["f%d" % i for i in range(20)],
             workers=[n_worker_address],
             allow_other_workers=True,
@@ -376,9 +342,7 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
         await wait(futures)
         result_fut = c.submit(sink, futures, workers=a.address)
 
-        with suppress(CommClosedError):
-            await c.run(os._exit, 1, workers=[n_worker_address])
-
+        await n.kill(timeout=1)
         while len(s.workers) > 2:
             await asyncio.sleep(0.01)
 

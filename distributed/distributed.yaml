@@ -164,10 +164,16 @@ distributed:
   nanny:
     preload: []             # Run custom modules with Nanny
     preload-argv: []        # See https://docs.dask.org/en/latest/how-to/customize-initialization.html
-
-    # Override environment variables. Read important caveats at
+    # Override environment variables after spawning the Worker process.
+    # Use whenever you are sure that nothing will read them before the end of the worker
+    # initialization.
+    environ: {}
+    # Override environment variables *before* spawning the Worker initialization.
+    # Use for variables that are parsed in or before the worker init.
+    # Note that this leaks variables into the nanny process.
+    # Read important caveats at
     # https://distributed.dask.org/en/stable/worker.html#nanny.
-    environ:
+    pre-spawn-environ:
       # See https://distributed.dask.org/en/stable/worker-memory.html#automatically-trim-memory
       MALLOC_TRIM_THRESHOLD_: 65536
       # Numpy configuration
@@ -257,6 +263,8 @@ distributed:
         - cuml
         - prefect
         - xgboost
+    erred-tasks:
+      max-history: 100
 
   ###################
   # Bokeh dashboard #

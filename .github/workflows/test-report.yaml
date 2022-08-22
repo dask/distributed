@@ -39,8 +39,8 @@ jobs:
       - name: Generate report
         shell: bash -l {0}
         run: |
-          python continuous_integration/scripts/test_report.py --days 90 --nfails 1 -o test_report.html
-          python continuous_integration/scripts/test_report.py --days 7 --nfails 2 -o test_short_report.html
+          python continuous_integration/scripts/test_report.py --max-days 90 --max-runs 50 --nfails 1 -o test_report.html
+          python continuous_integration/scripts/test_report.py --max-days 7 --max-runs 50 --nfails 2 -o test_short_report.html --title "Test Short Report"
           mkdir deploy
           mv test_report.html test_short_report.html deploy/
 

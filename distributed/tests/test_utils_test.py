@@ -34,6 +34,7 @@ from distributed.utils_test import (
     assert_story,
     captured_logger,
     check_process_leak,
+    check_thread_leak,
     cluster,
     dump_cluster_state,
     freeze_batched_send,
@@ -263,7 +264,7 @@ def _listen(delay=0):
 def test_new_config():
     c = config.copy()
     with new_config({"xyzzy": 5}):
-        config["xyzzy"] == 5
+        assert config["xyzzy"] == 5
 
     assert config == c
     assert "xyzzy" not in config
@@ -272,6 +273,8 @@ def test_new_config():
 def test_lingering_client():
     @gen_cluster()
     async def f(s, a, b):
+        # TODO: force async-with here?
+        # see https://github.com/dask/distributed/issues/6616
         await Client(s.address, asynchronous=True)
 
     f()
@@ -281,12 +284,13 @@ def test_lingering_client():
 
 
 def test_lingering_client_2(loop):
+    # TODO: assert where the client went
     with cluster() as (s, [a, b]):
         client = Client(s["address"], loop=loop)
 
 
 def test_tls_cluster(tls_client):
-    tls_client.submit(lambda x: x + 1, 10).result() == 11
+    assert tls_client.submit(lambda x: x + 1, 10).result() == 11
     assert tls_client.security
 
 
@@ -753,6 +757,49 @@ def test_raises_with_cause():
     with pytest.raises(AssertionError):
         with raises_with_cause(RuntimeError, "foo", ValueError, "cause"):
             raise RuntimeError("exception") from ValueError("cause")
+
+
+@pytest.mark.slow
+def test_check_thread_leak():
+    event = threading.Event()
+
+    t1 = threading.Thread(target=lambda: (event.wait(), "one"))
+    t1.start()
+
+    t2 = t3 = None
+    try:
+        with pytest.raises(
+            pytest.fail.Exception, match=r"2 thread\(s\) were leaked"
+        ) as exc:
+            with check_thread_leak():
+                t2 = threading.Thread(target=lambda: (event.wait(), "two"))
+                t2.start()
+                t3 = threading.Thread(target=lambda: (event.wait(), "three"))
+                t3.start()
+
+        msg = exc.value.msg
+        assert msg
+        print(msg)  # For reference, if test fails
+
+        # First, outer thread is ignored
+        assert msg.count("Call stack of leaked thread") == 2
+        assert "one" not in msg
+
+        # Make sure we can see the full traceback, not just the last line
+        assert msg.count(__file__) == 2
+        assert 'target=lambda: (event.wait(), "two")' in msg
+        assert 'target=lambda: (event.wait(), "three")' in msg
+
+        # Ensure there aren't too many or too few newlines
+        exc.match(r'event.wait\(\), "three"\)\)\n +File')
+    finally:
+        # Clean up
+        event.set()
+        t1.join(5)
+        if t2:
+            t2.join(5)
+        if t3:
+            t3.join(5)
 
 
 @pytest.mark.parametrize("sync", [True, False])

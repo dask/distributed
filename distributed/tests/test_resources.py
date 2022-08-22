@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from time import time
 
 import pytest
 
@@ -12,6 +11,15 @@ from dask.utils import stringify
 from distributed import Lock, Worker
 from distributed.client import wait
 from distributed.utils_test import gen_cluster, inc, lock_inc, slowadd, slowinc
+from distributed.worker_state_machine import (
+    ComputeTaskEvent,
+    Execute,
+    ExecuteFailureEvent,
+    ExecuteSuccessEvent,
+    FreeKeysEvent,
+    RescheduleEvent,
+    TaskFinishedMsg,
+)
 
 
 @gen_cluster(
@@ -235,20 +243,124 @@ async def test_minimum_resource(c, s, a):
     assert a.state.total_resources == a.state.available_resources
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 2, {"resources": {"A": 1}})])
-async def test_prefer_constrained(c, s, a):
-    futures = c.map(slowinc, range(1000), delay=0.1)
-    constrained = c.map(inc, range(10), resources={"A": 1})
+@pytest.mark.parametrize("swap", [False, True])
+@pytest.mark.parametrize("p1,p2,expect_key", [(1, 0, "y"), (0, 1, "x")])
+def test_constrained_vs_ready_priority_1(ws, p1, p2, expect_key, swap):
+    """If there are both ready and constrained tasks, those with the highest priority
+    win (note: on the Worker, priorities have their sign inverted)
+    """
+    ws.available_resources = {"R": 1}
+    ws.total_resources = {"R": 1}
+    RR = {"resource_restrictions": {"R": 1}}
 
-    start = time()
-    await wait(constrained)
-    end = time()
-    assert end - start < 4
-    assert (
-        len([ts for ts in s.tasks.values() if ts.state == "memory"])
-        <= len(constrained) + 2
+    ws.handle_stimulus(ComputeTaskEvent.dummy(key="clog", stimulus_id="clog"))
+
+    stimuli = [
+        ComputeTaskEvent.dummy("x", priority=(p1,), stimulus_id="s1"),
+        ComputeTaskEvent.dummy("y", priority=(p2,), **RR, stimulus_id="s2"),
+    ]
+    if swap:
+        stimuli = stimuli[::-1]  # This must be inconsequential
+
+    instructions = ws.handle_stimulus(
+        *stimuli,
+        ExecuteSuccessEvent.dummy("clog", stimulus_id="s3"),
     )
-    assert s.workers[a.address].processing
+    assert instructions == [
+        TaskFinishedMsg.match(key="clog", stimulus_id="s3"),
+        Execute(key=expect_key, stimulus_id="s3"),
+    ]
+
+
+@pytest.mark.parametrize("swap", [False, True])
+@pytest.mark.parametrize("p1,p2,expect_key", [(1, 0, "y"), (0, 1, "x")])
+def test_constrained_vs_ready_priority_2(ws, p1, p2, expect_key, swap):
+    """If there are both ready and constrained tasks, but not enough available
+    resources, priority is inconsequential - the tasks in the ready queue are picked up.
+    """
+    ws.nthreads = 2
+    ws.available_resources = {"R": 1}
+    ws.total_resources = {"R": 1}
+    RR = {"resource_restrictions": {"R": 1}}
+
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(key="clog1", stimulus_id="clog1"),
+        ComputeTaskEvent.dummy(key="clog2", **RR, stimulus_id="clog2"),
+    )
+
+    # Test that both priorities and order are inconsequential
+    stimuli = [
+        ComputeTaskEvent.dummy("x", priority=(p1,), stimulus_id="s1"),
+        ComputeTaskEvent.dummy("y", priority=(p2,), **RR, stimulus_id="s2"),
+    ]
+    if swap:
+        stimuli = stimuli[::-1]
+
+    instructions = ws.handle_stimulus(
+        *stimuli,
+        ExecuteSuccessEvent.dummy("clog1", stimulus_id="s3"),
+    )
+    assert instructions == [
+        TaskFinishedMsg.match(key="clog1", stimulus_id="s3"),
+        Execute(key="x", stimulus_id="s3"),
+    ]
+
+
+def test_constrained_tasks_respect_priority(ws):
+    ws.available_resources = {"R": 1}
+    ws.total_resources = {"R": 1}
+    RR = {"resource_restrictions": {"R": 1}}
+
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy(key="clog", **RR, stimulus_id="clog"),
+        ComputeTaskEvent.dummy(key="x1", priority=(1,), **RR, stimulus_id="s1"),
+        ComputeTaskEvent.dummy(key="x2", priority=(2,), **RR, stimulus_id="s2"),
+        ComputeTaskEvent.dummy(key="x3", priority=(0,), **RR, stimulus_id="s3"),
+        ExecuteSuccessEvent.dummy(key="clog", stimulus_id="s4"),  # start x3
+        ExecuteSuccessEvent.dummy(key="x3", stimulus_id="s5"),  # start x1
+        ExecuteSuccessEvent.dummy(key="x1", stimulus_id="s6"),  # start x2
+    )
+    assert instructions == [
+        Execute(key="clog", stimulus_id="clog"),
+        TaskFinishedMsg.match(key="clog", stimulus_id="s4"),
+        Execute(key="x3", stimulus_id="s4"),
+        TaskFinishedMsg.match(key="x3", stimulus_id="s5"),
+        Execute(key="x1", stimulus_id="s5"),
+        TaskFinishedMsg.match(key="x1", stimulus_id="s6"),
+        Execute(key="x2", stimulus_id="s6"),
+    ]
+
+
+def test_task_cancelled_and_readded_with_resources(ws):
+    """See https://github.com/dask/distributed/issues/6710
+
+    A task is enqueued without resources, then cancelled by the client, then re-added
+    with the same key, this time with resources.
+    Test that resources are respected.
+    """
+    ws.available_resources = {"R": 1}
+    ws.total_resources = {"R": 1}
+    RR = {"resource_restrictions": {"R": 1}}
+
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(key="clog", **RR, stimulus_id="s1"),
+        ComputeTaskEvent.dummy(key="x", stimulus_id="s2"),
+    )
+    ts = ws.tasks["x"]
+    assert ts.state == "ready"
+    assert ts in ws.ready
+    assert ts not in ws.constrained
+    assert ts.resource_restrictions == {}
+
+    ws.handle_stimulus(
+        FreeKeysEvent(keys=["x"], stimulus_id="clog"),
+        ComputeTaskEvent.dummy(key="x", **RR, stimulus_id="s2"),
+    )
+    ts = ws.tasks["x"]
+    assert ts.state == "constrained"
+    assert ts not in ws.ready
+    assert ts in ws.constrained
+    assert ts.resource_restrictions == {"R": 1}
 
 
 @pytest.mark.skip(reason="")
@@ -398,3 +510,70 @@ async def test_resources_from_python_override_config(c, s, a, b):
     info = c.scheduler_info()
     for worker in [a, b]:
         assert info["workers"][worker.address]["resources"] == {"my_resources": 10}
+
+
+@pytest.mark.parametrize(
+    "done_ev_cls", [ExecuteSuccessEvent, ExecuteFailureEvent, RescheduleEvent]
+)
+def test_cancelled_with_resources(ws_with_running_task, done_ev_cls):
+    """Test transition loop of a task with resources:
+
+    executing -> cancelled -> released
+    """
+    ws = ws_with_running_task
+    assert ws.available_resources == {"R": 0}
+
+    ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="s1"))
+    assert ws.available_resources == {"R": 0}
+
+    ws.handle_stimulus(done_ev_cls.dummy("x", stimulus_id="s2"))
+    assert ws.available_resources == {"R": 1}
+    assert "x" not in ws.tasks
+
+
+@pytest.mark.parametrize(
+    "done_ev_cls", [ExecuteSuccessEvent, ExecuteFailureEvent, RescheduleEvent]
+)
+def test_resumed_with_resources(ws_with_running_task, done_ev_cls):
+    """Test transition loop of a task with resources:
+
+    executing -> cancelled -> resumed(fetch) -> (complete execution)
+    """
+    ws = ws_with_running_task
+    ws2 = "127.0.0.1:2"
+    assert ws.available_resources == {"R": 0}
+
+    ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="s1"))
+    assert ws.available_resources == {"R": 0}
+
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s2")
+    )
+    assert ws.available_resources == {"R": 0}
+
+    ws.handle_stimulus(done_ev_cls.dummy("x", stimulus_id="s3"))
+    assert ws.available_resources == {"R": 1}
+
+
+@pytest.mark.parametrize(
+    "done_ev_cls", [ExecuteSuccessEvent, ExecuteFailureEvent, RescheduleEvent]
+)
+def test_resumed_with_different_resources(ws_with_running_task, done_ev_cls):
+    """A task with resources is cancelled and then resumed to the same state, but with
+    different resources. This is actually possible in case of manual cancellation from
+    the client, followed by resubmit.
+    """
+    ws = ws_with_running_task
+    assert ws.available_resources == {"R": 0}
+
+    ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="s1"))
+    assert ws.available_resources == {"R": 0}
+
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy("x", stimulus_id="s2", resource_restrictions={"R": 0.4})
+    )
+    assert not instructions
+    assert ws.available_resources == {"R": 0}
+
+    ws.handle_stimulus(done_ev_cls.dummy(key="x", stimulus_id="s3"))
+    assert ws.available_resources == {"R": 1}

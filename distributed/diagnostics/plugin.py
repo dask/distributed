@@ -276,9 +276,7 @@ class PipInstall(WorkerPlugin):
     def __init__(self, packages, pip_options=None, restart=False):
         self.packages = packages
         self.restart = restart
-        if pip_options is None:
-            pip_options = []
-        self.pip_options = pip_options
+        self.pip_options = pip_options or []
 
     async def setup(self, worker):
         from distributed.lock import Lock
@@ -345,7 +343,8 @@ class UploadFile(WorkerPlugin):
 class Environ(NannyPlugin):
     restart = True
 
-    def __init__(self, environ={}):
+    def __init__(self, environ: dict | None = None):
+        environ = environ or {}
         self.environ = {k: str(v) for k, v in environ.items()}
 
     async def setup(self, nanny):

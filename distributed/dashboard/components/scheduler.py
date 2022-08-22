@@ -8,10 +8,10 @@ from collections import OrderedDict, defaultdict
 from collections.abc import Iterable
 from datetime import datetime
 from numbers import Number
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import numpy as np
-from bokeh.core.properties import without_property_validation
+from bokeh.core.properties import value, without_property_validation
 from bokeh.io import curdoc
 from bokeh.layouts import column, row
 from bokeh.models import (
@@ -28,6 +28,7 @@ from bokeh.models import (
     FactorRange,
     GroupFilter,
     HoverTool,
+    HTMLTemplateFormatter,
     NumberFormatter,
     NumeralTickFormatter,
     OpenURL,
@@ -40,7 +41,6 @@ from bokeh.models import (
     Title,
     VeeHead,
     WheelZoomTool,
-    value,
 )
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.models.widgets.markups import Div
@@ -79,6 +79,7 @@ from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.diagnostics.task_stream import color_of as ts_color_of
 from distributed.diagnostics.task_stream import colors as ts_color_lookup
 from distributed.metrics import time
+from distributed.scheduler import Scheduler
 from distributed.utils import Log, log_errors
 
 if dask.config.get("distributed.dashboard.export-tool"):
@@ -1439,7 +1440,7 @@ class AggregateAction(DashboardComponent):
     def update(self):
         agg_times = defaultdict(float)
 
-        for key, ts in self.scheduler.task_prefixes.items():
+        for ts in self.scheduler.task_prefixes.values():
             for action, t in ts.all_durations.items():
                 agg_times[action] += t
 
@@ -2538,7 +2539,7 @@ class TaskGroupGraph(DashboardComponent):
 
         durations = set()
         nbytes = set()
-        for key, tg in self.scheduler.task_groups.items():
+        for tg in self.scheduler.task_groups.values():
 
             if tg.duration and tg.nbytes_total:
                 durations.add(tg.duration)
@@ -3206,6 +3207,95 @@ class EventLoop(DashboardComponent):
         update(self.source, data)
 
 
+class ExceptionsTable(DashboardComponent):
+    """
+    Exceptions logged in tasks.
+
+    Since there might be many related exceptions (e.g., all tasks in a given
+    task group fail for the same reason), we make a best-effort attempt to
+    (1) aggregate to the task group, and (2) deduplicate similar looking tasks.
+    """
+
+    scheduler: Scheduler
+
+    def __init__(self, scheduler: Scheduler, width: int = 1000, **kwargs: Any):
+        self.scheduler = scheduler
+
+        self.names = [
+            "Task",
+            "Exception",
+            "Traceback",
+            "Worker(s)",
+            "Count",
+        ]
+
+        self.source = ColumnDataSource({k: [] for k in self.names})
+
+        code_formatter = HTMLTemplateFormatter(
+            template='<code title="<%- value %>"><%= value %></code>'
+        )
+        columns = [
+            TableColumn(
+                field="Task",
+                title="Task",
+                formatter=code_formatter,
+                width=150,
+            ),
+            TableColumn(
+                field="Exception",
+                title="Exception",
+                formatter=code_formatter,
+                width=300,
+            ),
+            TableColumn(
+                field="Traceback",
+                title="Traceback",
+                formatter=code_formatter,
+                width=300,
+            ),
+            TableColumn(
+                field="Worker(s)",
+                title="Worker(s)",
+                formatter=code_formatter,
+                width=200,
+            ),
+            TableColumn(
+                field="Count",
+                title="Count",
+                formatter=NumberFormatter(format="0,0"),
+                width=50,
+            ),
+        ]
+
+        if "sizing_mode" in kwargs:
+            sizing_mode = {"sizing_mode": kwargs["sizing_mode"]}
+        else:
+            sizing_mode = {}
+        self.root = DataTable(
+            source=self.source,
+            columns=columns,
+            reorderable=True,
+            sortable=True,
+            width=width,
+            index_position=None,
+            **sizing_mode,
+        )
+
+    @without_property_validation
+    def update(self):
+        new_data = {name: [] for name in self.names}
+        erred_tasks = self.scheduler.erred_tasks
+
+        for ts in erred_tasks:
+            new_data["Task"].append(ts.key)
+            new_data["Exception"].append(ts.exception_text)
+            new_data["Traceback"].append(ts.traceback_text)
+            new_data["Worker(s)"].append(",\n".join(ts.erred_on))
+            new_data["Count"].append(len(ts.erred_on))
+
+        update(self.source, new_data)
+
+
 class WorkerTable(DashboardComponent):
     """Status of the current workers
 
@@ -3276,8 +3366,10 @@ class WorkerTable(DashboardComponent):
             "memory_unmanaged_recent": "unmanaged recent",
             "memory_spilled": "spilled",
             "num_fds": "# fds",
-            "read_bytes": "read",
-            "write_bytes": "write",
+            "read_bytes": "net read",
+            "write_bytes": "net write",
+            "read_bytes_disk": "disk read",
+            "write_bytes_disk": "disk write",
         }
 
         self.source = ColumnDataSource({k: [] for k in self.names})
@@ -3300,6 +3392,8 @@ class WorkerTable(DashboardComponent):
             "write_bytes": NumberFormatter(format="0 b"),
             "num_fds": NumberFormatter(format="0"),
             "nthreads": NumberFormatter(format="0"),
+            "read_bytes_disk": NumberFormatter(format="0 b"),
+            "write_bytes_disk": NumberFormatter(format="0 b"),
         }
 
         table = DataTable(
@@ -3329,6 +3423,12 @@ class WorkerTable(DashboardComponent):
             width=width,
             index_position=None,
         )
+
+        for name in extra_names:
+            if name in formatters:
+                extra_table.columns[extra_names.index(name)].formatter = formatters[
+                    name
+                ]
 
         hover = HoverTool(
             point_policy="follow_mouse",
@@ -3405,8 +3505,8 @@ class WorkerTable(DashboardComponent):
     @without_property_validation
     def update(self):
         data = {name: [] for name in self.names + self.extra_names}
-        for i, (addr, ws) in enumerate(
-            sorted(self.scheduler.workers.items(), key=lambda kv: str(kv[1].name))
+        for i, ws in enumerate(
+            sorted(self.scheduler.workers.values(), key=lambda ws: str(ws.name))
         ):
             minfo = ws.memory
 
@@ -3840,6 +3940,18 @@ def events_doc(scheduler, extra, doc):
     add_periodic_callback(doc, events, 500)
     doc.title = "Dask: Scheduler Events"
     doc.add_root(column(events.root, sizing_mode="scale_width"))
+    doc.template = env.get_template("simple.html")
+    doc.template_variables.update(extra)
+    doc.theme = BOKEH_THEME
+
+
+@log_errors
+def exceptions_doc(scheduler, extra, doc):
+    table = ExceptionsTable(scheduler)
+    table.update()
+    add_periodic_callback(doc, table, 1000)
+    doc.title = "Dask: Exceptions"
+    doc.add_root(table.root)
     doc.template = env.get_template("simple.html")
     doc.template_variables.update(extra)
     doc.theme = BOKEH_THEME

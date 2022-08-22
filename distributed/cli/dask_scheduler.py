@@ -27,7 +27,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 
 @click.command(context_settings=dict(ignore_unknown_options=True))
 @click.option("--host", type=str, default="", help="URI, IP or hostname of this server")
-@click.option("--port", type=int, default=None, help="Serving port")
+@click.option("--port", type=str, default=None, help="Serving port")
 @click.option(
     "--interface",
     type=str,
@@ -80,6 +80,15 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     required=False,
     help="Deprecated.  See --dashboard/--no-dashboard.",
 )
+@click.option(
+    "--jupyter/--no-jupyter",
+    "jupyter",
+    default=False,
+    required=False,
+    help="Start a Jupyter Server in the same process.  Warning: This will make"
+    "it possible for anyone with access to your dashboard address to run"
+    "Python code",
+)
 @click.option("--show/--no-show", default=False, help="Show web UI [default: --show]")
 @click.option(
     "--dashboard-prefix", type=str, default="", help="Prefix for the dashboard app"
@@ -121,6 +130,8 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 def main(
     host,
     port,
+    protocol,
+    interface,
     bokeh_port,
     show,
     dashboard,
@@ -132,6 +143,7 @@ def main(
     tls_cert,
     tls_key,
     dashboard_address,
+    jupyter,
     **kwargs,
 ):
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
@@ -152,8 +164,29 @@ def main(
         )
         dashboard = bokeh
 
+    if interface and "," in interface:
+        interface = interface.split(",")
+
+    if protocol and "," in protocol:
+        protocol = protocol.split(",")
+
+    if port:
+        if "," in port:
+            port = [int(p) for p in port.split(",")]
+        else:
+            port = int(port)
+
     if port is None and (not host or not re.search(r":\d", host)):
-        port = 8786
+        if isinstance(protocol, list):
+            port = [8786] + [0] * (len(protocol) - 1)
+        else:
+            port = 8786
+
+    if isinstance(protocol, list) or isinstance(port, list):
+        if (not isinstance(protocol, list) or not isinstance(port, list)) or len(
+            port
+        ) != len(protocol):
+            raise ValueError("--protocol and --port must both be lists of equal length")
 
     sec = {
         k: v
@@ -192,9 +225,12 @@ def main(
             security=sec,
             host=host,
             port=port,
+            protocol=protocol,
+            interface=interface,
             dashboard=dashboard,
             dashboard_address=dashboard_address,
             http_prefix=dashboard_prefix,
+            jupyter=jupyter,
             **kwargs,
         )
         logger.info("-" * 47)

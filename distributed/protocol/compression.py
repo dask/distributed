@@ -16,7 +16,7 @@ from tlz import identity
 
 import dask
 
-from distributed.utils import ensure_memoryview, nbytes
+from distributed.utils import ensure_memoryview, nbytes, no_default
 
 compressions: dict[
     str | None | Literal[False],
@@ -152,7 +152,7 @@ def maybe_compress(
     min_size=10_000,
     sample_size=10_000,
     nsamples=5,
-    compression=dask.config.get("distributed.comm.compression"),
+    compression=no_default,
 ):
     """
     Maybe compress payload
@@ -164,6 +164,8 @@ def maybe_compress(
         return the original
     4.  We return the compressed result
     """
+    if compression is no_default:
+        compression = dask.config.get("distributed.comm.compression")
     if not compression:
         return None, payload
     if not (min_size <= nbytes(payload) <= 2**31):

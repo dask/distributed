@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from enum import IntEnum, auto
 from platform import uname
 
 from packaging.version import parse as parse_version
@@ -12,11 +13,40 @@ try:
 except ImportError:
     pynvml = None
 
-nvmlInitialized = False
-nvmlLibraryNotFound = False
-nvmlWslInsufficientDriver = False
-nvmlOwnerPID = None
-minimumWslVersion = "512.15"
+
+class NVMLState(IntEnum):
+    UNINITIALIZED = auto()
+    """No attempt yet made to initialize PyNVML"""
+    INITIALIZED = auto()
+    """PyNVML was successfully initialized"""
+    DISABLED_PYNVML_NOT_AVAILABLE = auto()
+    """PyNVML not installed"""
+    DISABLED_CONFIG = auto()
+    """PyNVML diagnostics disabled by ``distributed.diagnostics.nvml`` config setting"""
+    DISABLED_LIBRARY_NOT_FOUND = auto()
+    """PyNVML available, but NVML not installed"""
+    DISABLED_WSL_INSUFFICIENT_DRIVER = auto()
+    """PyNVML and NVML available, but on WSL and the driver version is insufficient"""
+
+
+# Initialisation must occur per-process, so an initialised state is a
+# (state, pid) pair
+NVML_STATE = (
+    NVMLState.DISABLED_PYNVML_NOT_AVAILABLE
+    if pynvml is None
+    else NVMLState.UNINITIALIZED
+)
+"""Current initialization state"""
+
+NVML_OWNER_PID = None
+"""PID of process that successfully called pynvml.nvmlInit"""
+
+MINIMUM_WSL_VERSION = "512.15"
+
+
+def is_initialized():
+    """Is pynvml initialized on this process?"""
+    return NVML_STATE == NVMLState.INITIALIZED and NVML_OWNER_PID == os.getpid()
 
 
 def _in_wsl():
@@ -27,49 +57,62 @@ def _in_wsl():
 
 
 def init_once():
-    global nvmlInitialized, nvmlLibraryNotFound, nvmlWslInsufficientDriver, nvmlOwnerPID
+    """Idempotent (per-process) initialization of PyNVML
 
-    # nvml monitoring disabled
-    if dask.config.get("distributed.diagnostics.nvml") is False:
+    Notes
+    -----
+
+    Modifies global variables NVML_STATE and NVML_OWNER_PID"""
+    global NVML_STATE, NVML_OWNER_PID
+
+    if NVML_STATE in {
+        NVMLState.DISABLED_PYNVML_NOT_AVAILABLE,
+        NVMLState.DISABLED_CONFIG,
+        NVMLState.DISABLED_LIBRARY_NOT_FOUND,
+        NVMLState.DISABLED_WSL_INSUFFICIENT_DRIVER,
+    }:
         return
-
-    # nvml is already initialized on this process
-    if nvmlInitialized and nvmlOwnerPID == os.getpid():
+    elif NVML_STATE == NVMLState.INITIALIZED and NVML_OWNER_PID == os.getpid():
         return
-
-    # nvml failed to initialize due to missing / outdated requirements
-    if pynvml is None or nvmlLibraryNotFound or nvmlWslInsufficientDriver:
-        return
-
-    # attempt to initialize nvml
-    try:
-        pynvml.nvmlInit()
-    except (
-        pynvml.NVMLError_LibraryNotFound,
-        pynvml.NVMLError_DriverNotLoaded,
-        pynvml.NVMLError_Unknown,
+    elif NVML_STATE == NVMLState.UNINITIALIZED and not dask.config.get(
+        "distributed.diagnostics.nvml"
     ):
-        nvmlLibraryNotFound = True
+        NVML_STATE = NVMLState.DISABLED_CONFIG
         return
+    elif (
+        NVML_STATE == NVMLState.INITIALIZED and NVML_OWNER_PID != os.getpid()
+    ) or NVML_STATE == NVMLState.UNINITIALIZED:
+        try:
+            pynvml.nvmlInit()
+        except (
+            pynvml.NVMLError_LibraryNotFound,
+            pynvml.NVMLError_DriverNotLoaded,
+            pynvml.NVMLError_Unknown,
+        ):
+            NVML_STATE = NVMLState.DISABLED_LIBRARY_NOT_FOUND
+            return
 
-    # set a minimum driver version for WSL so we can assume certain queries work
-    if (
-        not nvmlLibraryNotFound
-        and parse_version(pynvml.nvmlSystemGetDriverVersion().decode())
-        < parse_version(minimumWslVersion)
-        and _in_wsl()
-    ):
-        nvmlWslInsufficientDriver = True
-        return
+        if _in_wsl() and parse_version(
+            pynvml.nvmlSystemGetDriverVersion().decode()
+        ) < parse_version(MINIMUM_WSL_VERSION):
+            NVML_STATE = NVMLState.DISABLED_WSL_INSUFFICIENT_DRIVER
+            return
+        else:
+            from distributed.worker import add_gpu_metrics
 
-    # initialization was successful
-    nvmlInitialized = True
-    nvmlOwnerPID = os.getpid()
+            # initialization was successful
+            NVML_STATE = NVMLState.INITIALIZED
+            NVML_OWNER_PID = os.getpid()
+            add_gpu_metrics()
+    else:
+        raise RuntimeError(
+            f"Unhandled initialisation state ({NVML_STATE=}, {NVML_OWNER_PID=})"
+        )
 
 
 def device_get_count():
     init_once()
-    if not nvmlInitialized:
+    if not is_initialized():
         return 0
     else:
         return pynvml.nvmlDeviceGetCount()
@@ -77,32 +120,31 @@ def device_get_count():
 
 def _pynvml_handles():
     count = device_get_count()
-    if count == 0:
-        if pynvml is None:
-            raise RuntimeError(
-                "NVML monitoring requires PyNVML and NVML to be installed"
+    if NVML_STATE == NVMLState.DISABLED_PYNVML_NOT_AVAILABLE:
+        raise RuntimeError("NVML monitoring requires PyNVML and NVML to be installed")
+    elif NVML_STATE == NVMLState.DISABLED_LIBRARY_NOT_FOUND:
+        raise RuntimeError("PyNVML is installed, but NVML is not")
+    elif NVML_STATE == NVMLState.DISABLED_WSL_INSUFFICIENT_DRIVER:
+        raise RuntimeError(
+            "Outdated NVIDIA drivers for WSL, please upgrade to "
+            f"{MINIMUM_WSL_VERSION} or newer"
+        )
+    elif NVML_STATE == NVMLState.DISABLED_CONFIG:
+        raise RuntimeError(
+            "PyNVML monitoring disabled by 'distributed.diagnostics.nvml' "
+            "config setting"
+        )
+    elif count == 0:
+        raise RuntimeError("No GPUs available")
+    else:
+        try:
+            gpu_idx = next(
+                map(int, os.environ.get("CUDA_VISIBLE_DEVICES", "").split(","))
             )
-        if nvmlLibraryNotFound:
-            raise RuntimeError("PyNVML is installed, but NVML is not")
-        if nvmlWslInsufficientDriver:
-            raise RuntimeError(
-                "Outdated NVIDIA drivers for WSL, please upgrade to "
-                f"{minimumWslVersion} or newer"
-            )
-        else:
-            raise RuntimeError("No GPUs available")
-
-    try:
-        cuda_visible_devices = [
-            int(idx) for idx in os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")
-        ]
-    except ValueError:
-        # CUDA_VISIBLE_DEVICES is not set
-        cuda_visible_devices = False
-    if not cuda_visible_devices:
-        cuda_visible_devices = list(range(count))
-    gpu_idx = cuda_visible_devices[0]
-    return pynvml.nvmlDeviceGetHandleByIndex(gpu_idx)
+        except ValueError:
+            # CUDA_VISIBLE_DEVICES is not set, take first device
+            gpu_idx = 0
+        return pynvml.nvmlDeviceGetHandleByIndex(gpu_idx)
 
 
 def has_cuda_context():
@@ -114,7 +156,7 @@ def has_cuda_context():
     index of the device for which there's a CUDA context.
     """
     init_once()
-    if not nvmlInitialized:
+    if not is_initialized():
         return False
     for index in range(device_get_count()):
         handle = pynvml.nvmlDeviceGetHandleByIndex(index)

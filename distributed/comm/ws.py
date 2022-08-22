@@ -205,7 +205,9 @@ class WS(Comm):
         self._read_extra()
 
     def _get_finalizer(self):
-        def finalize(sock=self.sock, r=repr(self)):
+        r = repr(self)
+
+        def finalize(sock=self.sock, r=r):
             if not sock.close_code:
                 logger.info("Closing dangling websocket in %s", r)
                 sock.close()

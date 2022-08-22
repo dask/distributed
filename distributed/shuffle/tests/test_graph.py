@@ -6,6 +6,7 @@ import pytest
 
 pd = pytest.importorskip("pandas")
 pytest.importorskip("dask.dataframe")
+pytest.importorskip("pyarrow")
 
 import dask
 import dask.dataframe as dd

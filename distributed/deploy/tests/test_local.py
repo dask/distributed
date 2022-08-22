@@ -5,11 +5,11 @@ import subprocess
 import sys
 from threading import Lock
 from time import sleep
+from unittest import mock
 from urllib.parse import urlparse
 
 import pytest
 from tornado.httpclient import AsyncHTTPClient
-from tornado.ioloop import IOLoop
 
 from dask.system import CPU_COUNT
 
@@ -25,7 +25,6 @@ from distributed.utils_test import (
     assert_can_connect_locally_4,
     assert_cannot_connect,
     captured_logger,
-    clean,
     gen_test,
     inc,
     raises_with_cause,
@@ -246,19 +245,21 @@ def test_Client_solo(loop):
 @gen_test()
 async def test_duplicate_clients():
     pytest.importorskip("bokeh")
-    c1 = await Client(
+    async with Client(
         processes=False, silence_logs=False, dashboard_address=9876, asynchronous=True
-    )
-    with pytest.warns(Warning) as info:
-        c2 = await Client(
-            processes=False,
-            silence_logs=False,
-            dashboard_address=9876,
-            asynchronous=True,
-        )
+    ) as c1:
+        c1_services = c1.cluster.scheduler.services
+        with pytest.warns(Warning) as info:
+            async with Client(
+                processes=False,
+                silence_logs=False,
+                dashboard_address=9876,
+                asynchronous=True,
+            ) as c2:
+                c2_services = c2.cluster.scheduler.services
 
-    assert "dashboard" in c1.cluster.scheduler.services
-    assert "dashboard" in c2.cluster.scheduler.services
+    assert c1_services == {"dashboard": mock.ANY}
+    assert c2_services == {"dashboard": mock.ANY}
 
     assert any(
         all(
@@ -267,8 +268,6 @@ async def test_duplicate_clients():
         )
         for msg in info.list
     )
-    await c1.close()
-    await c2.close()
 
 
 def test_Client_kwargs(loop):
@@ -825,35 +824,29 @@ async def test_scale_retires_workers():
         def scale_down(self, *args, **kwargs):
             pass
 
-    loop = IOLoop.current()
-    cluster = await MyCluster(
+    async with MyCluster(
         n_workers=0,
         processes=False,
         silence_logs=False,
         dashboard_address=":0",
-        loop=loop,
+        loop=None,
         asynchronous=True,
-    )
-    c = await Client(cluster, asynchronous=True)
+    ) as cluster, Client(cluster, asynchronous=True) as c:
+        assert not cluster.workers
 
-    assert not cluster.workers
+        await cluster.scale(2)
 
-    await cluster.scale(2)
+        start = time()
+        while len(cluster.scheduler.workers) != 2:
+            await asyncio.sleep(0.01)
+            assert time() < start + 3
 
-    start = time()
-    while len(cluster.scheduler.workers) != 2:
-        await asyncio.sleep(0.01)
-        assert time() < start + 3
+        await cluster.scale(1)
 
-    await cluster.scale(1)
-
-    start = time()
-    while len(cluster.scheduler.workers) != 1:
-        await asyncio.sleep(0.01)
-        assert time() < start + 3
-
-    await c.close()
-    await cluster.close()
+        start = time()
+        while len(cluster.scheduler.workers) != 1:
+            await asyncio.sleep(0.01)
+            assert time() < start + 3
 
 
 def test_local_tls_restart(loop):
@@ -997,10 +990,9 @@ def test_dont_select_closed_worker(loop):
 
 
 def test_client_cluster_synchronous(loop):
-    with clean(threads=False):
-        with Client(loop=loop, processes=False, dashboard_address=":0") as c:
-            assert not c.asynchronous
-            assert not c.cluster.asynchronous
+    with Client(loop=loop, processes=False, dashboard_address=":0") as c:
+        assert not c.asynchronous
+        assert not c.cluster.asynchronous
 
 
 @gen_test()
@@ -1267,3 +1259,15 @@ def test_localcluster_start_exception(loop):
             loop=loop,
         ):
             pass
+
+
+def test_localcluster_get_client(loop):
+    with LocalCluster(
+        n_workers=0, asynchronous=False, dashboard_address=":0", loop=loop
+    ) as cluster:
+        with cluster.get_client() as client1:
+            assert client1.cluster == cluster
+
+            with Client(cluster) as client2:
+                assert client1 != client2
+                assert client2 == cluster.get_client()

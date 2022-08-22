@@ -51,7 +51,7 @@ def test_stress_gc(loop, func, n):
     with cluster() as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
             x = c.submit(func, 1)
-            for i in range(n):
+            for _ in range(n):
                 x = c.submit(func, x)
 
             assert x.result() == n + 2
@@ -66,7 +66,7 @@ async def test_cancel_stress(c, s, *workers):
     await wait([x])
     y = (x.sum(axis=0) + x.sum(axis=1) + 1).std()
     n_todo = len(y.dask) - len(x.dask)
-    for i in range(5):
+    for _ in range(5):
         f = c.compute(y)
         while (
             len([ts for ts in s.tasks.values() if ts.waiting_on])
@@ -84,7 +84,7 @@ def test_cancel_stress_sync(loop):
             x = c.persist(x)
             y = (x.sum(axis=0) + x.sum(axis=1) + 1).std()
             wait(x)
-            for i in range(5):
+            for _ in range(5):
                 f = c.compute(y)
                 sleep(random.random())
                 c.cancel(f)
@@ -199,7 +199,7 @@ async def test_stress_steal(c, s, *workers):
 
     dinc = delayed(slowinc)
     L = [delayed(slowinc)(i, delay=0.005) for i in range(100)]
-    for i in range(5):
+    for _ in range(5):
         L = [delayed(slowsum)(part, delay=0.005) for part in sliding_window(5, L)]
 
     total = delayed(sum)(L)
@@ -207,7 +207,7 @@ async def test_stress_steal(c, s, *workers):
 
     while future.status != "finished":
         await asyncio.sleep(0.1)
-        for i in range(3):
+        for _ in range(3):
             a = random.choice(workers)
             b = random.choice(workers)
             if a is not b:
@@ -227,7 +227,7 @@ async def test_stress_steal(c, s, *workers):
 async def test_close_connections(c, s, *workers):
     da = pytest.importorskip("dask.array")
     x = da.random.random(size=(1000, 1000), chunks=(1000, 1))
-    for i in range(3):
+    for _ in range(3):
         x = x.rechunk((1, 1000))
         x = x.rechunk((1000, 1))
 

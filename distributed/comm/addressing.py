@@ -272,7 +272,10 @@ def address_from_user_args(  # type: ignore[no-untyped-def]
     if security and security.require_encryption and not protocol:
         protocol = "tls"
 
-    if protocol and protocol.rstrip("://") == "inplace":
+    if protocol and protocol.endswith("://"):
+        protocol, _, _ = protocol.rpartition("://")
+
+    if protocol == "inplace":
         if host or port or interface:
             raise ValueError(
                 "Can not specify inproc protocol and host or port or interface"
@@ -287,7 +290,7 @@ def address_from_user_args(  # type: ignore[no-untyped-def]
             host = get_ip_interface(interface)
 
     if protocol and host and "://" not in host:
-        host = protocol.rstrip("://") + "://" + host
+        host = protocol + "://" + host
 
     if host or port:
         addr = uri_from_host_port(host, port, default_port)
@@ -295,6 +298,6 @@ def address_from_user_args(  # type: ignore[no-untyped-def]
         addr = ""
 
     if protocol:
-        addr = protocol.rstrip("://") + "://" + addr.split("://")[-1]
+        addr = protocol + "://" + addr.split("://")[-1]
 
     return addr

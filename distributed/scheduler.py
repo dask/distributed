@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import heapq
 import inspect
 import itertools
@@ -72,7 +73,7 @@ from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
 from distributed.http import get_handlers
 from distributed.lock import LockExtension
-from distributed.metrics import time
+from distributed.metrics import monotonic, time
 from distributed.multi_lock import MultiLockExtension
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
@@ -611,6 +612,23 @@ class WorkerState:
             exclude=set(exclude) | {"versions"},  # type: ignore
             members=True,
         )
+
+
+@dataclasses.dataclass
+class ErredTask:
+    """Lightweight representation of an erred task without any dependency information
+    or runspec.
+
+    See also
+    --------
+    TaskState
+    """
+
+    key: Hashable
+    timestamp: float
+    erred_on: set[str]
+    exception_text: str
+    traceback_text: str
 
 
 class Computation:
@@ -1255,6 +1273,7 @@ class SchedulerState:
         "bandwidth",
         "clients",
         "computations",
+        "erred_tasks",
         "extensions",
         "host_info",
         "idle",
@@ -1317,6 +1336,9 @@ class SchedulerState:
         self.computations: deque[Computation] = deque(
             maxlen=dask.config.get("distributed.diagnostics.computations.max-history")
         )
+        self.erred_tasks: deque[ErredTask] = deque(
+            maxlen=dask.config.get("distributed.diagnostics.erred-tasks.max-history")
+        )
         self.task_groups: dict[str, TaskGroup] = {}
         self.task_prefixes: dict[str, TaskPrefix] = {}
         self.task_metadata = {}  # type: ignore
@@ -1374,6 +1396,7 @@ class SchedulerState:
             "task_prefixes": self.task_prefixes,
             "total_nthreads": self.total_nthreads,
             "total_occupancy": self.total_occupancy,
+            "erred_tasks": self.erred_tasks,
             "extensions": self.extensions,
             "clients": self.clients,
             "workers": self.workers,
@@ -2319,6 +2342,16 @@ class SchedulerState:
             else:
                 failing_ts = ts.exception_blame  # type: ignore
 
+            self.erred_tasks.appendleft(
+                ErredTask(
+                    ts.key,
+                    time(),
+                    ts.erred_on.copy(),
+                    exception_text or "",
+                    traceback_text or "",
+                )
+            )
+
             for dts in ts.dependents:
                 dts.exception_blame = failing_ts
                 recommendations[dts.key] = "erred"
@@ -2883,6 +2916,7 @@ class Scheduler(SchedulerState, ServerNode):
         plugins=(),
         contact_address=None,
         transition_counter_max=False,
+        jupyter=False,
         **kwargs,
     ):
         if loop is not None:
@@ -2970,11 +3004,42 @@ class Scheduler(SchedulerState, ServerNode):
             distributed.dashboard.scheduler.connect(
                 self.http_application, self.http_server, self, prefix=http_prefix
             )
+        self.jupyter = jupyter
+        if self.jupyter:
+            try:
+                from jupyter_server.serverapp import ServerApp
+            except ImportError:
+                raise ImportError(
+                    "In order to use the Dask jupyter option you "
+                    "need to have jupyterlab installed"
+                )
+            from traitlets.config import Config
+
+            j = ServerApp.instance(
+                config=Config(
+                    {
+                        "ServerApp": {
+                            "base_url": "jupyter",
+                            # SECURITY: We usually expect the dashboard to be a read-only view into
+                            # the scheduler activity. However, by adding an open Jupyter application
+                            # we are allowing arbitrary remote code execution on the scheduler via the
+                            # dashboard server. This option should only be used when the dashboard is
+                            # protected via other means, or when you don't care about cluster security.
+                            "token": "",
+                            "allow_remote_access": True,
+                        }
+                    }
+                )
+            )
+            j.initialize(
+                new_httpserver=False,
+            )
+            self._jupyter_server_application = j
+            self.http_application.add_application(j.web_app)
 
         # Communication state
         self.client_comms = {}
         self.stream_comms = {}
-        self._worker_coroutines = []
 
         # Task state
         tasks = {}
@@ -3045,7 +3110,6 @@ class Scheduler(SchedulerState, ServerNode):
             "client-releases-keys": self.client_releases_keys,
             "heartbeat-client": self.client_heartbeat,
             "close-client": self.remove_client,
-            "restart": self.restart,
             "subscribe-topic": self.subscribe_topic,
             "unsubscribe-topic": self.unsubscribe_topic,
         }
@@ -3082,6 +3146,7 @@ class Scheduler(SchedulerState, ServerNode):
             "rebalance": self.rebalance,
             "replicate": self.replicate,
             "run_function": self.run_function,
+            "restart": self.restart,
             "update_data": self.update_data,
             "set_resources": self.add_resources,
             "retire_workers": self.retire_workers,
@@ -3302,10 +3367,6 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.clear_task_state()
 
-        with suppress(AttributeError):
-            for c in self._worker_coroutines:
-                c.cancel()
-
         for addr in self._start_address:
             await self.listen(
                 addr,
@@ -3349,6 +3410,12 @@ class Scheduler(SchedulerState, ServerNode):
                 await preload.start()
             except Exception:
                 logger.exception("Failed to start preload")
+
+        if self.jupyter:
+            # Allow insecure communications from local users
+            if self.address.startswith("tls://"):
+                await self.listen("tcp://localhost:0")
+            os.environ["DASK_SCHEDULER_ADDRESS"] = self.listeners[-1].contact_address
 
         await asyncio.gather(
             *[plugin.start(self) for plugin in list(self.plugins.values())]
@@ -3424,6 +3491,9 @@ class Scheduler(SchedulerState, ServerNode):
                 futures.append(comm.close())
 
         await asyncio.gather(*futures)
+
+        if self.jupyter:
+            await self._jupyter_server_application._cleanup()
 
         for comm in self.client_comms.values():
             comm.abort()
@@ -3682,12 +3752,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         version_warning = version_module.error_message(
             version_module.get_versions(),
-            merge(
-                {w: ws.versions for w, ws in self.workers.items()},
-                {c: cs.versions for c, cs in self.clients.items() if cs.versions},
-            ),
+            {w: ws.versions for w, ws in self.workers.items()},
             versions,
-            client_name="This Worker",
+            source_name=str(ws.server_id),
         )
         msg.update(version_warning)
 
@@ -5084,12 +5151,37 @@ class Scheduler(SchedulerState, ServerNode):
             collection.clear()
 
     @log_errors
-    async def restart(self, client=None, timeout=30):
-        """Restart all workers. Reset local state."""
-        stimulus_id = f"restart-{time()}"
-        n_workers = len(self.workers)
+    async def restart(self, client=None, timeout=30, wait_for_workers=True):
+        """
+        Restart all workers. Reset local state. Optionally wait for workers to return.
 
-        logger.info("Send lost future signal to clients")
+        Workers without nannies are shut down, hoping an external deployment system
+        will restart them. Therefore, if not using nannies and your deployment system
+        does not automatically restart workers, ``restart`` will just shut down all
+        workers, then time out!
+
+        After `restart`, all connected workers are new, regardless of whether `TimeoutError`
+        was raised. Any workers that failed to shut down in time are removed, and
+        may or may not shut down on their own in the future.
+
+        Parameters
+        ----------
+        timeout:
+            How long to wait for workers to shut down and come back, if `wait_for_workers`
+            is True, otherwise just how long to wait for workers to shut down.
+            Raises `asyncio.TimeoutError` if this is exceeded.
+        wait_for_workers:
+            Whether to wait for all workers to reconnect, or just for them to shut down
+            (default True). Use ``restart(wait_for_workers=False)`` combined with
+            `Client.wait_for_workers` for granular control over how many workers to
+            wait for.
+        See also
+        ----------
+        Client.restart
+        """
+        stimulus_id = f"restart-{time()}"
+
+        logger.info("Releasing all requested keys")
         for cs in self.clients.values():
             self.client_releases_keys(
                 keys=[ts.key for ts in cs.wants_what],
@@ -5097,10 +5189,21 @@ class Scheduler(SchedulerState, ServerNode):
                 stimulus_id=stimulus_id,
             )
 
+        self.clear_task_state()
+        self.erred_tasks.clear()
+        self.computations.clear()
+        self.report({"op": "restart"})
+
+        for plugin in list(self.plugins.values()):
+            try:
+                plugin.restart(self)
+            except Exception as e:
+                logger.exception(e)
+
+        n_workers = len(self.workers)
         nanny_workers = {
             addr: ws.nanny for addr, ws in self.workers.items() if ws.nanny
         }
-
         # Close non-Nanny workers. We have no way to restart them, so we just let them go,
         # and assume a deployment system is going to restart them for us.
         await asyncio.gather(
@@ -5111,60 +5214,75 @@ class Scheduler(SchedulerState, ServerNode):
             )
         )
 
-        self.clear_task_state()
-
-        for plugin in list(self.plugins.values()):
-            try:
-                plugin.restart(self)
-            except Exception as e:
-                logger.exception(e)
-
         logger.debug("Send kill signal to nannies: %s", nanny_workers)
         async with contextlib.AsyncExitStack() as stack:
-            nannies = [
-                await stack.enter_async_context(
-                    rpc(nanny_address, connection_args=self.connection_args)
-                )
-                for nanny_address in nanny_workers.values()
-            ]
-
-            try:
-                resps = await asyncio.wait_for(
-                    asyncio.gather(
-                        *(
-                            nanny.restart(close=True, timeout=timeout * 0.8)
-                            for nanny in nannies
-                        )
-                    ),
-                    timeout,
-                )
-                # NOTE: the `WorkerState` entries for these workers will be removed
-                # naturally when they disconnect from the scheduler.
-            except TimeoutError:
-                logger.error(
-                    "Nannies didn't report back restarted within "
-                    "timeout.  Continuing with restart process"
-                )
-            else:
-                if not all(resp == "OK" for resp in resps):
-                    logger.error(
-                        "Not all workers responded positively: %s",
-                        resps,
-                        exc_info=True,
+            nannies = await asyncio.gather(
+                *(
+                    stack.enter_async_context(
+                        rpc(nanny_address, connection_args=self.connection_args)
                     )
+                    for nanny_address in nanny_workers.values()
+                )
+            )
 
-        self.clear_task_state()
+            start = monotonic()
+            resps = await asyncio.gather(
+                *(
+                    asyncio.wait_for(
+                        # FIXME does not raise if the process fails to shut down,
+                        # see https://github.com/dask/distributed/pull/6427/files#r894917424
+                        # NOTE: Nanny will automatically restart worker process when it's killed
+                        nanny.kill(timeout=timeout),
+                        timeout,
+                    )
+                    for nanny in nannies
+                ),
+                return_exceptions=True,
+            )
+            # NOTE: the `WorkerState` entries for these workers will be removed
+            # naturally when they disconnect from the scheduler.
 
-        with suppress(AttributeError):
-            for c in self._worker_coroutines:
-                c.cancel()
+            # Remove any workers that failed to shut down, so we can guarantee
+            # that after `restart`, there are no old workers around.
+            bad_nannies = [
+                addr for addr, resp in zip(nanny_workers, resps) if resp is not None
+            ]
+            if bad_nannies:
+                await asyncio.gather(
+                    *(
+                        self.remove_worker(addr, stimulus_id=stimulus_id)
+                        for addr in bad_nannies
+                    )
+                )
+
+                raise TimeoutError(
+                    f"{len(bad_nannies)}/{len(nannies)} nanny worker(s) did not shut down within {timeout}s"
+                )
 
         self.log_event([client, "all"], {"action": "restart", "client": client})
-        start = time()
-        while time() < start + 10 and len(self.workers) < n_workers:
-            await asyncio.sleep(0.01)
 
-        self.report({"op": "restart"})
+        if wait_for_workers:
+            while len(self.workers) < n_workers:
+                # NOTE: if new (unrelated) workers join while we're waiting, we may return before
+                # our shut-down workers have come back up. That's fine; workers are interchangeable.
+                if monotonic() < start + timeout:
+                    await asyncio.sleep(0.2)
+                else:
+                    msg = (
+                        f"Waited for {n_workers} worker(s) to reconnect after restarting, "
+                        f"but after {timeout}s, only {len(self.workers)} have returned. "
+                        "Consider a longer timeout, or `wait_for_workers=False`."
+                    )
+
+                    if (n_nanny := len(nanny_workers)) < n_workers:
+                        msg += (
+                            f" The {n_workers - n_nanny} worker(s) not using Nannies were just shut "
+                            "down instead of restarted (restart is only possible with Nannies). If "
+                            "your deployment system does not automatically re-launch terminated "
+                            "processes, then those workers will never come back, and `Client.restart` "
+                            "will always time out. Do not use `Client.restart` in that case."
+                        )
+                    raise TimeoutError(msg) from None
 
     async def broadcast(
         self,
@@ -6202,7 +6320,7 @@ class Scheduler(SchedulerState, ServerNode):
         elif key is None:
             key = ts.key
         else:
-            assert False, (key, ts)
+            raise ValueError(f"ts or key must be None, received key={key!r}, ts={ts!r}")
 
         if ts is not None:
             report_msg = _task_to_report_msg(ts)
@@ -6644,7 +6762,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     def remove_resources(self, worker):
         ws: WorkerState = self.workers[worker]
-        for resource, quantity in ws.resources.items():
+        for resource in ws.resources:
             dr: dict = self.resources.get(resource, None)
             if dr is None:
                 self.resources[resource] = dr = {}
@@ -6769,7 +6887,7 @@ class Scheduler(SchedulerState, ServerNode):
             tt = t // dt * dt
             if tt > last:
                 last = tt
-                for k, v in keys.items():
+                for v in keys.values():
                     v.append([tt, 0])
             for k, v in d.items():
                 keys[k][-1][1] += v
@@ -7027,7 +7145,7 @@ class Scheduler(SchedulerState, ServerNode):
                     workers: list = list(self.workers.values())
                     nworkers: int = len(workers)
                     i: int
-                    for i in range(nworkers):
+                    for _ in range(nworkers):
                         ws: WorkerState = workers[worker_index % nworkers]
                         worker_index += 1
                         try:
