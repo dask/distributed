@@ -32,9 +32,9 @@ one machine with 100GB of RAM.
 
 When we set up our cluster we define resources per worker::
 
-   dask-worker scheduler:8786 --resources "GPU=2"
-   dask-worker scheduler:8786 --resources "GPU=2"
-   dask-worker scheduler:8786 --resources "MEMORY=100e9"
+   dask worker scheduler:8786 --resources "GPU=2"
+   dask worker scheduler:8786 --resources "GPU=2"
+   dask worker scheduler:8786 --resources "MEMORY=100e9"
 
 When we submit tasks to the cluster we specify constraints per task
 
@@ -68,7 +68,7 @@ Resources can be provided when starting the worker process, as shown above:
 
 .. code-block:: console
 
-   dask-worker scheduler:8786 --resources "GPU=2"
+   dask worker scheduler:8786 --resources "GPU=2"
 
 The keys are used as the resource name and the values are parsed into a numeric value.
 
@@ -95,7 +95,7 @@ before starting the process. Using Bash syntax
 
 .. code-block:: console
 
-   $ DASK_DISTRIBUTED__WORKER__RESOURCES__GPU=2 dask-worker
+   $ DASK_DISTRIBUTED__WORKER__RESOURCES__GPU=2 dask worker
    ...
 
 This might be the easiest solution if you aren't able to pass options to the :class:`distributed.Worker` class.
@@ -103,18 +103,18 @@ This might be the easiest solution if you aren't able to pass options to the :cl
 Resources are applied separately to each worker process
 -------------------------------------------------------
 
-If you are using ``dask-worker --nworkers <nworkers>`` the resource will be applied
+If you are using ``dask worker --nworkers <nworkers>`` the resource will be applied
 separately to each of the ``nworkers`` worker processes. Suppose you have 2 GPUs
 on your machine, if you want to use two worker processes, you have 1 GPU per
 worker process so you need to do something like this::
 
-   dask-worker scheduler:8786 --nworkers 2 --resources "GPU=1"
+   dask worker scheduler:8786 --nworkers 2 --resources "GPU=1"
 
 Here is an example that illustrates how to use resources to ensure each task is
 run inside a separate process, which is useful to execute non thread-safe tasks
 or tasks that uses multithreading internally::
 
-   dask-worker scheduler:8786 --nworkers 3 --nthreads 2 --resources "process=1"
+   dask worker scheduler:8786 --nworkers 3 --nthreads 2 --resources "process=1"
 
 With the code below, there will be at most 3 tasks running concurrently and
 each task will run in a separate process:

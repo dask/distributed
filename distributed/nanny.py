@@ -102,7 +102,7 @@ class Nanny(ServerNode):
         For the same reason, be warned that changing
         ``distributed.worker.multiprocessing-method`` from ``spawn`` to ``fork`` or
         ``forkserver`` may inhibit some environment variables; if you do, you should
-        set the variables yourself in the shell before you start ``dask-worker``.
+        set the variables yourself in the shell before you start ``dask worker``.
 
     See Also
     --------

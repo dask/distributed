@@ -170,7 +170,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     type=str,
     default=None,
     help="Filename to JSON encoded scheduler information. "
-    "Use with dask-scheduler --scheduler-file",
+    "Use with dask scheduler --scheduler-file",
 )
 @click.option(
     "--death-timeout",
@@ -374,7 +374,7 @@ def main(  # type: ignore[no-untyped-def]
     ):
         raise ValueError(
             "Need to provide scheduler address like\n"
-            "dask-worker SCHEDULER_ADDRESS:8786"
+            "dask worker SCHEDULER_ADDRESS:8786"
         )
 
     with suppress(TypeError, ValueError):

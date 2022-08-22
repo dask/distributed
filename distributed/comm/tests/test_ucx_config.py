@@ -87,16 +87,17 @@ def test_ucx_config_w_env_var(ucx_loop, cleanup, loop):
 
     port = "13339"
     # Using localhost appears to be less flaky than {HOST}. Additionally, this is
-    # closer to how other dask-worker tests are written.
+    # closer to how other dask worker tests are written.
     sched_addr = f"ucx://127.0.0.1:{port}"
 
     with popen(
-        ["dask-scheduler", "--no-dashboard", "--protocol", "ucx", "--port", port],
+        ["dask", "scheduler", "--no-dashboard", "--protocol", "ucx", "--port", port],
         env=env,
     ):
         with popen(
             [
-                "dask-worker",
+                "dask",
+                "worker",
                 sched_addr,
                 "--host",
                 "127.0.0.1",

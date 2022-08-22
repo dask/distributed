@@ -15,11 +15,11 @@ logger = logging.getLogger("distributed.dask_ssh")
 @click.command(
     name="ssh",
     help=dedent(
-        """Launch a distributed cluster over SSH. A 'dask-scheduler' process will run on the
+        """Launch a distributed cluster over SSH. A 'dask scheduler' process will run on the
         first host specified in [HOSTNAMES] or in the hostfile, unless --scheduler is specified
-        explicitly. One or more 'dask-worker' processes will be run on each host. Use the flag
-        --nworkers to adjust how many dask-worker process are run on each host and the flag
-        --nthreads to adjust how many CPUs are used by each dask-worker process."""
+        explicitly. One or more 'dask worker' processes will be run on each host. Use the flag
+        --nworkers to adjust how many dask worker process are run on each host and the flag
+        --nthreads to adjust how many CPUs are used by each dask worker process."""
     ),
 )
 @click.option(
@@ -48,7 +48,7 @@ logger = logging.getLogger("distributed.dask_ssh")
 @click.option(
     "--nworkers",
     "n_workers",  # This sets the Python argument name
-    default=1
+    default=1,
     show_default=True,
     type=int,
     help="Number of worker processes per host.",
@@ -86,7 +86,7 @@ logger = logging.getLogger("distributed.dask_ssh")
     type=click.Path(exists=True),
     help=(
         "Directory to use on all cluster nodes for the output of "
-        "dask-scheduler and dask-worker commands."
+        "dask scheduler and dask worker commands."
     ),
 )
 @click.option(
@@ -197,9 +197,9 @@ def main(
     c.monitor_remote_processes()
 
     # Close down the remote processes and exit.
-    print("\n[ dask-ssh ]: Shutting down remote processes (this may take a moment).")
+    print("\n[ dask ssh ]: Shutting down remote processes (this may take a moment).")
     c.shutdown()
-    print("[ dask-ssh ]: Remote processes have been terminated. Exiting.")
+    print("[ dask ssh ]: Remote processes have been terminated. Exiting.")
 
 
 if __name__ == "__main__":

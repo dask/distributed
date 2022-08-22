@@ -240,13 +240,13 @@ class Worker(BaseWorker, ServerNode):
     Workers keep the scheduler informed of their data and use that scheduler to
     gather data from other workers when necessary to perform a computation.
 
-    You can start a worker with the ``dask-worker`` command line application::
+    You can start a worker with the ``dask worker`` command line application::
 
-        $ dask-worker scheduler-ip:port
+        $ dask worker scheduler-ip:port
 
     Use the ``--help`` flag to see more options::
 
-        $ dask-worker --help
+        $ dask worker --help
 
     The rest of this docstring is about the internal state that the worker uses
     to manage and track internal computations.
@@ -356,10 +356,10 @@ class Worker(BaseWorker, ServerNode):
 
     Use the command line to start a worker::
 
-        $ dask-scheduler
+        $ dask scheduler
         Start scheduler at 127.0.0.1:8786
 
-        $ dask-worker 127.0.0.1:8786
+        $ dask worker 127.0.0.1:8786
         Start worker at:               127.0.0.1:1234
         Registered with scheduler at:  127.0.0.1:8786
 
@@ -779,7 +779,7 @@ class Worker(BaseWorker, ServerNode):
             name: extension(self) for name, extension in extensions.items()
         }
 
-        setproctitle("dask-worker [not started]")
+        setproctitle("dask worker [not started]")
 
         if dask.config.get("distributed.worker.profile.enabled"):
             profile_trigger_interval = parse_timedelta(
@@ -1384,7 +1384,7 @@ class Worker(BaseWorker, ServerNode):
             )
         logger.info("      Local Directory: %26s", self.local_directory)
 
-        setproctitle("dask-worker [%s]" % self.address)
+        setproctitle("dask worker [%s]" % self.address)
 
         plugins_msgs = await asyncio.gather(
             *(
@@ -1490,7 +1490,7 @@ class Worker(BaseWorker, ServerNode):
             with self.rpc(self.nanny) as r:
                 await r.close_gracefully()
 
-        setproctitle("dask-worker [closing]")
+        setproctitle("dask worker [closing]")
 
         teardowns = [
             plugin.teardown(self)
@@ -1578,7 +1578,7 @@ class Worker(BaseWorker, ServerNode):
         self.status = Status.closed
         await ServerNode.close(self)
 
-        setproctitle("dask-worker [closed]")
+        setproctitle("dask worker [closed]")
         return "OK"
 
     async def close_gracefully(self, restart=None):
