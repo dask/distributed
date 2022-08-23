@@ -7510,7 +7510,7 @@ class Scheduler(SchedulerState, ServerNode):
 
 def _add_to_processing(
     state: SchedulerState, ts: TaskState, recommendations: dict, worker_msgs: dict
-) -> WorkerState | None:
+) -> None:
     if state.validate:
         assert not ts.waiting_on
         assert not ts.who_has
@@ -7535,7 +7535,6 @@ def _add_to_processing(
         # logger.debug("Send job to worker: %s, %s", worker, key)
 
         worker_msgs[ws.address] = [_task_to_msg(state, ts)]
-    return ws
 
 
 def _remove_from_processing(
