@@ -281,24 +281,6 @@ async def test_no_nanny(c, s):
         await c.wait_for_workers(1)
 
 
-@gen_cluster(client=True, nthreads=[])
-async def test_reconnect_deprecated(c, s):
-    with popen(
-        ["dask", "worker", s.address, "--reconnect"],
-        capture_output=True,
-    ) as worker:
-        wait_for_log_line(b"`--reconnect` option has been removed", worker.stdout)
-        assert worker.wait() == 1
-
-    with popen(
-        ["dask", "worker", s.address, "--no-reconnect"],
-        capture_output=True,
-    ) as worker:
-        wait_for_log_line(b"flag is deprecated, and will be removed", worker.stdout)
-        await c.wait_for_workers(1)
-        await c.shutdown()
-
-
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[])
 async def test_resources(c, s):
@@ -404,26 +386,6 @@ async def test_nworkers_expands_name(c, s):
     assert len(names) == len(set(names)) == 4
     zeros = [n for n in names if n.startswith("0-")]
     assert len(zeros) == 2
-
-
-@pytest.mark.slow
-@gen_cluster(client=True, nthreads=[])
-async def test_worker_cli_nprocs_renamed_to_nworkers(c, s):
-    with popen(
-        ["dask", "worker", s.address, "--nprocs=2"],
-        capture_output=True,
-    ) as worker:
-        await c.wait_for_workers(2)
-        wait_for_log_line(b"renamed to --nworkers", worker.stdout, max_lines=15)
-
-
-@gen_cluster(nthreads=[])
-async def test_worker_cli_nworkers_with_nprocs_is_an_error(s):
-    with popen(
-        ["dask", "worker", s.address, "--nprocs=2", "--nworkers=2"],
-        capture_output=True,
-    ) as worker:
-        wait_for_log_line(b"Both --nprocs and --nworkers", worker.stdout, max_lines=15)
 
 
 @pytest.mark.slow
@@ -570,25 +532,6 @@ def test_worker_timeout(no_nanny):
         args.append("--no-nanny")
     result = runner.invoke(main, args)
     assert result.exit_code == 1
-
-
-def test_bokeh_deprecation():
-    pytest.importorskip("bokeh")
-
-    runner = CliRunner()
-    with pytest.warns(UserWarning, match="dashboard"):
-        try:
-            runner.invoke(main, ["--bokeh"])
-        except ValueError:
-            # didn't pass scheduler
-            pass
-
-    with pytest.warns(UserWarning, match="dashboard"):
-        try:
-            runner.invoke(main, ["--no-bokeh"])
-        except ValueError:
-            # didn't pass scheduler
-            pass
 
 
 @pytest.mark.slow
