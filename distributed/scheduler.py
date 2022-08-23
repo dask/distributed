@@ -2259,7 +2259,7 @@ class SchedulerState:
                 assert ts.state == "processing"
 
             w = _remove_from_processing(self, ts)
-            if w:
+            if w in self.workers:
                 worker_msgs[w] = [
                     {
                         "op": "free-keys",
@@ -2304,7 +2304,6 @@ class SchedulerState:
         traceback=None,
         exception_text: str | None = None,
         traceback_text: str | None = None,
-        worker: str | None = None,
         **kwargs,
     ):
         ws: WorkerState
@@ -2329,7 +2328,7 @@ class SchedulerState:
 
             w = _remove_from_processing(self, ts)
 
-            ts.erred_on.add(w or worker)  # type: ignore
+            ts.erred_on.add(w)
             if exception is not None:
                 ts.exception = exception
                 ts.exception_text = exception_text  # type: ignore
@@ -7314,7 +7313,7 @@ class Scheduler(SchedulerState, ServerNode):
         )
 
 
-def _remove_from_processing(state: SchedulerState, ts: TaskState) -> str | None:
+def _remove_from_processing(state: SchedulerState, ts: TaskState) -> str:
     """Remove *ts* from the set of processing tasks.
 
     See also
@@ -7326,7 +7325,7 @@ def _remove_from_processing(state: SchedulerState, ts: TaskState) -> str | None:
     ts.processing_on = None
 
     if ws.address not in state.workers:  # may have been removed
-        return None
+        return ws.address
 
     duration = ws.processing.pop(ts)
     ws.long_running.discard(ts)
