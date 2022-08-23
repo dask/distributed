@@ -53,6 +53,12 @@ class WorkerMetricCollector(PrometheusCollector):
             value=self.server.latency,
         )
 
+        yield GaugeMetricFamily(
+            self.build_name("comm_reserved_bytes"),
+            "Number of bytes currently reserved for incoming/outgoing data transfers.",
+            value=self.server.state.comm_nbytes,
+        )
+
         # all metrics using digests require crick to be installed
         # the following metrics will export NaN, if the corresponding digests are None
         if self.crick_available:

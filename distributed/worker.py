@@ -983,6 +983,7 @@ class Worker(BaseWorker, ServerNode):
                 "memory": spilled_memory,
                 "disk": spilled_disk,
             },
+            comm_reserved_bytes=self.state.comm_nbytes,
             event_loop_interval=self._tick_interval_observed,
         )
         out.update(self.monitor.recent())
