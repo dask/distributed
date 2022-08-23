@@ -142,11 +142,11 @@ async def test_CommunicatingStream(c, s, a, b):
     aa.update()
     bb.update()
 
-    assert len(first(aa.outgoing.data.values())) and len(
-        first(bb.outgoing.data.values())
+    assert len(first(aa.outgoing_transfers.data.values())) and len(
+        first(bb.outgoing_transfers.data.values())
     )
-    assert len(first(aa.incoming.data.values())) and len(
-        first(bb.incoming.data.values())
+    assert len(first(aa.incoming_transfers.data.values())) and len(
+        first(bb.incoming_transfers.data.values())
     )
 
 

@@ -1967,7 +1967,7 @@ async def test_gather_dep_one_worker_always_busy(c, s, a, b):
     # We will block A for any outgoing communication. This simulates an
     # overloaded worker which will always return "busy" for get_data requests,
     # effectively blocking H indefinitely
-    a.outgoing_current_count = 10000000
+    a.current_outgoing_transfer_count = 10000000
 
     h = c.submit(add, f, g, key="h", workers=[b.address])
 
@@ -2029,7 +2029,7 @@ async def test_gather_dep_from_remote_workers_if_all_local_workers_are_busy(
         )
     )["f"]
     for w in lws:
-        w.outgoing_current_count = 10000000
+        w.current_outgoing_transfer_count = 10000000
 
     g = c.submit(inc, f, key="g", workers=[a.address])
     assert await g == 2

@@ -1143,7 +1143,7 @@ class WorkerState:
     #: The total number of bytes in flight
     comm_nbytes: int
 
-    #: The maximum number of concurrent incoming requests for data.
+    #: The maximum number of concurrent outgoing requests for data.
     #: See also :attr:`distributed.worker.Worker.total_in_connections`.
     total_out_connections: int
 

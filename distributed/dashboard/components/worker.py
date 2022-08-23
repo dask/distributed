@@ -114,8 +114,8 @@ class CommunicatingStream(DashboardComponent):
             "total",
         ]
 
-        self.incoming = ColumnDataSource({name: [] for name in names})
-        self.outgoing = ColumnDataSource({name: [] for name in names})
+        self.incoming_transfers = ColumnDataSource({name: [] for name in names})
+        self.outgoing_transfers = ColumnDataSource({name: [] for name in names})
 
         x_range = DataRange1d(range_padding=0)
         y_range = DataRange1d(range_padding=0)
@@ -131,7 +131,7 @@ class CommunicatingStream(DashboardComponent):
         )
 
         fig.rect(
-            source=self.incoming,
+            source=self.incoming_transfers,
             x="middle",
             y="y",
             width="duration",
@@ -140,7 +140,7 @@ class CommunicatingStream(DashboardComponent):
             alpha="alpha",
         )
         fig.rect(
-            source=self.outgoing,
+            source=self.outgoing_transfers,
             x="middle",
             y="y",
             width="duration",
@@ -159,26 +159,30 @@ class CommunicatingStream(DashboardComponent):
 
         self.root = fig
 
-        self.last_incoming = 0
-        self.last_outgoing = 0
+        self.last_incoming_transfer_count = 0
+        self.last_outgoing_transfer_count = 0
         self.who = dict()
 
     @without_property_validation
     @log_errors
     def update(self):
-        outgoing = self.worker.outgoing_transfer_log
-        n = self.worker.outgoing_count - self.last_outgoing
-        outgoing = [outgoing[-i].copy() for i in range(1, n + 1)]
-        self.last_outgoing = self.worker.outgoing_count
+        outgoing_transfer_log = self.worker.outgoing_transfer_log
+        n = self.worker.outgoing_transfer_count - self.last_outgoing_transfer_count
+        outgoing_transfer_log = [
+            outgoing_transfer_log[-i].copy() for i in range(1, n + 1)
+        ]
+        self.last_outgoing_transfer_count = self.worker.outgoing_transfer_count
 
-        incoming = self.worker.incoming_transfer_log
-        n = self.worker.incoming_count - self.last_incoming
-        incoming = [incoming[-i].copy() for i in range(1, n + 1)]
-        self.last_incoming = self.worker.incoming_count
+        incoming_transfer_log = self.worker.incoming_transfer_log
+        n = self.worker.incoming_transfer_count - self.last_incoming_transfer_count
+        incoming_transfer_log = [
+            incoming_transfer_log[-i].copy() for i in range(1, n + 1)
+        ]
+        self.last_incoming_transfer_count = self.worker.incoming_transfer_count
 
         for [msgs, source] in [
-            [incoming, self.incoming],
-            [outgoing, self.outgoing],
+            [incoming_transfer_log, self.incoming_transfers],
+            [outgoing_transfer_log, self.outgoing_transfers],
         ]:
 
             for msg in msgs:
