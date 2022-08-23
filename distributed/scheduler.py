@@ -1862,7 +1862,7 @@ class SchedulerState:
                 self.idle.values(), key=lambda ws: len(ws.processing) / ws.nthreads
             )
             if self.validate:
-                assert not worker_saturated(ws, self.WORKER_SATURATION), (
+                assert not _worker_full(ws, self.WORKER_SATURATION), (
                     ws,
                     _task_slots_available(ws, self.WORKER_SATURATION),
                 )
@@ -2733,7 +2733,7 @@ class SchedulerState:
         if (
             (p < nc or occ < nc * avg / 2)
             if math.isinf(self.WORKER_SATURATION)
-            else not worker_saturated(ws, self.WORKER_SATURATION)
+            else not _worker_full(ws, self.WORKER_SATURATION)
         ):
             if ws.status == Status.running:
                 idle[ws.address] = ws
@@ -7567,7 +7567,7 @@ def _remove_from_processing(
     state.release_resources(ts, ws)
 
     # If a slot has opened up for a queued task, schedule it.
-    if state.queued and not worker_saturated(ws, state.WORKER_SATURATION):
+    if state.queued and not _worker_full(ws, state.WORKER_SATURATION):
         qts = state.queued.peek()
         if state.validate:
             assert qts.state == "queued", qts.state
@@ -8001,7 +8001,7 @@ def _task_slots_available(ws: WorkerState, saturation_factor: float) -> int:
     )
 
 
-def worker_saturated(ws: WorkerState, saturation_factor: float) -> bool:
+def _worker_full(ws: WorkerState, saturation_factor: float) -> bool:
     if math.isinf(saturation_factor):
         return False
     return _task_slots_available(ws, saturation_factor) <= 0
