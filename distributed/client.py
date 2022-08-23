@@ -1523,11 +1523,10 @@ class Client(SyncMethodMixin):
 
         If fast is True, the client will close forcefully, by cancelling tasks
         the background _handle_report_task.
-
-        https://trio.readthedocs.io/en/stable/reference-io.html#trio.aclose_forcefully
         """
         # TODO: aclose more forcefully by aborting the RPC and cancelling all
         # background tasks.
+        # see https://trio.readthedocs.io/en/stable/reference-io.html#trio.aclose_forcefully
         if self.status == "closed":
             return
 
