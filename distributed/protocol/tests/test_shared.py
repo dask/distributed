@@ -91,16 +91,29 @@ def test_plasma_worker_worker(plasma_session):
     client.close()
 
 
+@pytest.fixture()
+def lmdb_deleter():
+    import shutil
+
+    yield
+    shutil.rmtree("/tmp/lmdb")
+
+
 @gen_cluster(
     client=True,
     client_kwargs={"serializers": ["lmdb", "error"]},
     worker_kwargs={"serializers": ["lmdb", "error"]},
 )
-async def test_lmdb_client_worker(c, s, a, b):
+async def test_lmdb_client_worker(c, s, a, b, lmdb_deleter):
+    from distributed.protocol.shared import _get_lmdb
+
     await b.close()  # ensure we reuse the worker data
+
+    lmdb = _get_lmdb()
     # uses temporary and unlikely hard-coded buffer min size of 1 byte
     x = np.arange(100)  # 800 bytes
     f = await c.scatter(x)  # produces one shared buffer
+    assert lmdb.stat()["entries"] == 1
     f2 = c.submit(inc, f)  # does not yet make new shared buffer
     f3 = c.submit(inc, f)  # does not make another buffer, key exists
     out = await f2  # getting result creates buffer for y + 1
