@@ -1864,7 +1864,7 @@ class SchedulerState:
             if self.validate:
                 assert not worker_saturated(ws, self.WORKER_SATURATION), (
                     ws,
-                    task_slots_available(ws, self.WORKER_SATURATION),
+                    _task_slots_available(ws, self.WORKER_SATURATION),
                 )
                 assert ws in self.running, (ws, self.running)
             return ws
@@ -2939,7 +2939,9 @@ class SchedulerState:
         # Schedule any queued tasks onto the new worker
         if not math.isinf(self.WORKER_SATURATION) and self.queued:
             for qts in reversed(
-                list(self.queued.topk(task_slots_available(ws, self.WORKER_SATURATION)))
+                list(
+                    self.queued.topk(_task_slots_available(ws, self.WORKER_SATURATION))
+                )
             ):
                 if self.validate:
                     assert qts.state == "queued"
@@ -7990,7 +7992,7 @@ def heartbeat_interval(n: int) -> float:
         return n / 200 + 1
 
 
-def task_slots_available(ws: WorkerState, saturation_factor: float) -> int:
+def _task_slots_available(ws: WorkerState, saturation_factor: float) -> int:
     "Number of tasks that can be sent to this worker without oversaturating it"
     assert not math.isinf(saturation_factor)
     nthreads = ws.nthreads
@@ -8002,7 +8004,7 @@ def task_slots_available(ws: WorkerState, saturation_factor: float) -> int:
 def worker_saturated(ws: WorkerState, saturation_factor: float) -> bool:
     if math.isinf(saturation_factor):
         return False
-    return task_slots_available(ws, saturation_factor) <= 0
+    return _task_slots_available(ws, saturation_factor) <= 0
 
 
 class KilledWorker(Exception):
