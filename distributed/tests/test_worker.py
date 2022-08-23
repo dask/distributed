@@ -3559,3 +3559,27 @@ async def test_execute_preamble_abort_retirement(c, s):
 
         # Test that y does not get stuck.
         assert await y == 2
+
+
+@gen_cluster()
+async def test_deprecation_of_renamed_worker_attributes(s, a, b):
+    msg = (
+        "The `Worker.incoming_count` attribute has been renamed to "
+        "`Worker.incoming_transfer_count`"
+    )
+    with pytest.warns(DeprecationWarning, match=msg):
+        assert a.incoming_count == a.incoming_transfer_count
+
+    msg = (
+        "The `Worker.outgoing_count` attribute has been renamed to "
+        "`Worker.outgoing_transfer_count`"
+    )
+    with pytest.warns(DeprecationWarning, match=msg):
+        assert a.outgoing_count == a.outgoing_transfer_count
+
+    msg = (
+        "The `Worker.outgoing_current_count` attribute has been renamed to "
+        "`Worker.current_outgoing_transfer_count`"
+    )
+    with pytest.warns(DeprecationWarning, match=msg):
+        assert a.outgoing_current_count == a.current_outgoing_transfer_count
