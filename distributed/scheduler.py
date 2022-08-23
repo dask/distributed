@@ -2259,7 +2259,7 @@ class SchedulerState:
                 assert ts.state == "processing"
 
             w = _remove_from_processing(self, ts)
-            if w:
+            if w in self.workers:
                 worker_msgs[w] = [
                     {
                         "op": "free-keys",
@@ -2304,7 +2304,6 @@ class SchedulerState:
         traceback=None,
         exception_text: str | None = None,
         traceback_text: str | None = None,
-        worker: str | None = None,
         **kwargs,
     ):
         ws: WorkerState
@@ -2329,7 +2328,7 @@ class SchedulerState:
 
             w = _remove_from_processing(self, ts)
 
-            ts.erred_on.add(w or worker)  # type: ignore
+            ts.erred_on.add(w)
             if exception is not None:
                 ts.exception = exception
                 ts.exception_text = exception_text  # type: ignore
@@ -2621,7 +2620,17 @@ class SchedulerState:
         on the given worker.
         """
         dts: TaskState
-        deps: set = ts.dependencies.difference(ws.has_what)
+        deps: set
+        if 10 * len(ts.dependencies) < len(ws.has_what):
+            # In the common case where the number of dependencies is
+            # much less than the number of tasks that we have,
+            # construct the set of deps that require communication in
+            # O(len(dependencies)) rather than O(len(has_what)) time.
+            # Factor of 10 is a guess at the overhead of explicit
+            # iteration as opposed to just calling set.difference
+            deps = {dep for dep in ts.dependencies if dep not in ws.has_what}
+        else:
+            deps = ts.dependencies.difference(ws.has_what)
         nbytes: int = 0
         for dts in deps:
             nbytes += dts.nbytes
@@ -7314,7 +7323,7 @@ class Scheduler(SchedulerState, ServerNode):
         )
 
 
-def _remove_from_processing(state: SchedulerState, ts: TaskState) -> str | None:
+def _remove_from_processing(state: SchedulerState, ts: TaskState) -> str:
     """Remove *ts* from the set of processing tasks.
 
     See also
@@ -7326,7 +7335,7 @@ def _remove_from_processing(state: SchedulerState, ts: TaskState) -> str | None:
     ts.processing_on = None
 
     if ws.address not in state.workers:  # may have been removed
-        return None
+        return ws.address
 
     duration = ws.processing.pop(ts)
     ws.long_running.discard(ts)
