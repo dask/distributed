@@ -387,7 +387,7 @@ class Worker(BaseWorker, ServerNode):
     outgoing_transfer_log: deque[dict[str, Any]]
     incoming_transfer_count: int
     outgoing_transfer_count: int
-    current_outgoing_tranfer_count: int
+    current_outgoing_transfer_count: int
     bandwidth: float
     latency: float
     profile_cycle_interval: float
@@ -543,7 +543,7 @@ class Worker(BaseWorker, ServerNode):
         self.incoming_transfer_count = 0
         self.outgoing_transfer_log = deque(maxlen=100000)
         self.outgoing_transfer_count = 0
-        self.current_outgoing_tranfer_count = 0
+        self.current_outgoing_transfer_count = 0
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
         self.bandwidth_workers = defaultdict(
             lambda: (0, 0)
@@ -1659,20 +1659,20 @@ class Worker(BaseWorker, ServerNode):
 
         if (
             max_connections is not False
-            and self.current_outgoing_tranfer_count >= max_connections
+            and self.current_outgoing_transfer_count >= max_connections
         ):
             logger.debug(
                 "Worker %s has too many open connections to respond to data request "
                 "from %s (%d/%d).%s",
                 self.address,
                 who,
-                self.current_outgoing_tranfer_count,
+                self.current_outgoing_transfer_count,
                 max_connections,
                 throttle_msg,
             )
             return {"status": "busy"}
 
-        self.current_outgoing_tranfer_count += 1
+        self.current_outgoing_transfer_count += 1
         data = {k: self.data[k] for k in keys if k in self.data}
 
         if len(data) < len(keys):
@@ -1704,7 +1704,7 @@ class Worker(BaseWorker, ServerNode):
             comm.abort()
             raise
         finally:
-            self.current_outgoing_tranfer_count -= 1
+            self.current_outgoing_transfer_count -= 1
         stop = time()
         if self.digests is not None:
             self.digests["get-data-send-duration"].add(stop - start)
