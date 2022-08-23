@@ -2533,6 +2533,36 @@ class Worker(BaseWorker, ServerNode):
 
             raise
 
+    @property
+    def incoming_count(self):
+        warnings.warn(
+            "The `Worker.incoming_count` attribute has been renamed to "
+            "`Worker.incoming_transfer_count`",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.incoming_transfer_count
+
+    @property
+    def outgoing_count(self):
+        warnings.warn(
+            "The `Worker.outgoing_count` attribute has been renamed to "
+            "`Worker.outgoing_transfer_count`",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.outgoing_transfer_count
+
+    @property
+    def outgoing_current_count(self):
+        warnings.warn(
+            "The `Worker.outgoing_current_count` attribute has been renamed to "
+            "`Worker.current_outgoing_transfer_count`",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.current_outgoing_transfer_count
+
 
 def get_worker() -> Worker:
     """Get the worker currently running this task
