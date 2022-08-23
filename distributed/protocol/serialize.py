@@ -15,8 +15,7 @@ import dask
 from dask.base import normalize_token
 from dask.utils import typename
 
-import distributed.protocol.shared as plasma_shared
-from distributed.protocol import pickle
+from distributed.protocol import pickle, shared
 from distributed.protocol.compression import decompress, maybe_compress
 from distributed.protocol.utils import (
     frame_split_size,
@@ -931,4 +930,5 @@ def register_generic(
     deserialize_func.register(cls)(object_with_dict_serializer.deserialize)
 
 
-register_serialization_family("plasma", plasma_shared.ser, plasma_shared.deser)
+register_serialization_family("plasma", shared.ser_plasma, shared.deser_plasma)
+register_serialization_family("lmdb", shared.ser_lmdb, shared.deser_lmdb)

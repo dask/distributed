@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import pickle
 from typing import Any
 from urllib import parse
@@ -17,20 +18,124 @@ except ImportError:
         raise ImportError("pyarrow.plasma was not importable")
 
 
-plasma: list[Any] = []  # module global to cache client
+try:
+    from lmdb import open as lmdb_connect
+except ImportError:
+
+    def lmdb_connect(**kwargs):
+        raise ImportError("lmdb was not importable")
+
+
+backends: dict[str, Any] = {}  # module global to cache client
+
+
+def _get_lmdb():
+    if "lmdb" not in backends:
+        # TODO: options to be available via config
+        backends["lmdb"] = lmdb_connect(
+            path="/tmp/lmdb",
+            map_size=10 * 2**30,
+            sync=False,
+            readahead=False,
+            writemap=True,
+            meminit=False,
+            max_spare_txns=4,
+            max_readers=16,
+        )
+    return backends["lmdb"]
+
+
+def _put_lmdb_buffer(buf):
+    client = _get_lmdb()
+    key = os.urandom(16)
+    with client.begin(write=True) as txn:
+        txn.put(key, buf)
+    return b"lmdb:" + key
+
+
+def ser_lmdb(x, context=None):
+    from distributed.worker import get_worker
+
+    size_limit = dask.config.get("distributed.protocol.shared.minsize", 1)
+
+    frames: list[bytes | memoryview] = [b""]
+    try:
+        worker = get_worker()
+    except ValueError:
+        # on client; must be scattering
+        worker = None
+
+    if worker and id(x) in worker.shared_data:
+        # cache hit
+        return worker.shared_data[id(x)]
+
+    def add_buf(buf):
+        frames.append(memoryview(buf))
+
+    frames[0] = pickle.dumps(x, protocol=-1, buffer_callback=add_buf)
+    if on_node(context) != on_node(context, "recipient"):
+        # across nodes
+        head = {"serializer": "pickle"}
+    else:
+        head = {"serializer": "lmdb"}
+        if any(buf.nbytes > size_limit for buf in frames[1:]):
+            # TODO: make DB keys deterministic by using dask key, if available
+            # TODO: use putmulti method of cursor
+            frames[1:] = [
+                _put_lmdb_buffer(buf) if buf.nbytes > size_limit else buf
+                for buf in frames[1:]
+            ]
+            if worker is not None:
+                # find object's dask key; it ought to exist
+                seq = [k for k, d in worker.data.items() if d is x]
+                # if key is not in data, this is probably a test in-process worker
+                if seq:
+                    k = first(seq)
+                    new_obj = deser_lmdb(
+                        None, frames
+                    )  # version of object pointing at shared buffers
+                    worker.data[k] = new_obj  # replace original object
+    return head, frames
+
+
+def deser_lmdb(header, frames):
+    from distributed.worker import get_worker
+
+    try:
+        worker = get_worker()
+    except ValueError:
+        # on client; must be scattering
+        worker = None
+    client = _get_lmdb()
+    didsome = False
+    frames0 = frames.copy()
+    for i, buf in enumerate(frames.copy()):
+        if isinstance(buf, (bytes, memoryview)) and buf[:5] == b"lmdb:":
+            # TODO: a cursor has getmulti method
+            ob = bytes(buf)[5:]
+            with client.begin(buffers=True) as tcx:
+                frames[i] = tcx.get(ob)
+                didsome = True
+    out = pickle.loads(frames[0], buffers=frames[1:])
+    if worker and didsome:
+        # "bufs" is a poor condition, maybe store in header
+        worker.shared_data[id(out)] = (
+            header or {"serializer": "lmdb"},
+            frames0,
+        )  # save shared buffers
+    return out
 
 
 def _get_plasma():
-    # TODO: cache error so we don't try this every time?
-    if not plasma:
+    if "plasma" not in backends:
         PLASMA_PATH = dask.config.get(
             "distributed.protocol.shared.plasma_path", "/tmp/plasma"
         )
-        plasma.append(connect(PLASMA_PATH))
-    return plasma[0]
+        backends["plasma"] = connect(PLASMA_PATH)
+    return backends["plasma"]
 
 
-def _put_buffer(buf):
+def _put_plasma_buffer(buf):
     client = _get_plasma()
     try:
         object_id = ObjectID(tokenize(buf)[:20].encode())  # use id()?
@@ -45,10 +150,10 @@ def _put_buffer(buf):
     return b"plasma:" + object_id.binary()
 
 
-def ser(x, context=None):
+def ser_plasma(x, context=None):
     from distributed.worker import get_worker
 
-    plasma_size_limit = dask.config.get("distributed.protocol.shared.minsize", 1)
+    size_limit = dask.config.get("distributed.protocol.shared.minsize", 1)
 
     frames: list[bytes | memoryview] = [b""]
     try:
@@ -70,10 +175,10 @@ def ser(x, context=None):
         head = {"serializer": "pickle"}
     else:
         head = {"serializer": "plasma"}
-        if any(buf.nbytes > plasma_size_limit for buf in frames[1:]):
+        if any(buf.nbytes > size_limit for buf in frames[1:]):
 
             frames[1:] = [
-                _put_buffer(buf) if buf.nbytes > plasma_size_limit else buf
+                _put_plasma_buffer(buf) if buf.nbytes > size_limit else buf
                 for buf in frames[1:]
             ]
             if worker is not None:
@@ -82,7 +187,7 @@ def ser(x, context=None):
                 # if key is not in data, this is probably a test in-process worker
                 if seq:
                     k = first(seq)
-                    new_obj = deser(
+                    new_obj = deser_plasma(
                         None, frames
                     )  # version of object pointing at shared buffers
                     worker.data[k] = new_obj  # replace original object
@@ -98,7 +203,7 @@ def on_node(context, which="sender"):
     return parse.urlparse(info).hostname
 
 
-def deser(header, frames):
+def deser_plasma(header, frames):
     from distributed.worker import get_worker
 
     try:

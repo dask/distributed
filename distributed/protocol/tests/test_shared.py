@@ -8,7 +8,6 @@ import pytest
 
 import dask.distributed
 
-plasma = pytest.importorskip("pyarrow.plasma")
 np = pytest.importorskip("numpy")
 
 from distributed.utils_test import gen_cluster, inc, wait_for
@@ -18,6 +17,7 @@ path = "/tmp/plasma"
 
 @pytest.fixture(scope="module")
 def plasma_process():
+    pytest.importorskip("pyarrow.plasma")
     cmd = shlex.split(f"plasma_store -m 10000000 -s {path}")  # 10MB
     proc = subprocess.Popen(cmd)
     yield
@@ -27,6 +27,8 @@ def plasma_process():
 
 @pytest.fixture()
 def plasma_session(plasma_process):
+    from pyarrow import plasma
+
     timeout = 10
     while True:
         try:
@@ -44,7 +46,7 @@ def plasma_session(plasma_process):
 
 
 @gen_cluster(client=True, client_kwargs={"serializers": ["plasma", "error"]})
-async def test_client_worker(c, s, a, b, plasma_session):
+async def test_plasma_client_worker(c, s, a, b, plasma_session):
     await b.close()  # ensure we reuse the worker data
     l0 = len(plasma_session.list())
     # uses temporary and unlikely hard-coded buffer min size of 1 byte
@@ -63,9 +65,7 @@ async def test_client_worker(c, s, a, b, plasma_session):
     assert len(plasma_session.list()) - l0 == 2
 
 
-def test_worker_worker(plasma_session):
-    import os
-
+def test_plasma_worker_worker(plasma_session):
     x = np.arange(100)  # 800 bytes
     client = dask.distributed.Client(
         n_workers=2,
@@ -78,7 +78,6 @@ def test_worker_worker(plasma_session):
     sers = client.run(lambda: dask.distributed.get_worker().rpc.serializers)
     assert list(sers.values()) == [["plasma", "error"], ["plasma", "error"]]
 
-    print(os.getpid(), client.run(os.getpid))
     f = client.scatter(x)  # ephemeral ref in this process, which does not persist
     ll = plasma_session.list()
     assert len(ll) == 1
@@ -89,3 +88,21 @@ def test_worker_worker(plasma_session):
     ll = plasma_session.list()
     assert len(ll) == 1
     assert list(ll.values())[0]["ref_count"] == 2
+    client.close()
+
+
+@gen_cluster(
+    client=True,
+    client_kwargs={"serializers": ["lmdb", "error"]},
+    worker_kwargs={"serializers": ["lmdb", "error"]},
+)
+async def test_lmdb_client_worker(c, s, a, b):
+    await b.close()  # ensure we reuse the worker data
+    # uses temporary and unlikely hard-coded buffer min size of 1 byte
+    x = np.arange(100)  # 800 bytes
+    f = await c.scatter(x)  # produces one shared buffer
+    f2 = c.submit(inc, f)  # does not yet make new shared buffer
+    f3 = c.submit(inc, f)  # does not make another buffer, key exists
+    out = await f2  # getting result creates buffer for y + 1
+    _ = await c.gather([f2, f3])  # does not make another buffer, ser already exists
+    assert (x + 1 == out).all()
