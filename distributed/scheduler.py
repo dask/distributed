@@ -2259,7 +2259,7 @@ class SchedulerState:
                 assert ts.state == "processing"
 
             w = _remove_from_processing(self, ts)
-            if w in self.workers:
+            if w:
                 worker_msgs[w] = [
                     {
                         "op": "free-keys",
@@ -2304,9 +2304,9 @@ class SchedulerState:
         traceback=None,
         exception_text: str | None = None,
         traceback_text: str | None = None,
+        worker: str | None = None,
         **kwargs,
     ):
-        ws: WorkerState
         try:
             ts: TaskState = self.tasks[key]
             dts: TaskState
@@ -2317,18 +2317,19 @@ class SchedulerState:
 
             if self.validate:
                 assert cause or ts.exception_blame
-                assert ts.processing_on
                 assert not ts.who_has
                 assert not ts.waiting_on
 
+            maybe_stale_ws = ts.processing_on
+            assert maybe_stale_ws
+
             if ts.actor:
-                assert ts.processing_on
-                ws = ts.processing_on
-                ws.actors.remove(ts)
+                maybe_stale_ws.actors.remove(ts)
 
-            w = _remove_from_processing(self, ts)
+            _remove_from_processing(self, ts)
 
-            ts.erred_on.add(w)
+            # NOTE: `worker` is None if it died, i.e. `KilledWorker`
+            ts.erred_on.add(worker or maybe_stale_ws.address)
             if exception is not None:
                 ts.exception = exception
                 ts.exception_text = exception_text  # type: ignore
@@ -2350,6 +2351,24 @@ class SchedulerState:
                     traceback_text or "",
                 )
             )
+
+            if worker and self.workers.get(worker) is not maybe_stale_ws:
+                # someone else has this task
+                logger.info(
+                    "Unexpected worker erred task. Expected: %s, Got: %s, Key: %s",
+                    maybe_stale_ws,
+                    worker,
+                    key,
+                )
+
+                if self.workers.get(maybe_stale_ws.address) is maybe_stale_ws:
+                    worker_msgs[maybe_stale_ws.address] = [
+                        {
+                            "op": "cancel-compute",
+                            "key": key,
+                            "stimulus_id": stimulus_id,
+                        }
+                    ]
 
             for dts in ts.dependents:
                 dts.exception_blame = failing_ts
@@ -7323,7 +7342,7 @@ class Scheduler(SchedulerState, ServerNode):
         )
 
 
-def _remove_from_processing(state: SchedulerState, ts: TaskState) -> str:
+def _remove_from_processing(state: SchedulerState, ts: TaskState) -> str | None:
     """Remove *ts* from the set of processing tasks.
 
     See also
@@ -7334,8 +7353,8 @@ def _remove_from_processing(state: SchedulerState, ts: TaskState) -> str:
     assert ws
     ts.processing_on = None
 
-    if ws.address not in state.workers:  # may have been removed
-        return ws.address
+    if state.workers.get(ws.address) is not ws:  # may have been removed
+        return None
 
     duration = ws.processing.pop(ts)
     ws.long_running.discard(ts)
