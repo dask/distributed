@@ -93,23 +93,37 @@ async def test_prometheus(c, s, a, b):
 
     http_client = AsyncHTTPClient()
 
-    # request data twice since there once was a case where metrics got registered multiple times resulting in
-    # prometheus_client errors
-    for _ in range(2):
-        response = await http_client.fetch(
-            "http://localhost:%d/metrics" % s.http_server.port
-        )
+    async def fetch_metrics():
+        port = s.http_server.port
+        response = await http_client.fetch(f"http://localhost:{port}/metrics")
         assert response.code == 200
         assert response.headers["Content-Type"] == "text/plain; version=0.0.4"
 
         txt = response.body.decode("utf8")
         families = {
-            family.name: family for family in text_string_to_metric_families(txt)
+            family.name: family
+            for family in text_string_to_metric_families(txt)
+            if family.name.startswith("dask_scheduler_")
         }
-        assert "dask_scheduler_workers" in families
+        return families
 
-        client = families["dask_scheduler_clients"]
-        assert client.samples[0].value == 1.0
+    active_metrics = await fetch_metrics()
+
+    expected_metrics = {
+        "dask_scheduler_clients",
+        "dask_scheduler_desired_workers",
+        "dask_scheduler_workers",
+        "dask_scheduler_tasks",
+        "dask_scheduler_tasks_suspicious",
+        "dask_scheduler_tasks_forgotten",
+    }
+
+    assert active_metrics.keys() == expected_metrics
+    assert active_metrics["dask_scheduler_clients"].samples[0].value == 1.0
+
+    # request data twice since there once was a case where metrics got registered multiple times resulting in
+    # prometheus_client errors
+    await fetch_metrics()
 
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})
