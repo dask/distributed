@@ -2307,6 +2307,32 @@ class SchedulerState:
         traceback_text: str | None = None,
         **kwargs,
     ):
+        """Processed a recommended transition processing -> erred.
+
+        Parameters
+        ----------
+        key
+           Key of the task to transition
+        stimulus_id
+            ID of the stimulus causing the transition
+        worker
+            Address of the worker on which the task was processing when causing the transition
+        cause
+            Address of the task that caused this task to be transitioned to erred
+        exception
+            Exception caused by the task
+        traceback
+            Traceback caused by the task
+        exception_text
+            String representation of the exception
+        traceback_text
+            String representation of the traceback
+
+
+        Returns
+        -------
+        Recommendations, client messages and worker messages to process
+        """
         try:
             ts: TaskState = self.tasks[key]
             dts: TaskState
