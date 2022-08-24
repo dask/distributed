@@ -237,9 +237,10 @@ class TaskState:
 
     #: The current state of the task
     state: TaskStateState = "released"
-    #: The previous state of the task. It is not None iff state in (cancelled, resumed).
+    #: The previous state of the task. It is not None iff :attr:`state` in
+    #: (cancelled, resumed).
     previous: Literal["executing", "long-running", "flight", None] = None
-    #: The next state of the task. It is not None iff state == resumed.
+    #: The next state of the task. It is not None iff :attr:`state` == resumed.
     next: Literal["fetch", "waiting", None] = None
 
     #: Expected duration of the task
@@ -562,7 +563,10 @@ class StealResponseMsg(SendMessageToScheduler):
 
 @dataclass
 class StateMachineEvent:
+    """Base abstract class for all stimuli that can modify the worker state"""
+
     __slots__ = ("stimulus_id", "handled")
+    #: Unique ID of the event
     stimulus_id: str
     #: timestamp of when the event was handled by the worker
     # TODO Switch to @dataclass(slots=True), uncomment the line below, and remove the
@@ -571,6 +575,7 @@ class StateMachineEvent:
     _classes: ClassVar[dict[str, type[StateMachineEvent]]] = {}
 
     def __new__(cls, *args: Any, **kwargs: Any) -> StateMachineEvent:
+        """Hack to initialize the ``handled`` attribute in Python <3.10"""
         self = object.__new__(cls)
         self.handled = None
         return self
@@ -1126,10 +1131,10 @@ class WorkerState:
     missing_dep_flight: set[TaskState]
 
     #: Which tasks that are coming to us in current peer-to-peer connections.
-    #: This set includes exclusively:
-    #: - tasks with :attr:`state` == 'flight'
-    #: - tasks with :attr:`state` in ('cancelled', 'resumed') and
-    #:   :attr:`previous` == 'flight`
+    #:
+    #: This set includes exclusively tasks with :attr:`~TaskState.state` == 'flight' as
+    #: well as tasks with :attr:`~TaskState.state` in ('cancelled', 'resumed') and
+    #: :attr:`~TaskState.previous` == 'flight`.
     #:
     #: See also :meth:`in_flight_tasks_count`.
     in_flight_tasks: set[TaskState]
@@ -1171,10 +1176,10 @@ class WorkerState:
     available_resources: dict[str, float]
 
     #: Set of tasks that are currently running.
-    #: This set includes exclusively:
-    #: - tasks with :attr:`state` == 'executing'
-    #: - tasks with :attr:`state` in ('cancelled', 'resumed') and
-    #:   :attr:`previous` == 'executing`
+    #:
+    #: This set includes exclusively tasks with :attr:`~TaskState.state` == 'executing'
+    #: as well as tasks with :attr:`~TaskState.state` in ('cancelled', 'resumed') and
+    #: :attr:`~TaskState.previous` == 'executing`.
     #:
     #: See also :meth:`executing_count` and :attr:`long_running`.
     executing: set[TaskState]
@@ -1183,11 +1188,11 @@ class WorkerState:
     #: :func:`~distributed.secede`, so they no longer count towards the maximum number
     #: of concurrent tasks (nthreads).
     #: These tasks do not appear in the :attr:`executing` set.
-    #: This set includes exclusively:
-    #: - tasks with :attr:`state` == 'long-running'
-    #: - tasks with :attr:`state` in ('cancelled', 'resumed') and
-    #:   :attr:`previous` == 'long-running`
     #:
+    #: This set includes exclusively tasks with
+    #: :attr:`~TaskState.state` == 'long-running' as well as tasks with
+    #: :attr:`~TaskState.state` in ('cancelled', 'resumed') and
+    #: :attr:`~TaskState.previous` == 'long-running`.
     long_running: set[TaskState]
 
     #: A number of tasks that this worker has run in its lifetime; this includes failed

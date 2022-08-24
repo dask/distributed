@@ -3,12 +3,20 @@ digraph{
         bgcolor="#FFFFFFF00",
         rankdir=LR,
         ];
-    new -> waiting;
+    released1 [label=released];
+    released2 [label=released];
+    released1 -> waiting;
     waiting -> ready;
+    waiting -> constrained;
     ready -> executing;
+    constrained -> executing;
     executing -> "long-running";
     executing -> memory;
     executing -> error;
+    executing -> rescheduled;
     "long-running" -> memory;
     "long-running" -> error;
+    "long-running" -> rescheduled;
+    rescheduled -> released2;
+    released2 -> forgotten;
 }
