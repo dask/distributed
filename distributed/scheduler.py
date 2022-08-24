@@ -1258,7 +1258,7 @@ class SchedulerState:
     * **idle:** ``{WorkerState}``:
         Set of workers that are currently in running state and not fully utilized
     * **saturated:** ``{WorkerState}``:
-        Set of workers that are not over-utilized
+        Set of workers that are fully utilized. May include non-running workers.
     * **running:** ``{WorkerState}``:
         Set of workers that are currently in running state
 
