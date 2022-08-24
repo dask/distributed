@@ -2316,7 +2316,7 @@ class SchedulerState:
         stimulus_id
             ID of the stimulus causing the transition
         worker
-            Address of the worker on which the task was processing when causing the transition
+            Address of the worker where the task erred. Not necessarily ``ts.processing_on``.
         cause
             Address of the task that caused this task to be transitioned to erred
         exception
