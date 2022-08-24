@@ -106,7 +106,9 @@ class HeapSet(MutableSet[T]):
             self._sorted = False
 
     def peekn(self, n: int) -> Iterator[T]:
-        "Iterator over the N smallest elements. This is O(1) for n == 1, O(n*logn) otherwise."
+        """Iterate over the n smallest elements without removing them.
+        This is O(1) for n == 1; O(n*logn) otherwise.
+        """
         if n <= 0:
             return  # empty iterator
         if n == 1:
@@ -173,10 +175,12 @@ class HeapSet(MutableSet[T]):
         if not self._sorted:
             self._heap.sort()  # A sorted list maintains the heap invariant
             self._sorted = True
+        seen = set()
         for _, _, vref in self._heap:
             value = vref()
-            if value in self._data:
+            if value in self._data and value not in seen:
                 yield value
+                seen.add(value)
 
     def clear(self) -> None:
         self._data.clear()
