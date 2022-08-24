@@ -7359,7 +7359,7 @@ def _remove_from_processing(state: SchedulerState, ts: TaskState) -> WorkerState
 
     Returns
     -------
-    The worker that processed *ts* if the worker is current,
+    Worker state of the worker that processed *ts* if the worker is current,
     None if the worker is stale.
 
     See also
