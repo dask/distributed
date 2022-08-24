@@ -57,8 +57,26 @@ notably ``released``, ``waiting``, ``no-worker``, ``processing``,
 
 Tasks flow along the following states with the following allowed transitions:
 
-.. image:: images/task-state.svg
-    :alt: Dask scheduler task states
+.. digraph:: scheduler_task_states
+   :alt: Dask scheduler task states
+
+    graph [
+        bgcolor="#FFFFFFF00",
+        rankdir=LR,
+        ];
+    released1 [label=released];
+    released2 [label=released];
+    new -> released1;
+    released1 -> waiting;
+    waiting -> processing;
+    waiting -> "no-worker";
+    "no-worker" -> waiting;
+    "no-worker" -> processing;
+    processing -> memory;
+    processing -> error;
+    error -> forgotten;
+    memory -> released2;
+    released2 -> forgotten;
 
 *  *Released*: Known but not actively computing or in memory
 *  *Waiting*: On track to be computed, waiting on dependencies to arrive in

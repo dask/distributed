@@ -4,6 +4,8 @@ build:
   os: ubuntu-20.04
   tools:
     python: "3.9"
+  apt_packages:
+    - dot
 
 sphinx:
   configuration: docs/source/conf.py

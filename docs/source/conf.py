@@ -44,6 +44,7 @@ extensions = [
     "sphinx.ext.autosummary",
     "sphinx.ext.extlinks",
     "sphinx.ext.intersphinx",
+    "sphinx.ext.graphviz",
     "numpydoc",
     "sphinx_click.ext",
 ]
