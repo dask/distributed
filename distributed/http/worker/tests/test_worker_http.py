@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
 from tornado.httpclient import AsyncHTTPClient
 
-from distributed.utils_test import gen_cluster
+from distributed.utils_test import gen_cluster, slowinc
 
 
 @gen_cluster(client=True)
@@ -55,6 +56,58 @@ async def test_prometheus(c, s, a, b):
     # request data twice since there once was a case where metrics got registered
     # multiple times resulting in prometheus_client errors
     await fetch_metrics()
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)], clean_kwargs={"threads": False})
+async def test_prometheus_task_states(c, s, a, b):
+    pytest.importorskip("prometheus_client")
+    from prometheus_client.parser import text_string_to_metric_families
+
+    http_client = AsyncHTTPClient()
+
+    async def fetch_metrics():
+        port = a.http_server.port
+        response = await http_client.fetch(f"http://localhost:{port}/metrics")
+        assert response.code == 200
+        assert response.headers["Content-Type"] == "text/plain; version=0.0.4"
+        txt = response.body.decode("utf8")
+        families = {
+            family.name: family
+            for family in text_string_to_metric_families(txt)
+            if family.name.startswith("dask_worker_")
+        }
+        active_metrics = {
+            sample.labels["state"]: sample.value
+            for sample in families["dask_worker_tasks"].samples
+        }
+        return active_metrics
+
+    expected_metrics = {"stored", "executing", "ready", "waiting"}
+    assert not a.state.tasks
+    active_metrics = await fetch_metrics()
+    assert active_metrics.keys() == expected_metrics
+    assert sum(active_metrics.values()) == 0.0
+
+    # submit a task which should show up in the prometheus scraping
+    future = c.submit(slowinc, 1, delay=0.5)
+    while future.key not in a.state.tasks:
+        await asyncio.sleep(0.001)
+
+    active_metrics = await fetch_metrics()
+    assert active_metrics.keys() == expected_metrics
+    assert sum(active_metrics.values()) == 1.0
+
+    res = await c.gather(future)
+    assert res == 2
+
+    future.release()
+
+    while future.key in a.state.tasks:
+        await asyncio.sleep(0.001)
+
+    active_metrics = await fetch_metrics()
+    assert active_metrics.keys() == expected_metrics
+    assert sum(active_metrics.values()) == 0.0
 
 
 @gen_cluster(client=True)
