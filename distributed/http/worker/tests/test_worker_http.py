@@ -6,7 +6,8 @@ import json
 import pytest
 from tornado.httpclient import AsyncHTTPClient
 
-from distributed.utils_test import gen_cluster, slowinc
+from distributed import Event
+from distributed.utils_test import gen_cluster
 
 
 @gen_cluster(client=True)
@@ -58,7 +59,7 @@ async def test_prometheus(c, s, a, b):
     await fetch_metrics()
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)], clean_kwargs={"threads": False})
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_prometheus_task_states(c, s, a, b):
     pytest.importorskip("prometheus_client")
     from prometheus_client.parser import text_string_to_metric_families
@@ -88,8 +89,10 @@ async def test_prometheus_task_states(c, s, a, b):
     assert active_metrics.keys() == expected_metrics
     assert sum(active_metrics.values()) == 0.0
 
+    ev = Event()
+
     # submit a task which should show up in the prometheus scraping
-    future = c.submit(slowinc, 1, delay=0.5)
+    future = c.submit(ev.wait)
     while future.key not in a.state.tasks:
         await asyncio.sleep(0.001)
 
@@ -97,8 +100,8 @@ async def test_prometheus_task_states(c, s, a, b):
     assert active_metrics.keys() == expected_metrics
     assert sum(active_metrics.values()) == 1.0
 
-    res = await c.gather(future)
-    assert res == 2
+    await ev.set()
+    await c.gather(future)
 
     future.release()
 
