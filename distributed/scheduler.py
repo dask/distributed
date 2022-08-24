@@ -2258,9 +2258,9 @@ class SchedulerState:
                 assert not ts.waiting_on
                 assert ts.state == "processing"
 
-            w = _remove_from_processing(self, ts)
-            if w:
-                worker_msgs[w.address] = [
+            ws = _remove_from_processing(self, ts)
+            if ws:
+                worker_msgs[ws.address] = [
                     {
                         "op": "free-keys",
                         "keys": [key],
