@@ -2258,9 +2258,9 @@ class SchedulerState:
                 assert not ts.waiting_on
                 assert ts.state == "processing"
 
-            w = _remove_from_processing(self, ts)
-            if w in self.workers:
-                worker_msgs[w] = [
+            ws = _remove_from_processing(self, ts)
+            if ws:
+                worker_msgs[ws.address] = [
                     {
                         "op": "free-keys",
                         "keys": [key],
@@ -2299,6 +2299,7 @@ class SchedulerState:
         self,
         key: str,
         stimulus_id: str,
+        worker: str,
         cause: str | None = None,
         exception=None,
         traceback=None,
@@ -2306,7 +2307,32 @@ class SchedulerState:
         traceback_text: str | None = None,
         **kwargs,
     ):
-        ws: WorkerState
+        """Processed a recommended transition processing -> erred.
+
+        Parameters
+        ----------
+        key
+           Key of the task to transition
+        stimulus_id
+            ID of the stimulus causing the transition
+        worker
+            Address of the worker where the task erred. Not necessarily ``ts.processing_on``.
+        cause
+            Address of the task that caused this task to be transitioned to erred
+        exception
+            Exception caused by the task
+        traceback
+            Traceback caused by the task
+        exception_text
+            String representation of the exception
+        traceback_text
+            String representation of the traceback
+
+
+        Returns
+        -------
+        Recommendations, client messages and worker messages to process
+        """
         try:
             ts: TaskState = self.tasks[key]
             dts: TaskState
@@ -2326,9 +2352,9 @@ class SchedulerState:
                 ws = ts.processing_on
                 ws.actors.remove(ts)
 
-            w = _remove_from_processing(self, ts)
+            _remove_from_processing(self, ts)
 
-            ts.erred_on.add(w)
+            ts.erred_on.add(worker)
             if exception is not None:
                 ts.exception = exception
                 ts.exception_text = exception_text  # type: ignore
@@ -4320,7 +4346,12 @@ class Scheduler(SchedulerState, ServerNode):
                         KilledWorker(task=k, last_worker=ws.clean()), protocol=4
                     )
                     r = self.transition(
-                        k, "erred", exception=e, cause=k, stimulus_id=stimulus_id
+                        k,
+                        "erred",
+                        exception=e,
+                        cause=k,
+                        stimulus_id=stimulus_id,
+                        worker=address,
                     )
                     recommendations.update(r)
                     logger.info(
@@ -7323,8 +7354,13 @@ class Scheduler(SchedulerState, ServerNode):
         )
 
 
-def _remove_from_processing(state: SchedulerState, ts: TaskState) -> str:
+def _remove_from_processing(state: SchedulerState, ts: TaskState) -> WorkerState | None:
     """Remove *ts* from the set of processing tasks.
+
+    Returns
+    -------
+    Worker state of the worker that processed *ts* if the worker is current,
+    None if the worker is stale.
 
     See also
     --------
@@ -7334,8 +7370,8 @@ def _remove_from_processing(state: SchedulerState, ts: TaskState) -> str:
     assert ws
     ts.processing_on = None
 
-    if ws.address not in state.workers:  # may have been removed
-        return ws.address
+    if state.workers.get(ws.address) is not ws:  # may have been removed
+        return None
 
     duration = ws.processing.pop(ts)
     ws.long_running.discard(ts)
@@ -7349,7 +7385,7 @@ def _remove_from_processing(state: SchedulerState, ts: TaskState) -> str:
     state.check_idle_saturated(ws)
     state.release_resources(ts, ws)
 
-    return ws.address
+    return ws
 
 
 def _add_to_memory(
