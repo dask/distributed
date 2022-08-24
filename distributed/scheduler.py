@@ -1431,6 +1431,21 @@ class SchedulerState:
 
         return ts
 
+    def _clear_task_state(self):
+
+        logger.debug("Clear task state")
+        for collection in [
+            self.unrunnable,
+            self.erred_tasks,
+            self.computations,
+            self.task_prefixes,
+            self.task_groups,
+            self.task_metadata,
+            self.unknown_durations,
+            self.replicated_tasks,
+        ]:
+            collection.clear()
+
     #####################
     # State Transitions #
     #####################
@@ -3063,8 +3078,6 @@ class Scheduler(SchedulerState, ServerNode):
         resources = {}
         aliases = {}
 
-        self._task_state_collections = [unrunnable]
-
         self._worker_collections = [
             workers,
             host_info,
@@ -3365,7 +3378,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         enable_gc_diagnosis()
 
-        self.clear_task_state()
+        self._clear_task_state()
 
         for addr in self._start_address:
             await self.listen(
@@ -5143,13 +5156,6 @@ class Scheduler(SchedulerState, ServerNode):
         self.log_event("all", {"action": "gather", "count": len(keys)})
         return result
 
-    def clear_task_state(self):
-        # XXX what about nested state such as ClientState.wants_what
-        # (see also fire-and-forget...)
-        logger.info("Clear task state")
-        for collection in self._task_state_collections:
-            collection.clear()
-
     @log_errors
     async def restart(self, client=None, timeout=30, wait_for_workers=True):
         """
@@ -5189,9 +5195,8 @@ class Scheduler(SchedulerState, ServerNode):
                 stimulus_id=stimulus_id,
             )
 
-        self.clear_task_state()
-        self.erred_tasks.clear()
-        self.computations.clear()
+        self._clear_task_state()
+        assert not self.tasks
         self.report({"op": "restart"})
 
         for plugin in list(self.plugins.values()):

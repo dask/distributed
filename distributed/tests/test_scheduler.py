@@ -615,10 +615,18 @@ async def test_ready_remove_worker(s, a, b):
 
 @gen_cluster(client=True, Worker=Nanny, timeout=60)
 async def test_restart(c, s, a, b):
+    from distributed.scheduler import TaskState
+
+    before = TaskState._instances
     futures = c.map(inc, range(20))
     await wait(futures)
 
     await s.restart()
+
+    assert TaskState._instances == before
+    assert not s.computations
+    assert not s.task_prefixes
+    assert not s.task_groups
 
     assert len(s.workers) == 2
 
