@@ -2323,7 +2323,7 @@ class SchedulerState:
 
             ws = _remove_from_processing(self, ts, recommendations)
             if ws:
-                worker_msgs[ws] = [
+                worker_msgs[ws.address] = [
                     {
                         "op": "free-keys",
                         "keys": [key],
@@ -2345,15 +2345,40 @@ class SchedulerState:
         self,
         key: str,
         stimulus_id: str,
+        worker: str,
         cause: str | None = None,
         exception=None,
         traceback=None,
         exception_text: str | None = None,
         traceback_text: str | None = None,
-        worker: str | None = None,
         **kwargs,
     ):
-        ws: WorkerState
+        """Processed a recommended transition processing -> erred.
+
+        Parameters
+        ----------
+        key
+           Key of the task to transition
+        stimulus_id
+            ID of the stimulus causing the transition
+        worker
+            Address of the worker where the task erred. Not necessarily ``ts.processing_on``.
+        cause
+            Address of the task that caused this task to be transitioned to erred
+        exception
+            Exception caused by the task
+        traceback
+            Traceback caused by the task
+        exception_text
+            String representation of the exception
+        traceback_text
+            String representation of the traceback
+
+
+        Returns
+        -------
+        Recommendations, client messages and worker messages to process
+        """
         try:
             ts: TaskState = self.tasks[key]
             dts: TaskState
@@ -2373,9 +2398,9 @@ class SchedulerState:
                 ws = ts.processing_on
                 ws.actors.remove(ts)
 
-            w = _remove_from_processing(self, ts, recommendations)
+            _remove_from_processing(self, ts, recommendations)
 
-            ts.erred_on.add(w or worker)  # type: ignore
+            ts.erred_on.add(worker)
             if exception is not None:
                 ts.exception = exception
                 ts.exception_text = exception_text  # type: ignore
@@ -2796,7 +2821,17 @@ class SchedulerState:
         on the given worker.
         """
         dts: TaskState
-        deps: set = ts.dependencies.difference(ws.has_what)
+        deps: set
+        if 10 * len(ts.dependencies) < len(ws.has_what):
+            # In the common case where the number of dependencies is
+            # much less than the number of tasks that we have,
+            # construct the set of deps that require communication in
+            # O(len(dependencies)) rather than O(len(has_what)) time.
+            # Factor of 10 is a guess at the overhead of explicit
+            # iteration as opposed to just calling set.difference
+            deps = {dep for dep in ts.dependencies if dep not in ws.has_what}
+        else:
+            deps = ts.dependencies.difference(ws.has_what)
         nbytes: int = 0
         for dts in deps:
             nbytes += dts.nbytes
@@ -4501,7 +4536,12 @@ class Scheduler(SchedulerState, ServerNode):
                         KilledWorker(task=k, last_worker=ws.clean()), protocol=4
                     )
                     r = self.transition(
-                        k, "erred", exception=e, cause=k, stimulus_id=stimulus_id
+                        k,
+                        "erred",
+                        exception=e,
+                        cause=k,
+                        stimulus_id=stimulus_id,
+                        worker=address,
                     )
                     recommendations.update(r)
                     logger.info(
@@ -7583,8 +7623,13 @@ def _add_to_processing(
 
 def _remove_from_processing(
     state: SchedulerState, ts: TaskState, recommendations: dict
-) -> str | None:
+) -> WorkerState | None:
     """Remove *ts* from the set of processing tasks.
+
+    Returns
+    -------
+    Worker state of the worker that processed *ts* if the worker is current,
+    None if the worker is stale.
 
     See also
     --------
@@ -7621,7 +7666,7 @@ def _remove_from_processing(
         # slots to open up.
         recommendations[qts.key] = "processing"
 
-    return ws.address
+    return ws
 
 
 def _add_to_memory(

@@ -38,11 +38,12 @@ class HeapSet(MutableSet[T]):
     Values must be compatible with :mod:`weakref`.
     """
 
-    __slots__ = ("key", "_data", "_heap", "_inc")
+    __slots__ = ("key", "_data", "_heap", "_inc", "_sorted")
     key: Callable[[T], Any]
     _data: set[T]
     _inc: int
     _heap: list[tuple[Any, int, weakref.ref[T]]]
+    _sorted: bool
 
     def __init__(self, *, key: Callable[[T], Any]):
         # FIXME https://github.com/python/mypy/issues/708
@@ -50,6 +51,7 @@ class HeapSet(MutableSet[T]):
         self._data = set()
         self._inc = 0
         self._heap = []
+        self._sorted = True
 
     def __repr__(self) -> str:
         return f"<{type(self).__name__}: {len(self)} items>"
@@ -68,13 +70,11 @@ class HeapSet(MutableSet[T]):
         self._inc = inc
         self._heap = [(k, i, weakref.ref(v)) for k, i, v in heap]
         heapq.heapify(self._heap)
+        self._sorted = not heap
         return self
 
     def __contains__(self, value: object) -> bool:
         return value in self._data
-
-    def __bool__(self) -> bool:
-        return bool(self._data)
 
     def __len__(self) -> int:
         return len(self._data)
@@ -85,13 +85,14 @@ class HeapSet(MutableSet[T]):
         k = self.key(value)  # type: ignore
         vref = weakref.ref(value)
         heapq.heappush(self._heap, (k, self._inc, vref))
+        self._sorted = False
         self._data.add(value)
         self._inc += 1
 
     def discard(self, value: T) -> None:
         self._data.discard(value)
         if not self._data:
-            self._heap.clear()
+            self.clear()
 
     def peek(self) -> T:
         """Return the smallest element without removing it"""
@@ -102,16 +103,7 @@ class HeapSet(MutableSet[T]):
             if value in self._data:
                 return value
             heapq.heappop(self._heap)
-
-    def pop(self) -> T:
-        if not self._data:
-            raise KeyError("pop from an empty set")
-        while True:
-            _, _, vref = heapq.heappop(self._heap)
-            value = vref()
-            if value in self._data:
-                self._data.discard(value)
-                return value
+            self._sorted = False
 
     def peekn(self, n: int) -> Iterator[T]:
         "Iterator over the N smallest elements. This is O(1) for n == 1, O(n*logn) otherwise."
@@ -126,6 +118,19 @@ class HeapSet(MutableSet[T]):
             # If we had a `heappop` that sliced the list instead of popping from it,
             # we could implement an optimized version for small `n`s.
             yield from itertools.islice(self.sorted(), n)
+
+    def pop(self) -> T:
+        if not self._data:
+            raise KeyError("pop from an empty set")
+        while True:
+            _, _, vref = heapq.heappop(self._heap)
+            self._sorted = False
+            value = vref()
+            if value in self._data:
+                self._data.discard(value)
+                if not self._data:
+                    self.clear()
+                return value
 
     def peekright(self) -> T:
         """Return one of the largest elements (not necessarily the largest!) without
@@ -150,6 +155,8 @@ class HeapSet(MutableSet[T]):
             value = vref()
             if value in self._data:
                 self._data.discard(value)
+                if not self._data:
+                    self.clear()
                 return value
 
     def __iter__(self) -> Iterator[T]:
@@ -163,7 +170,9 @@ class HeapSet(MutableSet[T]):
         elements in order, from smallest to largest according to the key and insertion
         order.
         """
-        self._heap.sort()  # A sorted list maintains the heap invariant
+        if not self._sorted:
+            self._heap.sort()  # A sorted list maintains the heap invariant
+            self._sorted = True
         for _, _, vref in self._heap:
             value = vref()
             if value in self._data:
@@ -172,3 +181,4 @@ class HeapSet(MutableSet[T]):
     def clear(self) -> None:
         self._data.clear()
         self._heap.clear()
+        self._sorted = True

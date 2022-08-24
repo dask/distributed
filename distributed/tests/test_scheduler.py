@@ -1652,14 +1652,13 @@ async def test_fifo_submission(c, s, w):
 @gen_test()
 async def test_scheduler_file():
     with tmpfile() as fn:
-        s = await Scheduler(scheduler_file=fn, dashboard_address=":0")
-        with open(fn) as f:
-            data = json.load(f)
-        assert data["address"] == s.address
+        async with Scheduler(scheduler_file=fn, dashboard_address=":0") as s:
+            with open(fn) as f:
+                data = json.load(f)
+            assert data["address"] == s.address
 
-        c = await Client(scheduler_file=fn, loop=s.loop, asynchronous=True)
-        await c.close()
-        await s.close()
+            async with Client(scheduler_file=fn, loop=s.loop, asynchronous=True):
+                pass
 
 
 @pytest.mark.parametrize(
