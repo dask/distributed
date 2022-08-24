@@ -60,7 +60,7 @@ async def test_prometheus(c, s, a):
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
-async def test_prometheus_collect_task_states(c, s, a, b):
+async def test_prometheus_collect_task_states(c, s, a):
     pytest.importorskip("prometheus_client")
     from prometheus_client.parser import text_string_to_metric_families
 
@@ -93,7 +93,7 @@ async def test_prometheus_collect_task_states(c, s, a, b):
 
     # submit a task which should show up in the prometheus scraping
     future = c.submit(ev.wait)
-    while future.key not in a.state.tasks:
+    while not a.state.executing:
         await asyncio.sleep(0.001)
 
     active_metrics = await fetch_metrics()
