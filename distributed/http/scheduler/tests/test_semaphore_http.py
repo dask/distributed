@@ -8,7 +8,7 @@ from distributed.utils_test import gen_cluster
 
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})
-async def test_prometheus_collect_task_states(c, s, a, b):
+async def test_prometheus(c, s, a, b):
     pytest.importorskip("prometheus_client")
     from prometheus_client.parser import text_string_to_metric_families
 
