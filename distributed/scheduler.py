@@ -2940,7 +2940,7 @@ class SchedulerState:
         if not math.isinf(self.WORKER_SATURATION) and self.queued:
             for qts in reversed(
                 list(
-                    self.queued.topk(_task_slots_available(ws, self.WORKER_SATURATION))
+                    self.queued.peekn(_task_slots_available(ws, self.WORKER_SATURATION))
                 )
             ):
                 if self.validate:

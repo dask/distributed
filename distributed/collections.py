@@ -113,19 +113,19 @@ class HeapSet(MutableSet[T]):
                 self._data.discard(value)
                 return value
 
-    def topk(self, k: int) -> Iterator[T]:
-        "Iterator over the largest K elements. This is O(1) for k == 1, O(n*logn) otherwise."
-        if k <= 0:
+    def peekn(self, n: int) -> Iterator[T]:
+        "Iterator over the N smallest elements. This is O(1) for n == 1, O(n*logn) otherwise."
+        if n <= 0:
             return  # empty iterator
-        if k == 1:
+        if n == 1:
             yield self.peek()
         else:
-            # NOTE: we could pop K items off the queue, then push them back.
-            # But copying the list K times is probably slower than just sorting it
+            # NOTE: we could pop N items off the queue, then push them back.
+            # But copying the list N times is probably slower than just sorting it
             # with fast C code.
             # If we had a `heappop` that sliced the list instead of popping from it,
-            # we could implement an optimized version for small `k`s.
-            yield from itertools.islice(self.sorted(), k)
+            # we could implement an optimized version for small `n`s.
+            yield from itertools.islice(self.sorted(), n)
 
     def peekright(self) -> T:
         """Return one of the largest elements (not necessarily the largest!) without

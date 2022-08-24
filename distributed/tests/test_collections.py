@@ -134,20 +134,20 @@ def test_heapset():
     heap.add(cx)
     assert cx in heap
 
-    # Test topk()
+    # Test peekn()
     heap.add(cy)
     heap.add(cw)
     heap.add(cz)
     heap.add(cx)
-    assert list(heap.topk(3)) == [cy, cx, cz]
+    assert list(heap.peekn(3)) == [cy, cx, cz]
     heap.remove(cz)
-    assert list(heap.topk(10)) == [cy, cx, cw]
-    assert list(heap.topk(0)) == []
-    assert list(heap.topk(-1)) == []
+    assert list(heap.peekn(10)) == [cy, cx, cw]
+    assert list(heap.peekn(0)) == []
+    assert list(heap.peekn(-1)) == []
     heap.remove(cy)
-    assert list(heap.topk(1)) == [cx]
+    assert list(heap.peekn(1)) == [cx]
     heap.remove(cw)
-    assert list(heap.topk(1)) == [cx]
+    assert list(heap.peekn(1)) == [cx]
 
     # Test resilience to failure in key()
     bad_key = C("bad_key", 0)
