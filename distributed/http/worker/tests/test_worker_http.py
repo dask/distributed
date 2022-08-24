@@ -15,18 +15,46 @@ async def test_prometheus(c, s, a, b):
 
     http_client = AsyncHTTPClient()
 
-    # request data twice since there once was a case where metrics got registered
-    # multiple times resulting in prometheus_client errors
-    for _ in range(2):
-        response = await http_client.fetch(
-            "http://localhost:%d/metrics" % a.http_server.port
-        )
+    async def fetch_metrics():
+        port = a.http_server.port
+        response = await http_client.fetch(f"http://localhost:{port}/metrics")
         assert response.code == 200
         assert response.headers["Content-Type"] == "text/plain; version=0.0.4"
-
         txt = response.body.decode("utf8")
-        families = {familiy.name for familiy in text_string_to_metric_families(txt)}
-        assert "dask_worker_latency_seconds" in families
+        families = {
+            family.name: family
+            for family in text_string_to_metric_families(txt)
+            if family.name.startswith("dask_worker_")
+        }
+        return families
+
+    active_metrics = await fetch_metrics()
+
+    expected_metrics = {
+        "dask_worker_tasks",
+        "dask_worker_concurrent_fetch_requests",
+        "dask_worker_threads",
+        "dask_worker_latency_seconds",
+    }
+
+    try:
+        import crick  # noqa: F401
+    except ImportError:
+        pass
+    else:
+        expected_metrics = expected_metrics.union(
+            {
+                "dask_worker_tick_duration_median_seconds",
+                "dask_worker_task_duration_median_seconds",
+                "dask_worker_transfer_bandwidth_median_bytes",
+            }
+        )
+
+    assert active_metrics.keys() == expected_metrics
+
+    # request data twice since there once was a case where metrics got registered
+    # multiple times resulting in prometheus_client errors
+    await fetch_metrics()
 
 
 @gen_cluster(client=True)

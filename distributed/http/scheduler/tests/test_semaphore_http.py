@@ -17,6 +17,7 @@ async def test_prometheus_collect_task_states(c, s, a, b):
     async def fetch_metrics():
         port = s.http_server.port
         response = await http_client.fetch(f"http://localhost:{port}/metrics")
+        assert response.code == 200
         txt = response.body.decode("utf8")
         families = {
             family.name: family
