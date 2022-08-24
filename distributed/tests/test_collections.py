@@ -158,6 +158,91 @@ def test_heapset():
     assert set(heap) == {cx}
 
 
+def assert_heap_sorted(heap: HeapSet) -> None:
+    assert heap._sorted
+    assert heap._heap == sorted(heap._heap)
+
+
+def test_heapset_sorted_flag_left():
+    heap = HeapSet(key=operator.attrgetter("i"))
+    assert heap._sorted
+    c1 = C("1", 1)
+    c2 = C("2", 2)
+    c3 = C("3", 3)
+    c4 = C("4", 4)
+
+    heap.add(c4)
+    assert not heap._sorted
+    heap.add(c3)
+    heap.add(c2)
+    heap.add(c1)
+
+    list(heap.sorted())
+    assert_heap_sorted(heap)
+
+    # `peek` maintains sort if first element is not discarded
+    assert heap.peek() is c1
+    assert_heap_sorted(heap)
+
+    # `pop` always de-sorts
+    assert heap.pop() is c1
+    assert not heap._sorted
+
+    list(heap.sorted())
+
+    # discard first element
+    heap.discard(c2)
+    assert heap.peek() is c3
+    assert not heap._sorted
+
+    # popping the last element resets the sorted flag
+    assert heap.pop() is c3
+    assert heap.pop() is c4
+    assert not heap
+    assert_heap_sorted(heap)
+
+    # discarding`` the last element resets the sorted flag
+    heap.add(c1)
+    heap.add(c2)
+    assert not heap._sorted
+    heap.discard(c1)
+    assert not heap._sorted
+    heap.discard(c2)
+    assert not heap
+    assert_heap_sorted(heap)
+
+
+def test_heapset_sorted_flag_right():
+    "Verify right operations don't affect sortedness"
+    heap = HeapSet(key=operator.attrgetter("i"))
+    c1 = C("1", 1)
+    c2 = C("2", 2)
+    c3 = C("3", 3)
+
+    heap.add(c2)
+    heap.add(c3)
+    heap.add(c1)
+
+    assert not heap._sorted
+    list(heap.sorted())
+    assert_heap_sorted(heap)
+
+    assert heap.peekright() is c3
+    assert_heap_sorted(heap)
+    assert heap.popright() is c3
+    assert_heap_sorted(heap)
+    assert heap.popright() is c2
+    assert_heap_sorted(heap)
+
+    heap.add(c2)
+    assert not heap._sorted
+    assert heap.popright() is c2
+    assert not heap._sorted
+    assert heap.popright() is c1
+    assert not heap
+    assert_heap_sorted(heap)
+
+
 @pytest.mark.parametrize("peek", [False, True])
 def test_heapset_popright(peek):
     heap = HeapSet(key=operator.attrgetter("i"))
@@ -213,8 +298,11 @@ def test_heapset_pickle():
         if random.random() > 0.7:
             heap.remove(c)
 
+    list(heap.sorted())  # trigger sort
+    assert heap._sorted
     heap2 = pickle.loads(pickle.dumps(heap))
     assert len(heap) == len(heap2)
+    assert not heap2._sorted  # re-heapification may have broken the sort
     # Test that the heap has been re-heapified upon unpickle
     assert len(heap2._heap) < len(heap._heap)
     while heap:
