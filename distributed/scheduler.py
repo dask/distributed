@@ -2319,7 +2319,8 @@ class SchedulerState:
             if self.validate:
                 assert cause or ts.exception_blame
                 assert ts.processing_on
-                assert ts.processing_on.address == worker
+                if worker is not None:
+                    assert ts.processing_on.address == worker
                 assert not ts.who_has
                 assert not ts.waiting_on
 
