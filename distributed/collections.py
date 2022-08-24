@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import heapq
+import itertools
 import weakref
 from collections import OrderedDict, UserDict
 from collections.abc import Callable, Hashable, Iterator
@@ -98,6 +99,20 @@ class HeapSet(MutableSet[T]):
             if value in self._data:
                 return value
             heapq.heappop(self._heap)
+
+    def peekn(self, n: int) -> Iterator[T]:
+        "Iterator over the N smallest elements. This is O(1) for n == 1, O(n*logn) otherwise."
+        if n <= 0:
+            return  # empty iterator
+        if n == 1:
+            yield self.peek()
+        else:
+            # NOTE: we could pop N items off the queue, then push them back.
+            # But copying the list N times is probably slower than just sorting it
+            # with fast C code.
+            # If we had a `heappop` that sliced the list instead of popping from it,
+            # we could implement an optimized version for small `n`s.
+            yield from itertools.islice(self.sorted(), n)
 
     def pop(self) -> T:
         if not self._data:

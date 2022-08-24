@@ -38,6 +38,9 @@ class C:
     def __eq__(self, other):
         return isinstance(other, C) and other.k == self.k
 
+    def __repr__(self):
+        return f"C({self.k}, {self.i})"
+
 
 def test_heapset():
     heap = HeapSet(key=operator.attrgetter("i"))
@@ -130,6 +133,21 @@ def test_heapset():
     assert not heap
     heap.add(cx)
     assert cx in heap
+
+    # Test peekn()
+    heap.add(cy)
+    heap.add(cw)
+    heap.add(cz)
+    heap.add(cx)
+    assert list(heap.peekn(3)) == [cy, cx, cz]
+    heap.remove(cz)
+    assert list(heap.peekn(10)) == [cy, cx, cw]
+    assert list(heap.peekn(0)) == []
+    assert list(heap.peekn(-1)) == []
+    heap.remove(cy)
+    assert list(heap.peekn(1)) == [cx]
+    heap.remove(cw)
+    assert list(heap.peekn(1)) == [cx]
 
     # Test resilience to failure in key()
     bad_key = C("bad_key", 0)
