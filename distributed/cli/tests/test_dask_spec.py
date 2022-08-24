@@ -1,20 +1,24 @@
+from __future__ import annotations
+
 import sys
 
 import yaml
 
 from distributed import Client
+from distributed.utils import open_port
 from distributed.utils_test import gen_cluster, gen_test, popen
 
 
 @gen_test(timeout=120)
 async def test_text():
+    port = open_port()
     with popen(
         [
             sys.executable,
             "-m",
             "distributed.cli.dask_spec",
             "--spec",
-            '{"cls": "dask.distributed.Scheduler", "opts": {"port": 9373}}',
+            '{"cls": "dask.distributed.Scheduler", "opts": {"port": %d}}' % port,
         ]
     ):
         with popen(
@@ -22,12 +26,12 @@ async def test_text():
                 sys.executable,
                 "-m",
                 "distributed.cli.dask_spec",
-                "tcp://localhost:9373",
+                "tcp://localhost:%d" % port,
                 "--spec",
                 '{"cls": "dask.distributed.Worker", "opts": {"nanny": false, "nthreads": 3, "name": "foo"}}',
             ]
         ):
-            async with Client("tcp://localhost:9373", asynchronous=True) as client:
+            async with Client("tcp://localhost:%d" % port, asynchronous=True) as client:
                 await client.wait_for_workers(1)
                 info = await client.scheduler.identity()
                 [w] = info["workers"].values()
@@ -74,7 +78,7 @@ def test_errors():
             "--spec-file",
             "foo.yaml",
         ],
-        flush_output=False,
+        capture_output=True,
     ) as proc:
         line = proc.stdout.readline().decode()
         assert "exactly one" in line
@@ -82,7 +86,7 @@ def test_errors():
 
     with popen(
         [sys.executable, "-m", "distributed.cli.dask_spec"],
-        flush_output=False,
+        capture_output=True,
     ) as proc:
         line = proc.stdout.readline().decode()
         assert "exactly one" in line

@@ -7,6 +7,8 @@ API
 
 **Client**
 
+The client connects to and submits computation to a Dask cluster (such as a :class:`distributed.LocalCluster`)
+
 .. autosummary::
    Client
 

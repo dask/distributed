@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 
 from distributed.http.prometheus import PrometheusCollector
@@ -27,21 +29,21 @@ class WorkerMetricCollector(PrometheusCollector):
             labels=["state"],
         )
         tasks.add_metric(["stored"], len(self.server.data))
-        tasks.add_metric(["executing"], self.server.executing_count)
-        tasks.add_metric(["ready"], len(self.server.ready))
-        tasks.add_metric(["waiting"], self.server.waiting_for_data_count)
+        tasks.add_metric(["executing"], self.server.state.executing_count)
+        tasks.add_metric(["ready"], len(self.server.state.ready))
+        tasks.add_metric(["waiting"], self.server.state.waiting_for_data_count)
         yield tasks
 
         yield GaugeMetricFamily(
             self.build_name("concurrent_fetch_requests"),
             "Number of open fetch requests to other workers.",
-            value=len(self.server.in_flight_workers),
+            value=len(self.server.state.in_flight_workers),
         )
 
         yield GaugeMetricFamily(
             self.build_name("threads"),
             "Number of worker threads.",
-            value=self.server.nthreads,
+            value=self.server.state.nthreads,
         )
 
         yield GaugeMetricFamily(

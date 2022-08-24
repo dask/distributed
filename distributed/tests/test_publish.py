@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 
 import pytest
@@ -13,28 +15,25 @@ from distributed.utils_test import gen_cluster, inc
 
 @gen_cluster()
 async def test_publish_simple(s, a, b):
-    c = Client(s.address, asynchronous=True)
-    f = Client(s.address, asynchronous=True)
-    await asyncio.gather(c, f)
-
-    data = await c.scatter(range(3))
-    await c.publish_dataset(data=data)
-    assert "data" in s.extensions["publish"].datasets
-    assert isinstance(s.extensions["publish"].datasets["data"]["data"], Serialized)
-
-    with pytest.raises(KeyError) as exc_info:
+    async with Client(s.address, asynchronous=True) as c, Client(
+        s.address, asynchronous=True
+    ) as f:
+        data = await c.scatter(range(3))
         await c.publish_dataset(data=data)
+        assert "data" in s.extensions["publish"].datasets
+        assert isinstance(s.extensions["publish"].datasets["data"]["data"], Serialized)
 
-    assert "exists" in str(exc_info.value)
-    assert "data" in str(exc_info.value)
+        with pytest.raises(KeyError) as exc_info:
+            await c.publish_dataset(data=data)
 
-    result = await c.scheduler.publish_list()
-    assert result == ("data",)
+        assert "exists" in str(exc_info.value)
+        assert "data" in str(exc_info.value)
 
-    result = await f.scheduler.publish_list()
-    assert result == ("data",)
+        result = await c.scheduler.publish_list()
+        assert result == ("data",)
 
-    await asyncio.gather(c.close(), f.close())
+        result = await f.scheduler.publish_list()
+        assert result == ("data",)
 
 
 @gen_cluster()
@@ -54,29 +53,27 @@ async def test_publish_non_string_key(s, a, b):
 
 @gen_cluster()
 async def test_publish_roundtrip(s, a, b):
-    c = await Client(s.address, asynchronous=True)
-    f = await Client(s.address, asynchronous=True)
+    async with Client(s.address, asynchronous=True) as c, Client(
+        s.address, asynchronous=True
+    ) as f:
 
-    data = await c.scatter([0, 1, 2])
-    await c.publish_dataset(data=data)
+        data = await c.scatter([0, 1, 2])
+        await c.publish_dataset(data=data)
 
-    assert any(
-        cs.client_key == "published-data" for cs in s.tasks[data[0].key].who_wants
-    )
-    result = await f.get_dataset(name="data")
+        assert any(
+            cs.client_key == "published-data" for cs in s.tasks[data[0].key].who_wants
+        )
+        result = await f.get_dataset(name="data")
 
-    assert len(result) == len(data)
-    out = await f.gather(result)
-    assert out == [0, 1, 2]
+        assert len(result) == len(data)
+        out = await f.gather(result)
+        assert out == [0, 1, 2]
 
-    with pytest.raises(KeyError) as exc_info:
-        await f.get_dataset(name="nonexistent")
+        with pytest.raises(KeyError) as exc_info:
+            await f.get_dataset(name="nonexistent")
 
-    assert "not found" in str(exc_info.value)
-    assert "nonexistent" in str(exc_info.value)
-
-    await c.close()
-    await f.close()
+        assert "not found" in str(exc_info.value)
+        assert "nonexistent" in str(exc_info.value)
 
 
 @gen_cluster(client=True)
@@ -152,29 +149,30 @@ def test_unpublish_multiple_datasets_sync(client):
 @gen_cluster()
 async def test_publish_bag(s, a, b):
     db = pytest.importorskip("dask.bag")
-    c = await Client(s.address, asynchronous=True)
-    f = await Client(s.address, asynchronous=True)
+    async with Client(s.address, asynchronous=True) as c, Client(
+        s.address, asynchronous=True
+    ) as f:
 
-    bag = db.from_sequence([0, 1, 2])
-    bagp = c.persist(bag)
+        bag = db.from_sequence([0, 1, 2])
+        bagp = c.persist(bag)
 
-    assert len(futures_of(bagp)) == 3
-    keys = {f.key for f in futures_of(bagp)}
-    assert keys == set(bag.dask)
+        assert len(futures_of(bagp)) == 3
+        keys = {f.key for f in futures_of(bagp)}
+        assert keys == set(bag.dask)
 
-    await c.publish_dataset(data=bagp)
+        await c.publish_dataset(data=bagp)
 
-    # check that serialization didn't affect original bag's dask
-    assert len(futures_of(bagp)) == 3
+        # check that serialization didn't affect original bag's dask
+        assert len(futures_of(bagp)) == 3
 
-    result = await f.get_dataset("data")
-    assert set(result.dask.keys()) == set(bagp.dask.keys())
-    assert {f.key for f in result.dask.values()} == {f.key for f in bagp.dask.values()}
+        result = await f.get_dataset("data")
+        assert set(result.dask.keys()) == set(bagp.dask.keys())
+        assert {f.key for f in result.dask.values()} == {
+            f.key for f in bagp.dask.values()
+        }
 
-    out = await f.compute(result)
-    assert out == [0, 1, 2]
-    await c.close()
-    await f.close()
+        out = await f.compute(result)
+        assert out == [0, 1, 2]
 
 
 def test_datasets_setitem(client):

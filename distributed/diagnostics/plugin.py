@@ -8,7 +8,7 @@ import sys
 import uuid
 import zipfile
 from collections.abc import Awaitable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from dask.utils import funcname, tmpfile
 
@@ -72,14 +72,20 @@ class SchedulerPlugin:
         """
 
     def update_graph(
-        self, scheduler: Scheduler, keys: set[str], restrictions: dict, **kwargs
+        self,
+        scheduler: Scheduler,
+        keys: set[str],
+        restrictions: dict[str, float],
+        **kwargs: Any,
     ) -> None:
         """Run when a new graph / tasks enter the scheduler"""
 
     def restart(self, scheduler: Scheduler) -> None:
         """Run when the scheduler restarts itself"""
 
-    def transition(self, key: str, start: str, finish: str, *args, **kwargs) -> None:
+    def transition(
+        self, key: str, start: str, finish: str, *args: Any, **kwargs: Any
+    ) -> None:
         """Run whenever a task changes state
 
         Parameters
@@ -90,7 +96,8 @@ class SchedulerPlugin:
             One of released, waiting, processing, memory, error.
         finish : string
             Final state of the transition.
-        *args, **kwargs : More options passed when transitioning
+        *args, **kwargs :
+            More options passed when transitioning
             This may include worker ID, compute time, etc.
         """
 
@@ -107,6 +114,9 @@ class SchedulerPlugin:
 
     def remove_client(self, scheduler: Scheduler, client: str) -> None:
         """Run when a client disconnects"""
+
+    def log_event(self, topic: str, msg: Any) -> None:
+        """Run when an event is logged"""
 
 
 class WorkerPlugin:
@@ -213,14 +223,14 @@ class NannyPlugin:
         """Run when the nanny to which the plugin is attached to is closed"""
 
 
-def _get_plugin_name(plugin) -> str:
+def _get_plugin_name(plugin: SchedulerPlugin | WorkerPlugin | NannyPlugin) -> str:
     """Return plugin name.
 
     If plugin has no name attribute a random name is used.
 
     """
     if hasattr(plugin, "name"):
-        return plugin.name
+        return plugin.name  # type: ignore
     else:
         return funcname(type(plugin)) + "-" + str(uuid.uuid4())
 
@@ -266,9 +276,7 @@ class PipInstall(WorkerPlugin):
     def __init__(self, packages, pip_options=None, restart=False):
         self.packages = packages
         self.restart = restart
-        if pip_options is None:
-            pip_options = []
-        self.pip_options = pip_options
+        self.pip_options = pip_options or []
 
     async def setup(self, worker):
         from distributed.lock import Lock
@@ -327,7 +335,7 @@ class UploadFile(WorkerPlugin):
 
     async def setup(self, worker):
         response = await worker.upload_file(
-            comm=None, filename=self.filename, data=self.data, load=True
+            filename=self.filename, data=self.data, load=True
         )
         assert len(self.data) == response["nbytes"]
 
@@ -335,7 +343,8 @@ class UploadFile(WorkerPlugin):
 class Environ(NannyPlugin):
     restart = True
 
-    def __init__(self, environ={}):
+    def __init__(self, environ: dict | None = None):
+        environ = environ or {}
         self.environ = {k: str(v) for k, v in environ.items()}
 
     async def setup(self, nanny):

@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import array
 import logging
 import os
+import random
 import uuid
+from pathlib import Path
 
 import pytest
 
 from dask.sizeof import sizeof
 
+from distributed import profile
 from distributed.compatibility import WINDOWS
-from distributed.profile import wait_profiler
-from distributed.protocol import serialize_bytelist
 from distributed.spill import SpillBuffer, has_zict_210, has_zict_220
 from distributed.utils_test import captured_logger
 
@@ -24,14 +26,16 @@ requires_zict_220 = pytest.mark.skipif(
 )
 
 
-def psize(*objs) -> tuple[int, int]:
+def psize(tmp_path: Path, **objs: object) -> tuple[int, int]:
     return (
-        sum(sizeof(o) for o in objs),
-        sum(len(frame) for obj in objs for frame in serialize_bytelist(obj)),
+        sum(sizeof(o) for o in objs.values()),
+        sum(os.stat(tmp_path / k).st_size for k in objs),
     )
 
 
-def assert_buf(buf: SpillBuffer, expect_fast: dict, expect_slow: dict) -> None:
+def assert_buf(
+    buf: SpillBuffer, tmp_path: Path, expect_fast: dict, expect_slow: dict
+) -> None:
     # assertions on fast
     assert dict(buf.fast) == expect_fast
     assert buf.fast.weights == {k: sizeof(v) for k, v in expect_fast.items()}
@@ -42,91 +46,111 @@ def assert_buf(buf: SpillBuffer, expect_fast: dict, expect_slow: dict) -> None:
     # assertions on slow
     assert set(buf.slow) == expect_slow.keys()
     slow = buf.slow.data if has_zict_220 else buf.slow  # type: ignore
-    assert slow.weight_by_key == {k: psize(v) for k, v in expect_slow.items()}
-    total_weight = psize(*expect_slow.values())
+    assert slow.weight_by_key == {
+        k: psize(tmp_path, **{k: v}) for k, v in expect_slow.items()
+    }
+    total_weight = psize(tmp_path, **expect_slow)
     assert slow.total_weight == total_weight
     assert buf.spilled_total == total_weight
 
 
-def test_spillbuffer(tmpdir):
-    buf = SpillBuffer(str(tmpdir), target=300)
+def test_psize(tmp_path):
+    buf = SpillBuffer(str(tmp_path), target=0)
+    a = "a" * 100
+    assert 100 < sizeof(a) < 200
+    buf["a"] = a
+    memory_size, disk_size = psize(tmp_path, a=a)
+    assert memory_size != disk_size
+
+
+def test_spillbuffer(tmp_path):
+    buf = SpillBuffer(str(tmp_path), target=300)
     # Convenience aliases
     assert buf.memory is buf.fast
     assert buf.disk is buf.slow
 
-    assert_buf(buf, {}, {})
+    assert_buf(buf, tmp_path, {}, {})
 
     a, b, c, d = "a" * 100, "b" * 99, "c" * 98, "d" * 97
 
     # Test assumption made by this test, mostly for non CPython implementations
     assert 100 < sizeof(a) < 200
-    assert psize(a)[0] != psize(a)[1]
 
     buf["a"] = a
-    assert_buf(buf, {"a": a}, {})
+    assert_buf(buf, tmp_path, {"a": a}, {})
     assert buf["a"] == a
 
     buf["b"] = b
-    assert_buf(buf, {"a": a, "b": b}, {})
+    assert_buf(buf, tmp_path, {"a": a, "b": b}, {})
 
     buf["c"] = c
-    assert_buf(buf, {"b": b, "c": c}, {"a": a})
+    assert_buf(buf, tmp_path, {"b": b, "c": c}, {"a": a})
 
     assert buf["a"] == a
-    assert_buf(buf, {"a": a, "c": c}, {"b": b})
+    assert_buf(buf, tmp_path, {"a": a, "c": c}, {"b": b})
 
     buf["d"] = d
-    assert_buf(buf, {"a": a, "d": d}, {"b": b, "c": c})
+    assert_buf(buf, tmp_path, {"a": a, "d": d}, {"b": b, "c": c})
 
     # Deleting an in-memory key does not automatically move spilled keys back to memory
     del buf["a"]
-    assert_buf(buf, {"d": d}, {"b": b, "c": c})
+    assert_buf(buf, tmp_path, {"d": d}, {"b": b, "c": c})
     with pytest.raises(KeyError):
         buf["a"]
 
     # Deleting a spilled key updates the metadata
     del buf["b"]
-    assert_buf(buf, {"d": d}, {"c": c})
+    assert_buf(buf, tmp_path, {"d": d}, {"c": c})
     with pytest.raises(KeyError):
         buf["b"]
 
     # Updating a spilled key moves it to the top of the LRU and to memory
     c2 = c * 2
     buf["c"] = c2
-    assert_buf(buf, {"c": c2}, {"d": d})
+    assert_buf(buf, tmp_path, {"c": c2}, {"d": d})
 
     # Single key is larger than target and goes directly into slow
     e = "e" * 500
 
     buf["e"] = e
-    assert_buf(buf, {"c": c2}, {"d": d, "e": e})
+    assert_buf(buf, tmp_path, {"c": c2}, {"d": d, "e": e})
 
     # Updating a spilled key with another larger than target updates slow directly
     d = "d" * 500
     buf["d"] = d
-    assert_buf(buf, {"c": c2}, {"d": d, "e": e})
+    assert_buf(buf, tmp_path, {"c": c2}, {"d": d, "e": e})
+
+
+def test_disk_size_calculation(tmp_path):
+    buf = SpillBuffer(str(tmp_path), target=0)
+    a = "a" * 100
+    b = array.array("d", (random.random() for _ in range(100)))
+    buf["a"] = a
+    buf["b"] = b
+    assert_buf(buf, tmp_path, {}, {"a": a, "b": b})
 
 
 @requires_zict_210
-def test_spillbuffer_maxlim(tmpdir):
-    buf = SpillBuffer(str(tmpdir), target=200, max_spill=600, min_log_interval=0)
+def test_spillbuffer_maxlim(tmp_path_factory):
+    buf_dir = tmp_path_factory.mktemp("buf")
+    buf = SpillBuffer(str(buf_dir), target=200, max_spill=600, min_log_interval=0)
 
     a, b, c, d, e = "a" * 200, "b" * 100, "c" * 99, "d" * 199, "e" * 98
 
     # size of a is bigger than target and is smaller than max_spill;
     # key should be in slow
     buf["a"] = a
-    assert_buf(buf, {}, {"a": a})
+    assert_buf(buf, buf_dir, {}, {"a": a})
     assert buf["a"] == a
 
     # size of b is smaller than target key should be in fast
     buf["b"] = b
-    assert_buf(buf, {"b": b}, {"a": a})
+    assert_buf(buf, buf_dir, {"b": b}, {"a": a})
 
     # size of c is smaller than target but b+c > target, c should stay in fast and b
     # move to slow since the max_spill limit has not been reached yet
     buf["c"] = c
-    assert_buf(buf, {"c": c}, {"a": a, "b": b})
+    assert_buf(buf, buf_dir, {"c": c}, {"a": a, "b": b})
 
     # size of e < target but e+c > target, this will trigger movement of c to slow
     # but the max spill limit prevents it. Resulting in e remaining in fast
@@ -135,7 +159,7 @@ def test_spillbuffer_maxlim(tmpdir):
         buf["e"] = e
 
     assert "disk reached capacity" in logs_e.getvalue()
-    assert_buf(buf, {"c": c, "e": e}, {"a": a, "b": b})
+    assert_buf(buf, buf_dir, {"c": c, "e": e}, {"a": a, "b": b})
 
     # size of d > target, d should go to slow but slow reached the max_spill limit then
     # d will end up on fast with c (which can't be move to slow because it won't fit
@@ -144,19 +168,24 @@ def test_spillbuffer_maxlim(tmpdir):
         buf["d"] = d
 
     assert "disk reached capacity" in logs_d.getvalue()
-    assert_buf(buf, {"c": c, "d": d, "e": e}, {"a": a, "b": b})
+    assert_buf(buf, buf_dir, {"c": c, "d": d, "e": e}, {"a": a, "b": b})
 
     # Overwrite a key that was in slow, but the size of the new key is larger than
     # max_spill
 
     a_large = "a" * 500
-    assert psize(a_large)[1] > 600  # size of max_spill
+
+    # Assert precondition that a_large is larger than max_spill when written to disk
+    unlimited_buf_dir = tmp_path_factory.mktemp("unlimited_buf")
+    unlimited_buf = SpillBuffer(unlimited_buf_dir, target=0)
+    unlimited_buf["a_large"] = a_large
+    assert psize(unlimited_buf_dir, a_large=a_large)[1] > 600
 
     with captured_logger(logging.getLogger("distributed.spill")) as logs_alarge:
         buf["a"] = a_large
 
     assert "disk reached capacity" in logs_alarge.getvalue()
-    assert_buf(buf, {"a": a_large, "d": d, "e": e}, {"b": b, "c": c})
+    assert_buf(buf, buf_dir, {"a": a_large, "d": d, "e": e}, {"b": b, "c": c})
 
     # Overwrite a key that was in fast, but the size of the new key is larger than
     # max_spill
@@ -166,7 +195,7 @@ def test_spillbuffer_maxlim(tmpdir):
         buf["d"] = d_large
 
     assert "disk reached capacity" in logs_dlarge.getvalue()
-    assert_buf(buf, {"a": a_large, "d": d_large, "e": e}, {"b": b, "c": c})
+    assert_buf(buf, buf_dir, {"a": a_large, "d": d_large, "e": e}, {"b": b, "c": c})
 
 
 class MyError(Exception):
@@ -185,8 +214,8 @@ class Bad:
 
 
 @requires_zict_210
-def test_spillbuffer_fail_to_serialize(tmpdir):
-    buf = SpillBuffer(str(tmpdir), target=200, max_spill=600, min_log_interval=0)
+def test_spillbuffer_fail_to_serialize(tmp_path):
+    buf = SpillBuffer(str(tmp_path), target=200, max_spill=600, min_log_interval=0)
 
     # bad data individually larger than spill threshold target 200
     a = Bad(size=201)
@@ -198,12 +227,12 @@ def test_spillbuffer_fail_to_serialize(tmpdir):
 
     # spill.py must remain silent because we're already logging in worker.py
     assert not logs_bad_key.getvalue()
-    assert_buf(buf, {}, {})
+    assert_buf(buf, tmp_path, {}, {})
 
     b = Bad(size=100)  # this is small enough to fit in memory/fast
 
     buf["b"] = b
-    assert_buf(buf, {"b": b}, {})
+    assert_buf(buf, tmp_path, {"b": b}, {})
 
     c = "c" * 100
     with captured_logger(logging.getLogger("distributed.spill")) as logs_bad_key_mem:
@@ -215,13 +244,13 @@ def test_spillbuffer_fail_to_serialize(tmpdir):
     logs_value = logs_bad_key_mem.getvalue()
     assert "Failed to pickle" in logs_value  # from distributed.spill
     assert "Traceback" in logs_value  # from distributed.spill
-    assert_buf(buf, {"b": b, "c": c}, {})
+    assert_buf(buf, tmp_path, {"b": b, "c": c}, {})
 
 
 @requires_zict_210
 @pytest.mark.skipif(WINDOWS, reason="Needs chmod")
-def test_spillbuffer_oserror(tmpdir):
-    buf = SpillBuffer(str(tmpdir), target=200, max_spill=800, min_log_interval=0)
+def test_spillbuffer_oserror(tmp_path):
+    buf = SpillBuffer(str(tmp_path), target=200, max_spill=800, min_log_interval=0)
 
     a, b, c, d = (
         "a" * 200,
@@ -233,21 +262,21 @@ def test_spillbuffer_oserror(tmpdir):
     # let's have something in fast and something in slow
     buf["a"] = a
     buf["b"] = b
-    assert_buf(buf, {"b": b}, {"a": a})
+    assert_buf(buf, tmp_path, {"b": b}, {"a": a})
 
     # modify permissions of disk to be read only.
     # This causes writes to raise OSError, just like in case of disk full.
-    os.chmod(tmpdir, 0o555)
+    os.chmod(tmp_path, 0o555)
 
     # Add key > than target
     with captured_logger(logging.getLogger("distributed.spill")) as logs_oserror_slow:
         buf["c"] = c
 
     assert "Spill to disk failed" in logs_oserror_slow.getvalue()
-    assert_buf(buf, {"b": b, "c": c}, {"a": a})
+    assert_buf(buf, tmp_path, {"b": b, "c": c}, {"a": a})
 
     del buf["c"]
-    assert_buf(buf, {"b": b}, {"a": a})
+    assert_buf(buf, tmp_path, {"b": b}, {"a": a})
 
     # add key to fast which is smaller than target but when added it triggers spill,
     # which triggers OSError
@@ -255,26 +284,26 @@ def test_spillbuffer_oserror(tmpdir):
         buf["d"] = d
 
     assert "Spill to disk failed" in logs_oserror_evict.getvalue()
-    assert_buf(buf, {"b": b, "d": d}, {"a": a})
+    assert_buf(buf, tmp_path, {"b": b, "d": d}, {"a": a})
 
 
 @requires_zict_210
-def test_spillbuffer_evict(tmpdir):
-    buf = SpillBuffer(str(tmpdir), target=300, min_log_interval=0)
+def test_spillbuffer_evict(tmp_path):
+    buf = SpillBuffer(str(tmp_path), target=300, min_log_interval=0)
 
     bad = Bad(size=100)
     a = "a" * 100
 
     buf["a"] = a
-    assert_buf(buf, {"a": a}, {})
+    assert_buf(buf, tmp_path, {"a": a}, {})
 
     # successful eviction
     weight = buf.evict()
     assert weight == sizeof(a)
-    assert_buf(buf, {}, {"a": a})
+    assert_buf(buf, tmp_path, {}, {"a": a})
 
     buf["bad"] = bad
-    assert_buf(buf, {"bad": bad}, {"a": a})
+    assert_buf(buf, tmp_path, {"bad": bad}, {"a": a})
 
     # unsuccessful eviction
     with captured_logger(logging.getLogger("distributed.spill")) as logs_evict_key:
@@ -283,7 +312,7 @@ def test_spillbuffer_evict(tmpdir):
 
     assert "Failed to pickle" in logs_evict_key.getvalue()
     # bad keys stays in fast
-    assert_buf(buf, {"bad": bad}, {"a": a})
+    assert_buf(buf, tmp_path, {"bad": bad}, {"a": a})
 
 
 class NoWeakRef:
@@ -318,8 +347,8 @@ class SupportsWeakRef(NoWeakRef):
     ],
 )
 @pytest.mark.parametrize("size", [60, 110])
-def test_weakref_cache(tmpdir, cls, expect_cached, size):
-    buf = SpillBuffer(str(tmpdir), target=100)
+def test_weakref_cache(tmp_path, cls, expect_cached, size):
+    buf = SpillBuffer(str(tmp_path), target=100)
 
     # Run this test twice:
     # - x is smaller than target and is evicted by y;
@@ -338,7 +367,10 @@ def test_weakref_cache(tmpdir, cls, expect_cached, size):
     # the same id as a deleted one
     id_x = x.id
     del x
-    wait_profiler()
+
+    # Ensure that the profiler has stopped and released all references to x so that it can be garbage-collected
+    with profile.lock:
+        pass
 
     if size < 100:
         buf["y"]

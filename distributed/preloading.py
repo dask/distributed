@@ -183,6 +183,8 @@ class Preload:
         self.argv = list(argv)
         self.file_dir = file_dir
 
+        logger.info("Creating preload: %s", self.name)
+
         if is_webaddress(name):
             self.module = _download_module(name)
         else:
@@ -193,6 +195,7 @@ class Preload:
         dask_setup = getattr(self.module, "dask_setup", None)
 
         if dask_setup:
+            logger.info("Run preload setup: %s", self.name)
             if isinstance(dask_setup, click.Command):
                 context = dask_setup.make_context(
                     "dask_setup", self.argv, allow_extra_args=False
@@ -202,17 +205,16 @@ class Preload:
                 )
                 if inspect.isawaitable(result):
                     await result
-                logger.info("Run preload setup click command: %s", self.name)
             else:
                 future = dask_setup(self.dask_object)
                 if inspect.isawaitable(future):
                     await future
-                logger.info("Run preload setup function: %s", self.name)
 
     async def teardown(self):
         """Run when the server starts its close method"""
         dask_teardown = getattr(self.module, "dask_teardown", None)
         if dask_teardown:
+            logger.info("Run preload teardown: %s", self.name)
             future = dask_teardown(self.dask_object)
             if inspect.isawaitable(future):
                 await future

@@ -1,7 +1,11 @@
+from __future__ import annotations
+
+import logging
+
 import pytest
 
-from distributed import Scheduler, SchedulerPlugin, Worker
-from distributed.utils_test import gen_cluster, gen_test, inc
+from distributed import Scheduler, SchedulerPlugin, Worker, get_worker
+from distributed.utils_test import captured_logger, gen_cluster, gen_test, inc
 
 
 @gen_cluster(client=True)
@@ -178,3 +182,66 @@ async def test_register_scheduler_plugin_pickle_disabled(c, s, a, b):
     assert "distributed.scheduler.pickle" in msg
 
     assert n_plugins == len(s.plugins)
+
+
+@gen_cluster(client=True)
+async def test_log_event_plugin(c, s, a, b):
+    class EventPlugin(SchedulerPlugin):
+        async def start(self, scheduler: Scheduler) -> None:
+            self.scheduler = scheduler
+            self.scheduler._recorded_events = list()  # type: ignore
+
+        def log_event(self, name, msg):
+            self.scheduler._recorded_events.append((name, msg))
+
+    await c.register_scheduler_plugin(EventPlugin())
+
+    def f():
+        get_worker().log_event("foo", 123)
+
+    await c.submit(f)
+
+    assert ("foo", 123) in s._recorded_events
+
+
+@gen_cluster(client=True)
+async def test_register_plugin_on_scheduler(c, s, a, b):
+    class MyPlugin(SchedulerPlugin):
+        async def start(self, scheduler: Scheduler) -> None:
+            scheduler._foo = "bar"  # type: ignore
+
+    await s.register_scheduler_plugin(MyPlugin())
+
+    assert s._foo == "bar"
+
+
+@gen_cluster(client=True)
+async def test_closing_errors_ok(c, s, a, b, capsys):
+    class OK(SchedulerPlugin):
+        async def before_close(self):
+            print(123)
+
+        async def close(self):
+            print(456)
+
+    class Bad(SchedulerPlugin):
+        async def before_close(self):
+            raise Exception("BEFORE_CLOSE")
+
+        async def close(self):
+            raise Exception("AFTER_CLOSE")
+
+    await s.register_scheduler_plugin(OK())
+    await s.register_scheduler_plugin(Bad())
+
+    with captured_logger(logging.getLogger("distributed.scheduler")) as logger:
+        await s.close()
+
+    out, err = capsys.readouterr()
+    assert "123" in out
+    assert "456" in out
+
+    text = logger.getvalue()
+    assert "BEFORE_CLOSE" in text
+    text = logger.getvalue()
+    assert "AFTER_CLOSE" in text

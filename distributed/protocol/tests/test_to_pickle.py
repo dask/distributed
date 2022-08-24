@@ -1,9 +1,8 @@
-from typing import Dict
+from __future__ import annotations
 
 import dask.config
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 
-from distributed.client import Client
 from distributed.protocol import dumps, loads
 from distributed.protocol.serialize import ToPickle
 from distributed.utils_test import gen_cluster
@@ -25,11 +24,11 @@ class NonMsgPackSerializableLayer(MaterializedLayer):
 
 
 @gen_cluster(client=True)
-async def test_non_msgpack_serializable_layer(c: Client, s, w1, w2):
+async def test_non_msgpack_serializable_layer(c, s, a, b):
     with dask.config.set({"distributed.scheduler.allowed-imports": "test_to_pickle"}):
         a = NonMsgPackSerializableLayer({"x": 42})
         layers = {"a": a}
-        dependencies: Dict[str, set] = {"a": set()}
+        dependencies: dict[str, set] = {"a": set()}
         hg = HighLevelGraph(layers, dependencies)
         res = await c.get(hg, "x", sync=False)
         assert res == 42

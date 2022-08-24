@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import numba
 import numba.cuda
 import numpy

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sys
 
 import psutil
@@ -17,6 +19,7 @@ def memory_limit() -> int:
     limit = psutil.virtual_memory().total
 
     # Check cgroups if available
+    # Note: can't use LINUX and WINDOWS constants as they upset mypy
     if sys.platform == "linux":
         try:
             with open("/sys/fs/cgroup/memory/memory.limit_in_bytes") as f:
@@ -27,14 +30,15 @@ def memory_limit() -> int:
             pass
 
     # Check rlimit if available
-    try:
-        import resource
+    if sys.platform != "win32":
+        try:
+            import resource
 
-        hard_limit = resource.getrlimit(resource.RLIMIT_RSS)[1]  # type: ignore
-        if hard_limit > 0:
-            limit = min(limit, hard_limit)
-    except (ImportError, OSError):
-        pass
+            hard_limit = resource.getrlimit(resource.RLIMIT_RSS)[1]
+            if hard_limit > 0:
+                limit = min(limit, hard_limit)
+        except (ImportError, OSError):
+            pass
 
     return limit
 

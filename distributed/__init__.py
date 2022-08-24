@@ -1,5 +1,10 @@
-from distributed import config  # isort:skip; load distributed configuration first
-from distributed import widgets  # isort:skip; load distributed widgets second
+from __future__ import annotations
+
+# isort: off
+from distributed import config  # load distributed configuration first
+from distributed import widgets  # load distributed widgets second
+
+# isort: on
 
 import atexit
 
@@ -94,3 +99,65 @@ def _():
     """
     global _python_shutting_down
     _python_shutting_down = True
+
+
+__all__ = [
+    "Actor",
+    "ActorFuture",
+    "Adaptive",
+    "BaseActorFuture",
+    "CancelledError",
+    "Client",
+    "CompatibleExecutor",
+    "Environ",
+    "Event",
+    "Future",
+    "KilledWorker",
+    "LocalCluster",
+    "Lock",
+    "MultiLock",
+    "Nanny",
+    "NannyPlugin",
+    "PipInstall",
+    "Pub",
+    "Queue",
+    "Reschedule",
+    "SSHCluster",
+    "Scheduler",
+    "SchedulerPlugin",
+    "Security",
+    "Semaphore",
+    "SpecCluster",
+    "Status",
+    "Sub",
+    "TimeoutError",
+    "UploadDirectory",
+    "UploadFile",
+    "Variable",
+    "Worker",
+    "WorkerPlugin",
+    "as_completed",
+    "config",
+    "connect",
+    "dask",
+    "default_client",
+    "fire_and_forget",
+    "futures_of",
+    "get_client",
+    "get_task_metadata",
+    "get_task_stream",
+    "get_versions",
+    "get_worker",
+    "local_client",
+    "performance_report",
+    "print",
+    "progress",
+    "rejoin",
+    "rpc",
+    "secede",
+    "sync",
+    "wait",
+    "warn",
+    "widgets",
+    "worker_client",
+]

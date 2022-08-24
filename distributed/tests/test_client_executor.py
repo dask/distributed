@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import random
 from concurrent.futures import (
     FIRST_COMPLETED,
@@ -150,7 +152,7 @@ def test_map(client):
         N = 10
         # Not consuming the iterator will cancel remaining tasks
         it = e.map(slowinc, range(N), [0.3] * N)
-        for x in take(2, it):
+        for _ in take(2, it):
             pass
         # Some tasks still processing
         assert number_of_processing_tasks(client) > 0

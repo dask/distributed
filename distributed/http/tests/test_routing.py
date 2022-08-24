@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pytest
 from tornado import web
 from tornado.httpclient import AsyncHTTPClient, HTTPClientError

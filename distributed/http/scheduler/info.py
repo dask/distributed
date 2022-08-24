@@ -29,123 +29,142 @@ logger = logging.getLogger(__name__)
 
 
 class Workers(RequestHandler):
+    @log_errors
     def get(self):
-        with log_errors():
-            self.render(
-                "workers.html",
-                title="Workers",
-                scheduler=self.server,
-                **merge(
-                    self.server.__dict__,
-                    self.server.__pdict__,
-                    ns,
-                    self.extra,
-                    rel_path_statics,
-                ),
-            )
+        self.render(
+            "workers.html",
+            title="Workers",
+            scheduler=self.server,
+            **merge(
+                self.server.__dict__,
+                self.server.__pdict__,
+                ns,
+                self.extra,
+                rel_path_statics,
+            ),
+        )
 
 
 class Worker(RequestHandler):
+    @log_errors
     def get(self, worker):
         worker = escape.url_unescape(worker)
         if worker not in self.server.workers:
             self.send_error(404)
             return
-        with log_errors():
-            self.render(
-                "worker.html",
-                title="Worker: " + worker,
-                scheduler=self.server,
-                Worker=worker,
-                **merge(
-                    self.server.__dict__,
-                    self.server.__pdict__,
-                    ns,
-                    self.extra,
-                    rel_path_statics,
-                ),
-            )
+
+        self.render(
+            "worker.html",
+            title="Worker: " + worker,
+            scheduler=self.server,
+            Worker=worker,
+            **merge(
+                self.server.__dict__,
+                self.server.__pdict__,
+                ns,
+                self.extra,
+                rel_path_statics,
+            ),
+        )
+
+
+class Exceptions(RequestHandler):
+    @log_errors
+    def get(self):
+        self.render(
+            "exceptions.html",
+            title="Exceptions",
+            scheduler=self.server,
+            **merge(
+                self.server.__dict__,
+                self.server.__pdict__,
+                ns,
+                self.extra,
+                rel_path_statics,
+            ),
+        )
 
 
 class Task(RequestHandler):
+    @log_errors
     def get(self, task):
         task = escape.url_unescape(task)
         if task not in self.server.tasks:
             self.send_error(404)
             return
-        with log_errors():
-            self.render(
-                "task.html",
-                title="Task: " + task,
-                Task=task,
-                scheduler=self.server,
-                **merge(
-                    self.server.__dict__,
-                    self.server.__pdict__,
-                    ns,
-                    self.extra,
-                    rel_path_statics,
-                ),
-            )
+
+        self.render(
+            "task.html",
+            title="Task: " + task,
+            Task=task,
+            scheduler=self.server,
+            **merge(
+                self.server.__dict__,
+                self.server.__pdict__,
+                ns,
+                self.extra,
+                rel_path_statics,
+            ),
+        )
 
 
 class Logs(RequestHandler):
+    @log_errors
     def get(self):
-        with log_errors():
-            logs = self.server.get_logs()
-            self.render(
-                "logs.html",
-                title="Logs",
-                logs=logs,
-                **merge(self.extra, rel_path_statics),
-            )
+        logs = self.server.get_logs()
+        self.render(
+            "logs.html",
+            title="Logs",
+            logs=logs,
+            **merge(self.extra, rel_path_statics),
+        )
 
 
 class WorkerLogs(RequestHandler):
+    @log_errors
     async def get(self, worker):
-        with log_errors():
-            worker = escape.url_unescape(worker)
-            logs = await self.server.get_worker_logs(workers=[worker])
-            logs = logs[worker]
-            self.render(
-                "logs.html",
-                title="Logs: " + worker,
-                logs=logs,
-                **merge(self.extra, rel_path_statics),
-            )
+        worker = escape.url_unescape(worker)
+        logs = await self.server.get_worker_logs(workers=[worker])
+        logs = logs[worker]
+        self.render(
+            "logs.html",
+            title="Logs: " + worker,
+            logs=logs,
+            **merge(self.extra, rel_path_statics),
+        )
 
 
 class WorkerCallStacks(RequestHandler):
+    @log_errors
     async def get(self, worker):
-        with log_errors():
-            worker = escape.url_unescape(worker)
-            keys = {ts.key for ts in self.server.workers[worker].processing}
-            call_stack = await self.server.get_call_stack(keys=keys)
-            self.render(
-                "call-stack.html",
-                title="Call Stacks: " + worker,
-                call_stack=call_stack,
-                **merge(self.extra, rel_path_statics),
-            )
+        worker = escape.url_unescape(worker)
+        keys = {ts.key for ts in self.server.workers[worker].processing}
+        call_stack = await self.server.get_call_stack(keys=keys)
+        self.render(
+            "call-stack.html",
+            title="Call Stacks: " + worker,
+            call_stack=call_stack,
+            **merge(self.extra, rel_path_statics),
+        )
 
 
 class TaskCallStack(RequestHandler):
+    @log_errors
     async def get(self, key):
-        with log_errors():
-            key = escape.url_unescape(key)
-            call_stack = await self.server.get_call_stack(keys=[key])
-            if not call_stack:
-                self.write(
-                    "<p>Task not actively running. "
-                    "It may be finished or not yet started</p>"
-                )
-            else:
-                self.render(
-                    "call-stack.html",
-                    title="Call Stack: " + key,
-                    call_stack=call_stack,
-                    **merge(self.extra, rel_path_statics),
-                )
+        key = escape.url_unescape(key)
+        call_stack = await self.server.get_call_stack(keys=[key])
+        if not call_stack:
+            self.write(
+                "<p>Task not actively running. "
+                "It may be finished or not yet started</p>"
+            )
+        else:
+            self.render(
+                "call-stack.html",
+                title="Call Stack: " + key,
+                call_stack=call_stack,
+                **merge(self.extra, rel_path_statics),
+            )
 
 
 class IndividualPlots(RequestHandler):
@@ -212,6 +231,7 @@ class EventstreamHandler(WebSocketHandler):
 routes: list[tuple] = [
     (r"info", redirect("info/main/workers.html"), {}),
     (r"info/main/workers.html", Workers, {}),
+    (r"info/main/exceptions.html", Exceptions, {}),
     (r"info/worker/(.*).html", Worker, {}),
     (r"info/task/(.*).html", Task, {}),
     (r"info/main/logs.html", Logs, {}),

@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 from time import sleep
 
 from distributed import Client
 from distributed.metrics import time
+from distributed.utils import open_port
 from distributed.utils_test import (
     get_cert,
     new_config_file,
@@ -27,7 +30,7 @@ def wait_for_cores(c, nthreads=1):
         assert time() < start + 10
 
 
-def test_basic(loop):
+def test_basic(loop, requires_default_ports):
     with popen(["dask-scheduler", "--no-dashboard"] + tls_args) as s:
         with popen(
             ["dask-worker", "--no-dashboard", "tls://127.0.0.1:8786"] + tls_args
@@ -39,33 +42,61 @@ def test_basic(loop):
 
 
 def test_nanny(loop):
-    with popen(["dask-scheduler", "--no-dashboard"] + tls_args) as s:
+    port = open_port()
+    with popen(
+        [
+            "dask-scheduler",
+            "--no-dashboard",
+            f"--port={port}",
+        ]
+        + tls_args
+    ) as s:
         with popen(
-            ["dask-worker", "--no-dashboard", "--nanny", "tls://127.0.0.1:8786"]
+            ["dask-worker", "--no-dashboard", "--nanny", f"tls://127.0.0.1:{port}"]
             + tls_args
         ) as w:
             with Client(
-                "tls://127.0.0.1:8786", loop=loop, security=tls_security()
+                f"tls://127.0.0.1:{port}", loop=loop, security=tls_security()
             ) as c:
                 wait_for_cores(c)
 
 
 def test_separate_key_cert(loop):
-    with popen(["dask-scheduler", "--no-dashboard"] + tls_args_2) as s:
+    port = open_port()
+    with popen(
+        [
+            "dask-scheduler",
+            "--no-dashboard",
+            f"--port={port}",
+        ]
+        + tls_args_2
+    ) as s:
         with popen(
-            ["dask-worker", "--no-dashboard", "tls://127.0.0.1:8786"] + tls_args_2
+            ["dask-worker", "--no-dashboard", f"tls://127.0.0.1:{port}"] + tls_args_2
         ) as w:
             with Client(
-                "tls://127.0.0.1:8786", loop=loop, security=tls_security()
+                f"tls://127.0.0.1:{port}", loop=loop, security=tls_security()
             ) as c:
                 wait_for_cores(c)
 
 
 def test_use_config_file(loop):
+    port = open_port()
     with new_config_file(tls_only_config()):
-        with popen(["dask-scheduler", "--no-dashboard", "--host", "tls://"]) as s:
-            with popen(["dask-worker", "--no-dashboard", "tls://127.0.0.1:8786"]) as w:
+        with popen(
+            [
+                "dask-scheduler",
+                "--no-dashboard",
+                "--host",
+                "tls://",
+                "--port",
+                str(port),
+            ]
+        ) as s:
+            with popen(
+                ["dask-worker", "--no-dashboard", f"tls://127.0.0.1:{port}"]
+            ) as w:
                 with Client(
-                    "tls://127.0.0.1:8786", loop=loop, security=tls_security()
+                    f"tls://127.0.0.1:{port}", loop=loop, security=tls_security()
                 ) as c:
                     wait_for_cores(c)

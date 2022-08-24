@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import os
 import socket
@@ -426,7 +428,7 @@ class SSHCluster:
 
         # Start worker nodes
         self.workers = []
-        for i, addr in enumerate(worker_addrs):
+        for addr in worker_addrs:
             self.add_worker(addr)
 
     @gen.coroutine

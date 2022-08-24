@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 from pathlib import Path
 
@@ -8,7 +10,7 @@ import yaml
 
 import distributed
 from distributed.cluster_dump import DumpArtefact, _tuple_to_list, write_state
-from distributed.utils_test import assert_worker_story, gen_cluster, gen_test, inc
+from distributed.utils_test import assert_story, gen_cluster, gen_test, inc
 
 
 @pytest.mark.parametrize(
@@ -68,7 +70,7 @@ async def test_cluster_dump_state(c, s, a, b, tmp_path):
     await c.dump_cluster_state(filename, format="msgpack")
 
     scheduler_tasks = list(s.tasks.values())
-    worker_tasks = [t for w in (a, b) for t in w.tasks.values()]
+    worker_tasks = [t for w in (a, b) for t in w.state.tasks.values()]
 
     smem_tasks = [t for t in scheduler_tasks if t.state == "memory"]
     wmem_tasks = [t for t in worker_tasks if t.state == "memory"]
@@ -126,31 +128,12 @@ async def test_cluster_dump_story(c, s, a, b, tmp_path):
     assert story.keys() == {"f1", "f2"}
 
     for k, task_story in story.items():
-        expected = [
-            (k, "released", "waiting", {k: "processing"}),
-            (k, "waiting", "processing", {}),
-            (k, "processing", "memory", {}),
-        ]
-
-        for event, expected_event in zip(task_story, expected):
-            for e1, e2 in zip(event, expected_event):
-                assert e1 == e2
+        assert_story(task_story, s.story(k))
 
     story = dump.worker_story("f1", "f2")
     assert story.keys() == {"f1", "f2"}
-
     for k, task_story in story.items():
-        assert_worker_story(
-            task_story,
-            [
-                (k, "compute-task"),
-                (k, "released", "waiting", "waiting", {k: "ready"}),
-                (k, "waiting", "ready", "ready", {k: "executing"}),
-                (k, "ready", "executing", "executing", {}),
-                (k, "put-in-memory"),
-                (k, "executing", "memory", "memory", {}),
-            ],
-        )
+        assert_story(task_story, a.state.story(k) + b.state.story(k))
 
 
 @gen_cluster(client=True)

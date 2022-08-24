@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import queue
 import random
@@ -240,9 +242,9 @@ async def test_str(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_as_completed_with_results_no_raise_async(c, s, a, b):
-    x = c.submit(throws, 1)
-    y = c.submit(slowinc, 5, delay=1)
-    z = c.submit(inc, 1)
+    x = c.submit(throws, 1, key="x")
+    y = c.submit(slowinc, 5, delay=1, key="y")
+    z = c.submit(inc, 1, key="z")
 
     ac = as_completed([x, y, z], with_results=True, raise_errors=False)
     await y.cancel()

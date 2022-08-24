@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import uuid
@@ -30,45 +32,45 @@ class LockExtension:
             {"lock_acquire": self.acquire, "lock_release": self.release}
         )
 
+    @log_errors
     async def acquire(self, name=None, id=None, timeout=None):
-        with log_errors():
-            if isinstance(name, list):
-                name = tuple(name)
-            if name not in self.ids:
-                result = True
-            else:
-                while name in self.ids:
-                    event = asyncio.Event()
-                    self.events[name].append(event)
-                    future = event.wait()
-                    if timeout is not None:
-                        future = asyncio.wait_for(future, timeout)
-                    try:
-                        await future
-                    except TimeoutError:
-                        result = False
-                        break
-                    else:
-                        result = True
-                    finally:
-                        event2 = self.events[name].popleft()
-                        assert event is event2
-            if result:
-                assert name not in self.ids
-                self.ids[name] = id
-            return result
+        if isinstance(name, list):
+            name = tuple(name)
+        if name not in self.ids:
+            result = True
+        else:
+            while name in self.ids:
+                event = asyncio.Event()
+                self.events[name].append(event)
+                future = event.wait()
+                if timeout is not None:
+                    future = asyncio.wait_for(future, timeout)
+                try:
+                    await future
+                except TimeoutError:
+                    result = False
+                    break
+                else:
+                    result = True
+                finally:
+                    event2 = self.events[name].popleft()
+                    assert event is event2
+        if result:
+            assert name not in self.ids
+            self.ids[name] = id
+        return result
 
+    @log_errors
     def release(self, name=None, id=None):
-        with log_errors():
-            if isinstance(name, list):
-                name = tuple(name)
-            if self.ids.get(name) != id:
-                raise ValueError("This lock has not yet been acquired")
-            del self.ids[name]
-            if self.events[name]:
-                self.scheduler.loop.add_callback(self.events[name][0].set)
-            else:
-                del self.events[name]
+        if isinstance(name, list):
+            name = tuple(name)
+        if self.ids.get(name) != id:
+            raise ValueError("This lock has not yet been acquired")
+        del self.ids[name]
+        if self.events[name]:
+            self.scheduler.loop.add_callback(self.events[name][0].set)
+        else:
+            del self.events[name]
 
 
 class Lock:
