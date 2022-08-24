@@ -1541,11 +1541,11 @@ class SchedulerState:
             if not stimulus_id:
                 stimulus_id = STIMULUS_ID_UNSET
 
-            finish2 = ts._state
+            actual_finish = ts._state
             # FIXME downcast antipattern
             scheduler = cast(Scheduler, self)
             scheduler.transition_log.append(
-                (key, start, finish2, recommendations, stimulus_id, time())
+                (key, start, actual_finish, recommendations, stimulus_id, time())
             )
             if self.validate:
                 if stimulus_id == STIMULUS_ID_UNSET:
@@ -1557,7 +1557,7 @@ class SchedulerState:
                     key,
                     start,
                     finish,
-                    ts.state,
+                    actual_finish,
                     dict(recommendations),
                 )
             if self.plugins:
@@ -1568,7 +1568,7 @@ class SchedulerState:
                     self.tasks[ts.key] = ts
                 for plugin in list(self.plugins.values()):
                     try:
-                        plugin.transition(key, start, finish2, *args, **kwargs)
+                        plugin.transition(key, start, actual_finish, *args, **kwargs)
                     except Exception:
                         logger.info("Plugin failed with exception", exc_info=True)
                 if ts.state == "forgotten":
