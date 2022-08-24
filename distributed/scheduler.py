@@ -1714,48 +1714,47 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    # FIXME This almost certainly shouldn't happen
-    # def transition_no_worker_memory(
-    #     self,
-    #     key,
-    #     stimulus_id,
-    #     nbytes=None,
-    #     type=None,
-    #     typename: str | None = None,
-    #     worker=None,
-    # ):
-    #     try:
-    #         ws: WorkerState = self.workers[worker]
-    #         ts: TaskState = self.tasks[key]
-    #         recommendations: dict = {}
-    #         client_msgs: dict = {}
-    #         worker_msgs: dict = {}
+    def transition_no_worker_memory(
+        self,
+        key,
+        stimulus_id,
+        nbytes=None,
+        type=None,
+        typename: str | None = None,
+        worker=None,
+    ):
+        try:
+            ws: WorkerState = self.workers[worker]
+            ts: TaskState = self.tasks[key]
+            recommendations: dict = {}
+            client_msgs: dict = {}
+            worker_msgs: dict = {}
 
-    #         if self.validate:
-    #             assert not ts.processing_on
-    #             assert not ts.waiting_on
-    #             assert ts.state == "no-worker"
+            if self.validate:
+                assert not ts.processing_on
+                assert not ts.waiting_on
+                assert ts.state == "no-worker"
 
-    #         self.unrunnable.remove(ts)
+            self.unrunnable.remove(ts)
 
-    #         if nbytes is not None:
-    #             ts.set_nbytes(nbytes)
+            if nbytes is not None:
+                ts.set_nbytes(nbytes)
 
-    #         self.check_idle_saturated(ws)
+            self.check_idle_saturated(ws)
 
-    #         _add_to_memory(
-    #             self, ts, ws, recommendations, client_msgs, type=type, typename=typename
-    #         )
-    #         ts.state = "memory"
+            _add_to_memory(
+                self, ts, ws, recommendations, client_msgs, type=type, typename=typename
+            )
+            ts.state = "memory"
 
-    #         return recommendations, client_msgs, worker_msgs
-    #     except Exception as e:
-    #         logger.exception(e)
-    #         if LOG_PDB:
-    #             import pdb
+            return recommendations, client_msgs, worker_msgs
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
 
-    #             pdb.set_trace()
-    #         raise
+                pdb.set_trace()
+            raise
 
     def decide_worker_rootish_queuing_disabled(
         self, ts: TaskState
@@ -2705,7 +2704,7 @@ class SchedulerState:
         ("processing", "erred"): transition_processing_erred,
         ("no-worker", "released"): transition_no_worker_released,
         ("no-worker", "processing"): transition_no_worker_processing,
-        # ("no-worker", "memory"): transition_no_worker_memory,
+        ("no-worker", "memory"): transition_no_worker_memory,
         ("released", "forgotten"): transition_released_forgotten,
         ("memory", "forgotten"): transition_memory_forgotten,
         ("erred", "released"): transition_erred_released,
