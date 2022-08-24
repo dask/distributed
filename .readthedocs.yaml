@@ -5,7 +5,7 @@ build:
   tools:
     python: "3.9"
   apt_packages:
-    - dot
+    - graphviz
 
 sphinx:
   configuration: docs/source/conf.py
