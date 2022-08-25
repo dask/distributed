@@ -3906,37 +3906,40 @@ class Scheduler(SchedulerState, ServerNode):
             _restrictions = {}
 
         for layer in graph_.layers.values():
-            if layer.annotations and "retries" in layer.annotations:
+            if not layer.annotations:
+                continue
+            layer_annotations: dict = dict(layer.annotations)
+            if "retries" in layer_annotations:
                 retries = retries or {}
-                d = process(layer.annotations["retries"], keys=layer, string_keys=None)
+                d = process(layer_annotations["retries"], keys=layer, string_keys=None)
                 retries.update(d)  # TODO: there is an implicit ordering here
-            if layer.annotations and "priority" in layer.annotations:
+            if "priority" in layer_annotations:
                 user_priority = user_priority or {}
                 d = process(
-                    dict(layer.annotations).pop("priority"),
+                    layer_annotations.pop("priority"),
                     keys=layer,
                     string_keys=None,
                 )
                 user_priority.update(d)  # TODO: there is an implicit ordering here
-            if layer.annotations and "resources" in layer.annotations:
+            if "resources" in layer_annotations:
                 resources = resources or {}
                 d = process(
-                    layer.annotations["resources"], keys=layer, string_keys=None
+                    layer_annotations["resources"], keys=layer, string_keys=None
                 )
                 resources.update(d)  # TODO: there is an implicit ordering here
-            if layer.annotations and "workers" in layer.annotations:
-                if isinstance(layer.annotations["workers"], (str, int)):
-                    layer.annotations["workers"] = (layer.annotations["workers"],)  # type: ignore
+            if "workers" in layer_annotations:
+                if isinstance(layer_annotations["workers"], (str, int)):
+                    layer_annotations["workers"] = (layer_annotations["workers"],)
                 _restrictions = _restrictions or {}
-                d = process(layer.annotations["workers"], keys=layer, string_keys=None)
+                d = process(layer_annotations["workers"], keys=layer, string_keys=None)
                 _restrictions.update(d)  # TODO: there is an implicit ordering here
 
-            if layer.annotations and "allow_other_workers" in layer.annotations:
-                if layer.annotations["allow_other_workers"] is True:
+            if "allow_other_workers" in layer_annotations:
+                if layer_annotations["allow_other_workers"] is True:
                     loose_restrictions.update(set(map(stringify, layer)))
 
-            if layer.annotations:
-                d = process(layer.annotations, keys=layer, string_keys=None)
+            if layer_annotations:
+                d = process(layer_annotations, keys=layer, string_keys=None)
                 annotations.update(d)
 
         from distributed.worker import dumps_task
