@@ -52,7 +52,7 @@ Task State
 ----------
 
 Internally, the scheduler moves tasks between a fixed set of states,
-notably ``released``, ``waiting``, ``no-worker``, ``processing``,
+notably ``released``, ``waiting``, ``no-worker``, ``queued``, ``processing``,
 ``memory``, ``error``.
 
 Tasks flow along the following states with the following allowed transitions:
@@ -66,6 +66,7 @@ Tasks flow along the following states with the following allowed transitions:
 *  *No-worker*: Ready to be computed, but no appropriate worker exists
    (for example because of resource restrictions, or because no worker is
    connected at all).
+*  *Queued*: Ready to be computed, but all workers are already full
 *  *Processing*: All dependencies are available and the task is assigned to a
    worker for compute (the scheduler doesn't know whether it's in a worker
    queue or actively being computed).

@@ -9,8 +9,12 @@ digraph{
     released1 -> waiting;
     waiting -> processing;
     waiting -> "no-worker";
-    "no-worker" -> waiting;
     "no-worker" -> processing;
+    "no-worker" -> released2;
+    waiting -> queued;
+    queued -> processing;
+    queued -> released2;
+    processing -> released2;
     processing -> memory;
     processing -> error;
     error -> forgotten;
