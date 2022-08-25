@@ -4522,11 +4522,21 @@ class Scheduler(SchedulerState, ServerNode):
                 client, {"action": "cancel", "count": len(keys), "force": force}
             )
 
+        # TODO: Check if this hack is still necessary
+        # (See: https://github.com/dask/distributed/pull/6028/files#r857932292)
+        for _ in range(10):
+            if any(key not in self.tasks for key in keys):
+                await asyncio.sleep(0.050)
+                continue
+            else:
+                break
+
         await asyncio.gather(
-            *[self._cancel_key(key, client, force=force) for key in keys]
+            *[self._cancel_key(key, client, force=force, report=False) for key in keys]
         )
 
-    async def _cancel_key(self, key, client, force=False):
+
+    async def _cancel_key(self, key, client, force=False, report=True):
         """Cancel a particular key and all dependents"""
         # TODO: this should be converted to use the transition mechanism
         ts: TaskState | None = self.tasks.get(key)
@@ -4552,7 +4562,8 @@ class Scheduler(SchedulerState, ServerNode):
                 ]
             )
             logger.info("Scheduler cancels key %s.  Force=%s", key, force)
-            self.report({"op": "cancelled-key", "key": key})
+            if report:
+                self.report({"op": "cancelled-key", "key": key})
         clients = list(ts.who_wants) if force else [cs]
         for cs in clients:
             self.client_releases_keys(
