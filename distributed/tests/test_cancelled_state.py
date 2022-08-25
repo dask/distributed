@@ -399,7 +399,7 @@ async def test_cancelled_resumed_after_flight_with_dependencies(c, s, a):
     See https://github.com/dask/distributed/pull/6327#discussion_r872231090
     See test_cancelled_resumed_after_flight_with_dependencies_workerstate below.
     """
-    async with await BlockedGetData(s.address) as b:
+    async with BlockedGetData(s.address) as b:
         x = c.submit(inc, 1, key="x", workers=[b.address], allow_other_workers=True)
         y = c.submit(inc, x, key="y", workers=[a.address])
         await b.in_get_data.wait()
