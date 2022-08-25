@@ -1366,21 +1366,19 @@ async def test_register_worker_callbacks_err(c, s, a, b):
 
 
 @gen_cluster(nthreads=[])
-async def test_local_directory(s):
-    with tmpfile() as fn:
-        with dask.config.set(temporary_directory=fn):
-            w = await Worker(s.address)
-            assert w.local_directory.startswith(fn)
-            assert "dask-worker-space" in w.local_directory
+async def test_local_directory(s, tmp_path):
+    with dask.config.set(temporary_directory=str(tmp_path)):
+        w = await Worker(s.address)
+        assert w.local_directory.startswith(str(tmp_path))
+        assert "dask-worker-space" in w.local_directory
 
 
 @gen_cluster(nthreads=[])
-async def test_local_directory_make_new_directory(s):
-    with tmpfile() as fn:
-        w = await Worker(s.address, local_directory=os.path.join(fn, "foo", "bar"))
-        assert w.local_directory.startswith(fn)
-        assert "foo" in w.local_directory
-        assert "dask-worker-space" in w.local_directory
+async def test_local_directory_make_new_directory(s, tmp_path):
+    w = await Worker(s.address, local_directory=str(tmp_path / "foo" / "bar"))
+    assert w.local_directory.startswith(str(tmp_path))
+    assert "foo" in w.local_directory
+    assert "dask-worker-space" in w.local_directory
 
 
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
