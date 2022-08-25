@@ -512,16 +512,31 @@ async def test_no_valid_workers_loose_restrictions(client, s, a, b, c):
     assert result == 2
 
 
+@pytest.mark.parametrize("queue", [False, True])
 @gen_cluster(client=True, nthreads=[])
-async def test_no_workers(client, s):
+async def test_no_workers(client, s, queue):
+    if queue:
+        s.WORKER_SATURATION = 1.0
+    else:
+        s.WORKER_SATURATION = float("inf")
+
     x = client.submit(inc, 1)
     while not s.tasks:
         await asyncio.sleep(0.01)
 
-    assert s.tasks[x.key] in s.unrunnable
+    ts = s.tasks[x.key]
+    if queue:
+        assert ts in s.queued
+        assert ts.state == "queued"
+    else:
+        assert ts in s.unrunnable
+        assert ts.state == "no-worker"
 
     with pytest.raises(TimeoutError):
         await asyncio.wait_for(x, 0.05)
+
+    async with Worker(s.address, nthreads=1):
+        await wait(x)
 
 
 @gen_cluster(nthreads=[])

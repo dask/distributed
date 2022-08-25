@@ -1780,7 +1780,7 @@ class SchedulerState:
             ``no-worker``.
         """
         if self.validate:
-            assert self.is_rootish(ts)
+            # See root-ish-ness note below in `decide_worker_rootish_queuing_enabled`
             assert math.isinf(self.WORKER_SATURATION)
 
         pool = self.idle.values() if self.idle else self.running
@@ -1839,7 +1839,10 @@ class SchedulerState:
 
         """
         if self.validate:
-            assert self.is_rootish(ts)
+            # We don't `assert self.is_rootish(ts)` here, because that check is dependent on
+            # cluster size. It's possible a task looked root-ish when it was queued, but the
+            # cluster has since scaled up and it no longer does when coming out of the queue.
+            # If `is_rootish` changes to a static definition, then add that assertion here.
             assert not math.isinf(self.WORKER_SATURATION)
 
         if not self.idle:
