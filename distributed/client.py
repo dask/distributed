@@ -1375,8 +1375,8 @@ class Client(SyncMethodMixin):
         """
         if n_workers is no_default:
             warnings.warn(
-                "Client.wait_for_workers requires passing the argument `n_workers`. Not passing any argument will no longer be supported in future versions.",
-                DeprecationWarning,
+                "Please specify the `n_workers` argument when using `Client.wait_for_workers`. Not specifying `n_workers` will no longer be supported in future versions.",
+                FutureWarning,
             )
             n_workers = 0
         elif not isinstance(n_workers, int) or n_workers < 1:
