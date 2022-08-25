@@ -36,13 +36,26 @@ class HeapSet(MutableSet[T]):
     arbitrary key function. Ties are broken by oldest first.
 
     Values must be compatible with :mod:`weakref`.
+
+    Parameters
+    ----------
+    key: Callable
+        A function that takes a single element of the collection as a parameter and
+        returns a sorting key. The key does not need to be hashable and does not need to
+        support :mod:`weakref`.
+
+    Note
+    ----
+    The key returned for each element should not to change over time. If it does, the
+    position in the heap won't change, even if the element is re-added, and it *may* not
+    change even if it's discarded and then re-added later.
     """
 
     __slots__ = ("key", "_data", "_heap", "_inc", "_sorted")
     key: Callable[[T], Any]
     _data: set[T]
-    _inc: int
     _heap: list[tuple[Any, int, weakref.ref[T]]]
+    _inc: int
     _sorted: bool
 
     def __init__(self, *, key: Callable[[T], Any]):
