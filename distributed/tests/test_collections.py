@@ -325,3 +325,17 @@ def test_heapset_pickle():
     assert len(heap2._heap) < len(heap._heap)
     while heap:
         assert heap.pop() == heap2.pop()
+
+
+def test_heapset_sort_duplicate():
+    """See https://github.com/dask/distributed/issues/6951"""
+    heap = HeapSet(key=operator.attrgetter("i"))
+    c1 = C("x", 1)
+    c2 = C("2", 2)
+
+    heap.add(c1)
+    heap.add(c2)
+    heap.discard(c1)
+    heap.add(c1)
+
+    assert list(heap.sorted()) == [c1, c2]
