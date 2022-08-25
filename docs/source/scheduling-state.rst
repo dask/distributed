@@ -52,35 +52,13 @@ Task State
 ----------
 
 Internally, the scheduler moves tasks between a fixed set of states,
-notably ``released``, ``waiting``, ``no-worker``, ``queued``, ``processing``,
+notably ``released``, ``waiting``, ``no-worker``, ``processing``,
 ``memory``, ``error``.
 
 Tasks flow along the following states with the following allowed transitions:
 
-.. digraph:: scheduler_task_states
-   :alt: Dask scheduler task states
-
-    graph [
-        bgcolor="#FFFFFFF00",
-        rankdir=LR,
-        ];
-    released1 [label=released];
-    released2 [label=released];
-    new -> released1;
-    released1 -> waiting;
-    waiting -> processing;
-    waiting -> "no-worker";
-    "no-worker" -> processing;
-    "no-worker" -> released2;
-    waiting -> queued;
-    queued -> processing;
-    queued -> released2;
-    processing -> released2;
-    processing -> memory;
-    processing -> error;
-    error -> forgotten;
-    memory -> released2;
-    released2 -> forgotten;
+.. image:: images/task-state.svg
+    :alt: Dask scheduler task states
 
 *  *Released*: Known but not actively computing or in memory
 *  *Waiting*: On track to be computed, waiting on dependencies to arrive in
@@ -88,7 +66,6 @@ Tasks flow along the following states with the following allowed transitions:
 *  *No-worker*: Ready to be computed, but no appropriate worker exists
    (for example because of resource restrictions, or because no worker is
    connected at all).
-* *Queued*: Ready to be computed, but all workers are already full
 *  *Processing*: All dependencies are available and the task is assigned to a
    worker for compute (the scheduler doesn't know whether it's in a worker
    queue or actively being computed).
