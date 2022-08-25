@@ -2904,6 +2904,8 @@ class Client(SyncMethodMixin):
             # Create futures before sending graph (helps avoid contention)
             futures = {key: Future(key, self, inform=False) for key in keyset}
 
+            # TODO: Need to preserve the option to materialize the
+            # graph here and send it to the scheduler without Pickle
             if self.scheduler.address.startswith("inproc://"):
                 kwargs = {"graph": dsk}
             else:
