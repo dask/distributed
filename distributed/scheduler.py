@@ -3802,7 +3802,7 @@ class Scheduler(SchedulerState, ServerNode):
         workers=None,
         allow_other_workers=None,
         annotations=None,
-        graph: HighLevelGraph = None,
+        graph: HighLevelGraph | None = None,
         graph_header: bytes | None = None,
         graph_frames: list[bytes] | None = None,
     ):
@@ -3812,7 +3812,7 @@ class Scheduler(SchedulerState, ServerNode):
             try:
                 graph_: HighLevelGraph = pickle.loads(
                     graph_header, buffers=graph_frames
-                )  # type:ignore
+                )
             except Exception as e:
                 text = str(e)
                 exc = pickle.dumps(e)
@@ -3913,7 +3913,9 @@ class Scheduler(SchedulerState, ServerNode):
             if layer.annotations and "priority" in layer.annotations:
                 user_priority = user_priority or {}
                 d = process(
-                    layer.annotations.pop("priority"), keys=layer, string_keys=None
+                    dict(layer.annotations).pop("priority"),
+                    keys=layer,
+                    string_keys=None,
                 )
                 user_priority.update(d)  # TODO: there is an implicit ordering here
             if layer.annotations and "resources" in layer.annotations:
@@ -3924,7 +3926,7 @@ class Scheduler(SchedulerState, ServerNode):
                 resources.update(d)  # TODO: there is an implicit ordering here
             if layer.annotations and "workers" in layer.annotations:
                 if isinstance(layer.annotations["workers"], (str, int)):
-                    layer.annotations["workers"] = (layer.annotations["workers"],)
+                    layer.annotations["workers"] = (layer.annotations["workers"],)  # type: ignore
                 _restrictions = _restrictions or {}
                 d = process(layer.annotations["workers"], keys=layer, string_keys=None)
                 _restrictions.update(d)  # TODO: there is an implicit ordering here
@@ -4523,7 +4525,7 @@ class Scheduler(SchedulerState, ServerNode):
             )
 
         # TODO: Check if this hack is still necessary
-        # (See: https://github.com/dask/distributed/pull/6028/files#r857932292)
+        # See: https://github.com/dask/distributed/pull/6028/files#r857932292
         for _ in range(10):
             if any(key not in self.tasks for key in keys):
                 await asyncio.sleep(0.050)
@@ -4534,7 +4536,6 @@ class Scheduler(SchedulerState, ServerNode):
         await asyncio.gather(
             *[self._cancel_key(key, client, force=force, report=False) for key in keys]
         )
-
 
     async def _cancel_key(self, key, client, force=False, report=True):
         """Cancel a particular key and all dependents"""
