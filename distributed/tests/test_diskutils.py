@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import functools
 import gc
 import os
@@ -12,17 +14,17 @@ import pytest
 
 import dask
 
+from distributed import profile
 from distributed.compatibility import WINDOWS
 from distributed.diskutils import WorkSpace
 from distributed.metrics import time
-from distributed.profile import wait_profiler
-from distributed.utils import mp_context
+from distributed.utils import get_mp_context
 from distributed.utils_test import captured_logger
 
 
 def assert_directory_contents(dir_path, expected, trials=2):
     expected = [os.path.join(dir_path, p) for p in expected]
-    for i in range(trials):
+    for _ in range(trials):
         actual = [
             os.path.join(dir_path, p)
             for p in os.listdir(dir_path)
@@ -53,8 +55,8 @@ def test_workdir_simple(tmpdir):
     a.release()
     assert_contents(["bb", "bb.dirlock"])
     del b
-    wait_profiler()
-    gc.collect()
+    with profile.lock:
+        gc.collect()
     assert_contents([])
 
     # Generated temporary name with a prefix
@@ -89,12 +91,12 @@ def test_two_workspaces_in_same_directory(tmpdir):
 
     del ws
     del b
-    wait_profiler()
-    gc.collect()
+    with profile.lock:
+        gc.collect()
     assert_contents(["aa", "aa.dirlock"], trials=5)
     del a
-    wait_profiler()
-    gc.collect()
+    with profile.lock:
+        gc.collect()
     assert_contents([], trials=5)
 
 
@@ -188,8 +190,8 @@ def test_locking_disabled(tmpdir):
             a.release()
             assert_contents(["bb"])
             del b
-            wait_profiler()
-            gc.collect()
+            with profile.lock:
+                gc.collect()
             assert_contents([])
 
         lock_file.assert_not_called()
@@ -226,9 +228,9 @@ def test_workspace_concurrency(tmpdir):
     """
     base_dir = str(tmpdir)
 
-    err_q = mp_context.Queue()
-    purged_q = mp_context.Queue()
-    stop_evt = mp_context.Event()
+    err_q = get_mp_context().Queue()
+    purged_q = get_mp_context().Queue()
+    stop_evt = get_mp_context().Event()
     ws = WorkSpace(base_dir)
     # Make sure purging only happens in the child processes
     ws._purge_leftovers = lambda: None
@@ -238,9 +240,9 @@ def test_workspace_concurrency(tmpdir):
     max_procs = 2 if WINDOWS else 16
 
     # Run a bunch of child processes that will try to purge concurrently
-    barrier = mp_context.Barrier(parties=max_procs + 1)
+    barrier = get_mp_context().Barrier(parties=max_procs + 1)
     processes = [
-        mp_context.Process(
+        get_mp_context().Process(
             target=_workspace_concurrency,
             args=(base_dir, purged_q, err_q, stop_evt, barrier),
         )

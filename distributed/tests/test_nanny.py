@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import gc
 import logging
@@ -11,6 +13,8 @@ from unittest import mock
 import psutil
 import pytest
 
+from distributed.diagnostics.plugin import WorkerPlugin
+
 pytestmark = pytest.mark.gpu
 
 from tlz import first, valmap
@@ -19,15 +23,19 @@ from tornado.ioloop import IOLoop
 import dask
 from dask.utils import tmpfile
 
-from distributed import Nanny, Scheduler, Worker, rpc, wait, worker
+from distributed import Nanny, Scheduler, Worker, profile, rpc, wait, worker
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status
 from distributed.diagnostics import SchedulerPlugin
 from distributed.metrics import time
-from distributed.profile import wait_profiler
 from distributed.protocol.pickle import dumps
-from distributed.utils import TimeoutError, parse_ports
-from distributed.utils_test import captured_logger, gen_cluster, gen_test
+from distributed.utils import TimeoutError, get_mp_context, parse_ports
+from distributed.utils_test import (
+    captured_logger,
+    gen_cluster,
+    gen_test,
+    raises_with_cause,
+)
 
 pytestmark = pytest.mark.ci1
 
@@ -79,7 +87,7 @@ async def test_nanny_process_failure(c, s):
 @gen_cluster(nthreads=[])
 async def test_run(s):
     async with Nanny(s.address, nthreads=2) as n:
-        with rpc(n.address) as nn:
+        async with rpc(n.address) as nn:
             response = await nn.run(function=dumps(lambda: 1))
             assert response["status"] == "OK"
             assert response["result"] == 1
@@ -139,7 +147,7 @@ async def test_nanny_death_timeout(s):
     with pytest.raises(TimeoutError):
         await w
 
-    assert w.status == Status.closed
+    assert w.status == Status.failed
 
 
 @gen_cluster(client=True, Worker=Nanny)
@@ -165,12 +173,12 @@ async def test_num_fds(s):
     # Warm up
     async with Nanny(s.address):
         pass
-    wait_profiler()
-    gc.collect()
+    with profile.lock:
+        gc.collect()
 
     before = proc.num_fds()
 
-    for i in range(3):
+    for _ in range(3):
         async with Nanny(s.address):
             await asyncio.sleep(0.1)
 
@@ -271,8 +279,8 @@ async def test_wait_for_scheduler():
 
 @gen_cluster(nthreads=[], client=True)
 async def test_environment_variable(c, s):
-    a = Nanny(s.address, loop=s.loop, memory_limit=0, env={"FOO": "123"})
-    b = Nanny(s.address, loop=s.loop, memory_limit=0, env={"FOO": "456"})
+    a = Nanny(s.address, memory_limit=0, env={"FOO": "123"})
+    b = Nanny(s.address, memory_limit=0, env={"FOO": "456"})
     await asyncio.gather(a, b)
     results = await c.run(lambda: os.environ["FOO"])
     assert results == {a.worker_address: "123", b.worker_address: "456"}
@@ -284,7 +292,7 @@ async def test_environment_variable_by_config(c, s, monkeypatch):
 
     with dask.config.set({"distributed.nanny.environ": "456"}):
         with pytest.raises(TypeError, match="configuration must be of type dict"):
-            Nanny(s.address, loop=s.loop, memory_limit=0)
+            Nanny(s.address, memory_limit=0)
 
     with dask.config.set({"distributed.nanny.environ": {"FOO": "456"}}):
 
@@ -292,10 +300,10 @@ async def test_environment_variable_by_config(c, s, monkeypatch):
         # kwargs > env var > config
 
         with mock.patch.dict(os.environ, {"FOO": "BAR"}, clear=True):
-            a = Nanny(s.address, loop=s.loop, memory_limit=0, env={"FOO": "123"})
-            x = Nanny(s.address, loop=s.loop, memory_limit=0)
+            a = Nanny(s.address, memory_limit=0, env={"FOO": "123"})
+            x = Nanny(s.address, memory_limit=0)
 
-        b = Nanny(s.address, loop=s.loop, memory_limit=0)
+        b = Nanny(s.address, memory_limit=0)
 
         await asyncio.gather(a, b, x)
         results = await c.run(lambda: os.environ["FOO"])
@@ -320,6 +328,25 @@ async def test_environment_variable_config(c, s, monkeypatch):
         assert results[n.worker_address]["B"] == "3"
         assert results[n.worker_address]["C"] == "4"
         assert results[n.worker_address]["D"] == "123"
+
+
+@gen_cluster(
+    nthreads=[("", 1)],
+    client=True,
+    Worker=Nanny,
+    config={
+        "distributed.nanny.pre-spawn-environ": {"PRE-SPAWN": 1},
+        "distributed.nanny.environ": {"POST-SPAWN": 2},
+    },
+)
+async def test_environment_variable_pre_post_spawn(c, s, n):
+    assert n.env == {"PRE-SPAWN": "1", "POST-SPAWN": "2"}
+    results = await c.run(lambda: os.environ)
+    assert results[n.worker_address]["PRE-SPAWN"] == "1"
+    assert results[n.worker_address]["POST-SPAWN"] == "2"
+
+    del os.environ["PRE-SPAWN"]
+    assert "POST-SPAWN" not in os.environ
 
 
 @gen_cluster(nthreads=[])
@@ -399,9 +426,9 @@ async def test_lifetime(s):
 
 
 @gen_cluster(client=True, nthreads=[])
-async def test_nanny_closes_cleanly_2(c, s):
+async def test_nanny_closes_cleanly_if_worker_is_terminated(c, s):
     async with Nanny(s.address) as n:
-        with c.rpc(n.worker_address) as w:
+        async with c.rpc(n.worker_address) as w:
             IOLoop.current().add_callback(w.terminate)
             start = time()
             while n.status != Status.closed:
@@ -426,8 +453,11 @@ async def test_nanny_port_range(c, s):
         assert n1.port == 9867  # Selects first port in range
         async with Nanny(s.address, port=nanny_port, worker_port=worker_port) as n2:
             assert n2.port == 9868  # Selects next port in range
-            with pytest.raises(
-                ValueError, match="Could not start Nanny"
+            with raises_with_cause(
+                RuntimeError,
+                "Nanny failed to start.",
+                ValueError,
+                "with port 9867:9868",
             ):  # No more ports left
                 async with Nanny(s.address, port=nanny_port, worker_port=worker_port):
                     pass
@@ -452,7 +482,7 @@ class KeyboardInterruptWorker(worker.Worker):
 
 @pytest.mark.parametrize("protocol", ["tcp", "ucx"])
 @gen_test()
-async def test_nanny_closed_by_keyboard_interrupt(protocol):
+async def test_nanny_closed_by_keyboard_interrupt(ucx_loop, protocol):
     if protocol == "ucx":  # Skip if UCX isn't available
         pytest.importorskip("ucp")
 
@@ -465,21 +495,29 @@ async def test_nanny_closed_by_keyboard_interrupt(protocol):
             assert "remove-worker" in str(s.events)
 
 
-class StartException(Exception):
-    pass
-
-
 class BrokenWorker(worker.Worker):
-    async def start(self):
-        raise StartException("broken")
+    async def start_unsafe(self):
+        raise ValueError("broken")
 
 
 @gen_cluster(nthreads=[])
 async def test_worker_start_exception(s):
-    # make sure this raises the right Exception:
-    with pytest.raises(StartException):
-        async with Nanny(s.address, worker_class=BrokenWorker) as n:
-            pass
+    nanny = Nanny(s.address, worker_class=BrokenWorker)
+    with captured_logger(logger="distributed.nanny", level=logging.WARNING) as logs:
+        with raises_with_cause(
+            RuntimeError,
+            "Nanny failed to start",
+            RuntimeError,
+            "BrokenWorker failed to start",
+        ):
+            async with nanny:
+                pass
+    assert nanny.status == Status.failed
+    # ^ NOTE: `Nanny.close` sets it to `closed`, then `Server.start._close_on_failure` sets it to `failed`
+    assert nanny.process is None
+    assert "Restarting worker" not in logs.getvalue()
+    # Avoid excessive spewing. (It's also printed once extra within the subprocess, which is okay.)
+    assert logs.getvalue().count("ValueError: broken") == 1, logs.getvalue()
 
 
 @gen_cluster(nthreads=[])
@@ -560,3 +598,107 @@ async def test_restart_memory(c, s, n):
 
     while not s.workers:
         await asyncio.sleep(0.1)
+
+
+class BlockClose(WorkerPlugin):
+    def __init__(self, close_happened):
+        self.close_happened = close_happened
+
+    async def teardown(self, worker):
+        # Never let the worker cleanly shut down, so it has to be killed
+        self.close_happened.set()
+        while True:
+            await asyncio.sleep(10)
+
+
+@pytest.mark.slow
+@gen_cluster(nthreads=[])
+async def test_close_joins(s):
+    close_happened = get_mp_context().Event()
+
+    nanny = Nanny(s.address, plugins=[BlockClose(close_happened)])
+    async with nanny:
+        p = nanny.process
+        assert p
+        close_t = asyncio.create_task(nanny.close())
+
+        while not close_happened.wait(0):
+            await asyncio.sleep(0.01)
+
+        assert not close_t.done()
+        assert nanny.status == Status.closing
+        assert nanny.process and nanny.process.status == Status.stopping
+
+        await close_t
+
+        assert nanny.status == Status.closed
+        assert not nanny.process
+
+        assert p.status == Status.stopped
+        assert not p.process
+
+
+@gen_cluster(Worker=Nanny, nthreads=[("", 1)])
+async def test_scheduler_crash_doesnt_restart(s, a):
+    # Simulate a scheduler crash by disconnecting it first
+    # (`s.close()` would tell workers to cleanly shut down)
+    bcomm = next(iter(s.stream_comms.values()))
+    bcomm.abort()
+    await s.close()
+
+    while a.status not in {Status.closing_gracefully, Status.closed}:
+        await asyncio.sleep(0.01)
+
+    await a.finished()
+    assert a.status == Status.closed
+    assert a.process is None
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not LINUX, reason="Requires GNU libc")
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    nthreads=[("", 2)],
+    worker_kwargs={"memory_limit": "2GiB"},
+)
+async def test_malloc_trim_threshold(c, s, a):
+    """Test that the nanny sets the MALLOC_TRIM_THRESHOLD_ environment variable before
+    starting the worker process.
+
+    This test relies on these settings to work:
+
+        distributed.nanny.pre-spawn-environ.MALLOC_TRIM_THRESHOLD_: 65536
+        distributed.worker.multiprocessing-method: spawn
+
+    We're deliberately not setting them explicitly in @gen_cluster above, as we want
+    this test to trip if somebody changes distributed.yaml.
+
+    Note
+    ----
+    This test may start failing in a future Python version if CPython switches to
+    using mimalloc by default. If it does, a thorough benchmarking exercise is needed.
+    """
+    da = pytest.importorskip("dask.array")
+
+    a = da.random.random(
+        2**29 // 8,  # 0.5 GiB,
+        chunks=160 * 2**10 // 8,  # 160 kiB
+    ).persist()
+    await wait(a)
+    # Wait for heartbeat
+    while s.memory.process < 2**29:
+        await asyncio.sleep(0.01)
+    del a
+
+    # This is the delicate bit, as it relies on
+    # 1. PyMem_Free() to be quick to invoke glibc free() when memory becomes available
+    # 2. glibc free() to be quick to invoke the kernel's sbrk() when the same happens
+    #
+    # At the moment of writing, the readings are:
+    # - 122 MiB after starting a new worker
+    # - 139 MiB after computing a trivial dask.array collection
+    # - 185 MiB at the end of this test, with MALLOC_TRIM_THRESHOLD_=65536
+    # - 698 MiB at the end of this test, without MALLOC_TRIM_THRESHOLD_
+    while s.memory.process > 250 * 2**20:
+        await asyncio.sleep(0.01)

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pytest
 
 from distributed.counter import Counter
@@ -42,6 +44,6 @@ def test_counter(loop):
     c = Counter(loop=loop)
     c.add(1)
 
-    for i in range(5):
+    for _ in range(5):
         c.shift()
         assert abs(sum(cc[1] for cc in c.components) - 1) < 1e-13

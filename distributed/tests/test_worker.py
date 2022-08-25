@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import importlib
 import logging
 import os
 import sys
+import tempfile
 import threading
 import traceback
+import warnings
 import weakref
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -18,6 +21,7 @@ from unittest import mock
 import psutil
 import pytest
 from tlz import first, pluck, sliding_window
+from tornado.ioloop import IOLoop
 
 import dask
 from dask import delayed
@@ -29,45 +33,59 @@ from distributed import (
     Client,
     Event,
     Nanny,
-    Reschedule,
+    WorkerPlugin,
     default_client,
     get_client,
     get_worker,
+    profile,
     wait,
 )
 from distributed.comm.registry import backends
-from distributed.compatibility import LINUX, WINDOWS
+from distributed.compatibility import LINUX, WINDOWS, to_thread
 from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
-from distributed.profile import wait_profiler
 from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
-from distributed.utils import TimeoutError
 from distributed.utils_test import (
+    BlockedExecute,
+    BlockedGatherDep,
+    BlockedGetData,
     TaskStateMetadataPlugin,
     _LockedCommPool,
-    assert_worker_story,
+    assert_story,
     captured_logger,
     dec,
     div,
+    freeze_batched_send,
+    freeze_data_fetching,
     gen_cluster,
     gen_test,
     inc,
     mul,
     nodebug,
+    raises_with_cause,
     slowinc,
     slowsum,
+    wait_for_state,
 )
 from distributed.worker import (
-    InvalidTransition,
     Worker,
     benchmark_disk,
     benchmark_memory,
     benchmark_network,
     error_message,
     logger,
+)
+from distributed.worker_state_machine import (
+    AcquireReplicasEvent,
+    ComputeTaskEvent,
+    ExecuteFailureEvent,
+    ExecuteSuccessEvent,
+    RemoveReplicasEvent,
+    SerializedTask,
+    StealRequestEvent,
 )
 
 pytestmark = pytest.mark.ci1
@@ -83,9 +101,9 @@ async def test_worker_nthreads(s):
 async def test_str(s, a, b):
     assert a.address in str(a)
     assert a.address in repr(a)
-    assert str(a.nthreads) in str(a)
-    assert str(a.nthreads) in repr(a)
-    assert str(a.executing_count) in repr(a)
+    assert str(a.state.nthreads) in str(a)
+    assert str(a.state.nthreads) in repr(a)
+    assert str(a.state.executing_count) in repr(a)
 
 
 @gen_cluster(nthreads=[])
@@ -111,7 +129,7 @@ async def test_worker_bad_args(c, s, a, b):
 
     x = c.submit(NoReprObj, workers=a.address)
     await wait(x)
-    assert not a.executing_count
+    assert not a.state.executing_count
     assert a.data
 
     def bad_func(*args, **kwargs):
@@ -143,7 +161,7 @@ async def test_worker_bad_args(c, s, a, b):
     y = c.submit(bad_func, x, k=x, workers=b.address)
     await wait(y)
 
-    assert not b.executing_count
+    assert not b.state.executing_count
     assert y.status == "error"
     # Make sure job died because of bad func and not because of bad
     # argument.
@@ -172,7 +190,7 @@ async def test_upload_file(c, s, a, b):
     assert not os.path.exists(os.path.join(b.local_directory, "foobar.py"))
     assert a.local_directory != b.local_directory
 
-    with rpc(a.address) as aa, rpc(b.address) as bb:
+    async with rpc(a.address) as aa, rpc(b.address) as bb:
         await asyncio.gather(
             aa.upload_file(filename="foobar.py", data=b"x = 123"),
             bb.upload_file(filename="foobar.py", data="x = 123"),
@@ -191,7 +209,7 @@ async def test_upload_file(c, s, a, b):
     assert result == 123
 
     await c.close()
-    await s.close(close_workers=True)
+    await s.close()
     assert not os.path.exists(os.path.join(a.local_directory, "foobar.py"))
 
 
@@ -287,7 +305,7 @@ async def test_upload_pyz(c, s, a, b):
 async def test_upload_large_file(c, s, a, b):
     pytest.importorskip("crick")
     await asyncio.sleep(0.05)
-    with rpc(a.address) as aa:
+    async with rpc(a.address) as aa:
         await aa.upload_file(filename="myfile.dat", data=b"0" * 100000000)
         await asyncio.sleep(0.05)
         assert a.digests["tick-duration"].components[0].max() < 0.050
@@ -295,7 +313,7 @@ async def test_upload_large_file(c, s, a, b):
 
 @gen_cluster()
 async def test_broadcast(s, a, b):
-    with rpc(s.address) as cc:
+    async with rpc(s.address) as cc:
         results = await cc.broadcast(msg={"op": "ping"})
         assert results == {a.address: b"pong", b.address: b"pong"}
 
@@ -314,8 +332,8 @@ async def test_worker_port_range(s):
         assert w1.port == 9867  # Selects first port in range
         async with Worker(s.address, port=port) as w2:
             assert w2.port == 9868  # Selects next port in range
-            with pytest.raises(
-                ValueError, match="Could not start Worker"
+            with raises_with_cause(
+                RuntimeError, None, ValueError, match_cause="Could not start Worker"
             ):  # No more ports left
                 async with Worker(s.address, port=port):
                     pass
@@ -402,8 +420,10 @@ async def test_plugin_exception():
         def setup(self, worker=None):
             raise ValueError("Setup failed")
 
-    async with Scheduler(port=0) as s:
-        with pytest.raises(ValueError, match="Setup failed"):
+    async with Scheduler(port=0, dashboard_address=":0") as s:
+        with raises_with_cause(
+            RuntimeError, "Worker failed to start", ValueError, "Setup failed"
+        ):
             async with Worker(
                 s.address,
                 plugins={
@@ -423,9 +443,14 @@ async def test_plugin_multiple_exceptions():
         def setup(self, worker=None):
             raise RuntimeError("MyPlugin2 Error")
 
-    async with Scheduler(port=0) as s:
+    async with Scheduler(port=0, dashboard_address=":0") as s:
         # There's no guarantee on the order of which exception is raised first
-        with pytest.raises((ValueError, RuntimeError), match="MyPlugin.* Error"):
+        with raises_with_cause(
+            RuntimeError,
+            None,
+            (ValueError, RuntimeError),
+            match_cause="MyPlugin.* Error",
+        ):
             with captured_logger("distributed.worker") as logger:
                 async with Worker(
                     s.address,
@@ -444,7 +469,12 @@ async def test_plugin_multiple_exceptions():
 @gen_test()
 async def test_plugin_internal_exception():
     async with Scheduler(port=0) as s:
-        with pytest.raises(UnicodeDecodeError, match="codec can't decode"):
+        with raises_with_cause(
+            RuntimeError,
+            "Worker failed to start",
+            UnicodeDecodeError,
+            match_cause="codec can't decode",
+        ):
             async with Worker(
                 s.address,
                 plugins={
@@ -457,7 +487,7 @@ async def test_plugin_internal_exception():
 @gen_cluster(client=True)
 async def test_gather(c, s, a, b):
     x, y = await c.scatter(["x", "y"], workers=[b.address])
-    with rpc(a.address) as aa:
+    async with rpc(a.address) as aa:
         resp = await aa.gather(who_has={x.key: [b.address], y.key: [b.address]})
 
     assert resp == {"status": "OK"}
@@ -469,7 +499,7 @@ async def test_gather(c, s, a, b):
 async def test_gather_missing_keys(c, s, a, b):
     """A key is missing. Other keys are gathered successfully."""
     x = await c.scatter("x", workers=[b.address])
-    with rpc(a.address) as aa:
+    async with rpc(a.address) as aa:
         resp = await aa.gather(who_has={x.key: [b.address], "y": [b.address]})
 
     assert resp == {"status": "partial-fail", "keys": {"y": (b.address,)}}
@@ -485,7 +515,7 @@ async def test_gather_missing_workers(c, s, a, b):
     bad_addr = "tcp://127.0.0.1:12345"
     x = await c.scatter("x", workers=[b.address])
 
-    with rpc(a.address) as aa:
+    async with rpc(a.address) as aa:
         resp = await aa.gather(who_has={x.key: [b.address], "y": [bad_addr]})
 
     assert resp == {"status": "partial-fail", "keys": {"y": (bad_addr,)}}
@@ -503,7 +533,7 @@ async def test_gather_missing_workers_replicated(c, s, a, b, missing_first):
     bad_addr = "tcp://127.0.0.1:12345"
     # Order matters! Test both
     addrs = [bad_addr, b.address] if missing_first else [b.address, bad_addr]
-    with rpc(a.address) as aa:
+    async with rpc(a.address) as aa:
         resp = await aa.gather(who_has={x.key: addrs})
     assert resp == {"status": "OK"}
     assert a.data[x.key] == b.data[x.key] == "x"
@@ -511,8 +541,22 @@ async def test_gather_missing_workers_replicated(c, s, a, b, missing_first):
 
 @gen_cluster(nthreads=[])
 async def test_io_loop(s):
-    async with Worker(s.address, loop=s.loop) as w:
-        assert w.io_loop is s.loop
+    async with Worker(s.address) as w:
+        assert w.io_loop is w.loop is s.loop
+
+
+@gen_cluster(nthreads=[])
+async def test_io_loop_alternate_loop(s, loop):
+    async def main():
+        with pytest.warns(
+            DeprecationWarning,
+            match=r"The `loop` argument to `Worker` is ignored, and will be "
+            r"removed in a future release. The Worker always binds to the current loop",
+        ):
+            async with Worker(s.address, loop=loop) as w:
+                assert w.io_loop is w.loop is IOLoop.current()
+
+    await to_thread(asyncio.run, main())
 
 
 @gen_cluster(client=True)
@@ -530,6 +574,15 @@ async def test_access_key(c, s, a, b):
 @gen_cluster(client=True)
 async def test_run_dask_worker(c, s, a, b):
     def f(dask_worker=None):
+        return dask_worker.id
+
+    response = await c._run(f)
+    assert response == {a.address: a.id, b.address: b.id}
+
+
+@gen_cluster(client=True)
+async def test_run_dask_worker_kwonlyarg(c, s, a, b):
+    def f(*, dask_worker=None):
         return dask_worker.id
 
     response = await c._run(f)
@@ -559,7 +612,7 @@ async def test_Executor(c, s):
             assert e._threads  # had to do some work
 
 
-@gen_cluster(nthreads=[("127.0.0.1", 1)], worker_kwargs={"reconnect": False})
+@gen_cluster(nthreads=[("127.0.0.1", 1)])
 async def test_close_on_disconnect(s, w):
     await s.close()
 
@@ -600,7 +653,7 @@ async def test_clean(c, s, a, b):
     await y
 
     collections = [
-        a.tasks,
+        a.state.tasks,
         a.data,
         a.threads,
     ]
@@ -610,7 +663,7 @@ async def test_clean(c, s, a, b):
     x.release()
     y.release()
 
-    while x.key in a.tasks:
+    while x.key in a.state.tasks:
         await asyncio.sleep(0.01)
 
     for c in collections:
@@ -619,11 +672,13 @@ async def test_clean(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_message_breakup(c, s, a, b):
-    n = 100000
-    a.target_message_size = 10 * n
-    b.target_message_size = 10 * n
-    xs = [c.submit(mul, b"%d" % i, n, workers=a.address) for i in range(30)]
-    y = c.submit(lambda *args: None, xs, workers=b.address)
+    n = 100_000
+    a.state.target_message_size = 10 * n
+    b.state.target_message_size = 10 * n
+    xs = [
+        c.submit(mul, b"%d" % i, n, key=f"x{i}", workers=[a.address]) for i in range(30)
+    ]
+    y = c.submit(lambda _: None, xs, key="y", workers=[b.address])
     await y
 
     assert 2 <= len(b.incoming_transfer_log) <= 20
@@ -635,16 +690,16 @@ async def test_message_breakup(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_types(c, s, a, b):
-    assert all(ts.type is None for ts in a.tasks.values())
-    assert all(ts.type is None for ts in b.tasks.values())
+    assert all(ts.type is None for ts in a.state.tasks.values())
+    assert all(ts.type is None for ts in b.state.tasks.values())
     x = c.submit(inc, 1, workers=a.address)
     await wait(x)
-    assert a.tasks[x.key].type == int
+    assert a.state.tasks[x.key].type == int
 
     y = c.submit(inc, x, workers=b.address)
     await wait(y)
-    assert b.tasks[x.key].type == int
-    assert b.tasks[y.key].type == int
+    assert b.state.tasks[x.key].type == int
+    assert b.state.tasks[y.key].type == int
 
     await c._cancel(y)
 
@@ -653,7 +708,7 @@ async def test_types(c, s, a, b):
         await asyncio.sleep(0.01)
         assert time() < start + 5
 
-    assert y.key not in b.tasks
+    assert y.key not in b.state.tasks
 
 
 @gen_cluster()
@@ -667,27 +722,27 @@ async def test_system_monitor(s, a, b):
 )
 async def test_restrictions(c, s, a, b):
     # Worker has resource available
-    assert a.available_resources == {"A": 1}
+    assert a.state.available_resources == {"A": 1}
     # Resource restrictions
     x = c.submit(inc, 1, resources={"A": 1})
     await x
-    ts = a.tasks[x.key]
+    ts = a.state.tasks[x.key]
     assert ts.resource_restrictions == {"A": 1}
-    await c._cancel(x)
+    await c.cancel([x])
 
-    while ts.state != "memory":
+    while ts.state == "executing":
         # Resource should be unavailable while task isn't finished
-        assert a.available_resources == {"A": 0}
+        assert a.state.available_resources == {"A": 0}
         await asyncio.sleep(0.01)
 
     # Resource restored after task is in memory
-    assert a.available_resources["A"] == 1
+    assert a.state.available_resources["A"] == 1
 
 
 @gen_cluster(client=True)
 async def test_clean_nbytes(c, s, a, b):
     L = [delayed(inc)(i) for i in range(10)]
-    for i in range(5):
+    for _ in range(5):
         L = [delayed(add)(x, y) for x, y in sliding_window(2, L)]
     total = delayed(sum)(L)
 
@@ -696,34 +751,45 @@ async def test_clean_nbytes(c, s, a, b):
 
     await asyncio.sleep(1)
     assert (
-        len(list(filter(None, [ts.nbytes for ts in a.tasks.values()])))
-        + len(list(filter(None, [ts.nbytes for ts in b.tasks.values()])))
+        len(list(filter(None, [ts.nbytes for ts in a.state.tasks.values()])))
+        + len(list(filter(None, [ts.nbytes for ts in b.state.tasks.values()])))
         == 1
     )
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 20)
-async def test_gather_many_small(c, s, a, *workers):
-    """If the dependencies of a given task are very small, do not limit the
-    number of concurrent outgoing connections
+@pytest.mark.parametrize("as_deps", [True, False])
+@gen_cluster(client=True, nthreads=[("", 1)] * 21)
+async def test_gather_many_small(c, s, a, *snd_workers, as_deps):
+    """If the dependencies of a given task are very small, do not limit the number of
+    concurrent outgoing connections. If multiple small fetches from the same worker are
+    scheduled all at once, they will result in a single call to gather_dep.
     """
-    a.total_out_connections = 2
-    futures = await c._scatter(list(range(100)))
+    a.state.total_out_connections = 2
+    futures = await c.scatter(
+        {f"x{i}": i for i in range(100)},
+        workers=[w.address for w in snd_workers],
+    )
+    assert all(w.data for w in snd_workers)
 
-    assert all(w.data for w in workers)
+    if as_deps:
+        future = c.submit(lambda _: None, futures, key="y", workers=[a.address])
+        await wait(future)
+    else:
+        s.request_acquire_replicas(a.address, list(futures), stimulus_id="test")
+        while len(a.data) < 100:
+            await asyncio.sleep(0.01)
 
-    def f(*args):
-        return 10
+    assert a.state.comm_nbytes == 0
 
-    future = c.submit(f, *futures, workers=a.address)
-    await wait(future)
-
-    types = list(pluck(0, a.log))
-    req = [i for i, t in enumerate(types) if t == "request-dep"]
-    recv = [i for i, t in enumerate(types) if t == "receive-dep"]
-    assert min(recv) > max(req)
-
-    assert a.comm_nbytes == 0
+    story = a.state.story("request-dep", "receive-dep")
+    assert len(story) == 40  # 1 request-dep + 1 receive-dep per sender worker
+    # All GatherDep instructions are fired at the same time; each fetches all keys
+    # available on the sender worker
+    for ev in story[:20]:
+        assert ev[0] == "request-dep"
+        assert len(ev[2]) > 1
+    for ev in story[20:]:
+        assert ev[0] == "receive-dep"
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
@@ -734,7 +800,7 @@ async def test_multiple_transfers(c, s, w1, w2, w3):
 
     await wait(z)
 
-    r = w3.tasks[z.key].startstops
+    r = w3.state.tasks[z.key].startstops
     transfers = [t for t in r if t["action"] == "transfer"]
     assert len(transfers) == 2
 
@@ -810,17 +876,16 @@ async def test_hold_onto_dependents(c, s, a, b):
         await asyncio.sleep(0.1)
 
 
-# Normally takes >2s but it has been observed to take >30s occasionally
-@pytest.mark.slow
-@gen_test(timeout=120)
+@pytest.mark.xfail(reason="asyncio.wait_for bug")
+@gen_test()
 async def test_worker_death_timeout():
     w = Worker("tcp://127.0.0.1:12345", death_timeout=0.1)
-    with pytest.raises(TimeoutError) as info:
+    with pytest.raises(asyncio.TimeoutError) as info:
         await w
 
     assert "Worker" in str(info.value)
-    assert "timed out" in str(info.value) or "failed to start" in str(info.value)
-    assert w.status == Status.closed
+    assert "timed out" in str(info.value)
+    assert w.status == Status.failed
 
 
 @gen_cluster(client=True)
@@ -831,7 +896,7 @@ async def test_stop_doing_unnecessary_work(c, s, a, b):
     del futures
 
     start = time()
-    while a.executing_count:
+    while a.state.executing_count:
         await asyncio.sleep(0.01)
         assert time() - start < 0.5
 
@@ -853,7 +918,7 @@ async def test_priorities(c, s, w):
 
     log = [
         t[0]
-        for t in w.log
+        for t in w.state.log
         if t[1] == "executing" and t[2] == "memory" and not t[0].startswith("finalize")
     ]
 
@@ -872,25 +937,27 @@ async def test_heartbeats(c, s, a, b):
 
 
 @pytest.mark.parametrize("worker", [Worker, Nanny])
-def test_worker_dir(worker):
-    with tmpfile() as fn:
+def test_worker_dir(worker, tmpdir):
+    @gen_cluster(client=True, worker_kwargs={"local_directory": str(tmpdir)})
+    async def test_worker_dir(c, s, a, b):
+        directories = [w.local_directory for w in s.workers.values()]
+        assert all(d.startswith(str(tmpdir)) for d in directories)
+        assert len(set(directories)) == 2  # distinct
 
-        @gen_cluster(client=True, worker_kwargs={"local_directory": fn})
-        async def test_worker_dir(c, s, a, b):
-            directories = [w.local_directory for w in s.workers.values()]
-            assert all(d.startswith(fn) for d in directories)
-            assert len(set(directories)) == 2  # distinct
-
-        test_worker_dir()
+    test_worker_dir()
 
 
-@gen_cluster(nthreads=[])
-async def test_false_worker_dir(s):
-    async with Worker(s.address, local_directory="") as w:
-        local_directory = w.local_directory
+@gen_cluster(client=True, nthreads=[], config={"temporary-directory": None})
+async def test_default_worker_dir(c, s):
+    expect = os.path.join(tempfile.gettempdir(), "dask-worker-space")
 
-    cwd = os.getcwd()
-    assert os.path.dirname(local_directory) == os.path.join(cwd, "dask-worker-space")
+    async with Worker(s.address) as w:
+        assert os.path.dirname(w.local_directory) == expect
+
+    async with Nanny(s.address) as n:
+        assert n.local_directory == expect
+        results = await c.run(lambda dask_worker: dask_worker.local_directory)
+        assert os.path.dirname(results[n.worker_address]) == expect
 
 
 @gen_cluster(client=True)
@@ -952,7 +1019,11 @@ def test_get_client_sync(client):
 @gen_cluster(client=True)
 async def test_get_client_coroutine(c, s, a, b):
     async def f():
-        client = await get_client()
+        # TODO: the existence of `await get_client()` implies the possibility
+        # of `async with get_client()` and that will kill the workers' client
+        # if you do that. We really don't want users to do that.
+        # https://github.com/dask/distributed/pull/6921/
+        client = get_client()
         future = client.submit(inc, 10)
         result = await future
         return result
@@ -985,7 +1056,7 @@ async def test_worker_fds(s):
     proc = psutil.Process()
     before = psutil.Process().num_fds()
 
-    async with Worker(s.address, loop=s.loop):
+    async with Worker(s.address):
         assert proc.num_fds() > before
 
     while proc.num_fds() > before:
@@ -1053,7 +1124,12 @@ async def test_scheduler_delay(c, s, a, b):
 
 
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
-@gen_cluster(client=True)
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.enabled": True,
+    },
+)
 async def test_statistical_profiling(c, s, a, b):
     futures = c.map(slowinc, range(10), delay=0.1)
     await wait(futures)
@@ -1068,6 +1144,7 @@ async def test_statistical_profiling(c, s, a, b):
     client=True,
     timeout=30,
     config={
+        "distributed.worker.profile.enabled": True,
         "distributed.worker.profile.interval": "1ms",
         "distributed.worker.profile.cycle": "100ms",
     },
@@ -1085,7 +1162,13 @@ async def test_statistical_profiling_2(c, s, a, b):
             break
 
 
-@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "50 ms"})
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.enabled": True,
+        "distributed.worker.profile.cycle": "100ms",
+    },
+)
 async def test_statistical_profiling_cycle(c, s, a, b):
     futures = c.map(slowinc, range(20), delay=0.05)
     await wait(futures)
@@ -1113,23 +1196,6 @@ async def test_get_current_task(c, s, a, b):
 
     result = await c.submit(some_name)
     assert result.startswith("some_name")
-
-
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
-async def test_reschedule(c, s, a, b):
-    await s.extensions["stealing"].stop()
-    a_address = a.address
-
-    def f(x):
-        sleep(0.1)
-        if get_worker().address == a_address:
-            raise Reschedule()
-
-    futures = c.map(f, range(4))
-    futures2 = c.map(slowinc, range(10), delay=0.1, workers=a.address)
-    await wait(futures)
-
-    assert all(f.key in b.data for f in futures)
 
 
 @gen_cluster(nthreads=[])
@@ -1163,7 +1229,7 @@ def test_get_worker_name(client):
 @gen_cluster(nthreads=[], client=True)
 async def test_scheduler_address_config(c, s):
     with dask.config.set({"scheduler-address": s.address}):
-        worker = await Worker(loop=s.loop)
+        worker = await Worker()
         assert worker.scheduler.address == s.address
     await worker.close()
 
@@ -1257,7 +1323,7 @@ async def test_register_worker_callbacks(c, s, a, b):
     assert list(result.values()) == [False] * 2
 
     # Start a worker and check that startup is not run
-    worker = await Worker(s.address, loop=s.loop)
+    worker = await Worker(s.address)
     result = await c.run(test_import, workers=[worker.address])
     assert list(result.values()) == [False]
     await worker.close()
@@ -1271,7 +1337,7 @@ async def test_register_worker_callbacks(c, s, a, b):
     assert list(result.values()) == [True] * 2
 
     # Start a worker and check it is ran on it
-    worker = await Worker(s.address, loop=s.loop)
+    worker = await Worker(s.address)
     result = await c.run(test_import, workers=[worker.address])
     assert list(result.values()) == [True]
     await worker.close()
@@ -1285,7 +1351,7 @@ async def test_register_worker_callbacks(c, s, a, b):
     assert list(result.values()) == [True] * 2
 
     # Start a worker and check it is ran on it
-    worker = await Worker(s.address, loop=s.loop)
+    worker = await Worker(s.address)
     result = await c.run(test_import, workers=[worker.address])
     assert list(result.values()) == [True]
     result = await c.run(test_startup2, workers=[worker.address])
@@ -1365,7 +1431,7 @@ async def test_interface_async(Worker):
 @pytest.mark.gpu
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
 @gen_test()
-async def test_protocol_from_scheduler_address(Worker):
+async def test_protocol_from_scheduler_address(ucx_loop, Worker):
     pytest.importorskip("ucp")
 
     async with Scheduler(protocol="ucx", dashboard_address=":0") as s:
@@ -1410,24 +1476,16 @@ def assert_amm_transfer_story(key: str, w_from: Worker, w_to: Worker) -> None:
     """Test that an in-memory key was transferred from worker w_from to worker w_to by
     the Active Memory Manager and it was not recalculated on w_to
     """
-    assert_worker_story(
-        w_to.story(key),
+    assert_story(
+        w_to.state.story(key),
         [
-            (key, "ensure-task-exists", "released"),
-            (key, "released", "fetch", "fetch", {}),
-            ("gather-dependencies", w_from.address, lambda set_: key in set_),
             (key, "fetch", "flight", "flight", {}),
             ("request-dep", w_from.address, lambda set_: key in set_),
             ("receive-dep", w_from.address, lambda set_: key in set_),
             (key, "put-in-memory"),
             (key, "flight", "memory", "memory", {}),
         ],
-        # There may be additional ('missing', 'fetch', 'fetch') events if transfers
-        # are slow enough that the Active Memory Manager ends up requesting them a
-        # second time. Here we're asserting that no matter how slow CI is, all
-        # transfers will be completed within 2 seconds (hardcoded interval in
-        # Scheduler.retire_worker when AMM is not enabled).
-        strict=True,
+        strict=False,
     )
     assert key in w_to.data
     # The key may or may not still be in w_from.data, depending if the AMM had the
@@ -1445,11 +1503,13 @@ async def test_close_gracefully(c, s, a, b):
     # be replicated by retire_workers().
     while True:
         mem = {k for k, ts in s.tasks.items() if ts.state == "memory"}
-        if len(mem) >= 8 and any(ts.state == "executing" for ts in b.tasks.values()):
+        if len(mem) >= 8 and any(
+            ts.state == "executing" for ts in b.state.tasks.values()
+        ):
             break
         await asyncio.sleep(0.01)
 
-    assert any(ts for ts in b.tasks.values() if ts.state == "executing")
+    assert any(ts for ts in b.state.tasks.values() if ts.state == "executing")
 
     await b.close_gracefully()
 
@@ -1507,7 +1567,9 @@ async def test_close_async_task_handles_cancellation(c, s, a):
         task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
     )
     start = time()
-    with captured_logger("distributed.worker", level=logging.ERROR) as logger:
+    with captured_logger(
+        "distributed.worker_state_machine", level=logging.ERROR
+    ) as logger:
         await a.close(timeout=1)
     assert "Failed to cancel asyncio task" in logger.getvalue()
     assert time() - start < 5
@@ -1647,24 +1709,115 @@ async def test_workerstate_executing(c, s, a):
     await f
 
 
-@pytest.mark.parametrize("reconnect", [True, False])
+@gen_cluster(nthreads=[("", 1)])
+async def test_shutdown_on_scheduler_comm_closed(s, a):
+    with captured_logger("distributed.worker", level=logging.INFO) as logger:
+        # Temporary network disconnect
+        s.stream_comms[a.address].abort()
+
+        await a.finished()
+        assert a.status == Status.closed
+        assert not s.workers
+        assert not s.stream_comms
+        assert "Connection to scheduler broken" in logger.getvalue()
+
+
 @gen_cluster(nthreads=[])
-async def test_heartbeat_comm_closed(s, monkeypatch, reconnect):
+async def test_heartbeat_comm_closed(s, monkeypatch):
     with captured_logger("distributed.worker", level=logging.WARNING) as logger:
 
         def bad_heartbeat_worker(*args, **kwargs):
             raise CommClosedError()
 
-        async with await Worker(s.address, reconnect=reconnect) as w:
+        async with await Worker(s.address) as w:
             # Trigger CommClosedError during worker heartbeat
             monkeypatch.setattr(w.scheduler, "heartbeat_worker", bad_heartbeat_worker)
 
             await w.heartbeat()
-            if reconnect:
-                assert w.status == Status.running
-            else:
-                assert w.status == Status.closed
+            assert w.status == Status.closed
+            while s.workers:
+                await asyncio.sleep(0.01)
     assert "Heartbeat to scheduler failed" in logger.getvalue()
+
+
+@gen_cluster(nthreads=[("", 1)], worker_kwargs={"heartbeat_interval": "100s"})
+async def test_heartbeat_missing(s, a, monkeypatch):
+    async def missing_heartbeat_worker(*args, **kwargs):
+        return {"status": "missing"}
+
+    with captured_logger("distributed.worker", level=logging.WARNING) as wlogger:
+        monkeypatch.setattr(a.scheduler, "heartbeat_worker", missing_heartbeat_worker)
+        await a.heartbeat()
+        assert a.status == Status.closed
+        assert "Scheduler was unaware of this worker" in wlogger.getvalue()
+
+        while s.workers:
+            await asyncio.sleep(0.01)
+
+
+@gen_cluster(nthreads=[("", 1)], worker_kwargs={"heartbeat_interval": "100s"})
+async def test_heartbeat_missing_real_cluster(s, a):
+    # The idea here is to create a situation where `s.workers[a.address]`,
+    # doesn't exist, but the worker is not yet closed and can still heartbeat.
+    # Ideally, this state would be impossible, and this test would be removed,
+    # and the `status: missing` handling would be replaced with an assertion error.
+    # However, `Scheduler.remove_worker` and `Worker.close` both currently leave things
+    # in degenerate, half-closed states while they're running (and yielding control
+    # via `await`).
+    # When https://github.com/dask/distributed/issues/6390 is fixed, this should no
+    # longer be possible.
+
+    assumption_msg = "Test assumptions have changed. Race condition may have been fixed; this test may be removable."
+
+    with captured_logger(
+        "distributed.worker", level=logging.WARNING
+    ) as wlogger, captured_logger(
+        "distributed.scheduler", level=logging.WARNING
+    ) as slogger:
+        with freeze_batched_send(s.stream_comms[a.address]):
+            await s.remove_worker(a.address, stimulus_id="foo")
+            assert not s.workers
+
+            # The scheduler has removed the worker state, but the close message has
+            # not reached the worker yet.
+            assert a.status == Status.running, assumption_msg
+            assert a.periodic_callbacks["heartbeat"].is_running(), assumption_msg
+
+            # The heartbeat PeriodicCallback is still running, so one _could_ fire
+            # before the `op: close` message reaches the worker. We simulate that explicitly.
+            await a.heartbeat()
+
+            # The heartbeat receives a `status: missing` from the scheduler, so it
+            # closes the worker. Heartbeats aren't sent over batched comms, so
+            # `freeze_batched_send` doesn't affect them.
+            assert a.status == Status.closed
+
+            assert "Scheduler was unaware of this worker" in wlogger.getvalue()
+            assert "Received heartbeat from unregistered worker" in slogger.getvalue()
+
+        assert not s.workers
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    Worker=Nanny,
+    worker_kwargs={"heartbeat_interval": "1ms"},
+)
+async def test_heartbeat_missing_restarts(c, s, n):
+    old_heartbeat_handler = s.handlers["heartbeat_worker"]
+    s.handlers["heartbeat_worker"] = lambda *args, **kwargs: {"status": "missing"}
+
+    assert n.process
+    await n.process.stopped.wait()
+
+    assert not s.workers
+    s.handlers["heartbeat_worker"] = old_heartbeat_handler
+
+    await n.process.running.wait()
+    assert n.status == Status.running
+
+    await c.wait_for_workers(1)
 
 
 @gen_cluster(nthreads=[])
@@ -1684,13 +1837,13 @@ async def test_bad_local_directory(s):
 
 @gen_cluster(client=True, nthreads=[])
 async def test_taskstate_metadata(c, s):
-    async with await Worker(s.address) as w:
+    async with await Worker(s.address) as a:
         await c.register_worker_plugin(TaskStateMetadataPlugin())
 
         f = c.submit(inc, 1)
         await f
 
-        ts = w.tasks[f.key]
+        ts = a.state.tasks[f.key]
         assert "start_time" in ts.metadata
         assert "stop_time" in ts.metadata
         assert ts.metadata["stop_time"] > ts.metadata["start_time"]
@@ -1728,84 +1881,77 @@ async def test_executor_offload(c, s, monkeypatch):
 async def test_story(c, s, w):
     future = c.submit(inc, 1)
     await future
-    ts = w.tasks[future.key]
-    assert ts.state in str(w.story(ts))
-    assert w.story(ts) == w.story(ts.key)
-
-
-@gen_cluster(client=True)
-async def test_story_with_deps(c, s, a, b):
-    """
-    Assert that the structure of the story does not change unintentionally and
-    expected subfields are actually filled
-    """
-    dep = c.submit(inc, 1, workers=[a.address], key="dep")
-    res = c.submit(inc, dep, workers=[b.address], key="res")
-    await res
-
-    story = a.story("res")
-    assert story == []
-    story = b.story("res")
-
-    # Story now includes randomized stimulus_ids and timestamps.
-    stimulus_ids = {ev[-2] for ev in story}
-    assert len(stimulus_ids) == 2, stimulus_ids
-    # This is a simple transition log
-    expected = [
-        ("res", "compute-task"),
-        ("res", "released", "waiting", "waiting", {"dep": "fetch"}),
-        ("res", "waiting", "ready", "ready", {"res": "executing"}),
-        ("res", "ready", "executing", "executing", {}),
-        ("res", "put-in-memory"),
-        ("res", "executing", "memory", "memory", {}),
-    ]
-    assert_worker_story(story, expected, strict=True)
-
-    story = b.story("dep")
-    stimulus_ids = {ev[-2] for ev in story}
-    assert len(stimulus_ids) == 2, stimulus_ids
-    expected = [
-        ("dep", "ensure-task-exists", "released"),
-        ("dep", "released", "fetch", "fetch", {}),
-        ("gather-dependencies", a.address, {"dep"}),
-        ("dep", "fetch", "flight", "flight", {}),
-        ("request-dep", a.address, {"dep"}),
-        ("receive-dep", a.address, {"dep"}),
-        ("dep", "put-in-memory"),
-        ("dep", "flight", "memory", "memory", {"res": "ready"}),
-    ]
-    assert_worker_story(story, expected, strict=True)
+    ts = w.state.tasks[future.key]
+    assert ts.state in str(w.state.story(ts))
+    assert w.state.story(ts) == w.state.story(ts.key)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_stimulus_story(c, s, a):
+    # Test that substrings aren't matched by stimulus_story()
+    f = c.submit(inc, 1, key="f")
+    f1 = c.submit(lambda: "foo", key="f1")
+    f2 = c.submit(inc, f1, key="f2")  # This will fail
+    await wait([f, f1, f2])
+
+    story = a.state.stimulus_story("f1", "f2")
+    assert len(story) == 4
+
+    assert isinstance(story[0], ComputeTaskEvent)
+    assert story[0].key == "f1"
+    assert story[0].run_spec == SerializedTask(task=None)  # Not logged
+
+    assert isinstance(story[1], ExecuteSuccessEvent)
+    assert story[1].key == "f1"
+    assert story[1].value is None  # Not logged
+    assert story[1].handled >= story[0].handled
+
+    assert isinstance(story[2], ComputeTaskEvent)
+    assert story[2].key == "f2"
+    assert story[2].who_has == {"f1": (a.address,)}
+    assert story[2].run_spec == SerializedTask(task=None)  # Not logged
+    assert story[2].handled >= story[1].handled
+
+    assert isinstance(story[3], ExecuteFailureEvent)
+    assert story[3].key == "f2"
+    assert story[3].handled >= story[2].handled
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_worker_descopes_data(c, s, a):
+    """Test that data is released on the worker:
+    1. when it's the output of a successful task
+    2. when it's the input of a failed task
+    3. when it's a local variable in the frame of a failed task
+    4. when it's embedded in the exception of a failed task
+    """
+
     class C:
-        pass
+        instances = weakref.WeakSet()
 
-    f = c.submit(C, key="f")  # Test that substrings aren't matched by story()
-    f2 = c.submit(inc, 2, key="f2")
-    f3 = c.submit(inc, 3, key="f3")
-    await wait([f, f2, f3])
+        def __init__(self):
+            C.instances.add(self)
 
-    # Test that ExecuteSuccessEvent.value is not stored in the the event log
-    assert isinstance(a.data["f"], C)
-    ref = weakref.ref(a.data["f"])
-    del f
-    while "f" in a.data:
+    def f(x):
+        y = C()
+        raise Exception(x, y)
+
+    f1 = c.submit(C, key="f1")
+    f2 = c.submit(f, f1, key="f2")
+    await wait([f2])
+
+    assert type(a.data["f1"]) is C
+
+    del f1
+    del f2
+    while a.data:
         await asyncio.sleep(0.01)
-    wait_profiler()
-    assert ref() is None
-
-    story = a.stimulus_story("f", "f2")
-    assert {ev.key for ev in story} == {"f", "f2"}
-    assert {ev.type for ev in story} == {C, int}
-
-    prev_handled = story[0].handled
-    for ev in story[1:]:
-        assert ev.handled >= prev_handled
-        prev_handled = ev.handled
+    with profile.lock:
+        gc.collect()
+    assert not C.instances
 
 
+@pytest.mark.slow
 @gen_cluster(client=True)
 async def test_gather_dep_one_worker_always_busy(c, s, a, b):
     # Ensure that both dependencies for H are on another worker than H itself.
@@ -1813,62 +1959,90 @@ async def test_gather_dep_one_worker_always_busy(c, s, a, b):
     # the data cannot be fetched
     # In the past it was important that there is more than one key on the
     # worker. This should be kept to avoid any edge case specific to one
-    f = c.submit(inc, 1, workers=[a.address])
-    g = c.submit(
-        inc,
-        2,
-        workers=[a.address],
-    )
+    f = c.submit(inc, 1, key="f", workers=[a.address])
+    g = c.submit(inc, 2, key="g", workers=[a.address])
+    await wait([f, g])
+    assert set(a.state.tasks) == {"f", "g"}
 
-    await f
-    await g
     # We will block A for any outgoing communication. This simulates an
     # overloaded worker which will always return "busy" for get_data requests,
     # effectively blocking H indefinitely
     a.outgoing_current_count = 10000000
-    assert f.key in a.tasks
-    assert g.key in a.tasks
-    # Ensure there are actually two distinct tasks and not some pure=True
-    # caching
-    assert f.key != g.key
-    h = c.submit(add, f, g, workers=[b.address])
 
-    fut = asyncio.wait_for(h, 0.1)
+    h = c.submit(add, f, g, key="h", workers=[b.address])
 
-    while h.key not in b.tasks:
+    while h.key not in b.state.tasks:
         await asyncio.sleep(0.01)
 
-    ts_h = b.tasks[h.key]
-    ts_f = b.tasks[f.key]
-    ts_g = b.tasks[g.key]
+    assert b.state.tasks[h.key].state == "waiting"
+    assert b.state.tasks[f.key].state in ("flight", "fetch")
+    assert b.state.tasks[g.key].state in ("flight", "fetch")
 
     with pytest.raises(asyncio.TimeoutError):
-        assert ts_h.state == "waiting"
-        assert ts_f.state in ["flight", "fetch"]
-        assert ts_g.state in ["flight", "fetch"]
-        await fut
+        await h.result(timeout=0.8)
 
-    # Ensure B wasn't lazy but tried at least once
-    assert b.repetitively_busy
+    story = b.state.story("busy-gather")
+    # 1 busy response straight away, followed by 1 retry every 150ms for 800ms.
+    # The requests for b and g are clustered together in single messages.
+    # We need to be very lax in measuring as PeriodicCallback+network comms have been
+    # observed on CI to occasionally lag behind by several hundreds of ms.
+    assert 2 <= len(story) <= 8
 
-    x = await Worker(s.address, name="x")
-    # We "scatter" the data to another worker which is able to serve this data.
-    # In reality this could be another worker which fetched this dependency and
-    # got through to A or another worker executed the task using work stealing
-    # or any other. To avoid cross effects, we'll just put the data onto the
-    # worker ourselves
-    x.update_data(data={key: a.data[key] for key in [f.key, g.key]})
-
-    assert await h == 5
-
-    # Since we put the data onto the worker ourselves, the gather_dep might
-    # still be mid execution and we'll get a dangling task. Let it finish
-    # naturally
-    while any(["Worker.gather_dep" in str(t) for t in asyncio.all_tasks()]):
-        await asyncio.sleep(0.05)
+    async with Worker(s.address, name="x") as x:
+        # We "scatter" the data to another worker which is able to serve this data.
+        # In reality this could be another worker which fetched this dependency and got
+        # through to A or another worker executed the task using work stealing or any
+        # other. To avoid cross effects, we'll just put the data onto the worker
+        # ourselves. Note that doing so means that B won't know about the existence of
+        # the extra replicas until it takes the initiative to invoke scheduler.who_has.
+        x.update_data({"f": 2, "g": 3})
+        assert await h == 5
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 0)])
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 2 + [("127.0.0.2", 2)] * 10,  # type: ignore
+)
+async def test_gather_dep_local_workers_first(c, s, a, lw, *rws):
+    f = (
+        await c.scatter(
+            {"f": 1}, workers=[w.address for w in (lw,) + rws], broadcast=True
+        )
+    )["f"]
+    g = c.submit(inc, f, key="g", workers=[a.address])
+    assert await g == 2
+    assert_story(a.state.story("f"), [("receive-dep", lw.address, {"f"})])
+
+
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.2", 1)] + [("127.0.0.1", 1)] * 10,  # type: ignore
+)
+async def test_gather_dep_from_remote_workers_if_all_local_workers_are_busy(
+    c, s, rw, a, *lws
+):
+    f = (
+        await c.scatter(
+            {"f": 1}, workers=[w.address for w in (rw,) + lws], broadcast=True
+        )
+    )["f"]
+    for w in lws:
+        w.outgoing_current_count = 10000000
+
+    g = c.submit(inc, f, key="g", workers=[a.address])
+    assert await g == 2
+
+    # Tried fetching from each local worker exactly once before falling back to the
+    # remote worker
+    assert sorted(ev[1] for ev in a.state.story("busy-gather")) == sorted(
+        w.address for w in lws
+    )
+    assert_story(a.state.story("receive-dep"), [("receive-dep", rw.address, {"f"})])
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_worker_client_uses_default_no_close(c, s, a):
     """
     If a default client is available in the process, the worker will pick this
@@ -1895,7 +2069,7 @@ async def test_worker_client_uses_default_no_close(c, s, a):
     assert c is c_def
 
 
-@gen_cluster(nthreads=[("127.0.0.1", 0)])
+@gen_cluster(nthreads=[("127.0.0.1", 1)])
 async def test_worker_client_closes_if_created_on_worker_one_worker(s, a):
     async with Client(s.address, set_as_default=False, asynchronous=True) as c:
         with pytest.raises(ValueError):
@@ -2079,14 +2253,18 @@ async def assert_task_states_on_worker(expected, worker):
     for _ in range(10):
         try:
             for dep_key, expected_state in expected.items():
-                assert dep_key in worker.tasks, (worker.name, dep_key, worker.tasks)
-                dep_ts = worker.tasks[dep_key]
+                assert dep_key in worker.state.tasks, (
+                    worker.name,
+                    dep_key,
+                    worker.state.tasks,
+                )
+                dep_ts = worker.state.tasks[dep_key]
                 assert dep_ts.state == expected_state, (
                     worker.name,
                     dep_ts,
                     expected_state,
                 )
-            assert set(expected) == set(worker.tasks)
+            assert set(expected) == set(worker.state.tasks)
             return
         except AssertionError as exc:
             active_exc = exc
@@ -2121,12 +2299,12 @@ async def test_worker_state_error_release_error_last(c, s, a, b):
         await res
 
     # Nothing bad happened on B, therefore B should hold on to G
-    assert len(b.tasks) == 1
-    assert g.key in b.tasks
+    assert len(b.state.tasks) == 1
+    assert g.key in b.state.tasks
 
     # A raised the exception therefore we should hold on to the erroneous task
-    assert res.key in a.tasks
-    ts = a.tasks[res.key]
+    assert res.key in a.state.tasks
+    ts = a.state.tasks[res.key]
     assert ts.state == "error"
 
     expected_states = {
@@ -2144,7 +2322,7 @@ async def test_worker_state_error_release_error_last(c, s, a, b):
 
     # We no longer hold any refs to f or g and B didn't have any erros. It
     # releases everything as expected
-    while b.tasks:
+    while b.state.tasks:
         await asyncio.sleep(0.01)
 
     expected_states = {
@@ -2159,9 +2337,8 @@ async def test_worker_state_error_release_error_last(c, s, a, b):
 
     # We no longer hold any refs. Cluster should reset completely
     # This is not happening
-    for server in [s, a, b]:
-        while server.tasks:
-            await asyncio.sleep(0.01)
+    while any((s.tasks, a.state.tasks, b.state.tasks)):
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True)
@@ -2189,12 +2366,12 @@ async def test_worker_state_error_release_error_first(c, s, a, b):
         await res
 
     # Nothing bad happened on B, therefore B should hold on to G
-    assert len(b.tasks) == 1
-    assert g.key in b.tasks
+    assert len(b.state.tasks) == 1
+    assert g.key in b.state.tasks
 
     # A raised the exception therefore we should hold on to the erroneous task
-    assert res.key in a.tasks
-    ts = a.tasks[res.key]
+    assert res.key in a.state.tasks
+    ts = a.state.tasks[res.key]
     assert ts.state == "error"
 
     expected_states = {
@@ -2212,7 +2389,7 @@ async def test_worker_state_error_release_error_first(c, s, a, b):
     res.release()
     # We no longer hold any refs to f or g and B didn't have any erros. It
     # releases everything as expected
-    while res.key in a.tasks:
+    while res.key in a.state.tasks:
         await asyncio.sleep(0.01)
 
     expected_states = {
@@ -2225,9 +2402,8 @@ async def test_worker_state_error_release_error_first(c, s, a, b):
     f.release()
     g.release()
 
-    for server in [s, a, b]:
-        while server.tasks:
-            await asyncio.sleep(0.01)
+    while any((s.tasks, a.state.tasks, b.state.tasks)):
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True)
@@ -2255,12 +2431,12 @@ async def test_worker_state_error_release_error_int(c, s, a, b):
         await res
 
     # Nothing bad happened on B, therefore B should hold on to G
-    assert len(b.tasks) == 1
-    assert g.key in b.tasks
+    assert len(b.state.tasks) == 1
+    assert g.key in b.state.tasks
 
     # A raised the exception therefore we should hold on to the erroneous task
-    assert res.key in a.tasks
-    ts = a.tasks[res.key]
+    assert res.key in a.state.tasks
+    ts = a.state.tasks[res.key]
     assert ts.state == "error"
 
     expected_states = {
@@ -2278,7 +2454,7 @@ async def test_worker_state_error_release_error_int(c, s, a, b):
     res.release()
     # We no longer hold any refs to f or g and B didn't have any erros. It
     # releases everything as expected
-    while len(a.tasks) > 1:
+    while len(a.state.tasks) > 1:
         await asyncio.sleep(0.01)
 
     expected_states = {
@@ -2291,9 +2467,8 @@ async def test_worker_state_error_release_error_int(c, s, a, b):
     g.release()
 
     # We no longer hold any refs. Cluster should reset completely
-    for server in [s, a, b]:
-        while server.tasks:
-            await asyncio.sleep(0.01)
+    while any((s.tasks, a.state.tasks, b.state.tasks)):
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True)
@@ -2375,12 +2550,11 @@ async def test_worker_state_error_long_chain(c, s, a, b):
     res.release()
 
     # We no longer hold any refs. Cluster should reset completely
-    for server in [s, a, b]:
-        while server.tasks:
-            await asyncio.sleep(0.01)
+    while any((s.tasks, a.state.tasks, b.state.tasks)):
+        await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", x) for x in range(4)])
+@gen_cluster(client=True, nthreads=[("", x) for x in (1, 2, 3, 4)])
 async def test_hold_on_to_replicas(c, s, *workers):
     f1 = c.submit(inc, 1, workers=[workers[0].address], key="f1")
     f2 = c.submit(inc, 2, workers=[workers[1].address], key="f2")
@@ -2394,175 +2568,16 @@ async def test_hold_on_to_replicas(c, s, *workers):
     f1.release()
     f2.release()
 
-    while sum_2.key not in workers[3].tasks:
+    while sum_2.key not in workers[3].state.tasks:
         await asyncio.sleep(0.01)
 
-    while not workers[3].tasks[sum_2.key].state == "memory":
+    while not workers[3].state.tasks[sum_2.key].state == "memory":
         assert len(s.tasks[f1.key].who_has) >= 2
         assert s.tasks[f2.key].state == "released"
         await asyncio.sleep(0.01)
 
     while len(workers[2].data) > 1:
         await asyncio.sleep(0.01)
-
-
-@pytest.mark.xfail(
-    WINDOWS and sys.version_info[:2] == (3, 8),
-    reason="https://github.com/dask/distributed/issues/5621",
-)
-@gen_cluster(client=True, nthreads=[("", 1), ("", 1)])
-async def test_worker_reconnects_mid_compute(c, s, a, b):
-    """Ensure that, if a worker disconnects while computing a result, the scheduler will
-    still accept the result.
-
-    There is also an edge case tested which ensures that the reconnect is
-    successful if a task is currently executing; see
-    https://github.com/dask/distributed/issues/5078
-
-    See also distributed.tests.test_scheduler.py::test_gather_allow_worker_reconnect
-    """
-    with captured_logger("distributed.scheduler") as s_logs:
-        # Let's put one task in memory to ensure the reconnect has tasks in
-        # different states
-        f1 = c.submit(inc, 1, workers=[a.address], allow_other_workers=True)
-        await f1
-        a_address = a.address
-        a.periodic_callbacks["heartbeat"].stop()
-        await a.heartbeat()
-        a.heartbeat_active = True
-
-        from distributed import Lock
-
-        def fast_on_a(lock):
-            w = get_worker()
-            import time
-
-            if w.address != a_address:
-                lock.acquire()
-            else:
-                time.sleep(1)
-
-        lock = Lock()
-        # We want to be sure that A is the only one computing this result
-        async with lock:
-
-            f2 = c.submit(
-                fast_on_a, lock, workers=[a.address], allow_other_workers=True
-            )
-
-            while f2.key not in a.tasks:
-                await asyncio.sleep(0.01)
-
-            await s.stream_comms[a.address].close()
-
-            assert len(s.workers) == 1
-            a.heartbeat_active = False
-            await a.heartbeat()
-            assert len(s.workers) == 2
-            # Since B is locked, this is ensured to originate from A
-            await f2
-
-    assert "Unexpected worker completed task" in s_logs.getvalue()
-
-    # Ensure that all in-memory tasks on A have been restored on the
-    # scheduler after reconnect
-    for ts in a.tasks.values():
-        if ts.state == "memory":
-            assert a.address in {ws.address for ws in s.tasks[ts.key].who_has}
-
-    # Ensure that all keys have been properly registered and will also be
-    # cleaned up nicely.
-    del f1, f2
-
-    while any(w.tasks for w in [a, b]):
-        await asyncio.sleep(0.001)
-
-
-@pytest.mark.xfail(
-    WINDOWS and sys.version_info[:2] == (3, 8),
-    reason="https://github.com/dask/distributed/issues/5621",
-)
-@gen_cluster(client=True, nthreads=[("", 1), ("", 1)])
-async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, a, b):
-    """
-    Ensure that a reconnecting worker does not break the scheduler regardless of
-    what state the keys of the worker are in when it connects back
-
-    See also test_worker_reconnects_mid_compute which uses a smaller chain of
-    tasks and does not release f1 in between
-    """
-
-    with captured_logger("distributed.scheduler") as s_logs:
-        # Let's put one task in memory to ensure the reconnect has tasks in
-        # different states
-        f1 = c.submit(inc, 1, workers=[a.address], allow_other_workers=True)
-        f2 = c.submit(inc, f1, workers=[a.address], allow_other_workers=True)
-        await f1
-        a_address = a.address
-
-        a.periodic_callbacks["heartbeat"].stop()
-        await a.heartbeat()
-        a.heartbeat_active = True
-
-        from distributed import Lock
-
-        def fast_on_a(lock):
-            w = get_worker()
-            import time
-
-            if w.address != a_address:
-                lock.acquire()
-            else:
-                time.sleep(1)
-
-        lock = Lock()
-        # We want to be sure that A is the only one computing this result
-        async with lock:
-
-            f3 = c.submit(
-                fast_on_a, lock, workers=[a.address], allow_other_workers=True
-            )
-
-            while f3.key not in a.tasks:
-                await asyncio.sleep(0.01)
-
-            story_before = s.story(f1.key)
-            await s.stream_comms[a.address].close()
-            # Release f1 which triggers a release cycle of all tasks such that
-            # they are rescheduled on B. However, at this time, B will never be
-            # able to compute f3 / fast_on_a since it is locked on that worker.
-            # The only way to get f3 to complete is for Worker A to reconnect.
-
-            f1.release()
-            assert len(s.workers) == 1
-            story = s.story(f1.key)
-            while len(story) == len(story_before):
-                story = s.story(f1.key)
-                await asyncio.sleep(0.1)
-
-            next = story[len(story_before)]
-            assert next[:3] == (f1.key, "memory", "released")
-
-            a.heartbeat_active = False
-            await a.heartbeat()
-
-            while len(s.workers) != 2:
-                await asyncio.sleep(0.01)
-
-            # Since B is locked, this is ensured to originate from A
-            await f3
-
-    assert "Unexpected worker completed task" in s_logs.getvalue()
-
-    # Ensure that all in-memory tasks on A have been restored on the
-    # scheduler after reconnect
-    for ts in a.tasks.values():
-        if ts.state == "memory":
-            assert a.address in {ws.address for ws in s.tasks[ts.key].who_has}
-
-    del f1, f2, f3
-    while any(w.tasks for w in [a, b]):
-        await asyncio.sleep(0.001)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
@@ -2573,15 +2588,15 @@ async def test_forget_dependents_after_release(c, s, a):
 
     await asyncio.wait([fut, fut2])
 
-    assert fut.key in a.tasks
-    assert fut2.key in a.tasks
-    assert fut2.key in {d.key for d in a.tasks[fut.key].dependents}
+    assert fut.key in a.state.tasks
+    assert fut2.key in a.state.tasks
+    assert fut2.key in {d.key for d in a.state.tasks[fut.key].dependents}
 
     fut2.release()
 
-    while fut2.key in a.tasks:
+    while fut2.key in a.state.tasks:
         await asyncio.sleep(0.001)
-    assert fut2.key not in {d.key for d in a.tasks[fut.key].dependents}
+    assert fut2.key not in {d.key for d in a.state.tasks[fut.key].dependents}
 
 
 @gen_cluster(client=True)
@@ -2631,7 +2646,7 @@ async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
             await asyncio.sleep(0)
 
         ts = s.tasks[fut.key]
-        a.handle_steal_request(fut.key, stimulus_id="test")
+        a.handle_stimulus(StealRequestEvent(key=fut.key, stimulus_id="test"))
         stealing_ext.scheduler.send_task_to_worker(b.address, ts)
 
         fut2 = c.submit(inc, fut, workers=[a.address])
@@ -2645,76 +2660,21 @@ async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
 
 
 @gen_cluster(client=True)
-async def test_gather_dep_exception_one_task(c, s, a, b):
-    """Ensure an exception in a single task does not tear down an entire batch of gather_dep
+async def test_run_spec_deserialize_fail(c, s, a, b):
+    class F:
+        def __call__(self):
+            pass
 
+        def __reduce__(self):
+            return lambda: 1 / 0, ()
 
-    See also https://github.com/dask/distributed/issues/5152
-    See also test_gather_dep_exception_one_task_2
-    """
-    fut = c.submit(inc, 1, workers=[a.address], key="f1")
-    fut2 = c.submit(inc, 2, workers=[a.address], key="f2")
-    fut3 = c.submit(inc, 3, workers=[a.address], key="f3")
+    with captured_logger("distributed.worker") as logger:
+        fut = c.submit(F())
+        assert isinstance(await fut.exception(), ZeroDivisionError)
 
-    import asyncio
-
-    event = asyncio.Event()
-    write_queue = asyncio.Queue()
-    b.rpc = _LockedCommPool(b.rpc, write_event=event, write_queue=write_queue)
-    b.rpc.remove(a.address)
-
-    def sink(a, b, *args):
-        return a + b
-
-    res1 = c.submit(sink, fut, fut2, fut3, workers=[b.address])
-    res2 = c.submit(sink, fut, fut2, workers=[b.address])
-
-    # Wait until we're sure the worker is attempting to fetch the data
-    while True:
-        peer_addr, msg = await write_queue.get()
-        if peer_addr == a.address and msg["op"] == "get_data":
-            break
-
-    # Provoke an "impossible transision exception"
-    # By choosing a state which doesn't exist we're not running into validation
-    # errors and the state machine should raise if we want to transition from
-    # fetch to memory
-
-    b.validate = False
-    b.tasks[fut3.key].state = "fetch"
-    event.set()
-
-    assert await res1 == 5
-    assert await res2 == 5
-
-    del res1, res2, fut, fut2
-    fut3.release()
-
-    while a.tasks and b.tasks:
-        await asyncio.sleep(0.1)
-
-
-@gen_cluster(client=True)
-async def test_gather_dep_exception_one_task_2(c, s, a, b):
-    """Ensure an exception in a single task does not tear down an entire batch of gather_dep
-
-    The below triggers an fetch->memory transition
-
-    See also https://github.com/dask/distributed/issues/5152
-    See also test_gather_dep_exception_one_task
-    """
-    # This test does not trigger the condition reliably but is a very easy case
-    # which should function correctly regardles
-
-    fut1 = c.submit(inc, 1, workers=[a.address], key="f1")
-    fut2 = c.submit(inc, fut1, workers=[b.address], key="f2")
-
-    while fut1.key not in b.tasks or b.tasks[fut1.key].state == "flight":
-        await asyncio.sleep(0)
-
-    s.handle_missing_data(key="f1", errant_worker=a.address)
-
-    await fut2
+    logvalue = logger.getvalue()
+    assert "Could not deserialize task" in logvalue
+    assert "return lambda: 1 / 0, ()" in logvalue
 
 
 @gen_cluster(client=True)
@@ -2729,11 +2689,11 @@ async def test_acquire_replicas(c, s, a, b):
 
     for w in (a, b):
         assert w.data[fut.key] == 2
-        assert w.tasks[fut.key].state == "memory"
+        assert w.state.tasks[fut.key].state == "memory"
 
     fut.release()
 
-    while b.tasks or a.tasks:
+    while b.state.tasks or a.state.tasks:
         await asyncio.sleep(0.005)
 
 
@@ -2747,7 +2707,9 @@ async def test_acquire_replicas_same_channel(c, s, a, b):
     s.request_acquire_replicas(b.address, [futA.key], stimulus_id=f"test-{time()}")
 
     await futC
-    while futA.key not in b.tasks or not b.tasks[futA.key].state == "memory":
+    while (
+        futA.key not in b.state.tasks or not b.state.tasks[futA.key].state == "memory"
+    ):
         await asyncio.sleep(0.005)
 
     while len(s.tasks[futA.key].who_has) != 2:
@@ -2757,8 +2719,8 @@ async def test_acquire_replicas_same_channel(c, s, a, b):
     # same communication channel
 
     for fut in (futA, futB):
-        assert_worker_story(
-            b.story(fut.key),
+        assert_story(
+            b.state.story(fut.key),
             [
                 ("gather-dependencies", a.address, {fut.key}),
                 ("request-dep", a.address, {fut.key}),
@@ -2768,70 +2730,89 @@ async def test_acquire_replicas_same_channel(c, s, a, b):
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
-async def test_acquire_replicas_many(c, s, *workers):
-    futs = c.map(inc, range(10), workers=[workers[0].address])
-    res = c.submit(sum, futs, workers=[workers[1].address])
-    final = c.submit(slowinc, res, delay=0.5, workers=[workers[1].address])
+async def test_acquire_replicas_many(c, s, w1, w2, w3):
+    futs = c.map(inc, range(10), workers=[w1.address])
+    res = c.submit(sum, futs, workers=[w2.address])
+    final = c.submit(slowinc, res, delay=0.5, workers=[w2.address])
 
     await wait(futs)
 
     s.request_acquire_replicas(
-        workers[2].address, [fut.key for fut in futs], stimulus_id=f"test-{time()}"
+        w3.address, [fut.key for fut in futs], stimulus_id=f"test-{time()}"
     )
 
     # Worker 2 should normally not even be involved if there was no replication
     while not all(
-        f.key in workers[2].tasks and workers[2].tasks[f.key].state == "memory"
+        f.key in w3.state.tasks and w3.state.tasks[f.key].state == "memory"
         for f in futs
     ):
         await asyncio.sleep(0.01)
 
-    assert all(ts.state == "memory" for ts in workers[2].tasks.values())
+    assert all(ts.state == "memory" for ts in w3.state.tasks.values())
 
     assert await final == sum(map(inc, range(10))) + 1
     # All workers have a replica
     assert all(len(s.tasks[f.key].who_has) == 3 for f in futs)
     del futs, res, final
 
-    while any(w.tasks for w in workers):
+    while any(w.state.tasks for w in (w1, w2, w3)):
         await asyncio.sleep(0.001)
 
 
-@pytest.mark.slow
-@gen_cluster(client=True, Worker=Nanny)
-async def test_acquire_replicas_already_in_flight(c, s, *nannies):
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_acquire_replicas_already_in_flight(c, s, a):
     """Trying to acquire a replica that is already in flight is a no-op"""
+    async with BlockedGatherDep(s.address) as b:
+        x = c.submit(inc, 1, workers=[a.address], key="x")
+        y = c.submit(inc, x, workers=[b.address], key="y")
+        await b.in_gather_dep.wait()
+        assert b.state.tasks["x"].state == "flight"
 
-    class SlowToFly:
-        def __getstate__(self):
-            sleep(0.9)
-            return {}
+        b.handle_stimulus(
+            AcquireReplicasEvent(
+                who_has={"x": a.address}, nbytes={"x": 1}, stimulus_id="test"
+            )
+        )
+        assert b.state.tasks["x"].state == "flight"
+        b.block_gather_dep.set()
+        assert await y == 3
 
-    a, b = s.workers
-    x = c.submit(SlowToFly, workers=[a], key="x")
-    await wait(x)
-    y = c.submit(lambda x: 123, x, workers=[b], key="y")
-    await asyncio.sleep(0.3)
-    s.request_acquire_replicas(b, [x.key], stimulus_id=f"test-{time()}")
-    assert await y == 123
+        assert_story(
+            b.state.story("x"),
+            [
+                ("x", "fetch", "flight", "flight", {}),
+                ("x", "flight", "fetch", "flight", {}),
+            ],
+        )
 
-    story = await c.run(lambda dask_worker: dask_worker.story("x"))
-    assert_worker_story(
-        story[b],
-        [
-            ("x", "ensure-task-exists", "released"),
-            ("x", "released", "fetch", "fetch", {}),
-            ("gather-dependencies", a, {"x"}),
-            ("x", "fetch", "flight", "flight", {}),
-            ("request-dep", a, {"x"}),
-            ("x", "ensure-task-exists", "flight"),
-            ("x", "flight", "fetch", "flight", {}),
-            ("receive-dep", a, {"x"}),
-            ("x", "put-in-memory"),
-            ("x", "flight", "memory", "memory", {"y": "ready"}),
-        ],
-        strict=True,
-    )
+
+@pytest.mark.slow
+@gen_cluster(client=True)
+async def test_forget_acquire_replicas(c, s, a, b):
+    """
+    1. The scheduler sends acquire-replicas to the worker
+    2. Before the task can reach the worker, the task is forgotten on the scheduler
+       and on the peer workers holding the replicas.
+       This is unlike in a compute-task command, where the workers that are fetching
+       the key are tracked on the scheduler side and receive a release-key command too.
+    3. The task eventually transitions to missing
+    4. At the next run of find_missing, the worker sends a request-refresh-who-has
+       message to the scheduler
+    5. The scheduler responds with free-keys
+    6. The task is forgotten everywhere.
+    """
+    x = c.submit(inc, 2, key="x", workers=[a.address])
+    await x
+    with freeze_data_fetching(b, jump_start=True):
+        s.request_acquire_replicas(b.address, ["x"], stimulus_id="test")
+        await wait_for_state("x", "fetch", b)
+        x.release()
+        while "x" in s.tasks or "x" in a.state.tasks:
+            await asyncio.sleep(0.01)
+
+    while "x" in b.state.tasks:
+        await asyncio.sleep(0.01)
+    assert "x" not in s.tasks
 
 
 @gen_cluster(client=True)
@@ -2851,7 +2832,7 @@ async def test_remove_replicas_simple(c, s, a, b):
 
     assert all(len(s.tasks[f.key].who_has) == 1 for f in futs)
 
-    while b.tasks:
+    while b.state.tasks:
         await asyncio.sleep(0.01)
 
     # Ensure there is no delayed reply to re-register the key
@@ -2876,7 +2857,7 @@ async def test_remove_replicas_while_computing(c, s, a, b):
     # All interesting things will happen on b
     dependents = c.map(some_slow, futs, event=dependents_event, workers=[b.address])
 
-    while not any(f.key in b.tasks for f in dependents):
+    while not any(f.key in b.state.tasks for f in dependents):
         await asyncio.sleep(0.01)
 
     # The scheduler removes keys from who_has/has_what immediately
@@ -2922,7 +2903,7 @@ async def test_remove_replicas_while_computing(c, s, a, b):
     # reenlist the key in the schedulers state system to avoid race conditions,
     # see also https://github.com/dask/distributed/issues/5265
     rejections = set()
-    for msg in b.log:
+    for msg in b.state.log:
         if msg[0] == "remove-replica-rejected":
             rejections.update(msg[1])
     assert rejections
@@ -2945,7 +2926,9 @@ async def test_remove_replicas_while_computing(c, s, a, b):
         stimulus_id=f"test-{time()}",
     )
 
-    while any(b.tasks[f.key].state != "released" for f in futs if f.key in b.tasks):
+    while any(
+        b.state.tasks[f.key].state != "released" for f in futs if f.key in b.state.tasks
+    ):
         await asyncio.sleep(0.01)
 
     # The scheduler actually gets notified about the removed replica
@@ -2956,7 +2939,7 @@ async def test_remove_replicas_while_computing(c, s, a, b):
 
     del dependents, futs
 
-    while any(w.tasks for w in (a, b)):
+    while any(w.state.tasks for w in (a, b)):
         await asyncio.sleep(0.01)
 
 
@@ -2980,21 +2963,19 @@ async def test_who_has_consistent_remove_replicas(c, s, *workers):
     # suspicious counters are raised since this is expected behaviour when
     # removing replicas
 
-    while f1.key not in a.tasks or a.tasks[f1.key].state != "flight":
+    while f1.key not in a.state.tasks or a.state.tasks[f1.key].state != "flight":
         await asyncio.sleep(0)
 
     coming_from = None
     for w in other_workers:
         coming_from = w
-        if w.address == a.tasks[f1.key].coming_from:
+        if w.address == a.state.tasks[f1.key].coming_from:
             break
 
-    coming_from.handle_remove_replicas([f1.key], "test")
-
+    coming_from.handle_stimulus(RemoveReplicasEvent(keys=[f1.key], stimulus_id="test"))
     await f2
 
-    assert_worker_story(a.story(f1.key), [(f1.key, "missing-dep")])
-    assert a.tasks[f1.key].suspicious_count == 0
+    assert a.state.tasks[f1.key].suspicious_count == 0
     assert s.tasks[f1.key].suspicious == 0
 
 
@@ -3008,17 +2989,43 @@ async def test_acquire_replicas_with_no_priority(c, s, a, b):
     y = c.submit(lambda: 2, key="y", workers=[a.address])
     await y
     assert s.tasks["x"].priority is None
-    assert a.tasks["x"].priority is None
+    assert a.state.tasks["x"].priority is None
     assert s.tasks["y"].priority is not None
-    assert a.tasks["y"].priority is not None
+    assert a.state.tasks["y"].priority is not None
 
     s.request_acquire_replicas(b.address, [x.key, y.key], stimulus_id=f"test-{time()}")
     while b.data != {"x": 1, "y": 2}:
         await asyncio.sleep(0.01)
 
     assert s.tasks["x"].priority is None
-    assert a.tasks["x"].priority is None
-    assert b.tasks["x"].priority is not None
+    assert a.state.tasks["x"].priority is None
+    assert b.state.tasks["x"].priority is not None
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_acquire_replicas_large_data(c, s, a):
+    """When acquire-replicas is used to acquire multiple sizeable tasks, it respects
+    target_message_size and acquires them over multiple iterations.
+    """
+    size = a.state.target_message_size // 5 - 10_000
+
+    class C:
+        def __sizeof__(self):
+            return size
+
+    futs = [c.submit(C, key=f"x{i}", workers=[a.address]) for i in range(10)]
+    await wait(futs)
+
+    async with BlockedGatherDep(s.address) as b:
+        s.request_acquire_replicas(
+            b.address, [f"x{i}" for i in range(10)], stimulus_id="test"
+        )
+        await b.in_gather_dep.wait()
+        assert len(b.state.in_flight_tasks) == 5
+        assert len(b.state.data_needed[a.address]) == 5
+        b.block_gather_dep.set()
+        while len(b.data) < 10:
+            await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True)
@@ -3032,14 +3039,14 @@ async def test_missing_released_zombie_tasks(c, s, a, b):
     f2 = c.submit(inc, f1, key="f2", workers=[b.address])
     key = f1.key
 
-    while key not in b.tasks or b.tasks[key].state != "fetch":
+    while key not in b.state.tasks or b.state.tasks[key].state != "fetch":
         await asyncio.sleep(0.01)
 
-    await a.close(report=False)
+    await a.close()
 
     del f1, f2
 
-    while b.tasks:
+    while b.state.tasks:
         await asyncio.sleep(0.01)
 
 
@@ -3057,11 +3064,11 @@ async def test_missing_released_zombie_tasks_2(c, s, b):
         f1 = c.submit(inc, 1, key="f1", workers=[a.address])
         f2 = c.submit(inc, f1, key="f2", workers=[b.address])
 
-        while f1.key not in b.tasks:
+        while f1.key not in b.state.tasks:
             await asyncio.sleep(0)
 
-        ts = b.tasks[f1.key]
-        assert ts.state == "fetch"
+        ts = b.state.tasks[f1.key]
+        assert ts.state == "flight"
 
         while ts.state != "missing":
             # If we sleep for a longer time, the worker will spin into an
@@ -3071,11 +3078,11 @@ async def test_missing_released_zombie_tasks_2(c, s, b):
 
         del f1, f2
 
-        while b.tasks:
+        while b.state.tasks:
             await asyncio.sleep(0.01)
 
-        assert_worker_story(
-            b.story(ts),
+        assert_story(
+            b.state.story(ts),
             [("f1", "missing", "released", "released", {"f1": "forgotten"})],
         )
 
@@ -3100,7 +3107,7 @@ async def test_worker_status_sync(s, a):
         {"action": "add-worker"},
         {
             "action": "worker-status-change",
-            "prev-status": "undefined",
+            "prev-status": "init",
             "status": "running",
         },
         {
@@ -3116,14 +3123,6 @@ async def test_worker_status_sync(s, a):
         {"action": "remove-worker", "processing-tasks": {}},
         {"action": "retired"},
     ]
-
-
-async def _wait_for_state(key: str, worker: Worker, state: str):
-    # Keep the sleep interval at 0 since the tests using this are very sensitive
-    # about timing. they intend to capture loop cycles after this specific
-    # condition was set
-    while key not in worker.tasks or worker.tasks[key].state != state:
-        await asyncio.sleep(0)
 
 
 @gen_cluster(client=True)
@@ -3152,7 +3151,7 @@ async def test_task_flight_compute_oserror(c, s, a, b):
     peer, msg = await write_queue.get()
     assert peer == a.address
     assert msg["op"] == "get_data"
-    in_flight_tasks = [ts for ts in b.tasks.values() if ts.key != "f1"]
+    in_flight_tasks = [ts for ts in b.state.tasks.values() if ts.key != "f1"]
     assert all(ts.state == "flight" for ts in in_flight_tasks)
     await a.close()
     write_event.set()
@@ -3163,9 +3162,9 @@ async def test_task_flight_compute_oserror(c, s, a, b):
     # asserting a few internals to make sure that if things change this is done
     # deliberately
 
-    sum_story = b.story("f1")
+    sum_story = b.state.story("f1")
     expected_sum_story = [
-        ("f1", "compute-task"),
+        ("f1", "compute-task", "released"),
         (
             "f1",
             "released",
@@ -3175,18 +3174,20 @@ async def test_task_flight_compute_oserror(c, s, a, b):
         ),
         # inc is lost and needs to be recomputed. Therefore, sum is released
         ("free-keys", ("f1",)),
-        ("f1", "release-key"),
-        ("f1", "waiting", "released", "released", {"f1": "forgotten"}),
+        # The recommendations here are hard to predict. Whatever key is
+        # currently scheduled to be fetched, if any, will be recommended to be
+        # released.
+        ("f1", "waiting", "released", "released", lambda msg: msg["f1"] == "forgotten"),
         ("f1", "released", "forgotten", "forgotten", {}),
         # Now, we actually compute the task *once*. This must not cycle back
-        ("f1", "compute-task"),
+        ("f1", "compute-task", "released"),
         ("f1", "released", "waiting", "waiting", {"f1": "ready"}),
         ("f1", "waiting", "ready", "ready", {"f1": "executing"}),
         ("f1", "ready", "executing", "executing", {}),
         ("f1", "put-in-memory"),
         ("f1", "executing", "memory", "memory", {}),
     ]
-    assert_worker_story(sum_story, expected_sum_story, strict=True)
+    assert_story(sum_story, expected_sum_story, strict=True)
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -3195,6 +3196,7 @@ async def test_gather_dep_cancelled_rescheduled(c, s):
     for in-flight state. The response parser, however, did not distinguish
     resulting in unwanted missing-data signals to the scheduler, causing
     potential rescheduling or data leaks.
+    (Note: missing-data was removed in #6445).
 
     If a cancelled key is rescheduled for fetching while gather_dep waits
     internally for get_data, the response parser would misclassify this key and
@@ -3208,62 +3210,33 @@ async def test_gather_dep_cancelled_rescheduled(c, s):
 
     See also test_gather_dep_do_not_handle_response_of_not_requested_tasks
     """
-    in_gather_dep = asyncio.Event()
-    gather_dep_finished = asyncio.Event()
-    block_gather_dep = asyncio.Lock()
-    await block_gather_dep.acquire()
-
-    class InstrumentedWorker(Worker):
-        async def gather_dep(self, *args, **kwargs):
-            in_gather_dep.set()
-            async with block_gather_dep:
-                try:
-                    return await super().gather_dep(*args, **kwargs)
-                finally:
-                    gather_dep_finished.set()
-
-    block_get_data = asyncio.Lock()
-    in_get_data = asyncio.Event()
-
-    class BlockedGetData(Worker):
-        async def get_data(self, comm, *args, **kwargs):
-            in_get_data.set()
-            async with block_get_data:
-                return await super().get_data(comm, *args, **kwargs)
-
     async with BlockedGetData(s.address) as a:
-        async with InstrumentedWorker(s.address) as b:
+        async with BlockedGatherDep(s.address) as b:
             fut1 = c.submit(inc, 1, workers=[a.address], key="f1")
             fut2 = c.submit(inc, fut1, workers=[a.address], key="f2")
-            await fut2
-            await block_get_data.acquire()
+            await wait(fut2)
             fut4 = c.submit(sum, fut1, fut2, workers=[b.address], key="f4")
             fut3 = c.submit(inc, fut1, workers=[b.address], key="f3")
 
-            fut2_key = fut2.key
-
-            await _wait_for_state(fut2_key, b, "flight")
-            await in_gather_dep.wait()
+            await wait_for_state(fut2.key, "flight", b)
+            await b.in_gather_dep.wait()
 
             fut4.release()
-            while fut4.key in b.tasks:
+            while fut4.key in b.state.tasks:
                 await asyncio.sleep(0)
 
-            assert b.tasks[fut2.key].state == "cancelled"
+            assert b.state.tasks[fut2.key].state == "cancelled"
 
-            block_gather_dep.release()
-
-            await in_get_data.wait()
+            b.block_gather_dep.set()
+            await a.in_get_data.wait()
 
             fut4 = c.submit(sum, [fut1, fut2], workers=[b.address], key="f4")
-            while b.tasks[fut2.key].state != "flight":
-                await asyncio.sleep(0.1)
-            block_get_data.release()
-            await gather_dep_finished.wait()
-            f2_story = b.story(fut2.key)
+            await wait_for_state(fut2.key, "flight", b)
+
+            a.block_get_data.set()
+            await wait([fut3, fut4])
+            f2_story = b.state.story(fut2.key)
             assert f2_story
-            await fut3
-            await fut4
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -3272,147 +3245,63 @@ async def test_gather_dep_do_not_handle_response_of_not_requested_tasks(c, s, a)
     for in-flight state. The response parser, however, did not distinguish
     resulting in unwanted missing-data signals to the scheduler, causing
     potential rescheduling or data leaks.
+    (Note: missing-data was removed in #6445).
+
     This test may become obsolete if the implementation changes significantly.
     """
-    in_gather_dep = asyncio.Event()
-    gather_dep_finished = asyncio.Event()
-    block_gather_dep = asyncio.Lock()
-    await block_gather_dep.acquire()
-
-    class InstrumentedWorker(Worker):
-        async def gather_dep(self, *args, **kwargs):
-            in_gather_dep.set()
-            async with block_gather_dep:
-                try:
-                    return await super().gather_dep(*args, **kwargs)
-                finally:
-                    gather_dep_finished.set()
-
-    async with InstrumentedWorker(s.address) as b:
+    async with BlockedGatherDep(s.address) as b:
         fut1 = c.submit(inc, 1, workers=[a.address], key="f1")
         fut2 = c.submit(inc, fut1, workers=[a.address], key="f2")
         await fut2
         fut4 = c.submit(sum, fut1, fut2, workers=[b.address], key="f4")
         fut3 = c.submit(inc, fut1, workers=[b.address], key="f3")
 
-        fut2_key = fut2.key
-
-        await _wait_for_state(fut2_key, b, "flight")
-
-        await in_gather_dep.wait()
+        await b.in_gather_dep.wait()
+        assert b.state.tasks[fut2.key].state == "flight"
 
         fut4.release()
-        while fut4.key in b.tasks:
-            await asyncio.sleep(0.05)
+        while fut4.key in b.state.tasks:
+            await asyncio.sleep(0.01)
 
-        assert b.tasks[fut2.key].state == "cancelled"
+        assert b.state.tasks[fut2.key].state == "cancelled"
 
-        block_gather_dep.release()
-        await gather_dep_finished.wait()
+        b.block_gather_dep.set()
 
-        assert fut2.key not in b.tasks
-        f2_story = b.story(fut2.key)
+        await fut3
+        assert fut2.key not in b.state.tasks
+        f2_story = b.state.story(fut2.key)
         assert f2_story
         assert not any("missing-dep" in msg for msg in f2_story)
-        await fut3
 
 
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
-    config={
-        "distributed.comm.recent-messages-log-length": 1000,
-    },
+    config={"distributed.comm.recent-messages-log-length": 1000},
 )
 async def test_gather_dep_no_longer_in_flight_tasks(c, s, a):
-    in_gather_dep = asyncio.Event()
-    gather_dep_finished = asyncio.Event()
-    block_gather_dep = asyncio.Lock()
-    await block_gather_dep.acquire()
-
-    class InstrumentedWorker(Worker):
-        async def gather_dep(self, *args, **kwargs):
-            in_gather_dep.set()
-            async with block_gather_dep:
-                try:
-                    return await super().gather_dep(*args, **kwargs)
-                finally:
-                    gather_dep_finished.set()
-
-    async with InstrumentedWorker(s.address) as b:
+    async with BlockedGatherDep(s.address) as b:
         fut1 = c.submit(inc, 1, workers=[a.address], key="f1")
         fut2 = c.submit(sum, fut1, fut1, workers=[b.address], key="f2")
 
-        fut1_key = fut1.key
-
-        await _wait_for_state(fut1_key, b, "flight")
-        await in_gather_dep.wait()
+        await wait_for_state(fut1.key, "flight", b)
+        await b.in_gather_dep.wait()
 
         fut2.release()
-        while fut2.key in b.tasks:
-            await asyncio.sleep(0)
+        while fut2.key in b.state.tasks:
+            await asyncio.sleep(0.01)
 
-        assert b.tasks[fut1.key].state == "cancelled"
+        assert b.state.tasks[fut1.key].state == "cancelled"
 
-        block_gather_dep.release()
-        await gather_dep_finished.wait()
+        b.block_gather_dep.set()
+        while fut2.key in b.state.tasks:
+            await asyncio.sleep(0.01)
 
-        assert fut2.key not in b.tasks
-        f1_story = b.story(fut1.key)
-        f2_story = b.story(fut2.key)
+        f1_story = b.state.story(fut1.key)
+        f2_story = b.state.story(fut2.key)
         assert f1_story
         assert f2_story
         assert not any("missing-dep" in msg for msg in f2_story)
-
-
-@pytest.mark.parametrize("intermediate_state", ["resumed", "cancelled"])
-@pytest.mark.parametrize("close_worker", [False, True])
-@gen_cluster(client=True)
-async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
-    c, s, a, x, intermediate_state, close_worker
-):
-    """If a task was transitioned to in-flight, the gather-dep coroutine was
-    scheduled but a cancel request came in before gather_data_from_worker was
-    issued this might corrupt the state machine if the cancelled key is not
-    properly handled"""
-
-    in_gather_dep = asyncio.Event()
-    gather_dep_finished = asyncio.Event()
-    block_gather_dep = asyncio.Lock()
-    await block_gather_dep.acquire()
-
-    class InstrumentedWorker(Worker):
-        async def gather_dep(self, *args, **kwargs):
-            in_gather_dep.set()
-            async with block_gather_dep:
-                try:
-                    return await super().gather_dep(*args, **kwargs)
-                finally:
-                    gather_dep_finished.set()
-
-    fut1 = c.submit(slowinc, 1, workers=[a.address], key="f1")
-    fut1B = c.submit(slowinc, 2, workers=[x.address], key="f1B")
-    fut2 = c.submit(sum, [fut1, fut1B], workers=[x.address], key="f2")
-    await fut2
-
-    async with InstrumentedWorker(s.address, name="b") as b:
-        fut3 = c.submit(inc, fut2, workers=[b.address], key="f3")
-
-        fut2_key = fut2.key
-
-        await _wait_for_state(fut2_key, b, "flight")
-
-        s.set_restrictions(worker={fut1B.key: a.address, fut2.key: b.address})
-
-        await in_gather_dep.wait()
-
-        await s.remove_worker(address=x.address, safe=True, close=close_worker)
-
-        await _wait_for_state(fut2_key, b, intermediate_state)
-
-        block_gather_dep.release()
-        await gather_dep_finished.wait()
-        await fut3
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -3424,26 +3313,14 @@ async def test_Worker__to_dict(c, s, a):
         "type",
         "id",
         "scheduler",
-        "nthreads",
         "address",
         "status",
         "thread_id",
-        "ready",
-        "constrained",
-        "long_running",
-        "executing_count",
-        "in_flight_tasks",
-        "in_flight_workers",
-        "log",
-        "stimulus_log",
-        "tasks",
         "logs",
         "config",
         "incoming_transfer_log",
         "outgoing_transfer_log",
-        "data_needed",
-        "pending_data_per_worker",
-        # attributes of WorkerMemoryManager
+        # Attributes of WorkerMemoryManager
         "data",
         "max_spill",
         "memory_limit",
@@ -3451,9 +3328,26 @@ async def test_Worker__to_dict(c, s, a):
         "memory_pause_fraction",
         "memory_spill_fraction",
         "memory_target_fraction",
+        # Attributes of WorkerState
+        "nthreads",
+        "running",
+        "ready",
+        "has_what",
+        "constrained",
+        "executing",
+        "long_running",
+        "missing_dep_flight",
+        "in_flight_tasks",
+        "in_flight_workers",
+        "busy_workers",
+        "log",
+        "stimulus_log",
+        "transition_counter",
+        "tasks",
+        "data_needed",
     }
     assert d["tasks"]["x"]["key"] == "x"
-    assert d["data"] == ["x"]
+    assert d["data"] == {"x": None}
 
 
 @gen_cluster(nthreads=[])
@@ -3477,7 +3371,7 @@ async def test_extension_methods(s):
             self.scheduler = scheduler
             pass
 
-        def heartbeat(self, ws, data: dict):
+        def heartbeat(self, ws, data):
             nonlocal flag
             assert ws in self.scheduler.workers.values()
             assert data == {"data": 123}
@@ -3524,29 +3418,6 @@ async def test_tick_interval(c, s, a, b):
         time.sleep(0.200)
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
-async def test_log_invalid_transitions(c, s, a):
-    x = c.submit(inc, 1)
-    y = c.submit(inc, x)
-    xkey = x.key
-    del x
-    await y
-    while a.tasks[xkey].state != "released":
-        await asyncio.sleep(0.01)
-    ts = a.tasks[xkey]
-    with pytest.raises(InvalidTransition):
-        a.transition(ts, "foo", stimulus_id="bar")
-
-    while not s.events["invalid-worker-transition"]:
-        await asyncio.sleep(0.01)
-
-    assert "foo" in str(s.events["invalid-worker-transition"])
-    assert a.address in str(s.events["invalid-worker-transition"])
-    assert ts.key in str(s.events["invalid-worker-transition"])
-
-    del s.events["invalid-worker-transition"]  # for test cleanup
-
-
 class BreakingWorker(Worker):
     broke_once = False
 
@@ -3566,3 +3437,125 @@ async def test_broken_comm(c, s, a, b):
     )
     s = df.shuffle("id", shuffle="tasks")
     await c.compute(s.size)
+
+
+@gen_cluster(nthreads=[])
+async def test_do_not_block_event_loop_during_shutdown(s):
+    loop = asyncio.get_running_loop()
+    called_handler = threading.Event()
+    block_handler = threading.Event()
+
+    w = await Worker(s.address)
+    executor = w.executors["default"]
+
+    # The block wait must be smaller than the test timeout and smaller than the
+    # default value for timeout in `Worker.close``
+    async def block():
+        def fn():
+            called_handler.set()
+            assert block_handler.wait(20)
+
+        await loop.run_in_executor(executor, fn)
+
+    async def set_future():
+        while True:
+            try:
+                await loop.run_in_executor(executor, sleep, 0.1)
+            except RuntimeError:  # executor has started shutting down
+                block_handler.set()
+                return
+
+    async def close():
+        called_handler.wait()
+        # executor_wait is True by default but we want to be explicit here
+        await w.close(executor_wait=True)
+
+    await asyncio.gather(block(), close(), set_future())
+
+
+@gen_cluster(nthreads=[])
+async def test_reconnect_argument_deprecated(s):
+    with pytest.deprecated_call(match="`reconnect` argument"):
+        async with Worker(s.address, reconnect=False):
+            pass
+    with pytest.raises(ValueError, match="reconnect=True"):
+        async with Worker(s.address, reconnect=True):
+            pass
+
+    with warnings.catch_warnings():
+        # No argument should not warn or raise
+        warnings.simplefilter("error")
+        async with Worker(s.address):
+            pass
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_worker_running_before_running_plugins(c, s, caplog):
+    class InitWorkerNewThread(WorkerPlugin):
+        name: str = "init_worker_new_thread"
+        setup_status: Status | None = None
+
+        def setup(self, worker):
+            self.setup_status = worker.status
+
+        def teardown(self, worker):
+            pass
+
+    await c.register_worker_plugin(InitWorkerNewThread())
+    async with Worker(s.address) as worker:
+        assert await c.submit(inc, 1) == 2
+        assert worker.plugins[InitWorkerNewThread.name].setup_status is Status.running
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[],
+    config={
+        # This is just to make Scheduler.retire_worker more reactive to changes
+        "distributed.scheduler.active-memory-manager.start": True,
+        "distributed.scheduler.active-memory-manager.interval": "50ms",
+    },
+)
+async def test_execute_preamble_abort_retirement(c, s):
+    """Test race condition in the preamble of Worker.execute(), which used to cause a
+    task to remain permanently in executing state in case of very tight timings when
+    exiting the closing_gracefully status.
+
+    See also
+    --------
+    https://github.com/dask/distributed/issues/6867
+    test_cancelled_state.py::test_execute_preamble_early_cancel
+    """
+    async with BlockedExecute(s.address) as a:
+        await c.wait_for_workers(1)
+        a.block_deserialize_task.set()  # Uninteresting in this test
+
+        x = await c.scatter({"x": 1}, workers=[a.address])
+        y = c.submit(inc, 1, key="y", workers=[a.address])
+        await a.in_execute.wait()
+
+        async with BlockedGatherDep(s.address) as b:
+            await c.wait_for_workers(2)
+            retire_fut = asyncio.create_task(c.retire_workers([a.address]))
+            while a.status != Status.closing_gracefully:
+                await asyncio.sleep(0.01)
+            # The Active Memory Manager will send to b the message
+            # {op: acquire-replicas, who_has: {x: [a.address]}}
+            await b.in_gather_dep.wait()
+
+            # Run Worker.execute. At the moment of writing this test, the method would
+            # detect the closing_gracefully status and perform an early exit.
+            a.block_execute.set()
+            await a.in_execute_exit.wait()
+
+        # b has shut down. There's nowhere to replicate x to anymore, so retire_workers
+        # will give up and reinstate a to running status.
+        assert await retire_fut == {}
+        while a.status != Status.running:
+            await asyncio.sleep(0.01)
+
+        # Finally let the done_callback of Worker.execute run
+        a.block_execute_exit.set()
+
+        # Test that y does not get stuck.
+        assert await y == 2

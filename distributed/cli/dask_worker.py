@@ -5,7 +5,6 @@ import atexit
 import gc
 import logging
 import os
-import signal
 import sys
 import warnings
 from collections.abc import Iterator
@@ -14,13 +13,13 @@ from typing import Any
 
 import click
 from tlz import valmap
-from tornado.ioloop import IOLoop, TimeoutError
+from tornado.ioloop import TimeoutError
 
 import dask
 from dask.system import CPU_COUNT
 
 from distributed import Nanny
-from distributed.cli.utils import install_signal_handlers
+from distributed._signals import wait_for_signals
 from distributed.comm import get_address_host_port
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.preloading import validate_preload_argv
@@ -170,8 +169,8 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 )
 @click.option(
     "--reconnect/--no-reconnect",
-    default=True,
-    help="Reconnect to scheduler if disconnected [default: --reconnect]",
+    default=None,
+    help="Deprecated, has no effect. Passing --reconnect is an error. [default: --no-reconnect]",
 )
 @click.option(
     "--nanny/--no-nanny",
@@ -255,7 +254,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     'like "foo.bar" or "/path/to/foo.py"',
 )
 @click.version_option()
-def main(
+def main(  # type: ignore[no-untyped-def]
     scheduler,
     host,
     worker_port: str | None,
@@ -280,6 +279,7 @@ def main(
     dashboard_address,
     worker_class,
     preload_nanny,
+    reconnect,
     **kwargs,
 ):
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
@@ -299,6 +299,20 @@ def main(
             "The --bokeh/--no-bokeh flag has been renamed to --dashboard/--no-dashboard. "
         )
         dashboard = bokeh
+    if reconnect is not None:
+        if reconnect:
+            logger.error(
+                "The `--reconnect` option has been removed. "
+                "To improve cluster stability, workers now always shut down in the face of network disconnects. "
+                "For details, or if this is an issue for you, see https://github.com/dask/distributed/issues/6350."
+            )
+            sys.exit(1)
+        else:
+            logger.warning(
+                "The `--no-reconnect/--reconnect` flag is deprecated, and will be removed in a future release. "
+                "Worker reconnection is now always disabled, so `--no-reconnect` is unnecessary. "
+                "See https://github.com/dask/distributed/issues/6350 for details.",
+            )
 
     sec = {
         k: v
@@ -404,8 +418,6 @@ def main(
     else:
         resources = None
 
-    loop = IOLoop.current()
-
     worker_class = import_term(worker_class)
 
     port_kwargs = _apportion_ports(worker_port, nanny_port, n_workers, nanny)
@@ -432,56 +444,65 @@ def main(
     with suppress(TypeError, ValueError):
         name = int(name)
 
-    nannies = [
-        t(
-            scheduler,
-            scheduler_file=scheduler_file,
-            nthreads=nthreads,
-            loop=loop,
-            resources=resources,
-            security=sec,
-            contact_address=contact_address,
-            host=host,
-            dashboard=dashboard,
-            dashboard_address=dashboard_address,
-            name=name
-            if n_workers == 1 or name is None or name == ""
-            else str(name) + "-" + str(i),
-            **kwargs,
-            **port_kwargs_i,
-        )
-        for i, port_kwargs_i in enumerate(port_kwargs)
-    ]
-
-    async def close_all():
-        # Unregister all workers from scheduler
-        if nanny:
-            await asyncio.gather(*(n.close(timeout=2) for n in nannies))
-
     signal_fired = False
 
-    def on_signal(signum):
-        nonlocal signal_fired
-        signal_fired = True
-        if signum != signal.SIGINT:
-            logger.info("Exiting on signal %d", signum)
-        return asyncio.ensure_future(close_all())
-
     async def run():
-        await asyncio.gather(*nannies)
-        await asyncio.gather(*(n.finished() for n in nannies))
+        nannies = [
+            t(
+                scheduler,
+                scheduler_file=scheduler_file,
+                nthreads=nthreads,
+                resources=resources,
+                security=sec,
+                contact_address=contact_address,
+                host=host,
+                dashboard=dashboard,
+                dashboard_address=dashboard_address,
+                name=name
+                if n_workers == 1 or name is None or name == ""
+                else str(name) + "-" + str(i),
+                **kwargs,
+                **port_kwargs_i,
+            )
+            for i, port_kwargs_i in enumerate(port_kwargs)
+        ]
 
-    install_signal_handlers(loop, cleanup=on_signal)
+        async def wait_for_nannies_to_finish():
+            """Wait for all nannies to initialize and finish"""
+            await asyncio.gather(*nannies)
+            await asyncio.gather(*(n.finished() for n in nannies))
+
+        async def wait_for_signals_and_close():
+            """Wait for SIGINT or SIGTERM and close all nannies upon receiving one of those signals"""
+            nonlocal signal_fired
+            await wait_for_signals()
+
+            signal_fired = True
+            if nanny:
+                # Unregister all workers from scheduler
+                await asyncio.gather(*(n.close(timeout=10) for n in nannies))
+
+        wait_for_signals_and_close_task = asyncio.create_task(
+            wait_for_signals_and_close()
+        )
+        wait_for_nannies_to_finish_task = asyncio.create_task(
+            wait_for_nannies_to_finish()
+        )
+
+        done, _ = await asyncio.wait(
+            [wait_for_signals_and_close_task, wait_for_nannies_to_finish_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        # Re-raise exceptions from done tasks
+        [task.result() for task in done]
 
     try:
-        loop.run_sync(run)
-    except TimeoutError:
+        asyncio.run(run())
+    except (TimeoutError, asyncio.TimeoutError):
         # We already log the exception in nanny / worker. Don't do it again.
         if not signal_fired:
             logger.info("Timed out starting worker")
         sys.exit(1)
-    except KeyboardInterrupt:  # pragma: no cover
-        pass
     finally:
         logger.info("End worker")
 

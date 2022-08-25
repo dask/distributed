@@ -1,14 +1,17 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import random
 from datetime import timedelta
-from time import monotonic, sleep
+from time import sleep
 
 import pytest
 
 from distributed import Client, Nanny, TimeoutError, Variable, wait, worker_client
 from distributed.compatibility import WINDOWS
-from distributed.metrics import time
+from distributed.metrics import monotonic, time
+from distributed.utils import open_port
 from distributed.utils_test import captured_logger, div, gen_cluster, inc, popen
 
 
@@ -38,11 +41,12 @@ async def test_variable(c, s, a, b):
 
 
 def test_variable_in_task(loop):
+    port = open_port()
     # Ensure that we can create a Variable inside a task on a
     # worker in a separate Python process than the client
-    with popen(["dask-scheduler", "--no-dashboard"]):
-        with popen(["dask-worker", "127.0.0.1:8786"]):
-            with Client("tcp://127.0.0.1:8786", loop=loop) as c:
+    with popen(["dask-scheduler", "--no-dashboard", "--port", str(port)]):
+        with popen(["dask-worker", f"127.0.0.1:{port}"]):
+            with Client(f"tcp://127.0.0.1:{port}", loop=loop) as c:
                 c.wait_for_workers(1)
 
                 x = Variable("x")
@@ -91,22 +95,20 @@ def test_sync(client):
 
 @gen_cluster()
 async def test_hold_futures(s, a, b):
-    c1 = await Client(s.address, asynchronous=True)
-    future = c1.submit(lambda x: x + 1, 10)
-    x1 = Variable("x")
-    await x1.set(future)
-    del x1
-    await c1.close()
+    async with Client(s.address, asynchronous=True) as c1:
+        future = c1.submit(lambda x: x + 1, 10)
+        x1 = Variable("x")
+        await x1.set(future)
+        del x1
 
     await asyncio.sleep(0.1)
 
-    c2 = await Client(s.address, asynchronous=True)
-    x2 = Variable("x")
-    future2 = await x2.get()
-    result = await future2
+    async with Client(s.address, asynchronous=True) as c2:
+        x2 = Variable("x")
+        future2 = await x2.get()
+        result = await future2
 
-    assert result == 11
-    await c2.close()
+        assert result == 11
 
 
 @gen_cluster(client=True)
@@ -224,31 +226,29 @@ async def test_Future_knows_status_immediately(c, s, a, b):
     v = Variable("x")
     await v.set(x)
 
-    c2 = await Client(s.address, asynchronous=True)
-    v2 = Variable("x", client=c2)
-    future = await v2.get()
-    assert future.status == "finished"
+    async with Client(s.address, asynchronous=True) as c2:
+        v2 = Variable("x", client=c2)
+        future = await v2.get()
+        assert future.status == "finished"
 
-    x = c.submit(div, 1, 0)
-    await wait(x)
-    await v.set(x)
+        x = c.submit(div, 1, 0)
+        await wait(x)
+        await v.set(x)
 
-    future2 = await v2.get()
-    assert future2.status == "error"
-    with pytest.raises(Exception):
-        await future2
-
-    start = time()
-    while True:  # we learn about the true error eventually
-        try:
+        future2 = await v2.get()
+        assert future2.status == "error"
+        with pytest.raises(Exception):
             await future2
-        except ZeroDivisionError:
-            break
-        except Exception:
-            assert time() < start + 5
-            await asyncio.sleep(0.05)
 
-    await c2.close()
+        start = time()
+        while True:  # we learn about the true error eventually
+            try:
+                await future2
+            except ZeroDivisionError:
+                break
+            except Exception:
+                assert time() < start + 5
+                await asyncio.sleep(0.05)
 
 
 @gen_cluster(client=True)

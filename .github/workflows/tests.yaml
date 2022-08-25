@@ -77,7 +77,7 @@ jobs:
 
       - name: Install dask branch
         shell: bash -l {0}
-        run: python -m pip install --no-deps git+https://github.com/mrocklin/dask@nuke-hlg
+        run: python -m pip install --no-deps git+https://github.com/rjzamora/dask@nuke-hlg
 
       - name: Install
         shell: bash -l {0}
@@ -106,6 +106,17 @@ jobs:
         # No SIGALRM available on Windows
         if: ${{ matrix.os != 'windows-latest' }}
         run: sed -i.bak 's/timeout_method = thread/timeout_method = signal/' setup.cfg
+
+      - name: Print host info
+        shell: bash -l {0}
+        run: |
+          if [[ "${{ matrix.os }}" = "ubuntu-latest" ]]; then
+              # FIXME ipv6-related failures on Ubuntu github actions CI
+              # https://github.com/dask/distributed/issues/4514
+              export DISABLE_IPV6=1
+          fi
+
+          python continuous_integration/scripts/host_info.py
 
       - name: Test
         id: run_tests

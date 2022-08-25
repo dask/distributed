@@ -6,22 +6,16 @@ import errno
 import functools
 import logging
 import socket
+import ssl
 import struct
 import sys
 import weakref
 from ssl import SSLCertVerificationError, SSLError
 from typing import Any, ClassVar
 
-from tornado import gen
-
-try:
-    import ssl
-except ImportError:
-    ssl = None  # type: ignore
-
 from tlz import sliding_window
-from tornado import netutil
-from tornado.iostream import StreamClosedError
+from tornado import gen, netutil
+from tornado.iostream import IOStream, StreamClosedError
 from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 
@@ -46,7 +40,7 @@ from distributed.comm.utils import (
 )
 from distributed.protocol.utils import pack_frames_prelude, unpack_frames
 from distributed.system import MEMORY_LIMIT
-from distributed.utils import ensure_ip, get_ip, get_ipv6, nbytes
+from distributed.utils import ensure_ip, ensure_memoryview, get_ip, get_ipv6, nbytes
 
 logger = logging.getLogger(__name__)
 
@@ -142,8 +136,8 @@ def convert_stream_closed_error(obj, exc):
     if exc.real_error is not None:
         # The stream was closed because of an underlying OS error
         exc = exc.real_error
-        if ssl and isinstance(exc, ssl.SSLError):
-            if "UNKNOWN_CA" in exc.reason:
+        if isinstance(exc, ssl.SSLError):
+            if exc.reason and "UNKNOWN_CA" in exc.reason:
                 raise FatalCommClosedError(f"in {obj}: {exc.__class__.__name__}: {exc}")
         raise CommClosedError(f"in {obj}: {exc.__class__.__name__}: {exc}") from exc
     else:
@@ -167,11 +161,14 @@ class TCP(Comm):
     An established communication based on an underlying Tornado IOStream.
     """
 
-    max_shard_size = dask.utils.parse_bytes(dask.config.get("distributed.comm.shard"))
+    max_shard_size: ClassVar[int] = dask.utils.parse_bytes(
+        dask.config.get("distributed.comm.shard")
+    )
+    stream: IOStream | None
 
     def __init__(
         self,
-        stream,
+        stream: IOStream,
         local_addr: str,
         peer_addr: str,
         deserialize: bool = True,
@@ -197,7 +194,9 @@ class TCP(Comm):
         pass
 
     def _get_finalizer(self):
-        def finalize(stream=self.stream, r=repr(self)):
+        r = repr(self)
+
+        def finalize(stream=self.stream, r=r):
             # stream is None if a StreamClosedError is raised during interpreter
             # shutdown
             if stream is not None and not stream.closed():
@@ -232,7 +231,7 @@ class TCP(Comm):
                 range(0, frames_nbytes + OPENSSL_MAX_CHUNKSIZE, OPENSSL_MAX_CHUNKSIZE),
             ):
                 chunk = frames[i:j]
-                chunk_nbytes = len(chunk)
+                chunk_nbytes = chunk.nbytes
                 n = await stream.read_into(chunk)
                 assert n == chunk_nbytes, (n, chunk_nbytes)
         except StreamClosedError as e:
@@ -240,11 +239,12 @@ class TCP(Comm):
             self._closed = True
             if not sys.is_finalizing():
                 convert_stream_closed_error(self, e)
-        except Exception:
-            # Some OSError or a another "low-level" exception. We do not really know what
-            # was already read from the underlying socket, so it is not even safe to retry
-            # here using the same stream. The only safe thing to do is to abort.
-            # (See also GitHub #4133).
+        except BaseException:
+            # Some OSError, CancelledError or a another "low-level" exception.
+            # We do not really know what was already read from the underlying
+            # socket, so it is not even safe to retry here using the same stream.
+            # The only safe thing to do is to abort.
+            # (See also GitHub #4133, #6548).
             self.abort()
             raise
         else:
@@ -299,16 +299,25 @@ class TCP(Comm):
             # trick to enque all frames for writing beforehand
             for each_frame_nbytes, each_frame in zip(frames_nbytes, frames):
                 if each_frame_nbytes:
-                    if stream._write_buffer is None:
-                        raise StreamClosedError()
+                    # Make sure that `len(data) == data.nbytes`
+                    # See <https://github.com/tornadoweb/tornado/pull/2996>
+                    each_frame = ensure_memoryview(each_frame)
+                    for i, j in sliding_window(
+                        2,
+                        range(
+                            0,
+                            each_frame_nbytes + OPENSSL_MAX_CHUNKSIZE,
+                            OPENSSL_MAX_CHUNKSIZE,
+                        ),
+                    ):
+                        chunk = each_frame[i:j]
+                        chunk_nbytes = chunk.nbytes
 
-                    if isinstance(each_frame, memoryview):
-                        # Make sure that `len(data) == data.nbytes`
-                        # See <https://github.com/tornadoweb/tornado/pull/2996>
-                        each_frame = memoryview(each_frame).cast("B")
+                        if stream._write_buffer is None:
+                            raise StreamClosedError()
 
-                    stream._write_buffer.append(each_frame)
-                    stream._total_write_index += each_frame_nbytes
+                        stream._write_buffer.append(chunk)
+                        stream._total_write_index += chunk_nbytes
 
             # start writing frames
             stream.write(b"")
@@ -317,11 +326,14 @@ class TCP(Comm):
             self._closed = True
             if not sys.is_finalizing():
                 convert_stream_closed_error(self, e)
-        except Exception:
+        except BaseException:
             # Some OSError or a another "low-level" exception. We do not really know
             # what was already written to the underlying socket, so it is not even safe
             # to retry here using the same stream. The only safe thing to do is to
             # abort. (See also GitHub #4133).
+            # In case of, for instance, KeyboardInterrupts or other
+            # BaseExceptions that could be handled further upstream, we equally
+            # want to discard this comm
             self.abort()
             raise
 
@@ -346,14 +358,14 @@ class TCP(Comm):
                 self._finalizer.detach()
                 stream.close()
 
-    def abort(self):
+    def abort(self) -> None:
         stream, self.stream = self.stream, None
         self._closed = True
         if stream is not None and not stream.closed():
             self._finalizer.detach()
             stream.close()
 
-    def closed(self):
+    def closed(self) -> bool:
         return self._closed
 
     @property
@@ -404,11 +416,44 @@ class RequireEncryptionMixin:
             )
 
 
+_NUMERIC_ONLY = socket.AI_NUMERICHOST | socket.AI_NUMERICSERV
+
+
+async def _getaddrinfo(host, port, *, family, type=socket.SOCK_STREAM):
+    # If host and port are numeric, then getaddrinfo doesn't block and we can
+    # skip get_running_loop().getaddrinfo which is implemented by running in
+    # a ThreadPoolExecutor.
+    # So we try first with the _NUMERIC_ONLY flags set, and then only use the
+    # threadpool if that fails with EAI_NONAME:
+    try:
+        return socket.getaddrinfo(
+            host,
+            port,
+            family=family,
+            type=type,
+            flags=_NUMERIC_ONLY,
+        )
+    except socket.gaierror as e:
+        if e.errno != socket.EAI_NONAME:
+            raise
+
+    # That failed; it's a real hostname. We better use a thread.
+    return await asyncio.get_running_loop().getaddrinfo(
+        host, port, family=family, type=socket.SOCK_STREAM
+    )
+
+
 class _DefaultLoopResolver(netutil.Resolver):
     """
     Resolver implementation using `asyncio.loop.getaddrinfo`.
     backport from Tornado 6.2+
     https://github.com/tornadoweb/tornado/blob/3de78b7a15ba7134917a18b0755ea24d7f8fde94/tornado/netutil.py#L416-L432
+
+    With an additional optimization based on
+    https://github.com/python-trio/trio/blob/4edfd41bd5519a2e626e87f6c6ca9fb32b90a6f4/trio/_socket.py#L125-L192
+    (Copyright Contributors to the Trio project.)
+
+    And proposed to cpython in https://github.com/python/cpython/pull/31497/
     """
 
     async def resolve(
@@ -421,7 +466,7 @@ class _DefaultLoopResolver(netutil.Resolver):
         # so the addresses we return should still be usable with SOCK_DGRAM.
         return [
             (fam, address)
-            for fam, _, _, _, address in await asyncio.get_running_loop().getaddrinfo(
+            for fam, _, _, _, address in await _getaddrinfo(
                 host, port, family=family, type=socket.SOCK_STREAM
             )
         ]
@@ -509,7 +554,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         self.tcp_server = TCPServer(max_buffer_size=MAX_BUFFER_SIZE, **self.server_args)
         self.tcp_server.handle_stream = self._handle_stream
         backlog = int(dask.config.get("distributed.comm.socket-backlog"))
-        for i in range(5):
+        for _ in range(5):
             try:
                 # When shuffling data between workers, there can
                 # really be O(cluster size) connection requests

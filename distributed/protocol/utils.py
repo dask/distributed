@@ -18,7 +18,9 @@ msgpack_opts["strict_map_key"] = False
 msgpack_opts["raw"] = False
 
 
-def frame_split_size(frame, n=BIG_BYTES_SHARD_SIZE) -> list:
+def frame_split_size(
+    frame: bytes | memoryview, n: int = BIG_BYTES_SHARD_SIZE
+) -> list[memoryview]:
     """
     Split a frame into a list of frames of maximum size
 

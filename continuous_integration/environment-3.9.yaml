@@ -19,20 +19,22 @@ dependencies:
   - ipywidgets
   - jinja2
   - locket >=1.0
-  - lz4  # Only tested here
+  - lz4 >=0.23.1  # Only tested here
   - msgpack-python
   - netcdf4
   - paramiko
   - pre-commit
   - prometheus_client
   - psutil
+  - pyarrow=7
+  - pynvml  # Only tested here
   - pytest
   - pytest-cov
   - pytest-faulthandler
   - pytest-repeat
   - pytest-rerunfailures
   - pytest-timeout
-  - python-snappy  # Only tested here
+  - python-snappy >=0.5.3  # Only tested here
   - pytorch  # Only tested here
   - requests
   - s3fs
@@ -42,9 +44,9 @@ dependencies:
   - tblib
   - toolz
   - torchvision  # Only tested here
-  - tornado
+  - tornado<6.2
   - zict
-  - zstandard
+  - zstandard >=0.9.0
   - pip:
       - git+https://github.com/dask/dask
       - keras

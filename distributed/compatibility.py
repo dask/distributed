@@ -9,7 +9,7 @@ logging_names.update(logging._nameToLevel)  # type: ignore
 
 LINUX = sys.platform == "linux"
 MACOS = sys.platform == "darwin"
-WINDOWS = sys.platform.startswith("win")
+WINDOWS = sys.platform == "win32"
 
 
 if sys.version_info >= (3, 9):

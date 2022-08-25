@@ -12,6 +12,7 @@ distributed:
     allowed-failures: 3     # number of retries before a task is considered bad
     bandwidth: 100000000    # 100 MB/s estimated worker-worker bandwidth
     blocked-handlers: []
+    contact-address: null
     default-data-size: 1kiB
     # Number of seconds to wait until workers or clients are removed from the events log
     # after they have been removed from the scheduler
@@ -21,7 +22,7 @@ distributed:
     events-log-length: 100000
     work-stealing: True     # workers should steal tasks from each other
     work-stealing-interval: 100ms  # Callback time for work stealing
-    worker-ttl: null        # like '60s'. Time to live for workers.  They must heartbeat faster than this
+    worker-ttl: "5 minutes" # like '60s'. Time to live for workers.  They must heartbeat faster than this
     pickle: True            # Is the scheduler allowed to deserialize arbitrary bytestrings
     preload: []             # Run custom modules with Scheduler
     preload-argv: []        # See https://docs.dask.org/en/latest/how-to/customize-initialization.html
@@ -90,6 +91,7 @@ distributed:
       restart: False        # Do we ressurrect the worker after the lifetime deadline?
 
     profile:
+      enabled: True         # Whether or not to enable profiling
       interval: 10ms        # Time between statistical profiling queries
       cycle: 1000ms         # Time between starting new profile
       low-level: False      # Whether or not to include low-level functions
@@ -162,8 +164,19 @@ distributed:
   nanny:
     preload: []             # Run custom modules with Nanny
     preload-argv: []        # See https://docs.dask.org/en/latest/how-to/customize-initialization.html
-    environ:
+    # Override environment variables after spawning the Worker process.
+    # Use whenever you are sure that nothing will read them before the end of the worker
+    # initialization.
+    environ: {}
+    # Override environment variables *before* spawning the Worker initialization.
+    # Use for variables that are parsed in or before the worker init.
+    # Note that this leaks variables into the nanny process.
+    # Read important caveats at
+    # https://distributed.dask.org/en/stable/worker.html#nanny.
+    pre-spawn-environ:
+      # See https://distributed.dask.org/en/stable/worker-memory.html#automatically-trim-memory
       MALLOC_TRIM_THRESHOLD_: 65536
+      # Numpy configuration
       OMP_NUM_THREADS: 1
       MKL_NUM_THREADS: 1
 
@@ -250,6 +263,8 @@ distributed:
         - cuml
         - prefect
         - xgboost
+    erred-tasks:
+      max-history: 100
 
   ###################
   # Bokeh dashboard #
@@ -278,6 +293,7 @@ distributed:
     pdb-on-err: False       # enter debug mode on scheduling error
     system-monitor:
       interval: 500ms
+      disk: true
     event-loop: tornado
   rmm:
     pool-size: null

@@ -18,6 +18,7 @@ from distributed.profile import (
     info_frame,
     ll_get_stack,
     llprocess,
+    lock,
     merge,
     plot_data,
     process,
@@ -33,7 +34,7 @@ def test_basic():
         sleep(0.02)
 
     def test_f():
-        for i in range(100):
+        for _ in range(100):
             test_g()
             test_h()
 
@@ -43,7 +44,7 @@ def test_basic():
 
     state = create()
 
-    for i in range(100):
+    for _ in range(100):
         sleep(0.02)
         frame = sys._current_frames()[thread.ident]
         process(frame, None, state)
@@ -74,7 +75,7 @@ def test_basic_low_level():
 
     state = create()
 
-    for i in range(100):
+    for _ in range(100):
         sleep(0.02)
         frame = sys._current_frames()[threading.get_ident()]
         llframes = {threading.get_ident(): ll_get_stack(threading.get_ident())}
@@ -184,27 +185,75 @@ def test_identifier():
 
 
 def test_watch():
+    stop_called = threading.Event()
+    watch_thread = None
     start = time()
 
     def stop():
+        if not stop_called.is_set():  # Run setup code
+            nonlocal watch_thread
+            nonlocal start
+            watch_thread = threading.current_thread()
+            start = time()
+            stop_called.set()
         return time() > start + 0.500
+
+    try:
+        log = watch(interval="10ms", cycle="50ms", stop=stop)
+
+        stop_called.wait(2)
+        sleep(0.5)
+        assert 1 < len(log) < 10
+    finally:
+        stop_called.wait()
+        watch_thread.join()
+
+
+def test_watch_requires_lock_to_run():
+    start = time()
+
+    stop_profiling_called = threading.Event()
+    profiling_thread = None
+
+    def stop_profiling():
+        if not stop_profiling_called.is_set():  # Run setup code
+            nonlocal profiling_thread
+            nonlocal start
+            profiling_thread = threading.current_thread()
+            start = time()
+            stop_profiling_called.set()
+        return time() > start + 0.500
+
+    release_lock = threading.Event()
+
+    def block_lock():
+        with lock:
+            release_lock.wait()
 
     start_threads = threading.active_count()
 
-    log = watch(interval="10ms", cycle="50ms", stop=stop)
+    # Block the lock over the entire duration of watch
+    blocking_thread = threading.Thread(target=block_lock, name="Block Lock")
+    blocking_thread.daemon = True
 
-    start = time()  # wait until thread starts up
-    while threading.active_count() <= start_threads:
-        assert time() < start + 2
-        sleep(0.01)
+    try:
+        blocking_thread.start()
 
-    sleep(0.5)
-    assert 1 < len(log) < 10
+        log = watch(interval="10ms", cycle="50ms", stop=stop_profiling)
 
-    start = time()
-    while threading.active_count() > start_threads:
-        assert time() < start + 2
-        sleep(0.01)
+        start = time()  # wait until thread starts up
+        while threading.active_count() < start_threads + 2:
+            assert time() < start + 2
+            sleep(0.01)
+
+        sleep(0.5)
+        assert len(log) == 0
+        release_lock.set()
+    finally:
+        release_lock.set()
+        stop_profiling_called.wait()
+        blocking_thread.join()
+        profiling_thread.join()
 
 
 @dataclasses.dataclass(frozen=True)

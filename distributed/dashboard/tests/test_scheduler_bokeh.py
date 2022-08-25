@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import re
@@ -30,6 +32,7 @@ from distributed.dashboard.components.scheduler import (
     Occupancy,
     ProcessingHistogram,
     ProfileServer,
+    Shuffling,
     StealingEvents,
     StealingTimeSeries,
     SystemMonitor,
@@ -49,6 +52,7 @@ from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.metrics import time
 from distributed.utils import format_dashboard_link
 from distributed.utils_test import dec, div, gen_cluster, get_cert, inc, slowinc
+from distributed.worker import Worker
 
 # Imported from distributed.dashboard.utils
 scheduler.PROFILING = False  # type: ignore
@@ -119,8 +123,8 @@ async def test_stealing_events(c, s, a, b):
     await wait(futures)
     se.update()
     assert len(first(se.source.data.values()))
-    assert b.tasks
-    assert sum(se.source.data["count"]) >= len(b.tasks)
+    assert b.state.tasks
+    assert sum(se.source.data["count"]) >= len(b.state.tasks)
 
 
 @gen_cluster(client=True)
@@ -131,7 +135,7 @@ async def test_events(c, s, a, b):
         slowinc, range(100), delay=0.1, workers=a.address, allow_other_workers=True
     )
 
-    while not b.tasks:
+    while not b.state.tasks:
         await asyncio.sleep(0.01)
 
     e.update()
@@ -503,22 +507,33 @@ async def test_WorkerNetworkBandwidth(c, s, a, b):
 async def test_WorkerNetworkBandwidth_metrics(c, s, a, b):
     # Disable system monitor periodic callback to allow us to manually control
     # when it is called below
-    a.periodic_callbacks["monitor"].stop()
-    b.periodic_callbacks["monitor"].stop()
+    with dask.config.set({"distributed.admin.system-monitor.disk": False}):
+        async with Worker(s.address) as w:
+            a.periodic_callbacks["monitor"].stop()
+            b.periodic_callbacks["monitor"].stop()
+            w.periodic_callbacks["monitor"].stop()
 
-    # Update worker system monitors and send updated metrics to the scheduler
-    a.monitor.update()
-    b.monitor.update()
-    await asyncio.gather(a.heartbeat(), b.heartbeat())
+            # Update worker system monitors and send updated metrics to the scheduler
+            a.monitor.update()
+            b.monitor.update()
+            w.monitor.update()
+            await asyncio.gather(a.heartbeat(), b.heartbeat())
+            await asyncio.gather(a.heartbeat(), b.heartbeat(), w.heartbeat())
 
-    nb = WorkerNetworkBandwidth(s)
-    nb.update()
+            nb = WorkerNetworkBandwidth(s)
+            nb.update()
 
-    for idx, ws in enumerate(s.workers.values()):
-        assert ws.metrics["read_bytes"] == nb.source.data["x_read"][idx]
-        assert ws.metrics["write_bytes"] == nb.source.data["x_write"][idx]
-        assert ws.metrics["read_bytes_disk"] == nb.source.data["x_read_disk"][idx]
-        assert ws.metrics["write_bytes_disk"] == nb.source.data["x_write_disk"][idx]
+            for idx, ws in enumerate(s.workers.values()):
+                assert ws.metrics["read_bytes"] == nb.source.data["x_read"][idx]
+                assert ws.metrics["write_bytes"] == nb.source.data["x_write"][idx]
+                assert (
+                    ws.metrics.get("read_bytes_disk", 0)
+                    == nb.source.data["x_read_disk"][idx]
+                )
+                assert (
+                    ws.metrics.get("write_bytes_disk", 0)
+                    == nb.source.data["x_write_disk"][idx]
+                )
 
 
 @gen_cluster(client=True)
@@ -787,18 +802,38 @@ async def test_TaskGroupGraph_arrows(c, s, a, b):
 @gen_cluster(
     client=True,
     config={
+        "distributed.worker.profile.enabled": True,
         "distributed.worker.profile.interval": "10ms",
         "distributed.worker.profile.cycle": "50ms",
     },
 )
 async def test_profile_server(c, s, a, b):
     ptp = ProfileServer(s)
+    assert "disabled" not in ptp.subtitle.text
     start = time()
     await asyncio.sleep(0.100)
     while len(ptp.ts_source.data["time"]) < 2:
         await asyncio.sleep(0.100)
         ptp.trigger_update()
         assert time() < start + 2
+
+
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.enabled": False,
+        "distributed.worker.profile.interval": "5ms",
+        "distributed.worker.profile.cycle": "10ms",
+    },
+)
+async def test_profile_server_disabled(c, s, a, b):
+    ptp = ProfileServer(s)
+    assert "disabled" in ptp.subtitle.text
+    start = time()
+    await asyncio.sleep(0.1)
+    ptp.trigger_update()
+    assert len(ptp.ts_source.data["time"]) == 0
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
@@ -844,11 +879,11 @@ async def test_proxy_to_workers(c, s, a, b):
 
         assert response_proxy.code == 200
         if proxy_exists:
-            assert b"Crossfilter" in response_proxy.body
+            assert b"System" in response_proxy.body
         else:
             assert b"python -m pip install jupyter-server-proxy" in response_proxy.body
         assert response_direct.code == 200
-        assert b"Crossfilter" in response_direct.body
+        assert b"System" in response_direct.body
 
 
 @gen_cluster(
@@ -1005,6 +1040,22 @@ async def test_prefix_bokeh(s, a, b):
     bokeh_app = s.http_application.applications[0]
     assert isinstance(bokeh_app, BokehTornado)
     assert bokeh_app.prefix == f"/{prefix}"
+
+
+@gen_cluster(client=True, worker_kwargs={"dashboard": True})
+async def test_shuffling(c, s, a, b):
+    pytest.importorskip("pyarrow")
+    dd = pytest.importorskip("dask.dataframe")
+    ss = Shuffling(s)
+
+    df = dask.datasets.timeseries()
+    df2 = dd.shuffle.shuffle(df, "x", shuffle="p2p").persist()
+
+    start = time()
+    while not ss.source.data["disk_read"]:
+        ss.update()
+        await asyncio.sleep(0.1)
+        assert time() < start + 5
 
 
 @gen_cluster(client=True, nthreads=[], scheduler_kwargs={"dashboard": True})

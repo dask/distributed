@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pytest
 
 pytest.importorskip("bokeh")
@@ -61,7 +63,7 @@ async def test_progress_stream(c, s, a, b):
     futures = c.map(div, [1] * 10, range(10))
 
     x = 1
-    for i in range(5):
+    for _ in range(5):
         x = delayed(inc)(x)
     future = c.compute(x)
 
