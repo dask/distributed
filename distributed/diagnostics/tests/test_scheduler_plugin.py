@@ -75,8 +75,8 @@ async def test_add_remove_worker(s):
 
     events[:] = []
     s.remove_plugin(plugin.name)
-    a = await Worker(s.address)
-    await a.close()
+    async with Worker(s.address):
+        pass
     assert events == []
 
 

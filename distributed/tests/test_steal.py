@@ -332,17 +332,14 @@ async def test_new_worker_steals(c, s, a):
     while len(a.state.tasks) < 10:
         await asyncio.sleep(0.01)
 
-    b = await Worker(s.address, nthreads=1, memory_limit=MEMORY_LIMIT)
+    async with Worker(s.address, nthreads=1, memory_limit=MEMORY_LIMIT) as b:
+        result = await total
+        assert result == sum(map(inc, range(100)))
 
-    result = await total
-    assert result == sum(map(inc, range(100)))
+        for w in (a, b):
+            assert all(isinstance(v, int) for v in w.data.values())
 
-    for w in [a, b]:
-        assert all(isinstance(v, int) for v in w.data.values())
-
-    assert b.data
-
-    await b.close()
+        assert b.data
 
 
 @gen_cluster(client=True)
@@ -443,17 +440,16 @@ async def test_steal_host_restrictions(c, s, wa, wb):
     assert len(wa.state.tasks) == ntasks
     assert len(wb.state.tasks) == 0
 
-    wc = await Worker(s.address, nthreads=1)
+    async with Worker(s.address, nthreads=1) as wc:
+        start = time()
+        while not wc.state.tasks or len(wa.state.tasks) == ntasks:
+            await asyncio.sleep(0.01)
+            assert time() < start + 3
 
-    start = time()
-    while not wc.state.tasks or len(wa.state.tasks) == ntasks:
-        await asyncio.sleep(0.01)
-        assert time() < start + 3
-
-    await asyncio.sleep(0.1)
-    assert 0 < len(wa.state.tasks) < ntasks
-    assert len(wb.state.tasks) == 0
-    assert 0 < len(wc.state.tasks) < ntasks
+        await asyncio.sleep(0.1)
+        assert 0 < len(wa.state.tasks) < ntasks
+        assert len(wb.state.tasks) == 0
+        assert 0 < len(wc.state.tasks) < ntasks
 
 
 @gen_cluster(
@@ -486,15 +482,12 @@ async def test_steal_resource_restrictions(c, s, a):
         await asyncio.sleep(0.01)
     assert len(a.state.tasks) == 101
 
-    b = await Worker(s.address, nthreads=1, resources={"A": 4})
+    async with Worker(s.address, nthreads=1, resources={"A": 4}) as b:
+        while not b.state.tasks or len(a.state.tasks) == 101:
+            await asyncio.sleep(0.01)
 
-    while not b.state.tasks or len(a.state.tasks) == 101:
-        await asyncio.sleep(0.01)
-
-    assert len(b.state.tasks) > 0
-    assert len(a.state.tasks) < 101
-
-    await b.close()
+        assert len(b.state.tasks) > 0
+        assert len(a.state.tasks) < 101
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1, {"resources": {"A": 2, "C": 1}})])
@@ -508,15 +501,12 @@ async def test_steal_resource_restrictions_asym_diff(c, s, a):
         await asyncio.sleep(0.01)
     assert len(a.state.tasks) == 101
 
-    b = await Worker(s.address, nthreads=1, resources={"A": 4, "B": 5})
+    async with Worker(s.address, nthreads=1, resources={"A": 4, "B": 5}) as b:
+        while not b.state.tasks or len(a.state.tasks) == 101:
+            await asyncio.sleep(0.01)
 
-    while not b.state.tasks or len(a.state.tasks) == 101:
-        await asyncio.sleep(0.01)
-
-    assert len(b.state.tasks) > 0
-    assert len(a.state.tasks) < 101
-
-    await b.close()
+        assert len(b.state.tasks) > 0
+        assert len(a.state.tasks) < 101
 
 
 @gen_cluster(

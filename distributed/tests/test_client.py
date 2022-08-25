@@ -2989,15 +2989,13 @@ async def test_unrunnable_task_runs(c, s, a, b):
     assert s.tasks[x.key] in s.unrunnable
     assert s.get_task_status(keys=[x.key]) == {x.key: "no-worker"}
 
-    w = await Worker(s.address)
+    async with Worker(s.address):
+        while x.status != "finished":
+            await asyncio.sleep(0.01)
 
-    while x.status != "finished":
-        await asyncio.sleep(0.01)
-
-    assert s.tasks[x.key] not in s.unrunnable
-    result = await x
-    assert result == 2
-    await w.close()
+        assert s.tasks[x.key] not in s.unrunnable
+        result = await x
+        assert result == 2
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -3632,16 +3630,15 @@ async def test_reconnect():
                         assert time() < start + 10
 
                     await w.finished()
-                    w = await Worker(f"127.0.0.1:{port}")
+                    async with Worker(f"127.0.0.1:{port}"):
+                        start = time()
+                        while len(await c.nthreads()) != 1:
+                            await asyncio.sleep(0.05)
+                            assert time() < start + 10
 
-                    start = time()
-                    while len(await c.nthreads()) != 1:
-                        await asyncio.sleep(0.05)
-                        assert time() < start + 10
-
-                    x = c.submit(inc, 1)
-                    assert (await x) == 2
-                    await hard_stop(s2)
+                        x = c.submit(inc, 1)
+                        assert (await x) == 2
+                        await hard_stop(s2)
 
                 start = time()
                 while True:
@@ -6084,11 +6081,10 @@ async def test_wait_for_workers(c, s, a, b):
     await asyncio.sleep(0.22)  # 2 chances
     assert not future.done()
 
-    w = await Worker(s.address)
-    start = time()
-    await future
-    assert time() < start + 1
-    await w.close()
+    async with Worker(s.address):
+        start = time()
+        await future
+        assert time() < start + 1
 
     with pytest.raises(TimeoutError) as info:
         await c.wait_for_workers(n_workers=10, timeout="1 ms")
