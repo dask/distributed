@@ -7510,16 +7510,29 @@ if __name__ == "__main__":
 
 
 @pytest.mark.slow
+@pytest.mark.flaky(reruns=5, rerun_delay=10, only_rerun="Found blocklist match")
 @pytest.mark.parametrize("processes", [True, False])
 def test_quiet_close_process(processes, tmp_path):
     with open(tmp_path / "script.py", mode="w") as f:
         f.write(client_script % processes)
 
     with popen([sys.executable, tmp_path / "script.py"], capture_output=True) as proc:
-        out, err = proc.communicate(timeout=60)
+        out, _ = proc.communicate(timeout=60)
 
-    assert not out
-    assert not err
+    lines = out.decode("utf-8").split("\n")
+    lines = [stripped for line in lines if (stripped := line.strip())]
+
+    # List of frequent spurious messages that are beyond the scope of this test
+    blocklist = [
+        "Creating scratch directories is taking a surprisingly long time",
+        "Future exception was never retrieved",
+        "tornado.util.TimeoutError",
+    ]
+    lines2 = [line for line in lines if not any(ign in line for ign in blocklist)]
+    # Instant failure for messages not in blocklist
+    assert not lines2
+    # Retry up to 5 times if the only messages are in the blocklist
+    assert not lines, "Found blocklist match, retrying: " + str(lines)
 
 
 @gen_cluster(client=False, nthreads=[])
