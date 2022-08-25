@@ -7542,7 +7542,10 @@ async def test_deprecated_loop_properties(s):
 
 @gen_cluster(client=True, nthreads=[])
 async def test_wait_for_workers_no_default(c, s):
-    with pytest.warns(FutureWarning, match=r"require.*n_workers"):
+    with pytest.warns(
+        FutureWarning,
+        match="specify the `n_workers` argument when using `Client.wait_for_workers`",
+    ):
         await c.wait_for_workers()
 
 
