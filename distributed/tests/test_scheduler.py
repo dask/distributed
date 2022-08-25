@@ -22,7 +22,15 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask import delayed
-from dask.utils import apply, parse_bytes, parse_timedelta, stringify, tmpfile, typename
+from dask.utils import (
+    apply,
+    format_bytes,
+    parse_bytes,
+    parse_timedelta,
+    stringify,
+    tmpfile,
+    typename,
+)
 
 from distributed import (
     CancelledError,
@@ -288,9 +296,17 @@ async def test_root_task_overproduction(c, s, *nannies):
     def big_data(size: int) -> str:
         return "x" * size
 
-    roots = [
-        big_data(parse_bytes("300 MiB"), dask_key_name=f"root-{i}") for i in range(16)
-    ]
+    available = await c.run(
+        lambda dask_worker: dask_worker.memory_manager.memory_limit
+        - dask_worker.monitor.get_process_memory()
+    )
+    print({k: format_bytes(v) for k, v in available.items()})
+    min_available = min(available.values())
+    # leave room so 2 can comfortably fit, but 3 can't
+    task_size = round(min_available / 2.9)
+    print(f"task size: {format_bytes(task_size)}")
+
+    roots = [big_data(task_size, dask_key_name=f"root-{i}") for i in range(16)]
     passthrough = [delayed(slowidentity)(x) for x in roots]
     memory_consumed = [delayed(len)(x) for x in passthrough]
     reduction = [sum(sizes) for sizes in partition(4, memory_consumed)]
