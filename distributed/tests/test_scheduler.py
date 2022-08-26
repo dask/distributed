@@ -2358,7 +2358,6 @@ async def test_adaptive_target(c, s, a, b):
 @gen_cluster(
     client=True,
     nthreads=[],
-    config={"distributed.scheduler.default-task-durations": {"inc": 1}},
 )
 async def test_adaptive_target_empty_cluster(c, s, queue):
     if queue:
@@ -2371,6 +2370,13 @@ async def test_adaptive_target_empty_cluster(c, s, queue):
     f = c.submit(inc, -1)
     await async_wait_for(lambda: s.tasks, timeout=5)
     assert s.adaptive_target() == 1
+    del f
+
+    if queue:
+        # only queuing supports fast scale-up for empty clusters https://github.com/dask/distributed/issues/6962
+        fs = c.map(inc, range(100))
+        await async_wait_for(lambda: len(s.tasks) == len(fs), timeout=5)
+        assert s.adaptive_target() > 1
 
 
 @gen_test()

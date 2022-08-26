@@ -7489,15 +7489,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         # CPU
 
-        # FIXME maintain a proper estimate of queued occupancy!!
-        # This is merely a hack intended to make queuing sorta work with adaptive scaling
-        # so people can try it out in the short term (at least the cluster should scale up
-        # when tasks are queued).
-        avg_duration = (
-            (self.total_occupancy / self.total_nthreads) if self.total_nthreads else 0
-        )
-        queued_occupancy = len(self.queued) * avg_duration
-
+        # TODO consider any user-specified default task durations for queued tasks
+        queued_occupancy = len(self.queued) * self.UNKNOWN_TASK_DURATION
         cpu = math.ceil(
             (self.total_occupancy + queued_occupancy) / target_duration
         )  # TODO: threads per worker
