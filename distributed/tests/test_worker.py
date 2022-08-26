@@ -1229,9 +1229,8 @@ def test_get_worker_name(client):
 @gen_cluster(nthreads=[], client=True)
 async def test_scheduler_address_config(c, s):
     with dask.config.set({"scheduler-address": s.address}):
-        worker = await Worker()
-        assert worker.scheduler.address == s.address
-    await worker.close()
+        async with Worker() as w:
+            assert w.scheduler.address == s.address
 
 
 @pytest.mark.xfail(reason="very high flakiness")
@@ -1323,10 +1322,9 @@ async def test_register_worker_callbacks(c, s, a, b):
     assert list(result.values()) == [False] * 2
 
     # Start a worker and check that startup is not run
-    worker = await Worker(s.address)
-    result = await c.run(test_import, workers=[worker.address])
-    assert list(result.values()) == [False]
-    await worker.close()
+    async with Worker(s.address) as worker:
+        result = await c.run(test_import, workers=[worker.address])
+        assert list(result.values()) == [False]
 
     # Add a plugin function
     response = await c.register_worker_callbacks(setup=mystartup)
@@ -1336,11 +1334,10 @@ async def test_register_worker_callbacks(c, s, a, b):
     result = await c.run(test_import)
     assert list(result.values()) == [True] * 2
 
-    # Start a worker and check it is ran on it
-    worker = await Worker(s.address)
-    result = await c.run(test_import, workers=[worker.address])
-    assert list(result.values()) == [True]
-    await worker.close()
+    # Start a worker and check it is run on it
+    async with Worker(s.address) as worker:
+        result = await c.run(test_import, workers=[worker.address])
+        assert list(result.values()) == [True]
 
     # Register another plugin function
     response = await c.register_worker_callbacks(setup=mystartup2)
@@ -1350,13 +1347,12 @@ async def test_register_worker_callbacks(c, s, a, b):
     result = await c.run(test_startup2)
     assert list(result.values()) == [True] * 2
 
-    # Start a worker and check it is ran on it
-    worker = await Worker(s.address)
-    result = await c.run(test_import, workers=[worker.address])
-    assert list(result.values()) == [True]
-    result = await c.run(test_startup2, workers=[worker.address])
-    assert list(result.values()) == [True]
-    await worker.close()
+    # Start a worker and check it is run on it
+    async with Worker(s.address) as worker:
+        result = await c.run(test_import, workers=[worker.address])
+        assert list(result.values()) == [True]
+        result = await c.run(test_startup2, workers=[worker.address])
+        assert list(result.values()) == [True]
 
 
 @gen_cluster(client=True)
@@ -1366,19 +1362,17 @@ async def test_register_worker_callbacks_err(c, s, a, b):
 
 
 @gen_cluster(nthreads=[])
-async def test_local_directory(s):
-    with tmpfile() as fn:
-        with dask.config.set(temporary_directory=fn):
-            w = await Worker(s.address)
-            assert w.local_directory.startswith(fn)
+async def test_local_directory(s, tmp_path):
+    with dask.config.set(temporary_directory=str(tmp_path)):
+        async with Worker(s.address) as w:
+            assert w.local_directory.startswith(str(tmp_path))
             assert "dask-worker-space" in w.local_directory
 
 
 @gen_cluster(nthreads=[])
-async def test_local_directory_make_new_directory(s):
-    with tmpfile() as fn:
-        w = await Worker(s.address, local_directory=os.path.join(fn, "foo", "bar"))
-        assert w.local_directory.startswith(fn)
+async def test_local_directory_make_new_directory(s, tmp_path):
+    async with Worker(s.address, local_directory=str(tmp_path / "foo" / "bar")) as w:
+        assert w.local_directory.startswith(str(tmp_path))
         assert "foo" in w.local_directory
         assert "dask-worker-space" in w.local_directory
 
@@ -1386,14 +1380,12 @@ async def test_local_directory_make_new_directory(s):
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster(nthreads=[], client=True)
 async def test_host_address(c, s):
-    w = await Worker(s.address, host="127.0.0.2")
-    assert "127.0.0.2" in w.address
-    await w.close()
+    async with Worker(s.address, host="127.0.0.2") as w:
+        assert "127.0.0.2" in w.address
 
-    n = await Nanny(s.address, host="127.0.0.3")
-    assert "127.0.0.3" in n.address
-    assert "127.0.0.3" in n.worker_address
-    await n.close()
+    async with Nanny(s.address, host="127.0.0.3") as n:
+        assert "127.0.0.3" in n.address
+        assert "127.0.0.3" in n.worker_address
 
 
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
@@ -1626,13 +1618,13 @@ async def test_bad_metrics(s):
 
 @gen_cluster(nthreads=[])
 async def test_bad_startup(s):
+    """Bad startup functions do not cause the Worker to fail"""
+
     def bad_startup(w):
         raise Exception("Hello")
 
-    try:
-        await Worker(s.address, startup_information={"bad": bad_startup})
-    except Exception:
-        pytest.fail("Startup exception was raised")
+    async with Worker(s.address, startup_information={"bad": bad_startup}):
+        pass
 
 
 @gen_cluster(client=True)
@@ -1684,7 +1676,7 @@ async def test_pip_install_fails(c, s, a, b):
 
 @gen_cluster(nthreads=[])
 async def test_update_latency(s):
-    async with await Worker(s.address) as w:
+    async with Worker(s.address) as w:
         original = w.latency
         await w.heartbeat()
         assert original != w.latency
@@ -1729,7 +1721,7 @@ async def test_heartbeat_comm_closed(s, monkeypatch):
         def bad_heartbeat_worker(*args, **kwargs):
             raise CommClosedError()
 
-        async with await Worker(s.address) as w:
+        async with Worker(s.address) as w:
             # Trigger CommClosedError during worker heartbeat
             monkeypatch.setattr(w.scheduler, "heartbeat_worker", bad_heartbeat_worker)
 
@@ -1837,7 +1829,7 @@ async def test_bad_local_directory(s):
 
 @gen_cluster(client=True, nthreads=[])
 async def test_taskstate_metadata(c, s):
-    async with await Worker(s.address) as a:
+    async with Worker(s.address) as a:
         await c.register_worker_plugin(TaskStateMetadataPlugin())
 
         f = c.submit(inc, 1)
