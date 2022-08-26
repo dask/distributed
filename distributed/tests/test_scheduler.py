@@ -421,11 +421,7 @@ async def test_queued_remove_add_worker(c, s, a, b):
     event = Event()
     fs = c.map(lambda i: event.wait(), range(10))
 
-    await async_wait_for(
-        lambda: len(s.queued) == 6,
-        timeout=5,
-        fail_func=lambda: print(list(s.queued.sorted()), s.tasks),
-    )
+    await async_wait_for(lambda: len(s.queued) == 6, timeout=5)
     await s.remove_worker(a.address, stimulus_id="fake")
     assert len(s.queued) == 8
 
