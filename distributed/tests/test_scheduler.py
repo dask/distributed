@@ -51,6 +51,7 @@ from distributed.scheduler import MemoryState, Scheduler, WorkerState
 from distributed.utils import TimeoutError
 from distributed.utils_test import (
     BrokenComm,
+    async_wait_for,
     captured_logger,
     cluster,
     dec,
@@ -409,6 +410,31 @@ async def test_queued_paused_unpaused(c, s, a, b, queue):
     assert not s.idle  # workers should have been (or already were) filled
 
     await wait(final)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 2)] * 2,
+    config={"distributed.scheduler.worker-saturation": 1.0},
+)
+async def test_queued_remove_add_worker(c, s, a, b):
+    event = Event()
+    fs = c.map(lambda i: event.wait(), range(10))
+
+    await async_wait_for(
+        lambda: len(s.queued) == 6,
+        timeout=5,
+        fail_func=lambda: print(list(s.queued.sorted()), s.tasks),
+    )
+    await s.remove_worker(a.address, stimulus_id="fake")
+    assert len(s.queued) == 8
+
+    # Add a new worker
+    async with Worker(s.address, nthreads=2) as w:
+        await async_wait_for(lambda: len(s.queued) == 6, timeout=5)
+
+        await event.set()
+        await wait(fs)
 
 
 @pytest.mark.parametrize(
