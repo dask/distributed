@@ -479,12 +479,10 @@ class WorkersMemory(DashboardComponent, MemoryColor):
         self.root.x_range = Range1d(start=0)
         self.root.yaxis.visible = False
         self.root.ygrid.visible = False
+        self.root.toolbar_location = None
 
         tap = TapTool(callback=OpenURL(url="./info/worker/@escaped_worker.html"))
         self.root.add_tools(tap)
-
-        self.root.toolbar_location = None
-        self.root.yaxis.visible = False
 
         hover = HoverTool(
             point_policy="follow_mouse",
@@ -630,6 +628,141 @@ class WorkersMemoryHistogram(DashboardComponent):
         counts, x = np.histogram(nbytes, bins=40)
         d = {"left": x[:-1], "right": x[1:], "top": counts}
         update(self.source, d)
+
+
+class WorkersCommReserved(DashboardComponent):
+    """Bytes reserved for comms per workers
+
+    See also
+    --------
+    WorkersCommReservedHistogram
+    """
+
+    @log_errors
+    def __init__(self, scheduler, width=600, **kwargs):
+        self.scheduler = scheduler
+        self.source = ColumnDataSource(
+            {
+                "comm_reserved_bytes": [],
+                "escaped_worker": [],
+                "worker": [],
+                "y": [],
+            }
+        )
+
+        self.root = figure(
+            title="Bytes reserved for comms per worker",
+            tools="",
+            id="bk-workers-comm-reserved-plot",
+            width=int(width / 2),
+            name="workers_comm_reserved",
+            min_border_bottom=50,
+            **kwargs,
+        )
+
+        self.root.hbar(
+            y="y",
+            right="comm_reserved_bytes",
+            line_color=None,
+            left=0,
+            height=0.9,
+            fill_color="blue",
+            source=self.source,
+        )
+
+        self.root.axis[0].ticker = BasicTicker(**TICKS_1024)
+        self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+        self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
+        self.root.xaxis.minor_tick_line_alpha = 0
+        self.root.x_range = Range1d(start=0)
+        self.root.yaxis.visible = False
+        self.root.ygrid.visible = False
+        self.root.toolbar_location = None
+
+        tap = TapTool(callback=OpenURL(url="./info/worker/@escaped_worker.html"))
+        hover = HoverTool()
+        hover.tooltips = "@worker : @comm_reserved_bytes{0.00 b}"
+        hover.point_policy = "follow_mouse"
+        self.root.add_tools(hover, tap)
+
+    @without_property_validation
+    @log_errors
+    def update(self):
+        wss = self.scheduler.workers.values()
+
+        y = list(range(len(wss)))
+
+        comm_reserved_bytes = [ws.metrics["comm_reserved_bytes"] for ws in wss]
+        workers = [ws.address for ws in wss]
+        escaped_workers = [escape.url_escape(worker) for worker in workers]
+
+        if wss:
+            x_limit = max(max(comm_reserved_bytes), max(ws.memory_limit for ws in wss))
+        else:
+            x_limit = 0
+        self.root.x_range.end = x_limit
+
+        result = {
+            "comm_reserved_bytes": comm_reserved_bytes,
+            "escaped_worker": escaped_workers,
+            "worker": workers,
+            "y": y,
+        }
+        update(self.source, result)
+
+
+class WorkersCommReservedHistogram(DashboardComponent):
+    """Histogram of bytes reserved for comms, showing how many workers there are
+    in each bucket of reservation. Replaces the per-worker graph when there are >= 50 workers.
+
+    See Also
+    --------
+    WorkersCommReserved
+    """
+
+    @log_errors
+    def __init__(self, scheduler, **kwargs):
+        self.last = 0
+        self.scheduler = scheduler
+        self.source = ColumnDataSource({"left": [], "right": [], "top": []})
+
+        self.root = figure(
+            title="Bytes reserved for comms per worker",
+            tools="",
+            name="workers_comm_reserved",
+            id="bk-workers-comm-reserved-histogram-plot",
+            y_axis_label="frequency",
+            **kwargs,
+        )
+
+        self.root.axis[0].ticker = AdaptiveTicker(**TICKS_1024)
+        self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+        self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
+        self.root.xaxis.minor_tick_line_alpha = 0
+        self.root.ygrid.visible = False
+        self.root.toolbar_location = None
+
+        self.root.quad(
+            source=self.source,
+            left="left",
+            right="right",
+            bottom=0,
+            top="top",
+            color="deepskyblue",
+            fill_alpha=0.5,
+        )
+
+    @without_property_validation
+    def update(self):
+        comm_reserved_bytes = np.asarray(
+            [
+                ws.metrics["comm_reserved_bytes"]
+                for ws in self.scheduler.workers.values()
+            ]
+        )
+        counts, x = np.histogram(comm_reserved_bytes, bins=40)
+        result = {"left": x[:-1], "right": x[1:], "top": counts}
+        update(self.source, result)
 
 
 class Hardware(DashboardComponent):
@@ -4120,11 +4253,17 @@ def status_doc(scheduler, extra, doc):
 
     if len(scheduler.workers) <= 100:
         workers_memory = WorkersMemory(scheduler, sizing_mode="stretch_both")
+        workers_comm_reserved = WorkersCommReserved(
+            scheduler, sizing_mode="stretch_both"
+        )
         processing = CurrentLoad(scheduler, sizing_mode="stretch_both")
 
         processing_root = processing.processing_figure
     else:
         workers_memory = WorkersMemoryHistogram(scheduler, sizing_mode="stretch_both")
+        workers_comm_reserved = WorkersCommReservedHistogram(
+            scheduler, sizing_mode="stretch_both"
+        )
         processing = ProcessingHistogram(scheduler, sizing_mode="stretch_both")
 
         processing_root = processing.root
@@ -4136,11 +4275,13 @@ def status_doc(scheduler, extra, doc):
     occupancy_root = occupancy.root
 
     workers_memory.update()
+    workers_comm_reserved.update()
     processing.update()
     current_load.update()
     occupancy.update()
 
     add_periodic_callback(doc, workers_memory, 100)
+    add_periodic_callback(doc, workers_comm_reserved, 100)
     add_periodic_callback(doc, processing, 100)
     add_periodic_callback(doc, current_load, 100)
     add_periodic_callback(doc, occupancy, 100)
@@ -4150,8 +4291,9 @@ def status_doc(scheduler, extra, doc):
     tab1 = Panel(child=processing_root, title="Processing")
     tab2 = Panel(child=cpu_root, title="CPU")
     tab3 = Panel(child=occupancy_root, title="Occupancy")
+    tab4 = Panel(child=workers_comm_reserved.root, title="Comm Reserved")
 
-    proc_tabs = Tabs(tabs=[tab1, tab2, tab3], name="processing_tabs")
+    proc_tabs = Tabs(tabs=[tab1, tab2, tab3, tab4], name="processing_tabs")
     doc.add_root(proc_tabs)
 
     task_stream = TaskStream(
