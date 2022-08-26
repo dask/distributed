@@ -346,10 +346,6 @@ async def test_queued_paused_new_worker(c, s, a, b, queue):
     a.status = Status.paused
     b.status = Status.paused
 
-    while a.state.executing_count or b.state.executing_count:
-        # wait for workers to stop
-        await asyncio.sleep(0.01)
-
     while s.running:
         # wait for workers pausing to hit the scheduler
         await asyncio.sleep(0.01)
@@ -366,6 +362,53 @@ async def test_queued_paused_new_worker(c, s, a, b, queue):
         while s.tasks:
             await asyncio.sleep(0.01)
         assert not s.queued
+
+
+@pytest.mark.parametrize("queue", [True, False])
+@gen_cluster(
+    client=True,
+    nthreads=[("", 2)] * 2,
+    config={
+        "distributed.worker.memory.pause": False,
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": False,
+        "distributed.scheduler.work-stealing": False,
+    },
+)
+async def test_queued_paused_unpaused(c, s, a, b, queue):
+    if queue:
+        s.WORKER_SATURATION = 1.0
+    else:
+        s.WORKER_SATURATION = float("inf")
+
+    f1s = c.map(slowinc, range(16))
+    f2s = c.map(slowinc, f1s)
+    final = c.submit(sum, *f2s)
+    del f1s, f2s
+
+    while not a.data or not b.data:
+        await asyncio.sleep(0.01)
+
+    # manually pause the workers
+    a.status = Status.paused
+    b.status = Status.paused
+
+    while s.running:
+        # wait for workers pausing to hit the scheduler
+        await asyncio.sleep(0.01)
+
+    assert not s.running
+    assert not s.idle
+
+    # un-pause
+    a.status = Status.running
+    b.status = Status.running
+    while not s.running:
+        await asyncio.sleep(0.01)
+
+    assert not s.idle  # workers should have been (or already were) filled
+
+    await wait(final)
 
 
 @pytest.mark.parametrize(
