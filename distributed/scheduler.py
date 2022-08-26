@@ -3007,10 +3007,9 @@ class SchedulerState:
                 steal.recalculate_cost(ts)
 
     def bulk_schedule_after_adding_worker(self, ws: WorkerState) -> dict[str, str]:
-        """Send tasks with ts.state=='no-worker' in bulk to a worker that just joined.
-        Return recommendations. As the worker will start executing the new tasks
-        immediately, without waiting for the batch to end, we can't rely on worker-side
-        ordering, so the recommendations are sorted by priority order here.
+        """Send ``queued`` or ``no-worker`` tasks to ``processing`` that this worker can handle.
+
+        Returns priority-ordered recommendations.
         """
         maybe_runnable: list[TaskState] = []
         # Schedule any queued tasks onto the new worker
