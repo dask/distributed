@@ -525,27 +525,6 @@ def test_saturation_factor(
     _test_saturation_factor()
 
 
-@pytest.mark.skip("Current queuing does not support co-assignment")
-@pytest.mark.parametrize("saturation_factor", [1.0, 2.0, float("inf")])
-@gen_cluster(
-    client=True,
-    nthreads=[("", 2), ("", 1)],
-    config={"distributed.scheduler.worker-saturation": 1.0},
-)
-async def test_oversaturation_multiple_task_groups(c, s, a, b, saturation_factor):
-    s.WORKER_SATURATION = saturation_factor
-    xs = [delayed(i, name=f"x-{i}") for i in range(9)]
-    ys = [delayed(i, name=f"y-{i}") for i in range(9)]
-    zs = [x + y for x, y in zip(xs, ys)]
-
-    await c.gather(c.compute(zs))
-
-    assert not a.incoming_transfer_log, [l["keys"] for l in a.incoming_transfer_log]
-    assert not b.incoming_transfer_log, [l["keys"] for l in b.incoming_transfer_log]
-    assert len(a.state.tasks) == 18
-    assert len(b.state.tasks) == 9
-
-
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 async def test_move_data_over_break_restrictions(client, s, a, b, c):
     [x] = await client.scatter([1], workers=b.address)
