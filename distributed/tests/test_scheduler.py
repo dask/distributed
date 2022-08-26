@@ -2354,6 +2354,25 @@ async def test_adaptive_target(c, s, a, b):
         assert s.adaptive_target(target_duration=".1s") == 0
 
 
+@pytest.mark.parametrize("queue", [True, False])
+@gen_cluster(
+    client=True,
+    nthreads=[],
+    config={"distributed.scheduler.default-task-durations": {"inc": 1}},
+)
+async def test_adaptive_target_empty_cluster(c, s, queue):
+    if queue:
+        s.WORKER_SATURATION = 1.0
+    else:
+        s.WORKER_SATURATION = float("inf")
+
+    assert s.adaptive_target() == 0
+
+    f = c.submit(inc, -1)
+    await async_wait_for(lambda: s.tasks, timeout=5)
+    assert s.adaptive_target() == 1
+
+
 @gen_test()
 async def test_async_context_manager():
     async with Scheduler(dashboard_address=":0") as s:

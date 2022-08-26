@@ -7512,7 +7512,7 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             cpu = min(tasks_ready, cpu)
 
-        if self.unrunnable and not self.workers:
+        if (self.unrunnable or self.queued) and not self.workers:
             cpu = max(1, cpu)
 
         # add more workers if more than 60% of memory is used
