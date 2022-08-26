@@ -25,7 +25,6 @@ from dask import delayed
 from dask.utils import (
     apply,
     format_bytes,
-    parse_bytes,
     parse_timedelta,
     stringify,
     tmpfile,
@@ -318,46 +317,55 @@ async def test_root_task_overproduction(c, s, *nannies):
     assert pids == [n.pid for n in nannies]
 
 
-@pytest.mark.parametrize("withhold", [True, False])
+@pytest.mark.parametrize("queue", [True, False])
 @gen_cluster(
     client=True,
     nthreads=[("", 2)] * 2,
-    worker_kwargs={"memory_limit": "1.0 GiB"},
-    Worker=Nanny,
     config={
-        "distributed.scheduler.worker-saturation": 1.0,
-        # With typical overhead, 1 task can be in memory but the second will trigger a pause
-        "distributed.worker.memory.pause": 0.4,
+        "distributed.worker.memory.pause": False,
         "distributed.worker.memory.target": False,
         "distributed.worker.memory.spill": False,
         "distributed.scheduler.work-stealing": False,
     },
 )
-async def test_queued_paused_released(c, s, a, b, withhold):
-    if not withhold:
+async def test_queued_paused_new_worker(c, s, a, b, queue):
+    if queue:
+        s.WORKER_SATURATION = 1.0
+    else:
         s.WORKER_SATURATION = float("inf")
 
-    @delayed(pure=True)  # type: ignore
-    def big_data(size: int) -> str:
-        return "x" * size
+    f1s = c.map(slowinc, range(16))
+    f2s = c.map(slowinc, f1s)
+    final = c.submit(sum, *f2s)
+    del f1s, f2s
 
-    roots = [
-        big_data(parse_bytes("200 MiB"), dask_key_name=f"root-{i}") for i in range(16)
-    ]
-    memory_consumed = [delayed(len)(x) for x in roots]
-    f = c.compute(sum(memory_consumed))
-
-    while s.running:  # wait for both workers pausing to hit the scheduler
+    while not a.data or not b.data:
         await asyncio.sleep(0.01)
+
+    # manually pause the workers
+    a.status = Status.paused
+    b.status = Status.paused
+
+    while a.state.executing_count or b.state.executing_count:
+        # wait for workers to stop
+        await asyncio.sleep(0.01)
+
+    while s.running:
+        # wait for workers pausing to hit the scheduler
+        await asyncio.sleep(0.01)
+
+    assert not s.idle
+    assert not s.running
 
     async with Worker(s.address, nthreads=2) as w:
         # Tasks are successfully scheduled onto a new worker
         while not w.state.data:
             await asyncio.sleep(0.01)
 
-        f.release()
+        del final
         while s.tasks:
             await asyncio.sleep(0.01)
+        assert not s.queued
 
 
 @pytest.mark.parametrize(
