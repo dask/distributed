@@ -2738,7 +2738,7 @@ class SchedulerState:
         """
         Whether ``ts`` is a root or root-like task.
 
-        Root-ish tasks are part of a group that's larger than the cluster,
+        Root-ish tasks are part of a group that's much larger than the cluster,
         and have few or no dependencies.
         """
         if ts.resource_restrictions or ts.worker_restrictions or ts.host_restrictions:

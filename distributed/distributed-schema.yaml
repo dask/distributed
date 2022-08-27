@@ -126,10 +126,11 @@ properties:
               Up to worker-saturation * nthreads root tasks are sent to a
               worker at a time. If `.inf`, all runnable tasks are immediately sent to workers.
 
-              Allowing oversaturation (> 1.0) means a worker will start running a new root task as
+              Allowing oversaturation (> 1.0) means a worker may start running a new root task as
               soon as it completes the previous, even if there is a higher-priority downstream task
               to run. This reduces worker idleness, by letting workers do something while waiting for
-              further instructions from the scheduler, even if it's not the most useful thing.
+              further instructions from the scheduler, even if it's not the most efficient
+              thing to do.
 
               This generally comes  at the expense of increased memory usage. It leads to "wider"
               (more breadth-first) execution of the graph.
