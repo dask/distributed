@@ -11,7 +11,7 @@ import sys
 from itertools import product
 from textwrap import dedent
 from time import sleep
-from typing import Collection
+from typing import ClassVar, Collection
 from unittest import mock
 
 import cloudpickle
@@ -316,6 +316,55 @@ async def test_root_task_overproduction(c, s, *nannies):
 
     # No restarts
     assert pids == [n.pid for n in nannies]
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("gil_sleep", [False, True])
+@gen_cluster(
+    nthreads=[("", 2)] * 4,
+    client=True,
+    config={"distributed.scheduler.worker-saturation": 1.0},
+)
+async def test_graph_execution_width(c, s, *workers, gil_sleep):
+    """
+    Test that we don't execute the graph more breadth-first than necessary.
+
+    We shouldn't start loading extra data if we're not going to use it immediately.
+    The number of parallel work streams match the number of threads.
+    """
+
+    class Refcount:
+        "Track how many instances of this class exist; logs the count at creation and deletion"
+
+        count: ClassVar[int] = 0
+        lock: ClassVar[dask.utils.SerializableLock] = dask.utils.SerializableLock()
+        log: ClassVar[list[int]] = []
+
+        def __init__(self) -> None:
+            sleep_time = 0.1  # significantly longer than scheduler<->worker round-trip
+            if gil_sleep:
+                start = time()
+                while time() < start + sleep_time:
+                    pass  # burn CPU holding GIL. This will gum up the event loop on the scheduler and workers.
+            else:
+                sleep(sleep_time)
+
+            with self.lock:
+                type(self).count += 1
+                self.log.append(self.count)
+
+        def __del__(self):
+            with self.lock:
+                self.log.append(self.count)
+                type(self).count -= 1
+
+    roots = [delayed(Refcount)() for _ in range(32)]
+    passthrough = [delayed(slowidentity)(r) for r in roots]
+    done = [delayed(lambda r: None)(r) for r in passthrough]
+
+    fs = c.compute(done)
+    await wait(fs)
+    assert max(Refcount.log) == s.total_nthreads
 
 
 @pytest.mark.parametrize("queue", [True, False])
