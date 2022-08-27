@@ -272,6 +272,7 @@ async def test_decide_worker_coschedule_order_binary_op(c, s, a, b, ngroups):
     assert not b.incoming_transfer_log, [l["keys"] for l in b.incoming_transfer_log]
 
 
+@pytest.mark.skipif(WINDOWS, reason="Process memory use seems unpredictable on Windows")
 @pytest.mark.slow
 @gen_cluster(
     client=True,
