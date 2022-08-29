@@ -94,6 +94,7 @@ def test_plasma_worker_worker(plasma_session):
 
 @pytest.fixture()
 def lmdb_deleter():
+    pytest.importorskip("lmdb")
     import shutil
 
     yield
@@ -128,7 +129,17 @@ vineyard_path = "/tmp/vineyard.sock"
 @pytest.fixture(scope="module")
 def vineyard_process():
     pytest.importorskip("vineyard")
-    cmd = [sys.executable, '-m', 'vineyard', '--socket', vineyard_path, '--size', '256Mi', '--meta', 'local']
+    cmd = [
+        sys.executable,
+        "-m",
+        "vineyard",
+        "--socket",
+        vineyard_path,
+        "--size",
+        "256Mi",
+        "--meta",
+        "local",
+    ]
     proc = subprocess.Popen(cmd)
     yield
     proc.terminate()
