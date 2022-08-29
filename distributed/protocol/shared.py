@@ -1,9 +1,21 @@
 from __future__ import annotations
 
+import functools
 import os
 import pickle
+import time
 from typing import Any
 from urllib import parse
+
+def timing(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        start = time.time()
+        result = fn(*args, **kwargs)
+        end = time.time()
+        # print(f"{fn.__name__} took {end - start} seconds")
+        return result
+    return wrapper
 
 from toolz import first
 
@@ -24,6 +36,15 @@ except ImportError:
 
     def lmdb_connect(**kwargs):
         raise ImportError("lmdb was not importable")
+
+
+try:
+    import vineyard
+    from vineyard import connect as vineyard_connect
+except ImportError:
+
+    def vineyard_connect(buf):
+        raise ImportError("vineyard was not importable")
 
 
 backends: dict[str, Any] = {}  # module global to cache client
@@ -135,6 +156,7 @@ def _get_plasma():
     return backends["plasma"]
 
 
+@timing
 def _put_plasma_buffer(buf):
     client = _get_plasma()
     try:
@@ -150,6 +172,7 @@ def _put_plasma_buffer(buf):
     return b"plasma:" + object_id.binary()
 
 
+@timing
 def ser_plasma(x, context=None):
     from distributed.worker import get_worker
 
@@ -203,6 +226,7 @@ def on_node(context, which="sender"):
     return parse.urlparse(info).hostname
 
 
+@timing
 def deser_plasma(header, frames):
     from distributed.worker import get_worker
 
@@ -225,6 +249,104 @@ def deser_plasma(header, frames):
         # "bufs" is a poor condition, maybe store in header
         worker.shared_data[id(out)] = (
             header or {"serializer": "plasma"},
+            frames0,
+        )  # save shared buffers
+    return out
+
+
+def _get_vineyard():
+    if "vineyard" not in backends:
+        VINEYARD_PATH = dask.config.get(
+            "distributed.protocol.shared.vineyard_path", "/tmp/vineyard.sock"
+        )
+        backends["vineyard"] = vineyard_connect(VINEYARD_PATH)
+    return backends["vineyard"]
+
+
+@timing
+def _put_vineyard_buffer(buf):
+    client = _get_vineyard()
+    try:
+        buffer_writer = client.create_blob(buf.nbytes)
+        buffer_writer.copy(0, memoryview(buf.cast("b")[:]))
+        vineyard_object_id = buffer_writer.seal(client).id
+    except vineyard.VineyardException:
+        # warn?
+        return buf
+    return b"vineyard:" + int(vineyard_object_id).to_bytes(8, "little")
+
+
+@timing
+def ser_vineyard(x, context=None):
+    from distributed.worker import get_worker
+
+    size_limit = dask.config.get("distributed.protocol.shared.minsize", 1)
+
+    frames: list[bytes | memoryview] = [b""]
+    try:
+        worker = get_worker()
+    except ValueError:
+        # on client; must be scattering
+        worker = None
+
+    if worker and id(x) in worker.shared_data:
+        # cache hit
+        return worker.shared_data[id(x)]
+
+    def add_buf(buf):
+        frames.append(memoryview(buf))
+
+    frames[0] = pickle.dumps(x, protocol=-1, buffer_callback=add_buf)
+    if on_node(context) != on_node(context, "recipient"):
+        # across nodes
+        head = {"serializer": "pickle"}
+    else:
+        head = {"serializer": "vineyard"}
+        if any(buf.nbytes > size_limit for buf in frames[1:]):
+
+            frames[1:] = [
+                _put_vineyard_buffer(buf) if buf.nbytes > size_limit else buf
+                for buf in frames[1:]
+            ]
+            if worker is not None:
+                # find object's dask key; it ought to exist
+                seq = [k for k, d in worker.data.items() if d is x]
+                # if key is not in data, this is probably a test in-process worker
+                if seq:
+                    k = first(seq)
+                    new_obj = deser_vineyard(
+                        None, frames
+                    )  # version of object pointing at shared buffers
+                    worker.data[k] = new_obj  # replace original object
+    return head, frames
+
+@timing
+def deser_vineyard(header, frames):
+    from distributed.worker import get_worker
+
+    try:
+        worker = get_worker()
+    except ValueError:
+        # on client; must be scattering
+        worker = None
+    client = _get_vineyard()
+    bufs = None
+    frames0 = frames.copy()
+    ids, indices, buffers = [], [], None
+    for i, buf in enumerate(frames.copy()):
+        if isinstance(buf, (bytes, memoryview)) and buf[:9] == b"vineyard:":
+            # probably faster to get all the buffers in a single call
+            ids.append(vineyard.ObjectID(int.from_bytes(bytes(buf)[9:], "little")))
+            indices.append(i)
+    if ids:
+        buffers = client.get_blobs(ids)
+        for i, blob in zip(indices, buffers):
+            frames[i] = memoryview(blob)
+    out = pickle.loads(frames[0], buffers=frames[1:])
+    if worker and buffers:
+        # "bufs" is a poor condition, maybe store in header
+        worker.shared_data[id(out)] = (
+            header or {"serializer": "vineyard"},
             frames0,
         )  # save shared buffers
     return out
