@@ -235,7 +235,7 @@ class CommunicatingTimeSeries(DashboardComponent):
         fig = figure(
             title="Communication History",
             x_axis_type="datetime",
-            y_range=[-0.1, worker.state.total_out_connections + 0.5],
+            y_range=[-0.1, worker.state.comm_incoming_limit + 0.5],
             height=150,
             tools="",
             x_range=x_range,

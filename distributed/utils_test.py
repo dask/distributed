@@ -2281,12 +2281,12 @@ def freeze_data_fetching(w: Worker, *, jump_start: bool = False) -> Iterator[Non
         If True, trigger ensure_communicating on exit; this simulates e.g. an unrelated
         worker moving out of in_flight_workers.
     """
-    old_out_connections = w.state.total_out_connections
+    old_out_connections = w.state.comm_incoming_limit
     old_comm_threshold = w.state.comm_threshold_bytes
-    w.state.total_out_connections = 0
+    w.state.comm_incoming_limit = 0
     w.state.comm_threshold_bytes = 0
     yield
-    w.state.total_out_connections = old_out_connections
+    w.state.comm_incoming_limit = old_out_connections
     w.state.comm_threshold_bytes = old_comm_threshold
     if jump_start:
         w.status = Status.paused

@@ -1143,11 +1143,11 @@ class WorkerState:
     #: The total number of incoming bytes through in-flight tasks.
     comm_incoming_bytes: int
 
-    #: The maximum number of concurrent outgoing requests for data.
-    #: See also :attr:`distributed.worker.Worker.total_in_connections`.
-    total_out_connections: int
+    #: The maximum number of concurrent incoming data transfers from other workers.
+    #: See also :attr:`distributed.worker.Worker.comm_outgoing_limit`.
+    comm_incoming_limit: int
 
-    #: Ignore :attr:`total_out_connections` as long as :attr:`comm_incoming_bytes` is
+    #: Ignore :attr:`comm_incoming_limit` as long as :attr:`comm_incoming_bytes` is
     #: less than this value.
     comm_threshold_bytes: int
 
@@ -1235,7 +1235,7 @@ class WorkerState:
         threads: dict[str, int] | None = None,
         plugins: dict[str, WorkerPlugin] | None = None,
         resources: Mapping[str, float] | None = None,
-        total_out_connections: int = 9999,
+        comm_incoming_limit: int = 9999,
         validate: bool = True,
         transition_counter_max: int | Literal[False] = False,
     ):
@@ -1264,7 +1264,7 @@ class WorkerState:
         )
         self.in_flight_workers = {}
         self.busy_workers = set()
-        self.total_out_connections = total_out_connections
+        self.comm_incoming_limit = comm_incoming_limit
         self.comm_threshold_bytes = int(10e6)
         self.comm_incoming_bytes = 0
         self.missing_dep_flight = set()
@@ -1462,7 +1462,7 @@ class WorkerState:
         if not self.running or not self.data_needed:
             return {}, []
         if (
-            self.comm_incoming_count >= self.total_out_connections
+            self.comm_incoming_count >= self.comm_incoming_limit
             and self.comm_incoming_bytes >= self.comm_threshold_bytes
         ):
             return {}, []
@@ -1486,7 +1486,7 @@ class WorkerState:
                 len(available_tasks),
                 len(self.data_needed),
                 self.comm_incoming_count,
-                self.total_out_connections,
+                self.comm_incoming_limit,
                 len(self.busy_workers),
             )
             self.log.append(
@@ -1517,7 +1517,7 @@ class WorkerState:
             self.in_flight_workers[worker] = to_gather_keys
             self.comm_incoming_bytes += total_nbytes
             if (
-                self.comm_incoming_count >= self.total_out_connections
+                self.comm_incoming_count >= self.comm_incoming_limit
                 and self.comm_incoming_bytes >= self.comm_threshold_bytes
             ):
                 break

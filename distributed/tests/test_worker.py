@@ -764,7 +764,7 @@ async def test_gather_many_small(c, s, a, *snd_workers, as_deps):
     concurrent outgoing connections. If multiple small fetches from the same worker are
     scheduled all at once, they will result in a single call to gather_dep.
     """
-    a.state.total_out_connections = 2
+    a.state.comm_incoming_limit = 2
     futures = await c.scatter(
         {f"x{i}": i for i in range(100)},
         workers=[w.address for w in snd_workers],
@@ -3036,7 +3036,7 @@ async def test_missing_released_zombie_tasks(c, s, a, b):
     Ensure that no fetch/flight tasks are left in the task dict of a
     worker after everything was released
     """
-    a.total_in_connections = 0
+    a.comm_outgoing_limit = 0
     f1 = c.submit(inc, 1, key="f1", workers=[a.address])
     f2 = c.submit(inc, f1, key="f2", workers=[b.address])
     key = f1.key

@@ -271,10 +271,10 @@ class Worker(BaseWorker, ServerNode):
     * **services:** ``{str: Server}``:
         Auxiliary web servers running on this worker
     * **service_ports:** ``{str: port}``:
-    * **total_in_connections**: ``int``
-        The maximum number of concurrent incoming requests for data.
+    * **comm_outgoing_limit**: ``int``
+        The maximum number of concurrent outgoing data transfers.
         See also
-        :attr:`distributed.worker_state_machine.WorkerState.total_out_connections`.
+        :attr:`distributed.worker_state_machine.WorkerState.comm_incoming_limit`.
     * **batched_stream**: ``BatchedSend``
         A batched stream along which we communicate to the scheduler
     * **log**: ``[(message)]``
@@ -374,7 +374,7 @@ class Worker(BaseWorker, ServerNode):
 
     nanny: Nanny | None
     _lock: threading.Lock
-    total_in_connections: int
+    comm_outgoing_limit: int
     threads: dict[str, int]  # {ts.key: thread ID}
     active_threads_lock: threading.Lock
     active_threads: dict[int, str]  # {thread ID: ts.key}
@@ -522,10 +522,8 @@ class Worker(BaseWorker, ServerNode):
         self.nanny = nanny
         self._lock = threading.Lock()
 
-        total_out_connections = dask.config.get(
-            "distributed.worker.connections.outgoing"
-        )
-        self.total_in_connections = dask.config.get(
+        comm_incoming_limit = dask.config.get("distributed.worker.connections.outgoing")
+        self.comm_outgoing_limit = dask.config.get(
             "distributed.worker.connections.incoming"
         )
 
@@ -751,7 +749,7 @@ class Worker(BaseWorker, ServerNode):
             threads=self.threads,
             plugins=self.plugins,
             resources=resources,
-            total_out_connections=total_out_connections,
+            comm_incoming_limit=comm_incoming_limit,
             validate=validate,
             transition_counter_max=transition_counter_max,
         )
@@ -871,7 +869,7 @@ class Worker(BaseWorker, ServerNode):
     ready = DeprecatedWorkerStateAttribute()
     tasks = DeprecatedWorkerStateAttribute()
     target_message_size = DeprecatedWorkerStateAttribute()
-    total_out_connections = DeprecatedWorkerStateAttribute()
+    total_out_connections = DeprecatedWorkerStateAttribute(target="comm_incoming_limit")
     total_resources = DeprecatedWorkerStateAttribute()
     transition_counter = DeprecatedWorkerStateAttribute()
     transition_counter_max = DeprecatedWorkerStateAttribute()
@@ -1644,7 +1642,7 @@ class Worker(BaseWorker, ServerNode):
         start = time()
 
         if max_connections is None:
-            max_connections = self.total_in_connections
+            max_connections = self.comm_outgoing_limit
 
         # Allow same-host connections more liberally
         if (
