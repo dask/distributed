@@ -1542,7 +1542,7 @@ async def test_close_while_executing(c, s, a, sync):
     )
     await a.close()
     assert task.cancelled()
-    assert s.tasks["f1"].state == "no-worker"
+    assert s.tasks["f1"].state in ("queued", "no-worker")
 
 
 @pytest.mark.slow
