@@ -859,6 +859,9 @@ class Worker(BaseWorker, ServerNode):
     executing_count = DeprecatedWorkerStateAttribute()
     generation = DeprecatedWorkerStateAttribute()
     has_what = DeprecatedWorkerStateAttribute()
+    incoming_count = DeprecatedWorkerStateAttribute(
+        target="transfer_incoming_count_total"
+    )
     in_flight_tasks = DeprecatedWorkerStateAttribute(target="in_flight_tasks_count")
     in_flight_workers = DeprecatedWorkerStateAttribute()
     log = DeprecatedWorkerStateAttribute()
@@ -2573,6 +2576,16 @@ class Worker(BaseWorker, ServerNode):
         warnings.warn(
             "The `Worker.outgoing_transfer_log` attribute has been renamed to "
             "`Worker.transfer_outgoing_log`",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.transfer_outgoing_log
+
+    @property
+    def total_in_connections(self):
+        warnings.warn(
+            "The `Worker.total_in_connections` attribute has been renamed to "
+            "`Worker.transfer_outgoing_count_limit`",
             DeprecationWarning,
             stacklevel=2,
         )
