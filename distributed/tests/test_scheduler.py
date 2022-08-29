@@ -227,7 +227,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         # Check that there were few transfers
         unexpected_transfers = []
         for worker in workers:
-            for log in worker.comm_incoming_log:
+            for log in worker.transfer_incoming_log:
                 keys = log["keys"]
                 # The root-ish tasks should never be transferred
                 assert not any(k.startswith("random") for k in keys), keys

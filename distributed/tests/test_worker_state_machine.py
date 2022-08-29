@@ -673,7 +673,7 @@ async def test_fetch_to_missing_on_busy(c, s, a, b):
     x = c.submit(inc, 1, key="x", workers=[b.address])
     await x
 
-    b.comm_outgoing_limit = 0
+    b.transfer_outgoing_count_limit = 0
     # Crucially, unlike with `c.submit(inc, x, workers=[a.address])`, the scheduler
     # doesn't keep track of acquire-replicas requests, so it won't proactively inform a
     # when we call remove_worker later on
@@ -923,7 +923,7 @@ async def test_fetch_to_missing_on_refresh_who_has(c, s, w1, w2, w3):
     x = c.submit(inc, 1, key="x", workers=[w1.address])
     y = c.submit(inc, 2, key="y", workers=[w1.address])
     await wait([x, y])
-    w1.comm_outgoing_limit = 0
+    w1.transfer_outgoing_count_limit = 0
     s.request_acquire_replicas(w3.address, ["x", "y"], stimulus_id="test1")
 
     # The tasks will now flip-flop between fetch and flight every 150ms
@@ -985,17 +985,17 @@ async def test_fetch_to_missing_on_network_failure(c, s, a):
 
 @gen_cluster()
 async def test_deprecated_worker_attributes(s, a, b):
-    n = a.state.comm_threshold_bytes
+    n = a.state.transfer_incoming_throttle_size_threshold
     msg = (
         "The `Worker.comm_threshold_bytes` attribute has been moved to "
-        "`Worker.state.comm_threshold_bytes`"
+        "`Worker.state.transfer_incoming_throttle_size_threshold`"
     )
     with pytest.warns(FutureWarning, match=msg):
         assert a.comm_threshold_bytes == n
     with pytest.warns(FutureWarning, match=msg):
         a.comm_threshold_bytes += 1
         assert a.comm_threshold_bytes == n + 1
-    assert a.state.comm_threshold_bytes == n + 1
+    assert a.state.transfer_incoming_throttle_size_threshold == n + 1
 
     # Old and new names differ
     msg = (
@@ -1040,7 +1040,7 @@ def test_gather_priority(ws):
     3. in case of tie, from the worker with the most tasks queued
     4. in case of tie, from a random worker (which is actually deterministic).
     """
-    ws.comm_incoming_limit = 4
+    ws.transfer_incoming_count_limit = 4
 
     instructions = ws.handle_stimulus(
         PauseEvent(stimulus_id="pause"),
@@ -1060,8 +1060,8 @@ def test_gather_priority(ws):
                 # This will be fetched first because it's on the same worker as y
                 "x8": ["127.0.0.7:1"],
             },
-            # Substantial nbytes prevents comm_incoming_limit to be overridden by
-            # comm_threshold_bytes, but it's less than target_message_size
+            # Substantial nbytes prevents transfer_incoming_count_limit to be overridden by
+            # transfer_incoming_throttle_size_threshold, but it's less than target_message_size
             nbytes={f"x{i}": 4 * 2**20 for i in range(1, 9)},
             stimulus_id="compute1",
         ),

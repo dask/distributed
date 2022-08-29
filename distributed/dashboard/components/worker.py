@@ -91,7 +91,7 @@ class StateTable(DashboardComponent):
             "Executing": ["%d / %d" % (w.state.executing_count, w.state.nthreads)],
             "Ready": [len(w.state.ready)],
             "Waiting": [w.state.waiting_for_data_count],
-            "Connections": [w.state.comm_incoming_count],
+            "Connections": [w.state.transfer_incoming_count],
             "Serving": [len(w._comms)],
         }
         update(self.source, d)
@@ -114,8 +114,8 @@ class CommunicatingStream(DashboardComponent):
             "total",
         ]
 
-        self.comm_incoming = ColumnDataSource({name: [] for name in names})
-        self.comm_outgoing = ColumnDataSource({name: [] for name in names})
+        self.transfer_incoming = ColumnDataSource({name: [] for name in names})
+        self.transfer_outgoing = ColumnDataSource({name: [] for name in names})
 
         x_range = DataRange1d(range_padding=0)
         y_range = DataRange1d(range_padding=0)
@@ -131,7 +131,7 @@ class CommunicatingStream(DashboardComponent):
         )
 
         fig.rect(
-            source=self.comm_incoming,
+            source=self.transfer_incoming,
             x="middle",
             y="y",
             width="duration",
@@ -140,7 +140,7 @@ class CommunicatingStream(DashboardComponent):
             alpha="alpha",
         )
         fig.rect(
-            source=self.comm_outgoing,
+            source=self.transfer_outgoing,
             x="middle",
             y="y",
             width="duration",
@@ -159,36 +159,40 @@ class CommunicatingStream(DashboardComponent):
 
         self.root = fig
 
-        self.last_comm_incoming_cumulative_count = 0
-        self.last_comm_outgoing_cumulative_count = 0
+        self.last_transfer_incoming_count_total = 0
+        self.last_transfer_outgoing_count_total = 0
         self.who = dict()
 
     @without_property_validation
     @log_errors
     def update(self):
-        comm_outgoing_log = self.worker.comm_outgoing_log
+        transfer_outgoing_log = self.worker.transfer_outgoing_log
         n = (
-            self.worker.comm_outgoing_cumulative_count
-            - self.last_comm_outgoing_cumulative_count
+            self.worker.transfer_outgoing_count_total
+            - self.last_transfer_outgoing_count_total
         )
-        comm_outgoing_log = [comm_outgoing_log[-i].copy() for i in range(1, n + 1)]
-        self.last_comm_outgoing_cumulative_count = (
-            self.worker.comm_outgoing_cumulative_count
+        transfer_outgoing_log = [
+            transfer_outgoing_log[-i].copy() for i in range(1, n + 1)
+        ]
+        self.last_transfer_outgoing_count_total = (
+            self.worker.transfer_outgoing_count_total
         )
 
-        comm_incoming_log = self.worker.comm_incoming_log
+        transfer_incoming_log = self.worker.transfer_incoming_log
         n = (
-            self.worker.comm_incoming_cumulative_count
-            - self.last_comm_incoming_cumulative_count
+            self.worker.transfer_incoming_count_total
+            - self.last_transfer_incoming_count_total
         )
-        comm_incoming_log = [comm_incoming_log[-i].copy() for i in range(1, n + 1)]
-        self.last_comm_incoming_cumulative_count = (
-            self.worker.comm_incoming_cumulative_count
+        transfer_incoming_log = [
+            transfer_incoming_log[-i].copy() for i in range(1, n + 1)
+        ]
+        self.last_transfer_incoming_count_total = (
+            self.worker.transfer_incoming_count_total
         )
 
         for [msgs, source] in [
-            [comm_incoming_log, self.comm_incoming],
-            [comm_outgoing_log, self.comm_outgoing],
+            [transfer_incoming_log, self.transfer_incoming],
+            [transfer_outgoing_log, self.transfer_outgoing],
         ]:
 
             for msg in msgs:
@@ -235,7 +239,7 @@ class CommunicatingTimeSeries(DashboardComponent):
         fig = figure(
             title="Communication History",
             x_axis_type="datetime",
-            y_range=[-0.1, worker.state.comm_incoming_limit + 0.5],
+            y_range=[-0.1, worker.state.transfer_incoming_count_limit + 0.5],
             height=150,
             tools="",
             x_range=x_range,

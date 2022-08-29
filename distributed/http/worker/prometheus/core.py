@@ -37,7 +37,7 @@ class WorkerMetricCollector(PrometheusCollector):
         yield GaugeMetricFamily(
             self.build_name("concurrent_fetch_requests"),
             "Number of open fetch requests to other workers.",
-            value=self.server.state.comm_incoming_count,
+            value=self.server.state.transfer_incoming_count,
         )
 
         yield GaugeMetricFamily(

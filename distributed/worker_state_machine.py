@@ -1140,16 +1140,16 @@ class WorkerState:
     #: dependencies until the current query returns.
     in_flight_workers: dict[str, set[str]]
 
-    #: The total number of incoming bytes through in-flight tasks.
-    comm_incoming_bytes: int
+    #: The total size of incoming data transfers for in-flight tasks.
+    transfer_incoming_bytes: int
 
     #: The maximum number of concurrent incoming data transfers from other workers.
-    #: See also :attr:`distributed.worker.Worker.comm_outgoing_limit`.
-    comm_incoming_limit: int
+    #: See also :attr:`distributed.worker.Worker.transfer_outgoing_count_limit`.
+    transfer_incoming_count_limit: int
 
-    #: Ignore :attr:`comm_incoming_limit` as long as :attr:`comm_incoming_bytes` is
+    #: Ignore :attr:`transfer_incoming_count_limit` as long as :attr:`transfer_incoming_bytes` is
     #: less than this value.
-    comm_threshold_bytes: int
+    transfer_incoming_throttle_size_threshold: int
 
     #: Peer workers that recently returned a busy status. Workers in this set won't be
     #: asked for additional dependencies for some time.
@@ -1235,7 +1235,7 @@ class WorkerState:
         threads: dict[str, int] | None = None,
         plugins: dict[str, WorkerPlugin] | None = None,
         resources: Mapping[str, float] | None = None,
-        comm_incoming_limit: int = 9999,
+        transfer_incoming_count_limit: int = 9999,
         validate: bool = True,
         transition_counter_max: int | Literal[False] = False,
     ):
@@ -1264,9 +1264,9 @@ class WorkerState:
         )
         self.in_flight_workers = {}
         self.busy_workers = set()
-        self.comm_incoming_limit = comm_incoming_limit
-        self.comm_threshold_bytes = int(10e6)
-        self.comm_incoming_bytes = 0
+        self.transfer_incoming_count_limit = transfer_incoming_count_limit
+        self.transfer_incoming_throttle_size_threshold = int(10e6)
+        self.transfer_incoming_bytes = 0
         self.missing_dep_flight = set()
         self.generation = 0
         self.ready = HeapSet(key=operator.attrgetter("priority"))
@@ -1350,8 +1350,8 @@ class WorkerState:
         return len(self.in_flight_tasks)
 
     @property
-    def comm_incoming_count(self) -> int:
-        """Count of open communications used to receive data from other workers.
+    def transfer_incoming_count(self) -> int:
+        """Count of open data transfers from other workers.
 
         See also
         --------
@@ -1462,8 +1462,9 @@ class WorkerState:
         if not self.running or not self.data_needed:
             return {}, []
         if (
-            self.comm_incoming_count >= self.comm_incoming_limit
-            and self.comm_incoming_bytes >= self.comm_threshold_bytes
+            self.transfer_incoming_count >= self.transfer_incoming_count_limit
+            and self.transfer_incoming_bytes
+            >= self.transfer_incoming_throttle_size_threshold
         ):
             return {}, []
 
@@ -1485,8 +1486,8 @@ class WorkerState:
                 worker,
                 len(available_tasks),
                 len(self.data_needed),
-                self.comm_incoming_count,
-                self.comm_incoming_limit,
+                self.transfer_incoming_count,
+                self.transfer_incoming_count_limit,
                 len(self.busy_workers),
             )
             self.log.append(
@@ -1515,10 +1516,11 @@ class WorkerState:
             )
 
             self.in_flight_workers[worker] = to_gather_keys
-            self.comm_incoming_bytes += total_nbytes
+            self.transfer_incoming_bytes += total_nbytes
             if (
-                self.comm_incoming_count >= self.comm_incoming_limit
-                and self.comm_incoming_bytes >= self.comm_threshold_bytes
+                self.transfer_incoming_count >= self.transfer_incoming_count_limit
+                and self.transfer_incoming_bytes
+                >= self.transfer_incoming_throttle_size_threshold
             ):
                 break
 
@@ -2765,7 +2767,7 @@ class WorkerState:
         --------
         _execute_done_common
         """
-        self.comm_incoming_bytes -= ev.total_nbytes
+        self.transfer_incoming_bytes -= ev.total_nbytes
         keys = self.in_flight_workers.pop(ev.worker)
         for key in keys:
             ts = self.tasks[key]

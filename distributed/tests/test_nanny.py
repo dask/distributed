@@ -241,7 +241,7 @@ async def test_throttle_incoming_connections(c, s, a, *other_workers):
     await wait(remote_data)
 
     a.status = Status.paused
-    a.comm_outgoing_count = 2
+    a.transfer_outgoing_count = 2
 
     requests = [
         await a.get_data(await w.rpc.connect(w.address), keys=[f.key], who=w.address)
