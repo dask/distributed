@@ -297,6 +297,8 @@ def test_basic_no_loop(cleanup):
             loop.add_callback(loop.stop)
 
 
+# adaptive target for queued tasks doesn't yet consider default or learned task durations
+@pytest.mark.oversaturate_only
 @pytest.mark.flaky(condition=LINUX, reruns=10, reruns_delay=5)
 @pytest.mark.xfail(condition=MACOS or WINDOWS, reason="extremely flaky")
 @gen_test()
