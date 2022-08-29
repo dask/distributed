@@ -3762,7 +3762,9 @@ async def test_Scheduler__to_dict(c, s, a):
     assert isinstance(d["workers"][a.address]["memory"]["process"], int)
 
 
-@gen_cluster(client=True, nthreads=[])
+@gen_cluster(
+    client=True, nthreads=[], config={"distributed.scheduler.worker-saturation": 1.0}
+)
 async def test_TaskState__to_dict(c, s):
     """tasks that are listed as dependencies of other tasks are dumped as a short repr
     and always appear in full under Scheduler.tasks
@@ -3779,7 +3781,7 @@ async def test_TaskState__to_dict(c, s):
     assert isinstance(tasks["y"], dict)
     assert isinstance(tasks["z"], dict)
     assert tasks["x"]["dependents"] == ["<TaskState 'y' waiting>"]
-    assert tasks["y"]["dependencies"] == ["<TaskState 'x' no-worker>"]
+    assert tasks["y"]["dependencies"] == ["<TaskState 'x' queued>"]
 
 
 def _verify_cluster_state(
