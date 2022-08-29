@@ -1147,6 +1147,9 @@ class WorkerState:
     #: See also :attr:`distributed.worker.Worker.transfer_outgoing_count_limit`.
     transfer_incoming_count_limit: int
 
+    #: Number of total data transfers from other workers.
+    transfer_incoming_count_total: int
+
     #: Ignore :attr:`transfer_incoming_count_limit` as long as :attr:`transfer_incoming_bytes` is
     #: less than this value.
     transfer_incoming_throttle_size_threshold: int
@@ -1265,6 +1268,7 @@ class WorkerState:
         self.in_flight_workers = {}
         self.busy_workers = set()
         self.transfer_incoming_count_limit = transfer_incoming_count_limit
+        self.transfer_incoming_count_total = 0
         self.transfer_incoming_throttle_size_threshold = int(10e6)
         self.transfer_incoming_bytes = 0
         self.missing_dep_flight = set()
@@ -2768,6 +2772,7 @@ class WorkerState:
         _execute_done_common
         """
         self.transfer_incoming_bytes -= ev.total_nbytes
+        self.transfer_incoming_count_total += 1
         keys = self.in_flight_workers.pop(ev.worker)
         for key in keys:
             ts = self.tasks[key]

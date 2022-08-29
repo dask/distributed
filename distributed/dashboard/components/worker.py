@@ -180,14 +180,14 @@ class CommunicatingStream(DashboardComponent):
 
         transfer_incoming_log = self.worker.transfer_incoming_log
         n = (
-            self.worker.transfer_incoming_count_total
+            self.worker.state.transfer_incoming_count_total
             - self.last_transfer_incoming_count_total
         )
         transfer_incoming_log = [
             transfer_incoming_log[-i].copy() for i in range(1, n + 1)
         ]
         self.last_transfer_incoming_count_total = (
-            self.worker.transfer_incoming_count_total
+            self.worker.state.transfer_incoming_count_total
         )
 
         for [msgs, source] in [

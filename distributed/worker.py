@@ -385,8 +385,6 @@ class Worker(BaseWorker, ServerNode):
     profile_history: deque[tuple[float, dict[str, Any]]]
     transfer_incoming_log: deque[dict[str, Any]]
     transfer_outgoing_log: deque[dict[str, Any]]
-    #: Number of total data transfers from other workers.
-    transfer_incoming_count_total: int
     #: Number of total data transfers to other workers.
     transfer_outgoing_count_total: int
     #: Number of open data transfers to other workers.
@@ -543,7 +541,6 @@ class Worker(BaseWorker, ServerNode):
             validate = dask.config.get("distributed.scheduler.validate")
 
         self.transfer_incoming_log = deque(maxlen=100000)
-        self.transfer_incoming_count_total = 0
         self.transfer_outgoing_log = deque(maxlen=100000)
         self.transfer_outgoing_count_total = 0
         self.transfer_outgoing_count = 0
@@ -1964,7 +1961,6 @@ class Worker(BaseWorker, ServerNode):
             self.digests["transfer-bandwidth"].add(total_bytes / duration)
             self.digests["transfer-duration"].add(duration)
         self.counters["transfer-count"].add(len(data))
-        self.transfer_incoming_count_total += 1
 
     @fail_hard
     async def gather_dep(
@@ -2541,16 +2537,6 @@ class Worker(BaseWorker, ServerNode):
                 self.log_event(topic, msg)
 
             raise
-
-    @property
-    def incoming_count(self):
-        warnings.warn(
-            "The `Worker.incoming_count` attribute has been renamed to "
-            "`Worker.transfer_incoming_count_total`",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.transfer_incoming_count_total
 
     @property
     def incoming_transfer_log(self):

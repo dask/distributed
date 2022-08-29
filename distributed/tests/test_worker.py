@@ -3564,13 +3564,6 @@ async def test_execute_preamble_abort_retirement(c, s):
 @gen_cluster()
 async def test_deprecation_of_renamed_worker_attributes(s, a, b):
     msg = (
-        "The `Worker.incoming_count` attribute has been renamed to "
-        "`Worker.transfer_incoming_count_total`"
-    )
-    with pytest.warns(DeprecationWarning, match=msg):
-        assert a.incoming_count == a.transfer_incoming_count_total
-
-    msg = (
         "The `Worker.outgoing_count` attribute has been renamed to "
         "`Worker.transfer_outgoing_count_total`"
     )
