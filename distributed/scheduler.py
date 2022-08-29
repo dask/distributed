@@ -1849,9 +1849,7 @@ class SchedulerState:
 
         return ws
 
-    def decide_worker_rootish_queuing_enabled(
-        self, ts: TaskState
-    ) -> WorkerState | None:
+    def decide_worker_rootish_queuing_enabled(self) -> WorkerState | None:
         """Pick a worker for a runnable root-ish task, if not all are busy.
 
         Picks the least-busy worker out of the ``idle`` workers (idle workers have fewer
@@ -1879,7 +1877,8 @@ class SchedulerState:
             # We don't `assert self.is_rootish(ts)` here, because that check is dependent on
             # cluster size. It's possible a task looked root-ish when it was queued, but the
             # cluster has since scaled up and it no longer does when coming out of the queue.
-            # If `is_rootish` changes to a static definition, then add that assertion here.
+            # If `is_rootish` changes to a static definition, then add that assertion here
+            # (and actually pass in the task).
             assert not math.isinf(self.WORKER_SATURATION)
 
         if not self.idle:
@@ -1986,7 +1985,7 @@ class SchedulerState:
                     if not (ws := self.decide_worker_rootish_queuing_disabled(ts)):
                         return {ts.key: "no-worker"}, {}, {}
                 else:
-                    if not (ws := self.decide_worker_rootish_queuing_enabled(ts)):
+                    if not (ws := self.decide_worker_rootish_queuing_enabled()):
                         return {ts.key: "queued"}, {}, {}
             else:
                 if not (ws := self.decide_worker_non_rootish(ts)):
@@ -2615,7 +2614,7 @@ class SchedulerState:
                 assert not ts.actor, f"Actors can't be queued: {ts}"
                 assert ts in self.queued
 
-            if ws := self.decide_worker_rootish_queuing_enabled(ts):
+            if ws := self.decide_worker_rootish_queuing_enabled():
                 self.queued.discard(ts)
                 worker_msgs = _add_to_processing(self, ts, ws)
             # If no worker, task just stays `queued`
