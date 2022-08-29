@@ -1351,7 +1351,7 @@ class WorkerState:
 
     @property
     def comm_incoming_count(self) -> int:
-        """Count of connections currently being used to receive data from other workers.
+        """Count of open communications used to receive data from other workers.
 
         See also
         --------

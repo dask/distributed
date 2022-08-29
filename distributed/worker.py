@@ -385,8 +385,11 @@ class Worker(BaseWorker, ServerNode):
     profile_history: deque[tuple[float, dict[str, Any]]]
     incoming_transfer_log: deque[dict[str, Any]]
     outgoing_transfer_log: deque[dict[str, Any]]
+    #: Number of total communications used to transfer data to other workers.
     comm_incoming_cumulative_count: int
+    #: Number of total communications used to transfer data to other workers.
     comm_outgoing_cumulative_count: int
+    #: Number of open communications used to transfer data to other workers.
     comm_outgoing_count: int
     bandwidth: float
     latency: float
@@ -1653,7 +1656,9 @@ class Worker(BaseWorker, ServerNode):
 
         if self.status == Status.paused:
             max_connections = 1
-            throttle_msg = " Throttling incoming connections because worker is paused."
+            throttle_msg = (
+                " Throttling outgoing data transfers because worker is paused."
+            )
         else:
             throttle_msg = ""
 
