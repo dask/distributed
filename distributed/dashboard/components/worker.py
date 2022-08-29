@@ -91,7 +91,7 @@ class StateTable(DashboardComponent):
             "Executing": ["%d / %d" % (w.state.executing_count, w.state.nthreads)],
             "Ready": [len(w.state.ready)],
             "Waiting": [w.state.waiting_for_data_count],
-            "Connections": [len(w.state.in_flight_workers)],
+            "Connections": [w.state.comm_incoming_count],
             "Serving": [len(w._comms)],
         }
         update(self.source, d)
@@ -159,26 +159,36 @@ class CommunicatingStream(DashboardComponent):
 
         self.root = fig
 
-        self.last_incoming_transfer_count = 0
-        self.last_outgoing_transfer_count = 0
+        self.last_comm_incoming_cumulative_count = 0
+        self.last_comm_outgoing_cumulative_count = 0
         self.who = dict()
 
     @without_property_validation
     @log_errors
     def update(self):
         outgoing_transfer_log = self.worker.outgoing_transfer_log
-        n = self.worker.outgoing_transfer_count - self.last_outgoing_transfer_count
+        n = (
+            self.worker.comm_outgoing_cumulative_count
+            - self.last_comm_outgoing_cumulative_count
+        )
         outgoing_transfer_log = [
             outgoing_transfer_log[-i].copy() for i in range(1, n + 1)
         ]
-        self.last_outgoing_transfer_count = self.worker.outgoing_transfer_count
+        self.last_comm_outgoing_cumulative_count = (
+            self.worker.comm_outgoing_cumulative_count
+        )
 
         incoming_transfer_log = self.worker.incoming_transfer_log
-        n = self.worker.incoming_transfer_count - self.last_incoming_transfer_count
+        n = (
+            self.worker.comm_incoming_cumulative_count
+            - self.last_comm_incoming_cumulative_count
+        )
         incoming_transfer_log = [
             incoming_transfer_log[-i].copy() for i in range(1, n + 1)
         ]
-        self.last_incoming_transfer_count = self.worker.incoming_transfer_count
+        self.last_comm_incoming_cumulative_count = (
+            self.worker.comm_incoming_cumulative_count
+        )
 
         for [msgs, source] in [
             [incoming_transfer_log, self.incoming_transfers],
@@ -251,7 +261,7 @@ class CommunicatingTimeSeries(DashboardComponent):
             {
                 "x": [time() * 1000],
                 "out": [len(self.worker._comms)],
-                "in": [len(self.worker.state.in_flight_workers)],
+                "in": [self.worker.state.incoming_count],
             },
             10000,
         )

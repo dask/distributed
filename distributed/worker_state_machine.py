@@ -1140,14 +1140,14 @@ class WorkerState:
     #: dependencies until the current query returns.
     in_flight_workers: dict[str, set[str]]
 
-    #: The total number of bytes in flight
-    comm_nbytes: int
+    #: The total number of incoming bytes through in-flight tasks.
+    comm_incoming_bytes: int
 
     #: The maximum number of concurrent outgoing requests for data.
     #: See also :attr:`distributed.worker.Worker.total_in_connections`.
     total_out_connections: int
 
-    #: Ignore :attr:`total_out_connections` as long as :attr:`comm_nbytes` is
+    #: Ignore :attr:`total_out_connections` as long as :attr:`comm_incoming_bytes` is
     #: less than this value.
     comm_threshold_bytes: int
 
@@ -1266,7 +1266,7 @@ class WorkerState:
         self.busy_workers = set()
         self.total_out_connections = total_out_connections
         self.comm_threshold_bytes = int(10e6)
-        self.comm_nbytes = 0
+        self.comm_incoming_bytes = 0
         self.missing_dep_flight = set()
         self.generation = 0
         self.ready = HeapSet(key=operator.attrgetter("priority"))
@@ -1348,6 +1348,16 @@ class WorkerState:
         WorkerState.in_flight_tasks
         """
         return len(self.in_flight_tasks)
+
+    @property
+    def comm_incoming_count(self) -> int:
+        """Count of connections currently being used to receive data from other workers.
+
+        See also
+        --------
+        WorkerState.in_flight_workers
+        """
+        return len(self.in_flight_workers)
 
     #########################
     # Shared helper methods #
@@ -1452,8 +1462,8 @@ class WorkerState:
         if not self.running or not self.data_needed:
             return {}, []
         if (
-            len(self.in_flight_workers) >= self.total_out_connections
-            and self.comm_nbytes >= self.comm_threshold_bytes
+            self.comm_incoming_count >= self.total_out_connections
+            and self.comm_incoming_bytes >= self.comm_threshold_bytes
         ):
             return {}, []
 
@@ -1475,7 +1485,7 @@ class WorkerState:
                 worker,
                 len(available_tasks),
                 len(self.data_needed),
-                len(self.in_flight_workers),
+                self.comm_incoming_count,
                 self.total_out_connections,
                 len(self.busy_workers),
             )
@@ -1505,10 +1515,10 @@ class WorkerState:
             )
 
             self.in_flight_workers[worker] = to_gather_keys
-            self.comm_nbytes += total_nbytes
+            self.comm_incoming_bytes += total_nbytes
             if (
-                len(self.in_flight_workers) >= self.total_out_connections
-                and self.comm_nbytes >= self.comm_threshold_bytes
+                self.comm_incoming_count >= self.total_out_connections
+                and self.comm_incoming_bytes >= self.comm_threshold_bytes
             ):
                 break
 
@@ -2755,7 +2765,7 @@ class WorkerState:
         --------
         _execute_done_common
         """
-        self.comm_nbytes -= ev.total_nbytes
+        self.comm_incoming_bytes -= ev.total_nbytes
         keys = self.in_flight_workers.pop(ev.worker)
         for key in keys:
             ts = self.tasks[key]

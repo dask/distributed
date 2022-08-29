@@ -779,7 +779,7 @@ async def test_gather_many_small(c, s, a, *snd_workers, as_deps):
         while len(a.data) < 100:
             await asyncio.sleep(0.01)
 
-    assert a.state.comm_nbytes == 0
+    assert a.state.comm_incoming_bytes == 0
 
     story = a.state.story("request-dep", "receive-dep")
     assert len(story) == 40  # 1 request-dep + 1 receive-dep per sender worker
@@ -1967,7 +1967,7 @@ async def test_gather_dep_one_worker_always_busy(c, s, a, b):
     # We will block A for any outgoing communication. This simulates an
     # overloaded worker which will always return "busy" for get_data requests,
     # effectively blocking H indefinitely
-    a.current_outgoing_transfer_count = 10000000
+    a.comm_outgoing_count = 10000000
 
     h = c.submit(add, f, g, key="h", workers=[b.address])
 
@@ -2029,7 +2029,7 @@ async def test_gather_dep_from_remote_workers_if_all_local_workers_are_busy(
         )
     )["f"]
     for w in lws:
-        w.current_outgoing_transfer_count = 10000000
+        w.comm_outgoing_count = 10000000
 
     g = c.submit(inc, f, key="g", workers=[a.address])
     assert await g == 2
@@ -3565,21 +3565,21 @@ async def test_execute_preamble_abort_retirement(c, s):
 async def test_deprecation_of_renamed_worker_attributes(s, a, b):
     msg = (
         "The `Worker.incoming_count` attribute has been renamed to "
-        "`Worker.incoming_transfer_count`"
+        "`Worker.comm_incoming_cumulative_count`"
     )
     with pytest.warns(DeprecationWarning, match=msg):
-        assert a.incoming_count == a.incoming_transfer_count
+        assert a.incoming_count == a.comm_incoming_cumulative_count
 
     msg = (
         "The `Worker.outgoing_count` attribute has been renamed to "
-        "`Worker.outgoing_transfer_count`"
+        "`Worker.comm_outgoing_cumulative_count`"
     )
     with pytest.warns(DeprecationWarning, match=msg):
-        assert a.outgoing_count == a.outgoing_transfer_count
+        assert a.outgoing_count == a.comm_outgoing_cumulative_count
 
     msg = (
         "The `Worker.outgoing_current_count` attribute has been renamed to "
-        "`Worker.current_outgoing_transfer_count`"
+        "`Worker.comm_outgoing_count`"
     )
     with pytest.warns(DeprecationWarning, match=msg):
-        assert a.outgoing_current_count == a.current_outgoing_transfer_count
+        assert a.outgoing_current_count == a.comm_outgoing_count
