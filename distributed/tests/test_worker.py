@@ -1570,7 +1570,7 @@ async def test_close_async_task_handles_cancellation(c, s, a):
     assert "Failed to cancel asyncio task" in logger.getvalue()
     assert time() - start < 5
     assert not task.cancelled()
-    assert s.tasks["f1"].state == "no-worker"
+    assert s.tasks["f1"].state in ("queued", "no-worker")
     task.cancel()
     await asyncio.wait({task})
 
