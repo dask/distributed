@@ -985,17 +985,17 @@ async def test_fetch_to_missing_on_network_failure(c, s, a):
 
 @gen_cluster()
 async def test_deprecated_worker_attributes(s, a, b):
-    n = a.state.transfer_incoming_throttle_size_threshold
+    n = a.state.target_message_size
     msg = (
-        "The `Worker.comm_threshold_bytes` attribute has been moved to "
-        "`Worker.state.transfer_incoming_throttle_size_threshold`"
+        "The `Worker.target_message_size` attribute has been moved to "
+        "`Worker.state.target_message_size`"
     )
     with pytest.warns(FutureWarning, match=msg):
-        assert a.comm_threshold_bytes == n
+        assert a.target_message_size == n
     with pytest.warns(FutureWarning, match=msg):
-        a.comm_threshold_bytes += 1
-        assert a.comm_threshold_bytes == n + 1
-    assert a.state.transfer_incoming_throttle_size_threshold == n + 1
+        a.target_message_size += 1
+        assert a.target_message_size == n + 1
+    assert a.state.target_message_size == n + 1
 
     # Old and new names differ
     msg = (
