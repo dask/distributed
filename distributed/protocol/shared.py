@@ -1,9 +1,21 @@
 from __future__ import annotations
 
+import functools
 import os
 import pickle
+import time
 from typing import Any
 from urllib import parse
+
+def timing(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        start = time.time()
+        result = fn(*args, **kwargs)
+        end = time.time()
+        # print(f"{fn.__name__} took {end - start} seconds")
+        return result
+    return wrapper
 
 from toolz import first
 
@@ -144,6 +156,7 @@ def _get_plasma():
     return backends["plasma"]
 
 
+@timing
 def _put_plasma_buffer(buf):
     client = _get_plasma()
     try:
@@ -159,6 +172,7 @@ def _put_plasma_buffer(buf):
     return b"plasma:" + object_id.binary()
 
 
+@timing
 def ser_plasma(x, context=None):
     from distributed.worker import get_worker
 
@@ -212,6 +226,7 @@ def on_node(context, which="sender"):
     return parse.urlparse(info).hostname
 
 
+@timing
 def deser_plasma(header, frames):
     from distributed.worker import get_worker
 
@@ -248,6 +263,7 @@ def _get_vineyard():
     return backends["vineyard"]
 
 
+@timing
 def _put_vineyard_buffer(buf):
     client = _get_vineyard()
     try:
@@ -260,6 +276,7 @@ def _put_vineyard_buffer(buf):
     return b"vineyard:" + int(vineyard_object_id).to_bytes(8, "little")
 
 
+@timing
 def ser_vineyard(x, context=None):
     from distributed.worker import get_worker
 
@@ -303,7 +320,7 @@ def ser_vineyard(x, context=None):
                     worker.data[k] = new_obj  # replace original object
     return head, frames
 
-
+@timing
 def deser_vineyard(header, frames):
     from distributed.worker import get_worker
 
@@ -315,7 +332,7 @@ def deser_vineyard(header, frames):
     client = _get_vineyard()
     bufs = None
     frames0 = frames.copy()
-    ids, indices = [], []
+    ids, indices, buffers = [], [], None
     for i, buf in enumerate(frames.copy()):
         if isinstance(buf, (bytes, memoryview)) and buf[:9] == b"vineyard:":
             # probably faster to get all the buffers in a single call
@@ -326,7 +343,7 @@ def deser_vineyard(header, frames):
         for i, blob in zip(indices, buffers):
             frames[i] = memoryview(blob)
     out = pickle.loads(frames[0], buffers=frames[1:])
-    if worker and bufs:
+    if worker and buffers:
         # "bufs" is a poor condition, maybe store in header
         worker.shared_data[id(out)] = (
             header or {"serializer": "vineyard"},
