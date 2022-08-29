@@ -7488,7 +7488,11 @@ class Scheduler(SchedulerState, ServerNode):
             self.idle_since = None
             return
 
-        if any([ws.processing for ws in self.workers.values()]) or self.unrunnable:
+        if (
+            self.queued
+            or self.unrunnable
+            or any([ws.processing for ws in self.workers.values()])
+        ):
             self.idle_since = None
             return
 
