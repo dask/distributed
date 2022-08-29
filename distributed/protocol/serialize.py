@@ -932,3 +932,4 @@ def register_generic(
 
 register_serialization_family("plasma", shared.ser_plasma, shared.deser_plasma)
 register_serialization_family("lmdb", shared.ser_lmdb, shared.deser_lmdb)
+register_serialization_family("vineyard", shared.ser_vineyard, shared.deser_vineyard)
