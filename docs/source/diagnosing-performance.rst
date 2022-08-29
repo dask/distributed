@@ -95,7 +95,7 @@ Bandwidth
 ---------
 
 Dask workers track every incoming and outgoing transfer in the
-``Worker.outgoing_transfer_log`` and ``Worker.incoming_transfer_log``
+``Worker.comm_outgoing_log`` and ``Worker.comm_incoming_log``
 attributes including
 
 1.  Total bytes transferred
@@ -110,8 +110,8 @@ command on the workers:
 
 .. code-block:: python
 
-   client.run(lambda dask_worker: dask_worker.outgoing_transfer_log)
-   client.run(lambda dask_worker: dask_worker.incoming_transfer_log)
+   client.run(lambda dask_worker: dask_worker.comm_outgoing_log)
+   client.run(lambda dask_worker: dask_worker.comm_incoming_log)
 
 
 Performance Reports

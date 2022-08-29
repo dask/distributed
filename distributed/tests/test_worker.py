@@ -681,11 +681,11 @@ async def test_message_breakup(c, s, a, b):
     y = c.submit(lambda _: None, xs, key="y", workers=[b.address])
     await y
 
-    assert 2 <= len(b.incoming_transfer_log) <= 20
-    assert 2 <= len(a.outgoing_transfer_log) <= 20
+    assert 2 <= len(b.comm_incoming_log) <= 20
+    assert 2 <= len(a.comm_outgoing_log) <= 20
 
-    assert all(msg["who"] == b.address for msg in a.outgoing_transfer_log)
-    assert all(msg["who"] == a.address for msg in a.incoming_transfer_log)
+    assert all(msg["who"] == b.address for msg in a.comm_outgoing_log)
+    assert all(msg["who"] == a.address for msg in a.comm_incoming_log)
 
 
 @gen_cluster(client=True)
@@ -814,9 +814,9 @@ async def test_share_communication(c, s, w1, w2, w3):
     await c._replicate([x, y], workers=[w1.address, w2.address])
     z = c.submit(add, x, y, workers=w3.address)
     await wait(z)
-    assert len(w3.incoming_transfer_log) == 2
-    assert w1.outgoing_transfer_log
-    assert w2.outgoing_transfer_log
+    assert len(w3.comm_incoming_log) == 2
+    assert w1.comm_outgoing_log
+    assert w2.comm_outgoing_log
 
 
 @pytest.mark.xfail(reason="very high flakiness")
@@ -827,8 +827,8 @@ async def test_dont_overlap_communications_to_same_worker(c, s, a, b):
     await wait([x, y])
     z = c.submit(add, x, y, workers=b.address)
     await wait(z)
-    assert len(b.incoming_transfer_log) == 2
-    l1, l2 = b.incoming_transfer_log
+    assert len(b.comm_incoming_log) == 2
+    l1, l2 = b.comm_incoming_log
 
     assert l1["stop"] < l2["start"]
 
@@ -1245,9 +1245,9 @@ async def test_wait_for_outgoing(c, s, a, b):
     y = c.submit(inc, future, workers=b.address)
     await wait(y)
 
-    assert len(b.incoming_transfer_log) == len(a.outgoing_transfer_log) == 1
-    bb = b.incoming_transfer_log[0]["duration"]
-    aa = a.outgoing_transfer_log[0]["duration"]
+    assert len(b.comm_incoming_log) == len(a.comm_outgoing_log) == 1
+    bb = b.comm_incoming_log[0]["duration"]
+    aa = a.comm_incoming_log[0]["duration"]
     ratio = aa / bb
 
     assert 1 / 3 < ratio < 3
@@ -1263,8 +1263,8 @@ async def test_prefer_gather_from_local_address(c, s, w1, w2, w3):
     y = c.submit(inc, x, workers=[w2.address])
     await wait(y)
 
-    assert any(d["who"] == w2.address for d in w1.outgoing_transfer_log)
-    assert not any(d["who"] == w2.address for d in w3.outgoing_transfer_log)
+    assert any(d["who"] == w2.address for d in w1.comm_outgoing_log)
+    assert not any(d["who"] == w2.address for d in w3.comm_outgoing_log)
 
 
 @gen_cluster(
@@ -1282,10 +1282,10 @@ async def test_avoid_oversubscription(c, s, *workers):
     await wait(futures)
 
     # Original worker not responsible for all transfers
-    assert len(workers[0].outgoing_transfer_log) < len(workers) - 2
+    assert len(workers[0].comm_outgoing_log) < len(workers) - 2
 
     # Some other workers did some work
-    assert len([w for w in workers if len(w.outgoing_transfer_log) > 0]) >= 3
+    assert len([w for w in workers if len(w.comm_outgoing_log) > 0]) >= 3
 
 
 @gen_cluster(client=True, worker_kwargs={"metrics": {"my_port": lambda w: w.port}})
@@ -2726,7 +2726,9 @@ async def test_acquire_replicas_same_channel(c, s, a, b):
                 ("request-dep", a.address, {fut.key}),
             ],
         )
-        assert any(fut.key in msg["keys"] for msg in b.incoming_transfer_log)
+        assert any(
+            fut.key in msg["keys"] for msg in b.outgocomm_outgoing_loging_transfer_log
+        )
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
@@ -3318,8 +3320,8 @@ async def test_Worker__to_dict(c, s, a):
         "thread_id",
         "logs",
         "config",
-        "incoming_transfer_log",
-        "outgoing_transfer_log",
+        "comm_incoming_log",
+        "comm_outgoing_log",
         # Attributes of WorkerMemoryManager
         "data",
         "max_spill",

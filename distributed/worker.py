@@ -383,8 +383,8 @@ class Worker(BaseWorker, ServerNode):
     profile_keys_history: deque[tuple[float, dict[str, dict[str, Any]]]]
     profile_recent: dict[str, Any]
     profile_history: deque[tuple[float, dict[str, Any]]]
-    incoming_transfer_log: deque[dict[str, Any]]
-    outgoing_transfer_log: deque[dict[str, Any]]
+    comm_incoming_log: deque[dict[str, Any]]
+    comm_outgoing_log: deque[dict[str, Any]]
     #: Number of total communications used to transfer data to other workers.
     comm_incoming_cumulative_count: int
     #: Number of total communications used to transfer data to other workers.
@@ -542,9 +542,9 @@ class Worker(BaseWorker, ServerNode):
         if validate is None:
             validate = dask.config.get("distributed.scheduler.validate")
 
-        self.incoming_transfer_log = deque(maxlen=100000)
+        self.comm_incoming_log = deque(maxlen=100000)
         self.comm_incoming_cumulative_count = 0
-        self.outgoing_transfer_log = deque(maxlen=100000)
+        self.comm_outgoing_log = deque(maxlen=100000)
         self.comm_outgoing_cumulative_count = 0
         self.comm_outgoing_count = 0
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
@@ -1030,8 +1030,8 @@ class Worker(BaseWorker, ServerNode):
             "status": self.status,
             "logs": self.get_logs(),
             "config": dask.config.config,
-            "incoming_transfer_log": self.incoming_transfer_log,
-            "outgoing_transfer_log": self.outgoing_transfer_log,
+            "comm_incoming_log": self.comm_incoming_log,
+            "comm_outgoing_log": self.comm_outgoing_log,
         }
         extra = {k: v for k, v in extra.items() if k not in exclude}
         info.update(extra)
@@ -1715,7 +1715,7 @@ class Worker(BaseWorker, ServerNode):
 
         self.comm_outgoing_cumulative_count += 1
         duration = (stop - start) or 0.5  # windows
-        self.outgoing_transfer_log.append(
+        self.comm_outgoing_log.append(
             {
                 "start": start + self.scheduler_delay,
                 "stop": stop + self.scheduler_delay,
@@ -1930,7 +1930,7 @@ class Worker(BaseWorker, ServerNode):
         )
         duration = (stop - start) or 0.010
         bandwidth = total_bytes / duration
-        self.incoming_transfer_log.append(
+        self.comm_incoming_log.append(
             {
                 "start": start + self.scheduler_delay,
                 "stop": stop + self.scheduler_delay,
@@ -2546,6 +2546,16 @@ class Worker(BaseWorker, ServerNode):
         return self.comm_incoming_cumulative_count
 
     @property
+    def incoming_transfer_log(self):
+        warnings.warn(
+            "The `Worker.incoming_transfer_log` attribute has been renamed to "
+            "`Worker.comm_incoming_log`",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.comm_incoming_log
+
+    @property
     def outgoing_count(self):
         warnings.warn(
             "The `Worker.outgoing_count` attribute has been renamed to "
@@ -2564,6 +2574,16 @@ class Worker(BaseWorker, ServerNode):
             stacklevel=2,
         )
         return self.comm_outgoing_count
+
+    @property
+    def outgoing_transfer_log(self):
+        warnings.warn(
+            "The `Worker.outgoing_transfer_log` attribute has been renamed to "
+            "`Worker.comm_outgoing_log`",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.comm_outgoing_log
 
 
 def get_worker() -> Worker:

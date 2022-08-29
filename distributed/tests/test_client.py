@@ -647,7 +647,7 @@ async def test_gather_skip(c, s, a):
 async def test_limit_concurrent_gathering(c, s, a, b):
     futures = c.map(inc, range(100))
     await c.gather(futures)
-    assert len(a.outgoing_transfer_log) + len(b.outgoing_transfer_log) < 100
+    assert len(a.comm_outgoing_log) + len(b.comm_outgoing_log) < 100
 
 
 @gen_cluster(client=True)

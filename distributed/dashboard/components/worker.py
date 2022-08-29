@@ -114,8 +114,8 @@ class CommunicatingStream(DashboardComponent):
             "total",
         ]
 
-        self.incoming_transfers = ColumnDataSource({name: [] for name in names})
-        self.outgoing_transfers = ColumnDataSource({name: [] for name in names})
+        self.comm_incoming = ColumnDataSource({name: [] for name in names})
+        self.comm_outgoing = ColumnDataSource({name: [] for name in names})
 
         x_range = DataRange1d(range_padding=0)
         y_range = DataRange1d(range_padding=0)
@@ -131,7 +131,7 @@ class CommunicatingStream(DashboardComponent):
         )
 
         fig.rect(
-            source=self.incoming_transfers,
+            source=self.comm_incoming,
             x="middle",
             y="y",
             width="duration",
@@ -140,7 +140,7 @@ class CommunicatingStream(DashboardComponent):
             alpha="alpha",
         )
         fig.rect(
-            source=self.outgoing_transfers,
+            source=self.comm_outgoing,
             x="middle",
             y="y",
             width="duration",
@@ -166,33 +166,29 @@ class CommunicatingStream(DashboardComponent):
     @without_property_validation
     @log_errors
     def update(self):
-        outgoing_transfer_log = self.worker.outgoing_transfer_log
+        comm_outgoing_log = self.worker.comm_outgoing_log
         n = (
             self.worker.comm_outgoing_cumulative_count
             - self.last_comm_outgoing_cumulative_count
         )
-        outgoing_transfer_log = [
-            outgoing_transfer_log[-i].copy() for i in range(1, n + 1)
-        ]
+        comm_outgoing_log = [comm_outgoing_log[-i].copy() for i in range(1, n + 1)]
         self.last_comm_outgoing_cumulative_count = (
             self.worker.comm_outgoing_cumulative_count
         )
 
-        incoming_transfer_log = self.worker.incoming_transfer_log
+        comm_incoming_log = self.worker.comm_incoming_log
         n = (
             self.worker.comm_incoming_cumulative_count
             - self.last_comm_incoming_cumulative_count
         )
-        incoming_transfer_log = [
-            incoming_transfer_log[-i].copy() for i in range(1, n + 1)
-        ]
+        comm_incoming_log = [comm_incoming_log[-i].copy() for i in range(1, n + 1)]
         self.last_comm_incoming_cumulative_count = (
             self.worker.comm_incoming_cumulative_count
         )
 
         for [msgs, source] in [
-            [incoming_transfer_log, self.incoming_transfers],
-            [outgoing_transfer_log, self.outgoing_transfers],
+            [comm_incoming_log, self.comm_incoming],
+            [comm_outgoing_log, self.comm_outgoing],
         ]:
 
             for msg in msgs:
