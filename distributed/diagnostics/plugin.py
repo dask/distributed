@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from dask.utils import funcname, tmpfile
 
 if TYPE_CHECKING:
-    from distributed.scheduler import Scheduler  # circular import
+    from distributed.scheduler import Scheduler, TaskStateState  # circular imports
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +84,12 @@ class SchedulerPlugin:
         """Run when the scheduler restarts itself"""
 
     def transition(
-        self, key: str, start: str, finish: str, *args: Any, **kwargs: Any
+        self,
+        key: str,
+        start: TaskStateState,
+        finish: TaskStateState,
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
         """Run whenever a task changes state
 

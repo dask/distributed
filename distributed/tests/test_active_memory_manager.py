@@ -1093,6 +1093,21 @@ async def tensordot_stress(c):
     client=True,
     nthreads=[("", 1)] * 4,
     Worker=Nanny,
+    config=NO_AMM_START,
+)
+async def test_noamm_stress(c, s, *nannies):
+    """Test the tensordot_stress helper without AMM. This is to figure out if a
+    stability issue is AMM-specific or not.
+    """
+    await tensordot_stress(c)
+
+
+@pytest.mark.slow
+@pytest.mark.avoid_ci(reason="distributed#5371")
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 4,
+    Worker=Nanny,
     config={
         "distributed.scheduler.active-memory-manager.start": True,
         "distributed.scheduler.active-memory-manager.interval": 0.1,
@@ -1150,6 +1165,8 @@ async def test_ReduceReplicas_stress(c, s, *nannies):
             {"class": "distributed.active_memory_manager.ReduceReplicas"},
         ],
     },
+    scheduler_kwargs={"transition_counter_max": 500_000},
+    worker_kwargs={"transition_counter_max": 500_000},
 )
 async def test_RetireWorker_stress(c, s, *nannies, use_ReduceReplicas):
     """It is safe to retire the best part of a cluster in the middle of a computation"""

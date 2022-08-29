@@ -7547,3 +7547,32 @@ async def test_deprecated_loop_properties(s):
         (DeprecationWarning, "The io_loop property is deprecated"),
         (DeprecationWarning, "setting the loop property is deprecated"),
     ]
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_wait_for_workers_no_default(c, s):
+    with pytest.warns(
+        FutureWarning,
+        match="specify the `n_workers` argument when using `Client.wait_for_workers`",
+    ):
+        await c.wait_for_workers()
+
+
+@pytest.mark.parametrize(
+    "value, exception",
+    [
+        (None, ValueError),
+        (0, ValueError),
+        (1.0, ValueError),
+        (1, None),
+        (2, None),
+    ],
+)
+@gen_cluster(client=True)
+async def test_wait_for_workers_n_workers_value_check(c, s, a, b, value, exception):
+    if exception:
+        ctx = pytest.raises(exception)
+    else:
+        ctx = nullcontext()
+    with ctx:
+        await c.wait_for_workers(value)

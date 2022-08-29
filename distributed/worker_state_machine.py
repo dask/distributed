@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from distributed.worker import Worker
 
     # TODO move out of TYPE_CHECKING (requires Python >=3.10)
+    # Not to be confused with distributed.scheduler.TaskStateState
     TaskStateState: TypeAlias = Literal[
         "cancelled",
         "constrained",
@@ -1014,6 +1015,7 @@ if TYPE_CHECKING:
     # TODO remove quotes (requires Python >=3.9)
     # TODO get out of TYPE_CHECKING (requires Python >=3.10)
     # {TaskState -> finish: TaskStateState | (finish: TaskStateState, transition *args)}
+    # Not to be confused with distributed.scheduler.Recs
     Recs: TypeAlias = "dict[TaskState, TaskStateState | tuple]"
     Instructions: TypeAlias = "list[Instruction]"
     RecsInstrs: TypeAlias = "tuple[Recs, Instructions]"
