@@ -1729,7 +1729,7 @@ class SchedulerState:
     def transition_no_worker_processing(self, key, stimulus_id):
         try:
             ts: TaskState = self.tasks[key]
-            recommendations: dict = {}
+            recommendations: Recs = {}
             client_msgs: dict = {}
             worker_msgs: dict = {}
 
@@ -2539,7 +2539,7 @@ class SchedulerState:
     def transition_waiting_queued(self, key, stimulus_id):
         try:
             ts: TaskState = self.tasks[key]
-            recommendations: dict = {}
+            recommendations: Recs = {}
             client_msgs: dict = {}
             worker_msgs: dict = {}
 
@@ -2562,7 +2562,7 @@ class SchedulerState:
     def transition_waiting_no_worker(self, key, stimulus_id):
         try:
             ts: TaskState = self.tasks[key]
-            recommendations: dict = {}
+            recommendations: Recs = {}
             client_msgs: dict = {}
             worker_msgs: dict = {}
 
@@ -2584,7 +2584,7 @@ class SchedulerState:
     def transition_queued_released(self, key, stimulus_id):
         try:
             ts: TaskState = self.tasks[key]
-            recommendations: dict = {}
+            recommendations: Recs = {}
             client_msgs: dict = {}
             worker_msgs: dict = {}
 
@@ -2607,7 +2607,7 @@ class SchedulerState:
     def transition_queued_processing(self, key, stimulus_id):
         try:
             ts: TaskState = self.tasks[key]
-            recommendations: dict = {}
+            recommendations: Recs = {}
             client_msgs: dict = {}
             worker_msgs: dict = {}
 
