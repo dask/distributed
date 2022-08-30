@@ -1152,7 +1152,7 @@ class WorkerState:
 
     #: Ignore :attr:`transfer_incoming_count_limit` as long as :attr:`transfer_incoming_bytes` is
     #: less than this value.
-    transfer_incoming_throttle_size_threshold: int
+    transfer_incoming_bytes_throttle_threshold: int
 
     #: Peer workers that recently returned a busy status. Workers in this set won't be
     #: asked for additional dependencies for some time.
@@ -1269,7 +1269,7 @@ class WorkerState:
         self.busy_workers = set()
         self.transfer_incoming_count_limit = transfer_incoming_count_limit
         self.transfer_incoming_count_total = 0
-        self.transfer_incoming_throttle_size_threshold = int(10e6)
+        self.transfer_incoming_bytes_throttle_threshold = int(10e6)
         self.transfer_incoming_bytes = 0
         self.missing_dep_flight = set()
         self.generation = 0
@@ -1468,7 +1468,7 @@ class WorkerState:
         if (
             self.transfer_incoming_count >= self.transfer_incoming_count_limit
             and self.transfer_incoming_bytes
-            >= self.transfer_incoming_throttle_size_threshold
+            >= self.transfer_incoming_bytes_throttle_threshold
         ):
             return {}, []
 
@@ -1524,7 +1524,7 @@ class WorkerState:
             if (
                 self.transfer_incoming_count >= self.transfer_incoming_count_limit
                 and self.transfer_incoming_bytes
-                >= self.transfer_incoming_throttle_size_threshold
+                >= self.transfer_incoming_bytes_throttle_threshold
             ):
                 break
 

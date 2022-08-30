@@ -1061,7 +1061,7 @@ def test_gather_priority(ws):
                 "x8": ["127.0.0.7:1"],
             },
             # Substantial nbytes prevents transfer_incoming_count_limit to be overridden by
-            # transfer_incoming_throttle_size_threshold, but it's less than target_message_size
+            # transfer_incoming_bytes_throttle_threshold, but it's less than target_message_size
             nbytes={f"x{i}": 4 * 2**20 for i in range(1, 9)},
             stimulus_id="compute1",
         ),

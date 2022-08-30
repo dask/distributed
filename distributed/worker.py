@@ -851,7 +851,7 @@ class Worker(BaseWorker, ServerNode):
     busy_workers = DeprecatedWorkerStateAttribute()
     comm_nbytes = DeprecatedWorkerStateAttribute(target="transfer_incoming_bytes")
     comm_threshold_bytes = DeprecatedWorkerStateAttribute(
-        target="transfer_incoming_throttle_size_threshold"
+        target="transfer_incoming_bytes_throttle_threshold"
     )
     constrained = DeprecatedWorkerStateAttribute()
     data_needed_per_worker = DeprecatedWorkerStateAttribute(target="data_needed")
