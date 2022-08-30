@@ -1540,7 +1540,7 @@ class WorkerState:
             )
 
             self.in_flight_workers[worker] = to_gather_keys
-            self.comm_nbytes += total_nbytes
+            self.transfer_incoming_bytes += total_nbytes
             if self._should_throttle_incoming_transfers():
                 break
 

@@ -1267,9 +1267,9 @@ def test_gather_dep_failure(ws):
 
 
 def test_throttling_does_not_affect_first_transfer(ws):
-    ws.total_out_connections = 100
+    ws.transfer_incoming_count_limit = 100
     ws.transfer_incoming_bytes_limit = 100
-    ws.comm_threshold_bytes = 1
+    ws.transfer_incoming_bytes_throttle_threshold = 1
     ws2 = "127.0.0.1:2"
     ws.handle_stimulus(
         ComputeTaskEvent.dummy(
