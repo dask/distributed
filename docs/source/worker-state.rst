@@ -98,11 +98,11 @@ These :class:`TaskState` objects have their state set to ``fetch``, are put in t
 network. For each dependency we select a worker at random that has that data and collect
 the dependency from that worker. To improve bandwidth, we opportunistically gather other
 dependencies of other tasks that are known to be on that worker, up to a maximum of 50MB
-of data (:attr:`~WorkerState.target_message_size`) - too little data and bandwidth
-suffers, too much data and responsiveness suffers. We use a fixed number of 50
-connections (:attr:`~WorkerState.total_out_connections`, which is in turn acquired from
-the configuration key ``distributed.worker.connections.outgoing``) so as to avoid
-overly-fragmenting our network bandwidth.
+of data (:attr:`~WorkerState.transfer_message_target_bytes`) - too little data and
+bandwidth suffers, too much data and responsiveness suffers. We use a fixed number of 50
+connections (:attr:`~WorkerState.transfer_incoming_count_limit`, which is in turn
+acquired from the configuration key ``distributed.worker.connections.outgoing``) so as
+to avoid overly-fragmenting our network bandwidth.
 
 In the event that the network comms between two workers are saturated, a dependency task
 may cycle between ``fetch`` and ``flight`` until it is successfully collected. It may
