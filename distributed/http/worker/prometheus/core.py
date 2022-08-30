@@ -77,7 +77,7 @@ class WorkerMetricCollector(PrometheusCollector):
 
 
 class PrometheusHandler(RequestHandler):
-    _collector: WorkerMetricCollector | None = None
+    _collector: ClassVar[WorkerMetricCollector | None] = None
 
     def __init__(self, *args, dask_server=None, **kwargs):
         import prometheus_client
