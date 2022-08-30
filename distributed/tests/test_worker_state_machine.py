@@ -1369,7 +1369,7 @@ def test_do_not_throttle_connections_while_below_threshold(ws):
     assert ws.tasks["a"].state == "fetch"
     assert ws.tasks["b"].state == "flight"
     assert ws.tasks["c"].state == "flight"
-    assert ws.comm_nbytes == 200
+    assert ws.transfer_incoming_bytes == 200
 
     instructions = ws.handle_stimulus(
         GatherDepSuccessEvent(
@@ -1381,6 +1381,6 @@ def test_do_not_throttle_connections_while_below_threshold(ws):
         GatherDep.match(worker=ws2, to_gather={"a"}, stimulus_id="s2"),
     ]
     assert ws.tasks["a"].state == "flight"
-    # Note: We ignore comm_nbytes if it's below comm_threshold_bytes
-    # and always fetch at least one task
-    assert ws.comm_nbytes == 300
+    # Note: We ignore transfer_incoming_bytes if it's below
+    # transfer_incoming_bytes_throttle_threshold and always fetch at least one task
+    assert ws.transfer_incoming_bytes == 300
