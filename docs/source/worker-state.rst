@@ -47,12 +47,12 @@ constrained
     The task can be found in the :attr:`WorkerState.constrained` queue.
 executing
     The task is currently being computed on a thread.
-    It can be found in the :attr`:WorkerState.executing` set and in the
+    It can be found in the :attr:`WorkerState.executing` set and in the
     :attr:`distributed.worker.Worker.active_threads` dict.
 long-running
     Like ``executing``, but the user code called :func:`distributed.secede` so the task
     no longer counts towards the maximum number of concurrent tasks.
-    It can be found in the :attr`:WorkerState.long_running` set and in the
+    It can be found in the :attr:`WorkerState.long_running` set and in the
     :attr:`distributed.worker.Worker.active_threads` dict.
 rescheduled
     The task just raised the :class:`~distributed.Reschedule` exception. This is a
@@ -67,7 +67,8 @@ resumed
     :attr:`~TaskState.previous` state.
 memory
     Task execution completed, or the task was successfully transferred from another
-    worker, and is now held in :class:`WorkerState.data`.
+    worker, and is now held in either :class:`WorkerState.data` or
+    :class:`WorkerState.actors`.
 error
     Task execution failed. Alternatively, task execution completed successfully, or the
     task data transferred successfully over the network, but it failed to serialize or
@@ -146,8 +147,10 @@ the maximum number of tasks running in parallel at the same time.
 
 A task can terminate in three ways:
 
-- Complete successfully; its return value is stored in :attr:`~WorkerState.data`
-- Raise an exception
+- Complete successfully; its return value is stored in either :attr:`~WorkerState.data`
+  or :attr:`~WorkerState.actors`
+- Raise an exception; the exception and traceback are stored on the :class:`TaskState`
+  object
 - Raise :class:`~distributed.Reschedule`; it is immediately forgotten.
 
 In all cases, the outcome is sent back to the scheduler.
