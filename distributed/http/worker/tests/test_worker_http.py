@@ -86,7 +86,12 @@ async def test_prometheus_collect_task_states(c, s, a):
     expected_metrics = {"stored", "executing", "ready", "waiting"}
     assert not a.state.tasks
     active_metrics = await fetch_metrics()
-    assert active_metrics == {"stored": 0.0, ""executing": 0.0, "ready": 0.0, "waiting": 0.0}
+    assert active_metrics == {
+        "stored": 0.0,
+        "executing": 0.0,
+        "ready": 0.0,
+        "waiting": 0.0,
+    }
 
     ev = Event()
 
@@ -96,7 +101,12 @@ async def test_prometheus_collect_task_states(c, s, a):
         await asyncio.sleep(0.001)
 
     active_metrics = await fetch_metrics()
-    assert active_metrics == {"stored": 0.0, ""executing": 1.0, "ready": 0.0, "waiting": 0.0}
+    assert active_metrics == {
+        "stored": 0.0,
+        "executing": 1.0,
+        "ready": 0.0,
+        "waiting": 0.0,
+    }
 
     await ev.set()
     await c.gather(future)
@@ -107,7 +117,12 @@ async def test_prometheus_collect_task_states(c, s, a):
         await asyncio.sleep(0.001)
 
     active_metrics = await fetch_metrics()
-    assert active_metrics == {"stored": 0.0, ""executing": 0.0, "ready": 0.0, "waiting": 0.0}
+    assert active_metrics == {
+        "stored": 0.0,
+        "executing": 0.0,
+        "ready": 0.0,
+        "waiting": 0.0,
+    }
 
 
 @gen_cluster(client=True)
