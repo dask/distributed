@@ -287,10 +287,15 @@ async def test_decide_worker_coschedule_order_binary_op(c, s, a, b, ngroups):
         "distributed.scheduler.allowed-failures": 0,  # don't allow nannies to restart
     },
 )
-async def test_root_task_overproduction(c, s, *nannies):
+async def test_near_memory_limit_workload(c, s, *nannies):
     """
-    Workload that would run out of memory and kill workers if >2 root tasks were
-    ever in memory at once on a worker.
+    Integration test: a workload close to worker memory limit, which might fail with bad scheduling decisions.
+
+    Each worker has 2 threads. The data is sized such that if >2 pieces of data are
+    ever in memory at once, the worker would exceed its memory limit and be killed.
+
+    The scheduler must decide when and where to schedule tasks so extra pieces of data
+    are not produced, and data is not transferred.
     """
 
     @delayed(pure=True)  # type: ignore
