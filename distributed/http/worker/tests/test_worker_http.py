@@ -107,8 +107,7 @@ async def test_prometheus_collect_task_states(c, s, a):
         await asyncio.sleep(0.001)
 
     active_metrics = await fetch_metrics()
-    assert active_metrics.keys() == expected_metrics
-    assert sum(active_metrics.values()) == 0.0
+    assert active_metrics == {"stored": 0.0, ""executing": 0.0, "ready": 0.0, "waiting": 0.0}
 
 
 @gen_cluster(client=True)
