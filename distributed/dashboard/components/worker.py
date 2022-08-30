@@ -261,7 +261,7 @@ class CommunicatingTimeSeries(DashboardComponent):
             {
                 "x": [time() * 1000],
                 "out": [len(self.worker._comms)],
-                "in": [self.worker.state.incoming_count],
+                "in": [self.worker.state.transfer_incoming_count],
             },
             10000,
         )
