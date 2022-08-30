@@ -615,10 +615,15 @@ async def test_ready_remove_worker(s, a, b):
 
 @gen_cluster(client=True, Worker=Nanny, timeout=60)
 async def test_restart(c, s, a, b):
+
     futures = c.map(inc, range(20))
     await wait(futures)
 
     await s.restart()
+
+    assert not s.computations
+    assert not s.task_prefixes
+    assert not s.task_groups
 
     assert len(s.workers) == 2
 
@@ -869,15 +874,13 @@ async def test_broadcast_deprecation(s, a, b):
 
 @gen_cluster(nthreads=[])
 async def test_worker_name(s):
-    w = await Worker(s.address, name="alice")
-    assert s.workers[w.address].name == "alice"
-    assert s.aliases["alice"] == w.address
+    async with Worker(s.address, name="alice") as w:
+        assert s.workers[w.address].name == "alice"
+        assert s.aliases["alice"] == w.address
 
-    with raises_with_cause(RuntimeError, None, ValueError, None):
-        w2 = await Worker(s.address, name="alice")
-        await w2.close()
-
-    await w.close()
+        with raises_with_cause(RuntimeError, None, ValueError, None):
+            async with Worker(s.address, name="alice"):
+                pass
 
 
 @gen_cluster(nthreads=[])
@@ -1011,10 +1014,8 @@ async def test_scatter_no_workers(c, s, direct):
 
 @gen_cluster(nthreads=[])
 async def test_scheduler_sees_memory_limits(s):
-    w = await Worker(s.address, nthreads=3, memory_limit=12345)
-
-    assert s.workers[w.address].memory_limit == 12345
-    await w.close()
+    async with Worker(s.address, nthreads=3, memory_limit=12345) as w:
+        assert s.workers[w.address].memory_limit == 12345
 
 
 @gen_cluster(client=True)
