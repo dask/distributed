@@ -483,54 +483,6 @@ async def test_queued_remove_add_worker(c, s, a, b):
         await wait(fs)
 
 
-@pytest.mark.slow
-@gen_cluster(
-    client=True,
-    nthreads=[("", 2)] * 2,
-    config={"distributed.scheduler.worker-saturation": 1.0},
-)
-async def test_queued_tasks_rebalance(client, s, a, b):
-    """
-    Test that all queued tasks complete as workers come and go.
-
-    Does not test how well balanced the load was.
-    """
-    roots1 = [delayed(slowinc)(i) for i in range(40)]
-    roots2 = [delayed(slowinc)(i, delay=0.01) for i in range(len(roots1))]
-    combined = [x + y for x, y in zip(roots1, roots2)]
-    agg = [sum(xs) for xs in partition(4, combined)]
-
-    fs = client.compute(agg)
-
-    while len(a.data) + len(b.data) < len(agg) * 0.25:
-        await asyncio.sleep(0.01)
-
-    # Add a new worker
-    async with Worker(s.address, nthreads=2) as c:
-        while not c.data:
-            await asyncio.sleep(0.01)
-
-        # Now add another
-        async with Worker(s.address, nthreads=1) as d:
-            while not d.data:
-                await asyncio.sleep(0.01)
-
-            # Remove an existing worker
-            await a.close()
-
-            while len(b.data) + len(c.data) + len(d.data) < len(agg) * 0.75:
-                await asyncio.sleep(0.01)
-
-            # And a new one
-            await d.close()
-
-        await client.gather(fs)
-        assert a.state.tasks
-        assert b.state.tasks
-        assert c.state.tasks
-        assert d.state.tasks
-
-
 @pytest.mark.parametrize(
     "saturation, expected_task_counts",
     [
