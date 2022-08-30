@@ -271,10 +271,10 @@ class Worker(BaseWorker, ServerNode):
     * **services:** ``{str: Server}``:
         Auxiliary web servers running on this worker
     * **service_ports:** ``{str: port}``:
-    * **total_in_connections**: ``int``
-        The maximum number of concurrent incoming requests for data.
+    * **transfer_outgoing_count_limit**: ``int``
+        The maximum number of concurrent outgoing data transfers.
         See also
-        :attr:`distributed.worker_state_machine.WorkerState.total_out_connections`.
+        :attr:`distributed.worker_state_machine.WorkerState.transfer_incoming_count_limit`.
     * **batched_stream**: ``BatchedSend``
         A batched stream along which we communicate to the scheduler
     * **log**: ``[(message)]``
@@ -374,7 +374,7 @@ class Worker(BaseWorker, ServerNode):
 
     nanny: Nanny | None
     _lock: threading.Lock
-    total_in_connections: int
+    transfer_outgoing_count_limit: int
     threads: dict[str, int]  # {ts.key: thread ID}
     active_threads_lock: threading.Lock
     active_threads: dict[int, str]  # {thread ID: ts.key}
@@ -383,11 +383,12 @@ class Worker(BaseWorker, ServerNode):
     profile_keys_history: deque[tuple[float, dict[str, dict[str, Any]]]]
     profile_recent: dict[str, Any]
     profile_history: deque[tuple[float, dict[str, Any]]]
-    incoming_transfer_log: deque[dict[str, Any]]
-    outgoing_transfer_log: deque[dict[str, Any]]
-    incoming_count: int
-    outgoing_count: int
-    outgoing_current_count: int
+    transfer_incoming_log: deque[dict[str, Any]]
+    transfer_outgoing_log: deque[dict[str, Any]]
+    #: Number of total data transfers to other workers.
+    transfer_outgoing_count_total: int
+    #: Number of open data transfers to other workers.
+    transfer_outgoing_count: int
     bandwidth: float
     latency: float
     profile_cycle_interval: float
@@ -519,10 +520,10 @@ class Worker(BaseWorker, ServerNode):
         self.nanny = nanny
         self._lock = threading.Lock()
 
-        total_out_connections = dask.config.get(
+        transfer_incoming_count_limit = dask.config.get(
             "distributed.worker.connections.outgoing"
         )
-        self.total_in_connections = dask.config.get(
+        self.transfer_outgoing_count_limit = dask.config.get(
             "distributed.worker.connections.incoming"
         )
 
@@ -539,11 +540,10 @@ class Worker(BaseWorker, ServerNode):
         if validate is None:
             validate = dask.config.get("distributed.scheduler.validate")
 
-        self.incoming_transfer_log = deque(maxlen=100000)
-        self.incoming_count = 0
-        self.outgoing_transfer_log = deque(maxlen=100000)
-        self.outgoing_count = 0
-        self.outgoing_current_count = 0
+        self.transfer_incoming_log = deque(maxlen=100000)
+        self.transfer_outgoing_log = deque(maxlen=100000)
+        self.transfer_outgoing_count_total = 0
+        self.transfer_outgoing_count = 0
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
         self.bandwidth_workers = defaultdict(
             lambda: (0, 0)
@@ -748,7 +748,7 @@ class Worker(BaseWorker, ServerNode):
             threads=self.threads,
             plugins=self.plugins,
             resources=resources,
-            total_out_connections=total_out_connections,
+            transfer_incoming_count_limit=transfer_incoming_count_limit,
             validate=validate,
             transition_counter_max=transition_counter_max,
         )
@@ -849,14 +849,19 @@ class Worker(BaseWorker, ServerNode):
     actors = DeprecatedWorkerStateAttribute()
     available_resources = DeprecatedWorkerStateAttribute()
     busy_workers = DeprecatedWorkerStateAttribute()
-    comm_nbytes = DeprecatedWorkerStateAttribute()
-    comm_threshold_bytes = DeprecatedWorkerStateAttribute()
+    comm_nbytes = DeprecatedWorkerStateAttribute(target="transfer_incoming_bytes")
+    comm_threshold_bytes = DeprecatedWorkerStateAttribute(
+        target="transfer_incoming_bytes_throttle_threshold"
+    )
     constrained = DeprecatedWorkerStateAttribute()
     data_needed_per_worker = DeprecatedWorkerStateAttribute(target="data_needed")
     executed_count = DeprecatedWorkerStateAttribute()
     executing_count = DeprecatedWorkerStateAttribute()
     generation = DeprecatedWorkerStateAttribute()
     has_what = DeprecatedWorkerStateAttribute()
+    incoming_count = DeprecatedWorkerStateAttribute(
+        target="transfer_incoming_count_total"
+    )
     in_flight_tasks = DeprecatedWorkerStateAttribute(target="in_flight_tasks_count")
     in_flight_workers = DeprecatedWorkerStateAttribute()
     log = DeprecatedWorkerStateAttribute()
@@ -867,8 +872,12 @@ class Worker(BaseWorker, ServerNode):
     story = DeprecatedWorkerStateAttribute()
     ready = DeprecatedWorkerStateAttribute()
     tasks = DeprecatedWorkerStateAttribute()
-    target_message_size = DeprecatedWorkerStateAttribute()
-    total_out_connections = DeprecatedWorkerStateAttribute()
+    target_message_size = DeprecatedWorkerStateAttribute(
+        target="transfer_message_target_bytes"
+    )
+    total_out_connections = DeprecatedWorkerStateAttribute(
+        target="transfer_incoming_count_limit"
+    )
     total_resources = DeprecatedWorkerStateAttribute()
     transition_counter = DeprecatedWorkerStateAttribute()
     transition_counter_max = DeprecatedWorkerStateAttribute()
@@ -1027,8 +1036,8 @@ class Worker(BaseWorker, ServerNode):
             "status": self.status,
             "logs": self.get_logs(),
             "config": dask.config.config,
-            "incoming_transfer_log": self.incoming_transfer_log,
-            "outgoing_transfer_log": self.outgoing_transfer_log,
+            "transfer_incoming_log": self.transfer_incoming_log,
+            "transfer_outgoing_log": self.transfer_outgoing_log,
         }
         extra = {k: v for k, v in extra.items() if k not in exclude}
         info.update(extra)
@@ -1641,7 +1650,7 @@ class Worker(BaseWorker, ServerNode):
         start = time()
 
         if max_connections is None:
-            max_connections = self.total_in_connections
+            max_connections = self.transfer_outgoing_count_limit
 
         # Allow same-host connections more liberally
         if (
@@ -1653,26 +1662,28 @@ class Worker(BaseWorker, ServerNode):
 
         if self.status == Status.paused:
             max_connections = 1
-            throttle_msg = " Throttling outgoing connections because worker is paused."
+            throttle_msg = (
+                " Throttling outgoing data transfers because worker is paused."
+            )
         else:
             throttle_msg = ""
 
         if (
             max_connections is not False
-            and self.outgoing_current_count >= max_connections
+            and self.transfer_outgoing_count >= max_connections
         ):
             logger.debug(
                 "Worker %s has too many open connections to respond to data request "
                 "from %s (%d/%d).%s",
                 self.address,
                 who,
-                self.outgoing_current_count,
+                self.transfer_outgoing_count,
                 max_connections,
                 throttle_msg,
             )
             return {"status": "busy"}
 
-        self.outgoing_current_count += 1
+        self.transfer_outgoing_count += 1
         data = {k: self.data[k] for k in keys if k in self.data}
 
         if len(data) < len(keys):
@@ -1704,16 +1715,16 @@ class Worker(BaseWorker, ServerNode):
             comm.abort()
             raise
         finally:
-            self.outgoing_current_count -= 1
+            self.transfer_outgoing_count -= 1
         stop = time()
         if self.digests is not None:
             self.digests["get-data-send-duration"].add(stop - start)
 
         total_bytes = sum(filter(None, nbytes.values()))
 
-        self.outgoing_count += 1
+        self.transfer_outgoing_count_total += 1
         duration = (stop - start) or 0.5  # windows
-        self.outgoing_transfer_log.append(
+        self.transfer_outgoing_log.append(
             {
                 "start": start + self.scheduler_delay,
                 "stop": stop + self.scheduler_delay,
@@ -1928,7 +1939,7 @@ class Worker(BaseWorker, ServerNode):
         )
         duration = (stop - start) or 0.010
         bandwidth = total_bytes / duration
-        self.incoming_transfer_log.append(
+        self.transfer_incoming_log.append(
             {
                 "start": start + self.scheduler_delay,
                 "stop": stop + self.scheduler_delay,
@@ -1955,7 +1966,6 @@ class Worker(BaseWorker, ServerNode):
             self.digests["transfer-bandwidth"].add(total_bytes / duration)
             self.digests["transfer-duration"].add(duration)
         self.counters["transfer-count"].add(len(data))
-        self.incoming_count += 1
 
     @fail_hard
     async def gather_dep(
@@ -2532,6 +2542,56 @@ class Worker(BaseWorker, ServerNode):
                 self.log_event(topic, msg)
 
             raise
+
+    @property
+    def incoming_transfer_log(self):
+        warnings.warn(
+            "The `Worker.incoming_transfer_log` attribute has been renamed to "
+            "`Worker.transfer_incoming_log`",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.transfer_incoming_log
+
+    @property
+    def outgoing_count(self):
+        warnings.warn(
+            "The `Worker.outgoing_count` attribute has been renamed to "
+            "`Worker.transfer_outgoing_count_total`",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.transfer_outgoing_count_total
+
+    @property
+    def outgoing_current_count(self):
+        warnings.warn(
+            "The `Worker.outgoing_current_count` attribute has been renamed to "
+            "`Worker.transfer_outgoing_count`",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.transfer_outgoing_count
+
+    @property
+    def outgoing_transfer_log(self):
+        warnings.warn(
+            "The `Worker.outgoing_transfer_log` attribute has been renamed to "
+            "`Worker.transfer_outgoing_log`",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.transfer_outgoing_log
+
+    @property
+    def total_in_connections(self):
+        warnings.warn(
+            "The `Worker.total_in_connections` attribute has been renamed to "
+            "`Worker.transfer_outgoing_count_limit`",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.transfer_outgoing_count_limit
 
 
 def get_worker() -> Worker:
