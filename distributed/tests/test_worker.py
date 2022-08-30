@@ -2730,7 +2730,7 @@ async def test_acquire_replicas_same_channel(c, s, a, b):
                 ("request-dep", a.address, {fut.key}),
             ],
         )
-        assert any(fut.key in msg["keys"] for msg in b.incoming_transfer_log)
+        assert any(fut.key in msg["keys"] for msg in b.transfer_incoming_log)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
