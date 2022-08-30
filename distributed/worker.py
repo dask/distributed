@@ -872,7 +872,9 @@ class Worker(BaseWorker, ServerNode):
     story = DeprecatedWorkerStateAttribute()
     ready = DeprecatedWorkerStateAttribute()
     tasks = DeprecatedWorkerStateAttribute()
-    target_message_size = DeprecatedWorkerStateAttribute()
+    target_message_size = DeprecatedWorkerStateAttribute(
+        target="transfer_message_target_bytes"
+    )
     total_out_connections = DeprecatedWorkerStateAttribute(
         target="transfer_incoming_count_limit"
     )

@@ -1120,7 +1120,7 @@ class WorkerState:
     #: :meth:`BaseWorker.gather_dep`. Multiple small tasks that can be fetched from the
     #: same worker will be clustered in a single instruction as long as their combined
     #: size doesn't exceed this value.
-    target_message_size: int
+    transfer_message_target_bytes: int
 
     #: All and only tasks with ``TaskState.state == 'missing'``.
     missing_dep_flight: set[TaskState]
@@ -1279,7 +1279,7 @@ class WorkerState:
         self.in_flight_tasks = set()
         self.executed_count = 0
         self.long_running = set()
-        self.target_message_size = int(50e6)  # 50 MB
+        self.transfer_message_target_bytes = int(50e6)  # 50 MB
         self.log = deque(maxlen=100_000)
         self.stimulus_log = deque(maxlen=10_000)
         self.transition_counter = 0
@@ -1600,7 +1600,7 @@ class WorkerState:
         """Helper of _ensure_communicating.
 
         Fetch all tasks that are replicated on the target worker within a single
-        message, up to target_message_size.
+        message, up to transfer_message_target_bytes.
         """
         to_gather: list[TaskState] = []
         total_nbytes = 0
@@ -1608,7 +1608,10 @@ class WorkerState:
         while available:
             ts = available.peek()
             # The top-priority task is fetched regardless of its size
-            if to_gather and total_nbytes + ts.get_nbytes() > self.target_message_size:
+            if (
+                to_gather
+                and total_nbytes + ts.get_nbytes() > self.transfer_message_target_bytes
+            ):
                 break
             for worker in ts.who_has:
                 # This also effectively pops from available

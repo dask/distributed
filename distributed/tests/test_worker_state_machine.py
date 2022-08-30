@@ -985,17 +985,17 @@ async def test_fetch_to_missing_on_network_failure(c, s, a):
 
 @gen_cluster()
 async def test_deprecated_worker_attributes(s, a, b):
-    n = a.state.target_message_size
+    n = a.state.generation
     msg = (
-        "The `Worker.target_message_size` attribute has been moved to "
-        "`Worker.state.target_message_size`"
+        "The `Worker.generation` attribute has been moved to "
+        "`Worker.state.generation`"
     )
     with pytest.warns(FutureWarning, match=msg):
-        assert a.target_message_size == n
+        assert a.generation == n
     with pytest.warns(FutureWarning, match=msg):
-        a.target_message_size += 1
-        assert a.target_message_size == n + 1
-    assert a.state.target_message_size == n + 1
+        a.generation -= 1
+        assert a.generation == n - 1
+    assert a.state.generation == n - 1
 
     # Old and new names differ
     msg = (
@@ -1012,7 +1012,7 @@ async def test_deprecated_worker_attributes(s, a, b):
 @pytest.mark.parametrize(
     "nbytes,n_in_flight",
     [
-        # Note: target_message_size = 50e6 bytes
+        # Note: transfer_message_target_bytes = 50e6 bytes
         (int(10e6), 3),
         (int(20e6), 2),
         (int(30e6), 1),
@@ -1060,8 +1060,9 @@ def test_gather_priority(ws):
                 # This will be fetched first because it's on the same worker as y
                 "x8": ["127.0.0.7:1"],
             },
-            # Substantial nbytes prevents transfer_incoming_count_limit to be overridden by
-            # transfer_incoming_bytes_throttle_threshold, but it's less than target_message_size
+            # Substantial nbytes prevents transfer_incoming_count_limit to be
+            # overridden by transfer_incoming_bytes_throttle_threshold,
+            # but it's less than transfer_message_target_bytes
             nbytes={f"x{i}": 4 * 2**20 for i in range(1, 9)},
             stimulus_id="compute1",
         ),
