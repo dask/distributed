@@ -6,12 +6,14 @@ import uuid
 import warnings
 from asyncio import TimeoutError
 from collections import defaultdict, deque
+from contextlib import suppress
 
 from tornado.ioloop import PeriodicCallback
 
 import dask
 from dask.utils import parse_timedelta
 
+from distributed.client import _current_client
 from distributed.metrics import time
 from distributed.utils import SyncMethodMixin, log_errors
 from distributed.utils_comm import retry_operation
@@ -546,14 +548,19 @@ class Semaphore(SyncMethodMixin):
 
     def __setstate__(self, state):
         name, max_leases = state
-        self.__init__(
-            name=name,
-            max_leases=max_leases,
-            register=False,
-        )
+        if _current_client.get() is not False:
+            self.__init__(
+                name=name,
+                max_leases=max_leases,
+                register=False,
+            )
+        else:
+            self.name = name
+            self.max_leases = max_leases
 
     def close(self):
         return self.sync(self.scheduler.semaphore_close, name=self.name)
 
     def __del__(self):
-        self.refresh_callback.stop()
+        with suppress(AttributeError):
+            self.refresh_callback.stop()

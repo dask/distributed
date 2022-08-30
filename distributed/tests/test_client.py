@@ -116,6 +116,15 @@ pytestmark = pytest.mark.ci1
 
 
 @gen_cluster(client=True)
+async def test_basic(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+    x = da.ones(15, chunks=(5,))
+    out = await c.compute(x.sum())
+    assert out == 15
+    s.validate_state()
+
+
+@gen_cluster(client=True)
 async def test_submit(c, s, a, b):
     x = c.submit(inc, 10, key="x")
     assert not x.done()
@@ -1896,10 +1905,10 @@ async def test_allow_restrictions(c, s, a, b):
         c.map(inc, [1], allow_other_workers=True)
 
     with pytest.raises(TypeError):
-        c.submit(inc, 20, workers="127.0.0.1", allow_other_workers="Hello!")
+        c.submit(inc, 40, workers="127.0.0.1", allow_other_workers="Hello!")
 
     with pytest.raises(TypeError):
-        c.map(inc, [20], workers="127.0.0.1", allow_other_workers="Hello!")
+        c.map(inc, [40], workers="127.0.0.1", allow_other_workers="Hello!")
 
 
 def test_bad_address(loop):
@@ -2281,8 +2290,8 @@ async def test_proxy(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_cancel(c, s, a, b):
-    x = c.submit(slowinc, 1)
-    y = c.submit(slowinc, x)
+    x = c.submit(slowinc, 1, key="x")
+    y = c.submit(slowinc, x, key="y")
 
     while y.key not in s.tasks:
         await asyncio.sleep(0.01)
@@ -2543,23 +2552,25 @@ def test_futures_of_class():
 
 @gen_cluster(client=True)
 async def test_futures_of_cancelled_raises(c, s, a, b):
-    x = c.submit(inc, 1)
-    await c.cancel([x])
+    x = c.submit(inc, 1, key="x")
+    await x.cancel()
+    assert x.cancelled()
 
     with pytest.raises(CancelledError):
         await x
 
     with pytest.raises(CancelledError):
-        await c.get({"x": (inc, x), "y": (inc, 2)}, ["x", "y"], sync=False)
+        y = c.submit(inc, x, key="y")
+        await y
 
     with pytest.raises(CancelledError):
-        c.submit(inc, x)
+        await c.submit(add, 1, y=x)
 
     with pytest.raises(CancelledError):
-        c.submit(add, 1, y=x)
+        await wait(c.map(add, [1], y=x))
 
     with pytest.raises(CancelledError):
-        c.map(add, [1], y=x)
+        await c.gather(c.get({"x": (inc, x), "y": (inc, 2)}, ["x", "y"], sync=False))
 
     assert "y" not in s.tasks
 
@@ -2583,6 +2594,7 @@ async def test_dont_delete_recomputed_results(c, s, w):
         await asyncio.sleep(0.01)
 
 
+@pytest.mark.skip(reason="We no longer support this")
 @gen_cluster(nthreads=[], client=True)
 async def test_fatally_serialized_input(c, s):
     o = FatallySerializedObject()
@@ -3025,7 +3037,7 @@ async def test_submit_on_cancelled_future(c, s, a, b):
     await c.cancel(x)
 
     with pytest.raises(CancelledError):
-        c.submit(inc, x)
+        await c.submit(inc, x)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10)
@@ -4114,14 +4126,11 @@ async def test_persist_workers_annotate(e, s, a, b, c):
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)] * 3, client=True)
 async def test_persist_workers_annotate2(e, s, a, b, c):
-    def key_to_worker(key):
-        return a.address
-
     L1 = [delayed(inc)(i) for i in range(4)]
     for x in L1:
         assert all(layer.annotations is None for layer in x.dask.layers.values())
 
-    with dask.annotate(workers=key_to_worker):
+    with dask.annotate(workers=a.address):
         out = e.persist(L1, optimize_graph=False)
         await wait(out)
 
@@ -5482,7 +5491,7 @@ async def test_future_defaults_to_default_client(c, s, a, b):
     x = c.submit(inc, 1)
     await wait(x)
 
-    future = Future(x.key)
+    future = Future(x.key, client=c)
     assert future.client is c
 
 
@@ -5620,13 +5629,14 @@ async def test_config_scheduler_address(s, a, b):
 
 @gen_cluster(client=True)
 async def test_warn_when_submitting_large_values(c, s, a, b):
-    with pytest.warns(
-        UserWarning,
-        match=r"Large object of size (2\.00 MB|1.91 MiB) detected in task graph:"
-        r" \n  \(b'00000000000000000000000000000000000000000000000 \.\.\. 000000000000',\)"
-        r"\nConsider scattering large objects ahead of time.*",
-    ):
-        future = c.submit(lambda x: x + 1, b"0" * 2000000)
+    with pytest.warns(UserWarning) as info:
+        future = c.submit(lambda x: x + 1, b"0" * 20000000)
+
+    [info] = info
+
+    assert "large" in str(info.message).lower()
+    assert "MiB" in str(info.message)
+    assert "scatter" in str(info.message).lower()
 
     with warnings.catch_warnings(record=True) as record:
         data = b"0" * 2000000
@@ -5896,10 +5906,8 @@ async def test_mixing_clients(s, a, b):
     ) as c2:
 
         future = c1.submit(inc, 1)
-        with pytest.raises(ValueError):
-            c2.submit(inc, future)
-
-        assert not c2.futures  # Don't create Futures on second Client
+        out = await c2.submit(inc, future)
+        assert out == 3
 
 
 @gen_cluster(client=True)
@@ -6603,9 +6611,7 @@ async def test_annotations_task_state(c, s, a, b):
     with dask.config.set(optimization__fuse__active=False):
         x = await x.persist()
 
-    assert all(
-        {"qux": "bar", "priority": 100} == ts.annotations for ts in s.tasks.values()
-    )
+    assert all(ts.annotations["qux"] == "bar" for ts in s.tasks.values())
 
 
 @pytest.mark.parametrize("fn", ["compute", "persist"])
@@ -6655,7 +6661,6 @@ async def test_annotations_priorities(c, s, a, b):
 
     assert all("15" in str(ts.priority) for ts in s.tasks.values())
     assert all(ts.priority[0] == -15 for ts in s.tasks.values())
-    assert all({"priority": 15} == ts.annotations for ts in s.tasks.values())
 
 
 @gen_cluster(client=True)
@@ -6668,7 +6673,6 @@ async def test_annotations_workers(c, s, a, b):
     with dask.config.set(optimization__fuse__active=False):
         x = await x.persist()
 
-    assert all({"workers": (a.address,)} == ts.annotations for ts in s.tasks.values())
     assert all({a.address} == ts.worker_restrictions for ts in s.tasks.values())
     assert a.data
     assert not b.data
@@ -6685,7 +6689,6 @@ async def test_annotations_retries(c, s, a, b):
         x = await x.persist()
 
     assert all(ts.retries == 2 for ts in s.tasks.values())
-    assert all(ts.annotations == {"retries": 2} for ts in s.tasks.values())
 
 
 @gen_cluster(client=True)
@@ -6736,7 +6739,6 @@ async def test_annotations_resources(c, s, a, b):
         x = await x.persist()
 
     assert all([{"GPU": 1} == ts.resource_restrictions for ts in s.tasks.values()])
-    assert all([{"resources": {"GPU": 1}} == ts.annotations for ts in s.tasks.values()])
 
 
 @gen_cluster(
@@ -6773,12 +6775,6 @@ async def test_annotations_loose_restrictions(c, s, a, b):
 
     assert all(not ts.worker_restrictions for ts in s.tasks.values())
     assert all({"fake"} == ts.host_restrictions for ts in s.tasks.values())
-    assert all(
-        [
-            {"workers": ("fake",), "allow_other_workers": True} == ts.annotations
-            for ts in s.tasks.values()
-        ]
-    )
 
 
 @gen_cluster(client=True)
@@ -7484,6 +7480,11 @@ async def test_wait_for_workers_updates_info(c, s):
     async with Worker(s.address):
         await c.wait_for_workers(1)
         assert c.scheduler_info()["workers"]
+
+
+def test_future_without_client():
+    future = Future("x")
+    assert future.client is None
 
 
 client_script = """

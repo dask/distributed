@@ -11,7 +11,6 @@ import logging
 import math
 import operator
 import os
-import pickle
 import random
 import sys
 import uuid
@@ -38,6 +37,7 @@ from sortedcontainers import SortedDict, SortedSet
 from tlz import (
     first,
     groupby,
+    keymap,
     merge,
     merge_sorted,
     merge_with,
@@ -49,8 +49,16 @@ from tlz import (
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
+from dask.core import get_deps
 from dask.highlevelgraph import HighLevelGraph
-from dask.utils import format_bytes, format_time, parse_bytes, parse_timedelta, tmpfile
+from dask.utils import (
+    format_bytes,
+    format_time,
+    parse_bytes,
+    parse_timedelta,
+    stringify,
+    tmpfile,
+)
 from dask.widgets import get_template
 
 from distributed import cluster_dump, preloading, profile
@@ -58,6 +66,7 @@ from distributed import versions as version_module
 from distributed._stories import scheduler_story
 from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
 from distributed.batched import BatchedSend
+from distributed.client import _current_client
 from distributed.comm import (
     Comm,
     CommClosedError,
@@ -77,7 +86,7 @@ from distributed.metrics import monotonic, time
 from distributed.multi_lock import MultiLockExtension
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
-from distributed.protocol.pickle import dumps, loads
+from distributed.protocol import pickle
 from distributed.publish import PublishExtension
 from distributed.pubsub import PubSubSchedulerExtension
 from distributed.queues import QueueExtension
@@ -3850,13 +3859,9 @@ class Scheduler(SchedulerState, ServerNode):
 
     def update_graph_hlg(
         self,
-        client=None,
-        hlg=None,
-        keys=None,
-        dependencies=None,
-        restrictions=None,
+        client: str,
+        keys: list[str],
         priority=None,
-        loose_restrictions=None,
         resources=None,
         submitting_task=None,
         retries=None,
@@ -3864,11 +3869,157 @@ class Scheduler(SchedulerState, ServerNode):
         actors=None,
         fifo_timeout=0,
         code=None,
+        workers=None,
+        allow_other_workers=None,
+        annotations=None,
+        graph: HighLevelGraph | None = None,
+        graph_header: bytes | None = None,
+        graph_frames: list[bytes] | None = None,
     ):
-        unpacked_graph = HighLevelGraph.__dask_distributed_unpack__(hlg)
-        dsk = unpacked_graph["dsk"]
-        dependencies = unpacked_graph["deps"]
-        annotations = unpacked_graph["annotations"]
+        if graph is None:
+            assert graph_header
+            tok = _current_client.set(False)  # type: ignore
+            try:
+                graph_: HighLevelGraph = pickle.loads(
+                    graph_header, buffers=graph_frames
+                )
+            except Exception as e:
+                text = str(e)
+                exc = pickle.dumps(e)
+                parent: SchedulerState = cast(SchedulerState, self)
+                for key in keys:
+                    ts = parent.new_task(
+                        key, None, "erred", computation=None  # computation
+                    )
+                    ts.exception = exc
+                    ts.exception_text = text
+                    ts.exception_blame = ts
+                    parent.tasks[key] = ts
+
+                self.client_desires_keys(keys=keys, client=client)
+                return
+            finally:
+                _current_client.reset(tok)
+        else:
+            graph_ = graph
+
+        if annotations is None:
+            annotations = {}
+
+        workers = workers or annotations.pop("workers", None)
+        allow_other_workers = allow_other_workers or annotations.pop(
+            "allow_other_workers", None
+        )
+        if retries is None:
+            retries = annotations.pop("retries", None)
+        resources = resources or annotations.pop("resources", None)
+        user_priority = annotations.pop("priority", user_priority)
+
+        if isinstance(workers, (str, Number)):
+            workers = [workers]
+        if isinstance(workers, (tuple, set)):
+            workers = list(workers)
+        if isinstance(workers, list):
+            restrictions = workers
+        elif workers is None:
+            restrictions = []
+        else:
+            raise TypeError("Workers must be a list or set of workers or None")
+
+        dsk = dict(graph_)
+
+        if allow_other_workers:
+            loose_restrictions = set(dsk)
+        else:
+            loose_restrictions = set()
+
+        from distributed.utils_comm import unpack_remotedata
+
+        dependencies, dependents = get_deps(dsk)
+
+        # Remove `Future` objects from graph and note any future     dependencies
+        dsk2 = {}
+        fut_deps = {}
+        for k, v in dsk.items():
+            dsk2[k], futs = unpack_remotedata(v, byte_keys=True)
+            if futs:
+                fut_deps[k] = futs
+        dsk = dsk2
+
+        # - Add in deps for any tasks that depend on futures
+        for k, futures in fut_deps.items():
+            dependencies[k].update(f.key for f in futures)
+
+        pre_stringify = set(dsk)
+        dsk = {stringify(k): stringify(v, exclusive=graph_) for k, v in dsk.items()}
+
+        def process(x, keys=dsk, string_keys=pre_stringify):
+            if callable(x):
+                return {stringify(k): x(k) for k in keys}
+            elif isinstance(x, (int, dict, tuple, set, list)):
+                return {stringify(k): x for k in string_keys or map(stringify, keys)}
+            elif isinstance(x, dict):
+                return keymap(stringify, x)
+            raise TypeError()
+
+        if annotations:
+            annotations = process(annotations)
+        if retries:
+            retries = process(retries)
+        if resources:
+            resources = process(resources)
+        if user_priority:
+            user_priority = process(user_priority)
+        if restrictions:
+            _restrictions = process(restrictions)
+        else:
+            _restrictions = {}
+
+        for layer in graph_.layers.values():
+            if not layer.annotations:
+                continue
+            layer_annotations: dict = dict(layer.annotations)
+            if "retries" in layer_annotations:
+                retries = retries or {}
+                d = process(layer_annotations["retries"], keys=layer, string_keys=None)
+                retries.update(d)  # TODO: there is an implicit ordering here
+            if "priority" in layer_annotations:
+                user_priority = user_priority or {}
+                d = process(
+                    layer_annotations.pop("priority"),
+                    keys=layer,
+                    string_keys=None,
+                )
+                user_priority.update(d)  # TODO: there is an implicit ordering here
+            if "resources" in layer_annotations:
+                resources = resources or {}
+                d = process(
+                    layer_annotations["resources"], keys=layer, string_keys=None
+                )
+                resources.update(d)  # TODO: there is an implicit ordering here
+            if "workers" in layer_annotations:
+                if isinstance(layer_annotations["workers"], (str, int)):
+                    layer_annotations["workers"] = (layer_annotations["workers"],)
+                _restrictions = _restrictions or {}
+                d = process(layer_annotations["workers"], keys=layer, string_keys=None)
+                _restrictions.update(d)  # TODO: there is an implicit ordering here
+
+            if "allow_other_workers" in layer_annotations:
+                if layer_annotations["allow_other_workers"] is True:
+                    loose_restrictions.update(set(map(stringify, layer)))
+
+            if layer_annotations:
+                d = process(layer_annotations, keys=layer, string_keys=None)
+                annotations.update(d)
+
+        from distributed.worker import dumps_task
+
+        dsk = valmap(dumps_task, dsk)
+
+        dependencies = {
+            stringify(k): {stringify(dep) for dep in deps}
+            for k, deps in dependencies.items()
+        }
 
         # Remove any self-dependencies (happens on test_publish_bag() and others)
         for k, v in dependencies.items():
@@ -3892,7 +4043,7 @@ class Scheduler(SchedulerState, ServerNode):
             dsk,
             keys,
             dependencies,
-            restrictions,
+            _restrictions,
             priority,
             loose_restrictions,
             resources,
@@ -4043,20 +4194,17 @@ class Scheduler(SchedulerState, ServerNode):
 
         annotations = annotations or {}
         restrictions = restrictions or {}
-        loose_restrictions = loose_restrictions or []
+        loose_restrictions = loose_restrictions or set()
         resources = resources or {}
         retries = retries or {}
 
         # Override existing taxonomy with per task annotations
         if annotations:
-            if "priority" in annotations:
-                user_priority.update(annotations["priority"])
-
             if "workers" in annotations:
                 restrictions.update(annotations["workers"])
 
             if "allow_other_workers" in annotations:
-                loose_restrictions.extend(
+                loose_restrictions.update(
                     k for k, v in annotations["allow_other_workers"].items() if v
                 )
 
@@ -4066,13 +4214,13 @@ class Scheduler(SchedulerState, ServerNode):
             if "resources" in annotations:
                 resources.update(annotations["resources"])
 
-            for a, kv in annotations.items():
+            for key, kv in annotations.items():
                 for k, v in kv.items():
                     # Tasks might have been culled, in which case
                     # we have nothing to annotate.
-                    ts = self.tasks.get(k)
+                    ts = self.tasks.get(key)
                     if ts is not None:
-                        ts.annotations[a] = v
+                        ts.annotations[k] = v
 
         # Add actors
         if actors is True:
@@ -4454,11 +4602,20 @@ class Scheduler(SchedulerState, ServerNode):
                 client, {"action": "cancel", "count": len(keys), "force": force}
             )
 
+        # TODO: Check if this hack is still necessary
+        # See: https://github.com/dask/distributed/pull/6028/files#r857932292
+        for _ in range(10):
+            if any(key not in self.tasks for key in keys):
+                await asyncio.sleep(0.050)
+                continue
+            else:
+                break
+
         await asyncio.gather(
-            *[self._cancel_key(key, client, force=force) for key in keys]
+            *[self._cancel_key(key, client, force=force, report=False) for key in keys]
         )
 
-    async def _cancel_key(self, key, client, force=False):
+    async def _cancel_key(self, key, client, force=False, report=True):
         """Cancel a particular key and all dependents"""
         # TODO: this should be converted to use the transition mechanism
         ts: TaskState | None = self.tasks.get(key)
@@ -4484,7 +4641,8 @@ class Scheduler(SchedulerState, ServerNode):
                 ]
             )
             logger.info("Scheduler cancels key %s.  Force=%s", key, force)
-            self.report({"op": "cancelled-key", "key": key})
+            if report:
+                self.report({"op": "cancelled-key", "key": key})
         clients = list(ts.who_wants) if force else [cs]
         for cs in clients:
             self.client_releases_keys(
@@ -5045,7 +5203,7 @@ class Scheduler(SchedulerState, ServerNode):
                 "'distributed.scheduler.pickle' configuration setting."
             )
         if not isinstance(plugin, SchedulerPlugin):
-            plugin = loads(plugin)
+            plugin = pickle.loads(plugin)
 
         if name is None:
             name = _get_plugin_name(plugin)
@@ -5409,7 +5567,7 @@ class Scheduler(SchedulerState, ServerNode):
                 elif on_error == "return":
                     return e
                 elif on_error == "return_pickle":
-                    return dumps(e, protocol=4)
+                    return pickle.dumps(e, protocol=4)
                 elif on_error == "ignore":
                     return ERROR
                 else:

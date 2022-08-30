@@ -72,8 +72,7 @@ from distributed.diagnostics.plugin import (
 )
 from distributed.metrics import time
 from distributed.objects import HasWhat, SchedulerInfo, WhoHas
-from distributed.protocol import to_serialize
-from distributed.protocol.pickle import dumps, loads
+from distributed.protocol import pickle, to_serialize
 from distributed.publish import Datasets
 from distributed.pubsub import PubSubClientExtension
 from distributed.security import Security
@@ -188,32 +187,38 @@ class Future(WrappedKey):
     def __init__(self, key, client=None, inform=True, state=None):
         self.key = key
         self._cleared = False
-        tkey = stringify(key)
-        self.client = client or Client.current()
-        self.client._inc_ref(tkey)
-        self._generation = self.client.generation
-
-        if tkey in self.client.futures:
-            self._state = self.client.futures[tkey]
-        else:
-            self._state = self.client.futures[tkey] = FutureState()
-
-        if inform:
-            self.client._send_to_scheduler(
-                {
-                    "op": "client-desires-keys",
-                    "keys": [stringify(key)],
-                    "client": self.client.id,
-                }
-            )
-
-        if state is not None:
+        if client is None and _current_client.get() is not False:
             try:
-                handler = self.client._state_handlers[state]
-            except KeyError:
+                client = Client.current()
+            except ValueError:
                 pass
+        self.client = client
+        if self.client:
+            tkey = stringify(key)
+            self.client._inc_ref(tkey)
+            self._generation = self.client.generation
+
+            if tkey in self.client.futures:
+                self._state = self.client.futures[tkey]
             else:
-                handler(key=key)
+                self._state = self.client.futures[tkey] = FutureState()
+
+            if inform:
+                self.client._send_to_scheduler(
+                    {
+                        "op": "client-desires-keys",
+                        "keys": [stringify(key)],
+                        "client": self.client.id,
+                    }
+                )
+
+            if state is not None:
+                try:
+                    handler = self.client._state_handlers[state]
+                except KeyError:
+                    pass
+                else:
+                    handler(key=key)
 
     @property
     def executor(self):
@@ -444,6 +449,8 @@ class Future(WrappedKey):
         This method can be called from different threads
         (see e.g. Client.get() or Future.__del__())
         """
+        if self.client is None:
+            return
         if not self._cleared and self.client.generation == self._generation:
             self._cleared = True
             try:
@@ -452,23 +459,21 @@ class Future(WrappedKey):
                 pass  # Shutting down, add_callback may be None
 
     def __getstate__(self):
-        return self.key, self.client.scheduler.address
+        return self.key
 
     def __setstate__(self, state):
-        key, address = state
-        try:
-            c = Client.current(allow_global=False)
-        except ValueError:
-            c = get_client(address)
-        self.__init__(key, c)
-        c._send_to_scheduler(
-            {
-                "op": "update-graph",
-                "tasks": {},
-                "keys": [stringify(self.key)],
-                "client": c.id,
-            }
-        )
+        key = state
+        self.__init__(key, client=None)
+
+        if self.client:
+            self.client._send_to_scheduler(
+                {
+                    "op": "update-graph",
+                    "tasks": {},
+                    "keys": [stringify(self.key)],
+                    "client": self.client.id,
+                }
+            )
 
     def __del__(self):
         try:
@@ -1486,7 +1491,7 @@ class Client(SyncMethodMixin):
         if state is not None:
             if type and not state.type:  # Type exists and not yet set
                 try:
-                    type = loads(type)
+                    type = pickle.loads(type)
                 except Exception:
                     type = None
                 # Here, `type` may be a str if actual type failed
@@ -1789,9 +1794,6 @@ class Client(SyncMethodMixin):
         if pure is None:
             pure = not actor
 
-        if allow_other_workers not in (True, False, None):
-            raise TypeError("allow_other_workers= must be True or False")
-
         if key is None:
             if pure:
                 key = funcname(func) + "-" + tokenize(func, kwargs, *args)
@@ -1804,12 +1806,6 @@ class Client(SyncMethodMixin):
             if skey in self.futures:
                 return Future(key, self, inform=False)
 
-        if allow_other_workers and workers is None:
-            raise ValueError("Only use allow_other_workers= if using workers=")
-
-        if isinstance(workers, (str, Number)):
-            workers = [workers]
-
         if kwargs:
             dsk = {skey: (apply, func, list(args), kwargs)}
         else:
@@ -1818,12 +1814,12 @@ class Client(SyncMethodMixin):
         futures = self._graph_to_futures(
             dsk,
             [skey],
-            workers=workers,
-            allow_other_workers=allow_other_workers,
             priority={skey: 0},
             user_priority=priority,
             resources=resources,
             retries=retries,
+            workers=workers,
+            allow_other_workers=allow_other_workers,
             fifo_timeout=fifo_timeout,
             actors=actor,
         )
@@ -1961,9 +1957,6 @@ class Client(SyncMethodMixin):
         if pure is None:
             pure = not actor
 
-        if allow_other_workers and workers is None:
-            raise ValueError("Only use allow_other_workers= if using workers=")
-
         iterables = list(zip(*zip(*iterables)))
         if isinstance(key, list):
             keys = key
@@ -2003,21 +1996,16 @@ class Client(SyncMethodMixin):
                 }
             )
 
-        if isinstance(workers, (str, Number)):
-            workers = [workers]
-        if workers is not None and not isinstance(workers, (list, set)):
-            raise TypeError("Workers must be a list or set of workers or None")
-
         internal_priority = dict(zip(keys, range(len(keys))))
 
         futures = self._graph_to_futures(
             dsk,
             keys,
-            workers=workers,
-            allow_other_workers=allow_other_workers,
             priority=internal_priority,
             resources=resources,
             retries=retries,
+            workers=workers,
+            allow_other_workers=allow_other_workers,
             user_priority=priority,
             fifo_timeout=fifo_timeout,
             actors=actor,
@@ -2645,9 +2633,9 @@ class Client(SyncMethodMixin):
 
     async def _run_on_scheduler(self, function, *args, wait=True, **kwargs):
         response = await self.scheduler.run_function(
-            function=dumps(function, protocol=4),
-            args=dumps(args, protocol=4),
-            kwargs=dumps(kwargs, protocol=4),
+            function=pickle.dumps(function, protocol=4),
+            args=pickle.dumps(args, protocol=4),
+            kwargs=pickle.dumps(kwargs, protocol=4),
             wait=wait,
         )
         if response["status"] == "error":
@@ -2708,10 +2696,10 @@ class Client(SyncMethodMixin):
         responses = await self.scheduler.broadcast(
             msg=dict(
                 op="run",
-                function=dumps(function, protocol=4),
-                args=dumps(args, protocol=4),
+                function=pickle.dumps(function, protocol=4),
+                args=pickle.dumps(args, protocol=4),
                 wait=wait,
-                kwargs=dumps(kwargs, protocol=4),
+                kwargs=pickle.dumps(kwargs, protocol=4),
             ),
             workers=workers,
             nanny=nanny,
@@ -2721,7 +2709,7 @@ class Client(SyncMethodMixin):
         for key, resp in responses.items():
             if isinstance(resp, bytes):
                 # Pickled RPC exception
-                exc = loads(resp)
+                exc = pickle.loads(resp)
                 assert isinstance(exc, Exception)
             elif resp["status"] == "error":
                 # Exception raised by the remote function
@@ -2899,15 +2887,20 @@ class Client(SyncMethodMixin):
         self,
         dsk,
         keys,
-        workers=None,
-        allow_other_workers=None,
         priority=None,
         user_priority=0,
         resources=None,
         retries=None,
+        workers=None,
+        allow_other_workers=None,
         fifo_timeout=0,
         actors=None,
     ):
+        if allow_other_workers not in (True, False, None):
+            raise TypeError("allow_other_workers= must be True or False")
+        if allow_other_workers and workers is None:
+            raise ValueError("Only use allow_other_workers= if using workers=")
+
         with self._refcount_lock:
             if actors is not None and actors is not True and actors is not False:
                 actors = list(self._expand_key(actors))
@@ -2917,41 +2910,52 @@ class Client(SyncMethodMixin):
                 dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
 
             annotations = {}
-            if user_priority:
-                annotations["priority"] = user_priority
-            if workers:
-                if not isinstance(workers, (list, tuple, set)):
-                    workers = [workers]
-                annotations["workers"] = workers
-            if retries:
-                annotations["retries"] = retries
-            if allow_other_workers not in (True, False, None):
-                raise TypeError("allow_other_workers= must be True, False, or None")
-            if allow_other_workers:
-                annotations["allow_other_workers"] = allow_other_workers
-            if resources:
-                annotations["resources"] = resources
 
             # Merge global and local annotations
             annotations = merge(dask.config.get("annotations", {}), annotations)
 
             # Pack the high level graph before sending it to the scheduler
             keyset = set(keys)
-            dsk = dsk.__dask_distributed_pack__(self, keyset, annotations)
 
             # Create futures before sending graph (helps avoid contention)
             futures = {key: Future(key, self, inform=False) for key in keyset}
 
+            # TODO: Need to preserve the option to materialize the
+            # graph here and send it to the scheduler without Pickle
+            if self.scheduler.address.startswith("inproc://"):
+                kwargs = {"graph": dsk}
+            else:
+                buffers = []
+                out = pickle.dumps(dsk, buffer_callback=buffers.append)
+                buffers = [buffer.raw() for buffer in buffers]
+                nbytes = len(out) + sum(map(len, buffers))
+                if nbytes > 10_000_000:
+                    warnings.warn(
+                        f"Sending large graph of {format_bytes(nbytes)}.\n"
+                        "This may cause some slowdown.\n"
+                        "Consider scattering data ahead of time and using futures."
+                    )
+                kwargs = {
+                    "graph_header": out,
+                    "graph_frames": buffers,
+                }
+
             self._send_to_scheduler(
                 {
                     "op": "update-graph-hlg",
-                    "hlg": dsk,
                     "keys": list(map(stringify, keys)),
                     "priority": priority,
                     "submitting_task": getattr(thread_state, "key", None),
                     "fifo_timeout": fifo_timeout,
                     "actors": actors,
                     "code": self._get_computation_code(),
+                    "retries": retries,
+                    "resources": resources,
+                    "user_priority": user_priority,
+                    "workers": workers,
+                    "allow_other_workers": allow_other_workers,
+                    "annotations": annotations,
+                    **kwargs,
                 }
             )
             return futures
@@ -3009,7 +3013,6 @@ class Client(SyncMethodMixin):
             Specified on a global (True/False) or per-task (``{'x': True,
             'y': False}``) basis. See :doc:`actors` for additional details.
 
-
         Returns
         -------
         results
@@ -3032,10 +3035,10 @@ class Client(SyncMethodMixin):
         futures = self._graph_to_futures(
             dsk,
             keys=set(flatten([keys])),
-            workers=workers,
-            allow_other_workers=allow_other_workers,
             resources=resources,
             fifo_timeout=fifo_timeout,
+            workers=workers,
+            allow_other_workers=allow_other_workers,
             retries=retries,
             user_priority=priority,
             actors=actors,
@@ -3245,11 +3248,11 @@ class Client(SyncMethodMixin):
         futures_dict = self._graph_to_futures(
             dsk,
             names,
-            workers=workers,
-            allow_other_workers=allow_other_workers,
             resources=resources,
             retries=retries,
             user_priority=priority,
+            allow_other_workers=allow_other_workers,
+            workers=workers,
             fifo_timeout=fifo_timeout,
             actors=actors,
         )
@@ -3351,9 +3354,9 @@ class Client(SyncMethodMixin):
         futures = self._graph_to_futures(
             dsk,
             names,
+            resources=resources,
             workers=workers,
             allow_other_workers=allow_other_workers,
-            resources=resources,
             retries=retries,
             user_priority=priority,
             fifo_timeout=fifo_timeout,
@@ -4480,7 +4483,7 @@ class Client(SyncMethodMixin):
 
     async def _register_scheduler_plugin(self, plugin, name, idempotent=False):
         return await self.scheduler.register_scheduler_plugin(
-            plugin=dumps(plugin, protocol=4),
+            plugin=pickle.dumps(plugin, protocol=4),
             name=name,
             idempotent=idempotent,
         )
@@ -4536,7 +4539,7 @@ class Client(SyncMethodMixin):
         else:
             method = self.scheduler.register_worker_plugin
 
-        responses = await method(plugin=dumps(plugin, protocol=4), name=name)
+        responses = await method(plugin=pickle.dumps(plugin, protocol=4), name=name)
         for response in responses.values():
             if response["status"] == "error":
                 _, exc, tb = clean_exception(

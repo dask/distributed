@@ -22,18 +22,6 @@ def test_ToPickle():
 class NonMsgPackSerializableLayer(MaterializedLayer):
     """Layer that uses non-msgpack-serializable data"""
 
-    def __dask_distributed_pack__(self, *args, **kwargs):
-        ret = super().__dask_distributed_pack__(*args, **kwargs)
-        # Some info that contains a `list`, which msgpack will convert to
-        # a tuple if getting the chance.
-        ret["myinfo"] = ["myinfo"]
-        return ToPickle(ret)
-
-    @classmethod
-    def __dask_distributed_unpack__(cls, state, *args, **kwargs):
-        assert state["myinfo"] == ["myinfo"]
-        return super().__dask_distributed_unpack__(state, *args, **kwargs)
-
 
 @gen_cluster(client=True)
 async def test_non_msgpack_serializable_layer(c, s, a, b):
