@@ -2286,8 +2286,8 @@ def freeze_data_fetching(w: Worker, *, jump_start: bool = False) -> Iterator[Non
     w.state.transfer_incoming_count_limit = 0
     w.state.transfer_incoming_bytes_throttle_threshold = 0
     yield
-    w.state.transfer_incoming_count_limit = old_out_connections
-    w.state.transfer_incoming_bytes_throttle_threshold = old_comm_threshold
+    w.state.transfer_incoming_count_limit = old_count_limit
+    w.state.transfer_incoming_bytes_throttle_threshold = old_threshold
     if jump_start:
         w.status = Status.paused
         w.status = Status.running
