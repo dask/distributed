@@ -17,7 +17,7 @@ from dask.sizeof import sizeof
 
 from distributed import Lock
 from distributed.utils import is_valid_xml
-from distributed.utils_test import gen_cluster, inc, lock_inc, slowinc
+from distributed.utils_test import fetch_metrics, gen_cluster, inc, lock_inc, slowinc
 
 DEFAULT_ROUTES = dask.config.get("distributed.scheduler.http.routes")
 
@@ -89,25 +89,8 @@ async def test_prefix(c, s, a, b):
 @gen_cluster(client=True, clean_kwargs={"threads": False})
 async def test_prometheus(c, s, a, b):
     pytest.importorskip("prometheus_client")
-    from prometheus_client.parser import text_string_to_metric_families
 
-    http_client = AsyncHTTPClient()
-
-    async def fetch_metrics():
-        port = s.http_server.port
-        response = await http_client.fetch(f"http://localhost:{port}/metrics")
-        assert response.code == 200
-        assert response.headers["Content-Type"] == "text/plain; version=0.0.4"
-
-        txt = response.body.decode("utf8")
-        families = {
-            family.name: family
-            for family in text_string_to_metric_families(txt)
-            if family.name.startswith("dask_scheduler_")
-        }
-        return families
-
-    active_metrics = await fetch_metrics()
+    active_metrics = await fetch_metrics(s.http_server.port, "dask_scheduler_")
 
     expected_metrics = {
         "dask_scheduler_clients",
@@ -123,23 +106,15 @@ async def test_prometheus(c, s, a, b):
 
     # request data twice since there once was a case where metrics got registered multiple times resulting in
     # prometheus_client errors
-    await fetch_metrics()
+    await fetch_metrics(s.http_server.port, "dask_scheduler_")
 
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})
 async def test_prometheus_collect_task_states(c, s, a, b):
     pytest.importorskip("prometheus_client")
-    from prometheus_client.parser import text_string_to_metric_families
 
-    http_client = AsyncHTTPClient()
-
-    async def fetch_metrics():
-        port = s.http_server.port
-        response = await http_client.fetch(f"http://localhost:{port}/metrics")
-        txt = response.body.decode("utf8")
-        families = {
-            family.name: family for family in text_string_to_metric_families(txt)
-        }
+    async def fetch_state_metrics():
+        families = await fetch_metrics(s.http_server.port, prefix="dask_scheduler_")
 
         active_metrics = {
             sample.labels["state"]: sample.value
@@ -156,7 +131,7 @@ async def test_prometheus_collect_task_states(c, s, a, b):
     # Ensure that we get full zero metrics for all states even though the
     # scheduler did nothing, yet
     assert not s.tasks
-    active_metrics, forgotten_tasks = await fetch_metrics()
+    active_metrics, forgotten_tasks = await fetch_state_metrics()
     assert active_metrics.keys() == expected
     assert sum(active_metrics.values()) == 0.0
     assert sum(forgotten_tasks) == 0.0
@@ -166,7 +141,7 @@ async def test_prometheus_collect_task_states(c, s, a, b):
     while not any(future.key in w.state.tasks for w in [a, b]):
         await asyncio.sleep(0.001)
 
-    active_metrics, forgotten_tasks = await fetch_metrics()
+    active_metrics, forgotten_tasks = await fetch_state_metrics()
     assert active_metrics.keys() == expected
     assert sum(active_metrics.values()) == 1.0
     assert sum(forgotten_tasks) == 0.0
@@ -179,7 +154,7 @@ async def test_prometheus_collect_task_states(c, s, a, b):
     while any(future.key in w.state.tasks for w in [a, b]):
         await asyncio.sleep(0.001)
 
-    active_metrics, forgotten_tasks = await fetch_metrics()
+    active_metrics, forgotten_tasks = await fetch_state_metrics()
     assert active_metrics.keys() == expected
     assert sum(active_metrics.values()) == 0.0
     assert sum(forgotten_tasks) == 0.0

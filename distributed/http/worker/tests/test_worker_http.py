@@ -7,30 +7,14 @@ import pytest
 from tornado.httpclient import AsyncHTTPClient
 
 from distributed import Event
-from distributed.utils_test import gen_cluster
+from distributed.utils_test import fetch_metrics, gen_cluster
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_prometheus(c, s, a):
     pytest.importorskip("prometheus_client")
-    from prometheus_client.parser import text_string_to_metric_families
 
-    http_client = AsyncHTTPClient()
-
-    async def fetch_metrics():
-        port = a.http_server.port
-        response = await http_client.fetch(f"http://localhost:{port}/metrics")
-        assert response.code == 200
-        assert response.headers["Content-Type"] == "text/plain; version=0.0.4"
-        txt = response.body.decode("utf8")
-        families = {
-            family.name: family
-            for family in text_string_to_metric_families(txt)
-            if family.name.startswith("dask_worker_")
-        }
-        return families
-
-    active_metrics = await fetch_metrics()
+    active_metrics = await fetch_metrics(a.http_server.port, prefix="dask_worker_")
 
     expected_metrics = {
         "dask_worker_tasks",
@@ -56,27 +40,15 @@ async def test_prometheus(c, s, a):
 
     # request data twice since there once was a case where metrics got registered
     # multiple times resulting in prometheus_client errors
-    await fetch_metrics()
+    await fetch_metrics(a.http_server.port, prefix="dask_worker_")
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_prometheus_collect_task_states(c, s, a):
     pytest.importorskip("prometheus_client")
-    from prometheus_client.parser import text_string_to_metric_families
 
-    http_client = AsyncHTTPClient()
-
-    async def fetch_metrics():
-        port = a.http_server.port
-        response = await http_client.fetch(f"http://localhost:{port}/metrics")
-        assert response.code == 200
-        assert response.headers["Content-Type"] == "text/plain; version=0.0.4"
-        txt = response.body.decode("utf8")
-        families = {
-            family.name: family
-            for family in text_string_to_metric_families(txt)
-            if family.name.startswith("dask_worker_")
-        }
+    async def fetch_state_metrics():
+        families = await fetch_metrics(a.http_server.port, prefix="dask_worker_")
         active_metrics = {
             sample.labels["state"]: sample.value
             for sample in families["dask_worker_tasks"].samples
@@ -85,7 +57,7 @@ async def test_prometheus_collect_task_states(c, s, a):
 
     expected_metrics = {"stored", "executing", "ready", "waiting"}
     assert not a.state.tasks
-    active_metrics = await fetch_metrics()
+    active_metrics = await fetch_state_metrics()
     assert active_metrics == {
         "stored": 0.0,
         "executing": 0.0,
@@ -100,7 +72,7 @@ async def test_prometheus_collect_task_states(c, s, a):
     while not a.state.executing:
         await asyncio.sleep(0.001)
 
-    active_metrics = await fetch_metrics()
+    active_metrics = await fetch_state_metrics()
     assert active_metrics == {
         "stored": 0.0,
         "executing": 1.0,
@@ -116,7 +88,7 @@ async def test_prometheus_collect_task_states(c, s, a):
     while future.key in a.state.tasks:
         await asyncio.sleep(0.001)
 
-    active_metrics = await fetch_metrics()
+    active_metrics = await fetch_state_metrics()
     assert active_metrics == {
         "stored": 0.0,
         "executing": 0.0,
