@@ -207,8 +207,9 @@ While a task is cancelled, one of three things will happen:
 - The scheduler switches back to its original request:
 
   - The scheduler asks the Worker to fetch a task that is currently
-    ``cancelled(flight)``; at which point the task will immediately revert to ``flight``
-    and forget that cancellation ever happened;
+    ``cancelled(flight)``, at which point the task will immediately revert to ``flight``,
+    forget that cancellation ever happened, and continue waiting on the data fetch that's
+    already running;
   - The scheduler asks the Worker to compute a task that is currently
     ``cancelled(executing)`` or ``cancelled(long-running)``. The Worker will completely
     disregard the new :attr:`~TaskState.run_spec` (if it changed) and, switch back
