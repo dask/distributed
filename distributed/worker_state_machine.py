@@ -22,6 +22,7 @@ from copy import copy
 from dataclasses import dataclass, field
 from functools import lru_cache, partial, singledispatchmethod
 from itertools import chain
+from math import inf
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypedDict, cast
 
 from tlz import peekn
@@ -1232,6 +1233,9 @@ class WorkerState:
     #: In production, it should always be set to False.
     transition_counter_max: int | Literal[False]
 
+    #: Limit of bytes for incoming data transfers; this is used for throttling.
+    transfer_incoming_bytes_limit: float
+
     #: Statically-seeded random state, used to guarantee determinism whenever a
     #: pseudo-random choice is required
     rng: random.Random
@@ -1250,6 +1254,7 @@ class WorkerState:
         transfer_incoming_count_limit: int = 9999,
         validate: bool = True,
         transition_counter_max: int | Literal[False] = False,
+        transfer_incoming_bytes_limit: float = inf,
     ):
         self.nthreads = nthreads
 
@@ -1293,6 +1298,7 @@ class WorkerState:
         self.stimulus_log = deque(maxlen=10_000)
         self.transition_counter = 0
         self.transition_counter_max = transition_counter_max
+        self.transfer_incoming_bytes_limit = transfer_incoming_bytes_limit
         self.actors = {}
         self.rng = random.Random(0)
 
@@ -1468,17 +1474,20 @@ class WorkerState:
         self.long_running.discard(ts)
         self.in_flight_tasks.discard(ts)
 
+    def _should_throttle_incoming_transfers(self) -> bool:
+        return (
+            len(self.in_flight_workers) >= self.transfer_incoming_count_limit
+            and self.transfer_incoming_bytes
+            >= self.transfer_incoming_bytes_throttle_threshold
+        ) or self.transfer_incoming_bytes >= self.transfer_incoming_bytes_limit
+
     def _ensure_communicating(self, *, stimulus_id: str) -> RecsInstrs:
         """Transition tasks from fetch to flight, until there are no more tasks in fetch
         state or a threshold has been reached.
         """
         if not self.running or not self.data_needed:
             return {}, []
-        if (
-            self.transfer_incoming_count >= self.transfer_incoming_count_limit
-            and self.transfer_incoming_bytes
-            >= self.transfer_incoming_bytes_throttle_threshold
-        ):
+        if self._should_throttle_incoming_transfers():
             return {}, []
 
         recommendations: Recs = {}
@@ -1529,12 +1538,8 @@ class WorkerState:
             )
 
             self.in_flight_workers[worker] = to_gather_keys
-            self.transfer_incoming_bytes += total_nbytes
-            if (
-                self.transfer_incoming_count >= self.transfer_incoming_count_limit
-                and self.transfer_incoming_bytes
-                >= self.transfer_incoming_bytes_throttle_threshold
-            ):
+            self.comm_nbytes += total_nbytes
+            if self._should_throttle_incoming_transfers():
                 break
 
         return recommendations, instructions
@@ -1617,9 +1622,10 @@ class WorkerState:
         while available:
             ts = available.peek()
             # The top-priority task is fetched regardless of its size
-            if (
-                to_gather
-                and total_nbytes + ts.get_nbytes() > self.transfer_message_target_bytes
+            if to_gather and (
+                total_nbytes + ts.get_nbytes() > self.transfer_message_target_bytes
+                or self.transfer_incoming_bytes + total_nbytes + ts.get_nbytes()
+                > self.transfer_incoming_bytes_limit
             ):
                 break
             for worker in ts.who_has:
