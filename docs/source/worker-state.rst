@@ -189,7 +189,7 @@ Task cancellation
 -----------------
 The Worker may receive a request to release a key while it is currently in ``flight``,
 ``executing``, or ``long-running``. Due to technical limitations around cancelling
-Python threads, such an event cannot cause the related asyncio task to be immediately
+Python threads, and the way data fetching from peer workers is currently implemented, such an event cannot cause the related asyncio task to be immediately
 aborted. Instead, tasks in these three states are instead transitioned to another state,
 ``cancelled``, which means that the asyncio task will proceed to completion (outcome is
 irrelevant) *and then* the Dask task will be released.
