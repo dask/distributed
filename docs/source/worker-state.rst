@@ -16,7 +16,7 @@ values:
 
 released
     Known but not actively computing or in memory. A task can stay in this state when
-    the scheduler asked to forget it, but it's got dependent tasks on the same worker.
+    the scheduler asked to forget it, but it has dependent tasks on the same worker.
 waiting
     The scheduler has added the task to the worker queue. All of its dependencies are
     in memory somewhere on the cluster, but not all of them are in memory on the current
