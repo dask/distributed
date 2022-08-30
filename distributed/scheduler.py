@@ -2128,7 +2128,7 @@ class SchedulerState:
             # NOTE: recommendations for queued tasks are added first, so they'll be popped last,
             # allowing higher-priority downstream tasks to be transitioned first.
             # FIXME: this would be incorrect if queued tasks are user-annotated as higher priority.
-            _remove_from_processing(self, ts, recommendations)
+            _exit_processing_common(self, ts, recommendations)
 
             _add_to_memory(
                 self, ts, ws, recommendations, client_msgs, type=type, typename=typename
@@ -2359,7 +2359,7 @@ class SchedulerState:
                 assert not ts.waiting_on
                 assert ts.state == "processing"
 
-            ws = _remove_from_processing(self, ts, recommendations)
+            ws = _exit_processing_common(self, ts, recommendations)
             if ws:
                 worker_msgs[ws.address] = [
                     {
@@ -2436,7 +2436,7 @@ class SchedulerState:
                 ws = ts.processing_on
                 ws.actors.remove(ts)
 
-            _remove_from_processing(self, ts, recommendations)
+            _exit_processing_common(self, ts, recommendations)
 
             ts.erred_on.add(worker)
             if exception is not None:
@@ -7655,7 +7655,7 @@ def _add_to_processing(
     return {ws.address: [_task_to_msg(state, ts)]}
 
 
-def _remove_from_processing(
+def _exit_processing_common(
     state: SchedulerState, ts: TaskState, recommendations: Recs
 ) -> WorkerState | None:
     """Remove *ts* from the set of processing tasks.
