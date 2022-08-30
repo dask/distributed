@@ -1247,7 +1247,7 @@ async def test_wait_for_outgoing(c, s, a, b):
 
     assert len(b.transfer_incoming_log) == len(a.transfer_outgoing_log) == 1
     bb = b.transfer_incoming_log[0]["duration"]
-    aa = a.transfer_incoming_log[0]["duration"]
+    aa = a.outgoing_transfer_log[0]["duration"]
     ratio = aa / bb
 
     assert 1 / 3 < ratio < 3
@@ -2726,7 +2726,7 @@ async def test_acquire_replicas_same_channel(c, s, a, b):
                 ("request-dep", a.address, {fut.key}),
             ],
         )
-        assert any(fut.key in msg["keys"] for msg in b.transfer_outgoing_log)
+        assert any(fut.key in msg["keys"] for msg in b.incoming_transfer_log)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
