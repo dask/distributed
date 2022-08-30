@@ -4854,7 +4854,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.transitions({key: "released"}, stimulus_id)
 
     def handle_long_running(
-        self, key: str, worker: str, compute_duration: float, stimulus_id: str
+        self, key: str, worker: str, compute_duration: float | None, stimulus_id: str
     ) -> None:
         """A task has seceded from the thread pool
 
@@ -4874,11 +4874,12 @@ class Scheduler(SchedulerState, ServerNode):
             logger.debug("Received long-running signal from duplicate task. Ignoring.")
             return
 
-        old_duration = ts.prefix.duration_average
-        if old_duration < 0:
-            ts.prefix.duration_average = compute_duration
-        else:
-            ts.prefix.duration_average = (old_duration + compute_duration) / 2
+        if compute_duration is not None:
+            old_duration = ts.prefix.duration_average
+            if old_duration < 0:
+                ts.prefix.duration_average = compute_duration
+            else:
+                ts.prefix.duration_average = (old_duration + compute_duration) / 2
 
         occ = ws.processing[ts]
         ws.occupancy -= occ
