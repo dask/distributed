@@ -232,7 +232,7 @@ async def test_nanny_timeout(c, s, a):
     clean_kwargs={"threads": False},
     config={"distributed.worker.memory.pause": False},
 )
-async def test_throttle_incoming_connections(c, s, a, *other_workers):
+async def test_throttle_outgoing_transfers(c, s, a, *other_workers):
     # Put a bunch of small data on worker a
     logging.getLogger("distributed.worker").setLevel(logging.DEBUG)
     remote_data = c.map(
