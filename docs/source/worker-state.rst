@@ -211,8 +211,8 @@ While a task is cancelled, one of three things will happen:
     and forget that cancellation ever happened;
   - The scheduler asks the Worker to compute a task that is currently
     ``cancelled(executing)`` or ``cancelled(long-running)``. The Worker will completely
-    disregard the new :attr:`~TaskState.run_spec` (if it changed) and just switch back
-    to the :attr:`~TaskState.previous` state.
+    disregard the new :attr:`~TaskState.run_spec` (if it changed) and, switch back
+    to the :attr:`~TaskState.previous` state, and wait for the already-executing thread to finish.
 
 - The scheduler flips to the opposite request, from fetch to computation or the other
   way around.
