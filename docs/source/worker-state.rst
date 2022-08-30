@@ -189,10 +189,12 @@ Task cancellation
 -----------------
 The Worker may receive a request to release a key while it is currently in ``flight``,
 ``executing``, or ``long-running``. Due to technical limitations around cancelling
-Python threads, and the way data fetching from peer workers is currently implemented, such an event cannot cause the related asyncio task to be immediately
-aborted. Instead, tasks in these three states are instead transitioned to another state,
-``cancelled``, which means that the asyncio task will proceed to completion (outcome is
-irrelevant) *and then* the Dask task will be released.
+Python threads, and the way data fetching from peer workers is currently implemented,
+such an event cannot cause the related asyncio task (and, in the case of ``executing`` /
+``long-running``, the thread running the user code) to be immediately aborted. Instead,
+tasks in these three states are instead transitioned to another state, ``cancelled``,
+which means that the asyncio task will proceed to completion (outcome is irrelevant) and
+then* the Dask task will be released.
 
 The ``cancelled`` state has a substate, :attr:`~TaskState.previous`, which is set to one
 of the above three states. The common notation for this ``<state>(<previous>)``,
@@ -207,13 +209,14 @@ While a task is cancelled, one of three things will happen:
 - The scheduler switches back to its original request:
 
   - The scheduler asks the Worker to fetch a task that is currently
-    ``cancelled(flight)``, at which point the task will immediately revert to ``flight``,
-    forget that cancellation ever happened, and continue waiting on the data fetch that's
-    already running;
+    ``cancelled(flight)``; at which point the task will immediately revert to
+    ``flight``, forget that cancellation ever happened, and continue waiting on the data
+    fetch that's already running;
   - The scheduler asks the Worker to compute a task that is currently
     ``cancelled(executing)`` or ``cancelled(long-running)``. The Worker will completely
-    disregard the new :attr:`~TaskState.run_spec` (if it changed) and, switch back
-    to the :attr:`~TaskState.previous` state, and wait for the already-executing thread to finish.
+    disregard the new :attr:`~TaskState.run_spec` (if it changed), switch back to the
+    :attr:`~TaskState.previous` state, and wait for the already executing thread to
+    finish.
 
 - The scheduler flips to the opposite request, from fetch to computation or the other
   way around.

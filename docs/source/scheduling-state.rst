@@ -315,7 +315,10 @@ log-event
     Note that this is in addition to the worker's log, which the client can fetch on
     request (up to a certain length).
 keep-alive
-    A worker informs that it's still online and responsive
+    A worker informs that it's still online and responsive. This uses the batched stream
+    channel, as opposed to :meth:`distributed.worker.Worker.heartbeat` and
+    :meth:`Scheduler.heartbeat_worker` which use dedicated RPC comms, and is needed to
+    prevent firewalls from closing down the batched stream.
 register-worker
     A new worker was added to the network
 unregister
