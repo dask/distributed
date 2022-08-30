@@ -1130,7 +1130,7 @@ class WorkerState:
     #: All and only tasks with ``TaskState.state == 'missing'``.
     missing_dep_flight: set[TaskState]
 
-    #: Which tasks that are coming to us in current peer-to-peer connections.
+    #: Tasks that are coming to us in current peer-to-peer connections.
     #:
     #: This set includes exclusively tasks with :attr:`~TaskState.state` == 'flight' as
     #: well as tasks with :attr:`~TaskState.state` in ('cancelled', 'resumed') and
