@@ -22,7 +22,6 @@ from copy import copy
 from dataclasses import dataclass, field
 from functools import lru_cache, partial, singledispatchmethod
 from itertools import chain
-from math import inf
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypedDict, cast
 
 from tlz import peekn
@@ -1234,7 +1233,7 @@ class WorkerState:
     transition_counter_max: int | Literal[False]
 
     #: Limit of bytes for incoming data transfers; this is used for throttling.
-    transfer_incoming_bytes_limit: float
+    transfer_incoming_bytes_limit: int | None
 
     #: Statically-seeded random state, used to guarantee determinism whenever a
     #: pseudo-random choice is required
@@ -1254,7 +1253,7 @@ class WorkerState:
         transfer_incoming_count_limit: int = 9999,
         validate: bool = True,
         transition_counter_max: int | Literal[False] = False,
-        transfer_incoming_bytes_limit: float = inf,
+        transfer_incoming_bytes_limit: int | None = None,
     ):
         self.nthreads = nthreads
 
@@ -1479,7 +1478,10 @@ class WorkerState:
             len(self.in_flight_workers) >= self.transfer_incoming_count_limit
             and self.transfer_incoming_bytes
             >= self.transfer_incoming_bytes_throttle_threshold
-        ) or self.transfer_incoming_bytes >= self.transfer_incoming_bytes_limit
+        ) or (
+            self.transfer_incoming_bytes_limit is not None
+            and self.transfer_incoming_bytes >= self.transfer_incoming_bytes_limit
+        )
 
     def _ensure_communicating(self, *, stimulus_id: str) -> RecsInstrs:
         """Transition tasks from fetch to flight, until there are no more tasks in fetch
@@ -1624,8 +1626,11 @@ class WorkerState:
             # The top-priority task is fetched regardless of its size
             if to_gather and (
                 total_nbytes + ts.get_nbytes() > self.transfer_message_target_bytes
-                or self.transfer_incoming_bytes + total_nbytes + ts.get_nbytes()
-                > self.transfer_incoming_bytes_limit
+                or (
+                    self.transfer_incoming_bytes_limit is not None
+                    and self.transfer_incoming_bytes + total_nbytes + ts.get_nbytes()
+                    > self.transfer_incoming_bytes_limit
+                )
             ):
                 break
             for worker in ts.who_has:
