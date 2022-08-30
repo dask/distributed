@@ -26,43 +26,60 @@ fetch
     is queued to be transferred over the network, either because it's a dependency of a
     task in ``waiting`` state, or because the :doc:`active_memory_manager` requested it
     to be replicated here.
+    The task can be found in the :attr:`WorkerState.data_needed` heap.
 missing
     Like ``fetch``, but all peer workers that were listed by the scheduler are either
     unreachable or have responded they don't actually have the task data. The worker
     will periodically ask the scheduler if it knows of additional replicas; when it
     does, the task will transition again to ``fetch``.
+    The task can be found in the :attr:`WorkerState.missing_dep_flight` set.
 flight
-    The task data is currently being transferred over the network from another worker
+    The task data is currently being transferred over the network from another worker.
+    The task can be found in the :attr:`WorkerState.in_flight_tasks` and
+    :attr:`WorkerState.in_flight_workers` collections.
 ready
     The task is ready to be computed; all of its dependencies are in memory on the
     current worker and it's waiting for an available thread.
+    The task can be found in the :attr:`WorkerState.ready` heap.
 constrained
     Like ``ready``, but the user specified :doc:`resource constraints <resources>` for
     this task.
+    The task can be found in the :attr:`WorkerState.constrained` queue.
 executing
-    The task is currently being computed on a thread
+    The task is currently being computed on a thread.
+    It can be found in the :attr`:WorkerState.executing` set and in the
+    :attr:`distributed.worker.Worker.active_threads` dict.
 long-running
     Like ``executing``, but the user code called :func:`distributed.secede` so the task
-    no longer counts towards the maximum number of concurrent tasks
+    no longer counts towards the maximum number of concurrent tasks.
+    It can be found in the :attr`:WorkerState.long_running` set and in the
+    :attr:`distributed.worker.Worker.active_threads` dict.
 rescheduled
     The task just raised the :class:`~distributed.Reschedule` exception. This is a
     transitory state, which is not stored permanently.
 cancelled
     The scheduler asked to forget about this task, but it's technically impossible at
-    the moment. See :ref:`cancelled-tasks`.
+    the moment. See :ref:`cancelled-tasks`. The task can be found in whatever
+    collections it was in its :attr:`~TaskState.previous` state.
 resumed
     The task was recovered from ``cancelled`` state. See :ref:`cancelled-tasks`.
+    The task can be found in whatever collections it was in its
+    :attr:`~TaskState.previous` state.
 memory
     Task execution completed, or the task was successfully transferred from another
     worker, and is now held in :class:`WorkerState.data`.
 error
     Task execution failed. Alternatively, task execution completed successfully, or the
     task data transferred successfully over the network, but it failed to serialize or
-    deserialize.
+    deserialize. The full exception and traceback are stored in the task itself, so that
+    they can be re-raised on the client.
 forgotten
     The scheduler asked this worker to forget abot the task, and there are neither
     dependents nor dependencies on the same worker. As soon as a task reaches this
-    state, it is immediately dereferenced from the :class:`WorkerState`.
+    state, it is immediately dereferenced from the :class:`WorkerState` and will be soon
+    garbage-collected. This is the only case where two instances of a :class:`TaskState`
+    object with the same :attr:`~TaskState.key` can (transitorily) exist in the same
+    interpreter at the same time.
 
 
 Fetching dependencies
@@ -153,6 +170,8 @@ This happens when there are no more Clients holding a reference to the key and t
 no more waiter tasks (that is, dependents that have not been computed). Additionally,
 the :doc:`active_memory_manager` may ask to drop excess replicas of a task.
 
+In the case of ``rescheduled``, the task will instead immediately transition to
+``released`` and then ``forgotten`` without waiting for the scheduler.
 
 .. image:: images/worker-forget-state.svg
     :alt: Worker states for computing tasks

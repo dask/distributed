@@ -279,7 +279,9 @@ class TaskState:
     nbytes: int | None = None
     #: Arbitrary task annotations
     annotations: dict | None = None
-    #: True if the task is in memory or erred; False otherwise
+    #: True if the :meth:`~WorkerBase.execute` or :meth:`~WorkerBase.gather_dep`
+    #: coroutine servicing this task completed; False otherwise. This flag changes
+    #: the behaviour of transitions out of the ``executing``, ``flight`` etc. states.
     done: bool = False
 
     _instances: ClassVar[weakref.WeakSet[TaskState]] = weakref.WeakSet()
