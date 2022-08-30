@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import ClassVar
 
 from distributed.http.prometheus import PrometheusCollector
 from distributed.http.utils import RequestHandler
