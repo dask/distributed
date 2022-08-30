@@ -2589,7 +2589,7 @@ class Worker(BaseWorker, ServerNode):
             DeprecationWarning,
             stacklevel=2,
         )
-        return self.transfer_outgoing_log
+        return self.transfer_outgoing_count_limit
 
 
 def get_worker() -> Worker:
