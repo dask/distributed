@@ -3612,24 +3612,21 @@ async def test_reconnect():
         with pytest.raises(CancelledError):
             await x
 
-        stack2 = ExitStack()
-        proc2 = popen(["dask-scheduler", "--no-dashboard", f"--port={port}"])
-        stack2.enter_context(proc2)
-        start = time()
-        while c.status != "running":
-            await asyncio.sleep(0.1)
-            assert time() < start + 10
-
-        await w.finished()
-        async with Worker(f"127.0.0.1:{port}"):
+        with popen(["dask-scheduler", "--no-dashboard", f"--port={port}"]):
             start = time()
-            while len(await c.nthreads()) != 1:
-                await asyncio.sleep(0.05)
+            while c.status != "running":
+                await asyncio.sleep(0.1)
                 assert time() < start + 10
 
-            x = c.submit(inc, 1)
-            assert (await x) == 2
-            stack2.close()
+            await w.finished()
+            async with Worker(f"127.0.0.1:{port}"):
+                start = time()
+                while len(await c.nthreads()) != 1:
+                    await asyncio.sleep(0.05)
+                    assert time() < start + 10
+
+                x = c.submit(inc, 1)
+                assert (await x) == 2
 
         start = time()
         while True:
