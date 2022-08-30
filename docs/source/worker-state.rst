@@ -272,7 +272,7 @@ so it will just transition to ``flight`` instead.
 2. Task x is computed successfully on worker A.
 3. When task x transitions to memory on worker A, the scheduler asks worker B to compute
    task y, which depends on task x.
-4. B starts acquiring the data for x from A, which sends the task into ``flight`` mode.
+4. B starts acquiring the key x from A, which sends the task into ``flight`` mode.
 5. Worker A crashes, and for whatever reason the scheduler notices before worker B does.
 6. The scheduler will release task y (because it's waiting on dependencies that are
    nowhere to be found in memory anymore) and reschedule task x somewhere else on the
