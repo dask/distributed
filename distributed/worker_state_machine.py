@@ -1147,7 +1147,7 @@ class WorkerState:
     #: See also :attr:`distributed.worker.Worker.transfer_outgoing_count_limit`.
     transfer_incoming_count_limit: int
 
-    #: Number of total data transfers from other workers.
+    #: Number of total data transfers from other workers since the worker was started.
     transfer_incoming_count_total: int
 
     #: Ignore :attr:`transfer_incoming_count_limit` as long as :attr:`transfer_incoming_bytes` is
