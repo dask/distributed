@@ -284,6 +284,7 @@ async def test_decide_worker_coschedule_order_binary_op(c, s, a, b, ngroups):
         "distributed.worker.memory.target": False,
         "distributed.worker.memory.spill": False,
         "distributed.scheduler.work-stealing": False,
+        "distributed.scheduler.allowed-failures": 0,  # don't allow nannies to restart
     },
 )
 async def test_root_task_overproduction(c, s, *nannies):
@@ -291,7 +292,6 @@ async def test_root_task_overproduction(c, s, *nannies):
     Workload that would run out of memory and kill workers if >2 root tasks were
     ever in memory at once on a worker.
     """
-    pids = [n.pid for n in nannies]
 
     @delayed(pure=True)  # type: ignore
     def big_data(size: int) -> str:
@@ -314,9 +314,6 @@ async def test_root_task_overproduction(c, s, *nannies):
     final = sum(reduction)
 
     await c.compute(final)
-
-    # No restarts
-    assert pids == [n.pid for n in nannies]
 
 
 @pytest.mark.slow
