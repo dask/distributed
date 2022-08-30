@@ -93,58 +93,13 @@ more details on the command line options, please have a look at the
 
 Internal Scheduling
 -------------------
-
-Internally tasks that come to the scheduler proceed through the following pipeline as
-:class:`distributed.worker_state_machine.TaskState` objects. Tasks which follow this
-path have a :attr:`~distributed.worker_state_machine.TaskState.runspec` defined which
-instructs the worker how to execute them.
-
-.. image:: images/worker-task-state.svg
-    :alt: Dask worker task states
-
-Data dependencies are also represented as
-:class:`~distributed.worker_state_machine.TaskState` objects and follow a simpler path
-through the execution pipeline. These tasks do not have a
-:attr:`~distributed.worker_state_machine.TaskState.runspec` defined and instead contain
-a listing of workers to collect their result from.
+See dedicated page: :doc:`worker-state`
 
 
-.. image:: images/worker-dep-state.svg
-    :alt: Dask worker dependency states
-
-As tasks arrive they are prioritized and put into a heap.  They are then taken
-from this heap in turn to have any remote dependencies collected.  For each
-dependency we select a worker at random that has that data and collect the
-dependency from that worker.  To improve bandwidth we opportunistically gather
-other dependencies of other tasks that are known to be on that worker, up to a
-maximum of 200MB of data (too little data and bandwidth suffers, too much data
-and responsiveness suffers).  We use a fixed number of connections (around
-10-50) so as to avoid overly-fragmenting our network bandwidth. In the event
-that the network comms between two workers are saturated, a dependency task may
-cycle between ``fetch`` and ``flight`` until it is successfully collected.
-
-After all dependencies for a task are in memory we transition the task to the
-ready state and put the task again into a heap of tasks that are ready to run.
-
-We collect from this heap and put the task into a thread from a local thread
-pool to execute.
-
-Optionally, this task may identify itself as a long-running task (see
-:doc:`Tasks launching tasks <task-launch>`), at which point it secedes from the
-thread pool.
-
-A task either errs or its result is put into memory.  In either case a response
-is sent back to the scheduler.
-
-Tasks slated for execution and tasks marked for collection from other workers
-must follow their respective transition paths as defined above. The only
-exceptions to this are when:
-
-* A task is `stolen <work-stealing>`_, in which case a task which might have
-  been collected will instead be executed on the thieving worker
-* Scheduler intercession, in which the scheduler reassigns a task that was
-  previously assigned to a separate worker to a new worker.  This most commonly
-  occurs when a `worker dies <killed>`_ during computation.
+API Documentation
+-----------------
+.. autoclass:: distributed.worker.Worker
+   :members:
 
 
 .. _nanny:
@@ -156,24 +111,4 @@ Dask workers are by default launched, monitored, and managed by a small Nanny
 process.
 
 .. autoclass:: distributed.nanny.Nanny
-   :members:
-
-
-API Documentation
------------------
-
-.. currentmodule:: distributed.worker_state_machine
-
-.. autoclass:: distributed.worker_state_machine.TaskState
-   :members:
-
-.. autoclass:: distributed.worker_state_machine.WorkerState
-   :members:
-
-.. autoclass:: distributed.worker_state_machine.BaseWorker
-   :members:
-
-.. currentmodule:: distributed.worker
-
-.. autoclass:: distributed.worker.Worker
    :members:
