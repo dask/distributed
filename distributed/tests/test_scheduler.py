@@ -17,19 +17,12 @@ from unittest import mock
 import cloudpickle
 import psutil
 import pytest
-from tlz import concat, first, merge, partition, valmap
+from tlz import concat, first, merge, valmap
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask import delayed
-from dask.utils import (
-    apply,
-    format_bytes,
-    parse_timedelta,
-    stringify,
-    tmpfile,
-    typename,
-)
+from dask.utils import apply, parse_timedelta, stringify, tmpfile, typename
 
 from distributed import (
     CancelledError,
@@ -270,55 +263,6 @@ async def test_decide_worker_coschedule_order_binary_op(c, s, a, b, ngroups):
 
     assert not a.incoming_transfer_log, [l["keys"] for l in a.incoming_transfer_log]
     assert not b.incoming_transfer_log, [l["keys"] for l in b.incoming_transfer_log]
-
-
-@pytest.mark.skipif(WINDOWS, reason="Process memory use seems unpredictable on Windows")
-@pytest.mark.slow
-@gen_cluster(
-    client=True,
-    nthreads=[("", 2)] * 2,
-    worker_kwargs={"memory_limit": "1.0GiB"},
-    Worker=Nanny,
-    config={
-        "distributed.scheduler.worker-saturation": 1.0,
-        "distributed.worker.memory.target": False,
-        "distributed.worker.memory.spill": False,
-        "distributed.scheduler.work-stealing": False,
-        "distributed.scheduler.allowed-failures": 0,  # don't allow nannies to restart
-    },
-)
-async def test_near_memory_limit_workload(c, s, *nannies):
-    """
-    Integration test: a workload close to worker memory limit, which might fail with bad scheduling decisions.
-
-    Each worker has 2 threads. The data is sized such that if >2 pieces of data are
-    ever in memory at once, the worker would exceed its memory limit and be killed.
-
-    The scheduler must decide when and where to schedule tasks so extra pieces of data
-    are not produced, and data is not transferred.
-    """
-
-    @delayed(pure=True)  # type: ignore
-    def big_data(size: int) -> str:
-        return "x" * size
-
-    available = await c.run(
-        lambda dask_worker: dask_worker.memory_manager.memory_limit
-        - dask_worker.monitor.get_process_memory()
-    )
-    print({k: format_bytes(v) for k, v in available.items()})
-    min_available = min(available.values())
-    # leave room so 2 can comfortably fit, but 3 can't
-    task_size = round(min_available / 2.9)
-    print(f"task size: {format_bytes(task_size)}")
-
-    roots = [big_data(task_size, dask_key_name=f"root-{i}") for i in range(16)]
-    passthrough = [delayed(slowidentity)(x) for x in roots]
-    memory_consumed = [delayed(len)(x) for x in passthrough]
-    reduction = [sum(sizes) for sizes in partition(4, memory_consumed)]
-    final = sum(reduction)
-
-    await c.compute(final)
 
 
 @pytest.mark.slow
