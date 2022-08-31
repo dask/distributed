@@ -322,13 +322,12 @@ async def test_near_memory_limit_workload(c, s, *nannies):
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("gil_sleep", [False, True])
 @gen_cluster(
     nthreads=[("", 2)] * 4,
     client=True,
     config={"distributed.scheduler.worker-saturation": 1.0},
 )
-async def test_graph_execution_width(c, s, *workers, gil_sleep):
+async def test_graph_execution_width(c, s, *workers):
     """
     Test that we don't execute the graph more breadth-first than necessary.
 
@@ -344,14 +343,6 @@ async def test_graph_execution_width(c, s, *workers, gil_sleep):
         log: ClassVar[list[int]] = []
 
         def __init__(self) -> None:
-            sleep_time = 0.1  # significantly longer than scheduler<->worker round-trip
-            if gil_sleep:
-                start = time()
-                while time() < start + sleep_time:
-                    pass  # burn CPU holding GIL. This will gum up the event loop on the scheduler and workers.
-            else:
-                sleep(sleep_time)
-
             with self.lock:
                 type(self).count += 1
                 self.log.append(self.count)
@@ -362,8 +353,9 @@ async def test_graph_execution_width(c, s, *workers, gil_sleep):
                 type(self).count -= 1
 
     roots = [delayed(Refcount)() for _ in range(32)]
-    passthrough = [delayed(slowidentity)(r) for r in roots]
-    done = [delayed(lambda r: None)(r) for r in passthrough]
+    passthrough1 = [delayed(slowidentity)(r, delay=0) for r in roots]
+    passthrough2 = [delayed(slowidentity)(r, delay=0) for r in passthrough1]
+    done = [delayed(lambda r: None)(r) for r in passthrough2]
 
     fs = c.compute(done)
     await wait(fs)
