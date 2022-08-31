@@ -5119,7 +5119,7 @@ class Scheduler(SchedulerState, ServerNode):
             {
                 "action": "worker-status-change",
                 "prev-status": prev_status.name,
-                "status": status,
+                "status": ws.status.name,
             },
         )
         logger.debug(f"Worker status {prev_status.name} -> {status} - {ws}")
