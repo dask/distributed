@@ -410,7 +410,7 @@ def test_computetask_dummy():
 
     # nbytes is generated from who_has if omitted
     ev2 = ComputeTaskEvent.dummy("x", who_has={"y": "127.0.0.1:2"}, stimulus_id="s")
-    assert ev2.nbytes == {"y": 7}
+    assert ev2.nbytes == {"y": 1}
 
 
 def test_updatedata_to_dict():
@@ -1086,7 +1086,7 @@ def test_gather_priority(ws):
             stimulus_id="unpause",
             worker="127.0.0.7:1",
             to_gather={"y", "x8"},
-            total_nbytes=7 + 4 * 2**20,
+            total_nbytes=1 + 4 * 2**20,
         ),
         # Followed by local workers
         GatherDep(
@@ -1114,7 +1114,7 @@ def test_gather_priority(ws):
             total_nbytes=4 * 2**20,
         ),
     ]
-    expected_bytes = 7 + 4 * 2**20 + 4 * 2**20 + 8 * 2**20 + 4 * 2**20
+    expected_bytes = 1 + 4 * 2**20 + 4 * 2**20 + 8 * 2**20 + 4 * 2**20
     assert ws.transfer_incoming_bytes == expected_bytes
     assert ws.transfer_incoming_count == 4
     assert ws.transfer_incoming_count_total == 4
