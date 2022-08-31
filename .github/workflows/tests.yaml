@@ -123,8 +123,8 @@ jobs:
           set -o pipefail
           mkdir reports
 
-          pytest distributed \
-            -m "not avoid_ci and ${{ matrix.partition }}" --runslow \
+          pytest distributed/tests/test_active_memory_manager.py distributed/tests/test_steal.py \
+            -m "not avoid_ci" --runslow \
             --leaks=fds,processes,threads \
             --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID \
             --cov=distributed --cov-report=xml \

@@ -1088,7 +1088,7 @@ async def tensordot_stress(c):
 
 
 @pytest.mark.slow
-@pytest.mark.avoid_ci(reason="distributed#5371")
+@pytest.mark.repeat(10)  # TEMP do not merge
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 4,
@@ -1103,7 +1103,7 @@ async def test_noamm_stress(c, s, *nannies):
 
 
 @pytest.mark.slow
-@pytest.mark.avoid_ci(reason="distributed#5371")
+@pytest.mark.repeat(10)  # TEMP do not merge
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 4,
@@ -1126,7 +1126,7 @@ async def test_drop_stress(c, s, *nannies):
 
 
 @pytest.mark.slow
-@pytest.mark.avoid_ci(reason="distributed#5371")
+@pytest.mark.repeat(10)  # TEMP do not merge
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 4,
@@ -1148,7 +1148,7 @@ async def test_ReduceReplicas_stress(c, s, *nannies):
 
 
 @pytest.mark.slow
-@pytest.mark.avoid_ci(reason="distributed#5371")
+@pytest.mark.repeat(10)  # TEMP do not merge
 @pytest.mark.parametrize("use_ReduceReplicas", [False, True])
 @gen_cluster(
     client=True,
@@ -1167,6 +1167,7 @@ async def test_ReduceReplicas_stress(c, s, *nannies):
     },
     scheduler_kwargs={"transition_counter_max": 500_000},
     worker_kwargs={"transition_counter_max": 500_000},
+    timeout=60,
 )
 async def test_RetireWorker_stress(c, s, *nannies, use_ReduceReplicas):
     """It is safe to retire the best part of a cluster in the middle of a computation"""
