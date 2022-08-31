@@ -5104,13 +5104,13 @@ class Scheduler(SchedulerState, ServerNode):
         self.check_idle_saturated(ws)
 
     def handle_worker_status_change(
-        self, status: str, worker: str, stimulus_id: str
+        self, status: str | Status, worker: str | WorkerState, stimulus_id: str
     ) -> None:
-        ws = self.workers.get(worker)
+        ws = self.workers.get(worker) if isinstance(worker, str) else worker
         if not ws:
             return
         prev_status = ws.status
-        ws.status = Status.lookup[status]  # type: ignore
+        ws.status = Status[status] if isinstance(status, str) else status
         if ws.status == prev_status:
             return
 
@@ -6450,9 +6450,9 @@ class Scheduler(SchedulerState, ServerNode):
                     # Change Worker.status to closing_gracefully. Immediately set
                     # the same on the scheduler to prevent race conditions.
                     prev_status = ws.status
-                    ws.status = Status.closing_gracefully
-                    self.running.discard(ws)
-                    self.idle.pop(ws.address, None)
+                    self.handle_worker_status_change(
+                        Status.closing_gracefully, ws, stimulus_id
+                    )
                     # FIXME: We should send a message to the nanny first;
                     # eventually workers won't be able to close their own nannies.
                     self.stream_comms[ws.address].send(
