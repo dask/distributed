@@ -385,7 +385,7 @@ class Worker(BaseWorker, ServerNode):
     profile_history: deque[tuple[float, dict[str, Any]]]
     transfer_incoming_log: deque[dict[str, Any]]
     transfer_outgoing_log: deque[dict[str, Any]]
-    #: Total number of data transfers to other workers since the worker was started.
+    #: Total number of data transfers to other workers since the worker was started
     transfer_outgoing_count_total: int
     #: Current total size of open data transfers to other workers
     transfer_outgoing_bytes: int
@@ -1708,9 +1708,11 @@ class Worker(BaseWorker, ServerNode):
                     )
 
         msg = {"status": "OK", "data": {k: to_serialize(v) for k, v in data.items()}}
-        # Note: `if k in self.data` above guarantees that 
+        # Note: `if k in self.data` above guarantees that
         # k is in self.state.tasks too and that nbytes is non-None
-        bytes_per_task = {k: self.state.tasks[k].nbytes for k in data}
+        bytes_per_task: dict[str, int] = {
+            k: self.state.tasks[k].nbytes or 0 for k in data
+        }
         total_bytes = sum(bytes_per_task.values())
         self.transfer_outgoing_bytes += total_bytes
         stop = time()

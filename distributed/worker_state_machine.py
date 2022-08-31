@@ -1149,7 +1149,7 @@ class WorkerState:
     #: dependencies until the current query returns.
     in_flight_workers: dict[str, set[str]]
 
-    #: Total size of open data transfers from other workers.
+    #: Current total size of open data transfers from other workers
     transfer_incoming_bytes: int
 
     #: Maximum number of concurrent incoming data transfers from other workers.
@@ -1364,7 +1364,7 @@ class WorkerState:
 
     @property
     def transfer_incoming_count(self) -> int:
-        """Number of open data transfers from other workers.
+        """Current number of open data transfers from other workers.
 
         See also
         --------
