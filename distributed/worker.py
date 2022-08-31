@@ -1710,9 +1710,7 @@ class Worker(BaseWorker, ServerNode):
         msg = {"status": "OK", "data": {k: to_serialize(v) for k, v in data.items()}}
         # Note: `if k in self.data` above guarantees that
         # k is in self.state.tasks too and that nbytes is non-None
-        bytes_per_task: dict[str, int] = {
-            k: self.state.tasks[k].nbytes or 0 for k in data
-        }
+        bytes_per_task = {k: self.state.tasks[k].nbytes or 0 for k in data}
         total_bytes = sum(bytes_per_task.values())
         self.transfer_outgoing_bytes += total_bytes
         stop = time()
