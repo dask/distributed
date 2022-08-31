@@ -1474,6 +1474,15 @@ class WorkerState:
         self.in_flight_tasks.discard(ts)
 
     def _should_throttle_incoming_transfers(self) -> bool:
+        """Decides whether the WorkerState should throttle data transfers from other workers.
+
+        Returns
+        -------
+        * True if the number of incoming data transfers reached its limit
+        and the size of incoming data transfers reached the minimum threshold for throttling
+        * True if the size of incoming data transfers reached its limit
+        * False otherwise
+        """
         reached_count_limit = (
             self.transfer_incoming_count >= self.transfer_incoming_count_limit
         )
