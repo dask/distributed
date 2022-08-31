@@ -30,7 +30,9 @@ from distributed.worker_state_machine import (
     GatherDepFailureEvent,
     GatherDepNetworkFailureEvent,
     GatherDepSuccessEvent,
+    LongRunningMsg,
     RescheduleEvent,
+    SecedeEvent,
     TaskFinishedMsg,
     UpdateDataEvent,
 )
@@ -640,7 +642,12 @@ def test_workerstate_executing_to_executing(ws_with_running_task):
         FreeKeysEvent(keys=["x"], stimulus_id="s1"),
         ComputeTaskEvent.dummy("x", resource_restrictions={"R": 1}, stimulus_id="s2"),
     )
-    assert not instructions
+    if prev_state == "executing":
+        assert not instructions
+    else:
+        assert instructions == [
+            LongRunningMsg(key="x", compute_duration=None, stimulus_id="s2")
+        ]
     assert ws.tasks["x"] is ts
     assert ts.state == prev_state
 
@@ -821,7 +828,12 @@ def test_workerstate_resumed_fetch_to_executing(ws_with_running_task):
         FreeKeysEvent(keys=["y", "x"], stimulus_id="s3"),
         ComputeTaskEvent.dummy("x", resource_restrictions={"R": 1}, stimulus_id="s4"),
     )
-    assert not instructions
+    if prev_state == "executing":
+        assert not instructions
+    else:
+        assert instructions == [
+            LongRunningMsg(key="x", compute_duration=None, stimulus_id="s4")
+        ]
     assert ws.tasks["x"].state == prev_state
 
 
@@ -946,3 +958,102 @@ def test_cancel_with_dependencies_in_memory(ws, release_dep, done_ev_cls):
         ws.handle_stimulus(done_ev_cls.dummy("y", stimulus_id="s5"))
         assert "y" not in ws.tasks
         assert ws.tasks["x"].state == "memory"
+
+
+@pytest.mark.parametrize("resume_to_fetch", [False, True])
+@pytest.mark.parametrize("resume_to_executing", [False, True])
+@pytest.mark.parametrize(
+    "done_ev_cls", [ExecuteSuccessEvent, ExecuteFailureEvent, RescheduleEvent]
+)
+def test_secede_cancelled_or_resumed_workerstate(
+    ws, resume_to_fetch, resume_to_executing, done_ev_cls
+):
+    """Test what happens when a cancelled or resumed(fetch) task calls secede().
+    See also test_secede_cancelled_or_resumed_scheduler
+    """
+    ws2 = "127.0.0.1:2"
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy("x", stimulus_id="s1"),
+        FreeKeysEvent(keys=["x"], stimulus_id="s2"),
+    )
+    if resume_to_fetch:
+        ws.handle_stimulus(
+            ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s3"),
+        )
+    ts = ws.tasks["x"]
+    assert ts.previous == "executing"
+    assert ts in ws.executing
+    assert ts not in ws.long_running
+
+    instructions = ws.handle_stimulus(
+        SecedeEvent(key="x", compute_duration=1, stimulus_id="s4")
+    )
+    assert not instructions  # Do not send RescheduleMsg
+    assert ts.previous == "long-running"
+    assert ts not in ws.executing
+    assert ts in ws.long_running
+
+    if resume_to_executing:
+        instructions = ws.handle_stimulus(
+            FreeKeysEvent(keys=["y"], stimulus_id="s5"),
+            ComputeTaskEvent.dummy("x", stimulus_id="s6"),
+        )
+        # Inform the scheduler of the SecedeEvent that happened in the past
+        assert instructions == [
+            LongRunningMsg(key="x", compute_duration=None, stimulus_id="s6")
+        ]
+        assert ts.state == "long-running"
+        assert ts not in ws.executing
+        assert ts in ws.long_running
+
+    ws.handle_stimulus(done_ev_cls.dummy(key="x", stimulus_id="s7"))
+    assert ts not in ws.executing
+    assert ts not in ws.long_running
+
+
+@gen_cluster(client=True, nthreads=[("", 1)], timeout=2)
+async def test_secede_cancelled_or_resumed_scheduler(c, s, a):
+    """Same as test_secede_cancelled_or_resumed_workerstate, but testing the interaction
+    with the scheduler
+    """
+    ws = s.workers[a.address]
+    ev1 = Event()
+    ev2 = Event()
+    ev3 = Event()
+    ev4 = Event()
+
+    def f(ev1, ev2, ev3, ev4):
+        ev1.set()
+        ev2.wait()
+        distributed.secede()
+        ev3.set()
+        ev4.wait()
+        return 123
+
+    x = c.submit(f, ev1, ev2, ev3, ev4, key="x")
+    await ev1.wait()
+    ts = a.state.tasks["x"]
+    assert ts.state == "executing"
+    assert sum(ws.processing.values()) > 0
+
+    x.release()
+    await wait_for_state("x", "cancelled", a)
+    assert not ws.processing
+
+    await ev2.set()
+    await ev3.wait()
+    assert ts.previous == "long-running"
+    assert not ws.processing
+
+    x = c.submit(inc, 1, key="x")
+    await wait_for_state("x", "long-running", a)
+
+    # Test that the scheduler receives a delayed {op: long-running}
+    assert ws.processing
+    while sum(ws.processing.values()):
+        await asyncio.sleep(0.1)
+    assert ws.processing
+
+    await ev4.set()
+    assert await x == 123
+    assert not ws.processing
