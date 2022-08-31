@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import ClassVar
 
 from distributed.http.prometheus import PrometheusCollector
 from distributed.http.utils import RequestHandler
@@ -77,19 +78,22 @@ class WorkerMetricCollector(PrometheusCollector):
 
 
 class PrometheusHandler(RequestHandler):
-    _initialized = False
+    _collector: ClassVar[WorkerMetricCollector | None] = None
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, dask_server=None, **kwargs):
         import prometheus_client
 
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, dask_server=dask_server, **kwargs)
 
-        if PrometheusHandler._initialized:
+        if PrometheusHandler._collector:
+            # Especially during testing, multiple workers are started
+            # sequentially in the same python process
+            PrometheusHandler._collector.server = self.server
             return
 
-        prometheus_client.REGISTRY.register(WorkerMetricCollector(self.server))
-
-        PrometheusHandler._initialized = True
+        PrometheusHandler._collector = WorkerMetricCollector(self.server)
+        # Register collector
+        prometheus_client.REGISTRY.register(PrometheusHandler._collector)
 
     def get(self):
         import prometheus_client
