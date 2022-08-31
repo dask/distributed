@@ -1474,14 +1474,19 @@ class WorkerState:
         self.in_flight_tasks.discard(ts)
 
     def _should_throttle_incoming_transfers(self) -> bool:
-        return (
-            len(self.in_flight_workers) >= self.transfer_incoming_count_limit
-            and self.transfer_incoming_bytes
-            >= self.transfer_incoming_bytes_throttle_threshold
-        ) or (
-            self.transfer_incoming_bytes_limit is not None
-            and self.transfer_incoming_bytes >= self.transfer_incoming_bytes_limit
+        reached_count_limit = (
+            self.transfer_incoming_count >= self.transfer_incoming_count_limit
         )
+        reached_throttle_threshold = (
+            self.transfer_incoming_bytes
+            >= self.transfer_incoming_bytes_throttle_threshold
+        )
+        has_bytes_limit = self.transfer_incoming_bytes_limit is not None
+        reached_bytes_limit = (
+            has_bytes_limit
+            and self.transfer_incoming_bytes >= self.transfer_incoming_bytes
+        )
+        return reached_count_limit and reached_throttle_threshold or reached_bytes_limit
 
     def _ensure_communicating(self, *, stimulus_id: str) -> RecsInstrs:
         """Transition tasks from fetch to flight, until there are no more tasks in fetch
