@@ -5,19 +5,15 @@ digraph{
         ];
     released1 [label=released];
     released2 [label=released];
-    new -> released1;
     released1 -> waiting;
     waiting -> processing;
     waiting -> "no-worker";
-    "no-worker" -> processing;
-    "no-worker" -> released2;
     waiting -> queued;
+    "no-worker" -> processing;
     queued -> processing;
-    queued -> released2;
-    processing -> released2;
     processing -> memory;
     processing -> error;
-    error -> forgotten;
+    error -> released2;
     memory -> released2;
     released2 -> forgotten;
 }
