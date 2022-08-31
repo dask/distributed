@@ -261,8 +261,12 @@ async def test_decide_worker_coschedule_order_binary_op(c, s, a, b, ngroups):
 
     await c.gather(c.compute(zs))
 
-    assert not a.incoming_transfer_log, [l["keys"] for l in a.incoming_transfer_log]
-    assert not b.incoming_transfer_log, [l["keys"] for l in b.incoming_transfer_log]
+    assert not a.state.incoming_transfer_log, [
+        l["keys"] for l in a.state.incoming_transfer_log
+    ]
+    assert not b.state.incoming_transfer_log, [
+        l["keys"] for l in b.state.incoming_transfer_log
+    ]
 
 
 @pytest.mark.slow
