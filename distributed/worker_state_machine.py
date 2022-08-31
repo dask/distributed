@@ -794,7 +794,7 @@ class ComputeTaskEvent(StateMachineEvent):
         return ComputeTaskEvent(
             key=key,
             who_has=who_has or {},
-            nbytes=nbytes or {k: 1 for k in who_has or ()},
+            nbytes=nbytes or {k: 7 for k in who_has or ()},
             priority=priority,
             duration=duration,
             run_spec=None,

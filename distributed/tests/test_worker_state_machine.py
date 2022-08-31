@@ -410,7 +410,7 @@ def test_computetask_dummy():
 
     # nbytes is generated from who_has if omitted
     ev2 = ComputeTaskEvent.dummy("x", who_has={"y": "127.0.0.1:2"}, stimulus_id="s")
-    assert ev2.nbytes == {"y": 1}
+    assert ev2.nbytes == {"y": 7}
 
 
 def test_updatedata_to_dict():
@@ -1030,6 +1030,9 @@ def test_aggregate_gather_deps(ws, nbytes, n_in_flight):
     assert instructions == [GatherDep.match(worker=ws2, stimulus_id="s1")]
     assert len(instructions[0].to_gather) == n_in_flight
     assert len(ws.in_flight_tasks) == n_in_flight
+    assert ws.transfer_incoming_bytes == nbytes * n_in_flight
+    assert ws.transfer_incoming_count == 1
+    assert ws.transfer_incoming_count_total == 1
 
 
 def test_gather_priority(ws):
@@ -1083,7 +1086,7 @@ def test_gather_priority(ws):
             stimulus_id="unpause",
             worker="127.0.0.7:1",
             to_gather={"y", "x8"},
-            total_nbytes=1 + 4 * 2**20,
+            total_nbytes=7 + 4 * 2**20,
         ),
         # Followed by local workers
         GatherDep(
@@ -1111,6 +1114,10 @@ def test_gather_priority(ws):
             total_nbytes=4 * 2**20,
         ),
     ]
+    expected_bytes = 7 + 4 * 2**20 + 4 * 2**20 + 8 * 2**20 + 4 * 2**20
+    assert ws.transfer_incoming_bytes == expected_bytes
+    assert ws.transfer_incoming_count == 4
+    assert ws.transfer_incoming_count_total == 4
 
 
 @pytest.mark.parametrize("state", ["executing", "long-running"])
@@ -1264,3 +1271,83 @@ def test_gather_dep_failure(ws):
     ]
     assert ws.tasks["x"].state == "error"
     assert ws.tasks["y"].state == "waiting"  # Not ready
+    assert ws.transfer_incoming_bytes == 0
+    assert ws.transfer_incoming_count == 0
+    assert ws.transfer_incoming_count_total == 1
+
+
+def test_transfer_incoming_metrics(ws):
+    assert ws.transfer_incoming_bytes == 0
+    assert ws.transfer_incoming_count == 0
+    assert ws.transfer_incoming_count_total == 0
+
+    ws2 = "127.0.0.1:2"
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "b", who_has={"a": [ws2]}, nbytes={"a": 7}, stimulus_id="s1"
+        )
+    )
+    assert ws.transfer_incoming_bytes == 7
+    assert ws.transfer_incoming_count == 1
+    assert ws.transfer_incoming_count_total == 1
+
+    ws.handle_stimulus(
+        GatherDepSuccessEvent(
+            worker=ws2, data={"a": 123}, total_nbytes=7, stimulus_id="s2"
+        )
+    )
+    assert ws.transfer_incoming_bytes == 0
+    assert ws.transfer_incoming_count == 0
+    assert ws.transfer_incoming_count_total == 1
+
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "e",
+            who_has={"c": [ws2], "d": [ws2]},
+            nbytes={"c": 11, "d": 13},
+            stimulus_id="s2",
+        )
+    )
+    assert ws.transfer_incoming_bytes == 24
+    assert ws.transfer_incoming_count == 1
+    assert ws.transfer_incoming_count_total == 2
+
+    ws.handle_stimulus(
+        GatherDepSuccessEvent(
+            worker=ws2, data={"c": 123, "d": 234}, total_nbytes=24, stimulus_id="s3"
+        )
+    )
+    assert ws.transfer_incoming_bytes == 0
+    assert ws.transfer_incoming_count == 0
+    assert ws.transfer_incoming_count_total == 2
+
+    ws3 = "127.0.0.1:3"
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "h",
+            who_has={"f": [ws2], "g": [ws3]},
+            nbytes={"f": 17, "g": 19},
+            stimulus_id="s4",
+        )
+    )
+    assert ws.transfer_incoming_bytes == 36
+    assert ws.transfer_incoming_count == 2
+    assert ws.transfer_incoming_count_total == 4
+
+    ws.handle_stimulus(
+        GatherDepSuccessEvent(
+            worker=ws3, data={"g": 345}, total_nbytes=19, stimulus_id="s5"
+        )
+    )
+    assert ws.transfer_incoming_bytes == 17
+    assert ws.transfer_incoming_count == 1
+    assert ws.transfer_incoming_count_total == 4
+
+    ws.handle_stimulus(
+        GatherDepSuccessEvent(
+            worker=ws2, data={"g": 456}, total_nbytes=17, stimulus_id="s6"
+        )
+    )
+    assert ws.transfer_incoming_bytes == 0
+    assert ws.transfer_incoming_count == 0
+    assert ws.transfer_incoming_count_total == 4
