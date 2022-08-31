@@ -21,7 +21,7 @@ import weakref
 import zipfile
 from collections import deque
 from collections.abc import Generator
-from contextlib import contextmanager, nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
 from functools import partial
 from operator import add
 from threading import Semaphore
@@ -72,7 +72,7 @@ from distributed.client import (
 from distributed.cluster_dump import load_cluster_dump
 from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, WINDOWS
-from distributed.core import Server, Status
+from distributed.core import Status
 from distributed.metrics import time
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
 from distributed.sizeof import sizeof
@@ -648,7 +648,7 @@ async def test_gather_skip(c, s, a):
 async def test_limit_concurrent_gathering(c, s, a, b):
     futures = c.map(inc, range(100))
     await c.gather(futures)
-    assert len(a.outgoing_transfer_log) + len(b.outgoing_transfer_log) < 100
+    assert len(a.transfer_outgoing_log) + len(b.transfer_outgoing_log) < 100
 
 
 @gen_cluster(client=True)
@@ -2990,15 +2990,13 @@ async def test_unrunnable_task_runs(c, s, a, b):
     assert s.tasks[x.key] in s.unrunnable
     assert s.get_task_status(keys=[x.key]) == {x.key: "no-worker"}
 
-    w = await Worker(s.address)
+    async with Worker(s.address):
+        while x.status != "finished":
+            await asyncio.sleep(0.01)
 
-    while x.status != "finished":
-        await asyncio.sleep(0.01)
-
-    assert s.tasks[x.key] not in s.unrunnable
-    result = await x
-    assert result == 2
-    await w.close()
+        assert s.tasks[x.key] not in s.unrunnable
+        result = await x
+        assert result == 2
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -3595,66 +3593,53 @@ async def test_scatter_raises_if_no_workers(c, s):
 async def test_reconnect():
     port = open_port()
 
-    async def hard_stop(s):
-        for pc in s.periodic_callbacks.values():
-            pc.stop()
+    stack = ExitStack()
+    proc = popen(["dask-scheduler", "--no-dashboard", f"--port={port}"])
+    stack.enter_context(proc)
+    async with Client(f"127.0.0.1:{port}", asynchronous=True) as c, Worker(
+        f"127.0.0.1:{port}"
+    ) as w:
+        await c.wait_for_workers(1, timeout=10)
+        x = c.submit(inc, 1)
+        assert (await x) == 2
+        stack.close()
 
-        s.stop_services()
-        for comm in list(s.stream_comms.values()):
-            comm.abort()
-        for comm in list(s.client_comms.values()):
-            comm.abort()
+        start = time()
+        while c.status != "connecting":
+            assert time() < start + 10
+            await asyncio.sleep(0.01)
 
-        await s.rpc.close()
-        s.stop()
-        await Server.close(s)
+        assert x.status == "cancelled"
+        with pytest.raises(CancelledError):
+            await x
 
-    async with Scheduler(port=port) as s:
-        async with Client(f"127.0.0.1:{port}", asynchronous=True) as c:
-            async with Worker(f"127.0.0.1:{port}") as w:
-                await c.wait_for_workers(1, timeout=10)
+        with popen(["dask-scheduler", "--no-dashboard", f"--port={port}"]):
+            start = time()
+            while c.status != "running":
+                await asyncio.sleep(0.1)
+                assert time() < start + 10
+
+            await w.finished()
+            async with Worker(f"127.0.0.1:{port}"):
+                start = time()
+                while len(await c.nthreads()) != 1:
+                    await asyncio.sleep(0.05)
+                    assert time() < start + 10
+
                 x = c.submit(inc, 1)
                 assert (await x) == 2
-                await hard_stop(s)
 
-                start = time()
-                while c.status != "connecting":
-                    assert time() < start + 10
-                    await asyncio.sleep(0.01)
-
-                assert x.status == "cancelled"
-                with pytest.raises(CancelledError):
-                    await x
-
-                async with Scheduler(port=port) as s2:
-                    start = time()
-                    while c.status != "running":
-                        await asyncio.sleep(0.1)
-                        assert time() < start + 10
-
-                    await w.finished()
-                    w = await Worker(f"127.0.0.1:{port}")
-
-                    start = time()
-                    while len(await c.nthreads()) != 1:
-                        await asyncio.sleep(0.05)
-                        assert time() < start + 10
-
-                    x = c.submit(inc, 1)
-                    assert (await x) == 2
-                    await hard_stop(s2)
-
-                start = time()
-                while True:
-                    assert time() < start + 10
-                    try:
-                        await x
-                        assert False
-                    except CommClosedError:
-                        continue
-                    except CancelledError:
-                        break
-            await c._close(fast=True)
+        start = time()
+        while True:
+            assert time() < start + 10
+            try:
+                await x
+                assert False
+            except CommClosedError:
+                continue
+            except CancelledError:
+                break
+        await c._close(fast=True)
 
 
 class UnhandledExceptions(Exception):
@@ -6085,11 +6070,10 @@ async def test_wait_for_workers(c, s, a, b):
     await asyncio.sleep(0.22)  # 2 chances
     assert not future.done()
 
-    w = await Worker(s.address)
-    start = time()
-    await future
-    assert time() < start + 1
-    await w.close()
+    async with Worker(s.address):
+        start = time()
+        await future
+        assert time() < start + 1
 
     with pytest.raises(TimeoutError) as info:
         await c.wait_for_workers(n_workers=10, timeout="1 ms")
@@ -7511,16 +7495,29 @@ if __name__ == "__main__":
 
 
 @pytest.mark.slow
+@pytest.mark.flaky(reruns=5, rerun_delay=10, only_rerun="Found blocklist match")
 @pytest.mark.parametrize("processes", [True, False])
 def test_quiet_close_process(processes, tmp_path):
     with open(tmp_path / "script.py", mode="w") as f:
         f.write(client_script % processes)
 
     with popen([sys.executable, tmp_path / "script.py"], capture_output=True) as proc:
-        out, err = proc.communicate(timeout=60)
+        out, _ = proc.communicate(timeout=60)
 
-    assert not out
-    assert not err
+    lines = out.decode("utf-8").split("\n")
+    lines = [stripped for line in lines if (stripped := line.strip())]
+
+    # List of frequent spurious messages that are beyond the scope of this test
+    blocklist = [
+        "Creating scratch directories is taking a surprisingly long time",
+        "Future exception was never retrieved",
+        "tornado.util.TimeoutError",
+    ]
+    lines2 = [line for line in lines if not any(ign in line for ign in blocklist)]
+    # Instant failure for messages not in blocklist
+    assert not lines2
+    # Retry up to 5 times if the only messages are in the blocklist
+    assert not lines, "Found blocklist match, retrying: " + str(lines)
 
 
 @gen_cluster(client=False, nthreads=[])
@@ -7557,3 +7554,32 @@ async def test_fast_close_on_aexit_failure(s):
     assert _close_proxy.mock_calls == [mock.call(fast=True)]
     assert c.status == "closed"
     assert (stop - start) < 2
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_wait_for_workers_no_default(c, s):
+    with pytest.warns(
+        FutureWarning,
+        match="specify the `n_workers` argument when using `Client.wait_for_workers`",
+    ):
+        await c.wait_for_workers()
+
+
+@pytest.mark.parametrize(
+    "value, exception",
+    [
+        (None, ValueError),
+        (0, ValueError),
+        (1.0, ValueError),
+        (1, None),
+        (2, None),
+    ],
+)
+@gen_cluster(client=True)
+async def test_wait_for_workers_n_workers_value_check(c, s, a, b, value, exception):
+    if exception:
+        ctx = pytest.raises(exception)
+    else:
+        ctx = nullcontext()
+    with ctx:
+        await c.wait_for_workers(value)
