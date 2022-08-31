@@ -1,6 +1,62 @@
 Changelog
 =========
 
+.. _v2022.8.1:
+
+2022.8.1
+--------
+
+Released on August 19, 2022
+
+New Features
+^^^^^^^^^^^^
+
+Enhancements
+^^^^^^^^^^^^
+- Drop comparison of versions against all clients (:pr:`6861`) `Hendrik Makait`_
+- Log the worker name if set (:pr:`6866`) `Johannes Lange`_
+- Skip ``getaddrinfo`` thread if host is already resolved, using ``socket.AI_NUMERIC*`` (:pr:`6847`) `Thomas Grainger`_
+- Display unexpected state in ``Worker.execute`` validation (:pr:`6856`) `James Bourbeau`_
+- ``pre-spawn-environ`` (:pr:`6841`) `crusaderky`_
+- Dump ``has_what``, ``missing_dep_flight`` (:pr:`6830`) `Gabe Joseph`_
+
+Bug Fixes
+^^^^^^^^^
+- ``cancelled`` / ``resumed`` -> ``rescheduled`` transition (:pr:`6913`) `crusaderky`_
+- Fix resource deallocation for resumed tasks (:pr:`6914`) `crusaderky`_
+- Only close scheduler in ``SpecCluster`` if it exists (:pr:`6888`) `Matthew Rocklin`_
+- Fix issue if ``exc.reason`` is ``None`` (:pr:`6881`) `Hendrik Makait`_
+- Always close ``BatchedSend`` write coroutines (:pr:`6865`) `Gabe Joseph`_
+- Harden preamble of ``Worker.execute`` against race conditions (:pr:`6878`) `crusaderky`_
+
+Documentation
+^^^^^^^^^^^^^
+- Fix typo (:pr:`6870`) `Pieter Gijsbers`_
+
+Maintenance
+^^^^^^^^^^^
+- Use retries for the test report (:pr:`6926`) `Florian Jetter`_
+- Duplicated code: ``in_flight_tasks`` validation (:pr:`6917`) `crusaderky`_
+- ``ipywidgets`` 8 compatibility (:pr:`6912`) `James Bourbeau`_
+- Overhaul transitions for the ``resumed`` state (:pr:`6699`) `crusaderky`_
+- Don't upgrade to ``ipywidgets`` 8 (:pr:`6910`) `crusaderky`_
+- Clean up ``cluster`` process reaping (:pr:`6840`) `Gabe Joseph`_
+- Don't use ``bokeh`` ``Figure`` in tests (:pr:`6721`) `Bryan Van de Ven`_
+- Work around incompatibility of crick with setuptools 65 (:pr:`6887`) `crusaderky`_
+- Add max version constraint for ``dask-core`` in nightlies (:pr:`6862`) `Charles Blackmon-Luca`_
+- Replace ``port = random.randint(`` with ``port = d.utils.open_port`` (:pr:`6883`) `Thomas Grainger`_
+- Fix flaky ``test_wall_clock`` (:pr:`6879`) `crusaderky`_
+- Add descriptive error message to assert (:pr:`6871`) `Hendrik Makait`_
+- Increase timeout in ``test_quiet_process`` (:pr:`6857`) `Florian Jetter`_
+- Descriptive title for test report (:pr:`6849`) `Hendrik Makait`_
+- Add ``flake8-bugbear`` as plugin to ``pre-commit`` (:pr:`6809`) `Hendrik Makait`_
+- Remove redundant use of ``with clean():`` (:pr:`6852`) `Thomas Grainger`_
+- Show actual Job URL on test report (:pr:`6837`) `Florian Jetter`_
+- Update ``pre-commit`` dependencies (:pr:`6851`) `Hendrik Makait`_
+- Call exit callback even if ``AsyncProcess`` is reaped elsewhere (:pr:`6684`) `Thomas Grainger`_
+- Avoid function calls in argument defaults (:pr:`6812`) `Hendrik Makait`_
+- Ignore warning for unclose ``SSHCluster`` in tests (:pr:`6827`) `Florian Jetter`_
+
 .. _v2022.8.0:
 
 2022.8.0
@@ -4034,3 +4090,5 @@ significantly without many new features.
 .. _`Lawrence Mitchell`: https://github.com/wence-
 .. _`Iain Dorrington`: https://github.com/idorrington92
 .. _`Martí Zamora`: https://github.com/z4m0
+.. _`Johannes Lange`: https://github.com/jolange
+.. _`Pieter Gijsbers`: https://github.com/PGijsbers

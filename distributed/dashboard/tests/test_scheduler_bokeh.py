@@ -19,6 +19,7 @@ from dask.core import flatten
 from dask.utils import stringify
 
 from distributed.client import wait
+from distributed.core import Status
 from distributed.dashboard import scheduler
 from distributed.dashboard.components.scheduler import (
     AggregateAction,
@@ -29,6 +30,7 @@ from distributed.dashboard.components.scheduler import (
     Events,
     Hardware,
     MemoryByKey,
+    MemoryColor,
     Occupancy,
     ProcessingHistogram,
     ProfileServer,
@@ -321,6 +323,48 @@ async def test_ClusterMemory(c, s, a, b):
     # unmanaged_old; there may be unmanaged_new. There won't be managed_spilled.
     assert any(d["width"])
     assert not all(d["width"])
+
+
+def test_memory_color():
+    def config(**kwargs):
+        return dask.config.set(
+            {f"distributed.worker.memory.{k}": v for k, v in kwargs.items()}
+        )
+
+    with config(target=0.6, spill=0.7, pause=0.8, terminate=0.95):
+        c = MemoryColor()
+        assert c._memory_color(50, 100, Status.running) == "blue"
+        assert c._memory_color(60, 100, Status.running) == "orange"
+        assert c._memory_color(75, 100, Status.running) == "orange"
+        # Pause is not impacted by the paused threshold, but by the worker status
+        assert c._memory_color(85, 100, Status.running) == "orange"
+        assert c._memory_color(0, 100, Status.paused) == "red"
+        assert c._memory_color(0, 100, Status.closing_gracefully) == "red"
+        # Passing the terminate threshold will turn the bar red, regardless of pause
+        assert c._memory_color(95, 100, Status.running) == "red"
+        # Disabling memory limit disables all threshold-related color changes
+        assert c._memory_color(100, 0, Status.running) == "blue"
+        assert c._memory_color(100, 0, Status.paused) == "red"
+
+    # target disabled
+    with config(target=False, spill=0.7):
+        c = MemoryColor()
+        assert c._memory_color(60, 100, Status.running) == "blue"
+        assert c._memory_color(75, 100, Status.running) == "orange"
+
+    # spilling disabled
+    with config(target=False, spill=False, pause=0.8, terminate=0.95):
+        c = MemoryColor()
+        assert c._memory_color(94, 100, Status.running) == "blue"
+        assert c._memory_color(0, 100, Status.closing_gracefully) == "red"
+        assert c._memory_color(95, 100, Status.running) == "red"
+
+    # terminate disabled; fall back to 100%
+    with config(target=False, spill=False, terminate=False):
+        c = MemoryColor()
+        assert c._memory_color(99, 100, Status.running) == "blue"
+        assert c._memory_color(100, 100, Status.running) == "red"
+        assert c._memory_color(110, 100, Status.running) == "red"
 
 
 @gen_cluster(client=True)

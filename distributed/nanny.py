@@ -780,9 +780,11 @@ class WorkerProcess:
         logger.info("Nanny asking worker to close")
 
         process = self.process
-        assert self.process
+        assert process
+        queue = self.child_stop_q
+        assert queue
         wait_timeout = timeout * 0.8
-        self.child_stop_q.put(
+        queue.put(
             {
                 "op": "stop",
                 "timeout": wait_timeout,
@@ -790,19 +792,25 @@ class WorkerProcess:
             }
         )
         await asyncio.sleep(0)  # otherwise we get broken pipe errors
-        self.child_stop_q.close()
+        queue.close()
+        del queue
 
         try:
-            await process.join(wait_timeout)
-            return
-        except asyncio.TimeoutError:
-            pass
+            try:
+                await process.join(wait_timeout)
+                return
+            except asyncio.TimeoutError:
+                pass
 
-        logger.warning(
-            f"Worker process still alive after {wait_timeout} seconds, killing"
-        )
-        await process.kill()
-        await process.join(max(0, deadline - time()))
+            logger.warning(
+                f"Worker process still alive after {wait_timeout} seconds, killing"
+            )
+            await process.kill()
+            await process.join(max(0, deadline - time()))
+        except ValueError as e:
+            if "invalid operation on closed AsyncProcess" in str(e):
+                return
+            raise
 
     async def _wait_until_connected(self, uid):
         while True:

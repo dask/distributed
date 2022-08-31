@@ -59,6 +59,14 @@ async def test_parse_memory_limit_worker(s, w):
     assert w.memory_manager.memory_limit == 2e9
 
 
+@gen_cluster(nthreads=[("", 1)], worker_kwargs={"memory_limit": "0.5"})
+async def test_parse_memory_limit_worker_relative(s, w):
+    assert w.memory_manager.memory_limit > 0.5
+    assert w.memory_manager.memory_limit == pytest.approx(
+        distributed.system.MEMORY_LIMIT * 0.5
+    )
+
+
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],

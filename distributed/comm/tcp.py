@@ -420,22 +420,29 @@ _NUMERIC_ONLY = socket.AI_NUMERICHOST | socket.AI_NUMERICSERV
 
 
 async def _getaddrinfo(host, port, *, family, type=socket.SOCK_STREAM):
-    # If host and port are numeric, then getaddrinfo doesn't block and we can
-    # skip get_running_loop().getaddrinfo which is implemented by running in
-    # a ThreadPoolExecutor.
-    # So we try first with the _NUMERIC_ONLY flags set, and then only use the
-    # threadpool if that fails with EAI_NONAME:
-    try:
-        return socket.getaddrinfo(
-            host,
-            port,
-            family=family,
-            type=type,
-            flags=_NUMERIC_ONLY,
-        )
-    except socket.gaierror as e:
-        if e.errno != socket.EAI_NONAME:
-            raise
+    # On Python3.8 we are observing problems, particularly on slow systems
+    # For additional info, see
+    # https://github.com/dask/distributed/pull/6847#issuecomment-1208179864
+    # https://github.com/dask/distributed/pull/6847
+    # https://github.com/dask/distributed/issues/6896
+    # https://github.com/dask/distributed/issues/6846
+    if sys.version_info >= (3, 9):
+        # If host and port are numeric, then getaddrinfo doesn't block and we
+        # can skip get_running_loop().getaddrinfo which is implemented by
+        # running in a ThreadPoolExecutor. So we try first with the
+        # _NUMERIC_ONLY flags set, and then only use the threadpool if that
+        # fails with EAI_NONAME:
+        try:
+            return socket.getaddrinfo(
+                host,
+                port,
+                family=family,
+                type=type,
+                flags=_NUMERIC_ONLY,
+            )
+        except socket.gaierror as e:
+            if e.errno != socket.EAI_NONAME:
+                raise
 
     # That failed; it's a real hostname. We better use a thread.
     return await asyncio.get_running_loop().getaddrinfo(
