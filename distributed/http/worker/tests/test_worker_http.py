@@ -21,6 +21,12 @@ async def test_prometheus(c, s, a):
         "dask_worker_concurrent_fetch_requests",
         "dask_worker_threads",
         "dask_worker_latency_seconds",
+        "dask_worker_transfer_incoming_bytes",
+        "dask_worker_transfer_incoming_count",
+        "dask_worker_transfer_incoming_count_total",
+        "dask_worker_transfer_outgoing_bytes",
+        "dask_worker_transfer_outgoing_count",
+        "dask_worker_transfer_outgoing_count_total",
     }
 
     try:
