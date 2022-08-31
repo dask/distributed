@@ -1149,14 +1149,14 @@ class WorkerState:
     #: dependencies until the current query returns.
     in_flight_workers: dict[str, set[str]]
 
-    #: The total size of incoming data transfers for in-flight tasks.
+    #: Current total size of open data transfers from other workers
     transfer_incoming_bytes: int
 
-    #: The maximum number of concurrent incoming data transfers from other workers.
+    #: Maximum number of concurrent incoming data transfers from other workers.
     #: See also :attr:`distributed.worker.Worker.transfer_outgoing_count_limit`.
     transfer_incoming_count_limit: int
 
-    #: Number of total data transfers from other workers since the worker was started.
+    #: Total number of data transfers from other workers since the worker was started.
     transfer_incoming_count_total: int
 
     #: Ignore :attr:`transfer_incoming_count_limit` as long as :attr:`transfer_incoming_bytes` is
@@ -1354,7 +1354,7 @@ class WorkerState:
 
     @property
     def in_flight_tasks_count(self) -> int:
-        """Count of tasks currently being replicated from other workers to this one.
+        """Number of tasks currently being replicated from other workers to this one.
 
         See also
         --------
@@ -1364,7 +1364,7 @@ class WorkerState:
 
     @property
     def transfer_incoming_count(self) -> int:
-        """Count of open data transfers from other workers.
+        """Current number of open data transfers from other workers.
 
         See also
         --------
@@ -1529,6 +1529,7 @@ class WorkerState:
             )
 
             self.in_flight_workers[worker] = to_gather_keys
+            self.transfer_incoming_count_total += 1
             self.transfer_incoming_bytes += total_nbytes
             if (
                 self.transfer_incoming_count >= self.transfer_incoming_count_limit
@@ -2845,7 +2846,6 @@ class WorkerState:
         _execute_done_common
         """
         self.transfer_incoming_bytes -= ev.total_nbytes
-        self.transfer_incoming_count_total += 1
         keys = self.in_flight_workers.pop(ev.worker)
         for key in keys:
             ts = self.tasks[key]

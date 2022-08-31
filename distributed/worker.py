@@ -385,9 +385,11 @@ class Worker(BaseWorker, ServerNode):
     profile_history: deque[tuple[float, dict[str, Any]]]
     transfer_incoming_log: deque[dict[str, Any]]
     transfer_outgoing_log: deque[dict[str, Any]]
-    #: Number of total data transfers to other workers.
+    #: Total number of data transfers to other workers since the worker was started
     transfer_outgoing_count_total: int
-    #: Number of open data transfers to other workers.
+    #: Current total size of open data transfers to other workers
+    transfer_outgoing_bytes: int
+    #: Current number of open data transfers to other workers
     transfer_outgoing_count: int
     bandwidth: float
     latency: float
@@ -543,6 +545,7 @@ class Worker(BaseWorker, ServerNode):
         self.transfer_incoming_log = deque(maxlen=100000)
         self.transfer_outgoing_log = deque(maxlen=100000)
         self.transfer_outgoing_count_total = 0
+        self.transfer_outgoing_bytes = 0
         self.transfer_outgoing_count = 0
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
         self.bandwidth_workers = defaultdict(
@@ -982,6 +985,14 @@ class Worker(BaseWorker, ServerNode):
             spilled_nbytes={
                 "memory": spilled_memory,
                 "disk": spilled_disk,
+            },
+            transfer={
+                "incoming_bytes": self.state.transfer_incoming_bytes,
+                "incoming_count": self.state.transfer_incoming_count,
+                "incoming_count_total": self.state.transfer_incoming_count_total,
+                "outgoing_bytes": self.transfer_outgoing_bytes,
+                "outgoing_count": self.transfer_outgoing_count,
+                "outgoing_count_total": self.transfer_outgoing_count_total,
             },
             event_loop_interval=self._tick_interval_observed,
         )
@@ -1684,6 +1695,7 @@ class Worker(BaseWorker, ServerNode):
             return {"status": "busy"}
 
         self.transfer_outgoing_count += 1
+        self.transfer_outgoing_count_total += 1
         data = {k: self.data[k] for k in keys if k in self.data}
 
         if len(data) < len(keys):
@@ -1696,7 +1708,11 @@ class Worker(BaseWorker, ServerNode):
                     )
 
         msg = {"status": "OK", "data": {k: to_serialize(v) for k, v in data.items()}}
-        nbytes = {k: self.state.tasks[k].nbytes for k in data if k in self.state.tasks}
+        # Note: `if k in self.data` above guarantees that
+        # k is in self.state.tasks too and that nbytes is non-None
+        bytes_per_task = {k: self.state.tasks[k].nbytes or 0 for k in data}
+        total_bytes = sum(bytes_per_task.values())
+        self.transfer_outgoing_bytes += total_bytes
         stop = time()
         if self.digests is not None:
             self.digests["get-data-load-duration"].add(stop - start)
@@ -1715,14 +1731,12 @@ class Worker(BaseWorker, ServerNode):
             comm.abort()
             raise
         finally:
+            self.transfer_outgoing_bytes -= total_bytes
             self.transfer_outgoing_count -= 1
         stop = time()
         if self.digests is not None:
             self.digests["get-data-send-duration"].add(stop - start)
 
-        total_bytes = sum(filter(None, nbytes.values()))
-
-        self.transfer_outgoing_count_total += 1
         duration = (stop - start) or 0.5  # windows
         self.transfer_outgoing_log.append(
             {
@@ -1731,7 +1745,7 @@ class Worker(BaseWorker, ServerNode):
                 "middle": (start + stop) / 2,
                 "duration": duration,
                 "who": who,
-                "keys": nbytes,
+                "keys": bytes_per_task,
                 "total": total_bytes,
                 "compressed": compressed,
                 "bandwidth": total_bytes / duration,
