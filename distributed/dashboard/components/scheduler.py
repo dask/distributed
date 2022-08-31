@@ -630,12 +630,12 @@ class WorkersMemoryHistogram(DashboardComponent):
         update(self.source, d)
 
 
-class WorkersCommReserved(DashboardComponent):
-    """Bytes reserved for comms per workers
+class WorkersTransferBytes(DashboardComponent):
+    """Size of open data transfers from/to other workers per worker
 
     See also
     --------
-    WorkersCommReservedHistogram
+    WorkersTransferBytesHistogram
     """
 
     @log_errors
@@ -643,29 +643,45 @@ class WorkersCommReserved(DashboardComponent):
         self.scheduler = scheduler
         self.source = ColumnDataSource(
             {
-                "comm_reserved_bytes": [],
                 "escaped_worker": [],
+                "transfer_incoming_bytes": [],
+                "transfer_outgoing_bytes": [],
                 "worker": [],
-                "y": [],
+                "y_incoming": [],
+                "y_outgoing": [],
             }
         )
 
         self.root = figure(
-            title="Bytes reserved for comms per worker",
+            title="Size of open data transfers per worker",
             tools="",
-            id="bk-workers-comm-reserved-plot",
+            id="bk-workers-transfer-bytes-plot",
             width=int(width / 2),
-            name="workers_comm_reserved",
+            name="workers_transfer_bytes",
             min_border_bottom=50,
             **kwargs,
         )
 
+        # transfer_incoming_bytes
         self.root.hbar(
-            y="y",
-            right="comm_reserved_bytes",
+            name="transfer_incoming_bytes",
+            y="y_incoming",
+            right="transfer_incoming_bytes",
             line_color=None,
             left=0,
-            height=0.9,
+            height=0.5,
+            fill_color="red",
+            source=self.source,
+        )
+
+        # transfer_outgoing_bytes
+        self.root.hbar(
+            name="transfer_outgoing_bytes",
+            y="y_outgoing",
+            right="transfer_outgoing_bytes",
+            line_color=None,
+            left=0,
+            height=0.5,
             fill_color="blue",
             source=self.source,
         )
@@ -680,88 +696,60 @@ class WorkersCommReserved(DashboardComponent):
         self.root.toolbar_location = None
 
         tap = TapTool(callback=OpenURL(url="./info/worker/@escaped_worker.html"))
-        hover = HoverTool()
-        hover.tooltips = "@worker : @comm_reserved_bytes{0.00 b}"
-        hover.point_policy = "follow_mouse"
-        self.root.add_tools(hover, tap)
+        incoming_hover = HoverTool(
+            names=["transfer_incoming_bytes"],
+            tooltips=[
+                ("Worker", "@worker"),
+                ("Incoming", "@transfer_incoming_bytes{0.00 b}"),
+            ],
+            point_policy="follow_mouse",
+        )
+        outgoing_hover = HoverTool(
+            names=["transfer_outgoing_bytes"],
+            tooltips=[
+                ("Worker", "@worker"),
+                ("Outgoing", "@transfer_outgoing_bytes{0.00 b}"),
+            ],
+            point_policy="follow_mouse",
+        )
+        self.root.add_tools(incoming_hover, outgoing_hover, tap)
 
     @without_property_validation
     @log_errors
     def update(self):
         wss = self.scheduler.workers.values()
 
-        y = list(range(len(wss)))
+        h = 0.1
+        y_incoming = [i + 0.75 + i * h for i in range(len(wss))]
+        y_outgoing = [i + 0.25 + i * h for i in range(len(wss))]
 
-        comm_reserved_bytes = [ws.metrics["comm_reserved_bytes"] for ws in wss]
+        transfer_incoming_bytes = [
+            ws.metrics["transfer"]["incoming_bytes"] for ws in wss
+        ]
+        transfer_outgoing_bytes = [
+            ws.metrics["transfer"]["outgoing_bytes"] for ws in wss
+        ]
         workers = [ws.address for ws in wss]
         escaped_workers = [escape.url_escape(worker) for worker in workers]
 
         if wss:
-            x_limit = max(max(comm_reserved_bytes), max(ws.memory_limit for ws in wss))
+            x_limit = max(
+                max(transfer_incoming_bytes),
+                max(transfer_outgoing_bytes),
+                max(ws.memory_limit for ws in wss),
+            )
         else:
             x_limit = 0
         self.root.x_range.end = x_limit
 
         result = {
-            "comm_reserved_bytes": comm_reserved_bytes,
             "escaped_worker": escaped_workers,
+            "transfer_incoming_bytes": transfer_incoming_bytes,
+            "transfer_outgoing_bytes": transfer_outgoing_bytes,
             "worker": workers,
-            "y": y,
+            "y_incoming": y_incoming,
+            "y_outgoing": y_outgoing,
         }
-        update(self.source, result)
-
-
-class WorkersCommReservedHistogram(DashboardComponent):
-    """Histogram of bytes reserved for comms, showing how many workers there are
-    in each bucket of reservation. Replaces the per-worker graph when there are >= 50 workers.
-
-    See Also
-    --------
-    WorkersCommReserved
-    """
-
-    @log_errors
-    def __init__(self, scheduler, **kwargs):
-        self.last = 0
-        self.scheduler = scheduler
-        self.source = ColumnDataSource({"left": [], "right": [], "top": []})
-
-        self.root = figure(
-            title="Bytes reserved for comms per worker",
-            tools="",
-            name="workers_comm_reserved",
-            id="bk-workers-comm-reserved-histogram-plot",
-            y_axis_label="frequency",
-            **kwargs,
-        )
-
-        self.root.axis[0].ticker = AdaptiveTicker(**TICKS_1024)
-        self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
-        self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
-        self.root.xaxis.minor_tick_line_alpha = 0
-        self.root.ygrid.visible = False
-        self.root.toolbar_location = None
-
-        self.root.quad(
-            source=self.source,
-            left="left",
-            right="right",
-            bottom=0,
-            top="top",
-            color="deepskyblue",
-            fill_alpha=0.5,
-        )
-
-    @without_property_validation
-    def update(self):
-        comm_reserved_bytes = np.asarray(
-            [
-                ws.metrics["comm_reserved_bytes"]
-                for ws in self.scheduler.workers.values()
-            ]
-        )
-        counts, x = np.histogram(comm_reserved_bytes, bins=40)
-        result = {"left": x[:-1], "right": x[1:], "top": counts}
         update(self.source, result)
 
 
@@ -4253,35 +4241,31 @@ def status_doc(scheduler, extra, doc):
 
     if len(scheduler.workers) <= 100:
         workers_memory = WorkersMemory(scheduler, sizing_mode="stretch_both")
-        workers_comm_reserved = WorkersCommReserved(
-            scheduler, sizing_mode="stretch_both"
-        )
+
         processing = CurrentLoad(scheduler, sizing_mode="stretch_both")
 
         processing_root = processing.processing_figure
     else:
         workers_memory = WorkersMemoryHistogram(scheduler, sizing_mode="stretch_both")
-        workers_comm_reserved = WorkersCommReservedHistogram(
-            scheduler, sizing_mode="stretch_both"
-        )
         processing = ProcessingHistogram(scheduler, sizing_mode="stretch_both")
 
         processing_root = processing.root
 
     current_load = CurrentLoad(scheduler, sizing_mode="stretch_both")
     occupancy = Occupancy(scheduler, sizing_mode="stretch_both")
+    workers_transfer_bytes = WorkersTransferBytes(scheduler, sizing_mode="stretch_both")
 
     cpu_root = current_load.cpu_figure
     occupancy_root = occupancy.root
 
     workers_memory.update()
-    workers_comm_reserved.update()
+    workers_transfer_bytes.update()
     processing.update()
     current_load.update()
     occupancy.update()
 
     add_periodic_callback(doc, workers_memory, 100)
-    add_periodic_callback(doc, workers_comm_reserved, 100)
+    add_periodic_callback(doc, workers_transfer_bytes, 100)
     add_periodic_callback(doc, processing, 100)
     add_periodic_callback(doc, current_load, 100)
     add_periodic_callback(doc, occupancy, 100)
@@ -4291,7 +4275,7 @@ def status_doc(scheduler, extra, doc):
     tab1 = Panel(child=processing_root, title="Processing")
     tab2 = Panel(child=cpu_root, title="CPU")
     tab3 = Panel(child=occupancy_root, title="Occupancy")
-    tab4 = Panel(child=workers_comm_reserved.root, title="Comm Reserved")
+    tab4 = Panel(child=workers_transfer_bytes.root, title="Data Transfer")
 
     proc_tabs = Tabs(tabs=[tab1, tab2, tab3, tab4], name="processing_tabs")
     doc.add_root(proc_tabs)

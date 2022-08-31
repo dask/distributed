@@ -30,8 +30,8 @@ from distributed.dashboard.components.scheduler import (
     TaskProgress,
     TaskStream,
     WorkerNetworkBandwidth,
-    WorkersCommReserved,
     WorkersMemory,
+    WorkersTransferBytes,
     WorkerTable,
     events_doc,
     exceptions_doc,
@@ -78,7 +78,7 @@ applications = {
     "/individual-group-progress": individual_doc(TaskGroupProgress, 200),
     "/individual-workers-memory": individual_doc(WorkersMemory, 100),
     "/individual-cluster-memory": individual_doc(ClusterMemory, 100),
-    "/individual-workers-comm-reserved": individual_doc(WorkersCommReserved, 100),
+    "/individual-workers-transfer-bytes": individual_doc(WorkersTransferBytes, 100),
     "/individual-cpu": individual_doc(CurrentLoad, 100, fig_attr="cpu_figure"),
     "/individual-nprocessing": individual_doc(
         CurrentLoad, 100, fig_attr="processing_figure"
