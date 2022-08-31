@@ -7,7 +7,10 @@ digraph{
     released2 [label=released];
     released1 -> waiting;
     waiting -> processing;
-    waiting -> "no-worker" [dir=both];
+    waiting -> "no-worker";
+    waiting -> queued;
+    "no-worker" -> processing;
+    queued -> processing;
     processing -> memory;
     processing -> error;
     error -> released2;
