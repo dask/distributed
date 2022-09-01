@@ -631,12 +631,7 @@ class WorkersMemoryHistogram(DashboardComponent):
 
 
 class WorkersTransferBytes(DashboardComponent):
-    """Size of open data transfers from/to other workers per worker
-
-    See also
-    --------
-    WorkersTransferBytesHistogram
-    """
+    """Size of open data transfers from/to other workers per worker"""
 
     @log_errors
     def __init__(self, scheduler, width=600, **kwargs):
