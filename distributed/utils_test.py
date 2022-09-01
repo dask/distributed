@@ -874,7 +874,11 @@ def gen_cluster(
     async def test_foo(scheduler, worker1, worker2, pytest_fixture_a, pytest_fixture_b):
         await ...  # use tornado coroutines
 
-    @gen_cluster(config={"logging": {"distributed": "debug"}}})
+    @gen_cluster(config={"logging.distributed": "debug"})
+    async def test_foo(scheduler, worker1, worker2):
+        await ...  # use tornado coroutines
+
+    @gen_cluster(config={"logging": {"distributed.scheduler": "debug"}})
     async def test_foo(scheduler, worker1, worker2):
         await ...  # use tornado coroutines
 

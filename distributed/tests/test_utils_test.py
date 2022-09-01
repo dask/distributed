@@ -223,6 +223,18 @@ def test_gen_cluster_custom_logging(config):
     test_func()
 
 
+@gen_cluster(client=True, config={"logging.distributed": "debug"})
+async def test_gen_cluster_custom_logging_global(c, s, a, b):
+    logger = logging.getLogger("distributed")
+    handlers = [l for l in logger.handlers if isinstance(l, logging.StreamHandler)]
+    assert len(handlers) == 1
+    with captured_handler(handlers[0]) as stream:
+        await c.submit(inc, 1)
+
+    # NOTE: relies on transitions being logged in scheduler at debug level
+    assert "Transitioned" in stream.getvalue()
+
+
 @pytest.mark.xfail(
     reason="Test should always fail to ensure the body of the test function was run",
     strict=True,
