@@ -52,13 +52,15 @@ Task State
 ----------
 
 Internally, the scheduler moves tasks between a fixed set of states,
-notably ``released``, ``waiting``, ``no-worker``, ``processing``,
+notably ``released``, ``waiting``, ``no-worker``, ``queued``, ``processing``,
 ``memory``, ``error``.
 
 Tasks flow along the following states with the following allowed transitions:
 
 .. image:: images/task-state.svg
     :alt: Dask scheduler task states
+
+Note that tasks may also transition to ``released`` from any state (not shown on diagram).
 
 released
     Known but not actively computing or in memory
@@ -67,6 +69,8 @@ waiting
 no-worker
     Ready to be computed, but no appropriate worker exists (for example because of
     resource restrictions, or because no worker is connected at all).
+queued
+    Ready to be computed, but all workers are already full.
 processing
     All dependencies are available and the task is assigned to a worker for compute (the
     scheduler doesn't know whether it's in a worker queue or actively being computed).
@@ -80,11 +84,17 @@ forgotten
     dereferenced from the scheduler.
 
 .. note::
-    There's no intermediate state between ``waiting`` / ``no-worker`` and
+    When the ``distributed.scheduler.worker_saturation`` config value is set to ``inf``
+    (default), there's no intermediate state between ``waiting`` / ``no-worker`` and
     ``processing``: as soon as a task has all of its dependencies in memory somewhere on
     the cluster, it is immediately assigned to a worker. This can lead to very long task
     queues on the workers, which are then rebalanced dynamically through
     :doc:`work-stealing`.
+
+    Setting ``distributed.scheduler.worker_saturation`` to ``1.0`` (or any finite value)
+    will instead queue excess root tasks on the scheduler in the ``queued`` state. These
+    tasks are only assigned to workers when they have capacity for them, reducing the
+    length of task queues on the workers.
 
 In addition to the literal state, though, other information needs to be
 kept and updated about each task.  Individual task state is stored in an

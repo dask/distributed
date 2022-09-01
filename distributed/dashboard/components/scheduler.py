@@ -2162,8 +2162,8 @@ class TaskGraph(DashboardComponent):
 
         node_colors = factor_cmap(
             "state",
-            factors=["waiting", "processing", "memory", "released", "erred"],
-            palette=["gray", "green", "red", "blue", "black"],
+            factors=["waiting", "queued", "processing", "memory", "released", "erred"],
+            palette=["gray", "yellow", "green", "red", "blue", "black"],
         )
 
         self.root = figure(title="Task Graph", **kwargs)
@@ -3051,7 +3051,7 @@ class TaskProgress(DashboardComponent):
         self.scheduler = scheduler
 
         data = progress_quads(
-            dict(all={}, memory={}, erred={}, released={}, processing={})
+            dict(all={}, memory={}, erred={}, released={}, processing={}, queued={})
         )
         self.source = ColumnDataSource(data=data)
 
@@ -3123,6 +3123,18 @@ class TaskProgress(DashboardComponent):
             fill_alpha=0.35,
             line_alpha=0,
         )
+        self.root.quad(
+            source=self.source,
+            top="top",
+            bottom="bottom",
+            left="processing-loc",
+            right="queued-loc",
+            fill_color="gray",
+            hatch_pattern="/",
+            hatch_color="white",
+            fill_alpha=0.35,
+            line_alpha=0,
+        )
         self.root.text(
             source=self.source,
             text="show-name",
@@ -3159,16 +3171,20 @@ class TaskProgress(DashboardComponent):
                     <span style="font-size: 10px; font-family: Monaco, monospace;">@all</span>
                 </div>
                 <div>
+                    <span style="font-size: 14px; font-weight: bold;">Queued:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@queued</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Processing:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@processing</span>
+                </div>
+                <div>
                     <span style="font-size: 14px; font-weight: bold;">Memory:</span>&nbsp;
                     <span style="font-size: 10px; font-family: Monaco, monospace;">@memory</span>
                 </div>
                 <div>
                     <span style="font-size: 14px; font-weight: bold;">Erred:</span>&nbsp;
                     <span style="font-size: 10px; font-family: Monaco, monospace;">@erred</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Ready:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@processing</span>
                 </div>
                 """,
         )
@@ -3183,6 +3199,7 @@ class TaskProgress(DashboardComponent):
             "released": {},
             "processing": {},
             "waiting": {},
+            "queued": {},
         }
 
         for tp in self.scheduler.task_prefixes.values():
@@ -3193,6 +3210,7 @@ class TaskProgress(DashboardComponent):
                 state["released"][tp.name] = active_states["released"]
                 state["processing"][tp.name] = active_states["processing"]
                 state["waiting"][tp.name] = active_states["waiting"]
+                state["queued"][tp.name] = active_states["queued"]
 
         state["all"] = {k: sum(v[k] for v in state.values()) for k in state["memory"]}
 
@@ -3205,7 +3223,7 @@ class TaskProgress(DashboardComponent):
 
         totals = {
             k: sum(state[k].values())
-            for k in ["all", "memory", "erred", "released", "waiting"]
+            for k in ["all", "memory", "erred", "released", "waiting", "queued"]
         }
         totals["processing"] = totals["all"] - sum(
             v for k, v in totals.items() if k != "all"
@@ -3213,8 +3231,10 @@ class TaskProgress(DashboardComponent):
 
         self.root.title.text = (
             "Progress -- total: %(all)s, "
-            "in-memory: %(memory)s, processing: %(processing)s, "
             "waiting: %(waiting)s, "
+            "queued: %(queued)s, "
+            "processing: %(processing)s, "
+            "in-memory: %(memory)s, "
             "erred: %(erred)s" % totals
         )
 

@@ -33,6 +33,7 @@ from typing import IO, Any, Generator, Iterator, Literal
 import pytest
 import yaml
 from tlz import assoc, memoize, merge
+from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import IOLoop
 
 import dask
@@ -2440,3 +2441,18 @@ def requires_default_ports(name_of_test):
         raise TimeoutError(f"Default ports didn't open up in time for {name_of_test}")
 
     yield
+
+
+async def fetch_metrics(port: int, prefix: str | None = None) -> dict[str, Any]:
+    from prometheus_client.parser import text_string_to_metric_families
+
+    http_client = AsyncHTTPClient()
+    response = await http_client.fetch(f"http://localhost:{port}/metrics")
+    assert response.code == 200
+    txt = response.body.decode("utf8")
+    families = {
+        family.name: family
+        for family in text_string_to_metric_families(txt)
+        if prefix is None or family.name.startswith(prefix)
+    }
+    return families

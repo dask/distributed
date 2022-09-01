@@ -517,7 +517,7 @@ class LongRunningMsg(SendMessageToScheduler):
 
     __slots__ = ("key", "compute_duration")
     key: str
-    compute_duration: float
+    compute_duration: float | None
 
 
 @dataclass
@@ -1149,14 +1149,14 @@ class WorkerState:
     #: dependencies until the current query returns.
     in_flight_workers: dict[str, set[str]]
 
-    #: The total size of incoming data transfers for in-flight tasks.
+    #: Current total size of open data transfers from other workers
     transfer_incoming_bytes: int
 
-    #: The maximum number of concurrent incoming data transfers from other workers.
+    #: Maximum number of concurrent incoming data transfers from other workers.
     #: See also :attr:`distributed.worker.Worker.transfer_outgoing_count_limit`.
     transfer_incoming_count_limit: int
 
-    #: Number of total data transfers from other workers since the worker was started.
+    #: Total number of data transfers from other workers since the worker was started.
     transfer_incoming_count_total: int
 
     #: Ignore :attr:`transfer_incoming_count_limit` as long as :attr:`transfer_incoming_bytes` is
@@ -1359,7 +1359,7 @@ class WorkerState:
 
     @property
     def in_flight_tasks_count(self) -> int:
-        """Count of tasks currently being replicated from other workers to this one.
+        """Number of tasks currently being replicated from other workers to this one.
 
         See also
         --------
@@ -1369,7 +1369,7 @@ class WorkerState:
 
     @property
     def transfer_incoming_count(self) -> int:
-        """Count of open data transfers from other workers.
+        """Current number of open data transfers from other workers.
 
         See also
         --------
@@ -1554,6 +1554,7 @@ class WorkerState:
             )
 
             self.in_flight_workers[worker] = to_gather_keys
+            self.transfer_incoming_count_total += 1
             self.transfer_incoming_bytes += total_nbytes
             if self._should_throttle_incoming_transfers():
                 break
@@ -2102,24 +2103,39 @@ class WorkerState:
         See also
         --------
         _transition_cancelled_fetch
+        _transition_cancelled_or_resumed_long_running
         _transition_cancelled_waiting
         _transition_resumed_fetch
         """
         # None of the exit events of execute or gather_dep recommend a transition to
         # waiting
         assert not ts.done
-        if ts.previous in ("executing", "long-running"):
+        if ts.previous == "executing":
             assert ts.next == "fetch"
             # We're back where we started. We should forget about the entire
             # cancellation attempt
-            ts.state = ts.previous
+            ts.state = "executing"
             ts.next = None
             ts.previous = None
-        elif self.validate:
+            return {}, []
+
+        elif ts.previous == "long-running":
+            assert ts.next == "fetch"
+            # Same as executing, and in addition send the LongRunningMsg in arrears
+            # Note that, if the task seceded before it was cancelled, this will cause
+            # the message to be sent twice.
+            ts.state = "long-running"
+            ts.next = None
+            ts.previous = None
+            smsg = LongRunningMsg(
+                key=ts.key, compute_duration=None, stimulus_id=stimulus_id
+            )
+            return {}, [smsg]
+
+        else:
             assert ts.previous == "flight"
             assert ts.next == "waiting"
-
-        return {}, []
+            return {}, []
 
     def _transition_cancelled_fetch(
         self, ts: TaskState, *, stimulus_id: str
@@ -2156,17 +2172,29 @@ class WorkerState:
         See also
         --------
         _transition_cancelled_fetch
+        _transition_cancelled_or_resumed_long_running
         _transition_resumed_fetch
         _transition_resumed_waiting
         """
         # None of the exit events of gather_dep or execute recommend a transition to
         # waiting
         assert not ts.done
-        if ts.previous in ("executing", "long-running"):
+        if ts.previous == "executing":
             # Forget the task was cancelled to begin with
-            ts.state = ts.previous
+            ts.state = "executing"
             ts.previous = None
             return {}, []
+        elif ts.previous == "long-running":
+            # Forget the task was cancelled to begin with, and inform the scheduler
+            # in arrears that it has seceded.
+            # Note that, if the task seceded before it was cancelled, this will cause
+            # the message to be sent twice.
+            ts.state = "long-running"
+            ts.previous = None
+            smsg = LongRunningMsg(
+                key=ts.key, compute_duration=None, stimulus_id=stimulus_id
+            )
+            return {}, [smsg]
         else:
             assert ts.previous == "flight"
             ts.state = "resumed"
@@ -2259,6 +2287,11 @@ class WorkerState:
     def _transition_executing_long_running(
         self, ts: TaskState, compute_duration: float, *, stimulus_id: str
     ) -> RecsInstrs:
+        """
+        See also
+        --------
+        _transition_cancelled_or_resumed_long_running
+        """
         ts.state = "long-running"
         self.executing.discard(ts)
         self.long_running.add(ts)
@@ -2270,6 +2303,34 @@ class WorkerState:
             ({}, [smsg]),
             self._ensure_computing(),
         )
+
+    def _transition_cancelled_or_resumed_long_running(
+        self, ts: TaskState, compute_duration: float, *, stimulus_id: str
+    ) -> RecsInstrs:
+        """Handles transitions:
+
+        - cancelled(executing) -> long-running
+        - cancelled(long-running) -> long-running (user called secede() twice)
+        - resumed(executing->fetch) -> long-running
+        - resumed(long-running->fetch) -> long-running (user called secede() twice)
+
+        Unlike in the executing->long_running transition, do not send LongRunningMsg.
+        From the scheduler's perspective, this task no longer exists (cancelled) or is
+        in memory on another worker (resumed). So it shouldn't hear about it.
+        Instead, we're going to send the LongRunningMsg when and if the task
+        transitions back to waiting.
+
+        See also
+        --------
+        _transition_executing_long_running
+        _transition_cancelled_waiting
+        _transition_resumed_waiting
+        """
+        assert ts.previous in ("executing", "long-running")
+        ts.previous = "long-running"
+        self.executing.discard(ts)
+        self.long_running.add(ts)
+        return self._ensure_computing()
 
     def _transition_executing_memory(
         self, ts: TaskState, value: object, *, stimulus_id: str
@@ -2377,6 +2438,7 @@ class WorkerState:
     ] = {
         ("cancelled", "error"): _transition_cancelled_released,
         ("cancelled", "fetch"): _transition_cancelled_fetch,
+        ("cancelled", "long-running"): _transition_cancelled_or_resumed_long_running,
         ("cancelled", "memory"): _transition_cancelled_released,
         ("cancelled", "missing"): _transition_cancelled_released,
         ("cancelled", "released"): _transition_cancelled_released,
@@ -2384,8 +2446,8 @@ class WorkerState:
         ("cancelled", "waiting"): _transition_cancelled_waiting,
         ("resumed", "error"): _transition_resumed_error,
         ("resumed", "fetch"): _transition_resumed_fetch,
+        ("resumed", "long-running"): _transition_cancelled_or_resumed_long_running,
         ("resumed", "memory"): _transition_resumed_memory,
-        ("resumed", "missing"): _transition_resumed_missing,
         ("resumed", "released"): _transition_resumed_released,
         ("resumed", "rescheduled"): _transition_resumed_rescheduled,
         ("resumed", "waiting"): _transition_resumed_waiting,
@@ -2809,7 +2871,6 @@ class WorkerState:
         _execute_done_common
         """
         self.transfer_incoming_bytes -= ev.total_nbytes
-        self.transfer_incoming_count_total += 1
         keys = self.in_flight_workers.pop(ev.worker)
         for key in keys:
             ts = self.tasks[key]
@@ -2923,10 +2984,9 @@ class WorkerState:
     @_handle_event.register
     def _handle_secede(self, ev: SecedeEvent) -> RecsInstrs:
         ts = self.tasks.get(ev.key)
-        if ts and ts.state == "executing":
-            return {ts: ("long-running", ev.compute_duration)}, []
-        else:
+        if not ts:
             return {}, []
+        return {ts: ("long-running", ev.compute_duration)}, []
 
     @_handle_event.register
     def _handle_steal_request(self, ev: StealRequestEvent) -> RecsInstrs:
