@@ -1381,7 +1381,7 @@ def test_throttling_does_not_affect_first_transfer(ws):
     assert ws.tasks["a"].state == "flight"
 
 
-def test_throttle_incoming_transfers_on__count_limit(ws):
+def test_throttle_incoming_transfers_on_count_limit(ws):
     ws.transfer_incoming_count_limit = 1
     ws.transfer_incoming_bytes_limit = 100_000
     ws.transfer_incoming_bytes_throttle_threshold = 1
