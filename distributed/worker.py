@@ -750,7 +750,7 @@ class Worker(BaseWorker, ServerNode):
             if self.memory_manager.memory_limit is None
             else int(
                 self.memory_manager.memory_limit
-                * dask.config.get("distributed.worker.memory.comm")
+                * dask.config.get("distributed.worker.memory.transfer")
             )
         )
         state = WorkerState(

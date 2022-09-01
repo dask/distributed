@@ -508,13 +508,21 @@ properties:
                       donate data and only nodes below 45% will receive them. This helps
                       avoid data from bouncing around the cluster repeatedly.
 
+              transfer:
+                oneOf:
+                  - {type: number, minimum: 0, maximum: 1}
+                  - {enum: [false]}
+                description: >-
+                  When the total size of incoming data transfers gets above this amount,
+                  we start throttling incoming data transfers
+
               target:
                 oneOf:
                   - {type: number, minimum: 0, maximum: 1}
                   - {enum: [false]}
                 description: >-
                   When the process memory (as observed by the operating system) gets
-                  above this amount we start spilling the dask keys holding the largest
+                  above this amount, we start spilling the dask keys holding the largest
                   chunks of data to disk
 
               spill:
@@ -523,7 +531,7 @@ properties:
                   - {enum: [false]}
                 description: >-
                   When the process memory (as observed by the operating system) gets
-                  above this amount we spill all data to disk.
+                  above this amount, we spill all data to disk.
 
               pause:
                 oneOf:
@@ -531,7 +539,7 @@ properties:
                   - {enum: [false]}
                 description: >-
                   When the process memory (as observed by the operating system) gets
-                  above this amount we no longer start new tasks on this worker.
+                  above this amount, we no longer start new tasks on this worker.
 
               terminate:
                 oneOf:
