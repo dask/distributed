@@ -26,7 +26,7 @@ jobs:
         python-version: ["3.8", "3.9", "3.10"]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
-        queuing: [False]
+        queuing: ["no-queue"]
         exclude:
           - os: macos-latest
             python-version: 3.9
@@ -37,7 +37,7 @@ jobs:
             partition-label: "notci1"
           - os: ubuntu-latest  # only test queuing on ubuntu 3.9
             python-version: 3.9
-            queuing: True
+            queuing: "queue"
 
         # Uncomment to stress-test the test suite for random failures.
         # Must also change env.TEST_ID below.
@@ -123,7 +123,7 @@ jobs:
               export DISABLE_IPV6=1
           fi
 
-          if [[ "${{ matrix.queuing }}" = "True" ]]; then
+          if [[ "${{ matrix.queuing }}" = "queue" ]]; then
               export DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=1.0
           fi
 
