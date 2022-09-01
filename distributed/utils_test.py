@@ -33,6 +33,7 @@ from typing import IO, Any, Generator, Iterator, Literal
 import pytest
 import yaml
 from tlz import assoc, memoize, merge
+from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import IOLoop
 
 import dask
@@ -2281,13 +2282,13 @@ def freeze_data_fetching(w: Worker, *, jump_start: bool = False) -> Iterator[Non
         If True, trigger ensure_communicating on exit; this simulates e.g. an unrelated
         worker moving out of in_flight_workers.
     """
-    old_out_connections = w.state.total_out_connections
-    old_comm_threshold = w.state.comm_threshold_bytes
-    w.state.total_out_connections = 0
-    w.state.comm_threshold_bytes = 0
+    old_count_limit = w.state.transfer_incoming_count_limit
+    old_threshold = w.state.transfer_incoming_bytes_throttle_threshold
+    w.state.transfer_incoming_count_limit = 0
+    w.state.transfer_incoming_bytes_throttle_threshold = 0
     yield
-    w.state.total_out_connections = old_out_connections
-    w.state.comm_threshold_bytes = old_comm_threshold
+    w.state.transfer_incoming_count_limit = old_count_limit
+    w.state.transfer_incoming_bytes_throttle_threshold = old_threshold
     if jump_start:
         w.status = Status.paused
         w.status = Status.running
@@ -2440,3 +2441,18 @@ def requires_default_ports(name_of_test):
         raise TimeoutError(f"Default ports didn't open up in time for {name_of_test}")
 
     yield
+
+
+async def fetch_metrics(port: int, prefix: str | None = None) -> dict[str, Any]:
+    from prometheus_client.parser import text_string_to_metric_families
+
+    http_client = AsyncHTTPClient()
+    response = await http_client.fetch(f"http://localhost:{port}/metrics")
+    assert response.code == 200
+    txt = response.body.decode("utf8")
+    families = {
+        family.name: family
+        for family in text_string_to_metric_families(txt)
+        if prefix is None or family.name.startswith(prefix)
+    }
+    return families
