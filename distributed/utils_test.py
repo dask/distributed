@@ -1756,15 +1756,22 @@ def check_instances():
 @contextmanager
 def config_for_cluster_tests(**extra_config):
     "Set recommended config values for tests that create or interact with clusters."
-    with new_config(
-        {
-            "local_directory": tempfile.gettempdir(),
-            "distributed.admin.tick.interval": "500 ms",
-            "distributed.worker.profile.enabled": False,
-            **extra_config,
-        },
-    ):
-        yield
+    reset_config()
+
+    try:
+        with dask.config.set(
+            {
+                "local_directory": tempfile.gettempdir(),
+                "distributed.admin.tick.interval": "500 ms",
+                "distributed.worker.profile.enabled": False,
+                **extra_config,
+            },
+        ):
+            initialize_logging(dask.config.config)
+            yield
+    finally:
+        # reset logging
+        initialize_logging(dask.config.config)
 
 
 @contextmanager
