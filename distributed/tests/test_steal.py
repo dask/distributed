@@ -1084,6 +1084,7 @@ async def test_steal_concurrent_simple(c, s, *workers):
     client=True,
     config={
         "distributed.scheduler.work-stealing-interval": 1_000_000,
+        "logging.distributed": "debug",
     },
 )
 async def test_steal_reschedule_reset_in_flight_occupancy(c, s, *workers):
