@@ -1490,10 +1490,9 @@ class WorkerState:
             self.transfer_incoming_bytes
             >= self.transfer_incoming_bytes_throttle_threshold
         )
-        has_bytes_limit = self.transfer_incoming_bytes_limit is not None
         reached_bytes_limit = (
-            has_bytes_limit
-            and self.transfer_incoming_bytes >= self.transfer_incoming_bytes
+            self.transfer_incoming_bytes_limit is not None
+            and self.transfer_incoming_bytes >= self.transfer_incoming_bytes_limit
         )
         return reached_count_limit and reached_throttle_threshold or reached_bytes_limit
 
