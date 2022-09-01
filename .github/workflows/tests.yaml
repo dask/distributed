@@ -26,6 +26,7 @@ jobs:
         python-version: ["3.8", "3.9", "3.10"]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
+        queuing: [False]
         exclude:
           - os: macos-latest
             python-version: 3.9
@@ -34,6 +35,9 @@ jobs:
             partition-label: "ci1"
           - partition: "not ci1"
             partition-label: "notci1"
+          - os: ubuntu-latest  # only test queuing on ubuntu 3.9
+            python-version: 3.9
+            queuing: True
 
         # Uncomment to stress-test the test suite for random failures.
         # Must also change env.TEST_ID below.
@@ -44,8 +48,8 @@ jobs:
         # run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
     env:
-      TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}
-      # TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}-${{ matrix.run }}
+      TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}-${{ matrix.queuing }}
+      # TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}-${{ matrix.queuing }}-${{ matrix.run }}
 
     steps:
       - name: Checkout source
@@ -117,6 +121,10 @@ jobs:
               # FIXME ipv6-related failures on Ubuntu github actions CI
               # https://github.com/dask/distributed/issues/4514
               export DISABLE_IPV6=1
+          fi
+
+          if [[ "${{ matrix.queuing }}" = "True" ]]; then
+              export DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=1.0
           fi
 
           source continuous_integration/scripts/set_ulimit.sh
