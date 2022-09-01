@@ -1513,7 +1513,9 @@ class WorkerState:
             to_gather_tasks, total_nbytes = self._select_keys_for_gather(
                 available_tasks
             )
-            assert to_gather_tasks
+            assert to_gather_tasks or self.transfer_incoming_bytes
+            if not to_gather_tasks:
+                break
             to_gather_keys = {ts.key for ts in to_gather_tasks}
 
             logger.debug(
@@ -1638,7 +1640,7 @@ class WorkerState:
         while available:
             ts = available.peek()
             # The top-priority task is fetched regardless of its size
-            if to_gather and (
+            if (self.transfer_incoming_bytes or to_gather) and (
                 total_nbytes + ts.get_nbytes() > self.transfer_message_target_bytes
                 or (
                     self.transfer_incoming_bytes_limit is not None
