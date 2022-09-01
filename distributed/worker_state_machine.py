@@ -1513,9 +1513,12 @@ class WorkerState:
             to_gather_tasks, total_nbytes = self._select_keys_for_gather(
                 available_tasks
             )
+            # We always load at least one task
             assert to_gather_tasks or self.transfer_incoming_bytes
+            # ...but that task might be selected in the previous iteration of the loop
             if not to_gather_tasks:
                 break
+
             to_gather_keys = {ts.key for ts in to_gather_tasks}
 
             logger.debug(
@@ -1632,7 +1635,8 @@ class WorkerState:
         """Helper of _ensure_communicating.
 
         Fetch all tasks that are replicated on the target worker within a single
-        message, up to transfer_message_target_bytes.
+        message, up to transfer_message_target_bytes or until we reach the limit
+        for the size of incoming data transfers.
         """
         to_gather: list[TaskState] = []
         total_nbytes = 0
@@ -1640,13 +1644,17 @@ class WorkerState:
         while available:
             ts = available.peek()
             # The top-priority task is fetched regardless of its size
-            if (self.transfer_incoming_bytes or to_gather) and (
+            gather_at_least_one_task = self.transfer_incoming_bytes or to_gather
+            exceed_message_target = (
                 total_nbytes + ts.get_nbytes() > self.transfer_message_target_bytes
-                or (
-                    self.transfer_incoming_bytes_limit is not None
-                    and self.transfer_incoming_bytes + total_nbytes + ts.get_nbytes()
-                    > self.transfer_incoming_bytes_limit
-                )
+            )
+            exceed_bytes_limit = (
+                self.transfer_incoming_bytes_limit is not None
+                and self.transfer_incoming_bytes + total_nbytes + ts.get_nbytes()
+                > self.transfer_incoming_bytes_limit
+            )
+            if gather_at_least_one_task and (
+                exceed_message_target or exceed_bytes_limit
             ):
                 break
             for worker in ts.who_has:
