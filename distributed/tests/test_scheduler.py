@@ -1488,10 +1488,7 @@ async def test_balance_many_workers(c, s, *workers):
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1)] * 30,
-    config={
-        "distributed.scheduler.work-stealing": False,
-        "logging.distributed": "debug",
-    },
+    config={"distributed.scheduler.work-stealing": False},
 )
 async def test_balance_many_workers_2(c, s, *workers):
     futures = c.map(slowinc, range(90), delay=0.2)

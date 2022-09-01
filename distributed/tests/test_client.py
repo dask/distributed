@@ -5516,13 +5516,7 @@ def test_client_async_before_loop_starts(cleanup):
 
 
 @pytest.mark.slow
-@gen_cluster(
-    client=True,
-    Worker=Nanny,
-    timeout=60,
-    nthreads=[("127.0.0.1", 3)] * 2,
-    config={"logging.distributed": "debug"},
-)
+@gen_cluster(client=True, Worker=Nanny, timeout=60, nthreads=[("127.0.0.1", 3)] * 2)
 async def test_nested_compute(c, s, a, b):
     def fib(x):
         assert get_worker().get_current_task()
