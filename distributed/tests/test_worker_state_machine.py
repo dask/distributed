@@ -1384,16 +1384,22 @@ def test_throttle_incoming_transfers_on_count_limit(ws):
             stimulus_id="s1",
         )
     )
-    assert ws.tasks["a"].state == "flight"
-    assert ws.tasks["b"].state == "fetch"
+    tasks_by_state = defaultdict(list)
+    for ts in ws.tasks.values():
+        tasks_by_state[ts.state].append(ts)
+    assert len(tasks_by_state["flight"]) == 1
+    assert len(tasks_by_state["fetch"]) == 1
     assert ws.transfer_incoming_bytes == 100
 
     ws.handle_stimulus(
         GatherDepSuccessEvent(
-            worker=ws2, data={"a": 123}, total_nbytes=100, stimulus_id="s2"
+            worker=ws2,
+            data={tasks_by_state["flight"][0]: 123},
+            total_nbytes=100,
+            stimulus_id="s2",
         )
     )
-    assert ws.tasks["b"].state == "flight"
+    assert ws.tasks[tasks_by_state["fetch"][0]].state == "flight"
     assert ws.transfer_incoming_bytes == 100
 
 
