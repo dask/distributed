@@ -133,6 +133,8 @@ jobs:
               export DISABLE_IPV6=1
           fi
 
+          echo $DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION
+
           source continuous_integration/scripts/set_ulimit.sh
           set -o pipefail
           mkdir reports
