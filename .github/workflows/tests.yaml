@@ -26,18 +26,23 @@ jobs:
         python-version: ["3.8", "3.9", "3.10"]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
-        queuing: ["no-queue"]
+        queuing: [queue, no-queue]
         exclude:
           - os: macos-latest
             python-version: 3.9
+          - queuing: queue
+            os: macos-latest
+          - queuing: queue
+            os: windows-latest
+          - queuing: queue
+            python-version: 3.8
+          - queuing: queue
+            python-version: 3.10
         include:
           - partition: "ci1"
             partition-label: "ci1"
           - partition: "not ci1"
             partition-label: "notci1"
-          - os: ubuntu-latest  # only test queuing on ubuntu 3.9
-            python-version: 3.9
-            queuing: "queue"
 
         # Uncomment to stress-test the test suite for random failures.
         # Must also change env.TEST_ID below.
