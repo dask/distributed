@@ -745,14 +745,18 @@ class Worker(BaseWorker, ServerNode):
             memory_spill_fraction=memory_spill_fraction,
             memory_pause_fraction=memory_pause_fraction,
         )
-        transfer_incoming_bytes_limit = (
-            None
-            if self.memory_manager.memory_limit is None
-            else int(
-                self.memory_manager.memory_limit
-                * dask.config.get("distributed.worker.memory.transfer")
-            )
+
+        transfer_incoming_bytes_limit = None
+        transfer_incoming_bytes_fraction = dask.config.get(
+            "distributed.worker.memory.transfer"
         )
+        if (
+            self.memory_manager.memory_limit is not None
+            and transfer_incoming_bytes_fraction is not False
+        ):
+            transfer_incoming_bytes_limit = int(
+                self.memory_manager.memory_limit * transfer_incoming_bytes_fraction
+            )
         state = WorkerState(
             nthreads=nthreads,
             data=self.memory_manager.data,
