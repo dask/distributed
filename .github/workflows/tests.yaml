@@ -116,11 +116,6 @@ jobs:
 
           python continuous_integration/scripts/host_info.py
 
-      - name: Enable queuing
-        if: ${{ matrix.queuing == 'queue' }}
-        shell: bash -l {0}
-        run: export DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=1.0
-
       - name: Test
         id: run_tests
         shell: bash -l {0}
@@ -131,6 +126,11 @@ jobs:
               # FIXME ipv6-related failures on Ubuntu github actions CI
               # https://github.com/dask/distributed/issues/4514
               export DISABLE_IPV6=1
+          fi
+
+          if [[ "${{ matrix.queuing }}" = "queue" ]]; then
+              export DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=1.0
+              echo "worker-saturation: $DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION"
           fi
 
           source continuous_integration/scripts/set_ulimit.sh
