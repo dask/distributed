@@ -541,7 +541,8 @@ properties:
                   - {enum: [false]}
                 description: >-
                   When the process memory (as observed by the operating system) gets
-                  above this amount, we no longer start new tasks on this worker.
+                  above this amount, we no longer start new tasks or fetch new
+                  data on the worker.
 
               terminate:
                 oneOf:
