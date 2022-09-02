@@ -691,23 +691,15 @@ class WorkersTransferBytes(DashboardComponent):
         self.root.toolbar_location = None
 
         tap = TapTool(callback=OpenURL(url="./info/worker/@escaped_worker.html"))
-        incoming_hover = HoverTool(
-            names=["transfer_incoming_bytes"],
+        hover = HoverTool(
             tooltips=[
                 ("Worker", "@worker"),
                 ("Incoming", "@transfer_incoming_bytes{0.00 b}"),
-            ],
-            point_policy="follow_mouse",
-        )
-        outgoing_hover = HoverTool(
-            names=["transfer_outgoing_bytes"],
-            tooltips=[
-                ("Worker", "@worker"),
                 ("Outgoing", "@transfer_outgoing_bytes{0.00 b}"),
             ],
             point_policy="follow_mouse",
         )
-        self.root.add_tools(incoming_hover, outgoing_hover, tap)
+        self.root.add_tools(hover, tap)
 
     @without_property_validation
     @log_errors
