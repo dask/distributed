@@ -251,24 +251,6 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
     test_decide_worker_coschedule_order_neighbors_()
 
 
-@pytest.mark.parametrize("ngroups", [1, 2, 3, 5])
-@gen_cluster(
-    client=True,
-    nthreads=[("", 1), ("", 1)],
-    config={
-        "distributed.scheduler.worker-saturation": float("inf"),
-    },
-)
-async def test_decide_worker_coschedule_order_binary_op(c, s, a, b, ngroups):
-    roots = [[delayed(i, name=f"x-{n}-{i}") for i in range(8)] for n in range(ngroups)]
-    zs = [sum(rs) for rs in zip(*roots)]
-
-    await c.gather(c.compute(zs))
-
-    assert not a.transfer_incoming_log, [l["keys"] for l in a.transfer_incoming_log]
-    assert not b.transfer_incoming_log, [l["keys"] for l in b.transfer_incoming_log]
-
-
 @pytest.mark.slow
 @gen_cluster(
     nthreads=[("", 2)] * 4,

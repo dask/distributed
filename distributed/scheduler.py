@@ -847,6 +847,14 @@ class TaskGroup:
     #: The result types of this TaskGroup
     types: set[str]
 
+    #: The worker most recently assigned a task from this group, or None when the group
+    #: is not identified to be root-like by `SchedulerState.decide_worker`.
+    last_worker: WorkerState | None
+
+    #: If `last_worker` is not None, the number of times that worker should be assigned
+    #: subsequent tasks until a new worker is chosen.
+    last_worker_tasks_left: int
+
     prefix: TaskPrefix | None
     start: float
     stop: float
@@ -865,6 +873,8 @@ class TaskGroup:
         self.start = 0.0
         self.stop = 0.0
         self.all_durations = defaultdict(float)
+        self.last_worker = None
+        self.last_worker_tasks_left = 0
 
     def add_duration(self, action: str, start: float, stop: float) -> None:
         duration = stop - start
@@ -1302,8 +1312,6 @@ class SchedulerState:
         "extensions",
         "host_info",
         "idle",
-        "last_root_worker",
-        "last_root_worker_tasks_left",
         "n_tasks",
         "queued",
         "resources",
@@ -1375,8 +1383,6 @@ class SchedulerState:
         self.total_nthreads = 0
         self.total_occupancy = 0.0
         self.unknown_durations: dict[str, set[TaskState]] = {}
-        self.last_root_worker: WorkerState | None = None
-        self.last_root_worker_tasks_left: int = 0
         self.queued = queued
         self.unrunnable = unrunnable
         self.validate = validate
@@ -1824,24 +1830,24 @@ class SchedulerState:
         if not pool:
             return None
 
-        lws = self.last_root_worker
+        tg = ts.group
+        lws = tg.last_worker
         if not (
-            lws
-            and self.last_root_worker_tasks_left
-            and self.workers.get(lws.address) is lws
+            lws and tg.last_worker_tasks_left and self.workers.get(lws.address) is lws
         ):
             # Last-used worker is full or unknown; pick a new worker for the next few tasks
-            ws = self.last_root_worker = min(
-                pool, key=lambda ws: len(ws.processing) / ws.nthreads
-            )
-            # TODO better batching metric (`len(tg)` is not necessarily the total number of root tasks!)
-            self.last_root_worker_tasks_left = math.floor(
-                (len(ts.group) / self.total_nthreads) * ws.nthreads
+            ws = min(pool, key=partial(self.worker_objective, ts))
+            tg.last_worker_tasks_left = math.floor(
+                (len(tg) / self.total_nthreads) * ws.nthreads
             )
         else:
             ws = lws
 
-        self.last_root_worker_tasks_left -= 1
+        # Record `last_worker`, or clear it on the final task
+        tg.last_worker = (
+            ws if tg.states["released"] + tg.states["waiting"] > 1 else None
+        )
+        tg.last_worker_tasks_left -= 1
 
         if self.validate and ws is not None:
             assert self.workers.get(ws.address) is ws
