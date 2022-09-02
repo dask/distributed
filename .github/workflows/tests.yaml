@@ -24,28 +24,24 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.8", "3.9", "3.10"]
+        queuing: [no_queue]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
-        queuing: [no_queue]
         exclude:
           - os: macos-latest
             python-version: 3.9
         include:
-          - partition: "ci1"
-            partition-label: "ci1"
-          - partition: "not ci1"
-            partition-label: "notci1"
           - os: ubuntu-latest
             python-version: 3.9
+            queuing: queue
             partition: "ci1"
-            queuing: queue
           - os: ubuntu-latest
             python-version: 3.9
-            partition: "not ci1"
             queuing: queue
+            partition: "not ci1"
 
         # Uncomment to stress-test the test suite for random failures.
-        # Must also change env.TEST_ID below.
+        # Must also change `export TEST_ID` in first step below.
         # This will take a LONG time and delay all PRs across the whole github.com/dask!
         # To avoid hamstringing other people, change 'on: [push, pull_request]' above
         # to just 'on: [push]'; this way the stress test will run exclusively in your
@@ -54,10 +50,18 @@ jobs:
 
     env:
       CONDA_FILE: continuous_integration/environment-${{ matrix.python-version }}.yaml
-      TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}-${{ matrix.queuing }}
-      # TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}-${{ matrix.queuing }}-${{ matrix.run }}
 
     steps:
+      - name: Set $TEST_ID
+        run: |
+          export PARTITION_LABEL=$( echo "${{ matrix.partition }}" | sed "s/ //" )
+          export TEST_ID="${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.queuing }}-$PARTITION_LABEL"
+          # Switch to this version for stress-test:
+          # export TEST_ID="${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.queuing }}-$PARTITION_LABEL-${{ matrix.run }}"
+          echo "TEST_ID: $TEST_ID"
+          echo "TEST_ID=$TEST_ID" >> $GITHUB_ENV
+        shell: bash
+
       - name: Checkout source
         uses: actions/checkout@v2
         with:
