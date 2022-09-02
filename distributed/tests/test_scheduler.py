@@ -1484,6 +1484,7 @@ async def test_balance_many_workers(c, s, *workers):
     assert {len(w.has_what) for w in s.workers.values()} == {0, 1}
 
 
+@pytest.mark.oversaturate_only  # FIXME flaky on macOS
 @nodebug
 @gen_cluster(
     client=True,
