@@ -1376,10 +1376,11 @@ def test_throttle_incoming_transfers_on_count_limit(ws):
     ws.transfer_incoming_bytes_throttle_threshold = 1
     ws2 = "127.0.0.1:2"
     ws3 = "127.0.0.1:3"
+    who_has = {"a": [ws2], "b": [ws3]}
     ws.handle_stimulus(
         ComputeTaskEvent.dummy(
             "c",
-            who_has={"a": [ws2], "b": [ws3]},
+            who_has=who_has,
             nbytes={"a": 100, "b": 100},
             stimulus_id="s1",
         )
@@ -1391,15 +1392,17 @@ def test_throttle_incoming_transfers_on_count_limit(ws):
     assert len(tasks_by_state["fetch"]) == 1
     assert ws.transfer_incoming_bytes == 100
 
+    in_flight_task = tasks_by_state["flight"][0]
     ws.handle_stimulus(
         GatherDepSuccessEvent(
-            worker=ws2,
-            data={tasks_by_state["flight"][0]: 123},
+            worker=who_has[in_flight_task.key][0],
+            data={in_flight_task.key: 123},
             total_nbytes=100,
             stimulus_id="s2",
         )
     )
-    assert ws.tasks[tasks_by_state["fetch"][0]].state == "flight"
+    assert tasks_by_state["flight"][0].state == "memory"
+    assert tasks_by_state["fetch"][0].state == "flight"
     assert ws.transfer_incoming_bytes == 100
 
 
@@ -1466,8 +1469,8 @@ def test_throttling_incoming_transfer_on_transfer_bytes_different_workers(ws):
             stimulus_id="s2",
         )
     )
-    assert all(ts.state == "memory" for ts in tasks_by_state["flight"])
-    assert all(ts.state == "flight" for ts in tasks_by_state["fetch"])
+    assert tasks_by_state["flight"][0].state == "memory"
+    assert tasks_by_state["fetch"][0].state == "flight"
 
 
 def test_do_not_throttle_connections_while_below_threshold(ws):
