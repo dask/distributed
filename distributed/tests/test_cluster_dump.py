@@ -14,7 +14,7 @@ from distributed.utils_test import assert_story, gen_cluster, gen_test, inc
 
 
 @gen_cluster()
-def test_fails_with_queuing(s, a, b):
+async def test_fails_with_queuing(s, a, b):
     assert s.WORKER_SATURATION != 1.0
 
 

@@ -35,7 +35,7 @@ pytestmark = pytest.mark.ci1
 
 
 @gen_cluster()
-def test_fails_without_queuing(s, a, b):
+async def test_fails_without_queuing(s, a, b):
     assert s.WORKER_SATURATION == 1.0
 
 
