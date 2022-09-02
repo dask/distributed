@@ -36,7 +36,7 @@ from distributed import (
     wait,
 )
 from distributed.comm.addressing import parse_host_port
-from distributed.compatibility import LINUX, WINDOWS
+from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps, loads
@@ -1484,7 +1484,12 @@ async def test_balance_many_workers(c, s, *workers):
     assert {len(w.has_what) for w in s.workers.values()} == {0, 1}
 
 
-@pytest.mark.oversaturate_only  # FIXME flaky on macOS
+# FIXME test is very timing-based; if some threads are consistently slower than others,
+# they'll receive fewer tasks from the queue (a good thing).
+@pytest.mark.skipif(
+    MACOS and math.isfinite(dask.config.get("distributed.scheduler.worker-saturation")),
+    reason="flaky on macOS with queuing active",
+)
 @nodebug
 @gen_cluster(
     client=True,

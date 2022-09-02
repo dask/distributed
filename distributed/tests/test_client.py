@@ -6,6 +6,7 @@ import functools
 import gc
 import inspect
 import logging
+import math
 import operator
 import os
 import pathlib
@@ -5515,7 +5516,12 @@ def test_client_async_before_loop_starts(cleanup):
         loop.run_sync(close)  # TODO: client.close() does not unset global client
 
 
-@pytest.mark.oversaturate_only  # FIXME flaky on windows
+# FIXME shouldn't consistently fail on windows, may be an actual bug
+@pytest.mark.skipif(
+    WINDOWS
+    and math.isfinite(dask.config.get("distributed.scheduler.worker-saturation")),
+    reason="flaky on Windows with queuing active",
+)
 @pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny, timeout=60, nthreads=[("127.0.0.1", 3)] * 2)
 async def test_nested_compute(c, s, a, b):
