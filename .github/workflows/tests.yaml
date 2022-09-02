@@ -41,7 +41,7 @@ jobs:
             queuing: queue
 
         # Uncomment to stress-test the test suite for random failures.
-        # Must also change env.TEST_ID below.
+        # Must also change `export TEST_ID` in first step below.
         # This will take a LONG time and delay all PRs across the whole github.com/dask!
         # To avoid hamstringing other people, change 'on: [push, pull_request]' above
         # to just 'on: [push]'; this way the stress test will run exclusively in your
@@ -56,13 +56,11 @@ jobs:
         run: |
           export PARTITION_LABEL=$( echo "${{ matrix.partition }}" | sed "s/ //" )
           export TEST_ID="${{ matrix.os }}-${{ matrix.python-version }}-$PARTITION_LABEL-${{ matrix.queuing }}"
+          # Switch to this version for stress-test:
           # export TEST_ID="${{ matrix.os }}-${{ matrix.python-version }}-$PARTITION_LABEL-${{ matrix.queuing }}-${{ matrix.run }}"
           echo "TEST_ID: $TEST_ID"
           echo "TEST_ID=$TEST_ID" >> $GITHUB_ENV
         shell: bash
-
-      - name: Test test id
-        run: echo test_id is $TEST_ID
 
       - name: Checkout source
         uses: actions/checkout@v2
