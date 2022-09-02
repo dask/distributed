@@ -140,7 +140,7 @@ def get_jobs(run, session):
         df_jobs.name.str.extract(r"test \((.+)\)", expand=False)
         .dropna()
         .str.split(", ", expand=True)
-        .rename(columns=["OS", "python_version", "partition", "queuing"])
+        .set_axis(["OS", "python_version", "partition", "queuing"], axis="columns")
         .assign(
             # We later need to join on this. Somehow the job ID is not part of the workflow schema and we have no other way to join
             suite_name=lambda df: df["OS"]
