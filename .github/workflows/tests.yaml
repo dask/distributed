@@ -39,12 +39,10 @@ jobs:
             os: ubuntu-latest
             python-version: 3.9
             partition: "ci1"
-            partition-label: "ci1"
           - queuing: queue
             os: ubuntu-latest
             python-version: 3.9
             partition: "not ci1"
-            partition-label: "notci1"
 
         # Uncomment to stress-test the test suite for random failures.
         # Must also change env.TEST_ID below.
