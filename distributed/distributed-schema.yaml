@@ -522,7 +522,7 @@ properties:
                   - {enum: [false]}
                 description: >-
                   When the process memory (as observed by the operating system) gets
-                  above this amount, we start spilling the dask keys holding the largest
+                  above this amount, we start spilling the dask keys holding the oldest
                   chunks of data to disk
 
               spill:
