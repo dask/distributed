@@ -55,8 +55,11 @@ jobs:
       - name: Set $TEST_ID
         run: |
           export PARTITION_LABEL=$( echo "${{ matrix.partition }}" | sed "s/ //" )
-          echo "TEST_ID=${{ matrix.os }}-${{ matrix.python-version }}-$PARTITION_LABEL-${{ matrix.queuing }}" >> $GITHUB_ENV
-        #  echo "TEST_ID=${{ matrix.os }}-${{ matrix.python-version }}-$PARTITION_LABEL-${{ matrix.queuing }}-${{ matrix.run }}" >> $GITHUB_ENV
+          export TEST_ID="${{ matrix.os }}-${{ matrix.python-version }}-$PARTITION_LABEL-${{ matrix.queuing }}"
+          # export TEST_ID="${{ matrix.os }}-${{ matrix.python-version }}-$PARTITION_LABEL-${{ matrix.queuing }}-${{ matrix.run }}"
+          echo "TEST_ID: $TEST_ID"
+          echo "TEST_ID=$TEST_ID" >> $GITHUB_ENV
+        shell: bash
 
       - name: Test test id
         run: echo test_id is $TEST_ID
