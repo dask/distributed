@@ -24,21 +24,21 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.8", "3.9", "3.10"]
+        queuing: [no_queue]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
-        queuing: [no_queue]
         exclude:
           - os: macos-latest
             python-version: 3.9
         include:
           - os: ubuntu-latest
             python-version: 3.9
-            partition: "ci1"
             queuing: queue
+            partition: "ci1"
           - os: ubuntu-latest
             python-version: 3.9
-            partition: "not ci1"
             queuing: queue
+            partition: "not ci1"
 
         # Uncomment to stress-test the test suite for random failures.
         # Must also change `export TEST_ID` in first step below.
@@ -55,9 +55,9 @@ jobs:
       - name: Set $TEST_ID
         run: |
           export PARTITION_LABEL=$( echo "${{ matrix.partition }}" | sed "s/ //" )
-          export TEST_ID="${{ matrix.os }}-${{ matrix.python-version }}-$PARTITION_LABEL-${{ matrix.queuing }}"
+          export TEST_ID="${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.queuing }}-$PARTITION_LABEL"
           # Switch to this version for stress-test:
-          # export TEST_ID="${{ matrix.os }}-${{ matrix.python-version }}-$PARTITION_LABEL-${{ matrix.queuing }}-${{ matrix.run }}"
+          # export TEST_ID="${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.queuing }}-$PARTITION_LABEL-${{ matrix.run }}"
           echo "TEST_ID: $TEST_ID"
           echo "TEST_ID=$TEST_ID" >> $GITHUB_ENV
         shell: bash
