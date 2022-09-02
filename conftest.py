@@ -1,10 +1,7 @@
+# https://pytest.org/latest/example/simple.html#control-skipping-of-tests-according-to-command-line-option
 from __future__ import annotations
 
-import math
-
 import pytest
-
-import dask
 
 # Uncomment to enable more logging and checks
 # (https://docs.python.org/3/library/asyncio-dev.html)
@@ -30,24 +27,13 @@ def pytest_addoption(parser):
 
 
 def pytest_collection_modifyitems(config, items):
-    # https://pytest.org/latest/example/simple.html#control-skipping-of-tests-according-to-command-line-option
-    if skip_slow := not config.getoption("--runslow"):
+    if config.getoption("--runslow"):
         # --runslow given in cli: do not skip slow tests
-        skip_slow_marker = pytest.mark.skip(reason="need --runslow option to run")
-
-    if skip_oversaturate := math.isfinite(
-        dask.config.get("distributed.scheduler.worker_saturation")
-    ):
-        skip_oversaturate_marker = pytest.mark.skip(
-            reason="need `distributed.scheduler.worker_saturation = inf` to run"
-        )
-
+        return
+    skip_slow = pytest.mark.skip(reason="need --runslow option to run")
     for item in items:
-        if skip_slow and "slow" in item.keywords:
-            item.add_marker(skip_slow_marker)
-
-        if skip_oversaturate and "oversaturate_only" in item.keywords:
-            item.add_marker(skip_oversaturate_marker)
+        if "slow" in item.keywords:
+            item.add_marker(skip_slow)
 
         if "ws" in item.fixturenames:
             item.add_marker(pytest.mark.workerstate)
