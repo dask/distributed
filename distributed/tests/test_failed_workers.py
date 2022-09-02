@@ -34,6 +34,11 @@ from distributed.worker_state_machine import FreeKeysEvent
 pytestmark = pytest.mark.ci1
 
 
+@gen_cluster()
+def test_fails_without_queuing(s, a, b):
+    assert s.WORKER_SATURATION == 1.0
+
+
 @pytest.mark.slow()
 def test_submit_after_failed_worker_sync(loop):
     with cluster() as (s, [a, b]):
