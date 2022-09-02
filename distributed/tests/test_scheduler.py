@@ -851,7 +851,7 @@ async def test_ready_remove_worker(s, a, b):
     elif math.isinf(s.WORKER_SATURATION):
         cmp = operator.gt
     else:
-        pytest.fail(f"{s.WORKER_OVERSATURATION=}, must be 1 or inf")
+        pytest.fail(f"{s.WORKER_SATURATION=}, must be 1 or inf")
 
     assert all(cmp(len(w.processing), w.nthreads) for w in s.workers.values()), (
         list(s.workers.values()),
