@@ -44,6 +44,7 @@ jobs:
         # run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
     env:
+      CONDA_FILE: continuous_integration/environment-${{ matrix.python-version }}.yaml
       TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}
       # TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}-${{ matrix.run }}
 
@@ -60,13 +61,38 @@ jobs:
           miniforge-version: latest
           condarc-file: continuous_integration/condarc
           use-mamba: true
-          python-version: ${{ matrix.python-version }}
-          environment-file: continuous_integration/environment-${{ matrix.python-version }}.yaml
           activate-environment: dask-distributed
 
       - name: Show conda options
         shell: bash -l {0}
         run: conda config --show
+
+      - name: Check if caching is enabled
+        uses: xarray-contrib/ci-trigger@v1.1
+        id: skip-caching
+        with:
+          keyword: "[skip-caching]"
+
+      - name: Get Date
+        if: steps.skip-caching.outputs.trigger-found != 'true'
+        id: get-date
+        run: echo "::set-output name=today::$(/bin/date -u '+%Y%m%d')"
+        shell: bash
+
+      - name: Cache Conda env
+        if: steps.skip-caching.outputs.trigger-found != 'true'
+        uses: actions/cache@v2
+        with:
+          path: ${{ env.CONDA }}/envs
+          key: conda-${{ matrix.os }}-${{ steps.get-date.outputs.today }}-${{ hashFiles(env.CONDA_FILE) }}-${{ env.CACHE_NUMBER }}
+        env:
+          # Increase this value to reset cache if continuous_integration/environment-${{ matrix.python-version }}.yaml has not changed
+          CACHE_NUMBER: 0
+        id: cache
+
+      - name: Update environment
+        run: mamba env update -n dask-distributed -f ${{ env.CONDA_FILE }}
+        if: steps.skip-caching.outputs.trigger-found == 'true' || steps.cache.outputs.cache-hit != 'true'
 
       - name: Install
         shell: bash -l {0}
