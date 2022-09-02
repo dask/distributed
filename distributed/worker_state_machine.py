@@ -1641,21 +1641,22 @@ class WorkerState:
         to_gather: list[TaskState] = []
         total_nbytes = 0
 
+        if self.transfer_incoming_bytes_limit is not None:
+            bytes_left_to_fetch = min(
+                self.transfer_incoming_bytes_limit - self.transfer_incoming_bytes,
+                self.transfer_message_target_bytes,
+            )
+        else:
+            bytes_left_to_fetch = self.transfer_message_target_bytes
+
         while available:
             ts = available.peek()
-            # The top-priority task is fetched regardless of its size
-            gather_at_least_one_task = self.transfer_incoming_bytes or to_gather
-            exceed_message_target = (
-                total_nbytes + ts.get_nbytes() > self.transfer_message_target_bytes
-            )
-            exceed_bytes_limit = (
-                self.transfer_incoming_bytes_limit is not None
-                and self.transfer_incoming_bytes + total_nbytes + ts.get_nbytes()
-                > self.transfer_incoming_bytes_limit
-            )
-            if gather_at_least_one_task and (
-                exceed_message_target or exceed_bytes_limit
-            ):
+            if (
+                # When there is no other traffic, the top-priority task is fetched
+                # regardless of its size to ensure progress
+                self.transfer_incoming_bytes
+                or to_gather
+            ) and total_nbytes + ts.get_nbytes() > bytes_left_to_fetch:
                 break
             for worker in ts.who_has:
                 # This also effectively pops from available
