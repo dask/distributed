@@ -531,7 +531,9 @@ properties:
                   - {enum: [false]}
                 description: >-
                   When the process memory (as observed by the operating system) gets
-                  above this amount, we spill all data to disk.
+                  above this amount, we spill data to disk, starting from the dask keys
+                  holding the oldest chunks of data, until the process memory falls below
+                  the target threshold.
 
               pause:
                 oneOf:
