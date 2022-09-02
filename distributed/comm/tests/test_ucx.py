@@ -367,3 +367,13 @@ async def test_ucx_unreachable(
 ):
     with pytest.raises(OSError, match="Timed out trying to connect to"):
         await Client("ucx://255.255.255.255:12345", timeout=1, asynchronous=True)
+
+
+@gen_test()
+async def test_comm_closed_on_read_error():
+    reader, writer = await get_comm_pair()
+
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(reader.read(), 0.01)
+
+    assert reader.closed()
