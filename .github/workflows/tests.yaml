@@ -117,7 +117,7 @@ jobs:
           python continuous_integration/scripts/host_info.py
 
       - name: Enable queuing
-        if: ${{ matrix.queuing }}
+        if: ${{ matrix.queuing == 'queue' }}
         shell: bash -l {0}
         run: export DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=1.0
 
