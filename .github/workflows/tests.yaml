@@ -31,19 +31,13 @@ jobs:
           - os: macos-latest
             python-version: 3.9
         include:
-          - partition: "ci1"
-            partition-label: "ci1"
-          - partition: "not ci1"
-            partition-label: "notci1"
           - os: ubuntu-latest
             python-version: 3.9
             partition: "ci1"
-            partition-label: "ci1"
             queuing: queue
           - os: ubuntu-latest
             python-version: 3.9
             partition: "not ci1"
-            partition-label: "notci1"
             queuing: queue
 
         # Uncomment to stress-test the test suite for random failures.
@@ -56,10 +50,17 @@ jobs:
 
     env:
       CONDA_FILE: continuous_integration/environment-${{ matrix.python-version }}.yaml
-      TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}-${{ matrix.queuing }}
-      # TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}-${{ matrix.queuing }}-${{ matrix.run }}
 
     steps:
+      - name: Set $TEST_ID
+        run: |
+          export PARTITION_LABEL=$( echo "${{ matrix.partition }}" | sed "s/ //" )
+          echo "TEST_ID=${{ matrix.os }}-${{ matrix.python-version }}-$PARTITION_LABEL-${{ matrix.queuing }}" >> $GITHUB_ENV
+        #  echo "TEST_ID=${{ matrix.os }}-${{ matrix.python-version }}-$PARTITION_LABEL-${{ matrix.queuing }}-${{ matrix.run }}" >> $GITHUB_ENV
+
+      - name: Test test id
+        run: echo test_id is $TEST_ID
+
       - name: Checkout source
         uses: actions/checkout@v2
         with:
