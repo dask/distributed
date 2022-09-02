@@ -140,7 +140,7 @@ jobs:
           set -o pipefail
           mkdir reports
 
-          pytest distributed \
+          pytest distributed/tests/test_batched.py \
             -m "not avoid_ci and ${{ matrix.partition }}" --runslow \
             --leaks=fds,processes,threads \
             --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID \
