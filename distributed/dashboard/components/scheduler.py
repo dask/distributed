@@ -648,7 +648,7 @@ class WorkersTransferBytes(DashboardComponent):
         )
 
         self.root = figure(
-            title="Size of open data transfers per worker",
+            title=f"Bytes transferring: {format_bytes(0)}",
             tools="",
             id="bk-workers-transfer-bytes-plot",
             width=int(width / 2),
@@ -737,6 +737,9 @@ class WorkersTransferBytes(DashboardComponent):
             "y_incoming": y_incoming,
             "y_outgoing": y_outgoing,
         }
+        self.root.title.text = (
+            f"Bytes transferring: {format_bytes(sum(transfer_incoming_bytes))}",
+        )
         update(self.source, result)
 
 
