@@ -206,7 +206,7 @@ def suite_from_name(name: str) -> str:
     can have matrix partitions, pytest marks, etc. Basically,
     just lop off the front of the name to get the suite.
     """
-    return "-".join(name.split("-")[:3])
+    return "-".join(name.split("-")[:4])
 
 
 def download_and_parse_artifact(
