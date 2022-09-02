@@ -1080,6 +1080,7 @@ async def test_steal_concurrent_simple(c, s, *workers):
     assert not ws2.has_what
 
 
+@pytest.mark.oversaturate_only  # FIXME flaky on ubuntu
 @gen_cluster(
     client=True,
     config={

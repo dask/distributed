@@ -5515,6 +5515,7 @@ def test_client_async_before_loop_starts(cleanup):
         loop.run_sync(close)  # TODO: client.close() does not unset global client
 
 
+@pytest.mark.oversaturate_only  # FIXME flaky on windows
 @pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny, timeout=60, nthreads=[("127.0.0.1", 3)] * 2)
 async def test_nested_compute(c, s, a, b):
