@@ -143,6 +143,7 @@ distributed:
 
       # Fractions of worker process memory at which we take action to avoid memory
       # blowup. Set any of the values to False to turn off the behavior entirely.
+      # All fractions are relative to each worker's memory_limit.
       transfer: 0.10  # fractional size of incoming data transfers where we start 
                        # throttling incoming data transfers
       target: 0.60     # fraction of managed memory where we start spilling to disk
