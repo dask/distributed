@@ -738,7 +738,7 @@ class WorkersTransferBytes(DashboardComponent):
             "y_outgoing": y_outgoing,
         }
         self.root.title.text = (
-            f"Bytes transferring: {format_bytes(sum(transfer_incoming_bytes))}",
+            f"Bytes transferring: {format_bytes(sum(transfer_incoming_bytes))}"
         )
         update(self.source, result)
 
