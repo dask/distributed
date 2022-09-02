@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import gc
 import pickle
+from collections import defaultdict
 from collections.abc import Iterator
 
 import pytest
@@ -1030,6 +1031,9 @@ def test_aggregate_gather_deps(ws, nbytes, n_in_flight):
     assert instructions == [GatherDep.match(worker=ws2, stimulus_id="s1")]
     assert len(instructions[0].to_gather) == n_in_flight
     assert len(ws.in_flight_tasks) == n_in_flight
+    assert ws.transfer_incoming_bytes == nbytes * n_in_flight
+    assert ws.transfer_incoming_count == 1
+    assert ws.transfer_incoming_count_total == 1
 
 
 def test_gather_priority(ws):
@@ -1111,6 +1115,10 @@ def test_gather_priority(ws):
             total_nbytes=4 * 2**20,
         ),
     ]
+    expected_bytes = 1 + 4 * 2**20 + 4 * 2**20 + 8 * 2**20 + 4 * 2**20
+    assert ws.transfer_incoming_bytes == expected_bytes
+    assert ws.transfer_incoming_count == 4
+    assert ws.transfer_incoming_count_total == 4
 
 
 @pytest.mark.parametrize("state", ["executing", "long-running"])
@@ -1264,3 +1272,269 @@ def test_gather_dep_failure(ws):
     ]
     assert ws.tasks["x"].state == "error"
     assert ws.tasks["y"].state == "waiting"  # Not ready
+    assert ws.transfer_incoming_bytes == 0
+    assert ws.transfer_incoming_count == 0
+    assert ws.transfer_incoming_count_total == 1
+
+
+def test_transfer_incoming_metrics(ws):
+    assert ws.transfer_incoming_bytes == 0
+    assert ws.transfer_incoming_count == 0
+    assert ws.transfer_incoming_count_total == 0
+
+    ws2 = "127.0.0.1:2"
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "b", who_has={"a": [ws2]}, nbytes={"a": 7}, stimulus_id="s1"
+        )
+    )
+    assert ws.transfer_incoming_bytes == 7
+    assert ws.transfer_incoming_count == 1
+    assert ws.transfer_incoming_count_total == 1
+
+    ws.handle_stimulus(
+        GatherDepSuccessEvent(
+            worker=ws2, data={"a": 123}, total_nbytes=7, stimulus_id="s2"
+        )
+    )
+    assert ws.transfer_incoming_bytes == 0
+    assert ws.transfer_incoming_count == 0
+    assert ws.transfer_incoming_count_total == 1
+
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "e",
+            who_has={"c": [ws2], "d": [ws2]},
+            nbytes={"c": 11, "d": 13},
+            stimulus_id="s2",
+        )
+    )
+    assert ws.transfer_incoming_bytes == 24
+    assert ws.transfer_incoming_count == 1
+    assert ws.transfer_incoming_count_total == 2
+
+    ws.handle_stimulus(
+        GatherDepSuccessEvent(
+            worker=ws2, data={"c": 123, "d": 234}, total_nbytes=24, stimulus_id="s3"
+        )
+    )
+    assert ws.transfer_incoming_bytes == 0
+    assert ws.transfer_incoming_count == 0
+    assert ws.transfer_incoming_count_total == 2
+
+    ws3 = "127.0.0.1:3"
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "h",
+            who_has={"f": [ws2], "g": [ws3]},
+            nbytes={"f": 17, "g": 19},
+            stimulus_id="s4",
+        )
+    )
+    assert ws.transfer_incoming_bytes == 36
+    assert ws.transfer_incoming_count == 2
+    assert ws.transfer_incoming_count_total == 4
+
+    ws.handle_stimulus(
+        GatherDepSuccessEvent(
+            worker=ws3, data={"g": 345}, total_nbytes=19, stimulus_id="s5"
+        )
+    )
+    assert ws.transfer_incoming_bytes == 17
+    assert ws.transfer_incoming_count == 1
+    assert ws.transfer_incoming_count_total == 4
+
+    ws.handle_stimulus(
+        GatherDepSuccessEvent(
+            worker=ws2, data={"g": 456}, total_nbytes=17, stimulus_id="s6"
+        )
+    )
+    assert ws.transfer_incoming_bytes == 0
+    assert ws.transfer_incoming_count == 0
+    assert ws.transfer_incoming_count_total == 4
+
+
+def test_throttling_does_not_affect_first_transfer(ws):
+    ws.transfer_incoming_count_limit = 100
+    ws.transfer_incoming_bytes_limit = 100
+    ws.transfer_incoming_bytes_throttle_threshold = 1
+    ws2 = "127.0.0.1:2"
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "c",
+            who_has={"a": [ws2]},
+            nbytes={"a": 200},
+            stimulus_id="s1",
+        )
+    )
+    assert ws.tasks["a"].state == "flight"
+
+
+def test_throttle_incoming_transfers_on_count_limit(ws):
+    ws.transfer_incoming_count_limit = 1
+    ws.transfer_incoming_bytes_limit = 100_000
+    ws.transfer_incoming_bytes_throttle_threshold = 1
+    ws2 = "127.0.0.1:2"
+    ws3 = "127.0.0.1:3"
+    who_has = {"a": [ws2], "b": [ws3]}
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "c",
+            who_has=who_has,
+            nbytes={"a": 100, "b": 100},
+            stimulus_id="s1",
+        )
+    )
+    tasks_by_state = defaultdict(list)
+    for ts in ws.tasks.values():
+        tasks_by_state[ts.state].append(ts)
+    assert len(tasks_by_state["flight"]) == 1
+    assert len(tasks_by_state["fetch"]) == 1
+    assert ws.transfer_incoming_bytes == 100
+
+    in_flight_task = tasks_by_state["flight"][0]
+    ws.handle_stimulus(
+        GatherDepSuccessEvent(
+            worker=who_has[in_flight_task.key][0],
+            data={in_flight_task.key: 123},
+            total_nbytes=100,
+            stimulus_id="s2",
+        )
+    )
+    assert tasks_by_state["flight"][0].state == "memory"
+    assert tasks_by_state["fetch"][0].state == "flight"
+    assert ws.transfer_incoming_bytes == 100
+
+
+def test_throttling_incoming_transfer_on_transfer_bytes_same_worker(ws):
+    ws.transfer_incoming_count_limit = 100
+    ws.transfer_incoming_bytes_limit = 250
+    ws.transfer_incoming_bytes_throttle_threshold = 1
+    ws2 = "127.0.0.1:2"
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "d",
+            who_has={"a": [ws2], "b": [ws2], "c": [ws2]},
+            nbytes={"a": 100, "b": 100, "c": 100},
+            stimulus_id="s1",
+        )
+    )
+    tasks_by_state = defaultdict(list)
+    for ts in ws.tasks.values():
+        tasks_by_state[ts.state].append(ts)
+    assert ws.transfer_incoming_bytes == 200
+    assert len(tasks_by_state["flight"]) == 2
+    assert len(tasks_by_state["fetch"]) == 1
+
+    ws.handle_stimulus(
+        GatherDepSuccessEvent(
+            worker=ws2,
+            data={ts.key: 123 for ts in tasks_by_state["flight"]},
+            total_nbytes=200,
+            stimulus_id="s2",
+        )
+    )
+    assert all(ts.state == "memory" for ts in tasks_by_state["flight"])
+    assert all(ts.state == "flight" for ts in tasks_by_state["fetch"])
+
+
+def test_throttling_incoming_transfer_on_transfer_bytes_different_workers(ws):
+    ws.transfer_incoming_count_limit = 100
+    ws.transfer_incoming_bytes_limit = 150
+    ws.transfer_incoming_bytes_throttle_threshold = 1
+    ws2 = "127.0.0.1:2"
+    ws3 = "127.0.0.1:3"
+    who_has = {"a": [ws2], "b": [ws3]}
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "c",
+            who_has=who_has,
+            nbytes={"a": 100, "b": 100},
+            stimulus_id="s1",
+        )
+    )
+    tasks_by_state = defaultdict(list)
+    for ts in ws.tasks.values():
+        tasks_by_state[ts.state].append(ts)
+    assert ws.transfer_incoming_bytes == 100
+    assert len(tasks_by_state["flight"]) == 1
+    assert len(tasks_by_state["fetch"]) == 1
+
+    in_flight_task = tasks_by_state["flight"][0]
+    ws.handle_stimulus(
+        GatherDepSuccessEvent(
+            worker=who_has[in_flight_task.key][0],
+            data={in_flight_task.key: 123},
+            total_nbytes=100,
+            stimulus_id="s2",
+        )
+    )
+    assert tasks_by_state["flight"][0].state == "memory"
+    assert tasks_by_state["fetch"][0].state == "flight"
+
+
+def test_do_not_throttle_connections_while_below_threshold(ws):
+    ws.transfer_incoming_count_limit = 1
+    ws.transfer_incoming_bytes_limit = 200
+    ws.transfer_incoming_bytes_throttle_threshold = 50
+    ws2 = "127.0.0.1:2"
+    ws3 = "127.0.0.1:3"
+    ws4 = "127.0.0.1:4"
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "b",
+            who_has={"a": [ws2]},
+            nbytes={"a": 1},
+            stimulus_id="s1",
+        )
+    )
+    assert ws.tasks["a"].state == "flight"
+
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "d",
+            who_has={"c": [ws3]},
+            nbytes={"c": 1},
+            stimulus_id="s2",
+        )
+    )
+    assert ws.tasks["c"].state == "flight"
+
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "f",
+            who_has={"e": [ws4]},
+            nbytes={"e": 100},
+            stimulus_id="s3",
+        )
+    )
+    assert ws.tasks["e"].state == "flight"
+    assert ws.transfer_incoming_bytes == 102
+
+
+def test_throttle_on_transfer_bytes_regardless_of_threshold(ws):
+    ws.transfer_incoming_count_limit = 1
+    ws.transfer_incoming_bytes_limit = 100
+    ws.transfer_incoming_bytes_throttle_threshold = 50
+    ws2 = "127.0.0.1:2"
+    ws3 = "127.0.0.1:3"
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "b",
+            who_has={"a": [ws2]},
+            nbytes={"a": 1},
+            stimulus_id="s1",
+        )
+    )
+    assert ws.tasks["a"].state == "flight"
+
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "d",
+            who_has={"c": [ws3]},
+            nbytes={"c": 100},
+            stimulus_id="s2",
+        )
+    )
+    assert ws.tasks["c"].state == "fetch"
+    assert ws.transfer_incoming_bytes == 1

@@ -1149,14 +1149,14 @@ class WorkerState:
     #: dependencies until the current query returns.
     in_flight_workers: dict[str, set[str]]
 
-    #: The total size of incoming data transfers for in-flight tasks.
+    #: Current total size of open data transfers from other workers
     transfer_incoming_bytes: int
 
-    #: The maximum number of concurrent incoming data transfers from other workers.
+    #: Maximum number of concurrent incoming data transfers from other workers.
     #: See also :attr:`distributed.worker.Worker.transfer_outgoing_count_limit`.
     transfer_incoming_count_limit: int
 
-    #: Number of total data transfers from other workers since the worker was started.
+    #: Total number of data transfers from other workers since the worker was started.
     transfer_incoming_count_total: int
 
     #: Ignore :attr:`transfer_incoming_count_limit` as long as :attr:`transfer_incoming_bytes` is
@@ -1232,6 +1232,9 @@ class WorkerState:
     #: In production, it should always be set to False.
     transition_counter_max: int | Literal[False]
 
+    #: Limit of bytes for incoming data transfers; this is used for throttling.
+    transfer_incoming_bytes_limit: int | None
+
     #: Statically-seeded random state, used to guarantee determinism whenever a
     #: pseudo-random choice is required
     rng: random.Random
@@ -1250,6 +1253,7 @@ class WorkerState:
         transfer_incoming_count_limit: int = 9999,
         validate: bool = True,
         transition_counter_max: int | Literal[False] = False,
+        transfer_incoming_bytes_limit: int | None = None,
     ):
         self.nthreads = nthreads
 
@@ -1293,6 +1297,7 @@ class WorkerState:
         self.stimulus_log = deque(maxlen=10_000)
         self.transition_counter = 0
         self.transition_counter_max = transition_counter_max
+        self.transfer_incoming_bytes_limit = transfer_incoming_bytes_limit
         self.actors = {}
         self.rng = random.Random(0)
 
@@ -1354,7 +1359,7 @@ class WorkerState:
 
     @property
     def in_flight_tasks_count(self) -> int:
-        """Count of tasks currently being replicated from other workers to this one.
+        """Number of tasks currently being replicated from other workers to this one.
 
         See also
         --------
@@ -1364,7 +1369,7 @@ class WorkerState:
 
     @property
     def transfer_incoming_count(self) -> int:
-        """Count of open data transfers from other workers.
+        """Current number of open data transfers from other workers.
 
         See also
         --------
@@ -1468,17 +1473,36 @@ class WorkerState:
         self.long_running.discard(ts)
         self.in_flight_tasks.discard(ts)
 
+    def _should_throttle_incoming_transfers(self) -> bool:
+        """Decides whether the WorkerState should throttle data transfers from other workers.
+
+        Returns
+        -------
+        * True if the number of incoming data transfers reached its limit
+        and the size of incoming data transfers reached the minimum threshold for throttling
+        * True if the size of incoming data transfers reached its limit
+        * False otherwise
+        """
+        reached_count_limit = (
+            self.transfer_incoming_count >= self.transfer_incoming_count_limit
+        )
+        reached_throttle_threshold = (
+            self.transfer_incoming_bytes
+            >= self.transfer_incoming_bytes_throttle_threshold
+        )
+        reached_bytes_limit = (
+            self.transfer_incoming_bytes_limit is not None
+            and self.transfer_incoming_bytes >= self.transfer_incoming_bytes_limit
+        )
+        return reached_count_limit and reached_throttle_threshold or reached_bytes_limit
+
     def _ensure_communicating(self, *, stimulus_id: str) -> RecsInstrs:
         """Transition tasks from fetch to flight, until there are no more tasks in fetch
         state or a threshold has been reached.
         """
         if not self.running or not self.data_needed:
             return {}, []
-        if (
-            self.transfer_incoming_count >= self.transfer_incoming_count_limit
-            and self.transfer_incoming_bytes
-            >= self.transfer_incoming_bytes_throttle_threshold
-        ):
+        if self._should_throttle_incoming_transfers():
             return {}, []
 
         recommendations: Recs = {}
@@ -1489,7 +1513,12 @@ class WorkerState:
             to_gather_tasks, total_nbytes = self._select_keys_for_gather(
                 available_tasks
             )
-            assert to_gather_tasks
+            # We always load at least one task
+            assert to_gather_tasks or self.transfer_incoming_bytes
+            # ...but that task might be selected in the previous iteration of the loop
+            if not to_gather_tasks:
+                break
+
             to_gather_keys = {ts.key for ts in to_gather_tasks}
 
             logger.debug(
@@ -1529,12 +1558,9 @@ class WorkerState:
             )
 
             self.in_flight_workers[worker] = to_gather_keys
+            self.transfer_incoming_count_total += 1
             self.transfer_incoming_bytes += total_nbytes
-            if (
-                self.transfer_incoming_count >= self.transfer_incoming_count_limit
-                and self.transfer_incoming_bytes
-                >= self.transfer_incoming_bytes_throttle_threshold
-            ):
+            if self._should_throttle_incoming_transfers():
                 break
 
         return recommendations, instructions
@@ -1609,18 +1635,28 @@ class WorkerState:
         """Helper of _ensure_communicating.
 
         Fetch all tasks that are replicated on the target worker within a single
-        message, up to transfer_message_target_bytes.
+        message, up to transfer_message_target_bytes or until we reach the limit
+        for the size of incoming data transfers.
         """
         to_gather: list[TaskState] = []
         total_nbytes = 0
 
+        if self.transfer_incoming_bytes_limit is not None:
+            bytes_left_to_fetch = min(
+                self.transfer_incoming_bytes_limit - self.transfer_incoming_bytes,
+                self.transfer_message_target_bytes,
+            )
+        else:
+            bytes_left_to_fetch = self.transfer_message_target_bytes
+
         while available:
             ts = available.peek()
-            # The top-priority task is fetched regardless of its size
             if (
-                to_gather
-                and total_nbytes + ts.get_nbytes() > self.transfer_message_target_bytes
-            ):
+                # When there is no other traffic, the top-priority task is fetched
+                # regardless of its size to ensure progress
+                self.transfer_incoming_bytes
+                or to_gather
+            ) and total_nbytes + ts.get_nbytes() > bytes_left_to_fetch:
                 break
             for worker in ts.who_has:
                 # This also effectively pops from available
@@ -2845,7 +2881,6 @@ class WorkerState:
         _execute_done_common
         """
         self.transfer_incoming_bytes -= ev.total_nbytes
-        self.transfer_incoming_count_total += 1
         keys = self.in_flight_workers.pop(ev.worker)
         for key in keys:
             ts = self.tasks[key]

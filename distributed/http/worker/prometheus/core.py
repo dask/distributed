@@ -37,7 +37,10 @@ class WorkerMetricCollector(PrometheusCollector):
 
         yield GaugeMetricFamily(
             self.build_name("concurrent_fetch_requests"),
-            "Number of open fetch requests to other workers.",
+            (
+                "[Deprecated: This metric has been renamed to transfer_incoming_count.] "
+                "Number of open fetch requests to other workers."
+            ),
             value=self.server.state.transfer_incoming_count,
         )
 
@@ -51,6 +54,48 @@ class WorkerMetricCollector(PrometheusCollector):
             self.build_name("latency_seconds"),
             "Latency of worker connection.",
             value=self.server.latency,
+        )
+
+        yield GaugeMetricFamily(
+            self.build_name("transfer_incoming_bytes"),
+            "Total size of open data transfers from other workers.",
+            value=self.server.state.transfer_incoming_bytes,
+        )
+
+        yield GaugeMetricFamily(
+            self.build_name("transfer_incoming_count"),
+            "Number of open data transfers from other workers.",
+            value=self.server.state.transfer_incoming_bytes,
+        )
+
+        yield GaugeMetricFamily(
+            self.build_name("transfer_incoming_count_total"),
+            (
+                "Total number of data transfers from other workers "
+                "since the worker was started."
+            ),
+            value=self.server.state.transfer_incoming_count_total,
+        )
+
+        yield GaugeMetricFamily(
+            self.build_name("transfer_outgoing_bytes"),
+            "Total size of open data transfers to other workers.",
+            value=self.server.transfer_outgoing_bytes,
+        )
+
+        yield GaugeMetricFamily(
+            self.build_name("transfer_outgoing_count"),
+            "Number of open data transfers to other workers.",
+            value=self.server.transfer_outgoing_count,
+        )
+
+        yield GaugeMetricFamily(
+            self.build_name("transfer_outgoing_count_total"),
+            (
+                "Total number of data transfers to other workers "
+                "since the worker was started."
+            ),
+            value=self.server.transfer_outgoing_count_total,
         )
 
         # all metrics using digests require crick to be installed
