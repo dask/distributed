@@ -14,13 +14,13 @@ import pytest
 from tlz import concat, sliding_window
 
 import dask
+from dask.utils import key_split
 
 from distributed import Event, Lock, Nanny, Worker, profile, wait, worker_client
 from distributed.compatibility import LINUX
 from distributed.config import config
 from distributed.core import Status
 from distributed.metrics import time
-from distributed.scheduler import key_split
 from distributed.system import MEMORY_LIMIT
 from distributed.utils_test import (
     captured_logger,
