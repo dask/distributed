@@ -135,15 +135,21 @@ jobs:
         if: ${{ matrix.os != 'windows-latest' }}
         run: sed -i.bak 's/timeout_method = thread/timeout_method = signal/' setup.cfg
 
+      - name: Disable IPv6
+        shell: bash -l {0}
+        # FIXME ipv6-related failures on Ubuntu github actions CI
+        # https://github.com/dask/distributed/issues/4514
+        if: ${{ matrix.os  == 'ubuntu-latest' }}
+        run: echo "DISABLE_IPV6=1" >> $GITHUB_ENV
+
+      - name: Set up dask env for job queuing
+        shell: bash -l {0}
+        if: ${{ matrix.queuing == 'queue' }}
+        run: echo "DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=1.0" >> $GITHUB_ENV
+
       - name: Print host info
         shell: bash -l {0}
         run: |
-          if [[ "${{ matrix.os }}" = "ubuntu-latest" ]]; then
-              # FIXME ipv6-related failures on Ubuntu github actions CI
-              # https://github.com/dask/distributed/issues/4514
-              export DISABLE_IPV6=1
-          fi
-
           python continuous_integration/scripts/host_info.py
 
       - name: Test
@@ -152,17 +158,6 @@ jobs:
         env:
           PYTHONFAULTHANDLER: 1
         run: |
-          if [[ "${{ matrix.os }}" = "ubuntu-latest" ]]; then
-              # FIXME ipv6-related failures on Ubuntu github actions CI
-              # https://github.com/dask/distributed/issues/4514
-              export DISABLE_IPV6=1
-          fi
-
-          if [[ "${{ matrix.queuing }}" = "queue" ]]; then
-              export DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=1.0
-              echo "worker-saturation: $DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION"
-          fi
-
           source continuous_integration/scripts/set_ulimit.sh
           set -o pipefail
           mkdir reports
@@ -202,6 +197,7 @@ jobs:
         with:
           name: ${{ env.TEST_ID }}
           path: reports
+
       - name: Upload gen_cluster dumps for failed tests
         # ensure this runs even if pytest fails
         if: >
