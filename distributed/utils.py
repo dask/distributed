@@ -645,7 +645,7 @@ def is_kernel():
 
 
 def key_split_group(x: object) -> str:
-    """A more fine-grained version of key_split
+    """A more fine-grained version of key_split.
 
     >>> key_split_group(('x-2', 1))
     'x-2'
