@@ -136,22 +136,23 @@ def get_jobs(run, session):
             cache[url] = jobs
 
     df_jobs = pandas.DataFrame.from_records(jobs)
-    extracted = df_jobs.name.str.extract(
-        r"\(([\w\-]+), (\d\.\d+),\s([\w|\s]+)\)"
-    ).dropna()
-    df_jobs["OS"] = extracted[0]
-    df_jobs["python_version"] = extracted[1]
-    df_jobs["partition"] = extracted[2]
-    # We later need to join on this. Somehow the job ID is not part of the workflow schema and we have no other way to join
-    df_jobs["suite_name"] = (
-        df_jobs["OS"]
-        + "-"
-        + df_jobs["python_version"]
-        + "-"
-        + df_jobs["partition"].str.replace(" ", "")
+    name_components = (
+        df_jobs.name.str.extract(r"test \((.+)\)", expand=False)
+        .dropna()
+        .str.split(", ", expand=True)
+        .set_axis(["OS", "python_version", "queuing", "partition"], axis="columns")
+        .assign(
+            # We later need to join on this. Somehow the job ID is not part of the workflow schema and we have no other way to join
+            suite_name=lambda df: df["OS"]
+            + "-"
+            + df["python_version"]
+            + "-"
+            + df["queuing"]
+            + "-"
+            + df["partition"].str.replace(" ", "")
+        )
     )
-
-    return df_jobs
+    return pandas.concat([df_jobs, name_components], axis="columns")
 
 
 def get_workflow_run_listing(
@@ -205,7 +206,7 @@ def suite_from_name(name: str) -> str:
     can have matrix partitions, pytest marks, etc. Basically,
     just lop off the front of the name to get the suite.
     """
-    return "-".join(name.split("-")[:3])
+    return "-".join(name.split("-")[:4])
 
 
 def download_and_parse_artifact(

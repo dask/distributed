@@ -36,7 +36,7 @@ from distributed import (
     wait,
 )
 from distributed.comm.addressing import parse_host_port
-from distributed.compatibility import LINUX, WINDOWS
+from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps, loads
@@ -150,6 +150,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         nthreads=nthreads,
         config={
             "distributed.scheduler.work-stealing": False,
+            "distributed.scheduler.worker-saturation": float("inf"),
         },
     )
     async def test_decide_worker_coschedule_order_neighbors_(c, s, *workers):
@@ -832,7 +833,7 @@ async def test_ready_remove_worker(s, a, b):
     elif math.isinf(s.WORKER_SATURATION):
         cmp = operator.gt
     else:
-        pytest.fail(f"{s.WORKER_OVERSATURATION=}, must be 1 or inf")
+        pytest.fail(f"{s.WORKER_SATURATION=}, must be 1 or inf")
 
     assert all(cmp(len(w.processing), w.nthreads) for w in s.workers.values()), (
         list(s.workers.values()),
@@ -1465,6 +1466,12 @@ async def test_balance_many_workers(c, s, *workers):
     assert {len(w.has_what) for w in s.workers.values()} == {0, 1}
 
 
+# FIXME test is very timing-based; if some threads are consistently slower than others,
+# they'll receive fewer tasks from the queue (a good thing).
+@pytest.mark.skipif(
+    MACOS and math.isfinite(dask.config.get("distributed.scheduler.worker-saturation")),
+    reason="flaky on macOS with queuing active",
+)
 @nodebug
 @gen_cluster(
     client=True,
@@ -3743,7 +3750,9 @@ async def test_Scheduler__to_dict(c, s, a):
     assert isinstance(d["workers"][a.address]["memory"]["process"], int)
 
 
-@gen_cluster(client=True, nthreads=[])
+@gen_cluster(
+    client=True, nthreads=[], config={"distributed.scheduler.worker-saturation": 1.0}
+)
 async def test_TaskState__to_dict(c, s):
     """tasks that are listed as dependencies of other tasks are dumped as a short repr
     and always appear in full under Scheduler.tasks
@@ -3760,7 +3769,7 @@ async def test_TaskState__to_dict(c, s):
     assert isinstance(tasks["y"], dict)
     assert isinstance(tasks["z"], dict)
     assert tasks["x"]["dependents"] == ["<TaskState 'y' waiting>"]
-    assert tasks["y"]["dependencies"] == ["<TaskState 'x' no-worker>"]
+    assert tasks["y"]["dependencies"] == ["<TaskState 'x' queued>"]
 
 
 def _verify_cluster_state(
