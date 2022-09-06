@@ -701,7 +701,7 @@ async def assert_balanced(inp, expected, recompute_saturation, c, s, *workers):
         ([[0, 0], []], [[0], [0]]),  # balance
         ([[0.1, 0.1], []], [[0], [0]]),  # balance even if results in even
         ([[0, 0, 0], []], [[0, 0], [0]]),  # don't over balance
-        ([[0, 0], [0, 0, 0], []], [[0, 0], [0, 0], [0]]),  # move from larger  XXX 4
+        ([[0, 0], [0, 0, 0], []], [[0, 0], [0, 0], [0]]),  # move from larger
         ([[0, 0, 0], [0], []], [[0, 0], [0], [0]]),  # move to smaller
         ([[0, 1], []], [[1], [0]]),  # choose easier first
         ([[0, 0, 0, 0], [], []], [[0, 0], [0], [0]]),  # spread evenly
@@ -712,13 +712,15 @@ async def assert_balanced(inp, expected, recompute_saturation, c, s, *workers):
             [[0, 0], [0, 0], [0, 0], []],  # no one clearly saturated
             [[0, 0], [0, 0], [0], [0]],
         ),
+        # NOTE: There is a timing issue that workers may already start executing
+        # tasks before we call balance, i.e. the workers will reject the
+        # stealing request and we end up with a different end result.
+        # Particularly tests with many input tasks are more likely to fail since
+        # the test setup takes longer and allows the workers more time to
+        # schedule a task on the threadpool
         (
             [[4, 2, 2, 2, 2, 1, 1], [4, 2, 1, 1], [], [], []],
             [[4, 2, 2, 2, 2], [4, 2, 1], [1], [1], [1]],
-        ),
-        (
-            [[1, 1, 1, 1, 1, 1, 1], [1, 1], [1, 1], [1, 1], []],
-            [[1, 1, 1, 1, 1], [1, 1], [1, 1], [1, 1], [1, 1]],
         ),
     ],
 )
