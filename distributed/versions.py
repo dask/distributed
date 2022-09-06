@@ -34,17 +34,20 @@ error_packages = {
 }
 
 
-def _remove_patch(v: str) -> str:
+def _remove_patch(version: str) -> str:
     """Removes the patch and any additional pre-release/metadata
     from a string-representation of a semantic version
 
     Returns
     -------
-    Semantic version of the form "<major>.<minor>"
+    Semantic version of the form "<major>.<minor>" if `version` follows that pattern,
+    `version` otherwise.
     """
-    match = re.match(r"\d+\.\d+", v)
-    assert match
-    return match.group(0)
+    match = re.match(r"\d+\.\d+", version)
+    if match:
+        return match.group(0)
+    else:
+        return version
 
 
 # only these scheduler packages will be checked for version mismatch
