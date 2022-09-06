@@ -7583,7 +7583,7 @@ async def test_get_versions_without_mismatch(c, s, a, b, check):
 
 def _increment_version(version: str, index: int) -> str:
     split = version.split(".")
-    split[1] = str(int(split[index]) + 1)
+    split[index] = str(int(split[index]) + 1)
     return ".".join(split)
 
 
