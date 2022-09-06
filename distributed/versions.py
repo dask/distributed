@@ -35,8 +35,8 @@ error_packages = {
 
 
 def _remove_patch(version: str) -> str:
-    """Removes the patch and any additional pre-release/metadata
-    from a string-representation of a semantic version
+    """Remove the patch and any additional pre-release/metadata
+    from a string-representation of a semantic version.
 
     Returns
     -------
