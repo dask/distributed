@@ -1100,7 +1100,17 @@ async def test_steal_reschedule_reset_in_flight_occupancy(c, s, *workers):
         range(6),
         key=[f"r-{ix}" for ix in range(6)],
     )
-    futs1 = [c.submit(slowinc, f, key=f"f1-{ix}") for f in roots for ix in range(4)]
+
+    def block(x, event):
+        event.wait()
+        return x + 1
+
+    event = Event()
+    futs1 = [
+        c.submit(block, f, event=event, key=f"f1-{ix}")
+        for f in roots
+        for ix in range(4)
+    ]
     while not w0.state.ready:
         await asyncio.sleep(0.01)
 
@@ -1115,6 +1125,7 @@ async def test_steal_reschedule_reset_in_flight_occupancy(c, s, *workers):
     steal.move_task_request(victim_ts, wsA, wsB)
 
     s.reschedule(victim_key, stimulus_id="test")
+    await event.set()
     await c.gather(futs1)
 
     del futs1
