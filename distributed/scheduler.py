@@ -50,7 +50,14 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask.highlevelgraph import HighLevelGraph
-from dask.utils import format_bytes, format_time, parse_bytes, parse_timedelta, tmpfile
+from dask.utils import (
+    format_bytes,
+    format_time,
+    key_split,
+    parse_bytes,
+    parse_timedelta,
+    tmpfile,
+)
 from dask.widgets import get_template
 
 from distributed import cluster_dump, preloading, profile
@@ -92,7 +99,6 @@ from distributed.utils import (
     TimeoutError,
     empty_context,
     get_fileno_limit,
-    key_split,
     key_split_group,
     log_errors,
     no_default,
