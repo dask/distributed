@@ -7,7 +7,7 @@ import random
 
 import pytest
 
-from distributed.collections import LRU, HeapSet
+from distributed.collections import LRU, HeapSet, Occupancy
 
 
 def test_lru():
@@ -339,3 +339,38 @@ def test_heapset_sort_duplicate():
     heap.add(c1)
 
     assert list(heap.sorted()) == [c1, c2]
+
+
+def test_occupancy():
+    ozero = Occupancy(0, 0)
+    assert not ozero
+    assert not ozero.total
+    assert ozero == ozero
+
+    o1_0 = Occupancy(1, 0)
+    assert o1_0
+    assert o1_0.total == 1
+    assert ozero != o1_0
+    assert o1_0 + ozero == o1_0
+
+    o0_1 = Occupancy(0, 1)
+    o1_1 = o0_1 + o1_0
+    assert o1_1.total == 2
+    assert o1_1 == o1_0 + o0_1
+
+    assert o1_1 - o0_1 == o1_0
+
+    mut = Occupancy(0, 0)
+    mut += ozero
+    assert not mut
+    mut += o1_0
+    assert mut == o1_0
+    mut += o1_0
+    assert mut == Occupancy(2, 0)
+
+    mut -= o0_1
+    assert mut == Occupancy(2, -1)
+    assert mut.total == 1
+
+    mut.clear()
+    assert mut == ozero
