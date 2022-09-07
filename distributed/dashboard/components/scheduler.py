@@ -163,7 +163,8 @@ class Occupancy(DashboardComponent):
         workers = self.scheduler.workers.values()
 
         y = list(range(len(workers)))
-        occupancy = [ws.occupancy for ws in workers]
+        # TODO split chart by cpu vs network
+        occupancy = [ws.occupancy.total for ws in workers]
         ms = [occ * 1000 for occ in occupancy]
         x = [occ / 500 for occ in occupancy]
         total = sum(occupancy)
