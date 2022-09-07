@@ -386,6 +386,48 @@ class MemoryState:
         return recursive_to_dict(self, exclude=exclude, members=True)
 
 
+@dataclasses.dataclass
+class Occupancy:
+    cpu: float
+    network: float
+
+    def __add__(self, other) -> Occupancy:
+        if isinstance(other, type(self)):
+            return type(self)(self.cpu + other.cpu, self.network + other.network)
+        return NotImplemented
+
+    def __iadd__(self, other):
+        if isinstance(other, type(self)):
+            self.cpu += other.cpu
+            self.network += other.network
+        return NotImplemented
+
+    def __sub__(self, other) -> Occupancy:
+        if isinstance(other, type(self)):
+            return type(self)(self.cpu - other.cpu, self.network - other.network)
+        return NotImplemented
+
+    def __isub__(self, other):
+        if isinstance(other, type(self)):
+            self.cpu -= other.cpu
+            self.network -= other.network
+        return NotImplemented
+
+    def __bool__(self) -> bool:
+        return self.cpu != 0 or self.network != 0
+
+    def clear(self) -> None:
+        self.cpu = 0.0
+        self.network = 0.0
+
+    def _to_dict(self) -> dict[str, float]:
+        return {"cpu": self.cpu, "network": self.network}
+
+    @property
+    def total(self) -> float:
+        return self.cpu + self.network
+
+
 class WorkerState:
     """A simple object holding information about a worker.
 
@@ -424,10 +466,10 @@ class WorkerState:
     #: (i.e. the tasks in this worker's :attr:`~WorkerState.has_what`).
     nbytes: int
 
-    #: The total expected runtime, in seconds, of all tasks currently processing on this
-    #: worker. This is the sum of all the costs in this worker's
+    #: The total expected cost, in seconds, of all tasks currently processing on this
+    #: worker. This is the sum of all the Occupancies in this worker's
     # :attr:`~WorkerState.processing` dictionary.
-    occupancy: float
+    occupancy: Occupancy
 
     #: Worker memory unknown to the worker, in bytes, which has been there for more than
     #: 30 seconds. See :class:`MemoryState`.
@@ -455,12 +497,12 @@ class WorkerState:
     _has_what: dict[TaskState, None]
 
     #: A dictionary of tasks that have been submitted to this worker. Each task state is
-    #: associated with the expected cost in seconds of running that task, summing both
-    #: the task's expected computation time and the expected communication time of its
-    #: result.
+    #: associated with the expected cost in seconds of running that task, both of
+    #: the task's expected computation time and the expected serial communication time of
+    #: its dependencies.
     #:
-    #: If a task is already executing on the worker and the excecution time is twice the
-    #: learned average TaskGroup duration, this will be set to twice the current
+    #: If a task is already executing on the worker and the execution time is twice the
+    #: learned average TaskGroup duration, the `cpu` time will be set to twice the current
     #: executing time. If the task is unknown, the default task duration is used instead
     #: of the TaskGroup average.
     #:
@@ -470,13 +512,13 @@ class WorkerState:
     #:
     #: All the tasks here are in the "processing" state.
     #: This attribute is kept in sync with :attr:`TaskState.processing_on`.
-    processing: dict[TaskState, float]
+    processing: dict[TaskState, Occupancy]
 
     #: Running tasks that invoked :func:`distributed.secede`
     long_running: set[TaskState]
 
     #: A dictionary of tasks that are currently being run on this worker.
-    #: Each task state is asssociated with the duration in seconds which the task has
+    #: Each task state is associated with the duration in seconds which the task has
     #: been running.
     executing: dict[TaskState, float]
 
@@ -527,7 +569,7 @@ class WorkerState:
         self.status = status
         self._hash = hash(self.server_id)
         self.nbytes = 0
-        self.occupancy = 0
+        self.occupancy = Occupancy(0.0, 0.0)
         self._memory_unmanaged_old = 0
         self._memory_unmanaged_history = deque()
         self.metrics = {}
@@ -1387,7 +1429,7 @@ class SchedulerState:
         self.task_prefixes: dict[str, TaskPrefix] = {}
         self.task_metadata = {}  # type: ignore
         self.total_nthreads = 0
-        self.total_occupancy = 0.0
+        self.total_occupancy = Occupancy(0.0, 0.0)
         self.unknown_durations: dict[str, set[TaskState]] = {}
         self.queued = queued
         self.unrunnable = unrunnable
@@ -1957,9 +1999,9 @@ class SchedulerState:
             wp_vals = worker_pool.values()
             n_workers: int = len(wp_vals)
             if n_workers < 20:  # smart but linear in small case
-                ws = min(wp_vals, key=operator.attrgetter("occupancy"))
+                ws = min(wp_vals, key=lambda ws: ws.occupancy.total)
                 assert ws
-                if ws.occupancy == 0:
+                if not ws.occupancy:
                     # special case to use round-robin; linear search
                     # for next worker with zero occupancy (or just
                     # land back where we started).
@@ -1968,7 +2010,7 @@ class SchedulerState:
                     i: int
                     for i in range(n_workers):
                         wp_i = wp_vals[(i + start) % n_workers]
-                        if wp_i.occupancy == 0:
+                        if not wp_i.occupancy:
                             ws = wp_i
                             break
             else:  # dumb but fast in large case
@@ -2801,19 +2843,17 @@ class SchedulerState:
         if ts in ws.long_running:
             return
 
-        exec_time: float = ws.executing.get(ts, 0)
-        duration: float = self.get_task_duration(ts)
-        total_duration: float
-        if exec_time > 2 * duration:
-            total_duration = 2 * exec_time
-        else:
-            comm: float = self.get_comm_cost(ts, ws)
-            total_duration = duration + comm
+        exec_time = ws.executing.get(ts, 0.0)
+        cpu = self.get_task_duration(ts)
+        if exec_time > 2 * cpu:
+            cpu = 2 * exec_time
+        network = self.get_comm_cost(ts, ws)
 
-        old = ws.processing.get(ts, 0)
-        ws.processing[ts] = total_duration
-        self.total_occupancy += total_duration - old
-        ws.occupancy += total_duration - old
+        old = ws.processing.get(ts, Occupancy(0, 0))
+        ws.processing[ts] = new = Occupancy(cpu, network)
+        delta = new - old
+        self.total_occupancy += delta
+        ws.occupancy += delta
 
     def check_idle_saturated(self, ws: WorkerState, occ: float = -1.0):
         """Update the status of the idle and saturated state
@@ -2841,11 +2881,11 @@ class SchedulerState:
         if self.total_nthreads == 0 or ws.status == Status.closed:
             return
         if occ < 0:
-            occ = ws.occupancy
+            occ = ws.occupancy.total
 
         nc: int = ws.nthreads
         p: int = len(ws.processing)
-        avg: float = self.total_occupancy / self.total_nthreads
+        avg: float = self.total_occupancy.total / self.total_nthreads
 
         idle = self.idle
         saturated = self.saturated
@@ -3003,7 +3043,8 @@ class SchedulerState:
                 nbytes = dts.get_nbytes()
                 comm_bytes += nbytes
 
-        stack_time: float = ws.occupancy / ws.nthreads
+        # FIXME use `occupancy.cpu` https://github.com/dask/distributed/issues/7003
+        stack_time: float = ws.occupancy.total / ws.nthreads
         start_time: float = stack_time + comm_bytes / self.bandwidth
 
         if ts.actor:
@@ -3045,7 +3086,7 @@ class SchedulerState:
     def _reevaluate_occupancy_worker(self, ws: WorkerState):
         """See reevaluate_occupancy"""
         ts: TaskState
-        old = ws.occupancy
+        old = ws.occupancy.total
         for ts in ws.processing:
             self._set_duration_estimate(ts, ws)
 
@@ -3053,7 +3094,8 @@ class SchedulerState:
         steal = self.extensions.get("stealing")
         if steal is None:
             return
-        if ws.occupancy > old * 1.3 or old > ws.occupancy * 1.3:
+        current = ws.occupancy.total
+        if current > old * 1.3 or old > current * 1.3:
             for ts in ws.processing:
                 steal.recalculate_cost(ts)
 
@@ -4142,7 +4184,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         dependencies = dependencies or {}
 
-        if self.total_occupancy > 1e-9 and self.computations:
+        if self.total_occupancy.total > 1e-9 and self.computations:
             # Still working on something. Assign new tasks to same computation
             computation = self.computations[-1]
         else:
@@ -4879,19 +4921,26 @@ class Scheduler(SchedulerState, ServerNode):
         }
         assert a == b, (a, b)
 
-        actual_total_occupancy = 0
+        actual_total_occupancy = Occupancy(0, 0)
         for worker, ws in self.workers.items():
             ws_processing_total = sum(
-                cost for ts, cost in ws.processing.items() if ts not in ws.long_running
+                (
+                    cost
+                    for ts, cost in ws.processing.items()
+                    if ts not in ws.long_running
+                ),
+                start=Occupancy(0, 0),
             )
-            assert abs(ws_processing_total - ws.occupancy) < 1e-8, (
+            delta = ws_processing_total - ws.occupancy
+            assert abs(delta.cpu) < 1e-8 and abs(delta.network) < 1e-8, (
                 worker,
                 ws_processing_total,
                 ws.occupancy,
             )
             actual_total_occupancy += ws.occupancy
 
-        assert abs(actual_total_occupancy - self.total_occupancy) < 1e-8, (
+        delta = actual_total_occupancy - self.total_occupancy
+        assert abs(delta.cpu) < 1e-8 and abs(delta.network) < 1e-8, (
             actual_total_occupancy,
             self.total_occupancy,
         )
@@ -5088,7 +5137,7 @@ class Scheduler(SchedulerState, ServerNode):
         if key not in self.tasks:
             logger.debug("Skipping long_running since key %s was already released", key)
             return
-        ts = self.tasks[key]
+        ts: TaskState = self.tasks[key]
         steal = self.extensions.get("stealing")
         if steal is not None:
             steal.remove_key_from_stealable(ts)
@@ -5112,7 +5161,7 @@ class Scheduler(SchedulerState, ServerNode):
         # idleness detection. Idle workers are typically targeted for
         # downscaling but we should not downscale workers with long running
         # tasks
-        ws.processing[ts] = 0
+        ws.processing[ts].clear()
         ws.long_running.add(ts)
         self.check_idle_saturated(ws)
 
@@ -7543,10 +7592,12 @@ class Scheduler(SchedulerState, ServerNode):
         # CPU
 
         # TODO consider any user-specified default task durations for queued tasks
-        queued_occupancy = len(self.queued) * self.UNKNOWN_TASK_DURATION
+        queued_occupancy: float = len(self.queued) * self.UNKNOWN_TASK_DURATION
+        # TODO: threads per worker
+        # TODO don't include network occupancy?
         cpu = math.ceil(
-            (self.total_occupancy + queued_occupancy) / target_duration
-        )  # TODO: threads per worker
+            (self.total_occupancy.total + queued_occupancy) / target_duration
+        )
 
         # Avoid a few long tasks from asking for many cores
         tasks_ready = len(self.queued)
@@ -7693,7 +7744,7 @@ def _exit_processing_common(
     ws.long_running.discard(ts)
     if not ws.processing:
         state.total_occupancy -= ws.occupancy
-        ws.occupancy = 0
+        ws.occupancy.clear()
     else:
         state.total_occupancy -= duration
         ws.occupancy -= duration

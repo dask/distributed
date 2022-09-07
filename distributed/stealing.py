@@ -17,6 +17,7 @@ from dask.utils import parse_timedelta
 from distributed.comm.addressing import get_address_host
 from distributed.core import CommClosedError, Status
 from distributed.diagnostics.plugin import SchedulerPlugin
+from distributed.scheduler import Occupancy
 from distributed.utils import log_errors, recursive_to_dict
 
 if TYPE_CHECKING:
@@ -56,8 +57,8 @@ _WORKER_STATE_UNDEFINED = {
 class InFlightInfo(TypedDict):
     victim: WorkerState
     thief: WorkerState
-    victim_duration: float
-    thief_duration: float
+    victim_duration: Occupancy
+    thief_duration: Occupancy
     stimulus_id: str
 
 
@@ -78,7 +79,7 @@ class WorkStealing(SchedulerPlugin):
     # { task state: <stealing info dict> }
     in_flight: dict[TaskState, InFlightInfo]
     # { worker state: occupancy }
-    in_flight_occupancy: defaultdict[WorkerState, float]
+    in_flight_occupancy: defaultdict[WorkerState, Occupancy]
     _in_flight_event: asyncio.Event
     _request_counter: int
 
@@ -100,7 +101,7 @@ class WorkStealing(SchedulerPlugin):
         self.scheduler.events["stealing"] = deque(maxlen=100000)
         self.count = 0
         self.in_flight = {}
-        self.in_flight_occupancy = defaultdict(lambda: 0)
+        self.in_flight_occupancy = defaultdict(lambda: Occupancy(0, 0))
         self._in_flight_event = asyncio.Event()
         self._request_counter = 0
         self.scheduler.stream_handlers["steal-response"] = self.move_task_confirm
@@ -205,7 +206,7 @@ class WorkStealing(SchedulerPlugin):
         except KeyError:
             pass
 
-    def steal_time_ratio(self, ts):
+    def steal_time_ratio(self, ts: TaskState) -> tuple[float, int] | tuple[None, None]:
         """The compute to communication time ratio of a key
 
         Returns
@@ -219,16 +220,18 @@ class WorkStealing(SchedulerPlugin):
             return None, None
 
         if not ts.dependencies:  # no dependencies fast path
-            return 0, 0
+            return 0.0, 0
 
         ws = ts.processing_on
+        assert ws
         compute_time = ws.processing[ts]
-        if compute_time < 0.005:  # 5ms, just give up
+        if compute_time.total < 0.005:  # 5ms, just give up
             return None, None
 
         nbytes = ts.get_nbytes_deps()
-        transfer_time = nbytes / self.scheduler.bandwidth + LATENCY
-        cost_multiplier = transfer_time / compute_time
+        transfer_time: float = nbytes / self.scheduler.bandwidth + LATENCY
+        # FIXME don't use `compute_time.total` https://github.com/dask/distributed/issues/7003
+        cost_multiplier = transfer_time / compute_time.total
         if cost_multiplier > 100:
             return None, None
 
@@ -262,9 +265,10 @@ class WorkStealing(SchedulerPlugin):
 
             victim_duration = victim.processing[ts]
 
-            thief_duration = self.scheduler.get_task_duration(
-                ts
-            ) + self.scheduler.get_comm_cost(ts, thief)
+            thief_duration = Occupancy(
+                self.scheduler.get_task_duration(ts),
+                self.scheduler.get_comm_cost(ts, thief),
+            )
 
             self.scheduler.stream_comms[victim.address].send(
                 {"op": "steal-request", "key": key, "stimulus_id": stimulus_id}
@@ -354,7 +358,7 @@ class WorkStealing(SchedulerPlugin):
                 self.scheduler.total_occupancy -= duration
                 if not victim.processing:
                     self.scheduler.total_occupancy -= victim.occupancy
-                    victim.occupancy = 0
+                    victim.occupancy.clear()
                 thief.processing[ts] = d["thief_duration"]
                 thief.occupancy += d["thief_duration"]
                 self.scheduler.total_occupancy += d["thief_duration"]
@@ -379,20 +383,25 @@ class WorkStealing(SchedulerPlugin):
         s = self.scheduler
 
         def combined_occupancy(ws: WorkerState) -> float:
-            return ws.occupancy + self.in_flight_occupancy[ws]
+            return ws.occupancy.total + self.in_flight_occupancy[ws].total
 
         def maybe_move_task(
             level: int,
             ts: TaskState,
             victim: WorkerState,
             thief: WorkerState,
-            duration: float,
+            duration: Occupancy,
             cost_multiplier: float,
         ) -> None:
+            # TODO calculate separately for cpu vs network?
             occ_thief = combined_occupancy(thief)
             occ_victim = combined_occupancy(victim)
 
-            if occ_thief + cost_multiplier * duration <= occ_victim - duration / 2:
+            duration_total = duration.total
+            if (
+                occ_thief + cost_multiplier * duration_total
+                <= occ_victim - duration_total / 2
+            ):
                 self.move_task_request(ts, victim, thief)
                 log.append(
                     (
