@@ -33,6 +33,9 @@ from distributed.utils import (
 logger = logging.getLogger(__name__)
 
 
+no_default = "__no_default__"
+
+
 class Cluster(SyncMethodMixin):
     """Superclass for cluster objects
 
@@ -617,7 +620,7 @@ class Cluster(SyncMethodMixin):
         await self._scheduler_info_comm.write({"op": "identity"})
         self.scheduler_info = SchedulerInfo(await self._scheduler_info_comm.read())
 
-    def wait_for_workers(self, n_workers=0, timeout=None):
+    def wait_for_workers(self, n_workers: int | str = no_default, timeout: float | None = None):
         """Blocking call to wait for n workers before continuing
 
         Parameters
@@ -628,4 +631,14 @@ class Cluster(SyncMethodMixin):
             Time in seconds after which to raise a
             ``dask.distributed.TimeoutError``
         """
+        if n_workers is no_default:
+            warnings.warn(
+                "Please specify the `n_workers` argument when using `Client.wait_for_workers`. Not specifying `n_workers` will no longer be supported in future versions.",
+                FutureWarning,
+            )
+            n_workers = 0
+        elif not isinstance(n_workers, int) or n_workers < 1:
+            raise ValueError(
+                f"`n_workers` must be a positive integer. Instead got {n_workers}."
+            )
         return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
