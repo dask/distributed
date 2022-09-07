@@ -620,7 +620,9 @@ class Cluster(SyncMethodMixin):
         await self._scheduler_info_comm.write({"op": "identity"})
         self.scheduler_info = SchedulerInfo(await self._scheduler_info_comm.read())
 
-    def wait_for_workers(self, n_workers: int | str = no_default, timeout: float | None = None):
+    def wait_for_workers(
+        self, n_workers: int | str = no_default, timeout: float | None = None
+    ) -> None:
         """Blocking call to wait for n workers before continuing
 
         Parameters
