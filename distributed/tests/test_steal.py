@@ -1128,7 +1128,7 @@ async def test_steal_reschedule_reset_in_flight_occupancy(c, s, *workers):
 
     del futs1
 
-    assert all(v == 0 for v in steal.in_flight_occupancy.values())
+    assert all(not v for v in steal.in_flight_occupancy.values())
 
 
 @gen_cluster(
