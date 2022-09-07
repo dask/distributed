@@ -405,15 +405,14 @@ async def test_oversubscribing_leases(c, s, a, b):
         client = get_client()
         client.set_metadata("release", True)
 
-    observer = await Worker(s.address)
+    async with Worker(s.address) as observer:
+        futures = c.map(
+            guaranteed_lease_timeout, range(2), sem=sem, workers=[a.address, b.address]
+        )
+        fut_observe = c.submit(observe_state, sem=sem, workers=[observer.address])
 
-    futures = c.map(
-        guaranteed_lease_timeout, range(2), sem=sem, workers=[a.address, b.address]
-    )
-    fut_observe = c.submit(observe_state, sem=sem, workers=[observer.address])
-
-    with captured_logger("distributed.semaphore", level=logging.DEBUG) as caplog:
-        payload, observer = await c.gather([futures, fut_observe])
+        with captured_logger("distributed.semaphore", level=logging.DEBUG) as caplog:
+            payload, _ = await c.gather([futures, fut_observe])
 
     logs = caplog.getvalue().split("\n")
     timeouts = [log for log in logs if "timed out" in log]

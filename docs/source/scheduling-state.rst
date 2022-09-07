@@ -1,5 +1,5 @@
-Scheduling State
-================
+Scheduler State Machine
+=======================
 
 .. currentmodule:: distributed.scheduler
 
@@ -52,7 +52,7 @@ Task State
 ----------
 
 Internally, the scheduler moves tasks between a fixed set of states,
-notably ``released``, ``waiting``, ``no-worker``, ``processing``,
+notably ``released``, ``waiting``, ``no-worker``, ``queued``, ``processing``,
 ``memory``, ``error``.
 
 Tasks flow along the following states with the following allowed transitions:
@@ -60,33 +60,52 @@ Tasks flow along the following states with the following allowed transitions:
 .. image:: images/task-state.svg
     :alt: Dask scheduler task states
 
-*  *Released*: Known but not actively computing or in memory
-*  *Waiting*: On track to be computed, waiting on dependencies to arrive in
-   memory
-*  *No-worker*: Ready to be computed, but no appropriate worker exists
-   (for example because of resource restrictions, or because no worker is
-   connected at all).
-*  *Processing*: All dependencies are available and the task is assigned to a
-   worker for compute (the scheduler doesn't know whether it's in a worker
-   queue or actively being computed).
-*  *Memory*: In memory on one or more workers
-*  *Erred*: Task computation, or one of its dependencies, has encountered an error
-*  *Forgotten* (not actually a state): Task is no longer needed by any client
-   or dependent task
+Note that tasks may also transition to ``released`` from any state (not shown on diagram).
+
+released
+    Known but not actively computing or in memory
+waiting
+    On track to be computed, waiting on dependencies to arrive in memory
+no-worker
+    Ready to be computed, but no appropriate worker exists (for example because of
+    resource restrictions, or because no worker is connected at all).
+queued
+    Ready to be computed, but all workers are already full.
+processing
+    All dependencies are available and the task is assigned to a worker for compute (the
+    scheduler doesn't know whether it's in a worker queue or actively being computed).
+memory
+    In memory on one or more workers
+erred
+    Task computation, or one of its dependencies, has encountered an error
+forgotten
+    Task is no longer needed by any client or dependent task, so it disappears from the
+    scheduler as well. As soon as a task reaches this state, it is immediately
+    dereferenced from the scheduler.
+
+.. note::
+    When the ``distributed.scheduler.worker_saturation`` config value is set to ``inf``
+    (default), there's no intermediate state between ``waiting`` / ``no-worker`` and
+    ``processing``: as soon as a task has all of its dependencies in memory somewhere on
+    the cluster, it is immediately assigned to a worker. This can lead to very long task
+    queues on the workers, which are then rebalanced dynamically through
+    :doc:`work-stealing`.
+
+    Setting ``distributed.scheduler.worker_saturation`` to ``1.0`` (or any finite value)
+    will instead queue excess root tasks on the scheduler in the ``queued`` state. These
+    tasks are only assigned to workers when they have capacity for them, reducing the
+    length of task queues on the workers.
 
 In addition to the literal state, though, other information needs to be
 kept and updated about each task.  Individual task state is stored in an
-object named :class:`TaskState` and consists of the following information:
-
-.. autoclass:: TaskState
-    :members:
+object named :class:`TaskState`; see full API through the link.
 
 The scheduler keeps track of all the :class:`TaskState` objects (those
 not in the "forgotten" state) using several containers:
 
 .. attribute:: tasks: {str: TaskState}
 
-   A dictionary mapping task keys (usually strings) to :class:`TaskState`
+   A dictionary mapping task keys (always strings) to :class:`TaskState`
    objects.  Task keys are how information about tasks is communicated
    between the scheduler and clients, or the scheduler and workers; this
    dictionary is then used to find the corresponding :class:`TaskState`
@@ -99,16 +118,22 @@ not in the "forgotten" state) using several containers:
    (their :attr:`~TaskState.waiting_on` set is empty), and are waiting
    for an appropriate worker to join the network before computing.
 
+Once a task is queued up on a worker, it is also tracked on the worker side by the
+:doc:`worker-state`.
+
 
 Worker State
 ------------
 
-Each worker's current state is stored in a :class:`WorkerState` object.
+Each worker's current state is stored in a :class:`WorkerState` object; see full API
+through the link.
+
+This is a scheduler-side object, which holds information about what the scheduler
+knows about each worker on the cluster, and is not to be confused with
+:class:`distributed.worker-state-machine.WorkerState`.
+
 This information is involved in deciding
 :ref:`which worker to run a task on <decide-worker>`.
-
-.. autoclass:: WorkerState
-    :members:
 
 In addition to individual worker state, the scheduler maintains two
 containers to help with scheduling tasks:
@@ -136,13 +161,7 @@ Client State
 ------------
 
 Information about each individual client of the scheduler is kept
-in a :class:`ClientState` object:
-
-.. autoclass:: ClientState
-    :members:
-
-
-.. XXX list invariants somewhere?
+in a :class:`ClientState` object; see full API through the link.
 
 
 Understanding a Task's Flow
@@ -215,6 +234,8 @@ memory → forgotten                   nbytes
    :attr:`WorkerState.nbytes`.
 
 
+.. _scheduling_state_implementation:
+
 Implementation
 --------------
 
@@ -224,21 +245,21 @@ name of the start and finish task state like the following.
 
 .. code-block:: python
 
-   def transition_released_waiting(self, key):
+   def transition_released_waiting(self, key, stimulus_id): ...
 
-   def transition_processing_memory(self, key):
+   def transition_processing_memory(self, key, stimulus_id): ...
 
-   def transition_processing_erred(self, key):
+   def transition_processing_erred(self, key, stimulus_id): ...
 
 These functions each have three effects.
 
 1.  They perform the necessary transformations on the scheduler state (the 20
     dicts/lists/sets) to move one key between states.
 2.  They return a dictionary of recommended ``{key: state}`` transitions to
-    enact directly afterwards on other keys.  For example after we transition a
-    key into memory we may find that many waiting keys are now ready to
+    enact directly afterwards on other keys. For example, after we transition a
+    key into memory, we may find that many waiting keys are now ready to
     transition from waiting to a ready state.
-3.  Optionally they include a set of validation checks that can be turned on
+3.  Optionally, they include a set of validation checks that can be turned on
     for testing.
 
 Rather than call these functions directly we call the central function
@@ -246,8 +267,7 @@ Rather than call these functions directly we call the central function
 
 .. code-block:: python
 
-   def transition(self, key, final_state):
-       """ Transition key to the suggested state """
+   def transition(self, key, final_state, stimulus_id): ...
 
 This transition function finds the appropriate path from the current to the
 final state.  It also serves as a central point for logging and diagnostics.
@@ -258,7 +278,7 @@ steady state.  For that we use the ``transitions`` function (note the plural ``s
 
 .. code-block:: python
 
-   def transitions(self, recommendations):
+   def transitions(self, recommendations, stimulus_id):
        recommendations = recommendations.copy()
        while recommendations:
            key, finish = recommendations.popitem()
@@ -276,17 +296,55 @@ Transitions occur from stimuli, which are state-changing messages to the
 scheduler from workers or clients.  The scheduler responds to the following
 stimuli:
 
-* **Workers**
-    * Task finished: A task has completed on a worker and is now in memory
-    * Task erred: A task ran and erred on a worker
-    * Task missing data: A task tried to run but was unable to find necessary
-      data on other workers
-    * Worker added: A new worker was added to the network
-    * Worker removed: An existing worker left the network
+**Workers**
 
-* **Clients**
-    * Update graph: The client sends more tasks to the scheduler
-    * Release keys: The client no longer desires the result of certain keys
+task-finished
+    A task has completed on a worker and is now in memory
+task-erred
+    A task ran and erred on a worker
+reschedule
+    A task has completed on a worker by raising :class:`~distributed.Reschedule`
+long-running
+    A task is still running on the worker, but it called :func:`~distributed.secede`
+add-keys
+    Replication finished. One or more tasks, which were previously in memory on other
+    workers, are now in memory on one additional worker. Also used to inform the
+    scheduler of a successful :func:`~distributed.Client.scatter` operation.
+request-refresh-who-has
+    All peers that hold a replica of a task in memory that a worker knows of are
+    unavailable (temporarily or permanently), so the worker can't fetch it and is asking
+    the scheduler if it knows of any additional replicas. This call is repeated
+    periodically until a new replica appears.
+release-worker-data
+    A worker informs that the scheduler that it no longer holds the task in memory
+worker-status-change
+    The global status of a worker has just changed, e.g. between ``running`` and
+    ``paused``.
+log-event
+    A generic event happend on the worker, which should be logged centrally.
+    Note that this is in addition to the worker's log, which the client can fetch on
+    request (up to a certain length).
+keep-alive
+    A worker informs that it's still online and responsive. This uses the batched stream
+    channel, as opposed to :meth:`distributed.worker.Worker.heartbeat` and
+    :meth:`Scheduler.heartbeat_worker` which use dedicated RPC comms, and is needed to
+    prevent firewalls from closing down the batched stream.
+register-worker
+    A new worker was added to the network
+unregister
+    An existing worker left the network
+
+
+**Clients**
+
+update-graph
+    The client sends more tasks to the scheduler
+client-releases-keys
+    The client no longer desires the result of certain keys.
+
+Note that there are many more client API endpoints (e.g. to serve
+:func:`~distributed.Client.scatter` etc.), which are not listed here for the sake of
+brevity.
 
 Stimuli functions are prepended with the text ``stimulus``, and take a variety
 of keyword arguments from the message as in the following examples:
@@ -314,6 +372,15 @@ API
 .. autoclass:: Scheduler
    :members:
    :inherited-members:
+
+.. autoclass:: TaskState
+    :members:
+
+.. autoclass:: WorkerState
+    :members:
+
+.. autoclass:: ClientState
+    :members:
 
 .. autofunction:: decide_worker
 

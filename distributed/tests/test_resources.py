@@ -14,8 +14,11 @@ from distributed.utils_test import gen_cluster, inc, lock_inc, slowadd, slowinc
 from distributed.worker_state_machine import (
     ComputeTaskEvent,
     Execute,
+    ExecuteFailureEvent,
     ExecuteSuccessEvent,
     FreeKeysEvent,
+    LongRunningMsg,
+    RescheduleEvent,
     TaskFinishedMsg,
 )
 
@@ -508,3 +511,77 @@ async def test_resources_from_python_override_config(c, s, a, b):
     info = c.scheduler_info()
     for worker in [a, b]:
         assert info["workers"][worker.address]["resources"] == {"my_resources": 10}
+
+
+@pytest.mark.parametrize(
+    "done_ev_cls", [ExecuteSuccessEvent, ExecuteFailureEvent, RescheduleEvent]
+)
+def test_cancelled_with_resources(ws_with_running_task, done_ev_cls):
+    """Test transition loop of a task with resources:
+
+    executing -> cancelled -> released
+    """
+    ws = ws_with_running_task
+    assert ws.available_resources == {"R": 0}
+
+    ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="s1"))
+    assert ws.available_resources == {"R": 0}
+
+    ws.handle_stimulus(done_ev_cls.dummy("x", stimulus_id="s2"))
+    assert ws.available_resources == {"R": 1}
+    assert "x" not in ws.tasks
+
+
+@pytest.mark.parametrize(
+    "done_ev_cls", [ExecuteSuccessEvent, ExecuteFailureEvent, RescheduleEvent]
+)
+def test_resumed_with_resources(ws_with_running_task, done_ev_cls):
+    """Test transition loop of a task with resources:
+
+    executing -> cancelled -> resumed(fetch) -> (complete execution)
+    """
+    ws = ws_with_running_task
+    ws2 = "127.0.0.1:2"
+    assert ws.available_resources == {"R": 0}
+
+    ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="s1"))
+    assert ws.available_resources == {"R": 0}
+
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s2")
+    )
+    assert ws.available_resources == {"R": 0}
+
+    ws.handle_stimulus(done_ev_cls.dummy("x", stimulus_id="s3"))
+    assert ws.available_resources == {"R": 1}
+
+
+@pytest.mark.parametrize(
+    "done_ev_cls", [ExecuteSuccessEvent, ExecuteFailureEvent, RescheduleEvent]
+)
+def test_resumed_with_different_resources(ws_with_running_task, done_ev_cls):
+    """A task with resources is cancelled and then resumed to the same state, but with
+    different resources. This is actually possible in case of manual cancellation from
+    the client, followed by resubmit.
+    """
+    ws = ws_with_running_task
+    assert ws.available_resources == {"R": 0}
+    ts = ws.tasks["x"]
+    prev_state = ts.state
+
+    ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="s1"))
+    assert ws.available_resources == {"R": 0}
+
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy("x", stimulus_id="s2", resource_restrictions={"R": 0.4})
+    )
+    if prev_state == "long-running":
+        assert instructions == [
+            LongRunningMsg(key="x", compute_duration=None, stimulus_id="s2")
+        ]
+    else:
+        assert not instructions
+    assert ws.available_resources == {"R": 0}
+
+    ws.handle_stimulus(done_ev_cls.dummy(key="x", stimulus_id="s3"))
+    assert ws.available_resources == {"R": 1}

@@ -12,6 +12,7 @@ from tlz import valmap
 from tornado.ioloop import IOLoop
 
 import dask
+from dask.utils import key_split
 
 from distributed.client import default_client, futures_of
 from distributed.core import (
@@ -22,7 +23,7 @@ from distributed.core import (
 )
 from distributed.diagnostics.progress import MultiProgress, Progress, format_time
 from distributed.protocol.pickle import dumps
-from distributed.utils import LoopRunner, is_kernel, key_split
+from distributed.utils import LoopRunner, is_kernel
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +164,7 @@ class TextProgressBar(ProgressBar):
             sys.stdout.flush()
 
     def _draw_stop(self, **kwargs):
-        sys.stdout.write("\r")
+        sys.stdout.write("\33[2K\r")
         sys.stdout.flush()
 
 
@@ -198,7 +199,9 @@ class ProgressWidget(ProgressBar):
 
     def _ipython_display_(self, **kwargs):
         IOLoop.current().add_callback(self.listen)
-        return self.widget._ipython_display_(**kwargs)
+        from IPython.display import display
+
+        display(self.widget, **kwargs)
 
     def _draw_stop(self, remaining, status, exception=None, **kwargs):
         if status == "error":
@@ -379,7 +382,9 @@ class MultiProgressWidget(MultiProgressBar):
 
     def _ipython_display_(self, **kwargs):
         IOLoop.current().add_callback(self.listen)
-        return self.widget._ipython_display_(**kwargs)
+        from IPython.display import display
+
+        display(self.widget, **kwargs)
 
     def _draw_stop(self, remaining, status, exception=None, key=None, **kwargs):
         for k, v in remaining.items():

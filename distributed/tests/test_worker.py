@@ -673,19 +673,19 @@ async def test_clean(c, s, a, b):
 @gen_cluster(client=True)
 async def test_message_breakup(c, s, a, b):
     n = 100_000
-    a.state.target_message_size = 10 * n
-    b.state.target_message_size = 10 * n
+    a.state.transfer_message_target_bytes = 10 * n
+    b.state.transfer_message_target_bytes = 10 * n
     xs = [
         c.submit(mul, b"%d" % i, n, key=f"x{i}", workers=[a.address]) for i in range(30)
     ]
     y = c.submit(lambda _: None, xs, key="y", workers=[b.address])
     await y
 
-    assert 2 <= len(b.incoming_transfer_log) <= 20
-    assert 2 <= len(a.outgoing_transfer_log) <= 20
+    assert 2 <= len(b.transfer_incoming_log) <= 20
+    assert 2 <= len(a.transfer_outgoing_log) <= 20
 
-    assert all(msg["who"] == b.address for msg in a.outgoing_transfer_log)
-    assert all(msg["who"] == a.address for msg in a.incoming_transfer_log)
+    assert all(msg["who"] == b.address for msg in a.transfer_outgoing_log)
+    assert all(msg["who"] == a.address for msg in a.transfer_incoming_log)
 
 
 @gen_cluster(client=True)
@@ -764,7 +764,7 @@ async def test_gather_many_small(c, s, a, *snd_workers, as_deps):
     concurrent outgoing connections. If multiple small fetches from the same worker are
     scheduled all at once, they will result in a single call to gather_dep.
     """
-    a.state.total_out_connections = 2
+    a.state.transfer_incoming_count_limit = 2
     futures = await c.scatter(
         {f"x{i}": i for i in range(100)},
         workers=[w.address for w in snd_workers],
@@ -779,7 +779,7 @@ async def test_gather_many_small(c, s, a, *snd_workers, as_deps):
         while len(a.data) < 100:
             await asyncio.sleep(0.01)
 
-    assert a.state.comm_nbytes == 0
+    assert a.state.transfer_incoming_bytes == 0
 
     story = a.state.story("request-dep", "receive-dep")
     assert len(story) == 40  # 1 request-dep + 1 receive-dep per sender worker
@@ -808,27 +808,31 @@ async def test_multiple_transfers(c, s, w1, w2, w3):
 @pytest.mark.xfail(reason="very high flakiness")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 async def test_share_communication(c, s, w1, w2, w3):
-    x = c.submit(mul, b"1", int(w3.target_message_size + 1), workers=w1.address)
-    y = c.submit(mul, b"2", int(w3.target_message_size + 1), workers=w2.address)
+    x = c.submit(
+        mul, b"1", int(w3.transfer_message_target_bytes + 1), workers=w1.address
+    )
+    y = c.submit(
+        mul, b"2", int(w3.transfer_message_target_bytes + 1), workers=w2.address
+    )
     await wait([x, y])
     await c._replicate([x, y], workers=[w1.address, w2.address])
     z = c.submit(add, x, y, workers=w3.address)
     await wait(z)
-    assert len(w3.incoming_transfer_log) == 2
-    assert w1.outgoing_transfer_log
-    assert w2.outgoing_transfer_log
+    assert len(w3.transfer_incoming_log) == 2
+    assert w1.transfer_outgoing_log
+    assert w2.transfer_outgoing_log
 
 
 @pytest.mark.xfail(reason="very high flakiness")
 @gen_cluster(client=True)
 async def test_dont_overlap_communications_to_same_worker(c, s, a, b):
-    x = c.submit(mul, b"1", int(b.target_message_size + 1), workers=a.address)
-    y = c.submit(mul, b"2", int(b.target_message_size + 1), workers=a.address)
+    x = c.submit(mul, b"1", int(b.transfer_message_target_bytes + 1), workers=a.address)
+    y = c.submit(mul, b"2", int(b.transfer_message_target_bytes + 1), workers=a.address)
     await wait([x, y])
     z = c.submit(add, x, y, workers=b.address)
     await wait(z)
-    assert len(b.incoming_transfer_log) == 2
-    l1, l2 = b.incoming_transfer_log
+    assert len(b.transfer_incoming_log) == 2
+    l1, l2 = b.transfer_incoming_log
 
     assert l1["stop"] < l2["start"]
 
@@ -1019,7 +1023,11 @@ def test_get_client_sync(client):
 @gen_cluster(client=True)
 async def test_get_client_coroutine(c, s, a, b):
     async def f():
-        client = await get_client()
+        # TODO: the existence of `await get_client()` implies the possibility
+        # of `async with get_client()` and that will kill the workers' client
+        # if you do that. We really don't want users to do that.
+        # https://github.com/dask/distributed/pull/6921/
+        client = get_client()
         future = client.submit(inc, 10)
         result = await future
         return result
@@ -1225,9 +1233,8 @@ def test_get_worker_name(client):
 @gen_cluster(nthreads=[], client=True)
 async def test_scheduler_address_config(c, s):
     with dask.config.set({"scheduler-address": s.address}):
-        worker = await Worker()
-        assert worker.scheduler.address == s.address
-    await worker.close()
+        async with Worker() as w:
+            assert w.scheduler.address == s.address
 
 
 @pytest.mark.xfail(reason="very high flakiness")
@@ -1241,8 +1248,8 @@ async def test_wait_for_outgoing(c, s, a, b):
     y = c.submit(inc, future, workers=b.address)
     await wait(y)
 
-    assert len(b.incoming_transfer_log) == len(a.outgoing_transfer_log) == 1
-    bb = b.incoming_transfer_log[0]["duration"]
+    assert len(b.transfer_incoming_log) == len(a.transfer_outgoing_log) == 1
+    bb = b.transfer_incoming_log[0]["duration"]
     aa = a.outgoing_transfer_log[0]["duration"]
     ratio = aa / bb
 
@@ -1259,8 +1266,8 @@ async def test_prefer_gather_from_local_address(c, s, w1, w2, w3):
     y = c.submit(inc, x, workers=[w2.address])
     await wait(y)
 
-    assert any(d["who"] == w2.address for d in w1.outgoing_transfer_log)
-    assert not any(d["who"] == w2.address for d in w3.outgoing_transfer_log)
+    assert any(d["who"] == w2.address for d in w1.transfer_outgoing_log)
+    assert not any(d["who"] == w2.address for d in w3.transfer_outgoing_log)
 
 
 @gen_cluster(
@@ -1278,10 +1285,10 @@ async def test_avoid_oversubscription(c, s, *workers):
     await wait(futures)
 
     # Original worker not responsible for all transfers
-    assert len(workers[0].outgoing_transfer_log) < len(workers) - 2
+    assert len(workers[0].transfer_outgoing_log) < len(workers) - 2
 
     # Some other workers did some work
-    assert len([w for w in workers if len(w.outgoing_transfer_log) > 0]) >= 3
+    assert len([w for w in workers if len(w.transfer_outgoing_log) > 0]) >= 3
 
 
 @gen_cluster(client=True, worker_kwargs={"metrics": {"my_port": lambda w: w.port}})
@@ -1319,10 +1326,9 @@ async def test_register_worker_callbacks(c, s, a, b):
     assert list(result.values()) == [False] * 2
 
     # Start a worker and check that startup is not run
-    worker = await Worker(s.address)
-    result = await c.run(test_import, workers=[worker.address])
-    assert list(result.values()) == [False]
-    await worker.close()
+    async with Worker(s.address) as worker:
+        result = await c.run(test_import, workers=[worker.address])
+        assert list(result.values()) == [False]
 
     # Add a plugin function
     response = await c.register_worker_callbacks(setup=mystartup)
@@ -1332,11 +1338,10 @@ async def test_register_worker_callbacks(c, s, a, b):
     result = await c.run(test_import)
     assert list(result.values()) == [True] * 2
 
-    # Start a worker and check it is ran on it
-    worker = await Worker(s.address)
-    result = await c.run(test_import, workers=[worker.address])
-    assert list(result.values()) == [True]
-    await worker.close()
+    # Start a worker and check it is run on it
+    async with Worker(s.address) as worker:
+        result = await c.run(test_import, workers=[worker.address])
+        assert list(result.values()) == [True]
 
     # Register another plugin function
     response = await c.register_worker_callbacks(setup=mystartup2)
@@ -1346,13 +1351,12 @@ async def test_register_worker_callbacks(c, s, a, b):
     result = await c.run(test_startup2)
     assert list(result.values()) == [True] * 2
 
-    # Start a worker and check it is ran on it
-    worker = await Worker(s.address)
-    result = await c.run(test_import, workers=[worker.address])
-    assert list(result.values()) == [True]
-    result = await c.run(test_startup2, workers=[worker.address])
-    assert list(result.values()) == [True]
-    await worker.close()
+    # Start a worker and check it is run on it
+    async with Worker(s.address) as worker:
+        result = await c.run(test_import, workers=[worker.address])
+        assert list(result.values()) == [True]
+        result = await c.run(test_startup2, workers=[worker.address])
+        assert list(result.values()) == [True]
 
 
 @gen_cluster(client=True)
@@ -1362,19 +1366,17 @@ async def test_register_worker_callbacks_err(c, s, a, b):
 
 
 @gen_cluster(nthreads=[])
-async def test_local_directory(s):
-    with tmpfile() as fn:
-        with dask.config.set(temporary_directory=fn):
-            w = await Worker(s.address)
-            assert w.local_directory.startswith(fn)
+async def test_local_directory(s, tmp_path):
+    with dask.config.set(temporary_directory=str(tmp_path)):
+        async with Worker(s.address) as w:
+            assert w.local_directory.startswith(str(tmp_path))
             assert "dask-worker-space" in w.local_directory
 
 
 @gen_cluster(nthreads=[])
-async def test_local_directory_make_new_directory(s):
-    with tmpfile() as fn:
-        w = await Worker(s.address, local_directory=os.path.join(fn, "foo", "bar"))
-        assert w.local_directory.startswith(fn)
+async def test_local_directory_make_new_directory(s, tmp_path):
+    async with Worker(s.address, local_directory=str(tmp_path / "foo" / "bar")) as w:
+        assert w.local_directory.startswith(str(tmp_path))
         assert "foo" in w.local_directory
         assert "dask-worker-space" in w.local_directory
 
@@ -1382,14 +1384,12 @@ async def test_local_directory_make_new_directory(s):
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster(nthreads=[], client=True)
 async def test_host_address(c, s):
-    w = await Worker(s.address, host="127.0.0.2")
-    assert "127.0.0.2" in w.address
-    await w.close()
+    async with Worker(s.address, host="127.0.0.2") as w:
+        assert "127.0.0.2" in w.address
 
-    n = await Nanny(s.address, host="127.0.0.3")
-    assert "127.0.0.3" in n.address
-    assert "127.0.0.3" in n.worker_address
-    await n.close()
+    async with Nanny(s.address, host="127.0.0.3") as n:
+        assert "127.0.0.3" in n.address
+        assert "127.0.0.3" in n.worker_address
 
 
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
@@ -1542,7 +1542,7 @@ async def test_close_while_executing(c, s, a, sync):
     )
     await a.close()
     assert task.cancelled()
-    assert s.tasks["f1"].state == "no-worker"
+    assert s.tasks["f1"].state in ("queued", "no-worker")
 
 
 @pytest.mark.slow
@@ -1570,7 +1570,7 @@ async def test_close_async_task_handles_cancellation(c, s, a):
     assert "Failed to cancel asyncio task" in logger.getvalue()
     assert time() - start < 5
     assert not task.cancelled()
-    assert s.tasks["f1"].state == "no-worker"
+    assert s.tasks["f1"].state in ("queued", "no-worker")
     task.cancel()
     await asyncio.wait({task})
 
@@ -1622,13 +1622,13 @@ async def test_bad_metrics(s):
 
 @gen_cluster(nthreads=[])
 async def test_bad_startup(s):
+    """Bad startup functions do not cause the Worker to fail"""
+
     def bad_startup(w):
         raise Exception("Hello")
 
-    try:
-        await Worker(s.address, startup_information={"bad": bad_startup})
-    except Exception:
-        pytest.fail("Startup exception was raised")
+    async with Worker(s.address, startup_information={"bad": bad_startup}):
+        pass
 
 
 @gen_cluster(client=True)
@@ -1680,7 +1680,7 @@ async def test_pip_install_fails(c, s, a, b):
 
 @gen_cluster(nthreads=[])
 async def test_update_latency(s):
-    async with await Worker(s.address) as w:
+    async with Worker(s.address) as w:
         original = w.latency
         await w.heartbeat()
         assert original != w.latency
@@ -1725,7 +1725,7 @@ async def test_heartbeat_comm_closed(s, monkeypatch):
         def bad_heartbeat_worker(*args, **kwargs):
             raise CommClosedError()
 
-        async with await Worker(s.address) as w:
+        async with Worker(s.address) as w:
             # Trigger CommClosedError during worker heartbeat
             monkeypatch.setattr(w.scheduler, "heartbeat_worker", bad_heartbeat_worker)
 
@@ -1833,7 +1833,7 @@ async def test_bad_local_directory(s):
 
 @gen_cluster(client=True, nthreads=[])
 async def test_taskstate_metadata(c, s):
-    async with await Worker(s.address) as a:
+    async with Worker(s.address) as a:
         await c.register_worker_plugin(TaskStateMetadataPlugin())
 
         f = c.submit(inc, 1)
@@ -1963,7 +1963,7 @@ async def test_gather_dep_one_worker_always_busy(c, s, a, b):
     # We will block A for any outgoing communication. This simulates an
     # overloaded worker which will always return "busy" for get_data requests,
     # effectively blocking H indefinitely
-    a.outgoing_current_count = 10000000
+    a.transfer_outgoing_count = 10000000
 
     h = c.submit(add, f, g, key="h", workers=[b.address])
 
@@ -2025,7 +2025,7 @@ async def test_gather_dep_from_remote_workers_if_all_local_workers_are_busy(
         )
     )["f"]
     for w in lws:
-        w.outgoing_current_count = 10000000
+        w.transfer_outgoing_count = 10000000
 
     g = c.submit(inc, f, key="g", workers=[a.address])
     assert await g == 2
@@ -2722,7 +2722,7 @@ async def test_acquire_replicas_same_channel(c, s, a, b):
                 ("request-dep", a.address, {fut.key}),
             ],
         )
-        assert any(fut.key in msg["keys"] for msg in b.incoming_transfer_log)
+        assert any(fut.key in msg["keys"] for msg in b.transfer_incoming_log)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
@@ -3001,9 +3001,9 @@ async def test_acquire_replicas_with_no_priority(c, s, a, b):
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_acquire_replicas_large_data(c, s, a):
     """When acquire-replicas is used to acquire multiple sizeable tasks, it respects
-    target_message_size and acquires them over multiple iterations.
+    transfer_message_target_bytes and acquires them over multiple iterations.
     """
-    size = a.state.target_message_size // 5 - 10_000
+    size = a.state.transfer_message_target_bytes // 5 - 10_000
 
     class C:
         def __sizeof__(self):
@@ -3030,7 +3030,7 @@ async def test_missing_released_zombie_tasks(c, s, a, b):
     Ensure that no fetch/flight tasks are left in the task dict of a
     worker after everything was released
     """
-    a.total_in_connections = 0
+    a.transfer_outgoing_count_limit = 0
     f1 = c.submit(inc, 1, key="f1", workers=[a.address])
     f2 = c.submit(inc, f1, key="f2", workers=[b.address])
     key = f1.key
@@ -3115,6 +3115,11 @@ async def test_worker_status_sync(s, a):
             "action": "worker-status-change",
             "prev-status": "paused",
             "status": "running",
+        },
+        {
+            "action": "worker-status-change",
+            "prev-status": "running",
+            "status": "closing_gracefully",
         },
         {"action": "remove-worker", "processing-tasks": {}},
         {"action": "retired"},
@@ -3314,8 +3319,8 @@ async def test_Worker__to_dict(c, s, a):
         "thread_id",
         "logs",
         "config",
-        "incoming_transfer_log",
-        "outgoing_transfer_log",
+        "transfer_incoming_log",
+        "transfer_outgoing_log",
         # Attributes of WorkerMemoryManager
         "data",
         "max_spill",
@@ -3555,3 +3560,20 @@ async def test_execute_preamble_abort_retirement(c, s):
 
         # Test that y does not get stuck.
         assert await y == 2
+
+
+@gen_cluster()
+async def test_deprecation_of_renamed_worker_attributes(s, a, b):
+    msg = (
+        "The `Worker.outgoing_count` attribute has been renamed to "
+        "`Worker.transfer_outgoing_count_total`"
+    )
+    with pytest.warns(DeprecationWarning, match=msg):
+        assert a.outgoing_count == a.transfer_outgoing_count_total
+
+    msg = (
+        "The `Worker.outgoing_current_count` attribute has been renamed to "
+        "`Worker.transfer_outgoing_count`"
+    )
+    with pytest.warns(DeprecationWarning, match=msg):
+        assert a.outgoing_current_count == a.transfer_outgoing_count

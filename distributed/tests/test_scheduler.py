@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import operator
 import pickle
 import re
@@ -10,7 +11,7 @@ import sys
 from itertools import product
 from textwrap import dedent
 from time import sleep
-from typing import Collection
+from typing import ClassVar, Collection
 from unittest import mock
 
 import cloudpickle
@@ -35,7 +36,7 @@ from distributed import (
     wait,
 )
 from distributed.comm.addressing import parse_host_port
-from distributed.compatibility import LINUX, WINDOWS
+from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps, loads
@@ -43,6 +44,7 @@ from distributed.scheduler import MemoryState, Scheduler, WorkerState
 from distributed.utils import TimeoutError
 from distributed.utils_test import (
     BrokenComm,
+    async_wait_for,
     captured_logger,
     cluster,
     dec,
@@ -54,6 +56,7 @@ from distributed.utils_test import (
     raises_with_cause,
     slowadd,
     slowdec,
+    slowidentity,
     slowinc,
     tls_only_security,
     varying,
@@ -145,7 +148,10 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
     @gen_cluster(
         client=True,
         nthreads=nthreads,
-        config={"distributed.scheduler.work-stealing": False},
+        config={
+            "distributed.scheduler.work-stealing": False,
+            "distributed.scheduler.worker-saturation": float("inf"),
+        },
     )
     async def test_decide_worker_coschedule_order_neighbors_(c, s, *workers):
         r"""
@@ -227,7 +233,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         # Check that there were few transfers
         unexpected_transfers = []
         for worker in workers:
-            for log in worker.incoming_transfer_log:
+            for log in worker.transfer_incoming_log:
                 keys = log["keys"]
                 # The root-ish tasks should never be transferred
                 assert not any(k.startswith("random") for k in keys), keys
@@ -243,6 +249,208 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         assert len(unexpected_transfers) <= 3, unexpected_transfers
 
     test_decide_worker_coschedule_order_neighbors_()
+
+
+@pytest.mark.slow
+@gen_cluster(
+    nthreads=[("", 2)] * 4,
+    client=True,
+    config={"distributed.scheduler.worker-saturation": 1.0},
+)
+async def test_graph_execution_width(c, s, *workers):
+    """
+    Test that we don't execute the graph more breadth-first than necessary.
+
+    We shouldn't start loading extra data if we're not going to use it immediately.
+    The number of parallel work streams match the number of threads.
+    """
+
+    class Refcount:
+        "Track how many instances of this class exist; logs the count at creation and deletion"
+
+        count: ClassVar[int] = 0
+        lock: ClassVar[dask.utils.SerializableLock] = dask.utils.SerializableLock()
+        log: ClassVar[list[int]] = []
+
+        def __init__(self) -> None:
+            with self.lock:
+                type(self).count += 1
+                self.log.append(self.count)
+
+        def __del__(self):
+            with self.lock:
+                self.log.append(self.count)
+                type(self).count -= 1
+
+    roots = [delayed(Refcount)() for _ in range(32)]
+    passthrough1 = [delayed(slowidentity)(r, delay=0) for r in roots]
+    passthrough2 = [delayed(slowidentity)(r, delay=0) for r in passthrough1]
+    done = [delayed(lambda r: None)(r) for r in passthrough2]
+
+    fs = c.compute(done)
+    await wait(fs)
+    # NOTE: the max should normally equal `total_nthreads`. But some macOS CI machines
+    # are slow enough that they aren't able to reach the full parallelism of 8 threads.
+    assert max(Refcount.log) <= s.total_nthreads
+
+
+@pytest.mark.parametrize("queue", [True, False])
+@gen_cluster(
+    client=True,
+    nthreads=[("", 2)] * 2,
+    config={
+        "distributed.worker.memory.pause": False,
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": False,
+        "distributed.scheduler.work-stealing": False,
+    },
+)
+async def test_queued_paused_new_worker(c, s, a, b, queue):
+    if queue:
+        s.WORKER_SATURATION = 1.0
+    else:
+        s.WORKER_SATURATION = float("inf")
+
+    f1s = c.map(slowinc, range(16))
+    f2s = c.map(slowinc, f1s)
+    final = c.submit(sum, *f2s)
+    del f1s, f2s
+
+    while not a.data or not b.data:
+        await asyncio.sleep(0.01)
+
+    # manually pause the workers
+    a.status = Status.paused
+    b.status = Status.paused
+
+    while s.running:
+        # wait for workers pausing to hit the scheduler
+        await asyncio.sleep(0.01)
+
+    assert not s.idle
+    assert not s.running
+
+    async with Worker(s.address, nthreads=2) as w:
+        # Tasks are successfully scheduled onto a new worker
+        while not w.state.data:
+            await asyncio.sleep(0.01)
+
+        del final
+        while s.tasks:
+            await asyncio.sleep(0.01)
+        assert not s.queued
+
+
+@pytest.mark.parametrize("queue", [True, False])
+@gen_cluster(
+    client=True,
+    nthreads=[("", 2)] * 2,
+    config={
+        "distributed.worker.memory.pause": False,
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": False,
+        "distributed.scheduler.work-stealing": False,
+    },
+)
+async def test_queued_paused_unpaused(c, s, a, b, queue):
+    if queue:
+        s.WORKER_SATURATION = 1.0
+    else:
+        s.WORKER_SATURATION = float("inf")
+
+    f1s = c.map(slowinc, range(16))
+    f2s = c.map(slowinc, f1s)
+    final = c.submit(sum, *f2s)
+    del f1s, f2s
+
+    while not a.data or not b.data:
+        await asyncio.sleep(0.01)
+
+    # manually pause the workers
+    a.status = Status.paused
+    b.status = Status.paused
+
+    while s.running:
+        # wait for workers pausing to hit the scheduler
+        await asyncio.sleep(0.01)
+
+    assert not s.running
+    assert not s.idle
+
+    # un-pause
+    a.status = Status.running
+    b.status = Status.running
+    while not s.running:
+        await asyncio.sleep(0.01)
+
+    assert not s.idle  # workers should have been (or already were) filled
+
+    await wait(final)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 2)] * 2,
+    config={"distributed.scheduler.worker-saturation": 1.0},
+)
+async def test_queued_remove_add_worker(c, s, a, b):
+    event = Event()
+    fs = c.map(lambda i: event.wait(), range(10))
+
+    await async_wait_for(lambda: len(s.queued) == 6, timeout=5)
+    await s.remove_worker(a.address, stimulus_id="fake")
+    assert len(s.queued) == 8
+
+    # Add a new worker
+    async with Worker(s.address, nthreads=2) as w:
+        await async_wait_for(lambda: len(s.queued) == 6, timeout=5)
+
+        await event.set()
+        await wait(fs)
+
+
+@pytest.mark.parametrize(
+    "saturation, expected_task_counts",
+    [
+        (2.5, (5, 2)),
+        (2.0, (4, 2)),
+        (1.0, (2, 1)),
+        (-1.0, (1, 1)),
+        (float("inf"), (6, 4))
+        # ^ depends on root task assignment logic; ok if changes, just needs to add up to 10
+    ],
+)
+def test_saturation_factor(
+    saturation: int | float, expected_task_counts: tuple[int, int]
+) -> None:
+    @gen_cluster(
+        client=True,
+        nthreads=[("", 2), ("", 1)],
+        config={
+            "distributed.scheduler.worker-saturation": saturation,
+        },
+    )
+    async def _test_saturation_factor(c, s, a, b):
+        event = Event()
+        fs = c.map(
+            lambda _: event.wait(), range(10), key=[f"wait-{i}" for i in range(10)]
+        )
+        while a.state.executing_count < min(
+            a.state.nthreads, expected_task_counts[0]
+        ) or b.state.executing_count < min(b.state.nthreads, expected_task_counts[1]):
+            await asyncio.sleep(0.01)
+
+        if math.isfinite(saturation):
+            assert len(a.state.tasks) == expected_task_counts[0]
+            assert len(b.state.tasks) == expected_task_counts[1]
+        else:
+            # Assignment is nondeterministic for some reason without queuing
+            assert len(a.state.tasks) > len(b.state.tasks)
+
+        await event.set()
+        await c.gather(fs)
+
+    _test_saturation_factor()
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
@@ -284,16 +492,31 @@ async def test_no_valid_workers_loose_restrictions(client, s, a, b, c):
     assert result == 2
 
 
+@pytest.mark.parametrize("queue", [False, True])
 @gen_cluster(client=True, nthreads=[])
-async def test_no_workers(client, s):
+async def test_no_workers(client, s, queue):
+    if queue:
+        s.WORKER_SATURATION = 1.0
+    else:
+        s.WORKER_SATURATION = float("inf")
+
     x = client.submit(inc, 1)
     while not s.tasks:
         await asyncio.sleep(0.01)
 
-    assert s.tasks[x.key] in s.unrunnable
+    ts = s.tasks[x.key]
+    if queue:
+        assert ts in s.queued
+        assert ts.state == "queued"
+    else:
+        assert ts in s.unrunnable
+        assert ts.state == "no-worker"
 
     with pytest.raises(TimeoutError):
         await asyncio.wait_for(x, 0.05)
+
+    async with Worker(s.address, nthreads=1):
+        await wait(x)
 
 
 @gen_cluster(nthreads=[])
@@ -321,7 +544,7 @@ async def test_remove_worker_from_scheduler(s, a, b):
     assert a.address in s.stream_comms
     await s.remove_worker(address=a.address, stimulus_id="test")
     assert a.address not in s.workers
-    assert len(s.workers[b.address].processing) == len(dsk)  # b owns everything
+    assert len(s.workers[b.address].processing) + len(s.queued) == len(dsk)
 
 
 @gen_cluster()
@@ -605,20 +828,44 @@ async def test_ready_remove_worker(s, a, b):
         dependencies={"x-%d" % i: [] for i in range(20)},
     )
 
-    assert all(len(w.processing) > w.nthreads for w in s.workers.values())
+    if s.WORKER_SATURATION == 1:
+        cmp = operator.eq
+    elif math.isinf(s.WORKER_SATURATION):
+        cmp = operator.gt
+    else:
+        pytest.fail(f"{s.WORKER_SATURATION=}, must be 1 or inf")
+
+    assert all(cmp(len(w.processing), w.nthreads) for w in s.workers.values()), (
+        list(s.workers.values()),
+        s.WORKER_SATURATION,
+    )
+    assert sum(len(w.processing) for w in s.workers.values()) + len(s.queued) == len(
+        s.tasks
+    )
 
     await s.remove_worker(address=a.address, stimulus_id="test")
 
     assert set(s.workers) == {b.address}
-    assert all(len(w.processing) > w.nthreads for w in s.workers.values())
+    assert all(cmp(len(w.processing), w.nthreads) for w in s.workers.values()), (
+        list(s.workers.values()),
+        s.WORKER_SATURATION,
+    )
+    assert sum(len(w.processing) for w in s.workers.values()) + len(s.queued) == len(
+        s.tasks
+    )
 
 
 @gen_cluster(client=True, Worker=Nanny, timeout=60)
 async def test_restart(c, s, a, b):
+
     futures = c.map(inc, range(20))
     await wait(futures)
 
     await s.restart()
+
+    assert not s.computations
+    assert not s.task_prefixes
+    assert not s.task_groups
 
     assert len(s.workers) == 2
 
@@ -869,15 +1116,13 @@ async def test_broadcast_deprecation(s, a, b):
 
 @gen_cluster(nthreads=[])
 async def test_worker_name(s):
-    w = await Worker(s.address, name="alice")
-    assert s.workers[w.address].name == "alice"
-    assert s.aliases["alice"] == w.address
+    async with Worker(s.address, name="alice") as w:
+        assert s.workers[w.address].name == "alice"
+        assert s.aliases["alice"] == w.address
 
-    with raises_with_cause(RuntimeError, None, ValueError, None):
-        w2 = await Worker(s.address, name="alice")
-        await w2.close()
-
-    await w.close()
+        with raises_with_cause(RuntimeError, None, ValueError, None):
+            async with Worker(s.address, name="alice"):
+                pass
 
 
 @gen_cluster(nthreads=[])
@@ -1011,10 +1256,8 @@ async def test_scatter_no_workers(c, s, direct):
 
 @gen_cluster(nthreads=[])
 async def test_scheduler_sees_memory_limits(s):
-    w = await Worker(s.address, nthreads=3, memory_limit=12345)
-
-    assert s.workers[w.address].memory_limit == 12345
-    await w.close()
+    async with Worker(s.address, nthreads=3, memory_limit=12345) as w:
+        assert s.workers[w.address].memory_limit == 12345
 
 
 @gen_cluster(client=True)
@@ -1179,9 +1422,13 @@ async def test_learn_occupancy(c, s, a, b):
     while sum(len(ts.who_has) for ts in s.tasks.values()) < 10:
         await asyncio.sleep(0.01)
 
-    assert 100 < s.total_occupancy < 1000
+    nproc = sum(ts.state == "processing" for ts in s.tasks.values())
+    assert nproc * 0.1 < s.total_occupancy < nproc * 0.4
     for w in [a, b]:
-        assert 50 < s.workers[w.address].occupancy < 700
+        ws = s.workers[w.address]
+        occ = ws.occupancy
+        proc = len(ws.processing)
+        assert proc * 0.1 < occ < proc * 0.4
 
 
 @pytest.mark.slow
@@ -1192,7 +1439,8 @@ async def test_learn_occupancy_2(c, s, a, b):
     while not any(ts.who_has for ts in s.tasks.values()):
         await asyncio.sleep(0.01)
 
-    assert 100 < s.total_occupancy < 1000
+    nproc = sum(ts.state == "processing" for ts in s.tasks.values())
+    assert nproc * 0.1 < s.total_occupancy < nproc * 0.4
 
 
 @gen_cluster(client=True)
@@ -1218,6 +1466,12 @@ async def test_balance_many_workers(c, s, *workers):
     assert {len(w.has_what) for w in s.workers.values()} == {0, 1}
 
 
+# FIXME test is very timing-based; if some threads are consistently slower than others,
+# they'll receive fewer tasks from the queue (a good thing).
+@pytest.mark.skipif(
+    MACOS and math.isfinite(dask.config.get("distributed.scheduler.worker-saturation")),
+    reason="flaky on macOS with queuing active",
+)
 @nodebug
 @gen_cluster(
     client=True,
@@ -1416,14 +1670,13 @@ async def test_fifo_submission(c, s, w):
 @gen_test()
 async def test_scheduler_file():
     with tmpfile() as fn:
-        s = await Scheduler(scheduler_file=fn, dashboard_address=":0")
-        with open(fn) as f:
-            data = json.load(f)
-        assert data["address"] == s.address
+        async with Scheduler(scheduler_file=fn, dashboard_address=":0") as s:
+            with open(fn) as f:
+                data = json.load(f)
+            assert data["address"] == s.address
 
-        c = await Client(scheduler_file=fn, loop=s.loop, asynchronous=True)
-        await c.close()
-        await s.close()
+            async with Client(scheduler_file=fn, loop=s.loop, asynchronous=True):
+                pass
 
 
 @pytest.mark.parametrize(
@@ -2009,6 +2262,31 @@ async def test_adaptive_target(c, s, a, b):
         while s.tasks:
             await asyncio.sleep(0.01)
         assert s.adaptive_target(target_duration=".1s") == 0
+
+
+@pytest.mark.parametrize("queue", [True, False])
+@gen_cluster(
+    client=True,
+    nthreads=[],
+)
+async def test_adaptive_target_empty_cluster(c, s, queue):
+    if queue:
+        s.WORKER_SATURATION = 1.0
+    else:
+        s.WORKER_SATURATION = float("inf")
+
+    assert s.adaptive_target() == 0
+
+    f = c.submit(inc, -1)
+    await async_wait_for(lambda: s.tasks, timeout=5)
+    assert s.adaptive_target() == 1
+    del f
+
+    if queue:
+        # only queuing supports fast scale-up for empty clusters https://github.com/dask/distributed/issues/6962
+        fs = c.map(inc, range(100))
+        await async_wait_for(lambda: len(s.tasks) == len(fs), timeout=5)
+        assert s.adaptive_target() > 1
 
 
 @gen_test()
@@ -3472,7 +3750,9 @@ async def test_Scheduler__to_dict(c, s, a):
     assert isinstance(d["workers"][a.address]["memory"]["process"], int)
 
 
-@gen_cluster(client=True, nthreads=[])
+@gen_cluster(
+    client=True, nthreads=[], config={"distributed.scheduler.worker-saturation": 1.0}
+)
 async def test_TaskState__to_dict(c, s):
     """tasks that are listed as dependencies of other tasks are dumped as a short repr
     and always appear in full under Scheduler.tasks
@@ -3489,7 +3769,7 @@ async def test_TaskState__to_dict(c, s):
     assert isinstance(tasks["y"], dict)
     assert isinstance(tasks["z"], dict)
     assert tasks["x"]["dependents"] == ["<TaskState 'y' waiting>"]
-    assert tasks["y"]["dependencies"] == ["<TaskState 'x' no-worker>"]
+    assert tasks["y"]["dependencies"] == ["<TaskState 'x' queued>"]
 
 
 def _verify_cluster_state(
