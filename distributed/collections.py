@@ -6,8 +6,13 @@ import itertools
 import weakref
 from collections import OrderedDict, UserDict
 from collections.abc import Callable, Hashable, Iterator
-from typing import MutableSet  # TODO move to collections.abc (requires Python >=3.9)
-from typing import Any, TypeVar, cast
+from typing import (  # TODO move to collections.abc (requires Python >=3.9)
+    Any,
+    Container,
+    MutableSet,
+    TypeVar,
+    cast,
+)
 
 T = TypeVar("T", bound=Hashable)
 
@@ -245,7 +250,7 @@ class Occupancy:
         self.cpu = 0.0
         self.network = 0.0
 
-    def _to_dict(self) -> dict[str, float]:
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict[str, float]:
         return {"cpu": self.cpu, "network": self.network}
 
     @property
