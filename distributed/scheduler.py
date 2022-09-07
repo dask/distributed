@@ -65,7 +65,7 @@ from distributed import versions as version_module
 from distributed._stories import scheduler_story
 from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
 from distributed.batched import BatchedSend
-from distributed.collections import HeapSet
+from distributed.collections import HeapSet, Occupancy
 from distributed.comm import (
     Comm,
     CommClosedError,
@@ -384,48 +384,6 @@ class MemoryState:
         distributed.utils.recursive_to_dict
         """
         return recursive_to_dict(self, exclude=exclude, members=True)
-
-
-@dataclasses.dataclass
-class Occupancy:
-    cpu: float
-    network: float
-
-    def __add__(self, other) -> Occupancy:
-        if isinstance(other, type(self)):
-            return type(self)(self.cpu + other.cpu, self.network + other.network)
-        return NotImplemented
-
-    def __iadd__(self, other):
-        if isinstance(other, type(self)):
-            self.cpu += other.cpu
-            self.network += other.network
-        return NotImplemented
-
-    def __sub__(self, other) -> Occupancy:
-        if isinstance(other, type(self)):
-            return type(self)(self.cpu - other.cpu, self.network - other.network)
-        return NotImplemented
-
-    def __isub__(self, other):
-        if isinstance(other, type(self)):
-            self.cpu -= other.cpu
-            self.network -= other.network
-        return NotImplemented
-
-    def __bool__(self) -> bool:
-        return self.cpu != 0 or self.network != 0
-
-    def clear(self) -> None:
-        self.cpu = 0.0
-        self.network = 0.0
-
-    def _to_dict(self) -> dict[str, float]:
-        return {"cpu": self.cpu, "network": self.network}
-
-    @property
-    def total(self) -> float:
-        return self.cpu + self.network
 
 
 class WorkerState:

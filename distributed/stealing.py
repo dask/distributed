@@ -14,10 +14,10 @@ from tornado.ioloop import PeriodicCallback
 import dask
 from dask.utils import parse_timedelta
 
+from distributed.collections import Occupancy
 from distributed.comm.addressing import get_address_host
 from distributed.core import CommClosedError, Status
 from distributed.diagnostics.plugin import SchedulerPlugin
-from distributed.scheduler import Occupancy
 from distributed.utils import log_errors, recursive_to_dict
 
 if TYPE_CHECKING:
