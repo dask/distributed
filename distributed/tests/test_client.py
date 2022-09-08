@@ -6600,6 +6600,32 @@ async def test_log_event(c, s, a):
     assert events[1][1] == ("alice", "bob")
 
 
+@gen_cluster(client=True, nthreads=[])
+async def test_log_event_multiple_clients(c, s):
+    c2 = await Client(s.address, set_as_default=False, asynchronous=True)
+    
+    received_events = []
+    
+    def get_event_handler(handler_id):
+        def handler(event):
+            received_events.append((handler_id, event))
+        return handler
+    
+    c.subscribe_topic('test-topic', get_event_handler(1))
+    c2.subscribe_topic('test-topic', get_event_handler(2)) 
+
+    while len(s.event_subscriber["test-topic"]) != 2:
+        await asyncio.sleep(0.01)
+
+    await c.log_event('test-topic', {})
+
+    while len(received_events) < 2:
+        await asyncio.sleep(0.01)
+
+    assert len(received_events) == 2
+    assert set(ev[0] for ev in received_events) == {1, 2}
+
+
 @gen_cluster(client=True)
 async def test_annotations_task_state(c, s, a, b):
     da = pytest.importorskip("dask.array")
