@@ -1371,14 +1371,15 @@ async def test_steal_very_fast_tasks(c, s, *workers):
     futs = c.compute(results)
     await c.gather(futs)
 
-    max_ = 0
-    rest = 0
+    # The following is an attempt to estimate and assert a roughly uniform data
+    # distribution
+    max_ntasks_on_worker = 0
     for w in workers:
-        ntasks = len(w.data)
-        if ntasks > max_:
-            rest += max_
-            max_ = ntasks
-        else:
-            rest += ntasks
+        ntasks_on_worker = len(w.data)
+        if ntasks_on_worker > max_ntasks_on_worker:
+            max_ntasks_on_worker = ntasks_on_worker
+        assert ntasks_on_worker > ntasks / len(workers) * 0.5
 
-    assert max_ < rest * 2 / 3
+    ntasks_on_other_workers = ntasks - max_ntasks_on_worker
+    nother_workers = len(workers) - 1
+    assert max_ntasks_on_worker < 2 * ntasks_on_other_workers / nother_workers
