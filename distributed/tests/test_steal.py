@@ -8,6 +8,7 @@ import math
 import random
 import sys
 import weakref
+from collections import defaultdict
 from operator import mul
 from time import sleep
 
@@ -47,6 +48,16 @@ pytestmark = pytest.mark.ci1
 # Most tests here are timing-dependent
 setup_module = nodebug_setup_module
 teardown_module = nodebug_teardown_module
+
+
+class Sizeof:
+    """Helper class for creating task results of a given size"""
+
+    def __init__(self, nbytes):
+        self._nbytes = nbytes - sys.getsizeof(object)
+
+    def __sizeof__(self) -> int:
+        return self._nbytes
 
 
 @gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
@@ -1415,13 +1426,112 @@ async def test_steal_very_fast_tasks(c, s, *workers):
     assert (ntasks_per_worker < ideal * 1.5).all(), (ideal, ntasks_per_worker)
 
 
-@gen_cluster(
-    client=True,
-    nthreads=[("", 1)] * 3,
-    config={"distributed.scheduler.unknown-task-duration": "1s"},
+@pytest.mark.parametrize("recompute_saturation", [True, False])
+@pytest.mark.parametrize(
+    "dependencies, dependency_placement, task_placement, expected_placement",
+    [
+        pytest.param(
+            {"a": 1},
+            [["a"], []],
+            [[["a"], ["a"], ["a"]], []],
+            [[["a"], ["a"]], [["a"]]],
+            id="test_balance[be willing to move costly items]",
+        ),
+        pytest.param(
+            {"a": 1},
+            [["a"], []],
+            [[["a"], ["a"], ["a"], ["a"]], []],
+            [[["a"], ["a"], ["a"]], [["a"]]],
+            id="test_balance[but don't move too many]",
+        ),
+        pytest.param(
+            {"a": 1},
+            [["a"], []],
+            [[["a"], ["a"]], []],
+            [[["a"]], [["a"]]],
+            id="balance without dependency",
+        ),
+        pytest.param(
+            {"a": 1},
+            [["a"], ["a"]],
+            [[["a"], ["a"]], []],
+            [[["a"]], [["a"]]],
+            id="balance with dependency",
+        ),
+        pytest.param(
+            {"a": 1},
+            [["a"], [], ["a"]],
+            [[["a"], ["a"]], [], []],
+            [[["a"]], [], [["a"]]],
+            id="balance to dependency",
+        ),
+    ],
 )
-async def test_steal_to_dependency(c, s, *workers):
-    expected = [[1], [], [1]]
+def test_balancing_with_dependencies(
+    dependencies,
+    dependency_placement,
+    task_placement,
+    expected_placement,
+    recompute_saturation,
+):
+    async def _test_balance(*args, **kwargs):
+        await assert_balanced_with_dependencies(
+            dependencies,
+            dependency_placement,
+            task_placement,
+            expected_placement,
+            recompute_saturation,
+            *args,
+            **kwargs,
+        )
+
+    config = {"distributed.scheduler.unknown-task-duration": "1s"}
+    gen_cluster(
+        client=True,
+        nthreads=[("", 1)] * len(task_placement),
+        config=config,
+    )(_test_balance)()
+
+
+async def place_dependencies(dependencies, placement, c, s, workers):
+    dependencies_to_workers = defaultdict(set)
+    for worker_idx, placed in enumerate(placement):
+        for dependency in placed:
+            dependencies_to_workers[dependency].add(workers[worker_idx].address)
+
+    dependency_futures = {}
+    for name, multiplier in dependencies.items():
+        worker_addresses = dependencies_to_workers[name]
+        [fut] = await c.scatter(
+            {name: Sizeof(int(multiplier * s.bandwidth))},
+            workers=worker_addresses,
+            broadcast=True,
+        )
+        dependency_futures[name] = fut
+
+    assert_dependency_placement(placement, workers)
+
+    return dependency_futures
+
+
+def assert_dependency_placement(expected, workers):
+    actual = []
+    for worker in workers:
+        actual.append(list(worker.state.tasks.keys()))
+
+    assert actual == expected
+
+
+async def assert_balanced_with_dependencies(
+    dependencies,
+    dependency_placement,
+    task_placement,
+    expected_placement,
+    recompute_saturation,
+    c,
+    s,
+    *workers,
+):
     steal = s.extensions["stealing"]
     await steal.stop()
     ev = Event()
@@ -1429,34 +1539,33 @@ async def test_steal_to_dependency(c, s, *workers):
     def block(*args, event, **kwargs):
         event.wait()
 
-    class Sizeof:
-        def __init__(self, nbytes):
-            self._nbytes = nbytes - sys.getsizeof(object())
+    counter = itertools.count()
 
-        def __sizeof__(self) -> int:
-            return self._nbytes
+    dependency_futures = await place_dependencies(
+        dependencies, dependency_placement, c, s, workers
+    )
 
     futures = []
-    t = 1
-    [dat] = await c.scatter(
-        [Sizeof(int(t * s.bandwidth))], workers=[workers[0].address, workers[2].address]
-    )
-    for i in range(2):
-        f = c.submit(
-            block,
-            dat,
-            event=ev,
-            key=f"{int(t)}-{i}",
-            workers=workers[0].address,
-            allow_other_workers=True,
-            pure=False,
-            priority=-i,
-        )
-        futures.append(f)
+    for idx, tasks in enumerate(task_placement):
+        for dependencies in tasks:
+            i = next(counter)
+            dep_key = "".join(sorted(dependencies))
+            key = f"{dep_key}-{i}"
+            f = c.submit(
+                block,
+                [dependency_futures[dependency] for dependency in dependencies],
+                event=ev,
+                key=key,
+                workers=workers[idx].address,
+                allow_other_workers=True,
+                pure=False,
+                priority=-i,
+            )
+            futures.append(f)
 
     while len([ts for ts in s.tasks.values() if ts.processing_on]) < len(futures):
         await asyncio.sleep(0.001)
-    if True:  # recompute_saturation:
+    if recompute_saturation:
         for ws in s.workers.values():
             s._reevaluate_occupancy_worker(ws)
     try:
@@ -1468,15 +1577,15 @@ async def test_steal_to_dependency(c, s, *workers):
 
             result = [
                 sorted(
-                    (int(key_split(ts.key)) for ts in s.workers[w.address].processing),
+                    (list(key_split(ts.key)) for ts in s.workers[w.address].processing),
                     reverse=True,
                 )
                 for w in workers
             ]
 
-            if result == expected:
+            if result == expected_placement:
                 # Release the threadpools
                 return
     finally:
         await ev.set()
-    raise Exception(f"Expected: {expected}; got: {result}")
+    raise Exception(f"Expected: {expected_placement}; got: {result}")
