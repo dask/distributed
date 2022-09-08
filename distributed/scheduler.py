@@ -26,6 +26,7 @@ from collections.abc import (
     Iterable,
     Iterator,
     Mapping,
+    Sequence,
     Set,
 )
 from contextlib import suppress
@@ -1299,13 +1300,15 @@ class SchedulerState:
     #######################
 
     #: Workers currently connected to the scheduler
-    workers: SortedDict[str, WorkerState]
+    #: (actually a SortedDict, but the sortedcontainers package isn't annotated)
+    workers: dict[str, WorkerState]
     #: Worker {name: address}
     aliases: dict[Hashable, str]
     #: Workers that are currently in running state
     running: set[WorkerState]
     #: Workers that are currently in running state and not fully utilized
-    idle: SortedDict[str, WorkerState]
+    #: (actually a SortedDict, but the sortedcontainers package isn't annotated)
+    idle: dict[str, WorkerState]
     #: Workers that are fully utilized. May include non-running workers.
     saturated: set[WorkerState]
     total_nthreads: int
@@ -1803,14 +1806,15 @@ class SchedulerState:
         self,
         key: str,
         stimulus_id: str,
+        *,
         nbytes: int | None = None,
         type: bytes | None = None,
         typename: str | None = None,
-        worker: str | None = None,
+        worker: str,
     ):
         try:
-            ws: WorkerState = self.workers[worker]
-            ts: TaskState = self.tasks[key]
+            ws = self.workers[worker]
+            ts = self.tasks[key]
             recommendations: dict = {}
             client_msgs: dict = {}
             worker_msgs: dict = {}
@@ -1990,7 +1994,9 @@ class SchedulerState:
 
             # Fastpath when there are no related tasks or restrictions
             worker_pool = self.idle or self.workers
-            wp_vals = worker_pool.values()
+            # FIXME idle and workers are SortedDict's declared as dicts
+            #       because sortedcontainers is not annotated
+            wp_vals = cast(Sequence[WorkerState], worker_pool.values())
             n_workers: int = len(wp_vals)
             if n_workers < 20:  # smart but linear in small case
                 ws = min(wp_vals, key=operator.attrgetter("occupancy"))
@@ -2118,8 +2124,7 @@ class SchedulerState:
 
             if self.validate:
                 assert ts.processing_on
-                ws = ts.processing_on
-                assert ts in ws.processing
+                assert ts in ts.processing_on.processing
                 assert not ts.waiting_on
                 assert not ts.who_has, (ts, ts.who_has)
                 assert not ts.exception_blame
@@ -2127,7 +2132,7 @@ class SchedulerState:
 
             ws = self.workers.get(worker)
             if ws is None:
-                return {key: "released"}, {}, {}  # type: ignore[unreachable]
+                return {key: "released"}, {}, {}
 
             if ws != ts.processing_on:  # someone else has this task
                 logger.info(
@@ -4915,7 +4920,7 @@ class Scheduler(SchedulerState, ServerNode):
         }
         assert a == b, (a, b)
 
-        actual_total_occupancy = 0
+        actual_total_occupancy = 0.0
         for worker, ws in self.workers.items():
             ws_processing_total = sum(
                 cost for ts, cost in ws.processing.items() if ts not in ws.long_running
@@ -5868,6 +5873,8 @@ class Scheduler(SchedulerState, ServerNode):
             calculated only using the allowed workers.
         """
         stimulus_id = stimulus_id or f"rebalance-{time()}"
+
+        wss: Collection[WorkerState]
         if workers is not None:
             wss = [self.workers[w] for w in workers]
         else:
@@ -6660,7 +6667,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     def report_on_key(self, key=None, *, ts=None, client=None):
         if (ts is None) == (key is None):
-            raise ValueError(
+            raise ValueError(  # pragma: nocover
                 f"ts and key are mutually exclusive; received {key=!r}, {ts=!r}"
             )
         if ts is None:
