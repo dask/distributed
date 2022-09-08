@@ -1811,6 +1811,7 @@ class SchedulerState:
         type: bytes | None = None,
         typename: str | None = None,
         worker: str,
+        **kwargs: Any,
     ):
         try:
             ws = self.workers[worker]
@@ -2057,13 +2058,14 @@ class SchedulerState:
 
     def transition_waiting_memory(
         self,
-        key,
-        stimulus_id,
-        nbytes=None,
-        type=None,
+        key: str,
+        stimulus_id: str,
+        *,
+        nbytes: int | None = None,
+        type: bytes | None = None,
         typename: str | None = None,
-        worker=None,
-        **kwargs,
+        worker: str,
+        **kwargs: Any,
     ):
         try:
             ws: WorkerState = self.workers[worker]
@@ -2106,11 +2108,12 @@ class SchedulerState:
         self,
         key: str,
         stimulus_id: str,
+        *,
         nbytes: int | None = None,
         type: bytes | None = None,
         typename: str | None = None,
-        worker: str | None = None,
-        startstops=None,
+        worker: str,
+        startstops: list[dict] | None = None,
         **kwargs: Any,
     ):
         recommendations: dict = {}
@@ -2154,7 +2157,6 @@ class SchedulerState:
             # Update Timing Information #
             #############################
             if startstops:
-                startstop: dict
                 for startstop in startstops:
                     ts.group.add_duration(
                         stop=startstop["stop"],
