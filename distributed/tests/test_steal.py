@@ -6,6 +6,7 @@ import itertools
 import logging
 import math
 import random
+import sys
 import weakref
 from operator import mul
 from time import sleep
@@ -703,8 +704,8 @@ async def assert_balanced(inp, expected, recompute_saturation, c, s, *workers):
 @pytest.mark.parametrize(
     "inp,expected",
     [
-        ([[1], []], [[1], []]),  # don't move unnecessarily
-        ([[0, 0], []], [[0], [0]]),  # balance
+        pytest.param([[1], []], [[1], []], id="don't move unnecessarily"),
+        pytest.param([[0, 0], []], [[0], [0]], id="balance"),
         ([[0.1, 0.1], []], [[0], [0]]),  # balance even if results in even
         ([[0, 0, 0], []], [[0, 0], [0]]),  # don't over balance
         ([[0, 0], [0, 0, 0], []], [[0, 0], [0, 0], [0]]),  # move from larger
@@ -1412,3 +1413,70 @@ async def test_steal_very_fast_tasks(c, s, *workers):
     ideal = ntasks / len(workers)
     assert (ntasks_per_worker > ideal * 0.5).all(), (ideal, ntasks_per_worker)
     assert (ntasks_per_worker < ideal * 1.5).all(), (ideal, ntasks_per_worker)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 3,
+    config={"distributed.scheduler.unknown-task-duration": "1s"},
+)
+async def test_steal_to_dependency(c, s, *workers):
+    expected = [[1], [], [1]]
+    steal = s.extensions["stealing"]
+    await steal.stop()
+    ev = Event()
+
+    def block(*args, event, **kwargs):
+        event.wait()
+
+    class Sizeof:
+        def __init__(self, nbytes):
+            self._nbytes = nbytes - sys.getsizeof(object())
+
+        def __sizeof__(self) -> int:
+            return self._nbytes
+
+    futures = []
+    t = 1
+    [dat] = await c.scatter(
+        [Sizeof(int(t * s.bandwidth))], workers=[workers[0].address, workers[2].address]
+    )
+    for i in range(2):
+        f = c.submit(
+            block,
+            dat,
+            event=ev,
+            key=f"{int(t)}-{i}",
+            workers=workers[0].address,
+            allow_other_workers=True,
+            pure=False,
+            priority=-i,
+        )
+        futures.append(f)
+
+    while len([ts for ts in s.tasks.values() if ts.processing_on]) < len(futures):
+        await asyncio.sleep(0.001)
+    if True:  # recompute_saturation:
+        for ws in s.workers.values():
+            s._reevaluate_occupancy_worker(ws)
+    try:
+        for _ in range(20):
+            steal.balance()
+
+            while steal.in_flight:
+                await asyncio.sleep(0.001)
+
+            result = [
+                sorted(
+                    (int(key_split(ts.key)) for ts in s.workers[w.address].processing),
+                    reverse=True,
+                )
+                for w in workers
+            ]
+
+            if result == expected:
+                # Release the threadpools
+                return
+    finally:
+        await ev.set()
+    raise Exception(f"Expected: {expected}; got: {result}")
