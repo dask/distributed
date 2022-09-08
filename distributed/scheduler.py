@@ -1997,7 +1997,7 @@ class SchedulerState:
             worker_pool = self.idle or self.workers
             # FIXME idle and workers are SortedDict's declared as dicts
             #       because sortedcontainers is not annotated
-            wp_vals = cast(Sequence[WorkerState], worker_pool.values())
+            wp_vals = cast("Sequence[WorkerState]", worker_pool.values())
             n_workers: int = len(wp_vals)
             if n_workers < 20:  # smart but linear in small case
                 ws = min(wp_vals, key=operator.attrgetter("occupancy"))
