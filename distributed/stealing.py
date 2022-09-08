@@ -408,7 +408,7 @@ class WorkStealing(SchedulerPlugin):
                         start,
                         level,
                         ts.key,
-                        duration,
+                        duration_total,
                         victim.address,
                         occ_victim,
                         thief.address,
