@@ -5,7 +5,8 @@
         <th> Cores </th>
         <th> Memory </th>
         <th> Memory use </th>
-        <th> Occupancy </th>
+        <th> Network Occupancy </th>
+        <th> CPU Occupancy </th>
         <th> Processing </th>
         <th> In-memory </th>
         <th> Services</th>
@@ -19,7 +20,8 @@
         <td> {{ ws.nthreads }} </td>
         <td> {{ format_bytes(ws.memory_limit) if ws.memory_limit is not None else "" }} </td>
         <td> <progress class="progress" value="{{ ws.metrics['memory'] }}" max="{{ ws.memory_limit }}"></progress> </td>
-        <td> {{ format_time(ws.occupancy) }} </td>
+        <td> {{ format_time(ws.occupancy.network) }} </td>
+        <td> {{ format_time(ws.occupancy.cpu) }} </td>
         <td> {{ len(ws.processing) }} </td>
         <td> {{ len(ws.has_what) }} </td>
         {% if 'dashboard' in ws.services %}
