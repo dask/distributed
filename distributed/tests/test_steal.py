@@ -1355,7 +1355,7 @@ def test_steal_worker_state(ws_with_running_task):
 @pytest.mark.slow()
 @gen_cluster(nthreads=[("", 1)] * 4, client=True)
 async def test_steal_very_fast_tasks(c, s, *workers):
-    # Ensure that very fast tasks
+    # Ensure that very fast tasks are allowed to be stolen
     root = dask.delayed(lambda n: "x" * n)(
         dask.utils.parse_bytes("1MiB"), dask_key_name="root"
     )
@@ -1371,7 +1371,6 @@ async def test_steal_very_fast_tasks(c, s, *workers):
     futs = c.compute(results)
     await c.gather(futs)
 
-    dat = {}
     max_ = 0
     rest = 0
     for w in workers:
@@ -1381,7 +1380,5 @@ async def test_steal_very_fast_tasks(c, s, *workers):
             max_ = ntasks
         else:
             rest += ntasks
-        dat[w] = len(w.data)
-        assert ntasks > ntasks / len(workers) * 0.5
 
     assert max_ < rest * 2 / 3
