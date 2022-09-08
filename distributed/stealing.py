@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 # submission which may include code serialization. Therefore, be very
 # conservative in the latency estimation to suppress too aggressive stealing
 # of small tasks
-LATENCY = 0.1
+LATENCY = 0.01
 
 logger = logging.getLogger(__name__)
 
@@ -237,8 +237,7 @@ class WorkStealing(SchedulerPlugin):
         assert ts.processing_on
         ws = ts.processing_on
         compute_time = ws.processing[ts]
-        if compute_time < 0.005:  # 5ms, just give up
-            return None, None
+        compute_time = max(compute_time, 0.010)
 
         nbytes = ts.get_nbytes_deps()
         transfer_time = nbytes / self.scheduler.bandwidth + LATENCY
