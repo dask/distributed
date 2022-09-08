@@ -37,6 +37,7 @@ from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import IOLoop
 
 import dask
+from dask.sizeof import sizeof
 
 from distributed import Scheduler, system
 from distributed import versions as version_module
@@ -2458,3 +2459,20 @@ async def fetch_metrics(port: int, prefix: str | None = None) -> dict[str, Any]:
         if prefix is None or family.name.startswith(prefix)
     }
     return families
+
+
+class SizeOf:
+    """
+    An object that returns exactly nbytes when inspected by dask.sizeof.sizeof
+    """
+
+    def __init__(self, nbytes: float) -> None:
+        self._nbytes = nbytes - sizeof(object())
+
+    def __sizeof__(self) -> int:
+        return self._nbytes
+
+
+def gen_nbytes(nbytes: float) -> SizeOf:
+    """A function that emulates exactly nbytes on the worker data structure."""
+    return SizeOf(nbytes)

@@ -19,6 +19,7 @@ import yaml
 from tornado import gen
 
 import dask.config
+from dask.sizeof import sizeof
 
 from distributed import Client, Event, Nanny, Scheduler, Worker, config, default_client
 from distributed.batched import BatchedSend
@@ -29,6 +30,7 @@ from distributed.metrics import time
 from distributed.tests.test_batched import EchoServer
 from distributed.utils import get_mp_context
 from distributed.utils_test import (
+    SizeOf,
     _LockedCommPool,
     _UnhashableCallable,
     assert_story,
@@ -39,6 +41,7 @@ from distributed.utils_test import (
     dump_cluster_state,
     freeze_batched_send,
     gen_cluster,
+    gen_nbytes,
     gen_test,
     inc,
     new_config,
@@ -1024,3 +1027,10 @@ def test_ws_with_running_task(ws_with_running_task):
     assert ws.available_resources == {"R": 0}
     assert ws.total_resources == {"R": 1}
     assert ts.state in ("executing", "long-running")
+
+
+@pytest.mark.parametrize("nbytes", [0, 1, 1234.567])
+def test_sizeof(nbytes):
+    assert sizeof(SizeOf(nbytes)) == nbytes
+    assert isinstance(gen_nbytes(nbytes), SizeOf)
+    assert sizeof(gen_nbytes(nbytes)) == nbytes
