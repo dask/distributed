@@ -374,3 +374,13 @@ def test_occupancy():
 
     mut.clear()
     assert mut == ozero
+
+    assert not mut == 1
+    with pytest.raises(TypeError):
+        mut + 1
+    with pytest.raises(TypeError):
+        mut - 1
+    with pytest.raises(TypeError):
+        mut += 1
+    with pytest.raises(TypeError):
+        mut -= 1
