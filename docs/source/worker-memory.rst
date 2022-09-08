@@ -134,6 +134,17 @@ spilled
 The sum of managed + unmanaged + unmanaged recent is equal by definition to the process
 memory.
 
+The color of the bars will change as a function of memory usage too:
+
+blue
+    The worker is operating as normal
+orange
+    The worker may be spilling data to disk
+red
+    The worker is paused or retiring
+grey
+    Data that has already been spilled to disk; this is in addition to process memory
+
 
 .. _memtrim:
 

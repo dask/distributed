@@ -64,6 +64,7 @@ from dask.utils import (
     parse_timedelta,
 )
 
+from distributed.core import Status
 from distributed.dashboard.components import add_periodic_callback
 from distributed.dashboard.components.shared import (
     DashboardComponent,
@@ -239,20 +240,63 @@ class ProcessingHistogram(DashboardComponent):
         self.source.data.update({"left": x[:-1], "right": x[1:], "top": counts})
 
 
-def _memory_color(current: int, limit: int) -> str:
-    """Dynamic color used by WorkersMemory and ClusterMemory"""
-    if limit and current > limit:
-        return "red"
-    if limit and current > limit / 2:
-        return "orange"
-    return "blue"
+class MemoryColor:
+    """Change the color of the memory bars from blue to orange when process memory goes
+    above the ``target`` threshold and to red when the worker pauses.
+    Workers in ``closing_gracefully`` state will also be orange.
+
+    If ``target`` is disabled, change to orange on ``spill`` instead.
+    If spilling is completely disabled, never turn orange.
+
+    If pausing is disabled, change to red when passing the ``terminate`` threshold
+    instead. If both pause and terminate are disabled, turn red when passing
+    ``memory_limit``.
+
+    Note
+    ----
+    A worker will start spilling when managed memory alone passes the target threshold.
+    However, here we're switching to orange when the process memory goes beyond target,
+    which is usually earlier.
+    This is deliberate for the sake of simplicity and also because, when the process
+    memory passes the spill threshold, it will keep spilling until it falls below the
+    target threshold - so it's not completely wrong. Again, we don't want to track
+    the hysteresis cycle of the spill system here for the sake of simplicity.
+
+    In short, orange should be treated as "the worker *may* be spilling".
+    """
+
+    orange: float
+    red: float
+
+    def __init__(self):
+        target = dask.config.get("distributed.worker.memory.target")
+        spill = dask.config.get("distributed.worker.memory.spill")
+        terminate = dask.config.get("distributed.worker.memory.terminate")
+        # These values can be False. It's also common to configure them to impossibly
+        # high values to achieve the same effect.
+        self.orange = min(target or math.inf, spill or math.inf)
+        self.red = min(terminate or math.inf, 1.0)
+
+    def _memory_color(self, current: int, limit: int, status: Status) -> str:
+        if status != Status.running:
+            return "red"
+        if not limit:
+            return "blue"
+        if current >= limit * self.red:
+            return "red"
+        if current >= limit * self.orange:
+            return "orange"
+        return "blue"
 
 
-class ClusterMemory(DashboardComponent):
+class ClusterMemory(DashboardComponent, MemoryColor):
     """Total memory usage on the cluster"""
 
     @log_errors
     def __init__(self, scheduler, width=600, **kwargs):
+        DashboardComponent.__init__(self)
+        MemoryColor.__init__(self)
+
         self.scheduler = scheduler
         self.source = ColumnDataSource(
             {
@@ -327,12 +371,30 @@ class ClusterMemory(DashboardComponent):
         )
         self.root.add_tools(hover)
 
+    def _cluster_memory_color(self) -> str:
+        colors = {
+            self._memory_color(
+                current=ws.memory.process,
+                limit=getattr(ws, "memory_limit", 0),
+                status=ws.status,
+            )
+            for ws in self.scheduler.workers.values()
+        }
+
+        assert colors.issubset({"red", "orange", "blue"})
+        if "red" in colors:
+            return "red"
+        elif "orange" in colors:
+            return "orange"
+        else:
+            return "blue"
+
     @without_property_validation
     @log_errors
     def update(self):
         limit = sum(ws.memory_limit for ws in self.scheduler.workers.values())
         meminfo = self.scheduler.memory
-        color = _memory_color(meminfo.process, limit)
+        color = self._cluster_memory_color()
 
         width = [
             meminfo.managed_in_memory,
@@ -363,11 +425,14 @@ class ClusterMemory(DashboardComponent):
         update(self.source, result)
 
 
-class WorkersMemory(DashboardComponent):
+class WorkersMemory(DashboardComponent, MemoryColor):
     """Memory usage for single workers"""
 
     @log_errors
     def __init__(self, scheduler, width=600, **kwargs):
+        DashboardComponent.__init__(self)
+        MemoryColor.__init__(self)
+
         self.scheduler = scheduler
         self.source = ColumnDataSource(
             {
@@ -477,7 +542,7 @@ class WorkersMemory(DashboardComponent):
             meminfo = ws.memory
             limit = getattr(ws, "memory_limit", 0)
             max_limit = max(max_limit, limit, meminfo.process + meminfo.managed_spilled)
-            color_i = _memory_color(meminfo.process, limit)
+            color_i = self._memory_color(meminfo.process, limit, ws.status)
 
             width += [
                 meminfo.managed_in_memory,
@@ -2097,8 +2162,8 @@ class TaskGraph(DashboardComponent):
 
         node_colors = factor_cmap(
             "state",
-            factors=["waiting", "processing", "memory", "released", "erred"],
-            palette=["gray", "green", "red", "blue", "black"],
+            factors=["waiting", "queued", "processing", "memory", "released", "erred"],
+            palette=["gray", "yellow", "green", "red", "blue", "black"],
         )
 
         self.root = figure(title="Task Graph", **kwargs)
@@ -2986,7 +3051,7 @@ class TaskProgress(DashboardComponent):
         self.scheduler = scheduler
 
         data = progress_quads(
-            dict(all={}, memory={}, erred={}, released={}, processing={})
+            dict(all={}, memory={}, erred={}, released={}, processing={}, queued={})
         )
         self.source = ColumnDataSource(data=data)
 
@@ -3058,6 +3123,18 @@ class TaskProgress(DashboardComponent):
             fill_alpha=0.35,
             line_alpha=0,
         )
+        self.root.quad(
+            source=self.source,
+            top="top",
+            bottom="bottom",
+            left="processing-loc",
+            right="queued-loc",
+            fill_color="gray",
+            hatch_pattern="/",
+            hatch_color="white",
+            fill_alpha=0.35,
+            line_alpha=0,
+        )
         self.root.text(
             source=self.source,
             text="show-name",
@@ -3094,16 +3171,20 @@ class TaskProgress(DashboardComponent):
                     <span style="font-size: 10px; font-family: Monaco, monospace;">@all</span>
                 </div>
                 <div>
+                    <span style="font-size: 14px; font-weight: bold;">Queued:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@queued</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Processing:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@processing</span>
+                </div>
+                <div>
                     <span style="font-size: 14px; font-weight: bold;">Memory:</span>&nbsp;
                     <span style="font-size: 10px; font-family: Monaco, monospace;">@memory</span>
                 </div>
                 <div>
                     <span style="font-size: 14px; font-weight: bold;">Erred:</span>&nbsp;
                     <span style="font-size: 10px; font-family: Monaco, monospace;">@erred</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Ready:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@processing</span>
                 </div>
                 """,
         )
@@ -3118,6 +3199,7 @@ class TaskProgress(DashboardComponent):
             "released": {},
             "processing": {},
             "waiting": {},
+            "queued": {},
         }
 
         for tp in self.scheduler.task_prefixes.values():
@@ -3128,6 +3210,7 @@ class TaskProgress(DashboardComponent):
                 state["released"][tp.name] = active_states["released"]
                 state["processing"][tp.name] = active_states["processing"]
                 state["waiting"][tp.name] = active_states["waiting"]
+                state["queued"][tp.name] = active_states["queued"]
 
         state["all"] = {k: sum(v[k] for v in state.values()) for k in state["memory"]}
 
@@ -3140,7 +3223,7 @@ class TaskProgress(DashboardComponent):
 
         totals = {
             k: sum(state[k].values())
-            for k in ["all", "memory", "erred", "released", "waiting"]
+            for k in ["all", "memory", "erred", "released", "waiting", "queued"]
         }
         totals["processing"] = totals["all"] - sum(
             v for k, v in totals.items() if k != "all"
@@ -3148,8 +3231,10 @@ class TaskProgress(DashboardComponent):
 
         self.root.title.text = (
             "Progress -- total: %(all)s, "
-            "in-memory: %(memory)s, processing: %(processing)s, "
             "waiting: %(waiting)s, "
+            "queued: %(queued)s, "
+            "processing: %(processing)s, "
+            "in-memory: %(memory)s, "
             "erred: %(erred)s" % totals
         )
 

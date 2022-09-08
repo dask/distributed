@@ -922,16 +922,21 @@ async def test_pause_while_spilling(c, s, a):
             return bool, (paused,)
 
     futs = c.map(SlowSpill, range(N_TOTAL))
-    while len(a.data.slow) < N_PAUSE + 1:
+    while len(a.data.slow) < (N_PAUSE + 1 if a.state.ready else N_PAUSE):
         await asyncio.sleep(0.01)
 
     assert a.status == Status.paused
     # Worker should have become paused after the first `SlowSpill` was evicted, because
     # the spill to disk took longer than the memory monitor interval.
     assert len(a.data.fast) == 0
-    assert len(a.data.slow) == N_PAUSE + 1
-    n_spilled_while_paused = sum(paused is True for paused in a.data.slow.values())
-    assert N_PAUSE <= n_spilled_while_paused <= N_PAUSE + 1
+    # With queuing enabled, after the 3rd `SlowSpill` has been created, there's a race
+    # between the scheduler sending the worker a new task, and the memory monitor
+    # running and pausing the worker. If the worker gets paused before the 4th task
+    # lands, only 3 will be in memory. If after, the 4th will block on the semaphore
+    # until one of the others is spilled.
+    assert len(a.data.slow) in (N_PAUSE, N_PAUSE + 1)
+    n_spilled_while_not_paused = sum(paused is False for paused in a.data.slow.values())
+    assert 0 <= n_spilled_while_not_paused <= 1
 
 
 @pytest.mark.slow

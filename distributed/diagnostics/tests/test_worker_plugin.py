@@ -44,11 +44,10 @@ class MyPlugin(WorkerPlugin):
 async def test_create_with_client(c, s):
     await c.register_worker_plugin(MyPlugin(123))
 
-    worker = await Worker(s.address)
-    assert worker._my_plugin_status == "setup"
-    assert worker._my_plugin_data == 123
+    async with Worker(s.address) as worker:
+        assert worker._my_plugin_status == "setup"
+        assert worker._my_plugin_data == 123
 
-    await worker.close()
     assert worker._my_plugin_status == "teardown"
 
 
@@ -57,33 +56,33 @@ async def test_remove_with_client(c, s):
     await c.register_worker_plugin(MyPlugin(123), name="foo")
     await c.register_worker_plugin(MyPlugin(546), name="bar")
 
-    worker = await Worker(s.address)
-    # remove the 'foo' plugin
-    await c.unregister_worker_plugin("foo")
-    assert worker._my_plugin_status == "teardown"
+    async with Worker(s.address) as worker:
+        # remove the 'foo' plugin
+        await c.unregister_worker_plugin("foo")
+        assert worker._my_plugin_status == "teardown"
 
-    # check that on the scheduler registered worker plugins we only have 'bar'
-    assert len(s.worker_plugins) == 1
-    assert "bar" in s.worker_plugins
+        # check that on the scheduler registered worker plugins we only have 'bar'
+        assert len(s.worker_plugins) == 1
+        assert "bar" in s.worker_plugins
 
-    # check on the worker plugins that we only have 'bar'
-    assert len(worker.plugins) == 1
-    assert "bar" in worker.plugins
+        # check on the worker plugins that we only have 'bar'
+        assert len(worker.plugins) == 1
+        assert "bar" in worker.plugins
 
-    # let's remove 'bar' and we should have none worker plugins
-    await c.unregister_worker_plugin("bar")
-    assert worker._my_plugin_status == "teardown"
-    assert not s.worker_plugins
-    assert not worker.plugins
+        # let's remove 'bar' and we should have none worker plugins
+        await c.unregister_worker_plugin("bar")
+        assert worker._my_plugin_status == "teardown"
+        assert not s.worker_plugins
+        assert not worker.plugins
 
 
 @gen_cluster(client=True, nthreads=[])
 async def test_remove_with_client_raises(c, s):
     await c.register_worker_plugin(MyPlugin(123), name="foo")
 
-    worker = await Worker(s.address)
-    with pytest.raises(ValueError, match="bar"):
-        await c.unregister_worker_plugin("bar")
+    async with Worker(s.address):
+        with pytest.raises(ValueError, match="bar"):
+            await c.unregister_worker_plugin("bar")
 
 
 @gen_cluster(client=True, worker_kwargs={"plugins": [MyPlugin(5)]})

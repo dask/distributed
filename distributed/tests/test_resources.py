@@ -17,6 +17,7 @@ from distributed.worker_state_machine import (
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
     FreeKeysEvent,
+    LongRunningMsg,
     RescheduleEvent,
     TaskFinishedMsg,
 )
@@ -565,6 +566,8 @@ def test_resumed_with_different_resources(ws_with_running_task, done_ev_cls):
     """
     ws = ws_with_running_task
     assert ws.available_resources == {"R": 0}
+    ts = ws.tasks["x"]
+    prev_state = ts.state
 
     ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="s1"))
     assert ws.available_resources == {"R": 0}
@@ -572,7 +575,12 @@ def test_resumed_with_different_resources(ws_with_running_task, done_ev_cls):
     instructions = ws.handle_stimulus(
         ComputeTaskEvent.dummy("x", stimulus_id="s2", resource_restrictions={"R": 0.4})
     )
-    assert not instructions
+    if prev_state == "long-running":
+        assert instructions == [
+            LongRunningMsg(key="x", compute_duration=None, stimulus_id="s2")
+        ]
+    else:
+        assert not instructions
     assert ws.available_resources == {"R": 0}
 
     ws.handle_stimulus(done_ev_cls.dummy(key="x", stimulus_id="s3"))
