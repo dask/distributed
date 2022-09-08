@@ -1350,3 +1350,38 @@ def test_steal_worker_state(ws_with_running_task):
     assert "x" not in ws.tasks
     assert "x" not in ws.data
     assert ws.available_resources == {"R": 1}
+
+
+@pytest.mark.slow()
+@gen_cluster(nthreads=[("", 1)] * 4, client=True)
+async def test_steal_very_fast_tasks(c, s, *workers):
+    # Ensure that very fast tasks
+    root = dask.delayed(lambda n: "x" * n)(
+        dask.utils.parse_bytes("1MiB"), dask_key_name="root"
+    )
+
+    @dask.delayed
+    def func(*args):
+        import time
+
+        time.sleep(0.002)
+
+    ntasks = 1000
+    results = [func(root, i) for i in range(ntasks)]
+    futs = c.compute(results)
+    await c.gather(futs)
+
+    dat = {}
+    max_ = 0
+    rest = 0
+    for w in workers:
+        ntasks = len(w.data)
+        if ntasks > max_:
+            rest += max_
+            max_ = ntasks
+        else:
+            rest += ntasks
+        dat[w] = len(w.data)
+        assert ntasks > ntasks / len(workers) * 0.5
+
+    assert max_ < rest * 2 / 3

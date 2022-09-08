@@ -1783,7 +1783,7 @@ class StealingEvents(DashboardComponent):
         self.last = 0
         self.source = ColumnDataSource(
             {
-                "time": [time() - 20, time()],
+                "time": [time() - 60, time()],
                 "level": [0, 15],
                 "color": ["white", "white"],
                 "duration": [0, 0],
@@ -1828,7 +1828,7 @@ class StealingEvents(DashboardComponent):
         """Convert a log message to a glyph"""
         total_duration = 0
         for msg in msgs:
-            time, level, key, duration, sat, occ_sat, idl, occ_idl = msg
+            time, level, key, duration, sat, occ_sat, idl, occ_idl = msg[:8]
             total_duration += duration
 
         try:
