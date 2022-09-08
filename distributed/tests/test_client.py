@@ -70,6 +70,7 @@ from distributed.client import (
     wait,
 )
 from distributed.cluster_dump import load_cluster_dump
+from distributed.collections import Occupancy
 from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import Status
@@ -5109,8 +5110,11 @@ async def test_long_running_not_in_occupancy(c, s, a, raise_exception):
     await entered.wait()
     ts = s.tasks[f.key]
     ws = s.workers[a.address]
-    assert ws.occupancy == parse_timedelta(
-        dask.config.get("distributed.scheduler.unknown-task-duration")
+    assert ws.occupancy == Occupancy(
+        cpu=parse_timedelta(
+            dask.config.get("distributed.scheduler.unknown-task-duration"),
+        ),
+        network=0,
     )
 
     while ws.occupancy:
@@ -5118,12 +5122,12 @@ async def test_long_running_not_in_occupancy(c, s, a, raise_exception):
     await a.heartbeat()
 
     s._set_duration_estimate(ts, ws)
-    assert s.workers[a.address].occupancy == 0
-    assert s.total_occupancy == 0
-    assert ws.occupancy == 0
+    assert s.workers[a.address].occupancy == Occupancy(0, 0)
+    assert s.total_occupancy == Occupancy(0, 0)
+    assert ws.occupancy == Occupancy(0, 0)
 
     s._ongoing_background_tasks.call_soon(s.reevaluate_occupancy, 0)
-    assert s.workers[a.address].occupancy == 0
+    assert s.workers[a.address].occupancy == Occupancy(0, 0)
     await l.release()
 
     with (
@@ -5133,8 +5137,8 @@ async def test_long_running_not_in_occupancy(c, s, a, raise_exception):
     ):
         await f
 
-    assert s.total_occupancy == 0
-    assert ws.occupancy == 0
+    assert s.total_occupancy == Occupancy(0, 0)
+    assert ws.occupancy == Occupancy(0, 0)
     assert not ws.long_running
 
 
@@ -5176,14 +5180,16 @@ async def test_long_running_removal_clean(c, s, a, ordinary_task):
     if ordinary_task:
         # Should be exactly 0.5 but if for whatever reason this test runs slow,
         # some approximation may kick in increasing this number
-        assert s.total_occupancy >= 0.5
-        assert ws.occupancy >= 0.5
+        assert not s.total_occupancy.network
+        assert not ws.occupancy.network
+        assert s.total_occupancy.cpu >= 0.5
+        assert ws.occupancy.cpu >= 0.5
         await l2.release()
         await f2
 
     # In the end, everything should be reset
-    assert s.total_occupancy == 0
-    assert ws.occupancy == 0
+    assert not s.total_occupancy
+    assert not ws.occupancy
     assert not ws.long_running
 
 

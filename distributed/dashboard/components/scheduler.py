@@ -120,13 +120,14 @@ class Occupancy(DashboardComponent):
         self.scheduler = scheduler
         self.source = ColumnDataSource(
             {
-                "occupancy": [0, 0],
-                "worker": ["a", "b"],
-                "x": [0.0, 0.1],
-                "y": [1, 2],
-                "ms": [1, 2],
-                "color": ["red", "blue"],
-                "escaped_worker": ["a", "b"],
+                "occupancy_network": [],
+                "occupancy_cpu": [],
+                "occupancy_network_ms": [],
+                "occupancy_cpu_ms": [],
+                "worker": [],
+                "y": [],
+                "color": [],
+                "escaped_worker": [],
             }
         )
 
@@ -139,10 +140,14 @@ class Occupancy(DashboardComponent):
             min_border_bottom=50,
             **kwargs,
         )
-        rect = self.root.rect(
-            source=self.source, x="x", width="ms", y="y", height=0.9, color="color"
+        self.root.hbar_stack(
+            ["occupancy_network_ms", "occupancy_cpu_ms"],
+            source=self.source,
+            y="y",
+            height=0.9,
+            fill_alpha=[0.8, 1.0],
+            color="color",
         )
-        rect.nonselection_glyph = None
 
         self.root.xaxis.minor_tick_line_alpha = 0
         self.root.yaxis.visible = False
@@ -153,7 +158,9 @@ class Occupancy(DashboardComponent):
         tap = TapTool(callback=OpenURL(url="./info/worker/@escaped_worker.html"))
 
         hover = HoverTool()
-        hover.tooltips = "@worker : @occupancy s."
+        hover.tooltips = (
+            "@worker : network: @occupancy_network s, cpu: @occupancy_cpu s."
+        )
         hover.point_policy = "follow_mouse"
         self.root.add_tools(hover, tap)
 
@@ -163,10 +170,14 @@ class Occupancy(DashboardComponent):
         workers = self.scheduler.workers.values()
 
         y = list(range(len(workers)))
-        occupancy = [ws.occupancy for ws in workers]
-        ms = [occ * 1000 for occ in occupancy]
-        x = [occ / 500 for occ in occupancy]
-        total = sum(occupancy)
+        occupancy_network, occupancy_cpu = zip(
+            *((ws.occupancy.network, ws.occupancy.cpu) for ws in workers)
+        )
+        occupancy_network = np.array(occupancy_network)
+        occupancy_cpu = np.array(occupancy_cpu)
+        total_network = occupancy_network.sum()
+        total_cpu = occupancy_cpu.sum()
+        total = total_network + total_cpu
         color = []
         for ws in workers:
             if ws in self.scheduler.idle:
@@ -178,20 +189,22 @@ class Occupancy(DashboardComponent):
 
         if total:
             self.root.title.text = (
-                f"Occupancy -- total time: {format_time(total)} "
-                f"wall time: {format_time(total / self.scheduler.total_nthreads)}"
+                f"Total time: {format_time(total)}, "
+                f"wall time: {format_time(total / self.scheduler.total_nthreads)}, "
+                f"{total_network / total:.0%} network"
             )
         else:
             self.root.title.text = "Occupancy"
 
-        if occupancy:
+        if workers:
             result = {
-                "occupancy": occupancy,
+                "occupancy_network": occupancy_network,
+                "occupancy_cpu": occupancy_cpu,
+                "occupancy_network_ms": occupancy_network * 1000,
+                "occupancy_cpu_ms": occupancy_cpu * 1000,
                 "worker": [ws.address for ws in workers],
-                "ms": ms,
                 "color": color,
                 "escaped_worker": [escape.url_escape(ws.address) for ws in workers],
-                "x": x,
                 "y": y,
             }
 

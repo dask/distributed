@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import dataclasses
 import heapq
 import itertools
 import weakref
 from collections import OrderedDict, UserDict
 from collections.abc import Callable, Hashable, Iterator
-from typing import MutableSet  # TODO move to collections.abc (requires Python >=3.9)
-from typing import Any, TypeVar, cast
+from typing import (  # TODO move to collections.abc (requires Python >=3.9)
+    Any,
+    Container,
+    MutableSet,
+    TypeVar,
+    cast,
+)
 
 T = TypeVar("T", bound=Hashable)
 
@@ -199,3 +205,54 @@ class HeapSet(MutableSet[T]):
         self._data.clear()
         self._heap.clear()
         self._sorted = True
+
+
+# NOTE: only used in Scheduler; if work stealing is ever removed,
+# this could be moved to `scheduler.py`.
+@dataclasses.dataclass
+class Occupancy:
+    cpu: float
+    network: float
+
+    def __add__(self, other: Any) -> Occupancy:
+        if isinstance(other, type(self)):
+            return type(self)(self.cpu + other.cpu, self.network + other.network)
+        return NotImplemented
+
+    def __iadd__(self, other: Any) -> Occupancy:
+        if isinstance(other, type(self)):
+            self.cpu += other.cpu
+            self.network += other.network
+            return self
+        return NotImplemented
+
+    def __sub__(self, other: Any) -> Occupancy:
+        if isinstance(other, type(self)):
+            return type(self)(self.cpu - other.cpu, self.network - other.network)
+        return NotImplemented
+
+    def __isub__(self, other: Any) -> Occupancy:
+        if isinstance(other, type(self)):
+            self.cpu -= other.cpu
+            self.network -= other.network
+            return self
+        return NotImplemented
+
+    def __bool__(self) -> bool:
+        return self.cpu != 0 or self.network != 0
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, type(self)):
+            return self.cpu == other.cpu and self.network == other.network
+        return NotImplemented
+
+    def clear(self) -> None:
+        self.cpu = 0.0
+        self.network = 0.0
+
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict[str, float]:
+        return {"cpu": self.cpu, "network": self.network}
+
+    @property
+    def total(self) -> float:
+        return self.cpu + self.network

@@ -1423,12 +1423,13 @@ async def test_learn_occupancy(c, s, a, b):
         await asyncio.sleep(0.01)
 
     nproc = sum(ts.state == "processing" for ts in s.tasks.values())
-    assert nproc * 0.1 < s.total_occupancy < nproc * 0.4
+    assert not s.total_occupancy.network
+    assert nproc * 0.1 < s.total_occupancy.cpu < nproc * 0.4
     for w in [a, b]:
         ws = s.workers[w.address]
-        occ = ws.occupancy
+        assert not ws.occupancy.network
         proc = len(ws.processing)
-        assert proc * 0.1 < occ < proc * 0.4
+        assert proc * 0.1 < ws.occupancy.cpu < proc * 0.4
 
 
 @pytest.mark.slow
@@ -1440,7 +1441,8 @@ async def test_learn_occupancy_2(c, s, a, b):
         await asyncio.sleep(0.01)
 
     nproc = sum(ts.state == "processing" for ts in s.tasks.values())
-    assert nproc * 0.1 < s.total_occupancy < nproc * 0.4
+    assert not s.total_occupancy.network
+    assert nproc * 0.1 < s.total_occupancy.cpu < nproc * 0.4
 
 
 @gen_cluster(client=True)
@@ -1448,14 +1450,14 @@ async def test_occupancy_cleardown(c, s, a, b):
     s.validate = False
 
     # Inject excess values in s.occupancy
-    s.workers[a.address].occupancy = 2
-    s.total_occupancy += 2
+    s.workers[a.address].occupancy.cpu += 2
+    s.total_occupancy.cpu += 2
     futures = c.map(slowinc, range(100), delay=0.01)
     await wait(futures)
 
     # Verify that occupancy values have been zeroed out
-    assert abs(s.total_occupancy) < 0.01
-    assert all(ws.occupancy == 0 for ws in s.workers.values())
+    assert abs(s.total_occupancy.total) < 0.01
+    assert all(not ws.occupancy for ws in s.workers.values())
 
 
 @nodebug
@@ -1492,11 +1494,13 @@ async def test_learn_occupancy_multiple_workers(c, s, a, b):
 
     await wait(x)
 
-    assert not any(v == 0.5 for w in s.workers.values() for v in w.processing.values())
+    assert not any(
+        occ.cpu == 0.5 for w in s.workers.values() for occ in w.processing.values()
+    )
 
 
 @gen_cluster(client=True)
-async def test_include_communication_in_occupancy(c, s, a, b):
+async def test_occupancy_network(c, s, a, b):
     await c.submit(slowadd, 1, 2, delay=0)
     x = c.submit(operator.mul, b"0", int(s.bandwidth), workers=a.address)
     y = c.submit(operator.mul, b"1", int(s.bandwidth * 1.5), workers=b.address)
@@ -1507,7 +1511,9 @@ async def test_include_communication_in_occupancy(c, s, a, b):
 
     ts = s.tasks[z.key]
     assert ts.processing_on == s.workers[b.address]
-    assert s.workers[b.address].processing[ts] > 1
+    occ = s.workers[b.address].processing[ts]
+    assert occ.network >= 1
+    assert occ.cpu > 0
     await wait(z)
     del z
 
