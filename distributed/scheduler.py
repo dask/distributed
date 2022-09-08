@@ -6651,14 +6651,14 @@ class Scheduler(SchedulerState, ServerNode):
             self.client_desires_keys(keys=list(who_has), client=client)
 
     @overload
-    def report_on_key(self, key: str, *, client: str) -> None:
+    def report_on_key(self, key: str, *, client: str | None = None) -> None:
         ...
 
     @overload
-    def report_on_key(self, *, ts: TaskState, client: str) -> None:
+    def report_on_key(self, *, ts: TaskState, client: str | None = None) -> None:
         ...
 
-    def report_on_key(self, key=None, *, ts=None, client):
+    def report_on_key(self, key=None, *, ts=None, client=None):
         if (ts is None) == (key is None):
             raise ValueError(
                 f"ts and key are mutually exclusive; received {key=!r}, {ts=!r}"
