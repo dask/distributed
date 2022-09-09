@@ -1438,6 +1438,7 @@ async def test_steal_very_fast_tasks(c, s, *workers):
 
 @pytest.mark.parametrize("recompute_saturation", [True, False])
 def test_balance_willing_to_move_costly_items(recompute_saturation):
+    """See also test_balance"""
     dependencies = {"a": 1, "b": 1, "c": 1}
     dependency_placement = [["a", "b", "c"], []]
     task_placement = [[["a"], ["b"], ["c"]], []]
@@ -1467,6 +1468,7 @@ def test_balance_willing_to_move_costly_items(recompute_saturation):
 
 @pytest.mark.parametrize("recompute_saturation", [True, False])
 def test_balance_but_dont_move_too_many(recompute_saturation):
+    """See also test_balance"""
     dependencies = {"a": 1, "b": 1, "c": 1, "d": 1}
     dependency_placement = [["a", "b", "c", "d"], []]
     task_placement = [[["a"], ["b"], ["c"], ["d"]], []]
@@ -1593,7 +1595,7 @@ def test_balance_to_larger_dependency(recompute_saturation):
 
 
 @pytest.mark.parametrize("recompute_saturation", [True, False])
-def test_balance_move_to_busier_with_dependency(recompute_saturation):
+def test_balance_prefers_busier_with_dependency(recompute_saturation):
     dependencies = {"a": 2, "b": 1}
     dependency_placement = [["a"], ["a", "b"], []]
     task_placement = [[["a"], ["a"], ["a"], ["a"], ["a"], ["a"]], [["b"]], []]
@@ -1626,7 +1628,7 @@ def test_balance_move_to_busier_with_dependency(recompute_saturation):
 
 
 @pytest.mark.parametrize("recompute_saturation", [True, False])
-def test_balance_when_moving_dependency(recompute_saturation):
+def test_balance_after_acquiring_dependency(recompute_saturation):
     dependencies = {"a": 1}
     dependency_placement = [["a"], []]
     task_placement = [[["a"], ["a"], ["a"], ["a"], ["a"], ["a"], ["a"]], []]
