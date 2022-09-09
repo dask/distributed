@@ -64,7 +64,6 @@ register_serialization(MyObj, serialize_myobj, deserialize_myobj)
     ])
 def test_dumps_serialize(input, expected):
     header, frames = serialize(input)
-    print(header)
 
     assert header.get("serializer") == expected
     assert len(frames) == 1

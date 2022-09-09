@@ -199,7 +199,6 @@ register_serialization_family("error", None, serialization_error_loads)
 
 
 def _infer_is_list_dask_serializable(x):
-    # import pdb;pdb.set_trace()
     try:
         _ = list(set(x))
         iseq = iter(x)
@@ -213,17 +212,14 @@ def _infer_is_list_dask_serializable(x):
             return check_dask_serializable(next(iter(x)))
     except TypeError:
     # We assume that if elements in the list are not hashable
-    # we will serialize them iteratively.  This means
-    # if our list contains an iterable, we fall back to
-    # iterating on the collection
+    # we will serialize them iteratively with pickle.
         return False
 
 
 def check_dask_serializable(x):
     if type(x) in (list, set, tuple) and len(x):
         if type(x) is list:
-            v = _infer_is_list_dask_serializable(x)
-            return v
+            return _infer_is_list_dask_serializable(x)
         else:
             return check_dask_serializable(next(iter(x)))
     elif type(x) is dict and len(x):
@@ -311,7 +307,6 @@ def serialize(  # type: ignore[no-untyped-def]
     # Note: don't use isinstance(), as it would match subclasses
     # (e.g. namedtuple, defaultdict) which however would revert to the base class on a
     # round-trip through msgpack
-    # import pdb;pdb.set_trace()
 
     if iterate_collection is None and type(x) in (list, set, tuple, dict):
         if type(x) is list and "msgpack" in serializers:
@@ -848,31 +843,11 @@ def _deserialize_memoryview(header, frames):
 
 @dask_serialize.register(list)
 def _serialize_list_as_ndarray(x):
-    # import pdb;pdb.set_trace()
-    # try:
-    #     _ = list(set(x))
-    #     iseq = iter(x)
-    #     first_type = type(next(iseq))
-
-    #     if (not is_dask_collection(first_type) and
-    #         all((type(i) is first_type) for i in iseq)
-    #         ):
     first_type = type(x[0])
-    obj_type = typename(first_type)
-    if obj_type in ('str', 'int', 'float'):
-        try:
-            x = np.array(x, dtype=first_type)
-            header, frames = dask_serialize(x)
-            header['type-serialized'] = pickle.dumps(type(x), protocol=4)
-            return header, frames
-        except Exception as e:
-            raise
-    else:
-        raise TypeError
-            # We assume that if elements in the list are not hashable
-            # we will serialize them iteratively.  This means
-            # if our list contains an iterable, we fall back to
-            # iterating on the collection
+    x = np.array(x, dtype=first_type)
+    header, frames = dask_serialize(x)
+    header['type-serialized'] = pickle.dumps(type(x), protocol=4)
+    return header, frames
 
 
 @dask_deserialize.register(list)
