@@ -215,7 +215,8 @@ def _infer_if_iterate_over_list(x):
             ):
             # Sometimes we get strings that are actually tuples
             # which are part of the task graph.  We need to serialize
-            # these recursively.
+            # these recursively.  We assume that all the items in the
+            # list are from the task graph
             return True
         if all((type(i) is type(first_val)) for i in iseq):
             return False
