@@ -60,6 +60,11 @@ class Sizeof:
         return self._nbytes
 
 
+@pytest.fixture(params=[True, False])
+def recompute_saturation(request):
+    yield request.params
+
+
 @gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
 async def test_work_stealing(c, s, a, b):
     [x] = await c._scatter([1], workers=a.address)
@@ -711,7 +716,6 @@ async def assert_balanced(inp, expected, recompute_saturation, c, s, *workers):
     raise Exception(f"Expected: {expected2}; got: {result2}")
 
 
-@pytest.mark.parametrize("recompute_saturation", [True, False])
 @pytest.mark.parametrize(
     "inp,expected",
     [
@@ -1436,7 +1440,6 @@ async def test_steal_very_fast_tasks(c, s, *workers):
     assert (ntasks_per_worker < ideal * 1.5).all(), (ideal, ntasks_per_worker)
 
 
-@pytest.mark.parametrize("recompute_saturation", [True, False])
 def test_balance_willing_to_move_costly_items(recompute_saturation):
     """See also test_balance"""
     dependencies = {"a": 1, "b": 1, "c": 1}
@@ -1466,7 +1469,6 @@ def test_balance_willing_to_move_costly_items(recompute_saturation):
     )(_run_test)()
 
 
-@pytest.mark.parametrize("recompute_saturation", [True, False])
 def test_balance_but_dont_move_too_many(recompute_saturation):
     """See also test_balance"""
     dependencies = {"a": 1, "b": 1, "c": 1, "d": 1}
@@ -1496,7 +1498,6 @@ def test_balance_but_dont_move_too_many(recompute_saturation):
     )(_run_test)()
 
 
-@pytest.mark.parametrize("recompute_saturation", [True, False])
 def test_balance_even_with_replica(recompute_saturation):
     dependencies = {"a": 1}
     dependency_placement = [["a"], ["a"]]
@@ -1528,7 +1529,6 @@ def test_balance_even_with_replica(recompute_saturation):
     )(_run_test)()
 
 
-@pytest.mark.parametrize("recompute_saturation", [True, False])
 def test_balance_to_replica(recompute_saturation):
     dependencies = {"a": 1}
     dependency_placement = [["a"], ["a"], []]
@@ -1561,7 +1561,6 @@ def test_balance_to_replica(recompute_saturation):
     )(_run_test)()
 
 
-@pytest.mark.parametrize("recompute_saturation", [True, False])
 def test_balance_to_larger_dependency(recompute_saturation):
     dependencies = {"a": 2, "b": 1}
     dependency_placement = [["a", "b"], ["a"], ["b"]]
@@ -1594,7 +1593,6 @@ def test_balance_to_larger_dependency(recompute_saturation):
     )(_run_test)()
 
 
-@pytest.mark.parametrize("recompute_saturation", [True, False])
 def test_balance_prefers_busier_with_dependency(recompute_saturation):
     dependencies = {"a": 2, "b": 1}
     dependency_placement = [["a"], ["a", "b"], []]
@@ -1627,7 +1625,6 @@ def test_balance_prefers_busier_with_dependency(recompute_saturation):
     )(_run_test)()
 
 
-@pytest.mark.parametrize("recompute_saturation", [True, False])
 def test_balance_after_acquiring_dependency(recompute_saturation):
     dependencies = {"a": 1}
     dependency_placement = [["a"], []]
@@ -1684,9 +1681,7 @@ async def _run_balance_test(
     try:
         for _ in range(20):
             steal.balance()
-
-            while steal.in_flight:
-                await asyncio.sleep(0.001)
+            await steal.stop()
 
             result = _get_task_placement(s, workers)
 
