@@ -639,7 +639,15 @@ class WorkerProcess:
         self.Worker = worker
         self.env = env
         self.pre_spawn_env = pre_spawn_env
-        self.config = config
+        self.config = config.copy()
+        try:
+            from distributed.client import default_client
+
+            default_client()
+            self.config.pop("scheduler", None)
+            self.config.pop("shuffle", None)
+        except ValueError:
+            pass
 
         # Initialized when worker is ready
         self.worker_dir = None
@@ -846,6 +854,7 @@ class WorkerProcess:
     ):  # pragma: no cover
         try:
             os.environ.update(env)
+            dask.config.refresh()
             dask.config.set(config)
 
             from dask.multiprocessing import default_initializer
