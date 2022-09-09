@@ -523,8 +523,8 @@ async def test_frame_split():
     "data,is_serializable",
     [
         ([], True),
-        ([[0,0], [0,0]], False),
-        ([[], []], False),
+        ([[0,0], [0,0]], True),
+        ([[], []], True),
         ({}, False),
         ({i: i for i in range(10)}, False),
         (set(range(10)), False),

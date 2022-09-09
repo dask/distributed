@@ -198,28 +198,31 @@ register_serialization_family("msgpack", msgpack_dumps, msgpack_loads)
 register_serialization_family("error", None, serialization_error_loads)
 
 
-def _infer_is_list_dask_serializable(x):
+def _infer_if_iterate_over_list(x):
     try:
         _ = list(set(x))
         iseq = iter(x)
         first_type = type(next(iseq))
-
         if (not is_dask_collection(first_type) and
+            typename(first_type) in ['str', 'int', 'float'] and
             all((type(i) is first_type) for i in iseq)
             ):
-            return True
+            return False
         else:
-            return check_dask_serializable(next(iter(x)))
+            Y = check_dask_serializable(next(iter(x)))
+            import pdb;pdb.set_trace()
+
+            return Y
     except TypeError:
     # We assume that if elements in the list are not hashable
     # we will serialize them iteratively with pickle.
-        return False
+        return True
 
 
 def check_dask_serializable(x):
     if type(x) in (list, set, tuple) and len(x):
         if type(x) is list:
-            return _infer_is_list_dask_serializable(x)
+            return _infer_if_iterate_over_list(x)
         else:
             return check_dask_serializable(next(iter(x)))
     elif type(x) is dict and len(x):
@@ -281,12 +284,11 @@ def serialize(  # type: ignore[no-untyped-def]
     to_serialize : Mark that data in a message should be serialized
     register_serialization : Register custom serialization functions
     """
-    if type(x) is list and iterate_collection is None:
-        serialize_list_as_array = _infer_is_list_dask_serializable(x)
-        if serialize_list_as_array is True:
-            iterate_collection=False
-        else:
-            iterate_collection = True
+    if (type(x) is list and 
+        iterate_collection is None and
+        serializers is None
+    ):
+        iterate_collection = _infer_if_iterate_over_list(x)
 
     if serializers is None:
         serializers = ("dask", "pickle")  # TODO: get from configuration
@@ -301,7 +303,7 @@ def serialize(  # type: ignore[no-untyped-def]
             serializers=serializers,
             on_error=on_error,
             context=context,
-            iterate_collection=True,
+            iterate_collection=x.iterate_collection,
         )
 
     # Note: don't use isinstance(), as it would match subclasses
@@ -476,6 +478,7 @@ def serialize_and_split(
     serialize
     merge_and_deserialize
     """
+
     header, frames = serialize(x, serializers, on_error, context)
     num_sub_frames = []
     offsets = []
@@ -548,6 +551,7 @@ class Serialize:
 
     def __init__(self, data):
         self.data = data
+        self.iterate_collection = check_dask_serializable(data)
 
     def __repr__(self):
         return f"<Serialize: {self.data}>"
