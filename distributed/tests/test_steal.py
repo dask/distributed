@@ -1601,9 +1601,41 @@ def test_balance_move_to_busier_with_dependency(recompute_saturation):
     def _correct_placement(actual):
         actual_task_counts = [len(placed) for placed in actual]
         return actual_task_counts == [
-            5,
-            2,
-            0,
+            3,
+            3,
+            1,
+        ]  # Note: The success of this test currently depends on worker ordering
+
+    async def _run_test(*args, **kwargs):
+        await _run_balance_test(
+            dependencies,
+            dependency_placement,
+            task_placement,
+            _correct_placement,
+            recompute_saturation,
+            *args,
+            **kwargs,
+        )
+
+    config = {"distributed.scheduler.unknown-task-duration": "1s"}
+    gen_cluster(
+        client=True,
+        nthreads=[("", 1)] * len(task_placement),
+        config=config,
+    )(_run_test)()
+
+
+@pytest.mark.parametrize("recompute_saturation", [True, False])
+def test_balance_when_moving_dependency(recompute_saturation):
+    dependencies = {"a": 1}
+    dependency_placement = [["a"], []]
+    task_placement = [[["a"], ["a"], ["a"], ["a"], ["a"], ["a"], ["a"]], []]
+
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        return actual_task_counts == [
+            4,
+            3,
         ]  # Note: The success of this test currently depends on worker ordering
 
     async def _run_test(*args, **kwargs):
