@@ -1427,59 +1427,21 @@ async def test_steal_very_fast_tasks(c, s, *workers):
 
 
 @pytest.mark.parametrize("recompute_saturation", [True, False])
-@pytest.mark.parametrize(
-    "dependencies, dependency_placement, task_placement, expected_placement",
-    [
-        pytest.param(
-            {"a": 1},
-            [["a"], []],
-            [[["a"], ["a"], ["a"]], []],
-            [[["a"], ["a"]], [["a"]]],
-            id="test_balance[be willing to move costly items]",
-        ),
-        pytest.param(
-            {"a": 1},
-            [["a"], []],
-            [[["a"], ["a"], ["a"], ["a"]], []],
-            [[["a"], ["a"], ["a"]], [["a"]]],
-            id="test_balance[but don't move too many]",
-        ),
-        pytest.param(
-            {"a": 1},
-            [["a"], []],
-            [[["a"], ["a"]], []],
-            [[["a"]], [["a"]]],
-            id="balance without dependency",
-        ),
-        pytest.param(
-            {"a": 1},
-            [["a"], ["a"]],
-            [[["a"], ["a"]], []],
-            [[["a"]], [["a"]]],
-            id="balance with dependency",
-        ),
-        pytest.param(
-            {"a": 1},
-            [["a"], [], ["a"]],
-            [[["a"], ["a"]], [], []],
-            [[["a"]], [], [["a"]]],
-            id="balance to dependency",
-        ),
-    ],
-)
-def test_balancing_with_dependencies(
-    dependencies,
-    dependency_placement,
-    task_placement,
-    expected_placement,
-    recompute_saturation,
-):
-    async def _test_balance(*args, **kwargs):
-        await assert_balanced_with_dependencies(
+def test_balance_willing_to_move_costly_items(recompute_saturation):
+    dependencies = {"a": 1, "b": 1, "c": 1}
+    dependency_placement = [["a", "b", "c"], []]
+    task_placement = [[["a"], ["b"], ["c"]], []]
+
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        return actual_task_counts == [2, 1]
+
+    async def _run_test(*args, **kwargs):
+        await _run_balance_test(
             dependencies,
             dependency_placement,
             task_placement,
-            expected_placement,
+            _correct_placement,
             recompute_saturation,
             *args,
             **kwargs,
@@ -1490,43 +1452,108 @@ def test_balancing_with_dependencies(
         client=True,
         nthreads=[("", 1)] * len(task_placement),
         config=config,
-    )(_test_balance)()
+    )(_run_test)()
 
 
-async def place_dependencies(dependencies, placement, c, s, workers):
-    dependencies_to_workers = defaultdict(set)
-    for worker_idx, placed in enumerate(placement):
-        for dependency in placed:
-            dependencies_to_workers[dependency].add(workers[worker_idx].address)
+@pytest.mark.parametrize("recompute_saturation", [True, False])
+def test_balance_but_dont_move_too_many(recompute_saturation):
+    dependencies = {"a": 1, "b": 1, "c": 1, "d": 1}
+    dependency_placement = [["a", "b", "c", "d"], []]
+    task_placement = [[["a"], ["b"], ["c"], ["d"]], []]
 
-    dependency_futures = {}
-    for name, multiplier in dependencies.items():
-        worker_addresses = dependencies_to_workers[name]
-        [fut] = await c.scatter(
-            {name: Sizeof(int(multiplier * s.bandwidth))},
-            workers=worker_addresses,
-            broadcast=True,
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        return actual_task_counts == [3, 1]
+
+    async def _run_test(*args, **kwargs):
+        await _run_balance_test(
+            dependencies,
+            dependency_placement,
+            task_placement,
+            _correct_placement,
+            recompute_saturation,
+            *args,
+            **kwargs,
         )
-        dependency_futures[name] = fut
 
-    assert_dependency_placement(placement, workers)
-
-    return dependency_futures
-
-
-def assert_dependency_placement(expected, workers):
-    actual = []
-    for worker in workers:
-        actual.append(list(worker.state.tasks.keys()))
-
-    assert actual == expected
+    config = {"distributed.scheduler.unknown-task-duration": "1s"}
+    gen_cluster(
+        client=True,
+        nthreads=[("", 1)] * len(task_placement),
+        config=config,
+    )(_run_test)()
 
 
-async def assert_balanced_with_dependencies(
+@pytest.mark.parametrize("recompute_saturation", [True, False])
+def test_balance_even_with_replica(recompute_saturation):
+    dependencies = {"a": 1}
+    dependency_placement = [["a"], ["a"]]
+    task_placement = [[["a"], ["a"]], []]
+
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        return actual_task_counts == [
+            1,
+            1,
+        ]
+
+    async def _run_test(*args, **kwargs):
+        await _run_balance_test(
+            dependencies,
+            dependency_placement,
+            task_placement,
+            _correct_placement,
+            recompute_saturation,
+            *args,
+            **kwargs,
+        )
+
+    config = {"distributed.scheduler.unknown-task-duration": "1s"}
+    gen_cluster(
+        client=True,
+        nthreads=[("", 1)] * len(task_placement),
+        config=config,
+    )(_run_test)()
+
+
+@pytest.mark.parametrize("recompute_saturation", [True, False])
+def test_balance_to_replica(recompute_saturation):
+    dependencies = {"a": 1}
+    dependency_placement = [["a"], ["a"], []]
+    task_placement = [[["a"], ["a"], ["a"]], [], []]
+
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        return actual_task_counts == [
+            2,
+            1,
+            0,
+        ]  # Note: The success of this test currently depends on worker ordering
+
+    async def _run_test(*args, **kwargs):
+        await _run_balance_test(
+            dependencies,
+            dependency_placement,
+            task_placement,
+            _correct_placement,
+            recompute_saturation,
+            *args,
+            **kwargs,
+        )
+
+    config = {"distributed.scheduler.unknown-task-duration": "1s"}
+    gen_cluster(
+        client=True,
+        nthreads=[("", 1)] * len(task_placement),
+        config=config,
+    )(_run_test)()
+
+
+async def _run_balance_test(
     dependencies,
     dependency_placement,
     task_placement,
-    expected_placement,
+    correct_placement_fn,
     recompute_saturation,
     c,
     s,
@@ -1536,35 +1563,11 @@ async def assert_balanced_with_dependencies(
     await steal.stop()
     ev = Event()
 
-    def block(*args, event, **kwargs):
-        event.wait()
-
-    counter = itertools.count()
-
-    dependency_futures = await place_dependencies(
+    dependency_futures = await _place_dependencies(
         dependencies, dependency_placement, c, s, workers
     )
 
-    futures = []
-    for idx, tasks in enumerate(task_placement):
-        for dependencies in tasks:
-            i = next(counter)
-            dep_key = "".join(sorted(dependencies))
-            key = f"{dep_key}-{i}"
-            f = c.submit(
-                block,
-                [dependency_futures[dependency] for dependency in dependencies],
-                event=ev,
-                key=key,
-                workers=workers[idx].address,
-                allow_other_workers=True,
-                pure=False,
-                priority=-i,
-            )
-            futures.append(f)
-
-    while len([ts for ts in s.tasks.values() if ts.processing_on]) < len(futures):
-        await asyncio.sleep(0.001)
+    futures = await _place_tasks(ev, task_placement, dependency_futures, c, s, workers)
     if recompute_saturation:
         for ws in s.workers.values():
             s._reevaluate_occupancy_worker(ws)
@@ -1575,17 +1578,96 @@ async def assert_balanced_with_dependencies(
             while steal.in_flight:
                 await asyncio.sleep(0.001)
 
-            result = [
-                sorted(
-                    (list(key_split(ts.key)) for ts in s.workers[w.address].processing),
-                    reverse=True,
-                )
-                for w in workers
-            ]
+            result = _get_task_placement(s, workers)
 
-            if result == expected_placement:
+            if correct_placement_fn(result):
                 # Release the threadpools
                 return
     finally:
         await ev.set()
-    raise Exception(f"Expected: {expected_placement}; got: {result}")
+
+    raise AssertionError(result)
+
+
+async def _place_dependencies(dependencies, placement, c, s, workers):
+    dependencies_to_workers = defaultdict(set)
+    for worker_idx, placed in enumerate(placement):
+        for dependency in placed:
+            dependencies_to_workers[dependency].add(workers[worker_idx].address)
+
+    futures = {}
+    for name, multiplier in dependencies.items():
+        worker_addresses = dependencies_to_workers[name]
+        futs = await c.scatter(
+            {name: Sizeof(int(multiplier * s.bandwidth))},
+            workers=worker_addresses,
+            broadcast=True,
+        )
+        futures[name] = futs[name]
+
+    await c.gather(futures.values())
+
+    _assert_dependency_placement(placement, workers)
+
+    return futures
+
+
+def _assert_dependency_placement(expected, workers):
+    actual = []
+    for worker in workers:
+        actual.append(list(worker.state.tasks.keys()))
+
+    assert actual == expected
+
+
+async def _place_tasks(ev, placement, dependency_futures, c, s, workers):
+    def block(*args, event, **kwargs):
+        event.wait()
+
+    counter = itertools.count()
+    futures = []
+    for worker_idx, tasks in enumerate(placement):
+        for dependencies in tasks:
+            i = next(counter)
+            dep_key = "".join(sorted(dependencies))
+            key = f"{dep_key}-{i}"
+            f = c.submit(
+                block,
+                [dependency_futures[dependency] for dependency in dependencies],
+                event=ev,
+                key=key,
+                workers=workers[worker_idx].address,
+                allow_other_workers=True,
+                pure=False,
+                priority=-i,
+            )
+            futures.append(f)
+
+    while len([ts for ts in s.tasks.values() if ts.processing_on]) < len(futures):
+        await asyncio.sleep(0.001)
+
+    assert_task_placement(placement, s, workers)
+
+    return futures
+
+
+def _get_task_placement(s, workers):
+    actual = []
+    for w in workers:
+        actual.append(
+            [list(key_split(ts.key)) for ts in s.workers[w.address].processing]
+        )
+    return actual
+
+
+def _equal_placement(actual, expected):
+    return _comparable_placement(actual) == _comparable_placement(expected)
+
+
+def _comparable_placement(placement):
+    return [sorted(placed) for placed in placement]
+
+
+def assert_task_placement(expected, s, workers):
+    actual = _get_task_placement(s, workers)
+    assert _equal_placement(actual, expected)
