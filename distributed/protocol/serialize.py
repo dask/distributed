@@ -199,7 +199,7 @@ register_serialization_family("msgpack", msgpack_dumps, msgpack_loads)
 register_serialization_family("error", None, serialization_error_loads)
 
 
-def _infer_if_iterate_over_list(x):
+def infer_if_recurse_to_serialize_list(x):
     try:
         _ = list(set(x))
         iseq = iter(x)
@@ -232,7 +232,7 @@ def _infer_if_iterate_over_list(x):
 def check_dask_serializable(x):
     if type(x) in (list, set, tuple) and len(x):
         if type(x) is list:
-            return _infer_if_iterate_over_list(x)
+            return infer_if_recurse_to_serialize_list(x)
         else:
             return check_dask_serializable(next(iter(x)))
     elif type(x) is dict and len(x):
@@ -298,7 +298,7 @@ def serialize(  # type: ignore[no-untyped-def]
         iterate_collection is None and
         serializers is None
     ):
-        iterate_collection = _infer_if_iterate_over_list(x)
+        iterate_collection = infer_if_recurse_to_serialize_list(x)
 
     if serializers is None:
         serializers = ("dask", "pickle")  # TODO: get from configuration
