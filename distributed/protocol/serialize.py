@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ast import literal_eval
 import codecs
 import importlib
 from multiprocessing.sharedctypes import Value
@@ -202,18 +203,26 @@ def _infer_if_iterate_over_list(x):
     try:
         _ = list(set(x))
         iseq = iter(x)
-        first_type = type(next(iseq))
-        if (not is_dask_collection(first_type) and
-            typename(first_type) in ['str', 'int', 'float'] and
-            all((type(i) is first_type) for i in iseq)
+        first_val = next(iseq)
+        if (is_dask_collection(first_val) or
+            typename(type(first_val)) not in ['str', 'int', 'float']
             ):
+            # Sometimes we get func.partial or pd.Timestamp objects
+            # from shuffle unit tests
+            return True
+        if (isinstance(first_val, str) and 
+            isinstance(literal_eval(first_val), tuple)
+            ):
+            # Sometimes we get strings that are actually tuples
+            # which are part of the task graph.  We need to serialize
+            # these recursively.
+            return True
+        if all((type(i) is type(first_val)) for i in iseq):
             return False
         else:
             Y = check_dask_serializable(next(iter(x)))
-            import pdb;pdb.set_trace()
-
             return Y
-    except TypeError:
+    except (TypeError, ValueError):
     # We assume that if elements in the list are not hashable
     # we will serialize them iteratively with pickle.
         return True
@@ -551,7 +560,11 @@ class Serialize:
 
     def __init__(self, data):
         self.data = data
-        self.iterate_collection = check_dask_serializable(data)
+        if typename(data) == 'list':
+            self.iterate_collection = check_dask_serializable(data)
+        else:
+            self.iterate_collection = True
+
 
     def __repr__(self):
         return f"<Serialize: {self.data}>"
