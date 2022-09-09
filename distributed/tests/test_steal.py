@@ -10,6 +10,7 @@ import weakref
 from operator import mul
 from time import sleep
 
+import numpy as np
 import pytest
 from tlz import sliding_window
 
@@ -1350,3 +1351,28 @@ def test_steal_worker_state(ws_with_running_task):
     assert "x" not in ws.tasks
     assert "x" not in ws.data
     assert ws.available_resources == {"R": 1}
+
+
+@pytest.mark.slow()
+@gen_cluster(nthreads=[("", 1)] * 4, client=True)
+async def test_steal_very_fast_tasks(c, s, *workers):
+    # Ensure that very fast tasks are allowed to be stolen
+    root = dask.delayed(lambda n: "x" * n)(
+        dask.utils.parse_bytes("1MiB"), dask_key_name="root"
+    )
+
+    @dask.delayed
+    def func(*args):
+        import time
+
+        time.sleep(0.002)
+
+    ntasks = 1000
+    results = [func(root, i) for i in range(ntasks)]
+    futs = c.compute(results)
+    await c.gather(futs)
+
+    ntasks_per_worker = np.array([len(w.data) for w in workers])
+    ideal = ntasks / len(workers)
+    assert (ntasks_per_worker > ideal * 0.5).all(), (ideal, ntasks_per_worker)
+    assert (ntasks_per_worker < ideal * 1.5).all(), (ideal, ntasks_per_worker)
