@@ -1594,14 +1594,14 @@ def test_balance_to_larger_dependency(recompute_saturation):
 
 @pytest.mark.parametrize("recompute_saturation", [True, False])
 def test_balance_move_to_busier_with_dependency(recompute_saturation):
-    dependencies = {"a": 4, "b": 1}
+    dependencies = {"a": 2, "b": 1}
     dependency_placement = [["a"], ["a", "b"], []]
-    task_placement = [[["a"], ["a"], ["a"]], ["b"], []]
+    task_placement = [[["a"], ["a"], ["a"], ["a"], ["a"], ["a"]], [["b"]], []]
 
     def _correct_placement(actual):
         actual_task_counts = [len(placed) for placed in actual]
         return actual_task_counts == [
-            2,
+            5,
             2,
             0,
         ]  # Note: The success of this test currently depends on worker ordering
