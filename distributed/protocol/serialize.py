@@ -2,17 +2,20 @@ from __future__ import annotations
 
 import codecs
 import importlib
+from multiprocessing.sharedctypes import Value
 import traceback
 from array import array
 from enum import Enum
 from functools import partial
 from types import ModuleType
-from typing import Any, Literal
+from typing import Any, Literal, Type
 
 import msgpack
+import numpy as np
 
 import dask
 from dask.base import normalize_token
+from dask import is_dask_collection
 from dask.utils import typename
 
 from distributed.protocol import pickle
@@ -56,6 +59,8 @@ def dask_dumps(x, context=None):
 def dask_loads(header, frames):
     typ = pickle.loads(header["type-serialized"])
     loads = dask_deserialize.dispatch(typ)
+    if header.get("sub-header") is None:
+        return loads(header, frames)
     return loads(header["sub-header"], frames)
 
 
@@ -193,9 +198,34 @@ register_serialization_family("msgpack", msgpack_dumps, msgpack_loads)
 register_serialization_family("error", None, serialization_error_loads)
 
 
+def _infer_is_list_dask_serializable(x):
+    # import pdb;pdb.set_trace()
+    try:
+        _ = list(set(x))
+        iseq = iter(x)
+        first_type = type(next(iseq))
+
+        if (not is_dask_collection(first_type) and
+            all((type(i) is first_type) for i in iseq)
+            ):
+            return True
+        else:
+            return check_dask_serializable(next(iter(x)))
+    except TypeError:
+    # We assume that if elements in the list are not hashable
+    # we will serialize them iteratively.  This means
+    # if our list contains an iterable, we fall back to
+    # iterating on the collection
+        return False
+
+
 def check_dask_serializable(x):
     if type(x) in (list, set, tuple) and len(x):
-        return check_dask_serializable(next(iter(x)))
+        if type(x) is list:
+            v = _infer_is_list_dask_serializable(x)
+            return v
+        else:
+            return check_dask_serializable(next(iter(x)))
     elif type(x) is dict and len(x):
         return check_dask_serializable(next(iter(x.items()))[1])
     else:
@@ -255,6 +285,13 @@ def serialize(  # type: ignore[no-untyped-def]
     to_serialize : Mark that data in a message should be serialized
     register_serialization : Register custom serialization functions
     """
+    if type(x) is list and iterate_collection is None:
+        serialize_list_as_array = _infer_is_list_dask_serializable(x)
+        if serialize_list_as_array is True:
+            iterate_collection=False
+        else:
+            iterate_collection = True
+
     if serializers is None:
         serializers = ("dask", "pickle")  # TODO: get from configuration
 
@@ -274,6 +311,8 @@ def serialize(  # type: ignore[no-untyped-def]
     # Note: don't use isinstance(), as it would match subclasses
     # (e.g. namedtuple, defaultdict) which however would revert to the base class on a
     # round-trip through msgpack
+    # import pdb;pdb.set_trace()
+
     if iterate_collection is None and type(x) in (list, set, tuple, dict):
         if type(x) is list and "msgpack" in serializers:
             # Note: "msgpack" will always convert lists to tuples
@@ -298,9 +337,9 @@ def serialize(  # type: ignore[no-untyped-def]
 
     if (
         type(x) in (list, set, tuple)
-        and iterate_collection
+        and iterate_collection is True
         or type(x) is dict
-        and iterate_collection
+        and iterate_collection is True
         and dict_safe
     ):
         if isinstance(x, dict):
@@ -315,7 +354,8 @@ def serialize(  # type: ignore[no-untyped-def]
             assert isinstance(x, (list, set, tuple))
             headers_frames = [
                 serialize(
-                    obj, serializers=serializers, on_error=on_error, context=context
+                    obj, serializers=serializers, on_error=on_error, context=context,
+                    iterate_collection=iterate_collection
                 )
                 for obj in x
             ]
@@ -805,6 +845,40 @@ def _deserialize_memoryview(header, frames):
 
     return out
 
+
+@dask_serialize.register(list)
+def _serialize_list_as_ndarray(x):
+    # import pdb;pdb.set_trace()
+    # try:
+    #     _ = list(set(x))
+    #     iseq = iter(x)
+    #     first_type = type(next(iseq))
+
+    #     if (not is_dask_collection(first_type) and
+    #         all((type(i) is first_type) for i in iseq)
+    #         ):
+    first_type = type(x[0])
+    obj_type = typename(first_type)
+    if obj_type in ('str', 'int', 'float'):
+        try:
+            x = np.array(x, dtype=first_type)
+            header, frames = dask_serialize(x)
+            header['type-serialized'] = pickle.dumps(type(x), protocol=4)
+            return header, frames
+        except Exception as e:
+            raise
+    else:
+        raise TypeError
+            # We assume that if elements in the list are not hashable
+            # we will serialize them iteratively.  This means
+            # if our list contains an iterable, we fall back to
+            # iterating on the collection
+
+
+@dask_deserialize.register(list)
+def _deserialize_list_from_ndarray(header, frames):
+    x = dask_loads(header, frames)
+    return x.tolist()
 
 #########################
 # Descend into __dict__ #

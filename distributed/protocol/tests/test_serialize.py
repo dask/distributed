@@ -57,16 +57,22 @@ def deserialize_myobj(header, frames):
 register_serialization(MyObj, serialize_myobj, deserialize_myobj)
 
 
-def test_dumps_serialize():
-    for x in [123, [1, 2, 3, 4, 5, 6]]:
-        header, frames = serialize(x)
-        assert header["serializer"] == "pickle"
-        assert len(frames) == 1
+@pytest.mark.parametrize("input, expected",
+    [
+    (123, "pickle"), 
+    ([1,2,3,4,5,6], "dask"),
+    ])
+def test_dumps_serialize(input, expected):
+    header, frames = serialize(input)
+    print(header)
 
-        result = deserialize(header, frames)
-        assert result == x
+    assert header.get("serializer") == expected
+    assert len(frames) == 1
 
-    x = MyObj(123)
+    result = deserialize(header, frames)
+    assert result == input
+
+    x = MyObj(input)
     header, frames = serialize(x)
     assert header["type"]
     assert len(frames) == 1
@@ -517,7 +523,9 @@ async def test_frame_split():
 @pytest.mark.parametrize(
     "data,is_serializable",
     [
-        ([], False),
+        ([], True),
+        ([[0,0], [0,0]], False),
+        ([[], []], False),
         ({}, False),
         ({i: i for i in range(10)}, False),
         (set(range(10)), False),
