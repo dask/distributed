@@ -717,18 +717,27 @@ async def assert_balanced(inp, expected, recompute_saturation, c, s, *workers):
     [
         pytest.param([[1], []], [[1], []], id="don't move unnecessarily"),
         pytest.param([[0, 0], []], [[0], [0]], id="balance"),
-        ([[0.1, 0.1], []], [[0], [0]]),  # balance even if results in even
-        ([[0, 0, 0], []], [[0, 0], [0]]),  # don't over balance
-        ([[0, 0], [0, 0, 0], []], [[0, 0], [0, 0], [0]]),  # move from larger
-        ([[0, 0, 0], [0], []], [[0, 0], [0], [0]]),  # move to smaller
-        ([[0, 1], []], [[1], [0]]),  # choose easier first
-        ([[0, 0, 0, 0], [], []], [[0, 0], [0], [0]]),  # spread evenly
-        ([[1, 0, 2, 0], [], []], [[2, 1], [0], [0]]),  # move easier
-        ([[1, 1, 1], []], [[1, 1], [1]]),  # be willing to move costly items
-        ([[1, 1, 1, 1], []], [[1, 1, 1], [1]]),  # but don't move too many
-        (
-            [[0, 0], [0, 0], [0, 0], []],  # no one clearly saturated
+        pytest.param(
+            [[0.1, 0.1], []], [[0], [0]], id="balance even if results in even"
+        ),
+        pytest.param([[0, 0, 0], []], [[0, 0], [0]], id="don't over balance"),
+        pytest.param(
+            [[0, 0], [0, 0, 0], []], [[0, 0], [0, 0], [0]], id="move from larger"
+        ),
+        pytest.param([[0, 0, 0], [0], []], [[0, 0], [0], [0]], id="move to smaller"),
+        pytest.param([[0, 1], []], [[1], [0]], id="choose easier first"),
+        pytest.param([[0, 0, 0, 0], [], []], [[0, 0], [0], [0]], id="spread evenly"),
+        pytest.param([[1, 0, 2, 0], [], []], [[2, 1], [0], [0]], id="move easier"),
+        pytest.param(
+            [[1, 1, 1], []], [[1, 1], [1]], id="be willing to move costly items"
+        ),
+        pytest.param(
+            [[1, 1, 1, 1], []], [[1, 1, 1], [1]], id="but don't move too many"
+        ),
+        pytest.param(
+            [[0, 0], [0, 0], [0, 0], []],
             [[0, 0], [0, 0], [0], [0]],
+            id="no one clearly saturated",
         ),
         # NOTE: There is a timing issue that workers may already start executing
         # tasks before we call balance, i.e. the workers will reject the
@@ -736,9 +745,10 @@ async def assert_balanced(inp, expected, recompute_saturation, c, s, *workers):
         # Particularly tests with many input tasks are more likely to fail since
         # the test setup takes longer and allows the workers more time to
         # schedule a task on the threadpool
-        (
+        pytest.param(
             [[4, 2, 2, 2, 2, 1, 1], [4, 2, 1, 1], [], [], []],
             [[4, 2, 2, 2], [4, 2, 1, 1], [2], [1], [1]],
+            id="balance multiple saturated workers",
         ),
     ],
 )
@@ -1527,6 +1537,72 @@ def test_balance_to_replica(recompute_saturation):
         return actual_task_counts == [
             2,
             1,
+            0,
+        ]  # Note: The success of this test currently depends on worker ordering
+
+    async def _run_test(*args, **kwargs):
+        await _run_balance_test(
+            dependencies,
+            dependency_placement,
+            task_placement,
+            _correct_placement,
+            recompute_saturation,
+            *args,
+            **kwargs,
+        )
+
+    config = {"distributed.scheduler.unknown-task-duration": "1s"}
+    gen_cluster(
+        client=True,
+        nthreads=[("", 1)] * len(task_placement),
+        config=config,
+    )(_run_test)()
+
+
+@pytest.mark.parametrize("recompute_saturation", [True, False])
+def test_balance_to_larger_dependency(recompute_saturation):
+    dependencies = {"a": 2, "b": 1}
+    dependency_placement = [["a", "b"], ["a"], ["b"]]
+    task_placement = [[["a", "b"], ["a", "b"], ["a", "b"]], [], []]
+
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        return actual_task_counts == [
+            2,
+            1,
+            0,
+        ]  # Note: The success of this test currently depends on worker ordering
+
+    async def _run_test(*args, **kwargs):
+        await _run_balance_test(
+            dependencies,
+            dependency_placement,
+            task_placement,
+            _correct_placement,
+            recompute_saturation,
+            *args,
+            **kwargs,
+        )
+
+    config = {"distributed.scheduler.unknown-task-duration": "1s"}
+    gen_cluster(
+        client=True,
+        nthreads=[("", 1)] * len(task_placement),
+        config=config,
+    )(_run_test)()
+
+
+@pytest.mark.parametrize("recompute_saturation", [True, False])
+def test_balance_move_to_busier_with_dependency(recompute_saturation):
+    dependencies = {"a": 4, "b": 1}
+    dependency_placement = [["a"], ["a", "b"], []]
+    task_placement = [[["a"], ["a"], ["a"]], ["b"], []]
+
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        return actual_task_counts == [
+            2,
+            2,
             0,
         ]  # Note: The success of this test currently depends on worker ordering
 
