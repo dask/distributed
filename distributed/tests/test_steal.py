@@ -10,6 +10,7 @@ import weakref
 from operator import mul
 from time import sleep
 
+import numpy as np
 import pytest
 from tlz import sliding_window
 
