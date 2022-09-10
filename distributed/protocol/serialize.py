@@ -4,7 +4,6 @@ import codecs
 import importlib
 import traceback
 from array import array
-from ast import literal_eval
 from enum import Enum
 from functools import partial
 from types import ModuleType
@@ -200,8 +199,8 @@ register_serialization_family("error", None, serialization_error_loads)
 
 def infer_if_recurse_to_serialize_list(x: list) -> bool:
     """
-    Function sets iterate_collection variable in serialize for 
-    lists.  If it returns False, the list will be serialized 
+    Function sets iterate_collection variable in serialize for
+    lists.  If it returns False, the list will be serialized
     using Dask Dispatch.  It it returns True, the list will
     be serialized recursively with pickle
     """
@@ -218,14 +217,12 @@ def infer_if_recurse_to_serialize_list(x: list) -> bool:
             # from shuffle unit tests
             return True
         if all((type(i) is type(first_val)) for i in iseq):
-            if (isinstance(first_val, str) and
-                set(["(", ")", ","]).issubset(set(first_val))
-                ):
-                    # Sometimes we get strings that are actually tuples
-                    # which are part of the task graph.  We need to serialize
-                    # these recursively.  We assume that all the items in the
-                    # list are from the task graph
-                    return True
+            if isinstance(first_val, str) and {"(", ")", ","}.issubset(set(first_val)):
+                # Sometimes we get strings that are actually tuples
+                # which are part of the task graph.  We need to serialize
+                # these recursively.  We assume that all the items in the
+                # list are from the task graph
+                return True
             else:
                 return False
 
