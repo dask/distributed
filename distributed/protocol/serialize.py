@@ -205,7 +205,6 @@ def infer_if_recurse_to_serialize_list(x: list) -> bool:
     using Dask Dispatch.  It it returns True, the list will
     be serialized recursively with pickle
     """
-    # import pdb;pdb.set_trace()
     try:
         _ = list(set(x))
         iseq = iter(x)
