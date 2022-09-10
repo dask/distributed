@@ -1,22 +1,21 @@
 from __future__ import annotations
 
-from ast import literal_eval
 import codecs
 import importlib
-from multiprocessing.sharedctypes import Value
 import traceback
 from array import array
+from ast import literal_eval
 from enum import Enum
 from functools import partial
 from types import ModuleType
-from typing import Any, Literal, Type
+from typing import Any, Literal
 
 import msgpack
 import numpy as np
 
 import dask
-from dask.base import normalize_token
 from dask import is_dask_collection
+from dask.base import normalize_token
 from dask.utils import typename
 
 from distributed.protocol import pickle
@@ -199,37 +198,56 @@ register_serialization_family("msgpack", msgpack_dumps, msgpack_loads)
 register_serialization_family("error", None, serialization_error_loads)
 
 
-def infer_if_recurse_to_serialize_list(x):
+def infer_if_recurse_to_serialize_list(x: list) -> bool:
+    """
+    Function sets iterate_collection variable in serialize for 
+    lists.  If it returns False, the list will be serialized 
+    using Dask Dispatch.  It it returns True, the list will
+    be serialized recursively with pickle
+    """
+    # import pdb;pdb.set_trace()
     try:
         _ = list(set(x))
         iseq = iter(x)
         first_val = next(iseq)
-        if (is_dask_collection(first_val) or
-            typename(type(first_val)) not in ['str', 'int', 'float']
-            ):
+        if is_dask_collection(first_val) or typename(type(first_val)) not in [
+            "str",
+            "int",
+            "float",
+        ]:
             # Sometimes we get func.partial or pd.Timestamp objects
             # from shuffle unit tests
             return True
-        if (isinstance(first_val, str) and 
-            isinstance(literal_eval(first_val), tuple)
-            ):
-            # Sometimes we get strings that are actually tuples
-            # which are part of the task graph.  We need to serialize
-            # these recursively.  We assume that all the items in the
-            # list are from the task graph
-            return True
         if all((type(i) is type(first_val)) for i in iseq):
-            return False
+            if (isinstance(first_val, str) and
+                set(["(", ")", ","]).issubset(set(first_val))
+                ):
+                    # Sometimes we get strings that are actually tuples
+                    # which are part of the task graph.  We need to serialize
+                    # these recursively.  We assume that all the items in the
+                    # list are from the task graph
+                    return True
+            else:
+                return False
+
         else:
-            Y = check_dask_serializable(next(iter(x)))
-            return Y
-    except (TypeError, ValueError):
-    # We assume that if elements in the list are not hashable
-    # we will serialize them iteratively with pickle.
+            # We default to serializing the list recursively
+            # with pickle
+            # Y = check_dask_serializable(next(iter(x)))
+            return True
+    except StopIteration:
+        return False
+    except TypeError:
+        # We assume that if elements in the list are not hashable
+        # we will serialize them iteratively with pickle.
         return True
 
 
 def check_dask_serializable(x):
+    """
+    This function sets the iterate_collection variable
+    for serialize
+    """
     if type(x) in (list, set, tuple) and len(x):
         if type(x) is list:
             return infer_if_recurse_to_serialize_list(x)
@@ -294,10 +312,7 @@ def serialize(  # type: ignore[no-untyped-def]
     to_serialize : Mark that data in a message should be serialized
     register_serialization : Register custom serialization functions
     """
-    if (type(x) is list and 
-        iterate_collection is None and
-        serializers is None
-    ):
+    if type(x) is list and iterate_collection is None and serializers is None:
         iterate_collection = infer_if_recurse_to_serialize_list(x)
 
     if serializers is None:
@@ -361,8 +376,11 @@ def serialize(  # type: ignore[no-untyped-def]
             assert isinstance(x, (list, set, tuple))
             headers_frames = [
                 serialize(
-                    obj, serializers=serializers, on_error=on_error, context=context,
-                    iterate_collection=iterate_collection
+                    obj,
+                    serializers=serializers,
+                    on_error=on_error,
+                    context=context,
+                    iterate_collection=iterate_collection,
                 )
                 for obj in x
             ]
@@ -561,11 +579,10 @@ class Serialize:
 
     def __init__(self, data):
         self.data = data
-        if typename(data) == 'list':
+        if typename(data) == "list":
             self.iterate_collection = check_dask_serializable(data)
         else:
             self.iterate_collection = True
-
 
     def __repr__(self):
         return f"<Serialize: {self.data}>"
@@ -864,7 +881,7 @@ def _serialize_list_as_ndarray(x):
     first_type = type(x[0])
     x = np.array(x, dtype=first_type)
     header, frames = dask_serialize(x)
-    header['type-serialized'] = pickle.dumps(type(x), protocol=4)
+    header["type-serialized"] = pickle.dumps(type(x), protocol=4)
     return header, frames
 
 
@@ -872,6 +889,7 @@ def _serialize_list_as_ndarray(x):
 def _deserialize_list_from_ndarray(header, frames):
     x = dask_loads(header, frames)
     return x.tolist()
+
 
 #########################
 # Descend into __dict__ #

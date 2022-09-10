@@ -13,6 +13,8 @@ try:
 except ImportError:
     np = None  # type: ignore
 
+import pandas as pd
+
 import dask
 
 from distributed import Nanny, wait
@@ -33,7 +35,7 @@ from distributed.protocol import (
     serialize_bytes,
     to_serialize,
 )
-from distributed.protocol.serialize import check_dask_serializable
+from distributed.protocol.serialize import check_dask_serializable, infer_if_recurse_to_serialize_list
 from distributed.utils import ensure_memoryview, nbytes
 from distributed.utils_test import gen_test, inc
 
@@ -57,11 +59,13 @@ def deserialize_myobj(header, frames):
 register_serialization(MyObj, serialize_myobj, deserialize_myobj)
 
 
-@pytest.mark.parametrize("input, expected",
+@pytest.mark.parametrize(
+    "input, expected",
     [
-    (123, "pickle"), 
-    ([1,2,3,4,5,6], "dask"),
-    ])
+        (123, "pickle"),
+        ([1, 2, 3, 4, 5, 6], "dask"),
+    ],
+)
 def test_dumps_serialize(input, expected):
     header, frames = serialize(input)
 
@@ -520,10 +524,30 @@ async def test_frame_split():
 
 
 @pytest.mark.parametrize(
+    "data, iterate_collection",
+    [
+        ([], False),
+        ([0,1,2], False),
+        ([0, 'a', 2], True),
+        ([[], []], True),
+        (['a', 'b', 1], True),
+        ([pd.Timestamp(2022), pd.Timestamp(2023)], True),
+        (["(123-456, 1)", "(789-101, 2)"], True),
+        ([(123, 456), (789, 101112)], True),
+        (['a', 'b', 'c'], False),
+        ([1,2,3,[4,5,6],7,8], True),
+     ]
+)
+def test_infer_if_recurse_to_serialize_list(data, iterate_collection):
+    result = infer_if_recurse_to_serialize_list(data)
+    expected = iterate_collection
+    assert result == expected
+
+@pytest.mark.parametrize(
     "data,is_serializable",
     [
         ([], True),
-        ([[0,0], [0,0]], True),
+        ([[0, 0], [0, 0]], True),
         ([[], []], True),
         ({}, False),
         ({i: i for i in range(10)}, False),
