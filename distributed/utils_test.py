@@ -2466,13 +2466,20 @@ class SizeOf:
     An object that returns exactly nbytes when inspected by dask.sizeof.sizeof
     """
 
-    def __init__(self, nbytes: float) -> None:
-        self._nbytes = nbytes - sizeof(object())
+    def __init__(self, nbytes: int) -> None:
+        if not isinstance(nbytes, int):
+            raise TypeError(f"Expected integer for nbytes but got {type(nbytes)}")
+        size_obj = sizeof(object())
+        if nbytes < size_obj:
+            raise ValueError(
+                f"Expected a value larger than {size_obj} integer but got {nbytes}."
+            )
+        self._nbytes = nbytes - size_obj
 
     def __sizeof__(self) -> int:
         return self._nbytes
 
 
-def gen_nbytes(nbytes: float) -> SizeOf:
+def gen_nbytes(nbytes: int) -> SizeOf:
     """A function that emulates exactly nbytes on the worker data structure."""
     return SizeOf(nbytes)

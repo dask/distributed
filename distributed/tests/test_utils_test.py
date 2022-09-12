@@ -1029,8 +1029,21 @@ def test_ws_with_running_task(ws_with_running_task):
     assert ts.state in ("executing", "long-running")
 
 
-@pytest.mark.parametrize("nbytes", [0, 1, 1234.567])
-def test_sizeof(nbytes):
-    assert sizeof(SizeOf(nbytes)) == nbytes
-    assert isinstance(gen_nbytes(nbytes), SizeOf)
-    assert sizeof(gen_nbytes(nbytes)) == nbytes
+def test_sizeof():
+    assert sizeof(SizeOf(100)) == 100
+    assert isinstance(gen_nbytes(100), SizeOf)
+    assert sizeof(gen_nbytes(100)) == 100
+
+
+@pytest.mark.parametrize(
+    "input, exc, msg",
+    [
+        (12345.0, TypeError, "Expected integer"),
+        (-1, ValueError, "larger than"),
+        (0, ValueError, "larger than"),
+        (10, ValueError, "larger than"),
+    ],
+)
+def test_sizeof_error(input, exc, msg):
+    with pytest.raises(exc, match=msg):
+        SizeOf(input)

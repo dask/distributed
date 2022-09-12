@@ -850,25 +850,26 @@ async def test_steal_twice(c, s, a, b):
             await asyncio.sleep(0.01)
 
     # Army of new workers arrives to help
-    workers = await asyncio.gather(*(Worker(s.address) for _ in range(20)))
+    async with contextlib.AsyncExitStack() as stack:
+        # This is pretty timing sensitive
+        workers = [stack.enter_async_context(Worker(s.address)) for _ in range(10)]
+        workers = await asyncio.gather(*workers)
 
-    await wait(futures)
+        await wait(futures)
 
-    # Note: this includes a and b
-    empty_workers = [ws for ws in s.workers.values() if not ws.has_what]
-    assert (
-        len(empty_workers) < 3
-    ), f"Too many workers without keys ({len(empty_workers)} out of {len(s.workers)})"
-    # This also tests that some tasks were stolen from b
-    # (see `while len(b.state.tasks) < 30` above)
-    # If queuing is enabled, then there was nothing to steal from b,
-    # so this just tests the queue was balanced not-terribly.
-    assert max(len(ws.has_what) for ws in s.workers.values()) < 30
+        # Note: this includes a and b
+        empty_workers = [ws for ws in s.workers.values() if not ws.has_what]
+        assert (
+            len(empty_workers) < 3
+        ), f"Too many workers without keys ({len(empty_workers)} out of {len(s.workers)})"
+        # This also tests that some tasks were stolen from b
+        # (see `while len(b.state.tasks) < 30` above)
+        # If queuing is enabled, then there was nothing to steal from b,
+        # so this just tests the queue was balanced not-terribly.
+        assert max(len(ws.has_what) for ws in s.workers.values()) < 30
 
-    assert a.state.in_flight_tasks_count == 0
-    assert b.state.in_flight_tasks_count == 0
-
-    await asyncio.gather(*(w.close() for w in workers))
+        assert a.state.in_flight_tasks_count == 0
+        assert b.state.in_flight_tasks_count == 0
 
 
 @gen_cluster(
