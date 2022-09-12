@@ -48,7 +48,7 @@ from bokeh.palettes import Viridis11
 from bokeh.plotting import figure
 from bokeh.themes import Theme
 from bokeh.transform import cumsum, factor_cmap, linear_cmap, stack
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 from tlz import curry, pipe, valmap
 from tlz.curried import concat, groupby, map
 from tornado import escape
