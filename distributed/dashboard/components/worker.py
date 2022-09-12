@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 env = Environment(
     loader=FileSystemLoader(
         os.path.join(os.path.dirname(__file__), "..", "..", "http", "templates"),
-        autoescape=jinja2.select_autoescape(enabled_extensions=('html', 'xml')
+        autoescape=select_autoescape()
     )
 )
 
