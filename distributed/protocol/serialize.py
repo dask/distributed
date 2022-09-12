@@ -49,7 +49,7 @@ def dask_dumps(x, context=None):
     header = {
         "sub-header": sub_header,
         "type": type_name,
-        "type-serialized": pickle.dumps(type(x), protocol=4),
+        "type-serialized": pickle.dumps(type(x)),
         "serializer": "dask",
     }
     return header, frames
@@ -308,9 +308,6 @@ def serialize(  # type: ignore[no-untyped-def]
     to_serialize : Mark that data in a message should be serialized
     register_serialization : Register custom serialization functions
     """
-    if type(x) is list and iterate_collection is None and serializers is None:
-        iterate_collection = infer_if_recurse_to_serialize_list(x)
-
     if serializers is None:
         serializers = ("dask", "pickle")  # TODO: get from configuration
 
@@ -332,14 +329,18 @@ def serialize(  # type: ignore[no-untyped-def]
     # round-trip through msgpack
 
     if iterate_collection is None and type(x) in (list, set, tuple, dict):
-        if type(x) is list and "msgpack" in serializers:
-            # Note: "msgpack" will always convert lists to tuples
-            #       (see GitHub #3716), so we should iterate
-            #       through the list if "msgpack" comes before "pickle"
-            #       in the list of serializers.
-            iterate_collection = ("pickle" not in serializers) or (
-                serializers.index("pickle") > serializers.index("msgpack")
-            )
+        if type(x) is list:
+            if "msgpack" in serializers:
+                # Note: "msgpack" will always convert lists to tuples
+                #       (see GitHub #3716), so we should iterate
+                #       through the list if "msgpack" comes before "pickle"
+                #       in the list of serializers.
+                iterate_collection = ("pickle" not in serializers) or (
+                    serializers.index("pickle") > serializers.index("msgpack")
+                )
+            else:
+                iterate_collection = infer_if_recurse_to_serialize_list(x)
+
         if not iterate_collection:
             # Check for "dask"-serializable data in dict/list/set
             iterate_collection = check_dask_serializable(x)
@@ -877,7 +878,7 @@ def _serialize_list_as_ndarray(x):
     first_type = type(x[0])
     x = np.array(x, dtype=first_type)
     header, frames = dask_serialize(x)
-    header["type-serialized"] = pickle.dumps(type(x), protocol=4)
+    header["type-serialized"] = pickle.dumps(type(x))
     return header, frames
 
 
