@@ -753,6 +753,7 @@ async def assert_balanced(inp, expected, recompute_saturation, c, s, *workers):
             [[4, 2, 2, 2, 2, 1, 1], [4, 2, 1, 1], [], [], []],
             [[4, 2, 2, 2], [4, 2, 1, 1], [2], [1], [1]],
             id="balance multiple saturated workers",
+            marks=pytest.mark.skip(reason="This test is highly timing-sensitive"),
         ),
     ],
 )
