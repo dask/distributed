@@ -502,8 +502,7 @@ def serialize_and_split(
     --------
     serialize
     merge_and_deserialize
-    """
-
+    """        
     header, frames = serialize(x, serializers, on_error, context)
     num_sub_frames = []
     offsets = []
@@ -577,7 +576,7 @@ class Serialize:
     def __init__(self, data):
         self.data = data
         if typename(data) == "list":
-            self.iterate_collection = check_dask_serializable(data)
+            self.iterate_collection = None
         else:
             self.iterate_collection = True
 
