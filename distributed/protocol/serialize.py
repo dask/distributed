@@ -232,7 +232,7 @@ def infer_if_recurse_to_serialize_list(x: list) -> bool:
             return True
     except StopIteration:
         return False
-    except Exception as e:
+    except Exception:
         # We assume that if elements in the list are not hashable
         # we will serialize them iteratively with pickle.
         return True
