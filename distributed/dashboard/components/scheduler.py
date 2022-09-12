@@ -92,7 +92,7 @@ T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
-env = Environment(
+env = Environment(autoescape=True,
     loader=FileSystemLoader(
         os.path.join(os.path.dirname(__file__), "..", "..", "http", "templates")
     )
