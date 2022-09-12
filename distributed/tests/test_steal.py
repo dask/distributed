@@ -62,7 +62,7 @@ class Sizeof:
 
 @pytest.fixture(params=[True, False])
 def recompute_saturation(request):
-    yield request.params
+    yield request.param
 
 
 @gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
