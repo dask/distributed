@@ -205,7 +205,6 @@ def infer_if_recurse_to_serialize_list(x: list) -> bool:
     be serialized recursively with pickle
     """
     try:
-        _ = list(set(x))
         iseq = iter(x)
         first_val = next(iseq)
         if is_dask_collection(first_val) or typename(type(first_val)) not in [
@@ -233,7 +232,7 @@ def infer_if_recurse_to_serialize_list(x: list) -> bool:
             return True
     except StopIteration:
         return False
-    except TypeError:
+    except Exception as e:
         # We assume that if elements in the list are not hashable
         # we will serialize them iteratively with pickle.
         return True
