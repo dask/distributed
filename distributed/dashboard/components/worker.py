@@ -19,7 +19,7 @@ from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.palettes import RdBu
 from bokeh.plotting import figure
 from bokeh.themes import Theme
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 from tlz import merge, partition_all
 
 from dask.utils import format_bytes, format_time
@@ -38,7 +38,8 @@ from distributed.utils import log_errors
 logger = logging.getLogger(__name__)
 env = Environment(
     loader=FileSystemLoader(
-        os.path.join(os.path.dirname(__file__), "..", "..", "http", "templates")
+        os.path.join(os.path.dirname(__file__), "..", "..", "http", "templates"),
+        autoescape=select_autoescape()
     )
 )
 
