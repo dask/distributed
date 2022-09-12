@@ -502,7 +502,7 @@ def serialize_and_split(
     --------
     serialize
     merge_and_deserialize
-    """        
+    """
     header, frames = serialize(x, serializers, on_error, context)
     num_sub_frames = []
     offsets = []
