@@ -36,9 +36,10 @@ from distributed.metrics import time
 from distributed.utils import log_errors
 
 logger = logging.getLogger(__name__)
-env = Environment.from_string(
+env = Environment(
     loader=FileSystemLoader(
-        os.path.join(os.path.dirname(__file__), "..", "..", "http", "templates")
+        os.path.join(os.path.dirname(__file__), "..", "..", "http", "templates"),
+        autoescape=jinja2.select_autoescape(enabled_extensions=('html', 'xml')
     )
 )
 
