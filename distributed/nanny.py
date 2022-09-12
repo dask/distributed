@@ -644,8 +644,8 @@ class WorkerProcess:
             from distributed.client import default_client
 
             default_client()
-            self.config.pop("scheduler", None)
-            self.config.pop("shuffle", None)
+            self.config.pop("scheduler")
+            self.config.pop("shuffle")
         except ValueError:
             pass
 

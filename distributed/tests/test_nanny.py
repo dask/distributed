@@ -7,12 +7,14 @@ import multiprocessing as mp
 import os
 import random
 import sys
+import warnings
 from contextlib import suppress
 from unittest import mock
 
 import psutil
 import pytest
 
+from distributed import Client
 from distributed.diagnostics.plugin import WorkerPlugin
 
 pytestmark = pytest.mark.gpu
@@ -702,3 +704,27 @@ async def test_malloc_trim_threshold(c, s, a):
     # - 698 MiB at the end of this test, without MALLOC_TRIM_THRESHOLD_
     while s.memory.process > 250 * 2**20:
         await asyncio.sleep(0.01)
+
+
+@gen_test()
+async def test_default_client_does_not_propagate_to_subprocess():
+    async with Scheduler() as s:
+        async with Client(s.address, asynchronous=True) as c:
+            async with Nanny(s.address, nthreads=1) as n:
+
+                @dask.delayed
+                def run_in_thread():
+                    return
+
+                def func():
+                    with warnings.catch_warnings(record=True) as rec:
+                        warnings.filterwarnings(
+                            "once",
+                            message="Running on a single-machine scheduler",
+                            category=UserWarning,
+                        )
+                        dask.compute(run_in_thread(), scheduler="single-threaded")
+                    return rec
+
+                rec = await c.submit(func)
+                assert not rec
