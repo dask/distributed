@@ -236,7 +236,10 @@ class WorkStealing(SchedulerPlugin):
 
         assert ts.processing_on
         ws = ts.processing_on
-        compute_time = ws.processing[ts]
+        # FIXME: this needs the other branch
+        compute_time = self.scheduler.get_task_duration(
+            ts
+        ) + self.scheduler.get_comm_cost(ts, ts.processing_on)
 
         if not compute_time:
             # occupancy/ws.proccessing[ts] is only allowed to be zero for
@@ -249,6 +252,7 @@ class WorkStealing(SchedulerPlugin):
         cost_multiplier = transfer_time / compute_time
 
         level = int(round(log2(cost_multiplier) + 6))
+
         if level < 1:
             level = 1
         elif level >= len(self.cost_multipliers):
@@ -278,8 +282,11 @@ class WorkStealing(SchedulerPlugin):
                 thief.occupancy,
             )
 
-            victim_duration = victim.processing[ts]
-
+            # TODO: occupancy no longer concats linearily so we can't easily
+            # assume that the network cost would go down by that much
+            victim_duration = self.scheduler.get_task_duration(
+                ts
+            ) + self.scheduler.get_comm_cost(ts, victim)
             thief_duration = self.scheduler.get_task_duration(
                 ts
             ) + self.scheduler.get_comm_cost(ts, thief)
@@ -345,10 +352,7 @@ class WorkStealing(SchedulerPlugin):
         try:
             _log_msg = [key, state, victim.address, thief.address, stimulus_id]
 
-            if ts.state != "processing":
-                self.scheduler._reevaluate_occupancy_worker(thief)
-                self.scheduler._reevaluate_occupancy_worker(victim)
-            elif (
+            if (
                 state in _WORKER_STATE_UNDEFINED
                 # If our steal information is somehow stale we need to reschedule
                 or state in _WORKER_STATE_CONFIRM
@@ -369,15 +373,8 @@ class WorkStealing(SchedulerPlugin):
             elif state in _WORKER_STATE_CONFIRM:
                 self.remove_key_from_stealable(ts)
                 ts.processing_on = thief
-                duration = victim.processing.pop(ts)
-                victim.occupancy -= duration
-                self.scheduler.total_occupancy -= duration
-                if not victim.processing:
-                    self.scheduler.total_occupancy -= victim.occupancy
-                    victim.occupancy = 0
-                thief.processing[ts] = d["thief_duration"]
-                thief.occupancy += d["thief_duration"]
-                self.scheduler.total_occupancy += d["thief_duration"]
+                victim.remove_from_processing(ts)
+                thief.add_to_processing(ts)
                 self.put_key_in_stealable(ts)
 
                 self.scheduler.send_task_to_worker(thief.address, ts)
@@ -464,6 +461,7 @@ class WorkStealing(SchedulerPlugin):
                         if (
                             ts not in self.key_stealable
                             or ts.processing_on is not victim
+                            or not ts.processing_on
                         ):
                             stealable.discard(ts)
                             continue
@@ -476,10 +474,9 @@ class WorkStealing(SchedulerPlugin):
                             break
                         thief = thieves[i % len(thieves)]
 
-                        duration = victim.processing.get(ts)
-                        if duration is None:
-                            stealable.discard(ts)
-                            continue
+                        duration = self.scheduler.get_task_duration(
+                            ts
+                        ) + self.scheduler.get_comm_cost(ts, ts.processing_on)
 
                         maybe_move_task(
                             level, ts, victim, thief, duration, cost_multiplier
@@ -505,10 +502,12 @@ class WorkStealing(SchedulerPlugin):
 
                         i += 1
                         thieves = _potential_thieves_for(ts, idle)
-                        if not thieves:
+                        if not thieves or not ts.processing_on:
                             continue
                         thief = thieves[i % len(thieves)]
-                        duration = victim.processing[ts]
+                        duration = self.scheduler.get_task_duration(
+                            ts
+                        ) + self.scheduler.get_comm_cost(ts, ts.processing_on)
 
                         maybe_move_task(
                             level, ts, victim, thief, duration, cost_multiplier

@@ -425,11 +425,6 @@ class WorkerState:
     #: (i.e. the tasks in this worker's :attr:`~WorkerState.has_what`).
     nbytes: int
 
-    #: The total expected runtime, in seconds, of all tasks currently processing on this
-    #: worker. This is the sum of all the costs in this worker's
-    # :attr:`~WorkerState.processing` dictionary.
-    occupancy: float
-
     #: Worker memory unknown to the worker, in bytes, which has been there for more than
     #: 30 seconds. See :class:`MemoryState`.
     _memory_unmanaged_old: int
@@ -471,7 +466,7 @@ class WorkerState:
     #:
     #: All the tasks here are in the "processing" state.
     #: This attribute is kept in sync with :attr:`TaskState.processing_on`.
-    processing: dict[TaskState, float]
+    processing: set[TaskState]
 
     #: Running tasks that invoked :func:`distributed.secede`
     long_running: set[TaskState]
@@ -497,6 +492,12 @@ class WorkerState:
     # The unique server ID this WorkerState is referencing
     server_id: str
 
+    # Reference to scheduler task_groups
+    task_groups: dict[str, TaskGroup]
+    task_groups_count: dict[str, int]
+    _network_occ: float
+    needs_what: dict[TaskState, int]
+
     __slots__ = tuple(__annotations__)
 
     def __init__(
@@ -511,6 +512,7 @@ class WorkerState:
         local_directory: str,
         nanny: str,
         server_id: str,
+        task_groups: dict[str, TaskGroup],
         services: dict[str, int] | None = None,
         versions: dict[str, Any] | None = None,
         extra: dict[str, Any] | None = None,
@@ -528,7 +530,7 @@ class WorkerState:
         self.status = status
         self._hash = hash(self.server_id)
         self.nbytes = 0
-        self.occupancy = 0
+        # self.occupancy = 0
         self._memory_unmanaged_old = 0
         self._memory_unmanaged_history = deque()
         self.metrics = {}
@@ -537,12 +539,16 @@ class WorkerState:
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
         self.actors = set()
         self._has_what = {}
-        self.processing = {}
+        self.processing = set()
         self.long_running = set()
         self.executing = {}
         self.resources = {}
         self.used_resources = {}
         self.extra = extra or {}
+        self.task_groups = task_groups
+        self.task_groups_count = defaultdict(int)
+        self.needs_what = {}
+        self._network_occ = 0
 
     def __hash__(self) -> int:
         return self._hash
@@ -593,10 +599,9 @@ class WorkerState:
             nanny=self.nanny,
             extra=self.extra,
             server_id=self.server_id,
+            task_groups=self.task_groups,
         )
-        ws.processing = {
-            ts.key: cost for ts, cost in self.processing.items()  # type: ignore
-        }
+
         ws.executing = {
             ts.key: duration for ts, duration in self.executing.items()  # type: ignore
         }
@@ -653,6 +658,59 @@ class WorkerState:
             exclude=set(exclude) | {"versions"},  # type: ignore
             members=True,
         )
+
+    # Replace all scheduler updates of ws.processing with this.
+    # Occupancy arg is merely there for drop in replacement
+    def add_to_processing(self, ts: TaskState) -> None:
+        tg = ts.group
+        self.task_groups_count[tg.name] += 1
+        self.processing.add(ts)
+        for dts in ts.dependencies:
+            if self not in dts.who_has:
+                self.need_replica(dts)
+
+    # This will effectively replace Scheduler.get_comm_cost
+    # Comm cost is always called in
+    # - move_task_request
+    # - _set_duration_estimate
+    #    - add_to_processing
+    #    - _reevaluate_occupancy_worker
+
+    # TODO: Scheduler.add_replica should call this
+    def need_replica(self, ts: TaskState) -> None:
+        if ts not in self.needs_what:
+            self.needs_what[ts] = 1
+            self._network_occ += ts.get_nbytes()
+        else:
+            self.needs_what[ts] += 1
+
+    def dont_need_replica(self, ts: TaskState) -> None:
+        if ts in self.needs_what:
+            self.needs_what[ts] -= 1
+            if not self.needs_what[ts]:
+                del self.needs_what[ts]
+                self._network_occ -= ts.get_nbytes()
+
+    def remove_from_processing(self, ts: TaskState) -> None:
+        self.task_groups_count[ts.group.name] -= 1
+        self.processing.discard(ts)
+        # TODO Loop over the smaller set of the two, see Scheduler.get_comm_cost
+        for dts in ts.dependencies:
+            if dts in self.needs_what:
+                self.dont_need_replica(dts)
+
+    @property
+    def occupancy(self):
+        res = 0
+        for group_name, count in self.task_groups_count.items():
+            # TODO: Kick out empty counters
+            # TODO: Deal with unknown tasks better
+            if count > 0:
+                duration = self.task_groups[group_name].prefix.duration_average
+                if duration < 0:
+                    duration = 0.5
+                res += duration * count
+        return res + self._network_occ
 
 
 @dataclasses.dataclass
@@ -1312,7 +1370,7 @@ class SchedulerState:
     #: Workers that are fully utilized. May include non-running workers.
     saturated: set[WorkerState]
     total_nthreads: int
-    total_occupancy: float
+    # total_occupancy: float
     #: Cluster-wide resources. {resource name: {worker address: amount}}
     resources: dict[str, dict[str, float]]
 
@@ -1426,7 +1484,6 @@ class SchedulerState:
         self.task_prefixes = {}
         self.task_metadata = {}
         self.total_nthreads = 0
-        self.total_occupancy = 0.0
         self.unknown_durations = {}
         self.queued = queued
         self.unrunnable = unrunnable
@@ -1467,6 +1524,10 @@ class SchedulerState:
     @property
     def memory(self) -> MemoryState:
         return MemoryState.sum(*(w.memory for w in self.workers.values()))
+
+    @property
+    def total_occupancy(self) -> float:
+        return sum(ws.occupancy for ws in self.workers.values())
 
     @property
     def __pdict__(self):
@@ -2168,10 +2229,8 @@ class SchedulerState:
             tts: TaskState
             steal = self.extensions.get("stealing")
             for tts in s:
-                if tts.processing_on:
-                    self._set_duration_estimate(tts, tts.processing_on)
-                    if steal:
-                        steal.recalculate_cost(tts)
+                if steal:
+                    steal.recalculate_cost(tts)
 
             ############################
             # Update State Information #
@@ -2829,34 +2888,6 @@ class SchedulerState:
             and sum(map(len, tg.dependencies)) < 5
         )
 
-    def _set_duration_estimate(self, ts: TaskState, ws: WorkerState) -> None:
-        """Estimate task duration using worker state and task state.
-
-        If a task takes longer than twice the current average duration we
-        estimate the task duration to be 2x current-runtime, otherwise we set it
-        to be the average duration.
-
-        See also ``_remove_from_processing``
-        """
-        # Long running tasks do not contribute to occupancy calculations and we
-        # do not set any task duration estimates
-        if ts in ws.long_running:
-            return
-
-        exec_time: float = ws.executing.get(ts, 0)
-        duration: float = self.get_task_duration(ts)
-        total_duration: float
-        if exec_time > 2 * duration:
-            total_duration = 2 * exec_time
-        else:
-            comm: float = self.get_comm_cost(ts, ws)
-            total_duration = duration + comm
-
-        old = ws.processing.get(ts, 0)
-        ws.processing[ts] = total_duration
-        self.total_occupancy += total_duration - old
-        ws.occupancy += total_duration - old
-
     def check_idle_saturated(self, ws: WorkerState, occ: float = -1.0):
         """Update the status of the idle and saturated state
 
@@ -3084,21 +3115,6 @@ class SchedulerState:
         if len(ts.who_has) > 1:
             self.replicated_tasks.remove(ts)
         ts.who_has.clear()
-
-    def _reevaluate_occupancy_worker(self, ws: WorkerState):
-        """See reevaluate_occupancy"""
-        ts: TaskState
-        old = ws.occupancy
-        for ts in ws.processing:
-            self._set_duration_estimate(ts, ws)
-
-        self.check_idle_saturated(ws)
-        steal = self.extensions.get("stealing")
-        if steal is None:
-            return
-        if ws.occupancy > old * 1.3 or old > ws.occupancy * 1.3:
-            for ts in ws.processing:
-                steal.recalculate_cost(ts)
 
     def bulk_schedule_after_adding_worker(self, ws: WorkerState) -> Recs:
         """Send ``queued`` or ``no-worker`` tasks to ``processing`` that this worker can handle.
@@ -3712,8 +3728,6 @@ class Scheduler(SchedulerState, ServerNode):
         for k, v in self.services.items():
             logger.info("%11s at: %25s", k, "%s:%d" % (listen_ip, v.port))
 
-        self._ongoing_background_tasks.call_soon(self.reevaluate_occupancy)
-
         if self.scheduler_file:
             with open(self.scheduler_file, "w") as f:
                 json.dump(self.identity(), f, indent=2)
@@ -4011,6 +4025,7 @@ class Scheduler(SchedulerState, ServerNode):
             nanny=nanny,
             extra=extra,
             server_id=server_id,
+            task_groups=self.task_groups,
         )
         if ws.status == Status.running:
             self.running.add(ws)
@@ -4185,7 +4200,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         dependencies = dependencies or {}
 
-        if self.total_occupancy > 1e-9 and self.computations:
+        if any(ws.occupancy for ws in self.workers.values()) and self.computations:
             # Still working on something. Assign new tasks to same computation
             computation = self.computations[-1]
         else:
@@ -4583,7 +4598,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         event_msg = {
             "action": "remove-worker",
-            "processing-tasks": {ts.key: cost for ts, cost in ws.processing.items()},
+            "processing-tasks": {ts.key for ts in ws.processing},
         }
         self.log_event(address, event_msg.copy())
         event_msg["worker"] = address
@@ -4612,7 +4627,6 @@ class Scheduler(SchedulerState, ServerNode):
         del self.workers[address]
         ws.status = Status.closed
         self.running.discard(ws)
-        self.total_occupancy -= ws.occupancy
 
         recommendations: dict = {}
 
@@ -4922,22 +4936,6 @@ class Scheduler(SchedulerState, ServerNode):
         }
         assert a == b, (a, b)
 
-        actual_total_occupancy = 0.0
-        for worker, ws in self.workers.items():
-            ws_processing_total = sum(
-                cost for ts, cost in ws.processing.items() if ts not in ws.long_running
-            )
-            assert abs(ws_processing_total - ws.occupancy) < 1e-8, (
-                worker,
-                ws_processing_total,
-                ws.occupancy,
-            )
-            actual_total_occupancy += ws.occupancy
-
-        assert abs(actual_total_occupancy - self.total_occupancy) < 1e-8, (
-            actual_total_occupancy,
-            self.total_occupancy,
-        )
         if self.transition_counter_max:
             assert self.transition_counter < self.transition_counter_max
 
@@ -5148,14 +5146,11 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 ts.prefix.duration_average = (old_duration + compute_duration) / 2
 
-        occ = ws.processing[ts]
-        ws.occupancy -= occ
-        self.total_occupancy -= occ
+        ws.remove_from_processing(ts)
         # Cannot remove from processing since we're using this for things like
         # idleness detection. Idle workers are typically targeted for
         # downscaling but we should not downscale workers with long running
         # tasks
-        ws.processing[ts] = 0
         ws.long_running.add(ts)
         self.check_idle_saturated(ws)
 
@@ -7484,50 +7479,6 @@ class Scheduler(SchedulerState, ServerNode):
     # Cleanup #
     ###########
 
-    async def reevaluate_occupancy(self, worker_index: int = 0):
-        """Periodically reassess task duration time
-
-        The expected duration of a task can change over time.  Unfortunately we
-        don't have a good constant-time way to propagate the effects of these
-        changes out to the summaries that they affect, like the total expected
-        runtime of each of the workers, or what tasks are stealable.
-
-        In this coroutine we walk through all of the workers and re-align their
-        estimates with the current state of tasks.  We do this periodically
-        rather than at every transition, and we only do it if the scheduler
-        process isn't under load (using psutil.Process.cpu_percent()).  This
-        lets us avoid this fringe optimization when we have better things to
-        think about.
-        """
-        try:
-            while self.status != Status.closed:
-                last = time()
-                delay = 0.1
-
-                if self.proc.cpu_percent() < 50:
-                    workers: list = list(self.workers.values())
-                    nworkers: int = len(workers)
-                    i: int
-                    for _ in range(nworkers):
-                        ws: WorkerState = workers[worker_index % nworkers]
-                        worker_index += 1
-                        try:
-                            if ws is None or not ws.processing:
-                                continue
-                            self._reevaluate_occupancy_worker(ws)
-                        finally:
-                            del ws  # lose ref
-
-                        duration = time() - last
-                        if duration > 0.005:  # 5ms since last release
-                            delay = duration * 5  # 25ms gap
-                            break
-                await asyncio.sleep(delay)
-
-        except Exception:
-            logger.error("Error in reevaluate occupancy", exc_info=True)
-            raise
-
     async def check_worker_ttl(self):
         now = time()
         stimulus_id = f"check-worker-ttl-{now}"
@@ -7706,7 +7657,7 @@ def _add_to_processing(
         assert ws in state.running, state.running
         assert (o := state.workers.get(ws.address)) is ws, (ws, o)
 
-    state._set_duration_estimate(ts, ws)
+    ws.add_to_processing(ts)
     ts.processing_on = ws
     ts.state = "processing"
     state.acquire_resources(ts, ws)
@@ -7739,15 +7690,8 @@ def _exit_processing_common(
 
     if state.workers.get(ws.address) is not ws:  # may have been removed
         return None
-
-    duration = ws.processing.pop(ts)
+    ws.remove_from_processing(ts)
     ws.long_running.discard(ts)
-    if not ws.processing:
-        state.total_occupancy -= ws.occupancy
-        ws.occupancy = 0
-    else:
-        state.total_occupancy -= duration
-        ws.occupancy -= duration
 
     state.check_idle_saturated(ws)
     state.release_resources(ts, ws)
