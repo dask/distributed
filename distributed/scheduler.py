@@ -5147,6 +5147,8 @@ class Scheduler(SchedulerState, ServerNode):
                 ts.prefix.duration_average = (old_duration + compute_duration) / 2
 
         ws.remove_from_processing(ts)
+        # FIXME: this is wrong
+        ws.processing.add(ts)
         # Cannot remove from processing since we're using this for things like
         # idleness detection. Idle workers are typically targeted for
         # downscaling but we should not downscale workers with long running
