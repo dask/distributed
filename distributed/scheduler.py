@@ -2229,7 +2229,7 @@ class SchedulerState:
             tts: TaskState
             steal = self.extensions.get("stealing")
             for tts in s:
-                if steal:
+                if tts.processing_on and steal:
                     steal.recalculate_cost(tts)
 
             ############################
