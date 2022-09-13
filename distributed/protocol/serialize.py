@@ -198,7 +198,8 @@ register_serialization_family("error", None, serialization_error_loads)
 
 
 def infer_if_recurse_to_serialize_list(x: list) -> bool:
-    """
+    """Determine how to serialize lists
+
     Function sets iterate_collection variable in serialize for
     lists.  If it returns False, the list will be serialized
     using Dask Dispatch.  It it returns True, the list will
@@ -224,17 +225,14 @@ def infer_if_recurse_to_serialize_list(x: list) -> bool:
                 return True
             else:
                 return False
-
         else:
             # We default to serializing the list recursively
             # with pickle
-            # Y = check_dask_serializable(next(iter(x)))
             return True
     except StopIteration:
         return False
     except Exception:
-        # We assume that if elements in the list are not hashable
-        # we will serialize them iteratively with pickle.
+        # Fallback position is to serialize x iteratively with pickle.
         return True
 
 
