@@ -624,7 +624,7 @@ async def test_steal_more_attractive_tasks(c, s, a, *rest):
     assert any(future.key in w.state.tasks for w in rest)
 
 
-async def assert_balanced(inp, expected, recompute_saturation, c, s, *workers):
+async def assert_balanced(inp, expected, c, s, *workers):
     steal = s.extensions["stealing"]
     await steal.stop()
     ev = Event()
@@ -665,9 +665,7 @@ async def assert_balanced(inp, expected, recompute_saturation, c, s, *workers):
 
     while len([ts for ts in s.tasks.values() if ts.processing_on]) < len(futures):
         await asyncio.sleep(0.001)
-    if recompute_saturation:
-        for ws in s.workers.values():
-            s._reevaluate_occupancy_worker(ws)
+
     try:
         for _ in range(10):
             steal.balance()
@@ -694,7 +692,6 @@ async def assert_balanced(inp, expected, recompute_saturation, c, s, *workers):
     raise Exception(f"Expected: {expected2}; got: {result2}")
 
 
-@pytest.mark.parametrize("recompute_saturation", [True, False])
 @pytest.mark.parametrize(
     "inp,expected",
     [
@@ -725,9 +722,9 @@ async def assert_balanced(inp, expected, recompute_saturation, c, s, *workers):
         ),
     ],
 )
-def test_balance(inp, expected, recompute_saturation):
+def test_balance(inp, expected):
     async def test_balance_(*args, **kwargs):
-        await assert_balanced(inp, expected, recompute_saturation, *args, **kwargs)
+        await assert_balanced(inp, expected, *args, **kwargs)
 
     config = {
         "distributed.scheduler.default-task-durations": {str(i): 1 for i in range(10)}
