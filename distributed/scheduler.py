@@ -14,6 +14,7 @@ import os
 import pickle
 import random
 import sys
+import threading
 import uuid
 import warnings
 import weakref
@@ -3352,6 +3353,9 @@ class Scheduler(SchedulerState, ServerNode):
                     }
                 )
             )
+            if threading.current_thread() is not threading.main_thread():
+                ServerApp.init_signal = lambda self: None
+                ServerApp._restore_sigint_handler = lambda self: None
             j.initialize(
                 new_httpserver=False,
             )
