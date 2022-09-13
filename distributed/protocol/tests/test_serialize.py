@@ -539,7 +539,7 @@ async def test_frame_split():
         ([(123, 456), (789, 101112)], True),
         (["a", "b", "c"], False),
         ([1, 2, 3, [4, 5, 6], 7, 8], True),
-        (None, True)
+        (None, True),
     ],
 )
 def test_infer_if_recurse_to_serialize_list(data, iterate_collection):
