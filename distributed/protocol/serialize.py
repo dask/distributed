@@ -226,8 +226,7 @@ def infer_if_recurse_to_serialize_list(x: list) -> bool:
             else:
                 return False
         else:
-            # We default to serializing the list recursively
-            # with pickle
+            # We default to serializing the list recursively with pickle
             return True
     except StopIteration:
         return False
