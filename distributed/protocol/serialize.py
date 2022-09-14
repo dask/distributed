@@ -202,23 +202,39 @@ def infer_if_recurse_to_serialize_list(x: list) -> bool:
 
     The serialize() function takes a parameter iterate_collection, which determines
     if we will recursively iterate into the collection, serializing each object indivdually
-    or if instead, we can serialize the entire collection at once usign the "dask" serializer
+    or if instead, we can serialize the entire collection at once using the "dask" serializer
 
     If we can serialize the entire list at once, it allows us to leverage dask's
-    customer serializaiton logic for numpy arrays, which will be much more performant
+    customer serializaiton logic for numpy arrays (Dask Dispatch) which will be much more performant
     than recursively iterating into the collection.  However, we must be selective about this
-    since we sometimes pass keys to the task graph around in lists.  These currently
+    since we sometimes pass keys to the task graph around (usually as strings) in lists.  These currently
     expect iterate_collection=True
 
+    To be safe, we confine these to list that are all the same datatype, and contain
+    Python ints or floats
 
 
+    Lists that would return False and serialized with Dask Dispatch
+    ---------------------------------------------------------------
+    list(range(100))
+    [0.0, 1.2, 2.3]
+
+
+    Lists that would return True and be serialized recursively
+    ----------------------------------------------------------
+    [pd.Timestamp(2022), pd.Timestamp(2023)]
+    [0, "a", 2]
+    [[0,1], [2,3]]
+    [("a", "b"), ("b", "c")]
+    [0, 1.2, 3]
+    ["a", "b", "c"]
     """
+
     if len(x) == 0:
         return False
     first_val = x[0]
     iseq = iter(x)
     if is_dask_collection(first_val) or typename(type(first_val)) not in [
-        "str",
         "int",
         "float",
     ]:

@@ -533,6 +533,8 @@ async def test_frame_split():
         ([1], False),
         ([0, 1, 2], False),
         ([0, "a", 2], True),
+        ([0.0, 1.2, 2.3], False),
+        ([0, 1.2, 3], True),
         ([[], []], True),
         (["a", "b", 1], True),
         ([pd.Timestamp(2022), pd.Timestamp(2023)], True),
