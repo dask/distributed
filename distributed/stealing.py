@@ -237,18 +237,22 @@ class WorkStealing(SchedulerPlugin):
         assert ts.processing_on
         ws = ts.processing_on
         compute_time = ws.processing[ts]
-        if compute_time < 0.005:  # 5ms, just give up
+
+        if not compute_time:
+            # occupancy/ws.proccessing[ts] is only allowed to be zero for
+            # long running tasks which cannot be stolen
+            assert ts in ws.long_running
             return None, None
 
         nbytes = ts.get_nbytes_deps()
         transfer_time = nbytes / self.scheduler.bandwidth + LATENCY
         cost_multiplier = transfer_time / compute_time
-        if cost_multiplier > 100:
-            return None, None
 
         level = int(round(log2(cost_multiplier) + 6))
         if level < 1:
             level = 1
+        elif level >= len(self.cost_multipliers):
+            return None, None
 
         return cost_multiplier, level
 
