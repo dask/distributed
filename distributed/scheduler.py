@@ -493,7 +493,7 @@ class WorkerState:
     server_id: str
 
     # Reference to scheduler task_groups
-    task_groups: dict[str, TaskGroup]
+    scheduler_ref: weakref.ref[SchedulerState] | None
     task_groups_count: dict[str, int]
     _network_occ: float
     needs_what: dict[TaskState, int]
@@ -512,10 +512,10 @@ class WorkerState:
         local_directory: str,
         nanny: str,
         server_id: str,
-        task_groups: dict[str, TaskGroup],
         services: dict[str, int] | None = None,
         versions: dict[str, Any] | None = None,
         extra: dict[str, Any] | None = None,
+        scheduler: SchedulerState | None = None,
     ):
         self.server_id = server_id
         self.address = address
@@ -545,7 +545,7 @@ class WorkerState:
         self.resources = {}
         self.used_resources = {}
         self.extra = extra or {}
-        self.task_groups = task_groups
+        self.scheduler_ref = weakref.ref(scheduler) if scheduler else None
         self.task_groups_count = defaultdict(int)
         self.needs_what = {}
         self._network_occ = 0
@@ -599,7 +599,6 @@ class WorkerState:
             nanny=self.nanny,
             extra=self.extra,
             server_id=self.server_id,
-            task_groups=self.task_groups,
         )
 
         ws.executing = {
@@ -659,11 +658,16 @@ class WorkerState:
             members=True,
         )
 
+    # FIXME: Since we need to maintain global state, all of this needs to move
+    # to SchedulerState
+
     # Replace all scheduler updates of ws.processing with this.
     # Occupancy arg is merely there for drop in replacement
     def add_to_processing(self, ts: TaskState) -> None:
+        assert self.scheduler_ref and (scheduler := self.scheduler_ref())
         tg = ts.group
         self.task_groups_count[tg.name] += 1
+        scheduler.task_groups_count_global[tg.name] += 1
         self.processing.add(ts)
         for dts in ts.dependencies:
             if self not in dts.who_has:
@@ -678,21 +682,29 @@ class WorkerState:
 
     # TODO: Scheduler.add_replica should call this
     def need_replica(self, ts: TaskState) -> None:
+        assert self.scheduler_ref and (scheduler := self.scheduler_ref())
         if ts not in self.needs_what:
             self.needs_what[ts] = 1
-            self._network_occ += ts.get_nbytes()
+            nbytes = ts.get_nbytes()
+            self._network_occ += nbytes
+            scheduler._network_occ_global += nbytes
         else:
             self.needs_what[ts] += 1
 
     def dont_need_replica(self, ts: TaskState) -> None:
+        assert self.scheduler_ref and (scheduler := self.scheduler_ref())
         if ts in self.needs_what:
             self.needs_what[ts] -= 1
             if not self.needs_what[ts]:
                 del self.needs_what[ts]
-                self._network_occ -= ts.get_nbytes()
+                nbytes = ts.get_nbytes()
+                self._network_occ -= nbytes
+                scheduler._network_occ_global -= nbytes
 
     def remove_from_processing(self, ts: TaskState) -> None:
+        assert self.scheduler_ref and (scheduler := self.scheduler_ref())
         self.task_groups_count[ts.group.name] -= 1
+        scheduler.task_groups_count_global[ts.group.name] -= 1
         self.processing.discard(ts)
         # TODO Loop over the smaller set of the two, see Scheduler.get_comm_cost
         for dts in ts.dependencies:
@@ -701,12 +713,13 @@ class WorkerState:
 
     @property
     def occupancy(self):
+        assert self.scheduler_ref and (scheduler := self.scheduler_ref())
         res = 0
         for group_name, count in self.task_groups_count.items():
             # TODO: Kick out empty counters
             # TODO: Deal with unknown tasks better
             if count > 0:
-                duration = self.task_groups[group_name].prefix.duration_average
+                duration = scheduler.task_groups[group_name].prefix.duration_average
                 if duration < 0:
                     duration = 0.5
                 res += duration * count
@@ -1423,6 +1436,8 @@ class SchedulerState:
     #: In production, it should always be set to False.
     transition_counter_max: int | Literal[False]
 
+    task_groups_count_global: defaultdict[str, int]
+    _network_occ_global: float
     ######################
     # Cached configuration
     ######################
@@ -1489,6 +1504,8 @@ class SchedulerState:
         self.unrunnable = unrunnable
         self.validate = validate
         self.workers = workers
+        self.task_groups_count_global = defaultdict(int)
+        self._network_occ_global = 0.0
         self.running = {
             ws for ws in self.workers.values() if ws.status == Status.running
         }
@@ -1524,10 +1541,6 @@ class SchedulerState:
     @property
     def memory(self) -> MemoryState:
         return MemoryState.sum(*(w.memory for w in self.workers.values()))
-
-    @property
-    def total_occupancy(self) -> float:
-        return sum(ws.occupancy for ws in self.workers.values())
 
     @property
     def __pdict__(self):
@@ -1597,6 +1610,19 @@ class SchedulerState:
             self.replicated_tasks,
         ]:
             collection.clear()
+
+    @property
+    def total_occupancy(self):
+        res = 0
+        for group_name, count in self.task_groups_count_global.items():
+            # TODO: Kick out empty counters
+            # TODO: Deal with unknown tasks better
+            if count > 0:
+                duration = self.task_groups[group_name].prefix.duration_average
+                if duration < 0:
+                    duration = 0.5
+                res += duration * count
+        return res + self._network_occ_global
 
     #####################
     # State Transitions #
@@ -4025,7 +4051,7 @@ class Scheduler(SchedulerState, ServerNode):
             nanny=nanny,
             extra=extra,
             server_id=server_id,
-            task_groups=self.task_groups,
+            scheduler=self,
         )
         if ws.status == Status.running:
             self.running.add(ws)
