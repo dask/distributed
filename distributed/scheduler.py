@@ -723,7 +723,7 @@ class WorkerState:
                 if duration < 0:
                     duration = 0.5
                 res += duration * count
-        return res + self._network_occ
+        return res + self._network_occ / scheduler.bandwidth
 
 
 @dataclasses.dataclass
@@ -1622,7 +1622,7 @@ class SchedulerState:
                 if duration < 0:
                     duration = 0.5
                 res += duration * count
-        return res + self._network_occ_global
+        return res + self._network_occ_global / self.bandwidth
 
     #####################
     # State Transitions #
