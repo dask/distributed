@@ -658,11 +658,6 @@ class WorkerState:
             members=True,
         )
 
-    # FIXME: Since we need to maintain global state, all of this needs to move
-    # to SchedulerState
-
-    # Replace all scheduler updates of ws.processing with this.
-    # Occupancy arg is merely there for drop in replacement
     def add_to_processing(self, ts: TaskState) -> None:
         assert self.scheduler_ref and (scheduler := self.scheduler_ref())
         tg = ts.group
@@ -672,13 +667,6 @@ class WorkerState:
         for dts in ts.dependencies:
             if self not in dts.who_has:
                 self.need_replica(dts)
-
-    # This will effectively replace Scheduler.get_comm_cost
-    # Comm cost is always called in
-    # - move_task_request
-    # - _set_duration_estimate
-    #    - add_to_processing
-    #    - _reevaluate_occupancy_worker
 
     # TODO: Scheduler.add_replica should call this
     def need_replica(self, ts: TaskState) -> None:
@@ -702,10 +690,16 @@ class WorkerState:
                 scheduler._network_occ_global -= nbytes
 
     def remove_from_processing(self, ts: TaskState) -> None:
+        if ts not in self.processing:
+            return
         assert self.scheduler_ref and (scheduler := self.scheduler_ref())
         self.task_groups_count[ts.group.name] -= 1
+        if not self.task_groups_count[ts.group.name]:
+            del self.task_groups_count[ts.group.name]
         scheduler.task_groups_count_global[ts.group.name] -= 1
-        self.processing.discard(ts)
+        if not scheduler.task_groups_count_global[ts.group.name]:
+            del scheduler.task_groups_count_global[ts.group.name]
+        self.processing.remove(ts)
         # TODO Loop over the smaller set of the two, see Scheduler.get_comm_cost
         for dts in ts.dependencies:
             if dts in self.needs_what:
@@ -716,14 +710,16 @@ class WorkerState:
         assert self.scheduler_ref and (scheduler := self.scheduler_ref())
         res = 0
         for group_name, count in self.task_groups_count.items():
-            # TODO: Kick out empty counters
             # TODO: Deal with unknown tasks better
-            if count > 0:
-                duration = scheduler.task_groups[group_name].prefix.duration_average
-                if duration < 0:
-                    duration = 0.5
-                res += duration * count
-        return res + self._network_occ / scheduler.bandwidth
+            prefix = scheduler.task_groups[group_name].prefix
+            assert prefix
+            duration = prefix.duration_average
+            if duration < 0:
+                duration = scheduler.UNKNOWN_TASK_DURATION
+            res += duration * count
+        occ = res + self._network_occ / scheduler.bandwidth
+        assert occ >= 0
+        return occ
 
 
 @dataclasses.dataclass
@@ -1615,13 +1611,13 @@ class SchedulerState:
     def total_occupancy(self):
         res = 0
         for group_name, count in self.task_groups_count_global.items():
-            # TODO: Kick out empty counters
             # TODO: Deal with unknown tasks better
-            if count > 0:
-                duration = self.task_groups[group_name].prefix.duration_average
-                if duration < 0:
-                    duration = 0.5
-                res += duration * count
+            prefix = self.task_groups[group_name].prefix
+            assert prefix
+            duration = prefix.duration_average
+            if duration < 0:
+                duration = self.UNKNOWN_TASK_DURATION
+            res += duration * count
         return res + self._network_occ_global / self.bandwidth
 
     #####################
@@ -2214,7 +2210,10 @@ class SchedulerState:
 
             if self.validate:
                 assert ts.processing_on
-                assert ts in ts.processing_on.processing
+                wss = ts.processing_on
+                assert wss
+                assert ts in wss.processing or ts in wss.long_running
+                del wss
                 assert not ts.waiting_on
                 assert not ts.who_has, (ts, ts.who_has)
                 assert not ts.exception_blame
@@ -5173,8 +5172,6 @@ class Scheduler(SchedulerState, ServerNode):
                 ts.prefix.duration_average = (old_duration + compute_duration) / 2
 
         ws.remove_from_processing(ts)
-        # FIXME: this is wrong
-        ws.processing.add(ts)
         # Cannot remove from processing since we're using this for things like
         # idleness detection. Idle workers are typically targeted for
         # downscaling but we should not downscale workers with long running
@@ -7535,6 +7532,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.queued
             or self.unrunnable
             or any([ws.processing for ws in self.workers.values()])
+            or any([ws.long_running for ws in self.workers.values()])
         ):
             self.idle_since = None
             return
