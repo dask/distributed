@@ -3337,6 +3337,10 @@ class Scheduler(SchedulerState, ServerNode):
                 )
             from traitlets.config import Config
 
+            if threading.current_thread() is not threading.main_thread():
+                ServerApp.init_signal = lambda self: None
+                ServerApp._restore_sigint_handler = lambda self: None
+
             j = ServerApp.instance(
                 config=Config(
                     {
@@ -3353,9 +3357,6 @@ class Scheduler(SchedulerState, ServerNode):
                     }
                 )
             )
-            if threading.current_thread() is not threading.main_thread():
-                ServerApp.init_signal = lambda self: None
-                ServerApp._restore_sigint_handler = lambda self: None
             j.initialize(
                 new_httpserver=False,
             )
