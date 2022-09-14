@@ -210,7 +210,7 @@ def infer_if_recurse_to_serialize_list(x: list) -> bool:
     since we sometimes pass keys to the task graph around (usually as strings) in lists.  These currently
     expect iterate_collection=True
 
-    To be safe, we confine these to list that are all the same datatype, and contain
+    To be safe, we confine these to list that are all the same dtype, and contain either
     Python ints or floats
 
 
@@ -242,14 +242,7 @@ def infer_if_recurse_to_serialize_list(x: list) -> bool:
         # from shuffle unit tests
         return True
     if all((type(i) is type(first_val)) for i in iseq):
-        if isinstance(first_val, str) and {"(", ")", ","}.issubset(set(first_val)):
-            # Sometimes we get strings that are actually tuples
-            # which are part of the task graph.  We need to serialize
-            # these recursively.  We assume that all the items in the
-            # list are from the task graph
-            return True
-        else:
-            return False
+        return False
     else:
         # We default to serializing the list recursively with pickle
         return True
@@ -337,7 +330,7 @@ def serialize(  # type: ignore[no-untyped-def]
             serializers=serializers,
             on_error=on_error,
             context=context,
-            iterate_collection=x.iterate_collection,
+            iterate_collection=None if type(x) is list else True,
         )
 
     # Note: don't use isinstance(), as it would match subclasses
@@ -591,10 +584,6 @@ class Serialize:
 
     def __init__(self, data):
         self.data = data
-        if typename(data) == "list":
-            self.iterate_collection = None
-        else:
-            self.iterate_collection = True
 
     def __repr__(self):
         return f"<Serialize: {self.data}>"
