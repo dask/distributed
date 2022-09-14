@@ -2847,7 +2847,11 @@ class SchedulerState:
         cpu = self.get_task_duration(ts)
         if exec_time > 2 * cpu:
             cpu = 2 * exec_time
-        network = self.get_comm_cost(ts, ws)
+            # FIXME this matches existing behavior but is clearly bizarre
+            # https://github.com/dask/distributed/issues/7003
+            network = 0.0
+        else:
+            network = self.get_comm_cost(ts, ws)
 
         old = ws.processing.get(ts, Occupancy(0, 0))
         ws.processing[ts] = new = Occupancy(cpu, network)
