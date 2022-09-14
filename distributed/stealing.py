@@ -6,8 +6,9 @@ from collections import defaultdict, deque
 from collections.abc import Container
 from math import log2
 from time import time
-from typing import TYPE_CHECKING, ClassVar, TypedDict
+from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, cast
 
+import sortedcontainers
 from tlz import topk
 from tornado.ioloop import PeriodicCallback
 
@@ -74,7 +75,7 @@ class WorkStealing(SchedulerPlugin):
     cost_multipliers: ClassVar[tuple[float, ...]] = (1.0,) + tuple(
         1 + 2 ** (i - 6) for i in range(1, 15)
     )
-    _callback_time: float | None
+    _callback_time: float
     count: int
     # { task state: <stealing info dict> }
     in_flight: dict[TaskState, InFlightInfo]
@@ -92,9 +93,12 @@ class WorkStealing(SchedulerPlugin):
         for worker in scheduler.workers:
             self.add_worker(worker=worker)
 
-        self._callback_time = parse_timedelta(
-            dask.config.get("distributed.scheduler.work-stealing-interval"),
-            default="ms",
+        self._callback_time = cast(
+            float,
+            parse_timedelta(
+                dask.config.get("distributed.scheduler.work-stealing-interval"),
+                default="ms",
+            ),
         )
         # `callback_time` is in milliseconds
         self.scheduler.add_plugin(self)
@@ -106,7 +110,7 @@ class WorkStealing(SchedulerPlugin):
         self._request_counter = 0
         self.scheduler.stream_handlers["steal-response"] = self.move_task_confirm
 
-    async def start(self, scheduler=None):
+    async def start(self, scheduler: Any = None) -> None:
         """Start the background coroutine to balance the tasks on the cluster.
         Idempotent.
         The scheduler argument is ignored. It is merely required to satisify the
@@ -122,7 +126,7 @@ class WorkStealing(SchedulerPlugin):
         self.scheduler.periodic_callbacks["stealing"] = pc
         self._in_flight_event.set()
 
-    async def stop(self):
+    async def stop(self) -> None:
         """Stop the background task balancing tasks on the cluster.
         This will block until all currently running stealing requests are
         finished. Idempotent
@@ -143,24 +147,31 @@ class WorkStealing(SchedulerPlugin):
         """
         return recursive_to_dict(self, exclude=exclude, members=True)
 
-    def log(self, msg):
+    def log(self, msg: Any) -> None:
         return self.scheduler.log_event("stealing", msg)
 
-    def add_worker(self, scheduler=None, worker=None):
+    def add_worker(self, scheduler: Any = None, worker: Any = None) -> None:
         self.stealable[worker] = tuple(set() for _ in range(15))
 
     def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
         del self.stealable[worker]
 
-    def teardown(self):
+    def teardown(self) -> None:
         pcs = self.scheduler.periodic_callbacks
         if "stealing" in pcs:
             pcs["stealing"].stop()
             del pcs["stealing"]
 
     def transition(
-        self, key, start, finish, compute_start=None, compute_stop=None, *args, **kwargs
-    ):
+        self,
+        key: str,
+        start: str,
+        finish: str,
+        compute_start: Any = None,
+        compute_stop: Any = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
         if finish == "processing":
             ts = self.scheduler.tasks[key]
             self.put_key_in_stealable(ts)
@@ -177,21 +188,23 @@ class WorkStealing(SchedulerPlugin):
                     self.in_flight_occupancy.clear()
                     self._in_flight_event.set()
 
-    def recalculate_cost(self, ts):
+    def recalculate_cost(self, ts: TaskState) -> None:
         if ts not in self.in_flight:
             self.remove_key_from_stealable(ts)
             self.put_key_in_stealable(ts)
 
-    def put_key_in_stealable(self, ts):
+    def put_key_in_stealable(self, ts: TaskState) -> None:
         cost_multiplier, level = self.steal_time_ratio(ts)
         if cost_multiplier is not None:
+            assert level is not None
+            assert ts.processing_on
             ws = ts.processing_on
             worker = ws.address
             self.stealable_all[level].add(ts)
             self.stealable[worker][level].add(ts)
             self.key_stealable[ts] = (worker, level)
 
-    def remove_key_from_stealable(self, ts):
+    def remove_key_from_stealable(self, ts: TaskState) -> None:
         result = self.key_stealable.pop(ts, None)
         if result is None:
             return
@@ -222,22 +235,27 @@ class WorkStealing(SchedulerPlugin):
         if not ts.dependencies:  # no dependencies fast path
             return 0.0, 0
 
+        assert ts.processing_on
         ws = ts.processing_on
         assert ws
-        compute_time = ws.processing[ts]
-        if compute_time.total < 0.005:  # 5ms, just give up
+        occupancy = ws.processing[ts]
+
+        if not occupancy:
+            # occupancy/ws.proccessing[ts] is only allowed to be zero for
+            # long running tasks which cannot be stolen
+            assert ts in ws.long_running
             return None, None
 
         nbytes = ts.get_nbytes_deps()
         transfer_time: float = nbytes / self.scheduler.bandwidth + LATENCY
-        # FIXME don't use `compute_time.total` https://github.com/dask/distributed/issues/7003
-        cost_multiplier = transfer_time / compute_time.total
-        if cost_multiplier > 100:
-            return None, None
+        # FIXME don't use `occupancy.total` https://github.com/dask/distributed/issues/7003
+        cost_multiplier = transfer_time / occupancy.total
 
         level = int(round(log2(cost_multiplier) + 6))
         if level < 1:
             level = 1
+        elif level >= len(self.cost_multipliers):
+            return None, None
 
         return cost_multiplier, level
 
@@ -296,7 +314,9 @@ class WorkStealing(SchedulerPlugin):
                 pdb.set_trace()
             raise
 
-    async def move_task_confirm(self, *, key, state, stimulus_id, worker=None):
+    async def move_task_confirm(
+        self, *, key: str, state: str, stimulus_id: str, worker: str | None = None
+    ) -> None:
         try:
             ts = self.scheduler.tasks[key]
         except KeyError:
@@ -379,8 +399,10 @@ class WorkStealing(SchedulerPlugin):
             self.scheduler.check_idle_saturated(thief)
             self.scheduler.check_idle_saturated(victim)
 
-    def balance(self):
+    def balance(self) -> None:
         s = self.scheduler
+        log = []
+        start = time()
 
         def combined_occupancy(ws: WorkerState) -> float:
             return ws.occupancy.total + self.in_flight_occupancy[ws].total
@@ -425,10 +447,8 @@ class WorkStealing(SchedulerPlugin):
             if not idle or len(idle) == len(s.workers):
                 return
 
-            log = []
-            start = time()
-
-            saturated = s.saturated
+            victim: WorkerState | None
+            saturated: set[WorkerState] | list[WorkerState] = s.saturated
             if not saturated:
                 saturated = topk(10, s.workers.values(), key=combined_occupancy)
                 saturated = [
@@ -510,7 +530,7 @@ class WorkStealing(SchedulerPlugin):
             if s.digests:
                 s.digests["steal-duration"].add(stop - start)
 
-    def restart(self, scheduler):
+    def restart(self, scheduler: Any) -> None:
         for stealable in self.stealable.values():
             for s in stealable:
                 s.clear()
@@ -519,8 +539,8 @@ class WorkStealing(SchedulerPlugin):
             s.clear()
         self.key_stealable.clear()
 
-    def story(self, *keys):
-        keys = {key.key if not isinstance(key, str) else key for key in keys}
+    def story(self, *keys_or_ts: str | TaskState) -> list:
+        keys = {key.key if not isinstance(key, str) else key for key in keys_or_ts}
         out = []
         for _, L in self.scheduler.get_events(topic="stealing"):
             if not isinstance(L, list):
@@ -531,7 +551,10 @@ class WorkStealing(SchedulerPlugin):
         return out
 
 
-def _potential_thieves_for(ts, idle):
+def _potential_thieves_for(
+    ts: TaskState,
+    idle: sortedcontainers.SortedValuesView[WorkerState] | list[WorkerState],
+) -> sortedcontainers.SortedValuesView[WorkerState] | list[WorkerState]:
     """Return the list of workers from ``idle`` that could steal ``ts``."""
     if _has_restrictions(ts):
         return [ws for ws in idle if _can_steal(ws, ts)]
@@ -539,7 +562,7 @@ def _potential_thieves_for(ts, idle):
         return idle
 
 
-def _can_steal(thief, ts):
+def _can_steal(thief: WorkerState, ts: TaskState) -> bool:
     """Determine whether worker ``thief`` can steal task ``ts``.
 
     Assumes that `ts` has some restrictions.
@@ -566,11 +589,11 @@ def _can_steal(thief, ts):
     return True
 
 
-def _has_restrictions(ts):
+def _has_restrictions(ts: TaskState) -> bool:
     """Determine whether the given task has restrictions and whether these
     restrictions are strict.
     """
-    return not ts.loose_restrictions and (
+    return not ts.loose_restrictions and bool(
         ts.host_restrictions or ts.worker_restrictions or ts.resource_restrictions
     )
 
