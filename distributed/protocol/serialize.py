@@ -200,38 +200,42 @@ register_serialization_family("error", None, serialization_error_loads)
 def infer_if_recurse_to_serialize_list(x: list) -> bool:
     """Determine how to serialize lists
 
-    Function sets iterate_collection variable in serialize for
-    lists.  If it returns False, the list will be serialized
-    using Dask Dispatch.  It it returns True, the list will
-    be serialized recursively with pickle
+    The serialize() function takes a parameter iterate_collection, which determines
+    if we will recursively iterate into the collection, serializing each object indivdually
+    or if instead, we can serialize the entire collection at once usign the "dask" serializer
+
+    If we can serialize the entire list at once, it allows us to leverage dask's
+    customer serializaiton logic for numpy arrays, which will be much more performant
+    than recursively iterating into the collection.  However, we must be selective about this
+    since we sometimes pass keys to the task graph around in lists.  These currently
+    expect iterate_collection=True
+
+
+
     """
-    try:
-        iseq = iter(x)
-        first_val = next(iseq)
-        if is_dask_collection(first_val) or typename(type(first_val)) not in [
-            "str",
-            "int",
-            "float",
-        ]:
-            # Sometimes we get func.partial or pd.Timestamp objects
-            # from shuffle unit tests
-            return True
-        if all((type(i) is type(first_val)) for i in iseq):
-            if isinstance(first_val, str) and {"(", ")", ","}.issubset(set(first_val)):
-                # Sometimes we get strings that are actually tuples
-                # which are part of the task graph.  We need to serialize
-                # these recursively.  We assume that all the items in the
-                # list are from the task graph
-                return True
-            else:
-                return False
-        else:
-            # We default to serializing the list recursively with pickle
-            return True
-    except StopIteration:
+    if len(x) == 0:
         return False
-    except Exception:
-        # Fallback position is to serialize x iteratively with pickle.
+    first_val = x[0]
+    iseq = iter(x)
+    if is_dask_collection(first_val) or typename(type(first_val)) not in [
+        "str",
+        "int",
+        "float",
+    ]:
+        # Sometimes we get func.partial or pd.Timestamp objects
+        # from shuffle unit tests
+        return True
+    if all((type(i) is type(first_val)) for i in iseq):
+        if isinstance(first_val, str) and {"(", ")", ","}.issubset(set(first_val)):
+            # Sometimes we get strings that are actually tuples
+            # which are part of the task graph.  We need to serialize
+            # these recursively.  We assume that all the items in the
+            # list are from the task graph
+            return True
+        else:
+            return False
+    else:
+        # We default to serializing the list recursively with pickle
         return True
 
 
