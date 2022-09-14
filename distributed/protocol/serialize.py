@@ -591,10 +591,6 @@ class Serialize:
 
     def __init__(self, data):
         self.data = data
-        if typename(data) == "list":
-            self.iterate_collection = None
-        else:
-            self.iterate_collection = True
 
     def __repr__(self):
         return f"<Serialize: {self.data}>"
