@@ -330,7 +330,7 @@ def serialize(  # type: ignore[no-untyped-def]
             serializers=serializers,
             on_error=on_error,
             context=context,
-            iterate_collection=None if type(x) is list else True,
+            iterate_collection=None if type(x.data) is list else True,
         )
 
     # Note: don't use isinstance(), as it would match subclasses
