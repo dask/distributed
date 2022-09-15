@@ -1433,64 +1433,6 @@ async def test_steal_very_fast_tasks(c, s, *workers):
     assert (ntasks_per_worker < ideal * 1.5).all(), (ideal, ntasks_per_worker)
 
 
-def test_balance_willing_to_move_costly_items(recompute_saturation):
-    """See also test_balance"""
-    dependencies = {"a": 1, "b": 1, "c": 1}
-    dependency_placement = [["a", "b", "c"], []]
-    task_placement = [[["a"], ["b"], ["c"]], []]
-
-    def _correct_placement(actual):
-        actual_task_counts = [len(placed) for placed in actual]
-        return actual_task_counts == [2, 1]
-
-    async def _run_test(*args, **kwargs):
-        await _run_balance_test(
-            dependencies,
-            dependency_placement,
-            task_placement,
-            _correct_placement,
-            recompute_saturation,
-            *args,
-            **kwargs,
-        )
-
-    config = {"distributed.scheduler.unknown-task-duration": "1s"}
-    gen_cluster(
-        client=True,
-        nthreads=[("", 1)] * len(task_placement),
-        config=config,
-    )(_run_test)()
-
-
-def test_balance_but_dont_move_too_many(recompute_saturation):
-    """See also test_balance"""
-    dependencies = {"a": 1, "b": 1, "c": 1, "d": 1}
-    dependency_placement = [["a", "b", "c", "d"], []]
-    task_placement = [[["a"], ["b"], ["c"], ["d"]], []]
-
-    def _correct_placement(actual):
-        actual_task_counts = [len(placed) for placed in actual]
-        return actual_task_counts == [3, 1]
-
-    async def _run_test(*args, **kwargs):
-        await _run_balance_test(
-            dependencies,
-            dependency_placement,
-            task_placement,
-            _correct_placement,
-            recompute_saturation,
-            *args,
-            **kwargs,
-        )
-
-    config = {"distributed.scheduler.unknown-task-duration": "1s"}
-    gen_cluster(
-        client=True,
-        nthreads=[("", 1)] * len(task_placement),
-        config=config,
-    )(_run_test)()
-
-
 def test_balance_even_with_replica(recompute_saturation):
     dependencies = {"a": 1}
     dependency_placement = [["a"], ["a"]]
