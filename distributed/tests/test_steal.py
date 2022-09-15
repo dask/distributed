@@ -679,9 +679,7 @@ async def assert_balanced(inp, expected, recompute_saturation, c, s, *workers):
     try:
         for _ in range(10):
             steal.balance()
-
-            while steal.in_flight:
-                await asyncio.sleep(0.001)
+            await steal.stop()
 
             result = [
                 sorted(

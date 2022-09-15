@@ -430,9 +430,6 @@ class WorkStealing(SchedulerPlugin):
                 )
             assert potential_victims
             assert potential_thieves
-            avg_occ_per_threads = (
-                self.scheduler.total_occupancy / self.scheduler.total_nthreads
-            )
             for level, _ in enumerate(self.cost_multipliers):
                 if not potential_thieves:
                     break
@@ -483,13 +480,11 @@ class WorkStealing(SchedulerPlugin):
                             )
 
                             occ_thief = self._combined_occupancy(thief)
-                            p = len(thief.processing) + self.in_flight_tasks[thief]
+                            nproc_thief = self._combined_nprocessing(thief)
 
-                            nc = thief.nthreads
-                            # TODO: this is replicating some logic of
-                            # check_idle_saturated
-                            # pending: float = occ_thief * (p - nc) / (p * nc)
-                            if not (p < nc or occ_thief < nc * avg_occ_per_threads / 2):
+                            if not self.scheduler.is_unoccupied(
+                                thief, occ_thief, nproc_thief
+                            ):
                                 potential_thieves.discard(thief)
                             stealable.discard(ts)
                     self.scheduler.check_idle_saturated(
@@ -506,7 +501,7 @@ class WorkStealing(SchedulerPlugin):
     def _combined_occupancy(self, ws: WorkerState) -> float:
         return ws.occupancy + self.in_flight_occupancy[ws]
 
-    def _combined_nprocessing(self, ws: WorkerState) -> float:
+    def _combined_nprocessing(self, ws: WorkerState) -> int:
         return len(ws.processing) + self.in_flight_tasks[ws]
 
     def restart(self, scheduler: Any) -> None:
