@@ -1509,23 +1509,113 @@ def test_balance_to_larger_dependency(recompute_saturation):
             0,
         ]  # Note: The success of this test currently depends on worker ordering
 
-    async def _run_test(*args, **kwargs):
-        await _run_balance_test(
+    _run_balance_test(
+        dependencies,
+        dependency_placement,
+        task_placement,
+        _correct_placement,
+        recompute_saturation,
+    )
+
+
+def _run_balance_test(
+    dependencies,
+    dependency_placement,
+    task_placement,
+    correct_placement_fn,
+    recompute_saturation,
+):
+    nworkers = len(task_placement)
+
+    async def _test(
+        dependencies,
+        dependency_placement,
+        task_placement,
+        correct_placement_fn,
+        recompute_saturation,
+        permutation,
+        c,
+        s,
+        *workers,
+    ):
+        steal = s.extensions["stealing"]
+        await steal.stop()
+        ev = Event()
+
+        dependency_placement = [dependency_placement[i] for i in permutation]
+
+        dependency_futures = await _place_dependencies(
+            dependencies, dependency_placement, c, s, workers
+        )
+
+        task_placement = [task_placement[i] for i in permutation]
+
+        futures = await _place_tasks(
+            ev, task_placement, dependency_futures, c, s, workers
+        )
+        if recompute_saturation:
+            for ws in s.workers.values():
+                s._reevaluate_occupancy_worker(ws)
+        try:
+            for _ in range(20):
+                steal.balance()
+                await steal.stop()
+
+                result = _get_task_placement(s, workers)
+                result = [result[i] for i in permutation]
+                if correct_placement_fn(result):
+                    return
+        finally:
+            # Release the threadpools
+            await ev.set()
+
+        raise AssertionError(result, permutation)
+
+    config = {"distributed.scheduler.unknown-task-duration": "1s"}
+
+    for permutation in itertools.permutations(range(nworkers)):
+
+        def _permutation_run(
             dependencies,
             dependency_placement,
             task_placement,
-            _correct_placement,
+            correct_placement_fn,
             recompute_saturation,
-            *args,
-            **kwargs,
-        )
+            permutation,
+        ):
+            _permutation = permutation
 
-    config = {"distributed.scheduler.unknown-task-duration": "1s"}
-    gen_cluster(
-        client=True,
-        nthreads=[("", 1)] * len(task_placement),
-        config=config,
-    )(_run_test)()
+            async def _(
+                *args,
+                **kwargs,
+            ):
+                await _test(
+                    dependencies,
+                    dependency_placement,
+                    task_placement,
+                    correct_placement_fn,
+                    recompute_saturation,
+                    _permutation,
+                    *args,
+                    **kwargs,
+                )
+
+            return _
+
+        gen_cluster(
+            client=True,
+            nthreads=[("", 1)] * len(task_placement),
+            config=config,
+        )(
+            _permutation_run(
+                dependencies,
+                dependency_placement,
+                task_placement,
+                correct_placement_fn,
+                recompute_saturation,
+                permutation,
+            )
+        )()
 
 
 def test_balance_prefers_busier_with_dependency(recompute_saturation):
@@ -1589,44 +1679,6 @@ def test_balance_after_acquiring_dependency(recompute_saturation):
         nthreads=[("", 1)] * len(task_placement),
         config=config,
     )(_run_test)()
-
-
-async def _run_balance_test(
-    dependencies,
-    dependency_placement,
-    task_placement,
-    correct_placement_fn,
-    recompute_saturation,
-    c,
-    s,
-    *workers,
-):
-    steal = s.extensions["stealing"]
-    await steal.stop()
-    ev = Event()
-
-    dependency_futures = await _place_dependencies(
-        dependencies, dependency_placement, c, s, workers
-    )
-
-    futures = await _place_tasks(ev, task_placement, dependency_futures, c, s, workers)
-    if recompute_saturation:
-        for ws in s.workers.values():
-            s._reevaluate_occupancy_worker(ws)
-    try:
-        for _ in range(20):
-            steal.balance()
-            await steal.stop()
-
-            result = _get_task_placement(s, workers)
-
-            if correct_placement_fn(result):
-                return
-    finally:
-        # Release the threadpools
-        await ev.set()
-
-    raise AssertionError(result)
 
 
 async def _place_dependencies(dependencies, placement, c, s, workers):
