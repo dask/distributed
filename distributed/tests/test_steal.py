@@ -75,24 +75,16 @@ async def test_dont_steal_expensive_data_fast_computation(c, s, a, b):
     assert len(a.data) == 12
 
 
-@gen_cluster(
-    client=True,
-    nthreads=[("127.0.0.1", 1)] * 2,
-    config={
-        "distributed.scheduler.work-stealing-interval": "10ms",
-    },
-)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
 async def test_steal_cheap_data_slow_computation(c, s, a, b):
     x = c.submit(slowinc, 100, delay=0.1)  # learn that slowinc is slow
-    await c.gather(x)
-    del x
+    await wait(x)
+
     futures = c.map(
-        slowinc, range(20), delay=0.1, workers=a.address, allow_other_workers=True
+        slowinc, range(10), delay=0.1, workers=a.address, allow_other_workers=True
     )
-    await c.gather(futures)
-    steal = s.extensions["stealing"]
-    assert len(a.data) + len(b.data) == 20
-    assert abs(len(a.data) - len(b.data)) <= 6
+    await wait(futures)
+    assert abs(len(a.data) - len(b.data)) <= 5
 
 
 @pytest.mark.slow
