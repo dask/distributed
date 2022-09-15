@@ -236,7 +236,6 @@ class WorkStealing(SchedulerPlugin):
 
         assert ts.processing_on
         ws = ts.processing_on
-        # FIXME: this needs the other branch
         task_occ = self.scheduler.get_task_duration(ts) + self.scheduler.get_comm_cost(
             ts, ts.processing_on
         )

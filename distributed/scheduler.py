@@ -530,7 +530,6 @@ class WorkerState:
         self.status = status
         self._hash = hash(self.server_id)
         self.nbytes = 0
-        # self.occupancy = 0
         self._memory_unmanaged_old = 0
         self._memory_unmanaged_history = deque()
         self.metrics = {}
@@ -1398,7 +1397,6 @@ class SchedulerState:
     #: Workers that are fully utilized. May include non-running workers.
     saturated: set[WorkerState]
     total_nthreads: int
-    # total_occupancy: float
     #: Cluster-wide resources. {resource name: {worker address: amount}}
     resources: dict[str, dict[str, float]]
 
@@ -3155,8 +3153,6 @@ class SchedulerState:
 
     def remove_replica(self, ts: TaskState, ws: WorkerState):
         """Note that a worker no longer holds a replica of a task"""
-        # If it isn't in needs_what, it is merely a replica by AMM and we don't
-        # need to increase any counters
         ws.remove_replica(ts)
         if len(ts.who_has) == 1:
             self.replicated_tasks.remove(ts)
@@ -4258,7 +4254,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         dependencies = dependencies or {}
 
-        if any(ws.occupancy for ws in self.workers.values()) and self.computations:
+        if self.total_occupancy > 1e-9 and self.computations:
             # Still working on something. Assign new tasks to same computation
             computation = self.computations[-1]
         else:
