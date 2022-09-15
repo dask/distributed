@@ -659,6 +659,7 @@ class WorkerState:
         )
 
     def add_to_processing(self, ts: TaskState) -> None:
+        """Assign a task to this worker for compute."""
         assert self.scheduler_ref and (scheduler := self.scheduler_ref())
         tg = ts.group
         self.task_groups_count[tg.name] += 1
@@ -666,30 +667,10 @@ class WorkerState:
         self.processing.add(ts)
         for dts in ts.dependencies:
             if self not in dts.who_has:
-                self.need_replica(dts)
-
-    # TODO: Scheduler.add_replica should call this
-    def need_replica(self, ts: TaskState) -> None:
-        assert self.scheduler_ref and (scheduler := self.scheduler_ref())
-        if ts not in self.needs_what:
-            self.needs_what[ts] = 1
-            nbytes = ts.get_nbytes()
-            self._network_occ += nbytes
-            scheduler._network_occ_global += nbytes
-        else:
-            self.needs_what[ts] += 1
-
-    def dont_need_replica(self, ts: TaskState) -> None:
-        assert self.scheduler_ref and (scheduler := self.scheduler_ref())
-        if ts in self.needs_what:
-            self.needs_what[ts] -= 1
-            if not self.needs_what[ts]:
-                del self.needs_what[ts]
-                nbytes = ts.get_nbytes()
-                self._network_occ -= nbytes
-                scheduler._network_occ_global -= nbytes
+                self._inc_needs_replica(dts)
 
     def remove_from_processing(self, ts: TaskState) -> None:
+        """Remove a task from a workers processing"""
         if ts not in self.processing:
             return
         assert self.scheduler_ref and (scheduler := self.scheduler_ref())
@@ -700,26 +681,55 @@ class WorkerState:
         if not scheduler.task_groups_count_global[ts.group.name]:
             del scheduler.task_groups_count_global[ts.group.name]
         self.processing.remove(ts)
-        # TODO Loop over the smaller set of the two, see Scheduler.get_comm_cost
         for dts in ts.dependencies:
             if dts in self.needs_what:
-                self.dont_need_replica(dts)
+                self._dec_needs_replica(dts)
+
+    def remove_replica(self, ts):
+        """The worker no longer has a task in memory"""
+        if ts in self.needs_what:
+            self._inc_needs_replica(ts)
+        self.nbytes -= ts.get_nbytes()
+        del self._has_what[ts]
+        ts.who_has.remove(self)
+
+    def _inc_needs_replica(self, ts: TaskState) -> None:
+        """Assign a task to this worker and update occupancies"""
+        assert self.scheduler_ref and (scheduler := self.scheduler_ref())
+        if ts not in self.needs_what:
+            self.needs_what[ts] = 1
+            nbytes = ts.get_nbytes()
+            self._network_occ += nbytes
+            scheduler._network_occ_global += nbytes
+        else:
+            self.needs_what[ts] += 1
+
+    def _dec_needs_replica(self, ts: TaskState) -> None:
+        assert self.scheduler_ref and (scheduler := self.scheduler_ref())
+        if ts in self.needs_what:
+            self.needs_what[ts] -= 1
+            if not self.needs_what[ts]:
+                del self.needs_what[ts]
+                nbytes = ts.get_nbytes()
+                self._network_occ -= nbytes
+                scheduler._network_occ_global -= nbytes
+
+    def add_replica(self, ts: TaskState) -> None:
+        """The worker acquired a replica of task"""
+        assert self.scheduler_ref and (scheduler := self.scheduler_ref())
+        nbytes = ts.get_nbytes()
+        if ts in self.needs_what:
+            del self.needs_what[ts]
+            self._network_occ -= nbytes
+            scheduler._network_occ_global -= nbytes
+        ts.who_has.add(self)
+        self.nbytes += nbytes
+        self._has_what[ts] = None
 
     @property
-    def occupancy(self):
+    def occupancy(self) -> float:
         assert self.scheduler_ref and (scheduler := self.scheduler_ref())
-        res = 0
-        for group_name, count in self.task_groups_count.items():
-            # TODO: Deal with unknown tasks better
-            prefix = scheduler.task_groups[group_name].prefix
-            assert prefix
-            duration = prefix.duration_average
-            if duration < 0:
-                duration = scheduler.UNKNOWN_TASK_DURATION
-            res += duration * count
-        occ = res + self._network_occ / scheduler.bandwidth
-        assert occ >= 0
-        return occ
+        return scheduler._calc_occupancy(self.task_groups_count, self._network_occ)
 
 
 @dataclasses.dataclass
@@ -818,6 +828,9 @@ class TaskPrefix:
     #: Store timings for each prefix-action
     all_durations: defaultdict[str, float]
 
+    #: If proper duration aren't known this is a
+    max_exec_time: float
+
     #: Task groups associated to this prefix
     groups: list[TaskGroup]
 
@@ -832,7 +845,13 @@ class TaskPrefix:
             self.duration_average = parse_timedelta(task_durations[self.name])
         else:
             self.duration_average = -1
+        self.max_exec_time = -1
         self.suspicious = 0
+
+    def add_exec_time(self, duration: float):
+        self.max_exec_time = max(duration, self.max_exec_time)
+        if duration > 2 * self.duration_average:
+            self.duration_average = -1
 
     def add_duration(self, action: str, start: float, stop: float) -> None:
         duration = stop - start
@@ -1608,17 +1627,32 @@ class SchedulerState:
             collection.clear()
 
     @property
-    def total_occupancy(self):
-        res = 0
-        for group_name, count in self.task_groups_count_global.items():
+    def total_occupancy(self) -> float:
+        return self._calc_occupancy(
+            self.task_groups_count_global,
+            self._network_occ_global,
+        )
+
+    def _calc_occupancy(
+        self,
+        task_groups_count: dict[str, int],
+        network_occ: float,
+    ) -> float:
+        res = 0.0
+        for group_name, count in task_groups_count.items():
             # TODO: Deal with unknown tasks better
             prefix = self.task_groups[group_name].prefix
-            assert prefix
+            assert prefix is not None
             duration = prefix.duration_average
             if duration < 0:
-                duration = self.UNKNOWN_TASK_DURATION
+                if prefix.max_exec_time > 0:
+                    duration = 2 * prefix.max_exec_time
+                else:
+                    duration = self.UNKNOWN_TASK_DURATION
             res += duration * count
-        return res + self._network_occ_global / self.bandwidth
+        occ = res + network_occ / self.bandwidth
+        assert occ >= 0
+        return occ
 
     #####################
     # State Transitions #
@@ -3115,18 +3149,15 @@ class SchedulerState:
         if self.validate:
             assert ws not in ts.who_has
             assert ts not in ws.has_what
-
-        ws.nbytes += ts.get_nbytes()
-        ws._has_what[ts] = None
-        ts.who_has.add(ws)
+        ws.add_replica(ts)
         if len(ts.who_has) == 2:
             self.replicated_tasks.add(ts)
 
     def remove_replica(self, ts: TaskState, ws: WorkerState):
         """Note that a worker no longer holds a replica of a task"""
-        ws.nbytes -= ts.get_nbytes()
-        del ws._has_what[ts]
-        ts.who_has.remove(ws)
+        # If it isn't in needs_what, it is merely a replica by AMM and we don't
+        # need to increase any counters
+        ws.remove_replica(ts)
         if len(ts.who_has) == 1:
             self.replicated_tasks.remove(ts)
 
@@ -3921,11 +3952,13 @@ class Scheduler(SchedulerState, ServerNode):
 
         ws.last_seen = local_now
         if executing is not None:
-            ws.executing = {
-                self.tasks[key]: duration
-                for key, duration in executing.items()
-                if key in self.tasks
-            }
+            # NOTE: the executing dict is unused
+            ws.executing = {}
+            for key, duration in executing.items():
+                if key in self.tasks:
+                    ts = self.tasks[key]
+                    ws.executing[ts] = duration
+                    ts.prefix.add_exec_time(duration)
 
         ws.metrics = metrics
 

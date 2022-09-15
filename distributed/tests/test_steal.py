@@ -181,7 +181,6 @@ async def test_stop_in_flight(c, s, a, b):
     assert len(b.state.tasks) != 0
 
 
-@pytest.mark.skip("executing heartbeats not considered yet")
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1)] * 2,
@@ -757,21 +756,28 @@ async def test_restart(c, s, a, b):
     assert not any(x for L in steal.stealable.values() for x in L)
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True,
-    config={"distributed.scheduler.default-task-durations": {"slowadd": 0.001}},
+    config={"distributed.scheduler.default-task-durations": {"blocked_add": 0.001}},
 )
 async def test_steal_communication_heavy_tasks(c, s, a, b):
     steal = s.extensions["stealing"]
+    await steal.stop()
     x = c.submit(mul, b"0", int(s.bandwidth), workers=a.address)
     y = c.submit(mul, b"1", int(s.bandwidth), workers=b.address)
+    event = Event()
+
+    def blocked_add(x, y, event):
+        event.wait()
+        return x + y
 
     futures = [
         c.submit(
-            slowadd,
+            blocked_add,
             x,
             y,
-            delay=1,
+            event=event,
             pure=False,
             workers=a.address,
             allow_other_workers=True,
@@ -782,11 +788,12 @@ async def test_steal_communication_heavy_tasks(c, s, a, b):
     while not any(f.key in s.tasks and s.tasks[f.key].processing_on for f in futures):
         await asyncio.sleep(0.01)
 
+    await steal.start()
     steal.balance()
-    while steal.in_flight:
-        await asyncio.sleep(0.001)
-
-    assert s.workers[b.address].processing
+    while not s.workers[b.address].processing:
+        await asyncio.sleep(0.01)
+    await event.set()
+    await c.gather(futures)
 
 
 @gen_cluster(client=True)
@@ -887,7 +894,7 @@ async def test_dont_steal_long_running_tasks(c, s, a, b):
     await c.submit(inc, 1)  # learn duration
 
     long_tasks = c.map(long, [0.5, 0.6], workers=a.address, allow_other_workers=True)
-    while sum(len(ws.processing) for ws in s.workers.values()) < 2:  # let them start
+    while sum(len(ws.long_running) for ws in s.workers.values()) < 2:  # let them start
         await asyncio.sleep(0.01)
 
     start = time()
@@ -901,7 +908,6 @@ async def test_dont_steal_long_running_tasks(c, s, a, b):
     incs = c.map(inc, range(100), workers=a.address, allow_other_workers=True)
 
     await asyncio.sleep(0.2)
-
     await wait(long_tasks)
 
     for t in long_tasks:
@@ -983,7 +989,6 @@ async def test_parse_stealing_interval(s, interval, expected):
         assert s.periodic_callbacks["stealing"].callback_time == expected
 
 
-@pytest.mark.skip("executing heartbeats not considered yet")
 @gen_cluster(client=True)
 async def test_balance_with_longer_task(c, s, a, b):
     np = pytest.importorskip("numpy")
@@ -1004,7 +1009,6 @@ async def test_balance_with_longer_task(c, s, a, b):
     assert z.key in b.data
 
 
-@pytest.mark.skip("executing heartbeats not considered yet")
 @gen_cluster(client=True)
 async def test_blocklist_shuffle_split(c, s, a, b):
 

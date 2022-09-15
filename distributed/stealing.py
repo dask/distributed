@@ -237,11 +237,11 @@ class WorkStealing(SchedulerPlugin):
         assert ts.processing_on
         ws = ts.processing_on
         # FIXME: this needs the other branch
-        compute_time = self.scheduler.get_task_duration(
-            ts
-        ) + self.scheduler.get_comm_cost(ts, ts.processing_on)
+        task_occ = self.scheduler.get_task_duration(ts) + self.scheduler.get_comm_cost(
+            ts, ts.processing_on
+        )
 
-        if not compute_time:
+        if not task_occ:
             # occupancy/ws.proccessing[ts] is only allowed to be zero for
             # long running tasks which cannot be stolen
             assert ts in ws.long_running
@@ -249,7 +249,7 @@ class WorkStealing(SchedulerPlugin):
 
         nbytes = ts.get_nbytes_deps()
         transfer_time = nbytes / self.scheduler.bandwidth + LATENCY
-        cost_multiplier = transfer_time / compute_time
+        cost_multiplier = transfer_time / task_occ
 
         level = int(round(log2(cost_multiplier) + 6))
 
