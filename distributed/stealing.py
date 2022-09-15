@@ -399,7 +399,7 @@ class WorkStealing(SchedulerPlugin):
             return ws.occupancy + self.in_flight_occupancy[ws]
 
         def combined_nprocessing(ws: WorkerState) -> float:
-            return ws.occupancy + self.in_flight_tasks[ws]
+            return len(ws.processing) + self.in_flight_tasks[ws]
 
         with log_errors():
             i = 0
