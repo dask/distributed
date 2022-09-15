@@ -6,7 +6,6 @@ import itertools
 import logging
 import math
 import random
-import sys
 import weakref
 from collections import defaultdict
 from operator import mul
@@ -25,7 +24,6 @@ from distributed.core import Status
 from distributed.metrics import time
 from distributed.system import MEMORY_LIMIT
 from distributed.utils_test import (
-    SizeOf,
     captured_logger,
     freeze_batched_send,
     gen_cluster,
@@ -48,16 +46,6 @@ pytestmark = pytest.mark.ci1
 # Most tests here are timing-dependent
 setup_module = nodebug_setup_module
 teardown_module = nodebug_teardown_module
-
-
-class Sizeof:
-    """Helper class for creating task results of a given size"""
-
-    def __init__(self, nbytes):
-        self._nbytes = nbytes - sys.getsizeof(object)
-
-    def __sizeof__(self) -> int:
-        return self._nbytes
 
 
 @pytest.fixture(params=[True, False])
@@ -670,7 +658,7 @@ async def assert_balanced(inp, expected, recompute_saturation, c, s, *workers):
         for t in sorted(ts, reverse=True):
             if t:
                 [dat] = await c.scatter(
-                    [SizeOf(int(t * s.bandwidth))], workers=w.address
+                    [gen_nbytes(int(t * s.bandwidth))], workers=w.address
                 )
             else:
                 dat = 123
@@ -1705,7 +1693,7 @@ async def _place_dependencies(dependencies, placement, c, s, workers):
     for name, multiplier in dependencies.items():
         worker_addresses = dependencies_to_workers[name]
         futs = await c.scatter(
-            {name: Sizeof(int(multiplier * s.bandwidth))},
+            {name: gen_nbytes(int(multiplier * s.bandwidth))},
             workers=worker_addresses,
             broadcast=True,
         )
