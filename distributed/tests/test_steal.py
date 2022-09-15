@@ -710,6 +710,11 @@ async def assert_balanced(inp, expected, recompute_saturation, c, s, *workers):
         pytest.param([[1], []], [[1], []], id="don't move unnecessarily"),
         pytest.param([[0, 0], []], [[0], [0]], id="balance"),
         pytest.param(
+            [[0, 0, 0, 0, 0, 0, 0, 0], []],
+            [[0, 0, 0, 0, 0, 0], [0, 0]],
+            id="balance until none idle",
+        ),
+        pytest.param(
             [[0.1, 0.1], []], [[0], [0]], id="balance even if results in even"
         ),
         pytest.param([[0, 0, 0], []], [[0, 0], [0]], id="don't over balance"),
@@ -741,7 +746,6 @@ async def assert_balanced(inp, expected, recompute_saturation, c, s, *workers):
             [[4, 2, 2, 2, 2, 1, 1], [4, 2, 1, 1], [], [], []],
             [[4, 2, 2, 2], [4, 2, 1, 1], [2], [1], [1]],
             id="balance multiple saturated workers",
-            marks=pytest.mark.skip(reason="This test is highly timing-sensitive"),
         ),
     ],
 )
@@ -1590,8 +1594,8 @@ def test_balance_prefers_busier_with_dependency(recompute_saturation):
     def _correct_placement(actual):
         actual_task_counts = [len(placed) for placed in actual]
         return actual_task_counts == [
-            3,
-            3,
+            4,
+            2,
             1,
         ]  # Note: The success of this test currently depends on worker ordering
 
@@ -1617,13 +1621,13 @@ def test_balance_prefers_busier_with_dependency(recompute_saturation):
 def test_balance_after_acquiring_dependency(recompute_saturation):
     dependencies = {"a": 1}
     dependency_placement = [["a"], []]
-    task_placement = [[["a"], ["a"], ["a"], ["a"], ["a"], ["a"], ["a"]], []]
+    task_placement = [[["a"]] * 8, []]
 
     def _correct_placement(actual):
         actual_task_counts = [len(placed) for placed in actual]
         return actual_task_counts == [
-            4,
-            3,
+            6,
+            2,
         ]  # Note: The success of this test currently depends on worker ordering
 
     async def _run_test(*args, **kwargs):
