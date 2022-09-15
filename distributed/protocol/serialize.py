@@ -233,7 +233,6 @@ def infer_if_recurse_to_serialize_list(x: list) -> bool:
     if len(x) == 0:
         return False
     first_val = x[0]
-    iseq = iter(x)
     if is_dask_collection(first_val) or typename(type(first_val)) not in [
         "int",
         "float",
@@ -241,7 +240,7 @@ def infer_if_recurse_to_serialize_list(x: list) -> bool:
         # Sometimes we get func.partial or pd.Timestamp objects
         # from shuffle unit tests
         return True
-    if all((type(i) is type(first_val)) for i in iseq):
+    if all((type(i) is type(first_val)) for i in x):
         return False
     else:
         # We default to serializing the list recursively with pickle
