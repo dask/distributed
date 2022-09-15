@@ -1465,7 +1465,7 @@ def test_balance_to_replica(recompute_saturation):
             2,
             1,
             0,
-        ]  # Note: The success of this test currently depends on worker ordering
+        ]
 
     _run_dependency_balance_test(
         dependencies,
@@ -1487,7 +1487,7 @@ def test_balance_to_larger_dependency(recompute_saturation):
             2,
             1,
             0,
-        ]  # Note: The success of this test currently depends on worker ordering
+        ]
 
     _run_dependency_balance_test(
         dependencies,
@@ -1509,7 +1509,7 @@ def test_balance_prefers_busier_with_dependency(recompute_saturation):
             4,
             2,
             1,
-        ]  # Note: The success of this test currently depends on worker ordering
+        ]
 
     _run_dependency_balance_test(
         dependencies,
@@ -1530,7 +1530,7 @@ def test_balance_after_acquiring_dependency(recompute_saturation):
         return actual_task_counts == [
             6,
             2,
-        ]  # Note: The success of this test currently depends on worker ordering
+        ]
 
     _run_dependency_balance_test(
         dependencies,
