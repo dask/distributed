@@ -1498,6 +1498,49 @@ def test_balance_to_larger_dependency(recompute_saturation):
     )
 
 
+def test_balance_prefers_busier_with_dependency(recompute_saturation):
+    dependencies = {"a": 2, "b": 1}
+    dependency_placement = [["a"], ["a", "b"], []]
+    task_placement = [[["a"], ["a"], ["a"], ["a"], ["a"], ["a"]], [["b"]], []]
+
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        return actual_task_counts == [
+            4,
+            2,
+            1,
+        ]  # Note: The success of this test currently depends on worker ordering
+
+    _run_dependency_balance_test(
+        dependencies,
+        dependency_placement,
+        task_placement,
+        _correct_placement,
+        recompute_saturation,
+    )
+
+
+def test_balance_after_acquiring_dependency(recompute_saturation):
+    dependencies = {"a": 1}
+    dependency_placement = [["a"], []]
+    task_placement = [[["a"]] * 8, []]
+
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        return actual_task_counts == [
+            6,
+            2,
+        ]  # Note: The success of this test currently depends on worker ordering
+
+    _run_dependency_balance_test(
+        dependencies,
+        dependency_placement,
+        task_placement,
+        _correct_placement,
+        recompute_saturation,
+    )
+
+
 def _run_dependency_balance_test(
     dependencies,
     dependency_placement,
@@ -1573,49 +1616,6 @@ async def _dependency_balance_test(
         await ev.set()
 
     raise AssertionError(result, permutation)
-
-
-def test_balance_prefers_busier_with_dependency(recompute_saturation):
-    dependencies = {"a": 2, "b": 1}
-    dependency_placement = [["a"], ["a", "b"], []]
-    task_placement = [[["a"], ["a"], ["a"], ["a"], ["a"], ["a"]], [["b"]], []]
-
-    def _correct_placement(actual):
-        actual_task_counts = [len(placed) for placed in actual]
-        return actual_task_counts == [
-            4,
-            2,
-            1,
-        ]  # Note: The success of this test currently depends on worker ordering
-
-    _run_dependency_balance_test(
-        dependencies,
-        dependency_placement,
-        task_placement,
-        _correct_placement,
-        recompute_saturation,
-    )
-
-
-def test_balance_after_acquiring_dependency(recompute_saturation):
-    dependencies = {"a": 1}
-    dependency_placement = [["a"], []]
-    task_placement = [[["a"]] * 8, []]
-
-    def _correct_placement(actual):
-        actual_task_counts = [len(placed) for placed in actual]
-        return actual_task_counts == [
-            6,
-            2,
-        ]  # Note: The success of this test currently depends on worker ordering
-
-    _run_dependency_balance_test(
-        dependencies,
-        dependency_placement,
-        task_placement,
-        _correct_placement,
-        recompute_saturation,
-    )
 
 
 async def _place_dependencies(dependencies, placement, c, s, workers):
