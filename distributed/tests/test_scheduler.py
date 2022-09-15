@@ -1444,18 +1444,6 @@ async def test_learn_occupancy_2(c, s, a, b):
     assert nproc * 0.1 < s.total_occupancy < nproc * 0.4
 
 
-@gen_cluster(client=True)
-async def test_occupancy_cleardown(c, s, a, b):
-    s.validate = False
-
-    futures = c.map(slowinc, range(100), delay=0.01)
-    await wait(futures)
-
-    # Verify that occupancy values have been zeroed out
-    assert abs(s.total_occupancy) < 0.01
-    assert all(ws.occupancy == 0 for ws in s.workers.values())
-
-
 @nodebug
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 30)
 async def test_balance_many_workers(c, s, *workers):
