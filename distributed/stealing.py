@@ -329,6 +329,8 @@ class WorkStealing(SchedulerPlugin):
 
         self.in_flight_occupancy[thief] -= d["thief_duration"]
         self.in_flight_occupancy[victim] += d["victim_duration"]
+        self.in_flight_tasks[victim] += 1
+        self.in_flight_tasks[thief] -= 1
 
         if not self.in_flight:
             self.in_flight_occupancy.clear()
