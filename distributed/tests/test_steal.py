@@ -1675,9 +1675,9 @@ async def _run_balance_test(
             result = _get_task_placement(s, workers)
 
             if correct_placement_fn(result):
-                # Release the threadpools
                 return
     finally:
+        # Release the threadpools
         await ev.set()
 
     raise AssertionError(result)
