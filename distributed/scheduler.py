@@ -674,9 +674,9 @@ class WorkerState:
             return
         assert self.scheduler_ref and (scheduler := self.scheduler_ref())
         self.task_groups_count[ts.group.name] -= 1
+        scheduler.task_groups_count_global[ts.group.name] -= 1
         if not self.task_groups_count[ts.group.name]:
             del self.task_groups_count[ts.group.name]
-        scheduler.task_groups_count_global[ts.group.name] -= 1
         if not scheduler.task_groups_count_global[ts.group.name]:
             del scheduler.task_groups_count_global[ts.group.name]
         self.processing.remove(ts)
@@ -4687,6 +4687,7 @@ class Scheduler(SchedulerState, ServerNode):
         ts: TaskState
         for ts in list(ws.processing):
             k = ts.key
+            ws.remove_from_processing(ts)
             recommendations[k] = "released"
             if not safe:
                 ts.suspicious += 1
@@ -4950,6 +4951,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.running,
             list(self.idle.values()),
         )
+        task_group_counts: defaultdict[str, int] = defaultdict(int)
         for w, ws in self.workers.items():
             assert isinstance(w, str), (type(w), w)
             assert isinstance(ws, WorkerState), (type(ws), ws)
@@ -4962,6 +4964,12 @@ class Scheduler(SchedulerState, ServerNode):
                 if ws.status == Status.running:
                     assert ws.address in self.idle
             assert (ws.status == Status.running) == (ws in self.running)
+            for name, count in ws.task_groups_count.items():
+                task_group_counts[name] += count
+
+        assert task_group_counts.keys() == self.task_groups_count_global.keys()
+        for name, global_count in self.task_groups_count_global.items():
+            assert task_group_counts[name] == global_count, name
 
         for ws in self.running:
             assert ws.status == Status.running
