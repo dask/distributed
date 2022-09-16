@@ -1525,27 +1525,6 @@ def test_balance_prefers_busier_with_dependency():
     )
 
 
-def test_balance_after_acquiring_dependency(recompute_saturation):
-    dependencies = {"a": 1}
-    dependency_placement = [["a"], []]
-    task_placement = [[["a"]] * 8, []]
-
-    def _correct_placement(actual):
-        actual_task_counts = [len(placed) for placed in actual]
-        return actual_task_counts == [
-            6,
-            2,
-        ]
-
-    _run_dependency_balance_test(
-        dependencies,
-        dependency_placement,
-        task_placement,
-        _correct_placement,
-        recompute_saturation,
-    )
-
-
 def _run_dependency_balance_test(
     dependencies,
     dependency_placement,
