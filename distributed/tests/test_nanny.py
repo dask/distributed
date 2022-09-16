@@ -723,6 +723,8 @@ async def test_default_client_does_not_propagate_to_subprocess():
                             message="Running on a single-machine scheduler",
                             category=UserWarning,
                         )
+                        # If no scheduler kwarg is provided, this will
+                        # automatically transition to long-running
                         dask.compute(run_in_thread(), scheduler="single-threaded")
                     return rec
 
