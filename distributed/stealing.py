@@ -527,7 +527,7 @@ def _get_thief(
     scheduler: SchedulerState, ts: TaskState, potential_thieves: set[WorkerState]
 ) -> WorkerState | None:
     valid_workers = scheduler.valid_workers(ts)
-    if valid_workers:
+    if valid_workers is not None:
         subset = potential_thieves & valid_workers
         if subset:
             return next(iter(subset))
