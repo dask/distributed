@@ -198,7 +198,6 @@ async def test_stop_in_flight(c, s, a, b):
     client=True,
     nthreads=[("127.0.0.1", 1)] * 2,
     config={"distributed.scheduler.work-stealing-interval": "10ms"},
-    timeout=10,
 )
 async def test_allow_tasks_stolen_before_first_completes(c, s, a, b):
     # https://github.com/dask/distributed/issues/5564
@@ -756,12 +755,10 @@ async def test_restart(c, s, a, b):
         await asyncio.sleep(0.01)
 
     steal = s.extensions["stealing"]
-    # assert any(st for st in steal.stealable_all)
     assert any(x for L in steal.stealable.values() for x in L)
 
     await c.restart()
 
-    # assert not any(x for x in steal.stealable_all)
     assert not any(x for L in steal.stealable.values() for x in L)
 
 

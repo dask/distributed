@@ -417,12 +417,6 @@ class WorkStealing(SchedulerPlugin):
                     and ws not in potential_thieves
                 ]
                 if not potential_victims:
-                    # TODO: Unclear how to reach this and what the implications
-                    # are. The return is only an optimization since the for-loop
-                    # below would be a no op but we'd safe ourselves a few loop
-                    # cycles. Unless any measurements about runtime, occupancy,
-                    # etc. changes we'd not get out of this and may have an
-                    # unbalanced cluster
                     return
             if len(potential_victims) < 20:
                 potential_victims = sorted(
