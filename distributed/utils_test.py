@@ -38,7 +38,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 
-from distributed import Scheduler, system
+from distributed import Event, Scheduler, system
 from distributed import versions as version_module
 from distributed.batched import BatchedSend
 from distributed.client import Client, _global_clients, default_client
@@ -287,6 +287,10 @@ def slowidentity(*args, **kwargs):
 def lock_inc(x, lock):
     with lock:
         return x + 1
+
+
+def block_on_event(event: Event) -> None:
+    event.wait()
 
 
 class _UnhashableCallable:
