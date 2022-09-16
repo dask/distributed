@@ -1498,17 +1498,22 @@ def test_balance_to_larger_dependency(recompute_saturation):
     )
 
 
-def test_balance_prefers_busier_with_dependency(recompute_saturation):
-    dependencies = {"a": 2, "b": 1}
+def test_balance_prefers_busier_with_dependency():
+    recompute_saturation = True
+    dependencies = {"a": 5, "b": 1}
     dependency_placement = [["a"], ["a", "b"], []]
-    task_placement = [[["a"], ["a"], ["a"], ["a"], ["a"], ["a"]], [["b"]], []]
+    task_placement = [
+        [["a"], ["a"], ["a"], ["a"], ["a"], ["a"]],
+        [["b"]],
+        [],
+    ]
 
     def _correct_placement(actual):
-        actual_task_counts = [len(placed) for placed in actual]
-        return actual_task_counts == [
-            4,
-            2,
-            1,
+        actual_task_placements = [sorted(placed) for placed in actual]
+        return actual_task_placements == [
+            [["a"], ["a"], ["a"], ["a"], ["a"]],
+            [["a"], ["b"]],
+            [],
         ]
 
     _run_dependency_balance_test(
