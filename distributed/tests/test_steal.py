@@ -1510,6 +1510,13 @@ def test_balance_prefers_busier_with_dependency():
 
     def _correct_placement(actual):
         actual_task_placements = [sorted(placed) for placed in actual]
+        # FIXME: A better task placement would even be but the current balancing
+        # logic aborts as soon as a worker is no longer classified as idle
+        # return actual_task_placements == [
+        #     [["a"], ["a"], ["a"], ["a"]],
+        #     [["a"], ["a"], ["b"]],
+        #     [],
+        # ]
         return actual_task_placements == [
             [["a"], ["a"], ["a"], ["a"], ["a"]],
             [["a"], ["b"]],

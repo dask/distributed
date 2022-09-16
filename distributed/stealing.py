@@ -521,9 +521,6 @@ class WorkStealing(SchedulerPlugin):
 def _get_thief(
     scheduler: SchedulerState, ts: TaskState, potential_thieves: set[WorkerState]
 ) -> WorkerState | None:
-    if not potential_thieves:
-        return None
-
     valid_workers = scheduler.valid_workers(ts)
     if valid_workers is not None:
         valid_thieves = potential_thieves & valid_workers
