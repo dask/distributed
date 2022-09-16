@@ -20,7 +20,7 @@ from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import Status
 from distributed.metrics import monotonic
 from distributed.spill import has_zict_210
-from distributed.utils_test import captured_logger, gen_cluster, inc
+from distributed.utils_test import captured_logger, gen_cluster, inc, wait_for_state
 from distributed.worker_memory import parse_memory_limit
 from distributed.worker_state_machine import (
     ComputeTaskEvent,
@@ -639,8 +639,7 @@ async def test_pause_prevents_deps_fetch(c, s, a, b):
     # - ensure_communicating is triggered again
     # - ensure_communicating refuses to fetch y because the worker is paused
 
-    while "y" not in a.state.tasks or a.state.tasks["y"].state != "fetch":
-        await asyncio.sleep(0.01)
+    await wait_for_state("y", "fetch", a)
     await asyncio.sleep(0.1)
     assert a.state.tasks["y"].state == "fetch"
     assert "y" not in a.data

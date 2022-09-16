@@ -2980,7 +2980,7 @@ class SchedulerState:
         idle = self.idle
         saturated = self.saturated
         if (
-            (p < nc or occ < nc * avg / 2)
+            self.is_unoccupied(ws, occ, p)
             if math.isinf(self.WORKER_SATURATION)
             else not _worker_full(ws, self.WORKER_SATURATION)
         ):
@@ -2997,6 +2997,13 @@ class SchedulerState:
                     return
 
             saturated.discard(ws)
+
+    def is_unoccupied(
+        self, ws: WorkerState, occupancy: float, nprocessing: int
+    ) -> bool:
+        nthreads = ws.nthreads
+        avg_occ_per_thread = self.total_occupancy / self.total_nthreads
+        return nprocessing < nthreads or occupancy < nthreads * avg_occ_per_thread / 2
 
     def get_comm_cost(self, ts: TaskState, ws: WorkerState) -> float:
         """

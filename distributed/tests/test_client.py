@@ -89,6 +89,7 @@ from distributed.utils_test import (
     _UnhashableCallable,
     async_wait_for,
     asyncinc,
+    block_on_event,
     captured_logger,
     cluster,
     dec,
@@ -727,8 +728,9 @@ async def test_wait(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_wait_first_completed(c, s, a, b):
-    x = c.submit(slowinc, 1)
-    y = c.submit(slowinc, 1)
+    event = Event()
+    x = c.submit(block_on_event, event)
+    y = c.submit(block_on_event, event)
     z = c.submit(inc, 2)
 
     done, not_done = await wait([x, y, z], return_when="FIRST_COMPLETED")
@@ -738,6 +740,7 @@ async def test_wait_first_completed(c, s, a, b):
     assert z.status == "finished"
     assert x.status == "pending"
     assert y.status == "pending"
+    await event.set()
 
 
 @gen_cluster(client=True)

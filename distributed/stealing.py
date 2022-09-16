@@ -8,21 +8,19 @@ from math import log2
 from time import time
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, cast
 
-import sortedcontainers
 from tlz import topk
 from tornado.ioloop import PeriodicCallback
 
 import dask
 from dask.utils import parse_timedelta
 
-from distributed.comm.addressing import get_address_host
-from distributed.core import CommClosedError, Status
+from distributed.core import CommClosedError
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.utils import log_errors, recursive_to_dict
 
 if TYPE_CHECKING:
     # Recursive imports
-    from distributed.scheduler import Scheduler, TaskState, WorkerState
+    from distributed.scheduler import Scheduler, SchedulerState, TaskState, WorkerState
 
 # Stealing requires multiple network bounces and if successful also task
 # submission which may include code serialization. Therefore, be very
@@ -64,8 +62,6 @@ class InFlightInfo(TypedDict):
 
 class WorkStealing(SchedulerPlugin):
     scheduler: Scheduler
-    # ({ task states for level 0}, ..., {task states for level 14})
-    stealable_all: tuple[set[TaskState], ...]
     # {worker: ({ task states for level 0}, ..., {task states for level 14})}
     stealable: dict[str, tuple[set[TaskState], ...]]
     # { task state: (worker, level) }
@@ -80,12 +76,12 @@ class WorkStealing(SchedulerPlugin):
     in_flight: dict[TaskState, InFlightInfo]
     # { worker state: occupancy }
     in_flight_occupancy: defaultdict[WorkerState, float]
+    in_flight_tasks: defaultdict[WorkerState, int]
     _in_flight_event: asyncio.Event
     _request_counter: int
 
     def __init__(self, scheduler: Scheduler):
         self.scheduler = scheduler
-        self.stealable_all = tuple(set() for _ in range(15))
         self.stealable = {}
         self.key_stealable = {}
 
@@ -105,6 +101,7 @@ class WorkStealing(SchedulerPlugin):
         self.count = 0
         self.in_flight = {}
         self.in_flight_occupancy = defaultdict(lambda: 0)
+        self.in_flight_tasks = defaultdict(lambda: 0)
         self._in_flight_event = asyncio.Event()
         self._request_counter = 0
         self.scheduler.stream_handlers["steal-response"] = self.move_task_confirm
@@ -177,15 +174,31 @@ class WorkStealing(SchedulerPlugin):
         elif start == "processing":
             ts = self.scheduler.tasks[key]
             self.remove_key_from_stealable(ts)
-            d = self.in_flight.pop(ts, None)
-            if d:
-                thief = d["thief"]
-                victim = d["victim"]
-                self.in_flight_occupancy[thief] -= d["thief_duration"]
-                self.in_flight_occupancy[victim] += d["victim_duration"]
-                if not self.in_flight:
-                    self.in_flight_occupancy.clear()
-                    self._in_flight_event.set()
+            self._remove_from_in_flight(ts)
+
+    def _add_to_in_flight(self, ts: TaskState, info: InFlightInfo) -> None:
+        self.in_flight[ts] = info
+        self._in_flight_event.clear()
+        thief = info["thief"]
+        victim = info["victim"]
+        self.in_flight_occupancy[victim] -= info["victim_duration"]
+        self.in_flight_occupancy[thief] += info["thief_duration"]
+        self.in_flight_tasks[victim] -= 1
+        self.in_flight_tasks[thief] += 1
+
+    def _remove_from_in_flight(self, ts: TaskState) -> InFlightInfo | None:
+        info = self.in_flight.pop(ts, None)
+        if info:
+            thief = info["thief"]
+            victim = info["victim"]
+            self.in_flight_occupancy[thief] -= info["thief_duration"]
+            self.in_flight_occupancy[victim] += info["victim_duration"]
+            self.in_flight_tasks[victim] += 1
+            self.in_flight_tasks[thief] -= 1
+            if not self.in_flight:
+                self.in_flight_occupancy.clear()
+                self._in_flight_event.set()
+        return info
 
     def recalculate_cost(self, ts: TaskState) -> None:
         if ts not in self.in_flight:
@@ -199,7 +212,6 @@ class WorkStealing(SchedulerPlugin):
             assert ts.processing_on
             ws = ts.processing_on
             worker = ws.address
-            self.stealable_all[level].add(ts)
             self.stealable[worker][level].add(ts)
             self.key_stealable[ts] = (worker, level)
 
@@ -211,10 +223,6 @@ class WorkStealing(SchedulerPlugin):
         worker, level = result
         try:
             self.stealable[worker][level].remove(ts)
-        except KeyError:
-            pass
-        try:
-            self.stealable_all[level].remove(ts)
         except KeyError:
             pass
 
@@ -234,21 +242,18 @@ class WorkStealing(SchedulerPlugin):
         if not ts.dependencies:  # no dependencies fast path
             return 0, 0
 
-        assert ts.processing_on
-        ws = ts.processing_on
-        task_occ = self.scheduler.get_task_duration(ts) + self.scheduler.get_comm_cost(
-            ts, ts.processing_on
-        )
+        compute_time = self.scheduler.get_task_duration(ts)
 
-        if not task_occ:
+        if not compute_time:
             # occupancy/ws.proccessing[ts] is only allowed to be zero for
             # long running tasks which cannot be stolen
-            assert ts in ws.long_running
+            assert ts.processing_on
+            assert ts in ts.processing_on.long_running
             return None, None
 
         nbytes = ts.get_nbytes_deps()
         transfer_time = nbytes / self.scheduler.bandwidth + LATENCY
-        cost_multiplier = transfer_time / task_occ
+        cost_multiplier = transfer_time / compute_time
 
         level = int(round(log2(cost_multiplier) + 6))
 
@@ -293,17 +298,14 @@ class WorkStealing(SchedulerPlugin):
             self.scheduler.stream_comms[victim.address].send(
                 {"op": "steal-request", "key": key, "stimulus_id": stimulus_id}
             )
-            self.in_flight[ts] = {
+            info: InFlightInfo = {
                 "victim": victim,  # guaranteed to be processing_on
                 "thief": thief,
                 "victim_duration": victim_duration,
                 "thief_duration": thief_duration,
                 "stimulus_id": stimulus_id,
             }
-            self._in_flight_event.clear()
-
-            self.in_flight_occupancy[victim] -= victim_duration
-            self.in_flight_occupancy[thief] += thief_duration
+            self._add_to_in_flight(ts, info)
             return stimulus_id
         except CommClosedError:
             logger.info("Worker comm %r closed while stealing: %r", victim, ts)
@@ -325,25 +327,18 @@ class WorkStealing(SchedulerPlugin):
             logger.debug("Key released between request and confirm: %s", key)
             return
         try:
-            d = self.in_flight.pop(ts)
-            if d["stimulus_id"] != stimulus_id:
+            if self.in_flight[ts]["stimulus_id"] != stimulus_id:
                 self.log(("stale-response", key, state, worker, stimulus_id))
-                self.in_flight[ts] = d
                 return
         except KeyError:
             self.log(("already-aborted", key, state, worker, stimulus_id))
             return
 
-        thief = d["thief"]
-        victim = d["victim"]
+        info = self._remove_from_in_flight(ts)
+        assert info
+        thief = info["thief"]
+        victim = info["victim"]
         logger.debug("Confirm move %s, %s -> %s.  State: %s", key, victim, thief, state)
-
-        self.in_flight_occupancy[thief] -= d["thief_duration"]
-        self.in_flight_occupancy[victim] += d["victim_duration"]
-
-        if not self.in_flight:
-            self.in_flight_occupancy.clear()
-            self._in_flight_event.set()
 
         if self.scheduler.validate:
             assert ts.processing_on == victim
@@ -396,67 +391,45 @@ class WorkStealing(SchedulerPlugin):
         log = []
         start = time()
 
-        def combined_occupancy(ws: WorkerState) -> float:
-            return ws.occupancy + self.in_flight_occupancy[ws]
-
-        def maybe_move_task(
-            level: int,
-            ts: TaskState,
-            victim: WorkerState,
-            thief: WorkerState,
-            duration: float,
-            cost_multiplier: float,
-        ) -> None:
-            occ_thief = combined_occupancy(thief)
-            occ_victim = combined_occupancy(victim)
-
-            if occ_thief + cost_multiplier * duration <= occ_victim - duration / 2:
-                self.move_task_request(ts, victim, thief)
-                log.append(
-                    (
-                        start,
-                        level,
-                        ts.key,
-                        duration,
-                        victim.address,
-                        occ_victim,
-                        thief.address,
-                        occ_thief,
-                    )
-                )
-                s.check_idle_saturated(victim, occ=occ_victim)
-                s.check_idle_saturated(thief, occ=occ_thief)
-
         with log_errors():
             i = 0
             # Paused and closing workers must never become thieves
-            idle = [ws for ws in s.idle.values() if ws.status == Status.running]
-            if not idle or len(idle) == len(s.workers):
+            potential_thieves = set(s.idle.values())
+            if not potential_thieves or len(potential_thieves) == len(s.workers):
                 return
-
             victim: WorkerState | None
-            saturated: set[WorkerState] | list[WorkerState] = s.saturated
-            if not saturated:
-                saturated = topk(10, s.workers.values(), key=combined_occupancy)
-                saturated = [
+            potential_victims: set[WorkerState] | list[WorkerState] = s.saturated
+            if not potential_victims:
+                potential_victims = topk(
+                    10, s.workers.values(), key=self._combined_occupancy
+                )
+                potential_victims = [
                     ws
-                    for ws in saturated
-                    if combined_occupancy(ws) > 0.2 and len(ws.processing) > ws.nthreads
+                    for ws in potential_victims
+                    if self._combined_occupancy(ws) > 0.2
+                    and self._combined_nprocessing(ws) > ws.nthreads
+                    and ws not in potential_thieves
                 ]
-            elif len(saturated) < 20:
-                saturated = sorted(saturated, key=combined_occupancy, reverse=True)
-            if len(idle) < 20:
-                idle = sorted(idle, key=combined_occupancy)
-
-            for level, cost_multiplier in enumerate(self.cost_multipliers):
-                if not idle:
+                if not potential_victims:
+                    return
+            if len(potential_victims) < 20:
+                potential_victims = sorted(
+                    potential_victims, key=self._combined_occupancy, reverse=True
+                )
+            assert potential_victims
+            assert potential_thieves
+            for level, _ in enumerate(self.cost_multipliers):
+                if not potential_thieves:
                     break
-                for victim in list(saturated):
+                for victim in list(potential_victims):
+
                     stealable = self.stealable[victim.address][level]
-                    if not stealable or not idle:
+                    if not stealable or not potential_thieves:
                         continue
 
                     for ts in list(stealable):
+                        if not potential_thieves:
+                            break
                         if (
                             ts not in self.key_stealable
                             or ts.processing_on is not victim
@@ -465,52 +438,47 @@ class WorkStealing(SchedulerPlugin):
                             stealable.discard(ts)
                             continue
                         i += 1
-                        if not idle:
-                            break
-
-                        thieves = _potential_thieves_for(ts, idle)
-                        if not thieves:
-                            break
-                        thief = thieves[i % len(thieves)]
-
-                        duration = self.scheduler.get_task_duration(
-                            ts
-                        ) + self.scheduler.get_comm_cost(ts, ts.processing_on)
-
-                        maybe_move_task(
-                            level, ts, victim, thief, duration, cost_multiplier
-                        )
-
-                if self.cost_multipliers[level] < 20:  # don't steal from public at cost
-                    stealable = self.stealable_all[level]
-                    for ts in list(stealable):
-                        if not idle:
-                            break
-                        if ts not in self.key_stealable:
+                        if not (thief := _get_thief(s, ts, potential_thieves)):
+                            continue
+                        if ts not in victim.processing:
                             stealable.discard(ts)
                             continue
 
-                        victim = ts.processing_on
-                        if victim is None:
+                        occ_thief = self._combined_occupancy(thief)
+                        occ_victim = self._combined_occupancy(victim)
+                        comm_cost_thief = self.scheduler.get_comm_cost(ts, thief)
+                        comm_cost_victim = self.scheduler.get_comm_cost(ts, thief)
+                        compute = self.scheduler.get_task_duration(ts)
+
+                        if (
+                            occ_thief + comm_cost_thief + compute
+                            <= occ_victim - (comm_cost_victim + compute) / 2
+                        ):
+                            self.move_task_request(ts, victim, thief)
+                            log.append(
+                                (
+                                    start,
+                                    level,
+                                    ts.key,
+                                    comm_cost_victim + compute,
+                                    victim.address,
+                                    occ_victim,
+                                    thief.address,
+                                    occ_thief,
+                                )
+                            )
+
+                            occ_thief = self._combined_occupancy(thief)
+                            nproc_thief = self._combined_nprocessing(thief)
+
+                            if not self.scheduler.is_unoccupied(
+                                thief, occ_thief, nproc_thief
+                            ):
+                                potential_thieves.discard(thief)
                             stealable.discard(ts)
-                            continue
-                        if combined_occupancy(victim) < 0.2:
-                            continue
-                        if len(victim.processing) <= victim.nthreads:
-                            continue
-
-                        i += 1
-                        thieves = _potential_thieves_for(ts, idle)
-                        if not thieves or not ts.processing_on:
-                            continue
-                        thief = thieves[i % len(thieves)]
-                        duration = self.scheduler.get_task_duration(
-                            ts
-                        ) + self.scheduler.get_comm_cost(ts, ts.processing_on)
-
-                        maybe_move_task(
-                            level, ts, victim, thief, duration, cost_multiplier
-                        )
+                    self.scheduler.check_idle_saturated(
+                        victim, occ=self._combined_occupancy(victim)
+                    )
 
             if log:
                 self.log(log)
@@ -519,13 +487,17 @@ class WorkStealing(SchedulerPlugin):
             if s.digests:
                 s.digests["steal-duration"].add(stop - start)
 
+    def _combined_occupancy(self, ws: WorkerState) -> float:
+        return ws.occupancy + self.in_flight_occupancy[ws]
+
+    def _combined_nprocessing(self, ws: WorkerState) -> int:
+        return len(ws.processing) + self.in_flight_tasks[ws]
+
     def restart(self, scheduler: Any) -> None:
         for stealable in self.stealable.values():
             for s in stealable:
                 s.clear()
 
-        for s in self.stealable_all:
-            s.clear()
         self.key_stealable.clear()
 
     def story(self, *keys_or_ts: str | TaskState) -> list:
@@ -540,51 +512,17 @@ class WorkStealing(SchedulerPlugin):
         return out
 
 
-def _potential_thieves_for(
-    ts: TaskState,
-    idle: sortedcontainers.SortedValuesView[WorkerState] | list[WorkerState],
-) -> sortedcontainers.SortedValuesView[WorkerState] | list[WorkerState]:
-    """Return the list of workers from ``idle`` that could steal ``ts``."""
-    if _has_restrictions(ts):
-        return [ws for ws in idle if _can_steal(ws, ts)]
-    else:
-        return idle
-
-
-def _can_steal(thief: WorkerState, ts: TaskState) -> bool:
-    """Determine whether worker ``thief`` can steal task ``ts``.
-
-    Assumes that `ts` has some restrictions.
-    """
-    if (
-        ts.host_restrictions
-        and get_address_host(thief.address) not in ts.host_restrictions
-    ):
-        return False
-    elif ts.worker_restrictions and thief.address not in ts.worker_restrictions:
-        return False
-
-    if not ts.resource_restrictions:
-        return True
-
-    for resource, value in ts.resource_restrictions.items():
-        try:
-            supplied = thief.resources[resource]
-        except KeyError:
-            return False
-        else:
-            if supplied < value:
-                return False
-    return True
-
-
-def _has_restrictions(ts: TaskState) -> bool:
-    """Determine whether the given task has restrictions and whether these
-    restrictions are strict.
-    """
-    return not ts.loose_restrictions and bool(
-        ts.host_restrictions or ts.worker_restrictions or ts.resource_restrictions
-    )
+def _get_thief(
+    scheduler: SchedulerState, ts: TaskState, potential_thieves: set[WorkerState]
+) -> WorkerState | None:
+    valid_workers = scheduler.valid_workers(ts)
+    if valid_workers is not None:
+        subset = potential_thieves & valid_workers
+        if subset:
+            return next(iter(subset))
+        elif not ts.loose_restrictions:
+            return None
+    return next(iter(potential_thieves))
 
 
 fast_tasks = {"split-shuffle"}
