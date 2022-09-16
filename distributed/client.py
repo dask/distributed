@@ -4155,8 +4155,8 @@ class Client(SyncMethodMixin):
             single argument `event` which is a tuple `(timestamp, msg)` where
             timestamp refers to the clock on the scheduler.
 
-        Example
-        -------
+        Examples
+        --------
 
         >>> import logging
         >>> logger = logging.getLogger("myLogger")  # Log config not shown
