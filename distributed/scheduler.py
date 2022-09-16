@@ -496,6 +496,7 @@ class WorkerState:
     scheduler_ref: weakref.ref[SchedulerState] | None
     task_groups_count: dict[str, int]
     _network_occ: float
+    _occupancy_cache: float | None
     needs_what: dict[TaskState, int]
 
     __slots__ = tuple(__annotations__)
@@ -548,6 +549,7 @@ class WorkerState:
         self.task_groups_count = defaultdict(int)
         self.needs_what = {}
         self._network_occ = 0
+        self._occupancy_cache = None
 
     def __hash__(self) -> int:
         return self._hash
@@ -599,6 +601,7 @@ class WorkerState:
             extra=self.extra,
             server_id=self.server_id,
         )
+        ws._occupancy_cache = ws.occupancy
 
         ws.executing = {
             ts.key: duration for ts, duration in self.executing.items()  # type: ignore
@@ -657,12 +660,18 @@ class WorkerState:
             members=True,
         )
 
+    @property
+    def scheduler(self):
+        assert self.scheduler_ref
+        s = self.scheduler_ref()
+        assert s
+        return s
+
     def add_to_processing(self, ts: TaskState) -> None:
         """Assign a task to this worker for compute."""
-        assert self.scheduler_ref and (scheduler := self.scheduler_ref())
         tg = ts.group
         self.task_groups_count[tg.name] += 1
-        scheduler.task_groups_count_global[tg.name] += 1
+        self.scheduler.task_groups_count_global[tg.name] += 1
         self.processing.add(ts)
         for dts in ts.dependencies:
             if self not in dts.who_has:
@@ -672,19 +681,18 @@ class WorkerState:
         """Remove a task from a workers processing"""
         if ts not in self.processing:
             return
-        assert self.scheduler_ref and (scheduler := self.scheduler_ref())
         self.task_groups_count[ts.group.name] -= 1
-        scheduler.task_groups_count_global[ts.group.name] -= 1
+        self.scheduler.task_groups_count_global[ts.group.name] -= 1
         if not self.task_groups_count[ts.group.name]:
             del self.task_groups_count[ts.group.name]
-        if not scheduler.task_groups_count_global[ts.group.name]:
-            del scheduler.task_groups_count_global[ts.group.name]
+        if not self.scheduler.task_groups_count_global[ts.group.name]:
+            del self.scheduler.task_groups_count_global[ts.group.name]
         self.processing.remove(ts)
         for dts in ts.dependencies:
             if dts in self.needs_what:
                 self._dec_needs_replica(dts)
 
-    def remove_replica(self, ts):
+    def remove_replica(self, ts: TaskState) -> None:
         """The worker no longer has a task in memory"""
         if ts in self.needs_what:
             self._inc_needs_replica(ts)
@@ -694,41 +702,39 @@ class WorkerState:
 
     def _inc_needs_replica(self, ts: TaskState) -> None:
         """Assign a task to this worker and update occupancies"""
-        assert self.scheduler_ref and (scheduler := self.scheduler_ref())
         if ts not in self.needs_what:
             self.needs_what[ts] = 1
             nbytes = ts.get_nbytes()
             self._network_occ += nbytes
-            scheduler._network_occ_global += nbytes
+            self.scheduler._network_occ_global += nbytes
         else:
             self.needs_what[ts] += 1
 
     def _dec_needs_replica(self, ts: TaskState) -> None:
-        assert self.scheduler_ref and (scheduler := self.scheduler_ref())
         if ts in self.needs_what:
             self.needs_what[ts] -= 1
             if not self.needs_what[ts]:
                 del self.needs_what[ts]
                 nbytes = ts.get_nbytes()
                 self._network_occ -= nbytes
-                scheduler._network_occ_global -= nbytes
+                self.scheduler._network_occ_global -= nbytes
 
     def add_replica(self, ts: TaskState) -> None:
         """The worker acquired a replica of task"""
-        assert self.scheduler_ref and (scheduler := self.scheduler_ref())
         nbytes = ts.get_nbytes()
         if ts in self.needs_what:
             del self.needs_what[ts]
             self._network_occ -= nbytes
-            scheduler._network_occ_global -= nbytes
+            self.scheduler._network_occ_global -= nbytes
         ts.who_has.add(self)
         self.nbytes += nbytes
         self._has_what[ts] = None
 
     @property
     def occupancy(self) -> float:
-        assert self.scheduler_ref and (scheduler := self.scheduler_ref())
-        return scheduler._calc_occupancy(self.task_groups_count, self._network_occ)
+        return self._occupancy_cache or self.scheduler._calc_occupancy(
+            self.task_groups_count, self._network_occ
+        )
 
 
 @dataclasses.dataclass
@@ -827,7 +833,8 @@ class TaskPrefix:
     #: Store timings for each prefix-action
     all_durations: defaultdict[str, float]
 
-    #: If proper duration aren't known this is a
+    #: This measures the maximum recorded live execution time and can be used to
+    #: detect outliers
     max_exec_time: float
 
     #: Task groups associated to this prefix
@@ -4970,6 +4977,13 @@ class Scheduler(SchedulerState, ServerNode):
                 assert not ws.occupancy
                 if ws.status == Status.running:
                     assert ws.address in self.idle
+            assert not (set(ws.needs_what) & set(ws.has_what))
+            actual_needs_what: defaultdict[TaskState, int] = defaultdict(int)
+            for ts in ws.processing:
+                for tss in ts.dependencies:
+                    if tss not in ws.has_what:
+                        actual_needs_what[tss] += 1
+            assert actual_needs_what == ws.needs_what
             assert (ws.status == Status.running) == (ws in self.running)
             for name, count in ws.task_groups_count.items():
                 task_group_counts[name] += count

@@ -1118,20 +1118,11 @@ async def test_steal_concurrent_simple(c, s, *workers):
     assert not ws2.has_what
 
 
-# FIXME shouldn't consistently fail, may be an actual bug?
-@pytest.mark.skipif(
-    math.isfinite(dask.config.get("distributed.scheduler.worker-saturation")),
-    reason="flaky with queuing active",
-)
-@gen_cluster(
-    client=True,
-    config={
-        "distributed.scheduler.work-stealing-interval": 1_000_000,
-    },
-)
+@gen_cluster(client=True)
 async def test_steal_reschedule_reset_in_flight_occupancy(c, s, *workers):
     # https://github.com/dask/distributed/issues/5370
     steal = s.extensions["stealing"]
+    await steal.stop()
     w0 = workers[0]
     roots = c.map(
         inc,

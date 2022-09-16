@@ -433,7 +433,6 @@ class WorkStealing(SchedulerPlugin):
                         if (
                             ts not in self.key_stealable
                             or ts.processing_on is not victim
-                            or not ts.processing_on
                         ):
                             stealable.discard(ts)
                             continue
