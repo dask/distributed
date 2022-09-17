@@ -28,7 +28,7 @@ class ServerNode(Server):
     # XXX avoid inheriting from Server? there is some large potential for confusion
     # between base and derived attribute namespaces...
 
-    def versions(self, packages=None):
+    def versions(self, packages=()):
         return get_versions(packages=packages)
 
     def start_services(self, default_listen_ip):

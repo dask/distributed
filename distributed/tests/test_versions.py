@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import sys
 
+import msgpack
 import pytest
 import tornado
 
@@ -148,17 +149,15 @@ def test_python_version():
 def test_version_custom_pkgs():
     out = get_versions(
         [
-            # Use custom function
-            ("distributed", lambda mod: "123"),
-            # Use version_of_package
             "notexist",
-            ("pytest", None),  # has __version__
-            "tornado",  # has version
-            "math",  # has nothing
+            "pytest",
+            "tornado",
+            "msgpack",
+            "math",
         ]
     )["packages"]
-    assert out["distributed"] == "123"
     assert out["notexist"] is None
     assert out["pytest"] == pytest.__version__
     assert out["tornado"] == tornado.version
+    assert out["msgpack"] == ".".join(str(v) for v in msgpack.version)
     assert out["math"] is None
