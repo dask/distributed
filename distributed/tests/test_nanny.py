@@ -108,9 +108,7 @@ async def test_no_hang_when_scheduler_closes(s, a, b):
 
 
 @pytest.mark.slow
-@gen_cluster(
-    Worker=Nanny, nthreads=[("127.0.0.1", 1)], worker_kwargs={"reconnect": False}
-)
+@gen_cluster(Worker=Nanny, nthreads=[("127.0.0.1", 1)])
 async def test_close_on_disconnect(s, w):
     await s.close()
 
