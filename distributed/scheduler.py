@@ -3337,6 +3337,8 @@ class Scheduler(SchedulerState, ServerNode):
                 )
             from traitlets.config import Config
 
+            # jupyter_server assumes it's starting in the main thread; if not, skip the
+            # initialization logic (see https://github.com/dask/distributed/issues/6886)
             if threading.current_thread() is not threading.main_thread():
                 ServerApp.init_signal = lambda self: None
                 ServerApp._restore_sigint_handler = lambda self: None
