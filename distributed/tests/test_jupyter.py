@@ -24,6 +24,7 @@ async def test_jupyter_server():
 @gen_test()
 async def test_jupyter_server_from_thread():
     """Check that we avoid calling `signal` if already running inside another thread."""
+
     def mock_signal(*args, **kwargs):
         raise
 
