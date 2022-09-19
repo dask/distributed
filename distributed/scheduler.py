@@ -4633,7 +4633,12 @@ class Scheduler(SchedulerState, ServerNode):
                 if ts.suspicious > self.allowed_failures:
                     del recommendations[k]
                     e = pickle.dumps(
-                        KilledWorker(task=k, last_worker=ws.clean()), protocol=4
+                        KilledWorker(
+                            task=k,
+                            last_worker=ws.clean(),
+                            allowed_failures=self.allowed_failures,
+                        ),
+                        protocol=4,
                     )
                     r = self.transition(
                         k,
@@ -8201,8 +8206,8 @@ def _worker_full(ws: WorkerState, saturation_factor: float) -> bool:
 
 
 class KilledWorker(Exception):
-    def __init__(self, task: str, last_worker: WorkerState):
-        super().__init__(task, last_worker)
+    def __init__(self, task: str, last_worker: WorkerState, allowed_failures: int):
+        super().__init__(task, last_worker, allowed_failures)
 
     @property
     def task(self) -> str:
@@ -8211,6 +8216,19 @@ class KilledWorker(Exception):
     @property
     def last_worker(self) -> WorkerState:
         return self.args[1]
+
+    @property
+    def allowed_failures(self) -> int:
+        return self.args[2]
+
+    def __str__(self) -> str:
+        return (
+            f"Attempted to run task {self.task} on {self.allowed_failures} different "
+            "workers but was unsuccessful. The last worker to attempt to run the task was "
+            f"{self.last_worker.address}. Inspecting worker logs is often a good next step "
+            "to diagnose what went wrong. For more information see "
+            "https://distributed.dask.org/en/stable/killed.html."
+        )
 
 
 class WorkerStatusPlugin(SchedulerPlugin):
