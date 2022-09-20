@@ -40,7 +40,7 @@ from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps, loads
-from distributed.scheduler import MemoryState, Scheduler, WorkerState
+from distributed.scheduler import KilledWorker, MemoryState, Scheduler, WorkerState
 from distributed.utils import TimeoutError
 from distributed.utils_test import (
     BrokenComm,
@@ -3978,3 +3978,16 @@ def test_runspec_regression_sync(loop):
         # serialization errors that result in KilledWorker
         with pytest.raises(IndexError):
             overlapped.compute()
+
+
+@gen_cluster(config={"distributed.scheduler.allowed-failures": 666})
+async def test_KilledWorker_informative_message(s, a, b):
+    ws = s.workers[a.address].clean()
+    ex = KilledWorker("foo-bar", ws, s.allowed_failures)
+    with pytest.raises(KilledWorker) as excinfo:
+        raise ex
+    msg = str(excinfo.value)
+    assert "Attempted to run task foo-bar" in msg
+    assert str(s.allowed_failures) in msg
+    assert "worker logs" in msg
+    assert "https://distributed.dask.org/en/stable/killed.html" in msg

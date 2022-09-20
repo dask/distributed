@@ -8224,7 +8224,7 @@ class KilledWorker(Exception):
     def __str__(self) -> str:
         return (
             f"Attempted to run task {self.task} on {self.allowed_failures} different "
-            "workers but was unsuccessful. The last worker to attempt to run the task was "
+            "workers but was unsuccessful. The last worker that attempt to run the task was "
             f"{self.last_worker.address}. Inspecting worker logs is often a good next step "
             "to diagnose what went wrong. For more information see "
             "https://distributed.dask.org/en/stable/killed.html."
