@@ -22,10 +22,35 @@ def memory_limit() -> int:
     # Note: can't use LINUX and WINDOWS constants as they upset mypy
     if sys.platform == "linux":
         try:
+            # cgroups v1 hard limit
             with open("/sys/fs/cgroup/memory/memory.limit_in_bytes") as f:
                 cgroups_limit = int(f.read())
             if cgroups_limit > 0:
                 limit = min(limit, cgroups_limit)
+        except Exception:
+            pass
+        try:
+            # cgroups v1 soft limit
+            with open("/sys/fs/cgroup/memory/memory.soft_limit_in_bytes") as f:
+                cgroups_limit = int(f.read())
+            if cgroups_limit > 0:
+                limit = min(limit, cgroups_limit)
+        except Exception:
+            pass
+        try:
+            # cgroups v2 hard limit
+            with open("/sys/fs/cgroup/memory.max") as f:
+                cgroups_limit = int(f.read())
+                if cgroups_limit > 0:
+                    limit = min(limit, cgroups_limit)
+        except Exception:
+            pass
+        try:
+            # cgroups v2 soft limit
+            with open("/sys/fs/cgroup/memory.high") as f:
+                cgroups_limit = int(f.read())
+                if cgroups_limit > 0:
+                    limit = min(limit, cgroups_limit)
         except Exception:
             pass
 
