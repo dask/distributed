@@ -706,11 +706,8 @@ async def test_malloc_trim_threshold(c, s, a):
         await asyncio.sleep(0.01)
 
 
-@gen_test()
-async def test_default_client_does_not_propagate_to_subprocess():
-    async with Scheduler() as s:
-        async with Client(s.address, asynchronous=True) as c:
-            async with Nanny(s.address, nthreads=1) as n:
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_default_client_does_not_propagate_to_subprocess(c, s, n):
 
                 @dask.delayed
                 def run_in_thread():
