@@ -37,8 +37,9 @@ from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import IOLoop
 
 import dask
+from dask.sizeof import sizeof
 
-from distributed import Scheduler, system
+from distributed import Event, Scheduler, system
 from distributed import versions as version_module
 from distributed.batched import BatchedSend
 from distributed.client import Client, _global_clients, default_client
@@ -287,6 +288,10 @@ def slowidentity(*args, **kwargs):
 def lock_inc(x, lock):
     with lock:
         return x + 1
+
+
+def block_on_event(event: Event) -> None:
+    event.wait()
 
 
 class _UnhashableCallable:
@@ -2458,3 +2463,27 @@ async def fetch_metrics(port: int, prefix: str | None = None) -> dict[str, Any]:
         if prefix is None or family.name.startswith(prefix)
     }
     return families
+
+
+class SizeOf:
+    """
+    An object that returns exactly nbytes when inspected by dask.sizeof.sizeof
+    """
+
+    def __init__(self, nbytes: int) -> None:
+        if not isinstance(nbytes, int):
+            raise TypeError(f"Expected integer for nbytes but got {type(nbytes)}")
+        size_obj = sizeof(object())
+        if nbytes < size_obj:
+            raise ValueError(
+                f"Expected a value larger than {size_obj} integer but got {nbytes}."
+            )
+        self._nbytes = nbytes - size_obj
+
+    def __sizeof__(self) -> int:
+        return self._nbytes
+
+
+def gen_nbytes(nbytes: int) -> SizeOf:
+    """A function that emulates exactly nbytes on the worker data structure."""
+    return SizeOf(nbytes)

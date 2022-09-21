@@ -363,8 +363,8 @@ class Instruction:
         :meth:`WorkerState.handle_stimulus` or in :attr:`WorkerState.stimulus_log` vs.
         an expected list of matches.
 
-        Example
-        -------
+        Examples
+        --------
 
         .. code-block:: python
 
