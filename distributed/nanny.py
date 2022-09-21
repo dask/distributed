@@ -640,7 +640,7 @@ class WorkerProcess:
         self.env = env
         self.pre_spawn_env = pre_spawn_env
         self.config = config.copy()
-        
+
         # Ensure default clients don't propagate to subprocesses
         try:
             from distributed.client import default_client
