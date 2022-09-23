@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Mapping
 from contextlib import contextmanager, nullcontext
+from functools import partial
 from pathlib import Path
 from typing import (
     IO,
@@ -99,7 +100,7 @@ def load_cluster_dump(url: str, **kwargs: Any) -> dict:
     """
     if url.endswith(".msgpack.gz"):
         mode = "rb"
-        reader = msgpack.unpack
+        reader = partial(msgpack.unpack, strict_map_key=False)
     elif url.endswith(".yaml"):
         import yaml
 
