@@ -2104,6 +2104,8 @@ class SchedulerState:
         ):
             # Last-used worker is full or unknown; pick a new worker for the next few tasks
             ws = min(pool, key=partial(self.worker_objective, ts))
+            if self.validate:
+                assert ws in self.running, (ws, self.running)
             tg.last_worker_tasks_left = math.floor(
                 (len(tg) / self.total_nthreads) * ws.nthreads
             )
@@ -2118,7 +2120,8 @@ class SchedulerState:
 
         if self.validate and ws is not None:
             assert self.workers.get(ws.address) is ws
-            assert ws in self.running, (ws, self.running)
+            # NOTE: `ws` may not be running currently. Though not ideal, it's necessary for co-assignment:
+            # we need to send all tasks in order to this worker, and let it decide what to do with them.
 
         return ws
 
