@@ -455,10 +455,12 @@ def test_saturation_factor(
     _test_saturation_factor()
 
 
-def test_bad_saturation_factor():
+@gen_test()
+async def test_bad_saturation_factor():
     with pytest.raises(ValueError, match="foo"):
         with dask.config.set({"distributed.scheduler.worker-saturation": "foo"}):
-            Scheduler(dashboard_address=":0", validate=True)
+            async with Scheduler(dashboard_address=":0", validate=True):
+                pass
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
