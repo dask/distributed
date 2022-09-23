@@ -410,9 +410,10 @@ async def test_queued_remove_add_worker(c, s, a, b):
 
 
 @pytest.mark.parametrize(
-    "saturation, expected_task_counts",
+    "saturation_config, expected_task_counts",
     [
         (2.5, (5, 2)),
+        ("2.5", (5, 2)),
         (2.0, (4, 2)),
         (1.0, (2, 1)),
         (-1.0, (1, 1)),
@@ -421,16 +422,17 @@ async def test_queued_remove_add_worker(c, s, a, b):
     ],
 )
 def test_saturation_factor(
-    saturation: int | float, expected_task_counts: tuple[int, int]
+    saturation_config: int | float | str, expected_task_counts: tuple[int, int]
 ) -> None:
     @gen_cluster(
         client=True,
         nthreads=[("", 2), ("", 1)],
         config={
-            "distributed.scheduler.worker-saturation": saturation,
+            "distributed.scheduler.worker-saturation": saturation_config,
         },
     )
     async def _test_saturation_factor(c, s, a, b):
+        saturation = float(saturation_config)
         event = Event()
         fs = c.map(
             lambda _: event.wait(), range(10), key=[f"wait-{i}" for i in range(10)]
@@ -451,6 +453,12 @@ def test_saturation_factor(
         await c.gather(fs)
 
     _test_saturation_factor()
+
+
+def test_bad_saturation_factor():
+    with pytest.raises(ValueError, match="foo"):
+        with dask.config.set({"distributed.scheduler.worker-saturation": "foo"}):
+            Scheduler(dashboard_address=":0", validate=True)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
