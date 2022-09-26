@@ -10,6 +10,7 @@ import weakref
 from collections import defaultdict
 from operator import mul
 from time import sleep
+from typing import Callable, Mapping
 
 import numpy as np
 import pytest
@@ -1510,7 +1511,7 @@ def test_balance_prefers_busier_with_dependency():
 
     def _correct_placement(actual):
         actual_task_placements = [sorted(placed) for placed in actual]
-        # FIXME: A better task placement would even be but the current balancing
+        # FIXME: A better task placement would be even but the current balancing
         # logic aborts as soon as a worker is no longer classified as idle
         # return actual_task_placements == [
         #     [["a"], ["a"], ["a"], ["a"]],
@@ -1533,12 +1534,29 @@ def test_balance_prefers_busier_with_dependency():
 
 
 def _run_dependency_balance_test(
-    dependencies,
-    dependency_placement,
-    task_placement,
-    correct_placement_fn,
-    recompute_saturation,
-):
+    dependencies: Mapping[str, int],
+    dependency_placement: list[list[str]],
+    task_placement: list[list[list[str]]],
+    correct_placement_fn: Callable[[list[list[list[str]]]], bool],
+    recompute_saturation: bool,
+) -> None:
+    """Run a test for balancing with task dependencies according to the provided specifications.
+
+    Parameters
+    ----------
+    dependencies
+        Mapping of task dependencies to their weight.
+    dependency_placement
+        List of list of dependencies to be placed on the worker corresponding
+        to the index of the outer list.
+    task_placement
+        List of list of tasks to be placed on the worker corresponding to the
+        index of the outer list. Each task is a list of names of dependencies.
+    correct_placement_fn
+        Callable used to determine if stealing placed the tasks as expected.
+    recompute_saturation
+        Whether to recompute worker saturation before stealing.
+    """
     nworkers = len(task_placement)
     for permutation in itertools.permutations(range(nworkers)):
 
