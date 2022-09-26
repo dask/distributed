@@ -1467,15 +1467,44 @@ def test_balance_even_with_replica(recompute_saturation):
 
 
 def test_balance_to_replica(recompute_saturation):
-    dependencies = {"a": 1}
+    dependencies = {"a": 2}
     dependency_placement = [["a"], ["a"], []]
-    task_placement = [[["a"], ["a"], ["a"]], [], []]
+    task_placement = [[["a"], ["a"]], [], []]
 
     def _correct_placement(actual):
         actual_task_counts = [len(placed) for placed in actual]
         return actual_task_counts == [
-            2,
             1,
+            1,
+            0,
+        ]
+
+    _run_dependency_balance_test(
+        dependencies,
+        dependency_placement,
+        task_placement,
+        _correct_placement,
+        recompute_saturation,
+    )
+
+
+def test_balance_multiple_to_replica(recompute_saturation):
+    dependencies = {"a": 6}
+    dependency_placement = [["a"], ["a"], []]
+    task_placement = [[["a"], ["a"], ["a"], ["a"], ["a"], ["a"], ["a"], ["a"]], [], []]
+
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        # FIXME: A better task placement would be even but the current balancing
+        # logic aborts as soon as a worker is no longer classified as idle
+        # return actual_task_counts == [
+        #     4,
+        #     4,
+        #     0,
+        # ]
+        return actual_task_counts == [
+            6,
+            2,
             0,
         ]
 
