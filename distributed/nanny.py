@@ -230,7 +230,7 @@ class Nanny(ServerNode):
             {k: str(v) for k, v in env.items()} if env else {},
         )
 
-        self.config = config or dask.config.config
+        self.config = merge(dask.config.config, config or {})
         worker_kwargs.update(
             {
                 "port": worker_port,
