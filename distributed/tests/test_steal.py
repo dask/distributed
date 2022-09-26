@@ -1641,14 +1641,16 @@ async def _dependency_balance_test_permutation(
     await steal.stop()
 
     inverse = [permutation.index(i) for i in range(len(permutation))]
-    dependency_placement = [dependency_placement[i] for i in permutation]
-    task_placement = [task_placement[i] for i in permutation]
+    permutated_dependency_placement = [dependency_placement[i] for i in permutation]
+    permutated_task_placement = [task_placement[i] for i in permutation]
 
     dependency_futures = await _place_dependencies(
-        dependencies, dependency_placement, c, s, workers
+        dependencies, permutated_dependency_placement, c, s, workers
     )
 
-    ev, futures = await _place_tasks(task_placement, dependency_futures, c, s, workers)
+    ev, futures = await _place_tasks(
+        permutated_task_placement, dependency_futures, c, s, workers
+    )
     if recompute_saturation:
         for ws in s.workers.values():
             s._reevaluate_occupancy_worker(ws)
@@ -1657,16 +1659,16 @@ async def _dependency_balance_test_permutation(
             steal.balance()
             await steal.stop()
 
-            result = _get_task_placement(s, workers)
-            result = [result[i] for i in inverse]
+            permutated_actual_placement = _get_task_placement(s, workers)
+            actual_placement = [permutated_actual_placement[i] for i in inverse]
 
-            if correct_placement_fn(result):
+            if correct_placement_fn(actual_placement):
                 return
     finally:
         # Release the threadpools
         await ev.set()
 
-    raise AssertionError(result, permutation)
+    raise AssertionError(actual_placement, permutation)
 
 
 async def _place_dependencies(
