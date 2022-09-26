@@ -89,20 +89,19 @@ class Nanny(ServerNode):
             2. Existing environment variables
             3. Dask configuration
 
-        Note
-        ----
-        Some environment variables, like ``OMP_NUM_THREADS``, must be set before
-        importing numpy to have effect. Others, like ``MALLOC_TRIM_THRESHOLD_`` (see
-        :ref:`memtrim`), must be set before starting the Linux process. Such variables
-        would be ineffective if set here or in ``distributed.nanny.environ``; they
-        must be set in ``distributed.nanny.pre-spawn-environ`` so that they are set
-        before spawning the subprocess, even if this means poisoning the
-        process running the Nanny.
+        .. note::
+           Some environment variables, like ``OMP_NUM_THREADS``, must be set before
+           importing numpy to have effect. Others, like ``MALLOC_TRIM_THRESHOLD_`` (see
+           :ref:`memtrim`), must be set before starting the Linux process. Such
+           variables would be ineffective if set here or in
+           ``distributed.nanny.environ``; they must be set in
+           ``distributed.nanny.pre-spawn-environ`` so that they are set before spawning
+           the subprocess, even if this means poisoning the process running the Nanny.
 
-        For the same reason, be warned that changing
-        ``distributed.worker.multiprocessing-method`` from ``spawn`` to ``fork`` or
-        ``forkserver`` may inhibit some environment variables; if you do, you should
-        set the variables yourself in the shell before you start ``dask-worker``.
+           For the same reason, be warned that changing
+           ``distributed.worker.multiprocessing-method`` from ``spawn`` to ``fork`` or
+           ``forkserver`` may inhibit some environment variables; if you do, you should
+           set the variables yourself in the shell before you start ``dask-worker``.
 
     See Also
     --------
@@ -639,7 +638,17 @@ class WorkerProcess:
         self.Worker = worker
         self.env = env
         self.pre_spawn_env = pre_spawn_env
-        self.config = config
+        self.config = config.copy()
+
+        # Ensure default clients don't propagate to subprocesses
+        try:
+            from distributed.client import default_client
+
+            default_client()
+            self.config.pop("scheduler", None)
+            self.config.pop("shuffle", None)
+        except ValueError:
+            pass
 
         # Initialized when worker is ready
         self.worker_dir = None
@@ -846,6 +855,7 @@ class WorkerProcess:
     ):  # pragma: no cover
         try:
             os.environ.update(env)
+            dask.config.refresh()
             dask.config.set(config)
 
             from dask.multiprocessing import default_initializer

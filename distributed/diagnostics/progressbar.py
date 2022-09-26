@@ -12,6 +12,7 @@ from tlz import valmap
 from tornado.ioloop import IOLoop
 
 import dask
+from dask.utils import key_split
 
 from distributed.client import default_client, futures_of
 from distributed.core import (
@@ -22,7 +23,7 @@ from distributed.core import (
 )
 from distributed.diagnostics.progress import MultiProgress, Progress, format_time
 from distributed.protocol.pickle import dumps
-from distributed.utils import LoopRunner, is_kernel, key_split
+from distributed.utils import LoopRunner, is_kernel
 
 logger = logging.getLogger(__name__)
 

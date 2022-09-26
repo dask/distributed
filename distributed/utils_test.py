@@ -24,7 +24,7 @@ import threading
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import contextmanager, nullcontext, suppress
 from itertools import count
 from time import sleep
@@ -37,8 +37,9 @@ from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import IOLoop
 
 import dask
+from dask.sizeof import sizeof
 
-from distributed import Scheduler, system
+from distributed import Event, Scheduler, system
 from distributed import versions as version_module
 from distributed.batched import BatchedSend
 from distributed.client import Client, _global_clients, default_client
@@ -287,6 +288,10 @@ def slowidentity(*args, **kwargs):
 def lock_inc(x, lock):
     with lock:
         return x + 1
+
+
+def block_on_event(event: Event) -> None:
+    event.wait()
 
 
 class _UnhashableCallable:
@@ -2330,6 +2335,8 @@ async def wait_for_state(
     """Wait for a task to appear on a Worker or on the Scheduler and to be in a specific
     state.
     """
+    tasks: Mapping[str, SchedulerTaskState | WorkerTaskState]
+
     if isinstance(dask_worker, Worker):
         tasks = dask_worker.state.tasks
     elif isinstance(dask_worker, Scheduler):
@@ -2456,3 +2463,27 @@ async def fetch_metrics(port: int, prefix: str | None = None) -> dict[str, Any]:
         if prefix is None or family.name.startswith(prefix)
     }
     return families
+
+
+class SizeOf:
+    """
+    An object that returns exactly nbytes when inspected by dask.sizeof.sizeof
+    """
+
+    def __init__(self, nbytes: int) -> None:
+        if not isinstance(nbytes, int):
+            raise TypeError(f"Expected integer for nbytes but got {type(nbytes)}")
+        size_obj = sizeof(object())
+        if nbytes < size_obj:
+            raise ValueError(
+                f"Expected a value larger than {size_obj} integer but got {nbytes}."
+            )
+        self._nbytes = nbytes - size_obj
+
+    def __sizeof__(self) -> int:
+        return self._nbytes
+
+
+def gen_nbytes(nbytes: int) -> SizeOf:
+    """A function that emulates exactly nbytes on the worker data structure."""
+    return SizeOf(nbytes)

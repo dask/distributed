@@ -281,13 +281,14 @@ async def test_ProcessingHistogram(c, s, a, b):
     ph = ProcessingHistogram(s)
     ph.update()
     assert (ph.source.data["top"] != 0).sum() == 1
+    assert ph.source.data["right"][-1] < 2
 
     futures = c.map(slowinc, range(10), delay=0.050)
     while not s.tasks:
         await asyncio.sleep(0.01)
 
     ph.update()
-    assert ph.source.data["right"][-1] > 2
+    assert ph.source.data["right"][-1] >= 2
 
 
 @gen_cluster(client=True)

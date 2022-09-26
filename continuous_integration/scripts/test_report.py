@@ -136,21 +136,30 @@ def get_jobs(run, session):
             cache[url] = jobs
 
     df_jobs = pandas.DataFrame.from_records(jobs)
-    extracted = df_jobs.name.str.extract(
-        r"\(([\w\-]+), (\d\.\d+),\s([\w|\s]+)\)"
-    ).dropna()
-    df_jobs["OS"] = extracted[0]
-    df_jobs["python_version"] = extracted[1]
-    df_jobs["partition"] = extracted[2]
-    # We later need to join on this. Somehow the job ID is not part of the workflow schema and we have no other way to join
-    df_jobs["suite_name"] = (
-        df_jobs["OS"]
-        + "-"
-        + df_jobs["python_version"]
-        + "-"
-        + df_jobs["partition"].str.replace(" ", "")
-    )
+    # Interpolate the `$TEST_ID` variable from the job name.
+    # Somehow the job ID is not part of the workflow schema and we have no other way to later join
+    # this to the JXML results.
 
+    name_components = (
+        df_jobs.name.str.extract(r"test \((.+)\)", expand=False)
+        .dropna()
+        .str.split(", ", expand=True)
+    )
+    if len(name_components.columns) == 4:
+        name_components.columns = ["OS", "python_version", "queuing", "partition"]
+    elif len(name_components.columns) == 3:
+        # Migration: handle older jobs without the `queuing` configuration.
+        # This branch can be removed after 2022-12-07.
+        name_components.columns = ["OS", "python_version", "partition"]
+    else:
+        raise ValueError(f"Job names must have 3 or 4 components:\n{name_components!r}")
+
+    # See `Set $TEST_ID` step in `tests.yaml`
+    name_components["partition"] = name_components.partition.str.replace(" ", "")
+
+    df_jobs["suite_name"] = name_components.iloc[:, 0].str.cat(
+        name_components.iloc[:, 1:], sep="-"
+    )
     return df_jobs
 
 
@@ -205,7 +214,12 @@ def suite_from_name(name: str) -> str:
     can have matrix partitions, pytest marks, etc. Basically,
     just lop off the front of the name to get the suite.
     """
-    return "-".join(name.split("-")[:3])
+    parts = name.split("-")
+    if len(parts) == 4:  # [OS, 'latest', py_version, $PARTITION_LABEL]
+        # Migration: handle older jobs without the `queuing` configuration.
+        # This branch can be removed after 2022-12-07.
+        parts.insert(3, "no_queue")
+    return "-".join(parts[:4])
 
 
 def download_and_parse_artifact(
@@ -353,7 +367,7 @@ def download_and_parse_artifacts(
                 html_url = jobs_df[jobs_df["suite_name"] == a["name"]].html_url.unique()
                 assert (
                     len(html_url) == 1
-                ), f"Artifact suit name {a['name']} did not match any jobs dataframe {jobs_df['suite_name'].unique()}"
+                ), f"Artifact suite name {a['name']} did not match any jobs dataframe:\n{jobs_df['suite_name'].unique()}"
                 html_url = html_url[0]
                 assert html_url is not None
                 df2 = df.assign(

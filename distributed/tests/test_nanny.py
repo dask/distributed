@@ -7,6 +7,7 @@ import multiprocessing as mp
 import os
 import random
 import sys
+import warnings
 from contextlib import suppress
 from unittest import mock
 
@@ -702,3 +703,25 @@ async def test_malloc_trim_threshold(c, s, a):
     # - 698 MiB at the end of this test, without MALLOC_TRIM_THRESHOLD_
     while s.memory.process > 250 * 2**20:
         await asyncio.sleep(0.01)
+
+
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_default_client_does_not_propagate_to_subprocess(c, s, n):
+    @dask.delayed
+    def run_in_thread():
+        return
+
+    def func():
+        with warnings.catch_warnings(record=True) as rec:
+            warnings.filterwarnings(
+                "once",
+                message="Running on a single-machine scheduler",
+                category=UserWarning,
+            )
+            # If no scheduler kwarg is provided, this will
+            # automatically transition to long-running
+            dask.compute(run_in_thread(), scheduler="single-threaded")
+        return rec
+
+    rec = await c.submit(func)
+    assert not rec

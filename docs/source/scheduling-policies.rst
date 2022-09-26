@@ -117,7 +117,11 @@ functions in ``scheduler.py``.
 
 .. autosummary:: decide_worker
 
-.. autosummary:: Scheduler.decide_worker
+.. autosummary:: Scheduler.decide_worker_non_rootish
+
+.. autosummary:: Scheduler.decide_worker_rootish_queuing_disabled
+
+.. autosummary:: Scheduler.decide_worker_rootish_queuing_enabled
 
 .. autosummary:: Scheduler.worker_objective
 

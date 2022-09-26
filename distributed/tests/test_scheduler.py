@@ -36,11 +36,11 @@ from distributed import (
     wait,
 )
 from distributed.comm.addressing import parse_host_port
-from distributed.compatibility import LINUX, WINDOWS
+from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps, loads
-from distributed.scheduler import MemoryState, Scheduler, WorkerState
+from distributed.scheduler import KilledWorker, MemoryState, Scheduler, WorkerState
 from distributed.utils import TimeoutError
 from distributed.utils_test import (
     BrokenComm,
@@ -150,6 +150,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         nthreads=nthreads,
         config={
             "distributed.scheduler.work-stealing": False,
+            "distributed.scheduler.worker-saturation": float("inf"),
         },
     )
     async def test_decide_worker_coschedule_order_neighbors_(c, s, *workers):
@@ -248,21 +249,6 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         assert len(unexpected_transfers) <= 3, unexpected_transfers
 
     test_decide_worker_coschedule_order_neighbors_()
-
-
-@pytest.mark.parametrize("ngroups", [1, 2, 3, 5])
-@gen_cluster(
-    client=True,
-    nthreads=[("", 1), ("", 1)],
-)
-async def test_decide_worker_coschedule_order_binary_op(c, s, a, b, ngroups):
-    roots = [[delayed(i, name=f"x-{n}-{i}") for i in range(8)] for n in range(ngroups)]
-    zs = [sum(rs) for rs in zip(*roots)]
-
-    await c.gather(c.compute(zs))
-
-    assert not a.transfer_incoming_log, [l["keys"] for l in a.transfer_incoming_log]
-    assert not b.transfer_incoming_log, [l["keys"] for l in b.transfer_incoming_log]
 
 
 @pytest.mark.slow
@@ -847,7 +833,7 @@ async def test_ready_remove_worker(s, a, b):
     elif math.isinf(s.WORKER_SATURATION):
         cmp = operator.gt
     else:
-        pytest.fail(f"{s.WORKER_OVERSATURATION=}, must be 1 or inf")
+        pytest.fail(f"{s.WORKER_SATURATION=}, must be 1 or inf")
 
     assert all(cmp(len(w.processing), w.nthreads) for w in s.workers.values()), (
         list(s.workers.values()),
@@ -1480,6 +1466,12 @@ async def test_balance_many_workers(c, s, *workers):
     assert {len(w.has_what) for w in s.workers.values()} == {0, 1}
 
 
+# FIXME test is very timing-based; if some threads are consistently slower than others,
+# they'll receive fewer tasks from the queue (a good thing).
+@pytest.mark.skipif(
+    MACOS and math.isfinite(dask.config.get("distributed.scheduler.worker-saturation")),
+    reason="flaky on macOS with queuing active",
+)
 @nodebug
 @gen_cluster(
     client=True,
@@ -3758,7 +3750,9 @@ async def test_Scheduler__to_dict(c, s, a):
     assert isinstance(d["workers"][a.address]["memory"]["process"], int)
 
 
-@gen_cluster(client=True, nthreads=[])
+@gen_cluster(
+    client=True, nthreads=[], config={"distributed.scheduler.worker-saturation": 1.0}
+)
 async def test_TaskState__to_dict(c, s):
     """tasks that are listed as dependencies of other tasks are dumped as a short repr
     and always appear in full under Scheduler.tasks
@@ -3775,7 +3769,7 @@ async def test_TaskState__to_dict(c, s):
     assert isinstance(tasks["y"], dict)
     assert isinstance(tasks["z"], dict)
     assert tasks["x"]["dependents"] == ["<TaskState 'y' waiting>"]
-    assert tasks["y"]["dependencies"] == ["<TaskState 'x' no-worker>"]
+    assert tasks["y"]["dependencies"] == ["<TaskState 'x' queued>"]
 
 
 def _verify_cluster_state(
@@ -3984,3 +3978,16 @@ def test_runspec_regression_sync(loop):
         # serialization errors that result in KilledWorker
         with pytest.raises(IndexError):
             overlapped.compute()
+
+
+@gen_cluster(config={"distributed.scheduler.allowed-failures": 666})
+async def test_KilledWorker_informative_message(s, a, b):
+    ws = s.workers[a.address].clean()
+    ex = KilledWorker("foo-bar", ws, s.allowed_failures)
+    with pytest.raises(KilledWorker) as excinfo:
+        raise ex
+    msg = str(excinfo.value)
+    assert "Attempted to run task foo-bar" in msg
+    assert str(s.allowed_failures) in msg
+    assert "worker logs" in msg
+    assert "https://distributed.dask.org/en/stable/killed.html" in msg

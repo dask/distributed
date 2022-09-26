@@ -8,11 +8,10 @@ from timeit import default_timer
 from tlz import groupby, valmap
 
 from dask.base import tokenize
-from dask.utils import stringify
+from dask.utils import key_split, stringify
 
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.metrics import time
-from distributed.utils import key_split
 
 logger = logging.getLogger(__name__)
 

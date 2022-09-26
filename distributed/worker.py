@@ -39,6 +39,7 @@ from dask.utils import (
     apply,
     format_bytes,
     funcname,
+    key_split,
     parse_bytes,
     parse_timedelta,
     stringify,
@@ -88,7 +89,6 @@ from distributed.utils import (
     is_python_shutting_down,
     iscoroutinefunction,
     json_load_robust,
-    key_split,
     log_errors,
     offload,
     parse_ports,
@@ -745,6 +745,18 @@ class Worker(BaseWorker, ServerNode):
             memory_spill_fraction=memory_spill_fraction,
             memory_pause_fraction=memory_pause_fraction,
         )
+
+        transfer_incoming_bytes_limit = None
+        transfer_incoming_bytes_fraction = dask.config.get(
+            "distributed.worker.memory.transfer"
+        )
+        if (
+            self.memory_manager.memory_limit is not None
+            and transfer_incoming_bytes_fraction is not False
+        ):
+            transfer_incoming_bytes_limit = int(
+                self.memory_manager.memory_limit * transfer_incoming_bytes_fraction
+            )
         state = WorkerState(
             nthreads=nthreads,
             data=self.memory_manager.data,
@@ -754,6 +766,7 @@ class Worker(BaseWorker, ServerNode):
             transfer_incoming_count_limit=transfer_incoming_count_limit,
             validate=validate,
             transition_counter_max=transition_counter_max,
+            transfer_incoming_bytes_limit=transfer_incoming_bytes_limit,
         )
         BaseWorker.__init__(self, state)
 
