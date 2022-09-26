@@ -1056,6 +1056,78 @@ async def test_RetireWorker_faulty_recipient(c, s, *nannies):
     clog_fut.cancel()
 
 
+class Counter:
+    def __init__(self):
+        self.n = 0
+
+    def increment(self):
+        self.n += 1
+
+
+@gen_cluster(client=True, config=demo_config("drop"))
+async def test_dont_drop_actors(c, s, a, b):
+    x = c.submit(Counter, key="x", actor=True, workers=[a.address])
+    y = c.submit(lambda cnt: cnt.increment(), x, key="y", workers=[b.address])
+    await wait([x, y])
+    assert len(s.tasks["x"].who_has) == 2
+    s.extensions["amm"].run_once()
+    await asyncio.sleep(0.2)
+    assert len(s.tasks["x"].who_has) == 2
+
+
+@gen_cluster(client=True, config=demo_config("replicate"))
+async def test_dont_replicate_actors(c, s, a, b):
+    x = c.submit(Counter, key="x", actor=True)
+    await wait(x)
+    assert len(s.tasks["x"].who_has) == 1
+    s.extensions["amm"].run_once()
+    await asyncio.sleep(0.2)
+    assert len(s.tasks["x"].who_has) == 1
+
+
+@pytest.mark.parametrize("has_proxy", [False, True])
+@gen_cluster(client=True, config=NO_AMM_START)
+async def test_RetireWorker_with_actor(c, s, a, b, has_proxy):
+    """A worker holding one or more original actor objects cannot be retired"""
+    x = c.submit(Counter, key="x", actor=True, workers=[a.address])
+    await wait(x)
+    assert "x" in a.state.actors
+
+    if has_proxy:
+        y = c.submit(
+            lambda cnt: cnt.increment().result(), x, key="y", workers=[b.address]
+        )
+        await wait(y)
+        assert "x" in b.data
+        assert "y" in b.data
+
+    with captured_logger("distributed.active_memory_manager", logging.WARNING) as log:
+        out = await c.retire_workers([a.address])
+    assert out == {}
+    assert "it holds actor(s)" in log.getvalue()
+    assert "x" in a.state.actors
+
+    if has_proxy:
+        assert "x" in b.data
+        assert "y" in b.data
+
+
+@gen_cluster(client=True, config=NO_AMM_START)
+async def test_RetireWorker_with_actor_proxy(c, s, a, b):
+    """A worker holding an Actor proxy object can be retired as normal."""
+    x = c.submit(Counter, key="x", actor=True, workers=[a.address])
+    y = c.submit(lambda cnt: cnt.increment().result(), x, key="y", workers=[b.address])
+    await wait(y)
+    assert "x" in a.state.actors
+    assert "x" in b.data
+    assert "y" in b.data
+
+    out = await c.retire_workers([b.address])
+    assert out.keys() == {b.address}
+    assert "x" in a.state.actors
+    assert "y" in a.data
+
+
 class DropEverything(ActiveMemoryManagerPolicy):
     """Inanely suggest to drop every single key in the cluster"""
 

@@ -2892,7 +2892,7 @@ class WorkerState:
     @_handle_event.register
     def _handle_gather_dep_success(self, ev: GatherDepSuccessEvent) -> RecsInstrs:
         """gather_dep terminated successfully.
-        The response may contain less keys than the request.
+        The response may contain fewer keys than the request.
         """
         recommendations: Recs = {}
         for ts in self._gather_dep_done_common(ev):

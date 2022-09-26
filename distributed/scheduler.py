@@ -1108,7 +1108,7 @@ class TaskState:
     #:     "processing" state and be sent for execution to another connected worker.
     loose_restrictions: bool
 
-    #: Whether or not this task is an Actor
+    #: Whether this task is an Actor
     actor: bool
 
     #: The group of tasks to which this one belongs
