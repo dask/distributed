@@ -350,6 +350,15 @@ async def test_environment_variable_pre_post_spawn(c, s, n):
     assert "POST-SPAWN" not in os.environ
 
 
+@gen_cluster(client=True, nthreads=[])
+async def test_config_param_overlays(c, s):
+    with dask.config.set({"test123.foo": 1, "test123.bar": 2}):
+        async with Nanny(s.address, config={"test123.bar": 3, "test123.baz": 4}) as n:
+            out = await c.submit(lambda: dask.config.get("test123"))
+
+    assert out == {"foo": 1, "bar": 3, "baz": 4}
+
+
 @gen_cluster(nthreads=[])
 async def test_local_directory(s):
     with tmpfile() as fn:
