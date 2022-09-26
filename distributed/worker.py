@@ -6,6 +6,7 @@ import builtins
 import errno
 import functools
 import logging
+import math
 import os
 import pathlib
 import random
@@ -746,7 +747,7 @@ class Worker(BaseWorker, ServerNode):
             memory_pause_fraction=memory_pause_fraction,
         )
 
-        transfer_incoming_bytes_limit = None
+        transfer_incoming_bytes_limit = math.inf
         transfer_incoming_bytes_fraction = dask.config.get(
             "distributed.worker.memory.transfer"
         )

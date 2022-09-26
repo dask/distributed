@@ -1234,7 +1234,7 @@ class WorkerState:
     transition_counter_max: int | Literal[False]
 
     #: Limit of bytes for incoming data transfers; this is used for throttling.
-    transfer_incoming_bytes_limit: int | None
+    transfer_incoming_bytes_limit: float
 
     #: Statically-seeded random state, used to guarantee determinism whenever a
     #: pseudo-random choice is required
@@ -1254,7 +1254,7 @@ class WorkerState:
         transfer_incoming_count_limit: int = 9999,
         validate: bool = True,
         transition_counter_max: int | Literal[False] = False,
-        transfer_incoming_bytes_limit: int | None = None,
+        transfer_incoming_bytes_limit: float = math.inf,
     ):
         self.nthreads = nthreads
 
@@ -1492,8 +1492,7 @@ class WorkerState:
             >= self.transfer_incoming_bytes_throttle_threshold
         )
         reached_bytes_limit = (
-            self.transfer_incoming_bytes_limit is not None
-            and self.transfer_incoming_bytes >= self.transfer_incoming_bytes_limit
+            self.transfer_incoming_bytes >= self.transfer_incoming_bytes_limit
         )
         return reached_count_limit and reached_throttle_threshold or reached_bytes_limit
 
@@ -1662,8 +1661,8 @@ class WorkerState:
             return False
 
         transfer_incoming_bytes_remaining = (
-            self.transfer_incoming_bytes_limit or math.inf
-        ) - self.transfer_incoming_bytes
+            self.transfer_incoming_bytes_limit - self.transfer_incoming_bytes
+        )
 
         if not total_nbytes:
             # Ignore the message target for the top-priority task of each worker
