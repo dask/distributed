@@ -1010,76 +1010,40 @@ async def test_deprecated_worker_attributes(s, a, b):
         assert a.data_needed == set()
 
 
+@pytest.mark.parametrize("n_remote_workers", [1, 2])
 @pytest.mark.parametrize(
-    "nbytes,n_in_flight",
+    "nbytes,n_in_flight_per_worker",
     [
         # Note: transfer_message_target_bytes = 50e6 bytes
         (int(10e6), 3),
         (int(20e6), 2),
         (int(30e6), 1),
+        (int(60e6), 1),
     ],
 )
-def test_aggregate_gather_deps(ws, nbytes, n_in_flight):
-    ws2 = "127.0.0.1:2"
+def test_aggregate_gather_deps(ws, nbytes, n_in_flight_per_worker, n_remote_workers):
+    wss = [f"127.0.0.1:{2 + i}" for i in range(n_remote_workers)]
+    who_has = {f"x{i}": [wss[i // 3]] for i in range(3 * n_remote_workers)}
     instructions = ws.handle_stimulus(
         AcquireReplicasEvent(
-            who_has={"x1": [ws2], "x2": [ws2], "x3": [ws2]},
-            nbytes={"x1": nbytes, "x2": nbytes, "x3": nbytes},
-            stimulus_id="s1",
-        )
-    )
-    assert instructions == [GatherDep.match(worker=ws2, stimulus_id="s1")]
-    assert len(instructions[0].to_gather) == n_in_flight
-    assert len(ws.in_flight_tasks) == n_in_flight
-    assert ws.transfer_incoming_bytes == nbytes * n_in_flight
-    assert ws.transfer_incoming_count == 1
-    assert ws.transfer_incoming_count_total == 1
-
-
-@pytest.mark.parametrize(
-    "nbytes,n_in_flight",
-    [
-        # Note: transfer_message_target_bytes = 50e6 bytes
-        (int(10e6), 6),
-        (int(20e6), 4),
-        (int(30e6), 2),
-        (int(60e6), 2),
-    ],
-)
-def test_aggregate_gather_deps_mutiple_workers(ws, nbytes, n_in_flight):
-    ws2 = "127.0.0.1:2"
-    ws3 = "127.0.0.1:3"
-    instructions = ws.handle_stimulus(
-        AcquireReplicasEvent(
-            who_has={
-                "x1": [ws2],
-                "x2": [ws2],
-                "x3": [ws2],
-                "x4": [ws3],
-                "x5": [ws3],
-                "x6": [ws3],
-            },
-            nbytes={
-                "x1": nbytes,
-                "x2": nbytes,
-                "x3": nbytes,
-                "x4": nbytes,
-                "x5": nbytes,
-                "x6": nbytes,
-            },
+            who_has=who_has,
+            nbytes={task: nbytes for task in who_has.keys()},
             stimulus_id="s1",
         )
     )
     assert instructions == [
-        GatherDep.match(worker=ws2, stimulus_id="s1"),
-        GatherDep.match(worker=ws3, stimulus_id="s1"),
+        GatherDep.match(worker=remote, stimulus_id="s1") for remote in wss
     ]
-    assert len(instructions[0].to_gather) == n_in_flight / 2
-    assert len(instructions[0].to_gather) == n_in_flight / 2
-    assert len(ws.in_flight_tasks) == n_in_flight
-    assert ws.transfer_incoming_bytes == nbytes * n_in_flight
-    assert ws.transfer_incoming_count == 2
-    assert ws.transfer_incoming_count_total == 2
+    assert all(
+        len(instruction.to_gather) == n_in_flight_per_worker
+        for instruction in instructions
+    )
+    assert len(ws.in_flight_tasks) == n_in_flight_per_worker * n_remote_workers
+    assert (
+        ws.transfer_incoming_bytes == nbytes * n_in_flight_per_worker * n_remote_workers
+    )
+    assert ws.transfer_incoming_count == n_remote_workers
+    assert ws.transfer_incoming_count_total == n_remote_workers
 
 
 def test_gather_priority(ws):
