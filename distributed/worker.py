@@ -566,8 +566,6 @@ class Worker(BaseWorker, ServerNode):
             local_directory = (
                 dask.config.get("temporary-directory") or tempfile.gettempdir()
             )
-
-        os.makedirs(local_directory, exist_ok=True)
         local_directory = os.path.join(local_directory, "dask-worker-space")
 
         with warn_on_duration(
@@ -577,7 +575,7 @@ class Worker(BaseWorker, ServerNode):
             "Consider specifying a local-directory to point workers to write "
             "scratch data to a local disk.",
         ):
-            self._workspace = WorkSpace(os.path.abspath(local_directory))
+            self._workspace = WorkSpace(local_directory)
             self._workdir = self._workspace.new_work_dir(prefix="worker-")
             self.local_directory = self._workdir.dir_path
 

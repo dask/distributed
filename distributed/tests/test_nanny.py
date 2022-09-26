@@ -369,6 +369,21 @@ async def test_local_directory(s):
                 assert n.process.worker_dir.count("dask-worker-space") == 1
 
 
+@pytest.mark.skipif(WINDOWS, reason="Need POSIX filesystem permissions and UIDs")
+@gen_cluster(nthreads=[])
+async def test_unwriteable_dask_worker_space(s, tmpdir):
+    os.mkdir(f"{tmpdir}/dask-worker-space", mode=0o500)
+    with pytest.raises(PermissionError):
+        open(f"{tmpdir}/dask-worker-space/tryme", "w")
+
+    with dask.config.set(temporary_directory=tmpdir):
+        async with Nanny(s.address) as n:
+            assert n.local_directory == os.path.join(
+                tmpdir, f"dask-worker-space-{os.getuid()}"
+            )
+            assert n.process.worker_dir.count(f"dask-worker-space-{os.getuid()}") == 1
+
+
 def _noop(x):
     """Define here because closures aren't pickleable."""
     pass
