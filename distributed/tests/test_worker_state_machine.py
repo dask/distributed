@@ -1036,6 +1036,52 @@ def test_aggregate_gather_deps(ws, nbytes, n_in_flight):
     assert ws.transfer_incoming_count_total == 1
 
 
+@pytest.mark.parametrize(
+    "nbytes,n_in_flight",
+    [
+        # Note: transfer_message_target_bytes = 50e6 bytes
+        (int(10e6), 6),
+        (int(20e6), 4),
+        (int(30e6), 2),
+        (int(60e6), 2),
+    ],
+)
+def test_aggregate_gather_deps_mutiple_workers(ws, nbytes, n_in_flight):
+    ws2 = "127.0.0.1:2"
+    ws3 = "127.0.0.1:3"
+    instructions = ws.handle_stimulus(
+        AcquireReplicasEvent(
+            who_has={
+                "x1": [ws2],
+                "x2": [ws2],
+                "x3": [ws2],
+                "x4": [ws3],
+                "x5": [ws3],
+                "x6": [ws3],
+            },
+            nbytes={
+                "x1": nbytes,
+                "x2": nbytes,
+                "x3": nbytes,
+                "x4": nbytes,
+                "x5": nbytes,
+                "x6": nbytes,
+            },
+            stimulus_id="s1",
+        )
+    )
+    assert instructions == [
+        GatherDep.match(worker=ws2, stimulus_id="s1"),
+        GatherDep.match(worker=ws3, stimulus_id="s1"),
+    ]
+    assert len(instructions[0].to_gather) == n_in_flight / 2
+    assert len(instructions[0].to_gather) == n_in_flight / 2
+    assert len(ws.in_flight_tasks) == n_in_flight
+    assert ws.transfer_incoming_bytes == nbytes * n_in_flight
+    assert ws.transfer_incoming_count == 2
+    assert ws.transfer_incoming_count_total == 2
+
+
 def test_gather_priority(ws):
     """Test that tasks are fetched in the following order:
 
@@ -1363,11 +1409,29 @@ def test_throttling_does_not_affect_first_transfer(ws):
         ComputeTaskEvent.dummy(
             "c",
             who_has={"a": [ws2]},
-            nbytes={"a": 200},
+            nbytes={"a": int(10e7)},  # transfer_message_target_bytes = 50e6 bytes
             stimulus_id="s1",
         )
     )
     assert ws.tasks["a"].state == "flight"
+
+
+def test_message_target_does_not_affect_first_transfer_on_different_worker(ws):
+    ws.transfer_incoming_count_limit = 100
+    ws.transfer_incoming_bytes_limit = int(10e8)
+    ws.transfer_incoming_bytes_throttle_threshold = 1
+    ws2 = "127.0.0.1:2"
+    ws3 = "127.0.0.1:3"
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "c",
+            who_has={"a": [ws2], "b": [ws3]},
+            nbytes={"a": int(60e6), "b": int(60e6)},
+            stimulus_id="s1",
+        )
+    )
+    assert ws.tasks["a"].state == "flight"
+    assert ws.tasks["b"].state == "flight"
 
 
 def test_throttle_incoming_transfers_on_count_limit(ws):
