@@ -714,8 +714,8 @@ async def test_malloc_trim_threshold(c, s, a):
         await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
-async def test_default_client_does_not_propagate_to_subprocess(c, s, n):
+@gen_cluster(client=True, nthreads=[])
+async def test_default_client_does_not_propagate_to_subprocess(c, s):
     @dask.delayed
     def run_in_thread():
         return
@@ -732,5 +732,14 @@ async def test_default_client_does_not_propagate_to_subprocess(c, s, n):
             dask.compute(run_in_thread(), scheduler="single-threaded")
         return rec
 
-    rec = await c.submit(func)
-    assert not rec
+    async with Nanny(s.address):
+        rec = await c.submit(func)
+        assert not rec
+
+
+@gen_cluster(client=True, nthreads=[], config={"test123": 456})
+async def test_worker_inherits_temp_config(c, s):
+    with dask.config.set(test123=123):
+        async with Nanny(s.address):
+            out = await c.submit(lambda: dask.config.get("test123"))
+            assert out == 123
