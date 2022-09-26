@@ -7017,6 +7017,46 @@ async def test_computation_object_code_client_compute(c, s, a, b):
     assert comp.code[0] == test_function_code
 
 
+@gen_cluster(client=True)
+async def test_upload_directory_worker(c, s, a, b, tmp_path):
+    from dask.distributed import UploadDirectoryWorker
+
+    # Be sure to exclude code coverage reports
+    files_start = {f for f in os.listdir() if not f.startswith(".coverage")}
+
+    folder_name = "mypackage"
+    uploaded_directory = os.path.join(tmp_path, folder_name)
+
+    os.mkdir(uploaded_directory)
+    with open(uploaded_directory / "foo.py", "w") as f:
+        f.write("x = 123")
+    with open(uploaded_directory / "bar.py", "w") as f:
+        f.write("from foo import x")
+
+    plugin = UploadDirectoryWorker(uploaded_directory)
+    await c.register_worker_plugin(plugin)
+
+    tmp_path_name = os.path.split(tmp_path)[-1]
+    [name] = a.plugins
+    assert tmp_path_name in name
+
+    def f():
+        import mypackage.bar as bar
+
+        return bar.x
+
+    results = await c.run(f)
+    assert results[a.worker_address] == 123
+    assert results[b.worker_address] == 123
+
+    async with Worker(s.address, local_directory=tmp_path / "foo", name="foo") as w:
+        results = await c.run(f)
+        assert results[w.worker_address] == 123
+
+    files_end = {f for f in os.listdir() if not f.startswith(".coverage")}
+    assert files_start == files_end  # no change
+
+
 @gen_cluster(client=True, Worker=Nanny)
 async def test_upload_directory(c, s, a, b, tmp_path):
     from dask.distributed import UploadDirectory
