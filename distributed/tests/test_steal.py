@@ -10,7 +10,7 @@ import weakref
 from collections import defaultdict
 from operator import mul
 from time import sleep
-from typing import Callable, Mapping
+from typing import Callable, Iterable, Mapping, Sequence
 
 import numpy as np
 import pytest
@@ -19,7 +19,18 @@ from tlz import sliding_window
 import dask
 from dask.utils import key_split
 
-from distributed import Event, Lock, Nanny, Worker, profile, wait, worker_client
+from distributed import (
+    Client,
+    Event,
+    Lock,
+    Nanny,
+    Scheduler,
+    Worker,
+    profile,
+    wait,
+    worker_client,
+)
+from distributed.client import Future
 from distributed.compatibility import LINUX
 from distributed.core import Status
 from distributed.metrics import time
@@ -1540,7 +1551,11 @@ def _run_dependency_balance_test(
     correct_placement_fn: Callable[[list[list[list[str]]]], bool],
     recompute_saturation: bool,
 ) -> None:
-    """Run a test for balancing with task dependencies according to the provided specifications.
+    """Run a test for balancing with task dependencies according to the provided
+    specifications.
+
+    This method executes the test logic for all permutations of worker placements
+    and generates a new cluster for each one.
 
     Parameters
     ----------
@@ -1556,16 +1571,20 @@ def _run_dependency_balance_test(
         Callable used to determine if stealing placed the tasks as expected.
     recompute_saturation
         Whether to recompute worker saturation before stealing.
+
+    See Also
+    --------
+    _dependency_balance_test_permutation
     """
     nworkers = len(task_placement)
     for permutation in itertools.permutations(range(nworkers)):
 
-        async def _run_permutation(
+        async def _run(
             *args,
             permutation=permutation,
             **kwargs,
         ):
-            await _dependency_balance_test(
+            await _dependency_balance_test_permutation(
                 dependencies,
                 dependency_placement,
                 task_placement,
@@ -1580,23 +1599,46 @@ def _run_dependency_balance_test(
             client=True,
             nthreads=[("", 1)] * len(task_placement),
             config={"distributed.scheduler.unknown-task-duration": "1s"},
-        )(_run_permutation)()
+        )(_run)()
 
 
-async def _dependency_balance_test(
-    dependencies,
-    dependency_placement,
-    task_placement,
-    correct_placement_fn,
-    recompute_saturation,
-    permutation,
-    c,
-    s,
-    *workers,
-):
+async def _dependency_balance_test_permutation(
+    dependencies: Mapping[str, int],
+    dependency_placement: list[list[str]],
+    task_placement: list[list[list[str]]],
+    correct_placement_fn: Callable[[list[list[list[str]]]], bool],
+    recompute_saturation: bool,
+    permutation: list[int],
+    c: Client,
+    s: Scheduler,
+    *workers: Worker,
+) -> None:
+    """Run a test for balancing with task dependencies according to the provided
+    specifications and worker permutations.
+
+    Parameters
+    ----------
+    dependencies
+        Mapping of task dependencies to their weight.
+    dependency_placement
+        List of list of dependencies to be placed on the worker corresponding
+        to the index of the outer list.
+    task_placement
+        List of list of tasks to be placed on the worker corresponding to the
+        index of the outer list. Each task is a list of names of dependencies.
+    correct_placement_fn
+        Callable used to determine if stealing placed the tasks as expected.
+    recompute_saturation
+        Whether to recompute worker saturation before stealing.
+    permutation
+        Permutation of workers to use for this run.
+
+    See Also
+    --------
+    _run_dependency_balance_test
+    """
     steal = s.extensions["stealing"]
     await steal.stop()
-    ev = Event()
 
     inverse = [permutation.index(i) for i in range(len(permutation))]
     dependency_placement = [dependency_placement[i] for i in permutation]
@@ -1606,7 +1648,7 @@ async def _dependency_balance_test(
         dependencies, dependency_placement, c, s, workers
     )
 
-    futures = await _place_tasks(ev, task_placement, dependency_futures, c, s, workers)
+    ev, futures = await _place_tasks(task_placement, dependency_futures, c, s, workers)
     if recompute_saturation:
         for ws in s.workers.values():
             s._reevaluate_occupancy_worker(ws)
@@ -1627,7 +1669,31 @@ async def _dependency_balance_test(
     raise AssertionError(result, permutation)
 
 
-async def _place_dependencies(dependencies, placement, c, s, workers):
+async def _place_dependencies(
+    dependencies: Mapping[str, int],
+    placement: list[list[str]],
+    c: Client,
+    s: Scheduler,
+    workers: Sequence[Worker],
+) -> dict[str, Future]:
+    """Places the dependencies on the workers as specified.
+
+    Parameters
+    ----------
+    dependencies
+        Mapping of task dependencies to their weight.
+    placement
+        List of list of dependencies to be placed on the worker corresponding to the
+        index of the outer list.
+
+    Returns
+    -------
+    Dictionary of futures matching the input dependencies.
+
+    See Also
+    --------
+    _run_dependency_balance_test
+    """
     dependencies_to_workers = defaultdict(set)
     for worker_idx, placed in enumerate(placement):
         for dependency in placed:
@@ -1651,6 +1717,7 @@ async def _place_dependencies(dependencies, placement, c, s, workers):
 
 
 def _assert_dependency_placement(expected, workers):
+    """Assert that dependencies are placed on the workers as expected."""
     actual = []
     for worker in workers:
         actual.append(list(worker.state.tasks.keys()))
@@ -1658,7 +1725,34 @@ def _assert_dependency_placement(expected, workers):
     assert actual == expected
 
 
-async def _place_tasks(ev, placement, dependency_futures, c, s, workers):
+async def _place_tasks(
+    placement: list[list[list[str]]],
+    dependency_futures: Mapping[str, Future],
+    c: Client,
+    s: Scheduler,
+    workers: Sequence[Worker],
+) -> tuple[Event, list[Future]]:
+    """Places the tasks on the workers as specified.
+
+    Parameters
+    ----------
+    placement
+        List of list of tasks to be placed on the worker corresponding to the
+        index of the outer list. Each task is a list of names of dependencies.
+    dependency_futures
+        Mapping of dependency names to their corresponding futures.
+
+    Returns
+    -------
+    Tuple of the event blocking the placed tasks and list of futures matching
+    the input task placement.
+
+    See Also
+    --------
+    _run_dependency_balance_test
+    """
+    ev = Event()
+
     def block(*args, event, **kwargs):
         event.wait()
 
@@ -1686,26 +1780,32 @@ async def _place_tasks(ev, placement, dependency_futures, c, s, workers):
 
     assert_task_placement(placement, s, workers)
 
-    return futures
+    return ev, futures
 
 
-def _get_task_placement(s, workers):
+def _get_task_placement(
+    s: Scheduler, workers: Iterable[Worker]
+) -> list[list[list[str]]]:
+    """Return the placement of tasks on this worker"""
     actual = []
     for w in workers:
         actual.append(
             [list(key_split(ts.key)) for ts in s.workers[w.address].processing]
         )
-    return actual
+    return _deterministic_placement(actual)
 
 
-def _equal_placement(actual, expected):
-    return _comparable_placement(actual) == _comparable_placement(expected)
+def _equal_placement(left, right):
+    """Return True IFF the two input placements are equal."""
+    return _deterministic_placement(left) == _deterministic_placement(right)
 
 
-def _comparable_placement(placement):
+def _deterministic_placement(placement):
+    """Return a deterministic ordering of the tasks or dependencies on each worker."""
     return [sorted(placed) for placed in placement]
 
 
 def assert_task_placement(expected, s, workers):
+    """Assert that tasks are placed on the workers as expected."""
     actual = _get_task_placement(s, workers)
     assert _equal_placement(actual, expected)
