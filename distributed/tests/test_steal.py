@@ -1667,6 +1667,7 @@ async def _dependency_balance_test_permutation(
     finally:
         # Release the threadpools
         await ev.set()
+        await c.gather(futures)
 
     raise AssertionError(actual_placement, permutation)
 
