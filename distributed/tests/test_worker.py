@@ -20,7 +20,7 @@ from unittest import mock
 
 import psutil
 import pytest
-from tlz import first, pluck, sliding_window
+from tlz import first, merge, pluck, sliding_window
 from tornado.ioloop import IOLoop
 
 import dask
@@ -49,6 +49,7 @@ from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
 from distributed.utils_test import (
+    NO_AMM,
     BlockedExecute,
     BlockedGatherDep,
     BlockedGetData,
@@ -645,29 +646,20 @@ async def test_inter_worker_communication(c, s, a, b):
     assert result == 3
 
 
-@gen_cluster(client=True)
-async def test_clean(c, s, a, b):
-    x = c.submit(inc, 1, workers=a.address)
-    y = c.submit(inc, x, workers=b.address)
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_clean(c, s, a):
+    x = c.submit(inc, 1)
+    await x
 
-    await y
-
-    collections = [
-        a.state.tasks,
-        a.data,
-        a.threads,
-    ]
-    for c in collections:
-        assert c
+    collections = [a.state.tasks, a.data, a.threads]
+    assert all(collections)
 
     x.release()
-    y.release()
 
     while x.key in a.state.tasks:
         await asyncio.sleep(0.01)
 
-    for c in collections:
-        assert not c
+    assert not any(collections)
 
 
 @gen_cluster(client=True)
@@ -806,16 +798,20 @@ async def test_multiple_transfers(c, s, w1, w2, w3):
 
 
 @pytest.mark.xfail(reason="very high flakiness")
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 3,
+    config=NO_AMM,
+)
 async def test_share_communication(c, s, w1, w2, w3):
     x = c.submit(
-        mul, b"1", int(w3.transfer_message_target_bytes + 1), workers=w1.address
+        mul, b"1", int(w3.state.transfer_message_target_bytes + 1), workers=w1.address
     )
     y = c.submit(
-        mul, b"2", int(w3.transfer_message_target_bytes + 1), workers=w2.address
+        mul, b"2", int(w3.state.transfer_message_target_bytes + 1), workers=w2.address
     )
     await wait([x, y])
-    await c._replicate([x, y], workers=[w1.address, w2.address])
+    await c.replicate([x, y], workers=[w1.address, w2.address])
     z = c.submit(add, x, y, workers=w3.address)
     await wait(z)
     assert len(w3.transfer_incoming_log) == 2
@@ -826,8 +822,12 @@ async def test_share_communication(c, s, w1, w2, w3):
 @pytest.mark.xfail(reason="very high flakiness")
 @gen_cluster(client=True)
 async def test_dont_overlap_communications_to_same_worker(c, s, a, b):
-    x = c.submit(mul, b"1", int(b.transfer_message_target_bytes + 1), workers=a.address)
-    y = c.submit(mul, b"2", int(b.transfer_message_target_bytes + 1), workers=a.address)
+    x = c.submit(
+        mul, b"1", int(b.state.transfer_message_target_bytes + 1), workers=a.address
+    )
+    y = c.submit(
+        mul, b"2", int(b.state.transfer_message_target_bytes + 1), workers=a.address
+    )
     await wait([x, y])
     z = c.submit(add, x, y, workers=b.address)
     await wait(z)
@@ -867,7 +867,7 @@ async def test_clean_up_dependencies(c, s, a, b):
     assert set(a.data) | set(b.data) == {zz.key}
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_hold_onto_dependents(c, s, a, b):
     x = c.submit(inc, 1, workers=a.address)
     y = c.submit(inc, x, workers=b.address)
@@ -1258,7 +1258,9 @@ async def test_wait_for_outgoing(c, s, a, b):
 
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster(
-    nthreads=[("127.0.0.1", 1), ("127.0.0.1", 1), ("127.0.0.2", 1)], client=True
+    nthreads=[("127.0.0.1", 1), ("127.0.0.1", 1), ("127.0.0.2", 1)],
+    client=True,
+    config=NO_AMM,
 )
 async def test_prefer_gather_from_local_address(c, s, w1, w2, w3):
     x = await c.scatter(123, workers=[w1.address, w3.address], broadcast=True)
@@ -1947,8 +1949,8 @@ async def test_worker_descopes_data(c, s, a):
     assert not C.instances
 
 
-@pytest.mark.slow
-@gen_cluster(client=True)
+# @pytest.mark.slow
+@gen_cluster(client=True, config=NO_AMM)
 async def test_gather_dep_one_worker_always_busy(c, s, a, b):
     # Ensure that both dependencies for H are on another worker than H itself.
     # The worker where the dependencies are on is then later blocked such that
@@ -1967,10 +1969,7 @@ async def test_gather_dep_one_worker_always_busy(c, s, a, b):
 
     h = c.submit(add, f, g, key="h", workers=[b.address])
 
-    while h.key not in b.state.tasks:
-        await asyncio.sleep(0.01)
-
-    assert b.state.tasks[h.key].state == "waiting"
+    await wait_for_state(h.key, "waiting", b)
     assert b.state.tasks[f.key].state in ("flight", "fetch")
     assert b.state.tasks[g.key].state in ("flight", "fetch")
 
@@ -1999,6 +1998,7 @@ async def test_gather_dep_one_worker_always_busy(c, s, a, b):
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1)] * 2 + [("127.0.0.2", 2)] * 10,  # type: ignore
+    config=NO_AMM,
 )
 async def test_gather_dep_local_workers_first(c, s, a, lw, *rws):
     f = (
@@ -2015,6 +2015,7 @@ async def test_gather_dep_local_workers_first(c, s, a, lw, *rws):
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.2", 1)] + [("127.0.0.1", 1)] * 10,  # type: ignore
+    config=NO_AMM,
 )
 async def test_gather_dep_from_remote_workers_if_all_local_workers_are_busy(
     c, s, rw, a, *lws
@@ -2244,7 +2245,9 @@ async def test_gpu_executor(c, s, w):
         assert "gpu" not in w.executors
 
 
-async def assert_task_states_on_worker(expected, worker):
+async def assert_task_states_on_worker(
+    expected: dict[str, str], worker: Worker
+) -> None:
     active_exc = None
     for _ in range(10):
         try:
@@ -2270,7 +2273,7 @@ async def assert_task_states_on_worker(expected, worker):
     raise active_exc
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_worker_state_error_release_error_last(c, s, a, b):
     """
     Create a chain of tasks and err one of them. Then release tasks in a certain
@@ -2337,7 +2340,7 @@ async def test_worker_state_error_release_error_last(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_worker_state_error_release_error_first(c, s, a, b):
     """
     Create a chain of tasks and err one of them. Then release tasks in a certain
@@ -2402,7 +2405,7 @@ async def test_worker_state_error_release_error_first(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_worker_state_error_release_error_int(c, s, a, b):
     """
     Create a chain of tasks and err one of them. Then release tasks in a certain
@@ -2467,7 +2470,7 @@ async def test_worker_state_error_release_error_int(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_worker_state_error_long_chain(c, s, a, b):
     def raise_exc(*args):
         raise RuntimeError()
@@ -2550,7 +2553,7 @@ async def test_worker_state_error_long_chain(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True, nthreads=[("", x) for x in (1, 2, 3, 4)])
+@gen_cluster(client=True, nthreads=[("", x) for x in (1, 2, 3, 4)], config=NO_AMM)
 async def test_hold_on_to_replicas(c, s, *workers):
     f1 = c.submit(inc, 1, workers=[workers[0].address], key="f1")
     f2 = c.submit(inc, 2, workers=[workers[1].address], key="f2")
@@ -2673,7 +2676,7 @@ async def test_run_spec_deserialize_fail(c, s, a, b):
     assert "return lambda: 1 / 0, ()" in logvalue
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_acquire_replicas(c, s, a, b):
     fut = c.submit(inc, 1, workers=[a.address])
     await fut
@@ -2693,7 +2696,7 @@ async def test_acquire_replicas(c, s, a, b):
         await asyncio.sleep(0.005)
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_acquire_replicas_same_channel(c, s, a, b):
     futA = c.submit(inc, 1, workers=[a.address], key="f-A")
     futB = c.submit(inc, 2, workers=[a.address], key="f-B")
@@ -2725,7 +2728,7 @@ async def test_acquire_replicas_same_channel(c, s, a, b):
         assert any(fut.key in msg["keys"] for msg in b.transfer_incoming_log)
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3, config=NO_AMM)
 async def test_acquire_replicas_many(c, s, w1, w2, w3):
     futs = c.map(inc, range(10), workers=[w1.address])
     res = c.submit(sum, futs, workers=[w2.address])
@@ -2755,7 +2758,7 @@ async def test_acquire_replicas_many(c, s, w1, w2, w3):
         await asyncio.sleep(0.001)
 
 
-@gen_cluster(client=True, nthreads=[("", 1)])
+@gen_cluster(client=True, nthreads=[("", 1)], config=NO_AMM)
 async def test_acquire_replicas_already_in_flight(c, s, a):
     """Trying to acquire a replica that is already in flight is a no-op"""
     async with BlockedGatherDep(s.address) as b:
@@ -2783,7 +2786,7 @@ async def test_acquire_replicas_already_in_flight(c, s, a):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_forget_acquire_replicas(c, s, a, b):
     """
     1. The scheduler sends acquire-replicas to the worker
@@ -2811,7 +2814,7 @@ async def test_forget_acquire_replicas(c, s, a, b):
     assert "x" not in s.tasks
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_remove_replicas_simple(c, s, a, b):
     futs = c.map(inc, range(10), workers=[a.address])
     await wait(futs)
@@ -2839,7 +2842,7 @@ async def test_remove_replicas_simple(c, s, a, b):
 @gen_cluster(
     client=True,
     nthreads=[("", 1), ("", 6)],  # Up to 5 threads of b will get stuck; read below
-    config={"distributed.comm.recent-messages-log-length": 1_000},
+    config=merge(NO_AMM, {"distributed.comm.recent-messages-log-length": 1_000}),
 )
 async def test_remove_replicas_while_computing(c, s, a, b):
     futs = c.map(inc, range(10), workers=[a.address])
@@ -2939,7 +2942,7 @@ async def test_remove_replicas_while_computing(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True, nthreads=[("", 1)] * 3)
+@gen_cluster(client=True, nthreads=[("", 1)] * 3, config=NO_AMM)
 async def test_who_has_consistent_remove_replicas(c, s, *workers):
     a = workers[0]
     other_workers = {w for w in workers if w != a}
@@ -2975,7 +2978,7 @@ async def test_who_has_consistent_remove_replicas(c, s, *workers):
     assert s.tasks[f1.key].suspicious == 0
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_acquire_replicas_with_no_priority(c, s, a, b):
     """Scattered tasks have no priority. When they transit to another worker through
     acquire-replicas, they end up in the Worker.data_needed heap together with tasks
@@ -2998,7 +3001,7 @@ async def test_acquire_replicas_with_no_priority(c, s, a, b):
     assert b.state.tasks["x"].priority is not None
 
 
-@gen_cluster(client=True, nthreads=[("", 1)])
+@gen_cluster(client=True, nthreads=[("", 1)], config=NO_AMM)
 async def test_acquire_replicas_large_data(c, s, a):
     """When acquire-replicas is used to acquire multiple sizeable tasks, it respects
     transfer_message_target_bytes and acquires them over multiple iterations.

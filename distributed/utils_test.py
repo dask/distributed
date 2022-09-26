@@ -112,6 +112,8 @@ logging_levels = {
 _TEST_TIMEOUT = 30
 _offload_executor.submit(lambda: None).result()  # create thread during import
 
+NO_AMM = {"distributed.scheduler.active-memory-manager.start": False}
+
 
 async def cleanup_global_workers():
     for worker in Worker._instances:
@@ -529,6 +531,22 @@ def client(loop, cluster_fixture):
     scheduler, workers = cluster_fixture
     with Client(scheduler["address"], loop=loop) as client:
         yield client
+
+
+@pytest.fixture
+def client_no_amm(client):
+    """Let a sync test that relies on the Active Memory Manager (AMM) to run wether
+    the AMM is enabled or not in the dask config
+    """
+    before = client.amm.running()
+    if before:
+        client.amm.stop()  # pragma: nocover
+
+    yield client
+    assert not client.amm.running()
+
+    if before:
+        client.amm.start()  # pragma: nocover
 
 
 # Compatibility. A lot of tests simply use `c` as fixture name
