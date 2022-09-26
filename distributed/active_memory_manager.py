@@ -46,14 +46,20 @@ class ActiveMemoryManagerExtension:
     ``distributed.scheduler.active-memory-manager``.
     """
 
+    #: Back-reference to the scheduler holding this extension
     scheduler: Scheduler
+    #: All active policies
     policies: set[ActiveMemoryManagerPolicy]
+    #: Memory measure to use. Must be one of the attributes or properties of
+    #: :class:`distributed.scheduler.MemoryState`.
+    measure: str
+    #: Run automatically every this many seconds
     interval: float
-
-    # These attributes only exist within the scope of self.run()
-    # Current memory (in bytes) allocated on each worker, plus/minus pending actions
+    #: Current memory (in bytes) allocated on each worker, plus/minus pending actions
+    #: This attribute only exist within the scope of self.run().
     workers_memory: dict[WorkerState, int]
-    # Pending replications and deletions for each task
+    #: Pending replications and deletions for each task
+    #: This attribute only exist within the scope of self.run().
     pending: dict[TaskState, tuple[set[WorkerState], set[WorkerState]]]
 
     def __init__(
@@ -63,6 +69,7 @@ class ActiveMemoryManagerExtension:
         # away on the fly a specialized manager, separate from the main one.
         policies: set[ActiveMemoryManagerPolicy] | None = None,
         *,
+        measure: str | None = None,
         register: bool = True,
         start: bool | None = None,
         interval: float | None = None,
@@ -83,6 +90,23 @@ class ActiveMemoryManagerExtension:
         for policy in policies:
             self.add_policy(policy)
 
+        if not measure:
+            measure = dask.config.get(
+                "distributed.scheduler.active-memory-manager.measure"
+            )
+        mem = scheduler.memory
+        measure_domain = {
+            name
+            for name in dir(mem)
+            if not name.startswith("_") and isinstance(getattr(mem, name), int)
+        }
+        if not isinstance(measure, str) or measure not in measure_domain:
+            raise ValueError(
+                "distributed.scheduler.active-memory-manager.measure "
+                "must be one of " + ", ".join(sorted(measure_domain))
+            )
+        self.measure = measure
+
         if register:
             scheduler.extensions["amm"] = self
             scheduler.handlers["amm_handler"] = self.amm_handler
@@ -92,6 +116,7 @@ class ActiveMemoryManagerExtension:
                 dask.config.get("distributed.scheduler.active-memory-manager.interval")
             )
         self.interval = interval
+
         if start is None:
             start = dask.config.get("distributed.scheduler.active-memory-manager.start")
         if start:
@@ -140,8 +165,9 @@ class ActiveMemoryManagerExtension:
         assert not hasattr(self, "pending")
 
         self.pending = {}
+        measure = self.measure
         self.workers_memory = {
-            w: w.memory.optimistic for w in self.scheduler.workers.values()
+            ws: getattr(ws.memory, measure) for ws in self.scheduler.workers.values()
         }
         try:
             # populate self.pending
