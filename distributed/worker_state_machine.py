@@ -1654,7 +1654,19 @@ class WorkerState:
         return to_gather, total_nbytes
 
     def _task_exceeds_transfer_limits(self, ts: TaskState, total_nbytes: int) -> bool:
-        """Return True if gathering the task together with `total_nbytes` of other data in the same message, False otherwise."""
+        """Would asking to fetch this task exceed transfer limits?
+
+        Parameters
+        ----------
+        ts
+            Candidate task for fetching
+        total_nbytes
+            Total number of bytes scheduler for fetching so far
+        Returns
+        -------
+        can_fetch
+            True if fetching the task is safe, False otherwise.
+        """
         if self.transfer_incoming_bytes == 0 and total_nbytes == 0:
             # When there is no other traffic, the top-priority task is fetched
             # regardless of its size to ensure progress
@@ -1665,8 +1677,8 @@ class WorkerState:
         )
 
         if total_nbytes == 0:
-            # Ignore the message target for the top-priority task of each worker
-            # to ensure progress
+            # Ignore `self.transfer_message_target_bytes` for the top-priority task
+            # of each worker to ensure progress
             bytes_left_to_fetch = transfer_incoming_bytes_remaining
         else:
             bytes_left_to_fetch = (
