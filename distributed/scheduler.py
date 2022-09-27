@@ -8219,25 +8219,27 @@ def family(ts: TaskState, maxsize: int) -> set[TaskState] | None:
     for child in ts.dependents:  # TODO even support multiple dependents?
         # Traverse linear chains
         # TODO something more efficient
-        while len(deps := child.dependencies) == 1 and len(cd := child.dependents) == 1:
-            child = next(iter(cd))
+        while len(siblings := child.dependencies) == 1 and len(gc := child.dependents) == 1:
+            child = next(iter(gc))
 
-        if len(deps) == 1:
+        if len(siblings) == 1:
             # Faster path: nothing but linear chains
             continue
 
-        if len(deps) < maxsize:
-            # Traverse _back_ to root tasks
-            # FIXME totally wrong, just a hack only for the test case
-            for cts in deps:
-                while len(cts.dependencies) == 1:
-                    ncts = next(iter(cts.dependencies))
-                    if len(ncts.dependents) == 1:
-                        cts = ncts
+        if len(siblings) < maxsize:
+            for sts in siblings:
+                if sts is ts:
+                    continue
+                # Traverse linear chains _back_ to root tasks
+                # FIXME totally wrong, just a hack only for the test case
+                while len(sts.dependencies) == 1:
+                    nsts = next(iter(sts.dependencies))
+                    if len(nsts.dependents) == 1:
+                        sts = nsts
                     else:
                         break
 
-                family.add(cts)
+                family.add(sts)
                 if len(family) > maxsize:
                     return None
     return family

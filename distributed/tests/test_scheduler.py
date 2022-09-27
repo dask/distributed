@@ -40,7 +40,7 @@ from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps, loads
-from distributed.scheduler import KilledWorker, MemoryState, Scheduler, WorkerState
+from distributed.scheduler import KilledWorker, MemoryState, Scheduler, WorkerState, family
 from distributed.utils import TimeoutError
 from distributed.utils_test import (
     BrokenComm,
@@ -150,7 +150,8 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         nthreads=nthreads,
         config={
             "distributed.scheduler.work-stealing": False,
-            "distributed.scheduler.worker-saturation": float("inf"),
+            # "distributed.scheduler.worker-saturation": float("inf"),
+            "distributed.scheduler.worker-saturation": 1.0,
         },
     )
     async def test_decide_worker_coschedule_order_neighbors_(c, s, *workers):
@@ -200,6 +201,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
                 **trivial_deps,
             )
 
+        # dask.visualize(x, x.sum(axis=1, split_every=20), optimize_graph=True)
         xx, xsum = dask.persist(x, x.sum(axis=1, split_every=20))
         await xsum
 
@@ -251,7 +253,22 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
     test_decide_worker_coschedule_order_neighbors_()
 
 
-@pytest.mark.slow
+@gen_cluster(nthreads=[], client=True)
+async def test_family(c, s):
+    ax = [delayed(i, name=f"a-{i}") for i in range(8)]
+    bx = [delayed(i, name=f"b-{i}") for i in range(8)]
+    cx = [delayed(i, name=f"c-{i}") for i in range(8)]
+
+    zs = [a + b + c for a, b, c in zip(ax, bx, cx)]
+
+    fs = c.compute(zs)
+    await async_wait_for(s.tasks, 5)
+
+    a1 = s.tasks['a-1']
+
+    a1_fam = family(a1, 1000)
+
+
 @gen_cluster(
     nthreads=[("", 2)] * 4,
     client=True,
