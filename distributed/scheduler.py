@@ -1912,18 +1912,14 @@ class SchedulerState:
             # All workers busy? Task gets/stays queued.
             return None
 
-        # Just pick the least busy worker.
-        # NOTE: this will lead to worst-case scheduling with regards to co-assignment.
+        # Pick the least busy worker.
         ws = min(self.idle.values(), key=lambda ws: len(ws.processing) / ws.nthreads)
         if self.validate:
+            assert self.workers.get(ws.address) is ws
             assert not _worker_full(ws, self.WORKER_SATURATION), (
                 ws,
                 _task_slots_available(ws, self.WORKER_SATURATION),
             )
-            assert ws in self.running, (ws, self.running)
-
-        if self.validate and ws is not None:
-            assert self.workers.get(ws.address) is ws
             assert ws in self.running, (ws, self.running)
 
         return ws
@@ -2016,6 +2012,7 @@ class SchedulerState:
                 else:
                     if not (ws := self.decide_worker_rootish_queuing_enabled()):
                         return {ts.key: "queued"}, {}, {}
+                    return _queueable_to_processing(self, ts, ws)
             else:
                 if not (ws := self.decide_worker_non_rootish(ts)):
                     return {ts.key: "no-worker"}, {}, {}
@@ -2634,9 +2631,6 @@ class SchedulerState:
     def transition_queued_processing(self, key, stimulus_id):
         try:
             ts: TaskState = self.tasks[key]
-            recommendations: Recs = {}
-            client_msgs: dict = {}
-            worker_msgs: dict = {}
 
             if self.validate:
                 assert not ts.actor, f"Actors can't be queued: {ts}"
@@ -2644,10 +2638,10 @@ class SchedulerState:
 
             if ws := self.decide_worker_rootish_queuing_enabled():
                 self.queued.discard(ts)
-                worker_msgs = _add_to_processing(self, ts, ws)
-            # If no worker, task just stays `queued`
+                return _queueable_to_processing(self, ts, ws)
 
-            return recommendations, client_msgs, worker_msgs
+            # If no worker, task just stays `queued`
+            return {}, {}, {}
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -7682,6 +7676,45 @@ def _validate_ready(state: SchedulerState, ts: TaskState) -> None:
     assert all(dts.who_has for dts in ts.dependencies)
 
 
+def _queueable_to_processing(
+    state: SchedulerState, ts: TaskState, ws: WorkerState
+) -> tuple[Recs, dict[str, list[Any]], dict[str, list[Any]]]:
+    "Common logic for transitioning a queueable (root-ish) task to processing, along with the rest of its family"
+    recommendations: Recs = {}
+    worker_msgs = _add_to_processing(state, ts, ws)
+
+    fam = family(ts, 20)  # TODO maxsize as config/what?!
+    if fam:
+        # Schedule other tasks that will all need to be in memory
+        # with this task on the same worker at once.
+
+        # TODO what about when the first task in a family that's already on a worker completes,
+        # but not the whole family? We want to wait for the whole family to be done before assigning
+        # another one. We don't want to take a slot that could be used for the downstream task in the future.
+
+        # If workers could be responsible with memory, this would be okay. Because if everything in the previous
+        # family is done execpt one input to the downstream, then yes, we might as well get started on a new family
+        # while we're waiting, as long as we have the memory capacity to do so.
+        for fts in sorted(fam, key=operator.attrgetter("priority")):
+            # FIXME these tasks may not all necessarily be runnable.
+            # Or maybe some are even in memory?
+            # When does this happen, and how should we handle them?
+            if fts is ts:
+                continue
+
+            if fts.state == "queued":
+                if state.validate:
+                    assert fts in state.queued
+                state.queued.discard(fts)
+            update_msgs(worker_msgs, _add_to_processing(state, fts, ws))
+
+            # This recommendation will be a no-op. It's just to remove any existing
+            # recommendation for the key from the recommendations queue.
+            recommendations[fts.key] = "processing"
+
+    return recommendations, {}, worker_msgs
+
+
 def _add_to_processing(
     state: SchedulerState, ts: TaskState, ws: WorkerState
 ) -> dict[str, list]:
@@ -8177,6 +8210,37 @@ def _worker_full(ws: WorkerState, saturation_factor: float) -> bool:
     if math.isinf(saturation_factor):
         return False
     return _task_slots_available(ws, saturation_factor) <= 0
+
+
+def family(ts: TaskState, maxsize: int) -> set[TaskState] | None:
+    if len(ts.dependents) > maxsize:
+        return None
+    family = set()
+    for child in ts.dependents:  # TODO even support multiple dependents?
+        # Traverse linear chains
+        # TODO something more efficient
+        while len(deps := child.dependencies) == 1 and len(cd := child.dependents) == 1:
+            child = next(iter(cd))
+
+        if len(deps) == 1:
+            # Faster path: nothing but linear chains
+            continue
+
+        if len(deps) < maxsize:
+            # Traverse _back_ to root tasks
+            # FIXME totally wrong, just a hack only for the test case
+            for cts in deps:
+                while len(cts.dependencies) == 1:
+                    ncts = next(iter(cts.dependencies))
+                    if len(ncts.dependents) == 1:
+                        cts = ncts
+                    else:
+                        break
+
+                family.add(cts)
+                if len(family) > maxsize:
+                    return None
+    return family
 
 
 def update_msgs(msgs: dict[str, list[Any]], new: dict[str, list[Any]]) -> None:
