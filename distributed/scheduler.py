@@ -1705,6 +1705,10 @@ class SchedulerState:
             new = self._transition(key, finish, stimulus_id)
             new_recs, new_cmsgs, new_wmsgs = new
 
+            # Put recommendations at end of dict, so they're processed in the next cycle
+            for k in new_recs:
+                if k != key:
+                    recommendations.pop(k, None)
             recommendations.update(new_recs)
             for c, new_msgs in new_cmsgs.items():
                 msgs = client_msgs.get(c)
