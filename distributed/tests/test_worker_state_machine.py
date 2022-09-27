@@ -1014,7 +1014,6 @@ async def test_deprecated_worker_attributes(s, a, b):
 @pytest.mark.parametrize(
     "nbytes,n_in_flight_per_worker",
     [
-        # Note: transfer_message_target_bytes = 50e6 bytes
         (int(10e6), 3),
         (int(20e6), 2),
         (int(30e6), 1),
@@ -1022,6 +1021,7 @@ async def test_deprecated_worker_attributes(s, a, b):
     ],
 )
 def test_aggregate_gather_deps(ws, nbytes, n_in_flight_per_worker, n_remote_workers):
+    ws.transfer_message_target_bytes = int(50e6)
     wss = [f"127.0.0.1:{2 + i}" for i in range(n_remote_workers)]
     who_has = {f"x{i}": [wss[i // 3]] for i in range(3 * n_remote_workers)}
     instructions = ws.handle_stimulus(
@@ -1368,12 +1368,13 @@ def test_throttling_does_not_affect_first_transfer(ws):
     ws.transfer_incoming_count_limit = 100
     ws.transfer_incoming_bytes_limit = 100
     ws.transfer_incoming_bytes_throttle_threshold = 1
+    ws.transfer_message_target_bytes = 100
     ws2 = "127.0.0.1:2"
     ws.handle_stimulus(
         ComputeTaskEvent.dummy(
             "c",
             who_has={"a": [ws2]},
-            nbytes={"a": int(10e7)},  # transfer_message_target_bytes = 50e6 bytes
+            nbytes={"a": 200},
             stimulus_id="s1",
         )
     )
@@ -1382,7 +1383,8 @@ def test_throttling_does_not_affect_first_transfer(ws):
 
 def test_message_target_does_not_affect_first_transfer_on_different_worker(ws):
     ws.transfer_incoming_count_limit = 100
-    ws.transfer_incoming_bytes_limit = int(10e8)
+    ws.transfer_incoming_bytes_limit = 600
+    ws.transfer_message_target_bytes = 100
     ws.transfer_incoming_bytes_throttle_threshold = 1
     ws2 = "127.0.0.1:2"
     ws3 = "127.0.0.1:3"
@@ -1390,7 +1392,7 @@ def test_message_target_does_not_affect_first_transfer_on_different_worker(ws):
         ComputeTaskEvent.dummy(
             "c",
             who_has={"a": [ws2], "b": [ws3]},
-            nbytes={"a": int(60e6), "b": int(60e6)},
+            nbytes={"a": 200, "b": 200},
             stimulus_id="s1",
         )
     )
