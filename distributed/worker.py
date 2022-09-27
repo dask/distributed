@@ -528,7 +528,9 @@ class Worker(BaseWorker, ServerNode):
         self.transfer_outgoing_count_limit = dask.config.get(
             "distributed.worker.connections.incoming"
         )
-
+        transfer_message_bytes_limit = parse_bytes(
+            dask.config.get("distributed.worker.transfer.message-bytes-limit")
+        )
         self.threads = {}
 
         self.active_threads_lock = threading.Lock()
@@ -767,6 +769,7 @@ class Worker(BaseWorker, ServerNode):
             validate=validate,
             transition_counter_max=transition_counter_max,
             transfer_incoming_bytes_limit=transfer_incoming_bytes_limit,
+            transfer_message_bytes_limit=transfer_message_bytes_limit,
         )
         BaseWorker.__init__(self, state)
 

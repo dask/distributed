@@ -78,6 +78,8 @@ distributed:
     blocked-handlers: []
     multiprocessing-method: spawn
     use-file-locking: True
+    transfer:
+      message-bytes-limit: 50MB
     connections:            # Maximum concurrent connections for data
       outgoing: 50          # This helps to control network saturation
       incoming: 10
