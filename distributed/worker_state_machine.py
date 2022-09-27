@@ -1654,18 +1654,18 @@ class WorkerState:
         return to_gather, total_nbytes
 
     def _task_exceeds_transfer_limits(self, ts: TaskState, total_nbytes: int) -> bool:
-        """Would asking to fetch this task exceed transfer limits?
+        """Would asking to gather this task exceed transfer limits?
 
         Parameters
         ----------
         ts
-            Candidate task for fetching
+            Candidate task for gathering
         total_nbytes
-            Total number of bytes scheduler for fetching so far
+            Total number of bytes scheduler for gathering so far
         Returns
         -------
         can_fetch
-            True if fetching the task is safe, False otherwise.
+            True if gathering the task is safe, False otherwise.
         """
         if self.transfer_incoming_bytes == 0 and total_nbytes == 0:
             # When there is no other traffic, the top-priority task is fetched
