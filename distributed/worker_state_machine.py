@@ -1510,7 +1510,7 @@ class WorkerState:
 
         for worker, available_tasks in self._select_workers_for_gather():
             assert worker != self.address
-            to_gather_tasks, total_nbytes = self._select_keys_for_gather(
+            to_gather_tasks, message_nbytes = self._select_keys_for_gather(
                 available_tasks
             )
             # We always load at least one task
@@ -1552,14 +1552,14 @@ class WorkerState:
                 GatherDep(
                     worker=worker,
                     to_gather=to_gather_keys,
-                    total_nbytes=total_nbytes,
+                    total_nbytes=message_nbytes,
                     stimulus_id=stimulus_id,
                 )
             )
 
             self.in_flight_workers[worker] = to_gather_keys
             self.transfer_incoming_count_total += 1
-            self.transfer_incoming_bytes += total_nbytes
+            self.transfer_incoming_bytes += message_nbytes
             if self._should_throttle_incoming_transfers():
                 break
 
@@ -1639,57 +1639,56 @@ class WorkerState:
         for the size of incoming data transfers.
         """
         to_gather: list[TaskState] = []
-        total_nbytes = 0
+        message_nbytes = 0
 
         while available:
             ts = available.peek()
-            if self._task_exceeds_transfer_limits(ts, total_nbytes):
+            if self._task_exceeds_transfer_limits(ts, message_nbytes):
                 break
             for worker in ts.who_has:
                 # This also effectively pops from available
                 self.data_needed[worker].remove(ts)
             to_gather.append(ts)
-            total_nbytes += ts.get_nbytes()
+            message_nbytes += ts.get_nbytes()
 
-        return to_gather, total_nbytes
+        return to_gather, message_nbytes
 
-    def _task_exceeds_transfer_limits(self, ts: TaskState, total_nbytes: int) -> bool:
+    def _task_exceeds_transfer_limits(self, ts: TaskState, message_nbytes: int) -> bool:
         """Would asking to gather this task exceed transfer limits?
 
         Parameters
         ----------
         ts
             Candidate task for gathering
-        total_nbytes
-            Total number of bytes scheduler for gathering so far
+        message_nbytes
+            Total number of bytes already scheduled for gathering in this message
         Returns
         -------
         can_fetch
             True if gathering the task is safe, False otherwise.
         """
-        if self.transfer_incoming_bytes == 0 and total_nbytes == 0:
+        if self.transfer_incoming_bytes == 0 and message_nbytes == 0:
             # When there is no other traffic, the top-priority task is fetched
             # regardless of its size to ensure progress
             return False
 
-        transfer_incoming_bytes_remaining = (
+        incoming_bytes_allowance = (
             self.transfer_incoming_bytes_limit - self.transfer_incoming_bytes
         )
 
-        if total_nbytes == 0:
-            # Ignore `self.transfer_message_target_bytes` for the top-priority task
-            # of each worker to ensure progress
-            bytes_left_to_fetch = transfer_incoming_bytes_remaining
-        else:
-            bytes_left_to_fetch = (
+        # If message_nbytes == 0, i.e., this is the first task to gather in this
+        # message, ignore `self.transfer_message_target_bytes` for the top-priority
+        # task to ensure progress. Otherwise:
+        if message_nbytes != 0:
+            incoming_bytes_allowance = (
                 min(
-                    transfer_incoming_bytes_remaining,
+                    incoming_bytes_allowance,
                     self.transfer_message_target_bytes,
                 )
-                - total_nbytes
+                - message_nbytes
             )
 
-        return ts.get_nbytes() > bytes_left_to_fetch
+        return ts.get_nbytes() > incoming_bytes_allowance
 
     def _ensure_computing(self) -> RecsInstrs:
         if not self.running:
