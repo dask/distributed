@@ -1130,7 +1130,7 @@ class WorkerState:
     #: :meth:`BaseWorker.gather_dep`. Multiple small tasks that can be fetched from the
     #: same worker will be clustered in a single instruction as long as their combined
     #: size doesn't exceed this value.
-    transfer_message_target_bytes: int
+    transfer_message_bytes_limit: float
 
     #: All and only tasks with ``TaskState.state == 'missing'``.
     missing_dep_flight: set[TaskState]
@@ -1255,6 +1255,7 @@ class WorkerState:
         validate: bool = True,
         transition_counter_max: int | Literal[False] = False,
         transfer_incoming_bytes_limit: float = math.inf,
+        transfer_message_bytes_limit: float = math.inf,
     ):
         self.nthreads = nthreads
 
@@ -1293,7 +1294,7 @@ class WorkerState:
         self.in_flight_tasks = set()
         self.executed_count = 0
         self.long_running = set()
-        self.transfer_message_target_bytes = int(50e6)  # 50 MB
+        self.transfer_message_bytes_limit = transfer_message_bytes_limit
         self.log = deque(maxlen=100_000)
         self.stimulus_log = deque(maxlen=10_000)
         self.transition_counter = 0
@@ -1635,7 +1636,7 @@ class WorkerState:
         """Helper of _ensure_communicating.
 
         Fetch all tasks that are replicated on the target worker within a single
-        message, up to transfer_message_target_bytes or until we reach the limit
+        message, up to transfer_message_bytes_limit or until we reach the limit
         for the size of incoming data transfers.
         """
         to_gather: list[TaskState] = []
@@ -1678,13 +1679,13 @@ class WorkerState:
         )
 
         # If message_nbytes == 0, i.e., this is the first task to gather in this
-        # message, ignore `self.transfer_message_target_bytes` for the top-priority
+        # message, ignore `self.transfer_message_bytes_limit` for the top-priority
         # task to ensure progress. Otherwise:
         if message_nbytes != 0:
             incoming_bytes_allowance = (
                 min(
                     incoming_bytes_allowance,
-                    self.transfer_message_target_bytes,
+                    self.transfer_message_bytes_limit,
                 )
                 - message_nbytes
             )

@@ -1021,7 +1021,7 @@ async def test_deprecated_worker_attributes(s, a, b):
     ],
 )
 def test_aggregate_gather_deps(ws, nbytes, n_in_flight_per_worker, n_remote_workers):
-    ws.transfer_message_target_bytes = int(50e6)
+    ws.transfer_message_bytes_limit = int(50e6)
     wss = [f"127.0.0.1:{2 + i}" for i in range(n_remote_workers)]
     who_has = {f"x{i}": [wss[i // 3]] for i in range(3 * n_remote_workers)}
     instructions = ws.handle_stimulus(
@@ -1076,7 +1076,7 @@ def test_gather_priority(ws):
             },
             # Substantial nbytes prevents transfer_incoming_count_limit to be
             # overridden by transfer_incoming_bytes_throttle_threshold,
-            # but it's less than transfer_message_target_bytes
+            # but it's less than transfer_message_bytes_limit
             nbytes={f"x{i}": 4 * 2**20 for i in range(1, 9)},
             stimulus_id="compute1",
         ),
@@ -1368,7 +1368,7 @@ def test_throttling_does_not_affect_first_transfer(ws):
     ws.transfer_incoming_count_limit = 100
     ws.transfer_incoming_bytes_limit = 100
     ws.transfer_incoming_bytes_throttle_threshold = 1
-    ws.transfer_message_target_bytes = 100
+    ws.transfer_message_bytes_limit = 100
     ws2 = "127.0.0.1:2"
     ws.handle_stimulus(
         ComputeTaskEvent.dummy(
@@ -1384,7 +1384,7 @@ def test_throttling_does_not_affect_first_transfer(ws):
 def test_message_target_does_not_affect_first_transfer_on_different_worker(ws):
     ws.transfer_incoming_count_limit = 100
     ws.transfer_incoming_bytes_limit = 600
-    ws.transfer_message_target_bytes = 100
+    ws.transfer_message_bytes_limit = 100
     ws.transfer_incoming_bytes_throttle_threshold = 1
     ws2 = "127.0.0.1:2"
     ws3 = "127.0.0.1:3"
