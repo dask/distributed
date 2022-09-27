@@ -494,7 +494,7 @@ class WorkerState:
 
     # Reference to scheduler task_groups
     scheduler_ref: weakref.ref[SchedulerState] | None
-    task_groups_count: dict[str, int]
+    task_groups_count: defaultdict[str, int]
     _network_occ: float
     _occupancy_cache: float | None
     needs_what: dict[TaskState, int]
