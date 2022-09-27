@@ -1637,7 +1637,7 @@ class WorkerState:
         """Helper of _ensure_communicating.
 
         Fetch all tasks that are replicated on the target worker within a single
-        message, up to transfer_message_target_bytes or until we reach the limit
+        message, up to transfer_message_bytes_limit or until we reach the limit
         for the size of incoming data transfers.
         """
         to_gather: list[TaskState] = []

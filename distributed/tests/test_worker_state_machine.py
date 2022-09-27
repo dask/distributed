@@ -1013,13 +1013,13 @@ async def test_deprecated_worker_attributes(s, a, b):
 @pytest.mark.parametrize(
     "nbytes,n_in_flight",
     [
-        # Note: transfer_message_target_bytes = 50e6 bytes
         (int(10e6), 3),
         (int(20e6), 2),
         (int(30e6), 1),
     ],
 )
 def test_aggregate_gather_deps(ws, nbytes, n_in_flight):
+    ws.transfer_message_bytes_limit = int(50e6)
     ws2 = "127.0.0.1:2"
     instructions = ws.handle_stimulus(
         AcquireReplicasEvent(
@@ -1066,7 +1066,7 @@ def test_gather_priority(ws):
             },
             # Substantial nbytes prevents transfer_incoming_count_limit to be
             # overridden by transfer_incoming_bytes_throttle_threshold,
-            # but it's less than transfer_message_target_bytes
+            # but it's less than transfer_message_bytes_limit
             nbytes={f"x{i}": 4 * 2**20 for i in range(1, 9)},
             stimulus_id="compute1",
         ),
