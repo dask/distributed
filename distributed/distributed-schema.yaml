@@ -349,7 +349,12 @@ properties:
                   - string
                   - integer
                 description: |
-                  The maximum size of a message sent between workers
+                  The maximum amount of data for a worker to request from another in a single ``GatherDep``
+
+                  Tasks are gathered in batches, and if the first task in a batch is larger than this value,
+                  the task will still be gathered to ensure progress. Hence, this limit is not absolute. 
+                  Note that this limit applies to a single ``GatherDep`` and a worker may gather data from 
+                  multiple workers in parallel.
           connections:
             type: object
             description: |
