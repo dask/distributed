@@ -24,7 +24,11 @@ from distributed.worker_state_machine import (
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 2,
-    config={"distributed.scheduler.work-stealing": False},
+    config={
+        "distributed.scheduler.work-stealing": False,
+        # Difficult to get many tasks in processing with scheduler-side queuing
+        "distributed.scheduler.worker-saturation": float("inf"),
+    },
 )
 async def test_scheduler_reschedule(c, s, a, b):
     xs = c.map(slowinc, range(100), key="x", delay=0.1)

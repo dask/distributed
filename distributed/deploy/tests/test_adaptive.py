@@ -302,7 +302,11 @@ def test_basic_no_loop(cleanup):
 @gen_test()
 async def test_target_duration():
     with dask.config.set(
-        {"distributed.scheduler.default-task-durations": {"slowinc": 1}}
+        {
+            "distributed.scheduler.default-task-durations": {"slowinc": 1},
+            # adaptive target for queued tasks doesn't yet consider default or learned task durations
+            "distributed.scheduler.worker-saturation": float("inf"),
+        }
     ):
         async with LocalCluster(
             n_workers=0,

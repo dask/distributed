@@ -4,6 +4,7 @@ import abc
 import asyncio
 import heapq
 import logging
+import math
 import operator
 import random
 import sys
@@ -363,8 +364,8 @@ class Instruction:
         :meth:`WorkerState.handle_stimulus` or in :attr:`WorkerState.stimulus_log` vs.
         an expected list of matches.
 
-        Example
-        -------
+        Examples
+        --------
 
         .. code-block:: python
 
@@ -1129,7 +1130,7 @@ class WorkerState:
     #: :meth:`BaseWorker.gather_dep`. Multiple small tasks that can be fetched from the
     #: same worker will be clustered in a single instruction as long as their combined
     #: size doesn't exceed this value.
-    transfer_message_target_bytes: int
+    transfer_message_bytes_limit: float
 
     #: All and only tasks with ``TaskState.state == 'missing'``.
     missing_dep_flight: set[TaskState]
@@ -1254,6 +1255,7 @@ class WorkerState:
         validate: bool = True,
         transition_counter_max: int | Literal[False] = False,
         transfer_incoming_bytes_limit: int | None = None,
+        transfer_message_bytes_limit: float = math.inf,
     ):
         self.nthreads = nthreads
 
@@ -1292,7 +1294,7 @@ class WorkerState:
         self.in_flight_tasks = set()
         self.executed_count = 0
         self.long_running = set()
-        self.transfer_message_target_bytes = int(50e6)  # 50 MB
+        self.transfer_message_bytes_limit = transfer_message_bytes_limit
         self.log = deque(maxlen=100_000)
         self.stimulus_log = deque(maxlen=10_000)
         self.transition_counter = 0
@@ -1635,7 +1637,7 @@ class WorkerState:
         """Helper of _ensure_communicating.
 
         Fetch all tasks that are replicated on the target worker within a single
-        message, up to transfer_message_target_bytes or until we reach the limit
+        message, up to transfer_message_bytes_limit or until we reach the limit
         for the size of incoming data transfers.
         """
         to_gather: list[TaskState] = []
@@ -1644,10 +1646,10 @@ class WorkerState:
         if self.transfer_incoming_bytes_limit is not None:
             bytes_left_to_fetch = min(
                 self.transfer_incoming_bytes_limit - self.transfer_incoming_bytes,
-                self.transfer_message_target_bytes,
+                self.transfer_message_bytes_limit,
             )
         else:
-            bytes_left_to_fetch = self.transfer_message_target_bytes
+            bytes_left_to_fetch = self.transfer_message_bytes_limit
 
         while available:
             ts = available.peek()

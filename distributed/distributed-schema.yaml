@@ -339,6 +339,17 @@ properties:
               To avoid this, Dask usually used a file-based lock.
               However, on some systems file-based locks don't work.
               This is particularly common on HPC NFS systems, where users may want to set this to false.
+          transfer:
+            type: object
+            description: |
+              Configuration setting for data transfer between workers
+            properties:
+              message-bytes-limit:
+                type:
+                  - string
+                  - integer
+                description: |
+                  The maximum size of a message sent between workers
           connections:
             type: object
             description: |

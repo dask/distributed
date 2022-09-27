@@ -21,13 +21,19 @@ def memory_limit() -> int:
     # Check cgroups if available
     # Note: can't use LINUX and WINDOWS constants as they upset mypy
     if sys.platform == "linux":
-        try:
-            with open("/sys/fs/cgroup/memory/memory.limit_in_bytes") as f:
-                cgroups_limit = int(f.read())
-            if cgroups_limit > 0:
-                limit = min(limit, cgroups_limit)
-        except Exception:
-            pass
+        for path in [
+            "/sys/fs/cgroup/memory/memory.limit_in_bytes",  # cgroups v1 hard limit
+            "/sys/fs/cgroup/memory/memory.soft_limit_in_bytes",  # cgroups v1 soft limit
+            "/sys/fs/cgroup/memory.max",  # cgroups v2 hard limit
+            "/sys/fs/cgroup/memory.high",  # cgroups v2 soft limit
+        ]:
+            try:
+                with open(path) as f:
+                    cgroups_limit = int(f.read())
+                if cgroups_limit > 0:
+                    limit = min(limit, cgroups_limit)
+            except Exception:
+                pass
 
     # Check rlimit if available
     if sys.platform != "win32":

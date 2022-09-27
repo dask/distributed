@@ -24,19 +24,24 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.8", "3.9", "3.10"]
+        queuing: [no_queue]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
         exclude:
           - os: macos-latest
             python-version: 3.9
         include:
-          - partition: "ci1"
-            partition-label: "ci1"
-          - partition: "not ci1"
-            partition-label: "notci1"
+          - os: ubuntu-latest
+            python-version: 3.9
+            queuing: queue
+            partition: "ci1"
+          - os: ubuntu-latest
+            python-version: 3.9
+            queuing: queue
+            partition: "not ci1"
 
         # Uncomment to stress-test the test suite for random failures.
-        # Must also change env.TEST_ID below.
+        # Must also change `export TEST_ID` in first step below.
         # This will take a LONG time and delay all PRs across the whole github.com/dask!
         # To avoid hamstringing other people, change 'on: [push, pull_request]' above
         # to just 'on: [push]'; this way the stress test will run exclusively in your
@@ -45,10 +50,18 @@ jobs:
 
     env:
       CONDA_FILE: continuous_integration/environment-${{ matrix.python-version }}.yaml
-      TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}
-      # TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}-${{ matrix.run }}
 
     steps:
+      - name: Set $TEST_ID
+        run: |
+          export PARTITION_LABEL=$( echo "${{ matrix.partition }}" | sed "s/ //" )
+          export TEST_ID="${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.queuing }}-$PARTITION_LABEL"
+          # Switch to this version for stress-test:
+          # export TEST_ID="${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.queuing }}-$PARTITION_LABEL-${{ matrix.run }}"
+          echo "TEST_ID: $TEST_ID"
+          echo "TEST_ID=$TEST_ID" >> $GITHUB_ENV
+        shell: bash
+
       - name: Checkout source
         uses: actions/checkout@v2
         with:
@@ -122,15 +135,21 @@ jobs:
         if: ${{ matrix.os != 'windows-latest' }}
         run: sed -i.bak 's/timeout_method = thread/timeout_method = signal/' setup.cfg
 
+      - name: Disable IPv6
+        shell: bash -l {0}
+        # FIXME ipv6-related failures on Ubuntu github actions CI
+        # https://github.com/dask/distributed/issues/4514
+        if: ${{ matrix.os  == 'ubuntu-latest' }}
+        run: echo "DISABLE_IPV6=1" >> $GITHUB_ENV
+
+      - name: Set up dask env for job queuing
+        shell: bash -l {0}
+        if: ${{ matrix.queuing == 'queue' }}
+        run: echo "DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=1.0" >> $GITHUB_ENV
+
       - name: Print host info
         shell: bash -l {0}
         run: |
-          if [[ "${{ matrix.os }}" = "ubuntu-latest" ]]; then
-              # FIXME ipv6-related failures on Ubuntu github actions CI
-              # https://github.com/dask/distributed/issues/4514
-              export DISABLE_IPV6=1
-          fi
-
           python continuous_integration/scripts/host_info.py
 
       - name: Test
@@ -139,12 +158,6 @@ jobs:
         env:
           PYTHONFAULTHANDLER: 1
         run: |
-          if [[ "${{ matrix.os }}" = "ubuntu-latest" ]]; then
-              # FIXME ipv6-related failures on Ubuntu github actions CI
-              # https://github.com/dask/distributed/issues/4514
-              export DISABLE_IPV6=1
-          fi
-
           source continuous_integration/scripts/set_ulimit.sh
           set -o pipefail
           mkdir reports
@@ -184,6 +197,7 @@ jobs:
         with:
           name: ${{ env.TEST_ID }}
           path: reports
+
       - name: Upload gen_cluster dumps for failed tests
         # ensure this runs even if pytest fails
         if: >

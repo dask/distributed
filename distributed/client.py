@@ -3441,8 +3441,11 @@ class Client(SyncMethodMixin):
         """Upload local package to workers
 
         This sends a local file up to all worker nodes.  This file is placed
-        into a temporary directory on Python's system path so any .py,  .egg
-        or .zip  files will be importable.
+        into the working directory of the running worker, see config option
+        ``temporary-directory`` (defaults to :py:func:`tempfile.gettempdir`).
+
+        This directory will be added to the Python's system path so any .py,
+        .egg or .zip  files will be importable.
 
         Parameters
         ----------
@@ -4155,8 +4158,8 @@ class Client(SyncMethodMixin):
             single argument `event` which is a tuple `(timestamp, msg)` where
             timestamp refers to the clock on the scheduler.
 
-        Example
-        -------
+        Examples
+        --------
 
         >>> import logging
         >>> logger = logging.getLogger("myLogger")  # Log config not shown
