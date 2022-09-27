@@ -1655,7 +1655,7 @@ class WorkerState:
 
     def _task_exceeds_transfer_limits(self, ts: TaskState, total_nbytes: int) -> bool:
         """Return True if gathering the task together with `total_nbytes` of other data in the same message, False otherwise."""
-        if not self.transfer_incoming_bytes and not total_nbytes:
+        if self.transfer_incoming_bytes == 0 and total_nbytes == 0:
             # When there is no other traffic, the top-priority task is fetched
             # regardless of its size to ensure progress
             return False
@@ -1664,7 +1664,7 @@ class WorkerState:
             self.transfer_incoming_bytes_limit - self.transfer_incoming_bytes
         )
 
-        if not total_nbytes:
+        if total_nbytes == 0:
             # Ignore the message target for the top-priority task of each worker
             # to ensure progress
             bytes_left_to_fetch = transfer_incoming_bytes_remaining
