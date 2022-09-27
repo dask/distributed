@@ -1665,7 +1665,8 @@ class WorkerState:
         Returns
         -------
         exceeds_limit
-            True if gathering the task would exceed limits, False otherwise (in which case the task can be gathered).
+            True if gathering the task would exceed limits, False otherwise
+            (in which case the task can be gathered).
         """
         if self.transfer_incoming_bytes == 0 and message_nbytes == 0:
             # When there is no other traffic, the top-priority task is fetched
