@@ -601,7 +601,7 @@ class WorkerState:
             extra=self.extra,
             server_id=self.server_id,
         )
-        ws._occupancy_cache = ws.occupancy
+        ws._occupancy_cache = self.occupancy
 
         ws.executing = {
             ts.key: duration for ts, duration in self.executing.items()  # type: ignore
