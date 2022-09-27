@@ -1600,32 +1600,12 @@ class SchedulerState:
                 b_recs, b_cmsgs, b_wmsgs = func(self, key, stimulus_id)
 
                 recommendations.update(a_recs)
-                for c, new_msgs in a_cmsgs.items():
-                    msgs = client_msgs.get(c)
-                    if msgs is not None:
-                        msgs.extend(new_msgs)
-                    else:
-                        client_msgs[c] = new_msgs
-                for w, new_msgs in a_wmsgs.items():
-                    msgs = worker_msgs.get(w)
-                    if msgs is not None:
-                        msgs.extend(new_msgs)
-                    else:
-                        worker_msgs[w] = new_msgs
+                update_msgs(client_msgs, a_cmsgs)
+                update_msgs(worker_msgs, a_wmsgs)
 
                 recommendations.update(b_recs)
-                for c, new_msgs in b_cmsgs.items():
-                    msgs = client_msgs.get(c)
-                    if msgs is not None:
-                        msgs.extend(new_msgs)
-                    else:
-                        client_msgs[c] = new_msgs
-                for w, new_msgs in b_wmsgs.items():
-                    msgs = worker_msgs.get(w)
-                    if msgs is not None:
-                        msgs.extend(new_msgs)
-                    else:
-                        worker_msgs[w] = new_msgs
+                update_msgs(client_msgs, b_cmsgs)
+                update_msgs(worker_msgs, b_wmsgs)
 
                 start = "released"
             else:
@@ -1710,18 +1690,8 @@ class SchedulerState:
                 if k != key:
                     recommendations.pop(k, None)
             recommendations.update(new_recs)
-            for c, new_msgs in new_cmsgs.items():
-                msgs = client_msgs.get(c)
-                if msgs is not None:
-                    msgs.extend(new_msgs)
-                else:
-                    client_msgs[c] = new_msgs
-            for w, new_msgs in new_wmsgs.items():
-                msgs = worker_msgs.get(w)
-                if msgs is not None:
-                    msgs.extend(new_msgs)
-                else:
-                    worker_msgs[w] = new_msgs
+            update_msgs(client_msgs, new_cmsgs)
+            update_msgs(worker_msgs, new_wmsgs)
 
         if self.validate:
             # FIXME downcast antipattern
@@ -8207,6 +8177,15 @@ def _worker_full(ws: WorkerState, saturation_factor: float) -> bool:
     if math.isinf(saturation_factor):
         return False
     return _task_slots_available(ws, saturation_factor) <= 0
+
+
+def update_msgs(msgs: dict[str, list[Any]], new: dict[str, list[Any]]) -> None:
+    for k, new_msgs in new.items():
+        m = msgs.get(k)
+        if m is not None:
+            m.extend(new_msgs)
+        else:
+            msgs[k] = new_msgs
 
 
 class KilledWorker(Exception):
