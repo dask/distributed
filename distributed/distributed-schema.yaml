@@ -349,11 +349,11 @@ properties:
                   - string
                   - integer
                 description: |
-                  The maximum amount of data for a worker to request from another in a single gather operation.
+                  The maximum amount of data for a worker to request from another in a single gather operation
 
                   Tasks are gathered in batches, and if the first task in a batch is larger than this value,
                   the task will still be gathered to ensure progress. Hence, this limit is not absolute. 
-                  Note that this limit applies to a single gather operation and a worker may gather data from 
+                  Note that this limit applies to a single gather operation and a worker may gather data from
                   multiple workers in parallel.
           connections:
             type: object
