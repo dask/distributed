@@ -1678,8 +1678,14 @@ async def _dependency_balance_test_permutation(
     )
 
     ev, futures = await _place_tasks(
-        permutated_task_placement, dependency_futures, c, s, workers
+        permutated_task_placement,
+        permutated_dependency_placement,
+        dependency_futures,
+        c,
+        s,
+        workers,
     )
+
     if recompute_saturation:
         for ws in s.workers.values():
             s._reevaluate_occupancy_worker(ws)
@@ -1759,6 +1765,7 @@ def _assert_dependency_placement(expected, workers):
 
 async def _place_tasks(
     placement: list[list[list[str]]],
+    dependency_placement: list[list[str]],
     dependency_futures: Mapping[str, Future],
     c: Client,
     s: Scheduler,
@@ -1771,6 +1778,9 @@ async def _place_tasks(
     placement
         List of list of tasks to be placed on the worker corresponding to the
         index of the outer list. Each task is a list of names of dependencies.
+    dependency_placement
+        List of list of dependencies to be placed on the worker corresponding to the
+        index of the outer list.
     dependency_futures
         Mapping of dependency names to their corresponding futures.
 
@@ -1808,6 +1818,12 @@ async def _place_tasks(
             futures.append(f)
 
     while len([ts for ts in s.tasks.values() if ts.processing_on]) < len(futures):
+        await asyncio.sleep(0.001)
+
+    while any(
+        len(w.state.tasks) < (len(tasks) + len(dependencies))
+        for w, dependencies, tasks in zip(workers, dependency_placement, placement)
+    ):
         await asyncio.sleep(0.001)
 
     assert_task_placement(placement, s, workers)
