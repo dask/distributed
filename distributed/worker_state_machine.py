@@ -1126,10 +1126,11 @@ class WorkerState:
     #: multiple entries in :attr:`~TaskState.who_has` will appear multiple times here.
     data_needed: defaultdict[str, HeapSet[TaskState]]
 
-    #: Number of bytes to fetch from the same worker in a single call to
-    #: :meth:`BaseWorker.gather_dep`. Multiple small tasks that can be fetched from the
-    #: same worker will be clustered in a single instruction as long as their combined
-    #: size doesn't exceed this value.
+    #: Number of bytes to gather from the same worker in a single call to
+    #: :meth:`BaseWorker.gather_dep`. Multiple small tasks that can be gathered from the
+    #: same worker will be batched in a single instruction as long as their combined
+    #: size doesn't exceed this value. If the first task to be gathered exceeds this
+    # limit, it will still be gathered to ensure progress. Hence, this limit is not absolute.
     transfer_message_bytes_limit: float
 
     #: All and only tasks with ``TaskState.state == 'missing'``.
@@ -1546,7 +1547,7 @@ class WorkerState:
 
             # A single invocation of _ensure_communicating may generate up to one
             # GatherDep instruction per worker. Multiple tasks from the same worker may
-            # be clustered in the same instruction by _select_keys_for_gather. But once
+            # be batched in the same instruction by _select_keys_for_gather. But once
             # a worker has been selected for a GatherDep and added to in_flight_workers,
             # it won't be selected again until the gather completes.
             instructions.append(
