@@ -1108,7 +1108,7 @@ class TaskState:
     #:     "processing" state and be sent for execution to another connected worker.
     loose_restrictions: bool
 
-    #: Whether or not this task is an Actor
+    #: Whether this task is an Actor
     actor: bool
 
     #: The group of tasks to which this one belongs
@@ -1457,9 +1457,14 @@ class SchedulerState:
             dask.config.get("distributed.worker.memory.rebalance.sender-recipient-gap")
             / 2.0
         )
-        self.WORKER_SATURATION = dask.config.get(
-            "distributed.scheduler.worker-saturation"
-        )
+
+        sat = dask.config.get("distributed.scheduler.worker-saturation")
+        try:
+            self.WORKER_SATURATION = float(sat)
+        except ValueError:
+            raise ValueError(
+                f"Unsupported `distributed.scheduler.worker-saturation` value {sat!r}. Must be a float."
+            )
         self.transition_counter = 0
         self._idle_transition_counter = 0
         self.transition_counter_max = transition_counter_max

@@ -665,8 +665,8 @@ async def test_clean(c, s, a):
 @gen_cluster(client=True)
 async def test_message_breakup(c, s, a, b):
     n = 100_000
-    a.state.transfer_message_target_bytes = 10 * n
-    b.state.transfer_message_target_bytes = 10 * n
+    a.state.transfer_message_bytes_limit = 10 * n
+    b.state.transfer_message_bytes_limit = 10 * n
     xs = [
         c.submit(mul, b"%d" % i, n, key=f"x{i}", workers=[a.address]) for i in range(30)
     ]
@@ -805,10 +805,10 @@ async def test_multiple_transfers(c, s, w1, w2, w3):
 )
 async def test_share_communication(c, s, w1, w2, w3):
     x = c.submit(
-        mul, b"1", int(w3.state.transfer_message_target_bytes + 1), workers=w1.address
+        mul, b"1", int(w3.transfer_message_bytes_limit + 1), workers=w1.address
     )
     y = c.submit(
-        mul, b"2", int(w3.state.transfer_message_target_bytes + 1), workers=w2.address
+        mul, b"2", int(w3.transfer_message_bytes_limit + 1), workers=w2.address
     )
     await wait([x, y])
     await c.replicate([x, y], workers=[w1.address, w2.address])
@@ -822,12 +822,8 @@ async def test_share_communication(c, s, w1, w2, w3):
 @pytest.mark.xfail(reason="very high flakiness")
 @gen_cluster(client=True)
 async def test_dont_overlap_communications_to_same_worker(c, s, a, b):
-    x = c.submit(
-        mul, b"1", int(b.state.transfer_message_target_bytes + 1), workers=a.address
-    )
-    y = c.submit(
-        mul, b"2", int(b.state.transfer_message_target_bytes + 1), workers=a.address
-    )
+    x = c.submit(mul, b"1", int(b.transfer_message_bytes_limit + 1), workers=a.address)
+    y = c.submit(mul, b"2", int(b.transfer_message_bytes_limit + 1), workers=a.address)
     await wait([x, y])
     z = c.submit(add, x, y, workers=b.address)
     await wait(z)
@@ -3004,9 +3000,9 @@ async def test_acquire_replicas_with_no_priority(c, s, a, b):
 @gen_cluster(client=True, nthreads=[("", 1)], config=NO_AMM)
 async def test_acquire_replicas_large_data(c, s, a):
     """When acquire-replicas is used to acquire multiple sizeable tasks, it respects
-    transfer_message_target_bytes and acquires them over multiple iterations.
+    transfer_message_bytes_limit and acquires them over multiple iterations.
     """
-    size = a.state.transfer_message_target_bytes // 5 - 10_000
+    size = a.state.transfer_message_bytes_limit // 5 - 10_000
 
     class C:
         def __sizeof__(self):

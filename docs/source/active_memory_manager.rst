@@ -37,6 +37,7 @@ configuration file <configuration>`:
        active-memory-manager:
          start: true
          interval: 2s
+         measure: optimistic
 
 The above is the recommended setup and will run all enabled *AMM policies* (see below)
 every two seconds. Alternatively, you can manually start/stop the AMM from the
@@ -80,6 +81,7 @@ Individual policies are enabled, disabled, and configured through the Dask confi
        active-memory-manager:
          start: true
          interval: 2s
+         measure: optimistic
          policies:
          - class: distributed.active_memory_manager.ReduceReplicas
          - class: my_package.MyPolicy
