@@ -40,7 +40,7 @@ from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps, loads
-from distributed.scheduler import KilledWorker, MemoryState, Scheduler, WorkerState, family
+from distributed.scheduler import KilledWorker, MemoryState, Scheduler, WorkerState
 from distributed.utils import TimeoutError
 from distributed.utils_test import (
     BrokenComm,
@@ -136,6 +136,7 @@ async def test_decide_worker_with_restrictions(client, s, a, b, c):
     assert x.key in a.data or x.key in b.data
 
 
+@pytest.mark.parametrize("sat", [float("inf"), 1.0])
 @pytest.mark.parametrize("ndeps", [0, 1, 4])
 @pytest.mark.parametrize(
     "nthreads",
@@ -144,14 +145,13 @@ async def test_decide_worker_with_restrictions(client, s, a, b, c):
         [("127.0.0.1", 3), ("127.0.0.1", 2), ("127.0.0.1", 1)],
     ],
 )
-def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
+def test_decide_worker_coschedule_order_neighbors(sat, ndeps, nthreads):
     @gen_cluster(
         client=True,
         nthreads=nthreads,
         config={
             "distributed.scheduler.work-stealing": False,
-            # "distributed.scheduler.worker-saturation": float("inf"),
-            "distributed.scheduler.worker-saturation": 1.0,
+            "distributed.scheduler.worker-saturation": sat,
         },
     )
     async def test_decide_worker_coschedule_order_neighbors_(c, s, *workers):
@@ -251,22 +251,6 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         assert len(unexpected_transfers) <= 3, unexpected_transfers
 
     test_decide_worker_coschedule_order_neighbors_()
-
-
-@gen_cluster(nthreads=[], client=True)
-async def test_family(c, s):
-    ax = [delayed(i, name=f"a-{i}") for i in range(8)]
-    bx = [delayed(i, name=f"b-{i}") for i in range(8)]
-    cx = [delayed(i, name=f"c-{i}") for i in range(8)]
-
-    zs = [a + b + c for a, b, c in zip(ax, bx, cx)]
-
-    fs = c.compute(zs)
-    await async_wait_for(s.tasks, 5)
-
-    a1 = s.tasks['a-1']
-
-    a1_fam = family(a1, 1000)
 
 
 @gen_cluster(
