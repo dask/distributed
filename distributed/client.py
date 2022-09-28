@@ -4741,9 +4741,9 @@ def wait(fs, timeout=None, return_when=ALL_COMPLETED):
     Parameters
     ----------
     fs : List[Future]
-    timeout : number, optional
-        Time in seconds after which to raise a
-        ``dask.distributed.TimeoutError``
+    timeout : number, string, optional
+        Time after which to raise a ``dask.distributed.TimeoutError``.
+        Can be a string like ``"10 minutes"`` or a number of seconds to wait.
     return_when : str, optional
         One of `ALL_COMPLETED` or `FIRST_COMPLETED`
 
@@ -4751,6 +4751,8 @@ def wait(fs, timeout=None, return_when=ALL_COMPLETED):
     -------
     Named tuple of completed, not completed
     """
+    if timeout is not None and isinstance(timeout, (Number, str)):
+        timeout = parse_timedelta(timeout, default="s")
     client = default_client()
     result = client.sync(_wait, fs, timeout=timeout, return_when=return_when)
     return result
