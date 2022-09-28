@@ -4,6 +4,7 @@ import abc
 import asyncio
 import heapq
 import logging
+import math
 import operator
 import random
 import sys
@@ -363,8 +364,8 @@ class Instruction:
         :meth:`WorkerState.handle_stimulus` or in :attr:`WorkerState.stimulus_log` vs.
         an expected list of matches.
 
-        Example
-        -------
+        Examples
+        --------
 
         .. code-block:: python
 
@@ -1125,11 +1126,12 @@ class WorkerState:
     #: multiple entries in :attr:`~TaskState.who_has` will appear multiple times here.
     data_needed: defaultdict[str, HeapSet[TaskState]]
 
-    #: Number of bytes to fetch from the same worker in a single call to
-    #: :meth:`BaseWorker.gather_dep`. Multiple small tasks that can be fetched from the
-    #: same worker will be clustered in a single instruction as long as their combined
-    #: size doesn't exceed this value.
-    transfer_message_target_bytes: int
+    #: Number of bytes to gather from the same worker in a single call to
+    #: :meth:`BaseWorker.gather_dep`. Multiple small tasks that can be gathered from the
+    #: same worker will be batched in a single instruction as long as their combined
+    #: size doesn't exceed this value. If the first task to be gathered exceeds this
+    # limit, it will still be gathered to ensure progress. Hence, this limit is not absolute.
+    transfer_message_bytes_limit: float
 
     #: All and only tasks with ``TaskState.state == 'missing'``.
     missing_dep_flight: set[TaskState]
@@ -1233,7 +1235,7 @@ class WorkerState:
     transition_counter_max: int | Literal[False]
 
     #: Limit of bytes for incoming data transfers; this is used for throttling.
-    transfer_incoming_bytes_limit: int | None
+    transfer_incoming_bytes_limit: float
 
     #: Statically-seeded random state, used to guarantee determinism whenever a
     #: pseudo-random choice is required
@@ -1253,7 +1255,8 @@ class WorkerState:
         transfer_incoming_count_limit: int = 9999,
         validate: bool = True,
         transition_counter_max: int | Literal[False] = False,
-        transfer_incoming_bytes_limit: int | None = None,
+        transfer_incoming_bytes_limit: float = math.inf,
+        transfer_message_bytes_limit: float = math.inf,
     ):
         self.nthreads = nthreads
 
@@ -1292,7 +1295,7 @@ class WorkerState:
         self.in_flight_tasks = set()
         self.executed_count = 0
         self.long_running = set()
-        self.transfer_message_target_bytes = int(50e6)  # 50 MB
+        self.transfer_message_bytes_limit = transfer_message_bytes_limit
         self.log = deque(maxlen=100_000)
         self.stimulus_log = deque(maxlen=10_000)
         self.transition_counter = 0
@@ -1491,8 +1494,7 @@ class WorkerState:
             >= self.transfer_incoming_bytes_throttle_threshold
         )
         reached_bytes_limit = (
-            self.transfer_incoming_bytes_limit is not None
-            and self.transfer_incoming_bytes >= self.transfer_incoming_bytes_limit
+            self.transfer_incoming_bytes >= self.transfer_incoming_bytes_limit
         )
         return reached_count_limit and reached_throttle_threshold or reached_bytes_limit
 
@@ -1510,7 +1512,7 @@ class WorkerState:
 
         for worker, available_tasks in self._select_workers_for_gather():
             assert worker != self.address
-            to_gather_tasks, total_nbytes = self._select_keys_for_gather(
+            to_gather_tasks, message_nbytes = self._select_keys_for_gather(
                 available_tasks
             )
             # We always load at least one task
@@ -1545,21 +1547,21 @@ class WorkerState:
 
             # A single invocation of _ensure_communicating may generate up to one
             # GatherDep instruction per worker. Multiple tasks from the same worker may
-            # be clustered in the same instruction by _select_keys_for_gather. But once
+            # be batched in the same instruction by _select_keys_for_gather. But once
             # a worker has been selected for a GatherDep and added to in_flight_workers,
             # it won't be selected again until the gather completes.
             instructions.append(
                 GatherDep(
                     worker=worker,
                     to_gather=to_gather_keys,
-                    total_nbytes=total_nbytes,
+                    total_nbytes=message_nbytes,
                     stimulus_id=stimulus_id,
                 )
             )
 
             self.in_flight_workers[worker] = to_gather_keys
             self.transfer_incoming_count_total += 1
-            self.transfer_incoming_bytes += total_nbytes
+            self.transfer_incoming_bytes += message_nbytes
             if self._should_throttle_incoming_transfers():
                 break
 
@@ -1635,36 +1637,61 @@ class WorkerState:
         """Helper of _ensure_communicating.
 
         Fetch all tasks that are replicated on the target worker within a single
-        message, up to transfer_message_target_bytes or until we reach the limit
+        message, up to transfer_message_bytes_limit or until we reach the limit
         for the size of incoming data transfers.
         """
         to_gather: list[TaskState] = []
-        total_nbytes = 0
-
-        if self.transfer_incoming_bytes_limit is not None:
-            bytes_left_to_fetch = min(
-                self.transfer_incoming_bytes_limit - self.transfer_incoming_bytes,
-                self.transfer_message_target_bytes,
-            )
-        else:
-            bytes_left_to_fetch = self.transfer_message_target_bytes
+        message_nbytes = 0
 
         while available:
             ts = available.peek()
-            if (
-                # When there is no other traffic, the top-priority task is fetched
-                # regardless of its size to ensure progress
-                self.transfer_incoming_bytes
-                or to_gather
-            ) and total_nbytes + ts.get_nbytes() > bytes_left_to_fetch:
+            if self._task_exceeds_transfer_limits(ts, message_nbytes):
                 break
             for worker in ts.who_has:
                 # This also effectively pops from available
                 self.data_needed[worker].remove(ts)
             to_gather.append(ts)
-            total_nbytes += ts.get_nbytes()
+            message_nbytes += ts.get_nbytes()
 
-        return to_gather, total_nbytes
+        return to_gather, message_nbytes
+
+    def _task_exceeds_transfer_limits(self, ts: TaskState, message_nbytes: int) -> bool:
+        """Would asking to gather this task exceed transfer limits?
+
+        Parameters
+        ----------
+        ts
+            Candidate task for gathering
+        message_nbytes
+            Total number of bytes already scheduled for gathering in this message
+        Returns
+        -------
+        exceeds_limit
+            True if gathering the task would exceed limits, False otherwise
+            (in which case the task can be gathered).
+        """
+        if self.transfer_incoming_bytes == 0 and message_nbytes == 0:
+            # When there is no other traffic, the top-priority task is fetched
+            # regardless of its size to ensure progress
+            return False
+
+        incoming_bytes_allowance = (
+            self.transfer_incoming_bytes_limit - self.transfer_incoming_bytes
+        )
+
+        # If message_nbytes == 0, i.e., this is the first task to gather in this
+        # message, ignore `self.transfer_message_bytes_limit` for the top-priority
+        # task to ensure progress. Otherwise:
+        if message_nbytes != 0:
+            incoming_bytes_allowance = (
+                min(
+                    incoming_bytes_allowance,
+                    self.transfer_message_bytes_limit,
+                )
+                - message_nbytes
+            )
+
+        return ts.get_nbytes() > incoming_bytes_allowance
 
     def _ensure_computing(self) -> RecsInstrs:
         if not self.running:
@@ -2892,7 +2919,7 @@ class WorkerState:
     @_handle_event.register
     def _handle_gather_dep_success(self, ev: GatherDepSuccessEvent) -> RecsInstrs:
         """gather_dep terminated successfully.
-        The response may contain less keys than the request.
+        The response may contain fewer keys than the request.
         """
         recommendations: Recs = {}
         for ts in self._gather_dep_done_common(ev):

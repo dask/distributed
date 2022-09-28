@@ -6,6 +6,7 @@ import builtins
 import errno
 import functools
 import logging
+import math
 import os
 import pathlib
 import random
@@ -528,7 +529,9 @@ class Worker(BaseWorker, ServerNode):
         self.transfer_outgoing_count_limit = dask.config.get(
             "distributed.worker.connections.incoming"
         )
-
+        transfer_message_bytes_limit = parse_bytes(
+            dask.config.get("distributed.worker.transfer.message-bytes-limit")
+        )
         self.threads = {}
 
         self.active_threads_lock = threading.Lock()
@@ -746,7 +749,7 @@ class Worker(BaseWorker, ServerNode):
             memory_pause_fraction=memory_pause_fraction,
         )
 
-        transfer_incoming_bytes_limit = None
+        transfer_incoming_bytes_limit = math.inf
         transfer_incoming_bytes_fraction = dask.config.get(
             "distributed.worker.memory.transfer"
         )
@@ -767,6 +770,7 @@ class Worker(BaseWorker, ServerNode):
             validate=validate,
             transition_counter_max=transition_counter_max,
             transfer_incoming_bytes_limit=transfer_incoming_bytes_limit,
+            transfer_message_bytes_limit=transfer_message_bytes_limit,
         )
         BaseWorker.__init__(self, state)
 
@@ -889,7 +893,7 @@ class Worker(BaseWorker, ServerNode):
     ready = DeprecatedWorkerStateAttribute()
     tasks = DeprecatedWorkerStateAttribute()
     target_message_size = DeprecatedWorkerStateAttribute(
-        target="transfer_message_target_bytes"
+        target="transfer_message_bytes_limit"
     )
     total_out_connections = DeprecatedWorkerStateAttribute(
         target="transfer_incoming_count_limit"
