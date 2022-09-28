@@ -17,7 +17,7 @@ import sys
 import uuid
 import warnings
 import weakref
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from collections.abc import (
     Callable,
     Collection,
@@ -32,7 +32,7 @@ from collections.abc import (
 from contextlib import suppress
 from functools import partial
 from numbers import Number
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, overload
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, NoReturn, cast, overload
 
 import psutil
 from sortedcontainers import SortedDict, SortedSet
@@ -961,6 +961,8 @@ class TaskState:
     #: further in :doc:`Scheduling Policy <scheduling-policies>`.
     priority: tuple[int, ...]
 
+    planned_on: WorkerState | None
+
     # Attribute underlying the state property
     _state: TaskStateState
 
@@ -1153,6 +1155,7 @@ class TaskState:
         self.waiting_on = set()
         self.waiters = set()
         self.who_has = set()
+        self.planned_on = None
         self.processing_on = None
         self.has_lost_dependencies = False
         self.host_restrictions = None  # type: ignore
@@ -1924,6 +1927,37 @@ class SchedulerState:
 
         return ws
 
+    def decide_worker_from_family(
+        self, family: tuple[set[TaskState], set[TaskState]] | None
+    ) -> WorkerState | None:
+        if family is not None:
+            siblings, children = family
+            # First see if any downstream tasks are already planned somewhere; use that
+            candidates: Counter[WorkerState] = Counter()
+            for cts in children:
+                if pws := cts.planned_on:
+                    if self.workers.get(pws.address) is pws:
+                        candidates.update((pws,))
+                    else:
+                        cts.planned_on = None
+
+            if candidates:
+                return candidates.most_common(1)[0][0]
+
+            # If not, see if any sibling tasks are already planned somewhere; use that
+            for cts in siblings:
+                if pws := cts.planned_on:
+                    if self.workers.get(pws.address) is pws:
+                        candidates.update((pws,))
+                    else:
+                        cts.planned_on = None
+
+            if candidates:
+                return candidates.most_common(1)[0][0]
+
+        # No family, or nothing is planned anywhere. Pick a new worker.
+        return self.decide_worker_rootish_queuing_enabled()
+
     def decide_worker_non_rootish(self, ts: TaskState) -> WorkerState | None:
         """Pick a worker for a runnable non-root task, considering dependencies and restrictions.
 
@@ -2010,9 +2044,7 @@ class SchedulerState:
                     if not (ws := self.decide_worker_rootish_queuing_disabled(ts)):
                         return {ts.key: "no-worker"}, {}, {}
                 else:
-                    if not (ws := self.decide_worker_rootish_queuing_enabled()):
-                        return {ts.key: "queued"}, {}, {}
-                    return _queueable_to_processing(self, ts, ws)
+                    return _queueable_to_processing(self, ts)
             else:
                 if not (ws := self.decide_worker_non_rootish(ts)):
                     return {ts.key: "no-worker"}, {}, {}
@@ -2636,12 +2668,7 @@ class SchedulerState:
                 assert not ts.actor, f"Actors can't be queued: {ts}"
                 assert ts in self.queued
 
-            if ws := self.decide_worker_rootish_queuing_enabled():
-                self.queued.discard(ts)
-                return _queueable_to_processing(self, ts, ws)
-
-            # If no worker, task just stays `queued`
-            return {}, {}, {}
+            return _queueable_to_processing(self, ts)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -7677,40 +7704,62 @@ def _validate_ready(state: SchedulerState, ts: TaskState) -> None:
 
 
 def _queueable_to_processing(
-    state: SchedulerState, ts: TaskState, ws: WorkerState
+    state: SchedulerState, ts: TaskState
 ) -> tuple[Recs, dict[str, list[Any]], dict[str, list[Any]]]:
     "Common logic for transitioning a queueable (root-ish) task to processing, along with the rest of its family"
     recommendations: Recs = {}
-    worker_msgs = _add_to_processing(state, ts, ws)
+    worker_msgs: dict[str, list[Any]] = {}
 
     fam = family(ts, 20)  # TODO maxsize as config/what?!
-    if fam:
-        # Schedule other tasks that will all need to be in memory
-        # with this task on the same worker at once.
+    if ws := state.decide_worker_from_family(fam):
+        worker_msgs = _add_to_processing(state, ts, ws)
+        if fam:
+            siblings, children = fam
 
-        # TODO what about when the first task in a family that's already on a worker completes,
-        # but not the whole family? We want to wait for the whole family to be done before assigning
-        # another one. We don't want to take a slot that could be used for the downstream task in the future.
+            # Schedule other tasks that will all need to be in memory
+            # with this task on the same worker at once.
 
-        # If workers could be responsible with memory, this would be okay. Because if everything in the previous
-        # family is done execpt one input to the downstream, then yes, we might as well get started on a new family
-        # while we're waiting, as long as we have the memory capacity to do so.
-        for fts in sorted(fam, key=operator.attrgetter("priority")):
-            # FIXME these tasks may not all necessarily be runnable.
-            # Or maybe some are even in memory?
-            # When does this happen, and how should we handle them?
-            if fts is ts:
-                continue
+            # TODO what about when the first task in a family that's already on a worker completes,
+            # but not the whole family? We want to wait for the whole family to be done before assigning
+            # another one. We don't want to take a slot that could be used for the downstream task in the future.
 
-            if fts.state == "queued":
-                if state.validate:
-                    assert fts in state.queued
-                state.queued.discard(fts)
-            update_msgs(worker_msgs, _add_to_processing(state, fts, ws))
+            # If workers could be responsible with memory, this would be okay. Because if everything in the previous
+            # family is done execpt one input to the downstream, then yes, we might as well get started on a new family
+            # while we're waiting, as long as we have the memory capacity to do so.
+            for fts in sorted(siblings, key=operator.attrgetter("priority")):
+                # FIXME these tasks may not all necessarily be runnable.
+                # Or maybe some are even in memory?
+                # When does this happen, and how should we handle them?
+                assert fts is not ts
+                assert fts.planned_on is None or fts.planned_on is ws, (
+                    fts.planned_on,
+                    ws,
+                )
 
-            # This recommendation will be a no-op. It's just to remove any existing
-            # recommendation for the key from the recommendations queue.
-            recommendations[fts.key] = "processing"
+                if fts.state == "processing":
+                    assert fts.processing_on is ws, (fts.processing_on, ws)
+
+                if fts.state == "memory":
+                    assert ws in fts.who_has, (fts.who_has, ws)
+
+                if fts.state == "queued":
+                    if state.validate:
+                        assert fts in state.queued
+                    state.queued.discard(fts)
+
+                if fts.state in ("released", "waiting", "queued"):
+                    fts.planned_on = ws
+
+                    if not fts.waiting_on:  # wtf if it's released??
+                        update_msgs(worker_msgs, _add_to_processing(state, fts, ws))
+
+                        # This recommendation will be a no-op. It's just to remove any existing
+                        # recommendation for the key from the recommendations queue.
+                        recommendations[fts.key] = "processing"
+
+            for cts in children:
+                if cts.planned_on is None:
+                    cts.planned_on = ws
 
     return recommendations, {}, worker_msgs
 
@@ -7726,6 +7775,7 @@ def _add_to_processing(
         assert (o := state.workers.get(ws.address)) is ws, (ws, o)
 
     state._set_duration_estimate(ts, ws)
+    ts.planned_on = None
     ts.processing_on = ws
     ts.state = "processing"
     state.acquire_resources(ts, ws)
@@ -8212,37 +8262,40 @@ def _worker_full(ws: WorkerState, saturation_factor: float) -> bool:
     return _task_slots_available(ws, saturation_factor) <= 0
 
 
-def family(ts: TaskState, maxsize: int) -> set[TaskState] | None:
+def family(ts: TaskState, maxsize: int) -> tuple[set[TaskState], set[TaskState]] | None:
     if len(ts.dependents) > maxsize:
         return None
-    family = set()
+
+    siblings: set[TaskState] = set()
+    children: set[TaskState] = set()
     for child in ts.dependents:  # TODO even support multiple dependents?
         # Traverse linear chains
-        # TODO something more efficient
-        while len(siblings := child.dependencies) == 1 and len(gc := child.dependents) == 1:
+        while len(sibs := child.dependencies) == 1 and len(gc := child.dependents) == 1:
             child = next(iter(gc))
 
-        if len(siblings) == 1:
-            # Faster path: nothing but linear chains
+        children.add(child)
+        if len(sibs) == 1:
+            # Faster path: nothing but linear chains, so no siblings besides `ts`
             continue
 
-        if len(siblings) < maxsize:
-            for sts in siblings:
-                if sts is ts:
-                    continue
+        if len(sibs) < maxsize:
+            for sts in sibs:
                 # Traverse linear chains _back_ to root tasks
-                # FIXME totally wrong, just a hack only for the test case
-                while len(sts.dependencies) == 1:
+                # FIXME probably wrong
+                while sts is not ts and len(sts.dependencies) == 1:
                     nsts = next(iter(sts.dependencies))
                     if len(nsts.dependents) == 1:
                         sts = nsts
                     else:
                         break
 
-                family.add(sts)
-                if len(family) > maxsize:
+                if sts is ts:
+                    continue
+
+                siblings.add(sts)
+                if len(siblings) > maxsize:
                     return None
-    return family
+    return siblings, children
 
 
 def update_msgs(msgs: dict[str, list[Any]], new: dict[str, list[Any]]) -> None:
