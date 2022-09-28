@@ -230,6 +230,10 @@ class ActiveMemoryManagerExtension:
             log_reject(f"ts.state = {ts.state}")
             return None
 
+        if ts.actor:
+            log_reject("task is an actor")
+            return None
+
         if candidates is None:
             candidates = self.scheduler.running.copy()
         else:
@@ -280,6 +284,10 @@ class ActiveMemoryManagerExtension:
 
         if len(ts.who_has) - len(pending_drop) < 2:
             log_reject("less than 2 replicas exist")
+            return None
+
+        if ts.actor:
+            log_reject("task is an actor")
             return None
 
         if candidates is None:
@@ -591,11 +599,26 @@ class RetireWorker(ActiveMemoryManagerPolicy):
             self.manager.policies.remove(self)
             return
 
+        if ws.actors:
+            logger.warning(
+                f"Tried retiring worker {self.address}, but it holds actor(s) "
+                f"{set(ws.actors)}, which can't be moved."
+                "The worker will not be retired."
+            )
+            self.no_recipients = True
+            self.manager.policies.remove(self)
+            return
+
         nrepl = 0
         nno_rec = 0
 
         logger.debug("Retiring %s", ws)
         for ts in ws.has_what:
+            if ts.actor:
+                # This is just a proxy Actor object; if there were any originals we
+                # would have stopped earlier
+                continue
+
             if len(ts.who_has) > 1:
                 # There are already replicas of this key on other workers.
                 # Suggest dropping the replica from this worker.
@@ -663,10 +686,10 @@ class RetireWorker(ActiveMemoryManagerPolicy):
     def done(self) -> bool:
         """Return True if it is safe to close the worker down; False otherwise"""
         if self not in self.manager.policies:
-            # Either the no_recipients flag has been raised, or there were no unique replicas
-            # as of the latest AMM run. Note that due to tasks transitioning from running to
-            # memory there may be some now; it's OK to lose them and just recompute them
-            # somewhere else.
+            # Either the no_recipients flag has been raised, or there were no unique
+            # replicas as of the latest AMM run. Note that due to tasks transitioning
+            # from running to memory there may be some now; it's OK to lose them and
+            # just recompute them somewhere else.
             return True
         ws = self.manager.scheduler.workers.get(self.address)
         if ws is None:
