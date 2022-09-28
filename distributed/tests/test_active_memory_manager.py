@@ -20,8 +20,8 @@ from distributed.active_memory_manager import (
 )
 from distributed.core import Status
 from distributed.utils_test import (
-    BlockedGatherDep,
     NO_AMM,
+    BlockedGatherDep,
     assert_story,
     captured_logger,
     gen_cluster,
@@ -1082,7 +1082,7 @@ async def test_dont_replicate_actors(c, s, a, b):
 
 
 @pytest.mark.parametrize("has_proxy", [False, True])
-@gen_cluster(client=True, config=NO_AMM_START)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_RetireWorker_with_actor(c, s, a, b, has_proxy):
     """A worker holding one or more original actor objects cannot be retired"""
     x = c.submit(Counter, key="x", actor=True, workers=[a.address])
@@ -1108,7 +1108,7 @@ async def test_RetireWorker_with_actor(c, s, a, b, has_proxy):
         assert "y" in b.data
 
 
-@gen_cluster(client=True, config=NO_AMM_START)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_RetireWorker_with_actor_proxy(c, s, a, b):
     """A worker holding an Actor proxy object can be retired as normal."""
     x = c.submit(Counter, key="x", actor=True, workers=[a.address])
@@ -1162,7 +1162,6 @@ async def tensordot_stress(c):
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 4,
-    Worker=Nanny,
     config=NO_AMM,
 )
 async def test_noamm_stress(c, s, *workers):
