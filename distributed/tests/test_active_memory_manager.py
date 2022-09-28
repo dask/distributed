@@ -1025,6 +1025,7 @@ async def test_RetireWorker_faulty_recipient(c, s, w1, w2):
     x = c.submit(lambda: 123, key="x", workers=[w1.address])
     await wait(x)
     # Fill w2 with dummy data so that it's got the highest memory usage
+    # among the workers that are not being retired (w2 and w3).
     clutter = await c.scatter(456, workers=[w2.address])
 
     async with BlockedGatherDep(s.address) as w3:
