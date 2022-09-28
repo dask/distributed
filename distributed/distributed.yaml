@@ -69,8 +69,7 @@ distributed:
       start: true
 
       # Once started, run the AMM cycle every <interval>
-      # TODO REVERT BEFORE MERGING
-      interval: 0.01s
+      interval: 2s
 
       # Memory measure to use. Must be one of the attributes of
       # distributed.scheduler.MemoryState.
