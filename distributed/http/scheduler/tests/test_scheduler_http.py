@@ -99,6 +99,7 @@ async def test_prometheus(c, s, a, b):
         "dask_scheduler_tasks",
         "dask_scheduler_tasks_suspicious",
         "dask_scheduler_tasks_forgotten",
+        "dask_scheduler_task_prefixes",
     }
 
     assert active_metrics.keys() == expected_metrics
@@ -335,3 +336,19 @@ async def test_adaptive_target(c, s, a, b):
             assert resp.headers["Content-Type"] == "application/json"
             num_workers = json.loads(await resp.text())["workers"]
             assert num_workers == 0
+
+
+@gen_cluster(client=True, clean_kwargs={"threads": False})
+async def test_prometheus_task_prefix(c, s, a, b):
+    pytest.importorskip("prometheus_client")
+
+    futures = c.map(slowinc, range(10), delay=0.5)
+    while not any(ws.executing for ws in s.workers.values()):
+        await asyncio.sleep(0.01)
+
+    active_metrics = await fetch_metrics(
+        s.http_server.port,
+        "dask_scheduler_task_prefix"
+    )
+
+    assert "slowinc" in str(active_metrics)

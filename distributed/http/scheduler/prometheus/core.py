@@ -38,6 +38,16 @@ class SchedulerMetricCollector(PrometheusCollector):
         worker_states.add_metric(["idle"], len(self.server.idle))
         yield worker_states
 
+        prefixes = GaugeMetricFamily(
+            self.build_name("task_prefixes"),
+            "Task Prefixes active right now",
+            labels=["prefix"],
+        )
+        out = toolz.frequencies(ts.prefix.name for ws in self.server.workers.values() for ts in ws.executing)
+        for k, v in out.items():
+            prefixes.add_metric([k], v)
+        yield prefixes
+
         tasks = GaugeMetricFamily(
             self.build_name("tasks"),
             "Number of tasks known by scheduler.",
