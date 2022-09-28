@@ -46,7 +46,7 @@ jobs:
         # To avoid hamstringing other people, change 'on: [push, pull_request]' above
         # to just 'on: [push]'; this way the stress test will run exclusively in your
         # branch (https://github.com/<your name>/distributed/actions).
-        # run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+        run: [1, 2, 3, 4, 5]
 
     env:
       CONDA_FILE: continuous_integration/environment-${{ matrix.python-version }}.yaml
@@ -55,9 +55,9 @@ jobs:
       - name: Set $TEST_ID
         run: |
           export PARTITION_LABEL=$( echo "${{ matrix.partition }}" | sed "s/ //" )
-          export TEST_ID="${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.queuing }}-$PARTITION_LABEL"
+          # export TEST_ID="${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.queuing }}-$PARTITION_LABEL"
           # Switch to this version for stress-test:
-          # export TEST_ID="${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.queuing }}-$PARTITION_LABEL-${{ matrix.run }}"
+          export TEST_ID="${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.queuing }}-$PARTITION_LABEL-${{ matrix.run }}"
           echo "TEST_ID: $TEST_ID"
           echo "TEST_ID=$TEST_ID" >> $GITHUB_ENV
         shell: bash
