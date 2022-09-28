@@ -331,7 +331,7 @@ class UCX(Comm):
             # (See also https://github.com/dask/distributed/pull/6574).
             self.abort()
             raise CommClosedError("Connection closed by writer.\n"
-                                  "Inner exception: {e!r}")
+                                  f"Inner exception: {e!r}")
         else:
             # Recv frames
             frames = [
