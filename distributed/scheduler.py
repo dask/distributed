@@ -1876,30 +1876,9 @@ class SchedulerState:
 
         return ws
 
-    def decide_worker_rootish_queuing_enabled(self) -> WorkerState:
-        """Pick a worker for a runnable root-ish task, if not all are busy.
-
-        Picks the least-busy worker out of the ``idle`` workers (idle workers have fewer
-        tasks running than threads, as set by ``distributed.scheduler.worker-saturation``).
-        It does not consider the location of dependencies, since they'll end up on every
-        worker anyway.
-
-        If all workers are full, returns None, meaning the task should transition to
-        ``queued``. The scheduler will wait to send it to a worker until a thread opens
-        up. This ensures that downstream tasks always run before new root tasks are
-        started.
-
-        This does not try to schedule sibling tasks on the same worker; in fact, it
-        usually does the opposite. Even though this increases subsequent data transfer,
-        it typically reduces overall memory use by eliminating root task overproduction.
-
-        Returns
-        -------
-        ws: WorkerState | None
-            The worker to assign the task to. If there are no idle workers, returns
-            None, in which case the task should be transitioned to ``queued``.
-
-        """
+    def decide_worker_from_family(
+        self, family: tuple[set[TaskState], set[TaskState]] | None
+    ) -> WorkerState:
         if self.validate:
             # We don't `assert self.is_rootish(ts)` here, because that check is dependent on
             # cluster size. It's possible a task looked root-ish when it was queued, but the
@@ -1909,11 +1888,29 @@ class SchedulerState:
             assert not math.isinf(self.WORKER_SATURATION)
             assert self.idle
 
-        # if not self.idle:
-        #     # All workers busy? Task gets/stays queued.
-        #     return None
+        if family:
+            siblings, downstream = family
+            # If any tasks are in memory or processing, use the worker that holds the most data already.
+            candidates: defaultdict[WorkerState, int] = defaultdict(lambda: 0)
+            for ts in siblings:
+                for ws in ts.who_has:
+                    candidates[ws] += ts.get_nbytes()
+                if ts.processing_on:  # NOTE: exclusive with `ts.who_has`
+                    tg = ts.group
+                    nbytes_estimate = (
+                        round(tg.nbytes_total / nmem)
+                        if (nmem := tg.states["memory"])
+                        else DEFAULT_DATA_SIZE
+                    )
+                    candidates[ts.processing_on] += nbytes_estimate
+            if candidates:
+                ws, _ = max(candidates.items(), key=operator.itemgetter(1))
+                logger.info(
+                    f"Scheduling family on sibling worker {ws}, {candidates=}, {family=}"
+                )
+                return ws
 
-        # Pick the least busy worker.
+        # No siblings are anywhere else (or no family at all). Pick the least busy worker.
         ws = min(self.idle.values(), key=lambda ws: len(ws.processing) / ws.nthreads)
         if self.validate:
             assert self.workers.get(ws.address) is ws
@@ -7680,23 +7677,15 @@ def _queueable_to_processing(
     if not state.idle:
         return {ts.key: "queued"}, {}, {}
 
-    # NOTE: we don't have family-based decide-worker logic yet, since it's currently impossible for siblings to be spread
-    # across multiple workers, since all sibling tasks are scheduled onto the same worker at once.
-    # (This is relying on the assumption that all sibling tasks are always runnable, which `is_rootish` _kinda_ should guarantee but maybe
-    # could break in some cases).
-    # So the corollary of this is:
-    # * on scale-up, we pop a task off the queue and schedule all its siblings, all of which are guaranteed not to be running or
-    #   in memory anywhere else yet. Sibling-based co-assignment is unnecessary.
-    # * on scale-down, all siblings are processing or in memory on the same worker, so they all get rescheduled.
-    #   FIXME except some might have been replicated!! we should schedule near those replicas!
-    ws = state.decide_worker_rootish_queuing_enabled()
+    fam = family(ts, 20)  # TODO maxsize as config/what?!
+    ws = state.decide_worker_from_family(fam)
+    # ^ NOTE: This is all we need to for good (re)scheduling when the cluster changes size.
 
     if ts.state == "queued":
         state.queued.remove(ts)
     worker_msgs: dict[str, list[Any]] = _add_to_processing(state, ts, ws)
 
     recommendations: Recs = {}
-    fam = family(ts, 20)  # TODO maxsize as config/what?!
     if fam:
         siblings, downstream = fam
         # Schedule other tasks that will all need to be in memory
@@ -7720,9 +7709,10 @@ def _queueable_to_processing(
             # if fts.state == "processing":
             #     assert fts.processing_on is ws, (fts.processing_on, ws)
 
-            # if fts.state == "memory":
-            #     # only can happen in the case of rescheduling, and replicas already exist
-            #     continue
+            if fts.state == "memory":
+                # only can happen in the case of rescheduling, and replicas already exist
+                logger.info(f"Skipping in memory {fts}")
+                continue
             #     # assert ws in fts.who_has, (fts.who_has, ws)
 
             if fts.state == "queued":
