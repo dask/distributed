@@ -304,6 +304,9 @@ class PipInstall(WorkerPlugin):
 
             if self.restart and worker.nanny:
                 lines = stdout.strip().split(b"\n")
+                # This line appears if using a private PyPI server
+                if lines[0].startswith(b"Looking in indexes:"):
+                    lines = lines[1:]
                 if not all(
                     line.startswith(b"Requirement already satisfied") for line in lines
                 ):
