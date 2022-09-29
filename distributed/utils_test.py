@@ -112,6 +112,9 @@ logging_levels = {
 _TEST_TIMEOUT = 30
 _offload_executor.submit(lambda: None).result()  # create thread during import
 
+# Dask configuration to completely disable the Active Memory Manager.
+# This is typically used with @gen_cluster(config=NO_AMM)
+# or @gen_cluster(config=merge(NO_AMM, {<more config options})).
 NO_AMM = {"distributed.scheduler.active-memory-manager.start": False}
 
 
