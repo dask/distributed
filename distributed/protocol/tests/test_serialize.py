@@ -35,7 +35,7 @@ from distributed.protocol import (
 )
 from distributed.protocol.serialize import check_dask_serializable
 from distributed.utils import ensure_memoryview, nbytes
-from distributed.utils_test import gen_test, inc
+from distributed.utils_test import NO_AMM, gen_test, inc
 
 
 class MyObj:
@@ -208,7 +208,7 @@ async def test_object_in_graph(c, s, a, b):
     assert result.data == 123
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_scatter(c, s, a, b):
     o = MyObj(123)
     [future] = await c._scatter([o])

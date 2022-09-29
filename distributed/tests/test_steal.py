@@ -23,6 +23,8 @@ from distributed.core import Status
 from distributed.metrics import time
 from distributed.system import MEMORY_LIMIT
 from distributed.utils_test import (
+    NO_AMM,
+    BlockedGetData,
     SizeOf,
     captured_logger,
     freeze_batched_send,
@@ -88,7 +90,7 @@ async def test_steal_cheap_data_slow_computation(c, s, a, b):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("", 1)] * 2)
+@gen_cluster(client=True, nthreads=[("", 1)] * 2, config=NO_AMM)
 async def test_steal_expensive_data_slow_computation(c, s, a, b):
     np = pytest.importorskip("numpy")
 
@@ -105,7 +107,7 @@ async def test_steal_expensive_data_slow_computation(c, s, a, b):
     assert b.data  # not empty
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10, config=NO_AMM)
 async def test_worksteal_many_thieves(c, s, *workers):
     x = c.submit(slowinc, -1, delay=0.1)
     await x
@@ -300,44 +302,50 @@ async def test_dont_steal_fast_tasks_compute_time(c, s, *workers):
     assert len(s.workers[workers[0].address].has_what) == len(xs) + len(futures)
 
 
-@gen_cluster(client=True)
-async def test_dont_steal_fast_tasks_blocklist(c, s, a, b):
-    # create a dependency
-    x = c.submit(slowinc, 1, workers=[b.address])
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_dont_steal_fast_tasks_blocklist(c, s, a):
+    async with BlockedGetData(s.address) as b:
+        # create a dependency
+        x = c.submit(inc, 1, workers=[b.address], key="x")
+        await wait(x)
 
-    # If the blocklist of fast tasks is tracked somewhere else, this needs to be
-    # changed. This test requires *any* key which is blocked.
-    from distributed.stealing import fast_tasks
+        # If the blocklist of fast tasks is tracked somewhere else, this needs to be
+        # changed. This test requires *any* key which is blocked.
+        from distributed.stealing import fast_tasks
 
-    blocked_key = next(iter(fast_tasks))
+        blocked_key = next(iter(fast_tasks))
 
-    def fast_blocked(x, y=None):
-        # The task should observe a certain computation time such that we can
-        # ensure that it is not stolen due to the blocking. If it is too
-        # fast, the standard mechanism shouldn't allow stealing
-        import time
+        def fast_blocked(i, x):
+            # The task should observe a certain computation time such that we can
+            # ensure that it is not stolen due to the blocking. If it is too
+            # fast, the standard mechanism shouldn't allow stealing
+            sleep(0.01)
 
-        time.sleep(0.01)
+        futures = c.map(
+            fast_blocked,
+            range(50),
+            x=x,
+            # Submit the task to one worker but allow it to be distributed elsewhere,
+            # i.e. this is not a task restriction
+            workers=[a.address],
+            allow_other_workers=True,
+            key=blocked_key,
+        )
 
-    futures = c.map(
-        fast_blocked,
-        range(100),
-        y=x,
-        # Submit the task to one worker but allow it to be distributed else,
-        # i.e. this is not a task restriction
-        workers=[a.address],
-        allow_other_workers=True,
-        key=blocked_key,
-    )
+        while len(s.tasks) < 51:
+            await asyncio.sleep(0.01)
+        b.block_get_data.set()
+        await wait(futures)
 
-    await wait(futures)
-
-    # The +1 is the dependency we initially submitted to worker B
-    assert len(s.workers[a.address].has_what) == 101
-    assert len(s.workers[b.address].has_what) == 1
+        # Note: x may now be on a, b, or both, depending if the Active Memory Manager
+        # got to run or not
+        ws_a = s.workers[a.address]
+        for ts in s.tasks.values():
+            if ts.key.startswith(blocked_key):
+                assert ts.who_has == {ws_a}
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+@gen_cluster(client=True, nthreads=[("", 1)], config=NO_AMM)
 async def test_new_worker_steals(c, s, a):
     await wait(c.submit(slowinc, 1, delay=0.01))
 
@@ -346,13 +354,16 @@ async def test_new_worker_steals(c, s, a):
     while len(a.state.tasks) < 10:
         await asyncio.sleep(0.01)
 
-    async with Worker(s.address, nthreads=1, memory_limit=MEMORY_LIMIT) as b:
+    async with Worker(s.address, nthreads=1) as b:
         result = await total
         assert result == sum(map(inc, range(100)))
 
         for w in (a, b):
             assert all(isinstance(v, int) for v in w.data.values())
 
+        # This requires AMM to be off. Otherwise, if b reports higher optimistic memory
+        # than a and `total` happens to be computed on a, then all keys on b will be
+        # replicated onto a and then deleted by the AMM.
         assert b.data
 
 
@@ -1115,11 +1126,6 @@ async def test_steal_concurrent_simple(c, s, *workers):
     assert not ws2.has_what
 
 
-# FIXME shouldn't consistently fail, may be an actual bug?
-@pytest.mark.skipif(
-    math.isfinite(dask.config.get("distributed.scheduler.worker-saturation")),
-    reason="flaky with queuing active",
-)
 @gen_cluster(
     client=True,
     config={
@@ -1142,8 +1148,8 @@ async def test_steal_reschedule_reset_in_flight_occupancy(c, s, *workers):
 
     event = Event()
     futs1 = [
-        c.submit(block, f, event=event, key=f"f1-{ix}")
-        for f in roots
+        c.submit(block, r, event=event, key=f"f{ir}-{ix}")
+        for ir, r in enumerate(roots)
         for ix in range(4)
     ]
     while not w0.state.ready:
@@ -1335,9 +1341,9 @@ async def test_correct_bad_time_estimate(c, s, *workers):
     steal = s.extensions["stealing"]
     future = c.submit(slowinc, 1, delay=0)
     await wait(future)
-    futures = [c.submit(slowinc, future, delay=0.1, pure=False) for i in range(20)]
-    while not any(f.key in s.tasks for f in futures):
-        await asyncio.sleep(0.001)
+    futures = [c.submit(slowinc, future, delay=0.1, pure=False) for _ in range(20)]
+    while len(s.tasks) < 21:
+        await asyncio.sleep(0)
     assert not any(s.tasks[f.key] in steal.key_stealable for f in futures)
     await asyncio.sleep(0.5)
     assert any(s.tasks[f.key] in steal.key_stealable for f in futures)
