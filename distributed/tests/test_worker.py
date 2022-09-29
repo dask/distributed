@@ -1673,11 +1673,6 @@ async def test_pip_install_fails(c, s, a, b):
                 assert "not-a-package" in logger.getvalue()
 
 
-#             args = p2.call_args[0][0]
-#             assert "python" in args[0]
-#             assert args[1:] == ["-m", "pip", "--upgrade", "install", "requests"]
-
-
 @gen_cluster(nthreads=[])
 async def test_update_latency(s):
     async with Worker(s.address) as w:
