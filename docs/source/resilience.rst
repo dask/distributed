@@ -53,7 +53,7 @@ This has some fail cases.
     task graph via other Dask functions) is not kept in the scheduler, as it is often
     quite large, and so the loss of this data is irreparable. You may wish to call
     :meth:`~distributed.client.Client.replicate` on the data with a suitable replication
-    factor to ensure that it remains long-lived or else back the data off of some
+    factor to ensure that it remains long-lived or else back the data off on some
     resilient store, like a file system.
 
 
