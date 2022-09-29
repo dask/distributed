@@ -450,19 +450,9 @@ class WorkerState:
     #: Underlying data of :meth:`WorkerState.has_what`
     _has_what: dict[TaskState, None]
 
-    #: A dictionary of tasks that have been submitted to this worker. Each task state is
-    #: associated with the expected cost in seconds of running that task, summing both
-    #: the task's expected computation time and the expected communication time of its
-    #: result.
-    #:
-    #: If a task is already executing on the worker and the excecution time is twice the
-    #: learned average TaskGroup duration, this will be set to twice the current
-    #: executing time. If the task is unknown, the default task duration is used instead
-    #: of the TaskGroup average.
-    #:
-    #: Multiple tasks may be submitted to a worker in advance and the worker will run
-    #: them eventually, depending on its execution resources (but see
-    #: :doc:`work-stealing`).
+    #: A set of tasks that have been submitted to this worker. Multiple tasks may be
+    # submitted to a worker in advance and the worker will run them eventually,
+    # depending on its execution resources (but see :doc:`work-stealing`).
     #:
     #: All the tasks here are in the "processing" state.
     #: This attribute is kept in sync with :attr:`TaskState.processing_on`.
