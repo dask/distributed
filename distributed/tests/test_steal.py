@@ -14,7 +14,7 @@ from typing import Callable, Iterable, Mapping, Sequence
 
 import numpy as np
 import pytest
-from tlz import sliding_window
+from tlz import merge, sliding_window
 
 import dask
 from dask.utils import key_split
@@ -1570,6 +1570,10 @@ def test_balance_prefers_busier_with_dependency():
         task_placement,
         _correct_placement,
         recompute_saturation,
+        # This test relies on disabling queueing to flag workers as idle
+        config={
+            "distributed.scheduler.worker-saturation": float("inf"),
+        },
     )
 
 
@@ -1579,6 +1583,7 @@ def _run_dependency_balance_test(
     task_placement: list[list[list[str]]],
     correct_placement_fn: Callable[[list[list[list[str]]]], bool],
     recompute_saturation: bool,
+    config: dict | None = None,
 ) -> None:
     """Run a test for balancing with task dependencies according to the provided
     specifications.
@@ -1600,7 +1605,8 @@ def _run_dependency_balance_test(
         Callable used to determine if stealing placed the tasks as expected.
     recompute_saturation
         Whether to recompute worker saturation before stealing.
-
+    config
+        Optional configuration to apply to the test.
     See Also
     --------
     _dependency_balance_test_permutation
@@ -1627,7 +1633,12 @@ def _run_dependency_balance_test(
         gen_cluster(
             client=True,
             nthreads=[("", 1)] * len(task_placement),
-            config={"distributed.scheduler.unknown-task-duration": "1s"},
+            config=merge(
+                config or {},
+                {
+                    "distributed.scheduler.unknown-task-duration": "1s",
+                },
+            ),
         )(_run)()
 
 
