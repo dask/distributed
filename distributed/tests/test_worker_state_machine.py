@@ -17,6 +17,7 @@ from distributed.protocol.serialize import Serialize
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.utils import recursive_to_dict
 from distributed.utils_test import (
+    NO_AMM,
     _LockedCommPool,
     assert_story,
     freeze_data_fetching,
@@ -598,7 +599,11 @@ async def test_fetch_via_amm_to_compute(c, s, a, b):
 
 
 @pytest.mark.parametrize("as_deps", [False, True])
-@gen_cluster(client=True, nthreads=[("", 1)] * 3)
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 3,
+    config=NO_AMM,
+)
 async def test_lose_replica_during_fetch(c, s, w1, w2, w3, as_deps):
     """
     as_deps=True
@@ -779,7 +784,7 @@ async def test_cancelled_while_in_flight(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_in_memory_while_in_flight(c, s, a, b):
     """
     1. A client scatters x to a

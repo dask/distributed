@@ -4,6 +4,7 @@ import asyncio
 import logging
 from collections import defaultdict, deque
 from collections.abc import Container
+from functools import partial
 from math import log2
 from time import time
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, cast
@@ -516,12 +517,12 @@ def _get_thief(
 ) -> WorkerState | None:
     valid_workers = scheduler.valid_workers(ts)
     if valid_workers is not None:
-        subset = potential_thieves & valid_workers
-        if subset:
-            return next(iter(subset))
+        valid_thieves = potential_thieves & valid_workers
+        if valid_thieves:
+            potential_thieves = valid_thieves
         elif not ts.loose_restrictions:
             return None
-    return next(iter(potential_thieves))
+    return min(potential_thieves, key=partial(scheduler.worker_objective, ts))
 
 
 fast_tasks = {"split-shuffle"}

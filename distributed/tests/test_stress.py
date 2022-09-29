@@ -17,6 +17,7 @@ from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 from distributed.utils import CancelledError
 from distributed.utils_test import (
+    NO_AMM,
     bump_rlimit,
     cluster,
     gen_cluster,
@@ -122,7 +123,11 @@ async def test_stress_creation_and_deletion(c, s):
         assert await c.compute(z) == 8000884.93
 
 
-@gen_cluster(nthreads=[("", 1)] * 10, client=True)
+@gen_cluster(
+    nthreads=[("", 1)] * 10,
+    client=True,
+    config=NO_AMM,
+)
 async def test_stress_scatter_death(c, s, *workers):
     s.allowed_failures = 1000
     np = pytest.importorskip("numpy")
