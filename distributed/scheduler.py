@@ -17,7 +17,7 @@ import sys
 import uuid
 import warnings
 import weakref
-from collections import Counter, defaultdict, deque
+from collections import defaultdict, deque
 from collections.abc import (
     Callable,
     Collection,
@@ -961,8 +961,6 @@ class TaskState:
     #: further in :doc:`Scheduling Policy <scheduling-policies>`.
     priority: tuple[int, ...]
 
-    planned_on: WorkerState | None
-
     # Attribute underlying the state property
     _state: TaskStateState
 
@@ -1155,7 +1153,6 @@ class TaskState:
         self.waiting_on = set()
         self.waiters = set()
         self.who_has = set()
-        self.planned_on = None
         self.processing_on = None
         self.has_lost_dependencies = False
         self.host_restrictions = None  # type: ignore
@@ -1927,37 +1924,6 @@ class SchedulerState:
             assert ws in self.running, (ws, self.running)
 
         return ws
-
-    def decide_worker_from_family(
-        self, family: tuple[set[TaskState], set[TaskState]] | None
-    ) -> WorkerState:
-        if family is not None:
-            siblings, downstream = family
-            # First see if any downstream tasks are already planned somewhere; use that
-            candidates: Counter[WorkerState] = Counter()
-            for dts in downstream:
-                if pws := dts.planned_on:
-                    if self.workers.get(pws.address) is pws:
-                        candidates.update((pws,))
-                    else:
-                        dts.planned_on = None
-
-            if candidates:
-                return candidates.most_common(1)[0][0]
-
-            # If not, see if any sibling tasks are already planned somewhere; use that
-            for dts in siblings:
-                if pws := dts.planned_on:
-                    if self.workers.get(pws.address) is pws:
-                        candidates.update((pws,))
-                    else:
-                        dts.planned_on = None
-
-            if candidates:
-                return candidates.most_common(1)[0][0]
-
-        # No family, or nothing is planned anywhere. Pick a new worker.
-        return self.decide_worker_rootish_queuing_enabled()
 
     def decide_worker_non_rootish(self, ts: TaskState) -> WorkerState | None:
         """Pick a worker for a runnable non-root task, considering dependencies and restrictions.
@@ -7714,14 +7680,23 @@ def _queueable_to_processing(
     if not state.idle:
         return {ts.key: "queued"}, {}, {}
 
-    fam = family(ts, 20)  # TODO maxsize as config/what?!
-    ws = state.decide_worker_from_family(fam)
+    # NOTE: we don't have family-based decide-worker logic yet, since it's currently impossible for siblings to be spread
+    # across multiple workers, since all sibling tasks are scheduled onto the same worker at once.
+    # (This is relying on the assumption that all sibling tasks are always runnable, which `is_rootish` _kinda_ should guarantee but maybe
+    # could break in some cases).
+    # So the corollary of this is:
+    # * on scale-up, we pop a task off the queue and schedule all its siblings, all of which are guaranteed not to be running or
+    #   in memory anywhere else yet. Sibling-based co-assignment is unnecessary.
+    # * on scale-down, all siblings are processing or in memory on the same worker, so they all get rescheduled.
+    #   FIXME except some might have been replicated!! we should schedule near those replicas!
+    ws = state.decide_worker_rootish_queuing_enabled()
 
     if ts.state == "queued":
         state.queued.remove(ts)
     worker_msgs: dict[str, list[Any]] = _add_to_processing(state, ts, ws)
 
     recommendations: Recs = {}
+    fam = family(ts, 20)  # TODO maxsize as config/what?!
     if fam:
         siblings, downstream = fam
         # Schedule other tasks that will all need to be in memory
@@ -7739,35 +7714,43 @@ def _queueable_to_processing(
             # Or maybe some are even in memory?
             # When does this happen, and how should we handle them?
             assert fts is not ts
-            assert fts.planned_on is None or fts.planned_on is ws, (
-                fts.planned_on,
-                ws,
-            )
 
-            if fts.state == "processing":
-                assert fts.processing_on is ws, (fts.processing_on, ws)
+            # breaks our assumption that all siblings must be runnable at the same time
+            assert fts.state != "processing", (fts, fts.processing_on, ts, ws)
+            # if fts.state == "processing":
+            #     assert fts.processing_on is ws, (fts.processing_on, ws)
 
-            if fts.state == "memory":
-                assert ws in fts.who_has, (fts.who_has, ws)
+            # if fts.state == "memory":
+            #     # only can happen in the case of rescheduling, and replicas already exist
+            #     continue
+            #     # assert ws in fts.who_has, (fts.who_has, ws)
 
             if fts.state == "queued":
                 if state.validate:
                     assert fts in state.queued
                 state.queued.discard(fts)
 
-            if fts.state in ("released", "waiting", "queued"):
-                fts.planned_on = ws
+            assert fts.state in ("released", "waiting", "queued"), (fts, ts)
 
-                if not fts.waiting_on:  # wtf if it's released??
-                    update_msgs(worker_msgs, _add_to_processing(state, fts, ws))
+            # TODO when is this not the case, and what should we do then?
+            # Violates the assumption that all siblings are runnable together
+            # (which is a bad assumption anyway).
+            # In that case, we have a task that's going to run later, once its deps
+            # are available. I guess it should just schedule near those deps.
+            # Unless they're widely-shared, in which case it should schedule near its family.
+            # In which case it should look root-ish, so it should come back here.
+            # Therefore, we again need a `decide_worker_from_family` that co-locates with
+            # in-memory or processing tasks.
 
-                    # This recommendation will be a no-op. It's just to remove any existing
-                    # recommendation for the key from the recommendations queue.
-                    recommendations[fts.key] = "processing"
+            if (
+                not fts.waiting_on
+            ):  # wtf if it's released?? then this hasn't been set yet.
+                # assert not fts.waiting_on, (fts, fts.waiting_on, ts)
+                update_msgs(worker_msgs, _add_to_processing(state, fts, ws))
 
-        for cts in downstream:
-            if cts.planned_on is None:
-                cts.planned_on = ws
+                # This recommendation will be a no-op. It's just to remove any existing
+                # recommendation for the key from the recommendations queue.
+                recommendations[fts.key] = "processing"
 
     return recommendations, {}, worker_msgs
 
@@ -7783,7 +7766,6 @@ def _add_to_processing(
         assert (o := state.workers.get(ws.address)) is ws, (ws, o)
 
     state._set_duration_estimate(ts, ws)
-    ts.planned_on = None
     ts.processing_on = ws
     ts.state = "processing"
     state.acquire_resources(ts, ws)
@@ -8373,6 +8355,8 @@ def family(ts: TaskState, maxsize: int) -> tuple[set[TaskState], set[TaskState]]
                 if len(siblings) > maxsize:
                     return None
 
+    # NOTE: `downstream` isn't used for scheduling yet, since family scheduling
+    # only applies to root tasks. But it would be used for STA.
     return siblings, downstream
 
 
