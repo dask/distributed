@@ -733,11 +733,6 @@ async def assert_balanced(inp, expected, recompute_saturation, c, s, *workers):
         pytest.param([[1], []], [[1], []], id="don't move unnecessarily"),
         pytest.param([[0, 0], []], [[0], [0]], id="balance"),
         pytest.param(
-            [[0, 0, 0, 0, 0, 0, 0, 0], []],
-            [[0, 0, 0, 0, 0, 0], [0, 0]],
-            id="balance until none idle",
-        ),
-        pytest.param(
             [[0.1, 0.1], []], [[0], [0]], id="balance even if results in even"
         ),
         pytest.param([[0, 0, 0], []], [[0, 0], [0]], id="don't over balance"),
