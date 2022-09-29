@@ -535,18 +535,20 @@ def client(loop, cluster_fixture):
 
 @pytest.fixture
 def client_no_amm(client):
-    """Let a sync test that relies on the Active Memory Manager (AMM) to run wether
-    the AMM is enabled or not in the dask config
+    """Sync client with the Active Memory Manager (AMM) turned off.
+    This works regardless of the AMM being on or off in the dask config.
     """
     before = client.amm.running()
     if before:
         client.amm.stop()  # pragma: nocover
 
     yield client
-    assert not client.amm.running()
 
-    if before:
+    after = client.amm.running()
+    if before and not after:
         client.amm.start()  # pragma: nocover
+    elif not before and after:
+        client.amm.stop()  # pragma: nocover
 
 
 # Compatibility. A lot of tests simply use `c` as fixture name
