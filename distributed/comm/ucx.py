@@ -330,8 +330,9 @@ class UCX(Comm):
             # "low-level" exception. The only safe thing to do is to abort.
             # (See also https://github.com/dask/distributed/pull/6574).
             self.abort()
-            raise CommClosedError("Connection closed by writer.\n"
-                                  f"Inner exception: {e!r}")
+            raise CommClosedError(
+                f"Connection closed by writer.\nInner exception: {e!r}"
+            )
         else:
             # Recv frames
             frames = [
