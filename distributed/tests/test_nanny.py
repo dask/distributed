@@ -7,6 +7,7 @@ import multiprocessing as mp
 import os
 import random
 import sys
+import warnings
 from contextlib import suppress
 from unittest import mock
 
@@ -347,6 +348,15 @@ async def test_environment_variable_pre_post_spawn(c, s, n):
 
     del os.environ["PRE-SPAWN"]
     assert "POST-SPAWN" not in os.environ
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_config_param_overlays(c, s):
+    with dask.config.set({"test123.foo": 1, "test123.bar": 2}):
+        async with Nanny(s.address, config={"test123.bar": 3, "test123.baz": 4}) as n:
+            out = await c.submit(lambda: dask.config.get("test123"))
+
+    assert out == {"foo": 1, "bar": 3, "baz": 4}
 
 
 @gen_cluster(nthreads=[])
@@ -702,3 +712,34 @@ async def test_malloc_trim_threshold(c, s, a):
     # - 698 MiB at the end of this test, without MALLOC_TRIM_THRESHOLD_
     while s.memory.process > 250 * 2**20:
         await asyncio.sleep(0.01)
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_default_client_does_not_propagate_to_subprocess(c, s):
+    @dask.delayed
+    def run_in_thread():
+        return
+
+    def func():
+        with warnings.catch_warnings(record=True) as rec:
+            warnings.filterwarnings(
+                "once",
+                message="Running on a single-machine scheduler",
+                category=UserWarning,
+            )
+            # If no scheduler kwarg is provided, this will
+            # automatically transition to long-running
+            dask.compute(run_in_thread(), scheduler="single-threaded")
+        return rec
+
+    async with Nanny(s.address):
+        rec = await c.submit(func)
+        assert not rec
+
+
+@gen_cluster(client=True, nthreads=[], config={"test123": 456})
+async def test_worker_inherits_temp_config(c, s):
+    with dask.config.set(test123=123):
+        async with Nanny(s.address):
+            out = await c.submit(lambda: dask.config.get("test123"))
+            assert out == 123

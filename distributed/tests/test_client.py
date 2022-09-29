@@ -749,6 +749,11 @@ async def test_wait_timeout(c, s, a, b):
     with pytest.raises(TimeoutError):
         await wait(future, timeout=0.01)
 
+    # Ensure timeout can be a string
+    future = c.submit(sleep, 0.3)
+    with pytest.raises(TimeoutError):
+        await wait(future, timeout="0.01 s")
+
 
 def test_wait_sync(c):
     x = c.submit(inc, 1)

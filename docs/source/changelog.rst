@@ -1,6 +1,38 @@
 Changelog
 =========
 
+.. _v2022.9.1:
+
+2022.9.1
+--------
+
+Released on September 16, 2022
+
+Enhancements
+^^^^^^^^^^^^
+- Add dashboard component for size of open data transfers (:pr:`6982`) `Hendrik Makait`_
+- Allow very fast keys and very expensive transfers as stealing candidates (:pr:`7022`) `Florian Jetter`_
+
+Bug Fixes
+^^^^^^^^^
+- No longer double count transfer cost in stealing (:pr:`7036`) `Hendrik Makait`_
+
+Maintenance
+^^^^^^^^^^^
+- Make ``test_wait_first_completed`` robust (:pr:`7039`) `Florian Jetter`_
+- Partial annotations for ``SchedulerState`` (:pr:`7023`) `crusaderky`_
+- Add more type annotations to ``stealing.py`` (:pr:`7009`) `Florian Jetter`_
+- Update codecov settings (:pr:`7015`) `Florian Jetter`_
+- Speed up ``test_balance`` (:pr:`7008`) `Florian Jetter`_
+- Fix test report after queuing job added (:pr:`7012`) `Gabe Joseph`_
+- Clean up env variables in Gihub Actions (:pr:`7001`) `crusaderky`_
+- Make ``test_steal_reschedule_reset_in_flight_occupancy`` non timing dependent (:pr:`7010`) `Florian Jetter`_
+- Replaced ``distributed.utils.key_split`` with ``dask.utils.key_split`` (:pr:`7005`) `Luke Conibear`_
+- Revert "Revert "Limit incoming data transfers by amount of data" (:pr:`6994)" (:pr:`7007`) `Florian Jetter`_
+- CI job running tests with queuing on (:pr:`6989`) `Gabe Joseph`_
+- Fix ``distributed/tests/test_client_executor.py::test_wait`` (:pr:`6990`) `Florian Jetter`_
+
+
 .. _v2022.9.0:
 
 2022.9.0
@@ -4153,3 +4185,4 @@ significantly without many new features.
 .. _`Crislana Rafael`: https://github.com/crislanarafael
 .. _`Ian Liu Rodrigues`: https://github.com/ianliu
 .. _`Vincenzo Eduardo Padulano`: https://github.com/vepadulano
+.. _`Luke Conibear`: https://github.com/lukeconibear

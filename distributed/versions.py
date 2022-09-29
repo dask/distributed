@@ -29,7 +29,7 @@ optional_packages = [
 
 
 # only these scheduler packages will be checked for version mismatch
-scheduler_relevant_packages = {pkg for pkg, _ in required_packages} | {"lz4"}
+scheduler_relevant_packages = {pkg for pkg, _ in required_packages} | {"lz4", "python"}
 
 
 # notes to be displayed for mismatch packages

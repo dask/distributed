@@ -107,16 +107,23 @@ def test_scheduler_additional_irrelevant_package(kwargs_matching):
     assert error_message(**kwargs_matching)["warning"] == ""
 
 
-def test_python_mismatch(kwargs_matching):
-    kwargs_matching["source"]["packages"]["python"] = "0.0.0"
-    msg = error_message(**kwargs_matching)
+def test_python_mismatch(kwargs_matching, node):
+    column_matching = {"source": 1, "scheduler": 2, "workers": 3}
+    i = column_matching.get(node, 3)
+    mismatch_version = "0.0.0"
+    kwargs = kwargs_matching
+    if node in kwargs["workers"]:
+        kwargs["workers"][node]["packages"]["python"] = mismatch_version
+    else:
+        kwargs[node]["packages"]["python"] = mismatch_version
+    msg = error_message(**kwargs)
     assert "Mismatched versions found" in msg["warning"]
     assert "python" in msg["warning"]
     assert (
         "0.0.0"
         in re.search(r"python\s+(?:(?:\|[^|\r\n]*)+\|(?:\r?\n|\r)?)+", msg["warning"])
         .group(0)
-        .split("|")[1]
+        .split("|")[i]
         .strip()
     )
 

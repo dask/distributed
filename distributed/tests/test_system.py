@@ -17,7 +17,7 @@ def test_memory_limit():
     assert limit >= 1
 
 
-def test_memory_limit_cgroups(monkeypatch):
+def test_hard_memory_limit_cgroups(monkeypatch):
     builtin_open = builtins.open
 
     def myopen(path, *args, **kwargs):
@@ -31,6 +31,60 @@ def test_memory_limit_cgroups(monkeypatch):
 
     limit = memory_limit()
     assert limit == 20
+
+
+def test_soft_memory_limit_cgroups(monkeypatch):
+    builtin_open = builtins.open
+
+    def myopen(path, *args, **kwargs):
+        if path == "/sys/fs/cgroup/memory/memory.limit_in_bytes":
+            # Absurdly low, unlikely to match real value
+            return io.StringIO("20")
+        if path == "/sys/fs/cgroup/memory/memory.soft_limit_in_bytes":
+            # Should take precedence
+            return io.StringIO("10")
+        return builtin_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", myopen)
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    limit = memory_limit()
+    assert limit == 10
+
+
+def test_hard_memory_limit_cgroups2(monkeypatch):
+    builtin_open = builtins.open
+
+    def myopen(path, *args, **kwargs):
+        if path == "/sys/fs/cgroup/memory.max":
+            # Absurdly low, unlikely to match real value
+            return io.StringIO("20")
+        return builtin_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", myopen)
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    limit = memory_limit()
+    assert limit == 20
+
+
+def test_soft_memory_limit_cgroups2(monkeypatch):
+    builtin_open = builtins.open
+
+    def myopen(path, *args, **kwargs):
+        if path == "/sys/fs/cgroup/memory.max":
+            # Absurdly low, unlikely to match real value
+            return io.StringIO("20")
+        if path == "/sys/fs/cgroup/memory.high":
+            # should take precedence
+            return io.StringIO("10")
+        return builtin_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", myopen)
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    limit = memory_limit()
+    assert limit == 10
 
 
 def test_rlimit():

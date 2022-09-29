@@ -1214,7 +1214,7 @@ class TaskState:
     #:     "processing" state and be sent for execution to another connected worker.
     loose_restrictions: bool
 
-    #: Whether or not this task is an Actor
+    #: Whether this task is an Actor
     actor: bool
 
     #: The group of tasks to which this one belongs
@@ -1565,9 +1565,14 @@ class SchedulerState:
             dask.config.get("distributed.worker.memory.rebalance.sender-recipient-gap")
             / 2.0
         )
-        self.WORKER_SATURATION = dask.config.get(
-            "distributed.scheduler.worker-saturation"
-        )
+
+        sat = dask.config.get("distributed.scheduler.worker-saturation")
+        try:
+            self.WORKER_SATURATION = float(sat)
+        except ValueError:
+            raise ValueError(
+                f"Unsupported `distributed.scheduler.worker-saturation` value {sat!r}. Must be a float."
+            )
         self.transition_counter = 0
         self._idle_transition_counter = 0
         self.transition_counter_max = transition_counter_max
@@ -4723,7 +4728,12 @@ class Scheduler(SchedulerState, ServerNode):
                 if ts.suspicious > self.allowed_failures:
                     del recommendations[k]
                     e = pickle.dumps(
-                        KilledWorker(task=k, last_worker=ws.clean()), protocol=4
+                        KilledWorker(
+                            task=k,
+                            last_worker=ws.clean(),
+                            allowed_failures=self.allowed_failures,
+                        ),
+                        protocol=4,
                     )
                     r = self.transition(
                         k,
@@ -8229,8 +8239,8 @@ def _worker_full(ws: WorkerState, saturation_factor: float) -> bool:
 
 
 class KilledWorker(Exception):
-    def __init__(self, task: str, last_worker: WorkerState):
-        super().__init__(task, last_worker)
+    def __init__(self, task: str, last_worker: WorkerState, allowed_failures: int):
+        super().__init__(task, last_worker, allowed_failures)
 
     @property
     def task(self) -> str:
@@ -8239,6 +8249,19 @@ class KilledWorker(Exception):
     @property
     def last_worker(self) -> WorkerState:
         return self.args[1]
+
+    @property
+    def allowed_failures(self) -> int:
+        return self.args[2]
+
+    def __str__(self) -> str:
+        return (
+            f"Attempted to run task {self.task} on {self.allowed_failures} different "
+            "workers, but all those workers died while running it. "
+            f"The last worker that attempt to run the task was {self.last_worker.address}. "
+            "Inspecting worker logs is often a good next step to diagnose what went wrong. "
+            "For more information see https://distributed.dask.org/en/stable/killed.html."
+        )
 
 
 class WorkerStatusPlugin(SchedulerPlugin):
