@@ -66,7 +66,7 @@ distributed:
       # Set to true to auto-start the Active Memory Manager on Scheduler start; if false
       # you'll have to either manually start it with client.amm.start() or run it once
       # with client.amm.run_once().
-      start: false
+      start: true
 
       # Once started, run the AMM cycle every <interval>
       interval: 2s
