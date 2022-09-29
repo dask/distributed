@@ -31,10 +31,8 @@ def test_serialize_numba(shape, dtype, order, serializers):
     elif serializers[0] == "dask":
         assert all(isinstance(f, memoryview) for f in frames)
 
-    hx = np.empty_like(ary)
-    hy = np.empty_like(ary)
-    x.copy_to_host(hx)
-    y.copy_to_host(hy)
+    hx = x.copy_to_host()
+    hy = y.copy_to_host()
     assert (hx == hy).all()
 
 
