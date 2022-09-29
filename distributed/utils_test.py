@@ -550,8 +550,8 @@ def client_no_amm(client):
     after = client.amm.running()
     if before and not after:
         client.amm.start()  # pragma: nocover
-    elif not before and after:
-        client.amm.stop()  # pragma: nocover
+    elif not before and after:  # pragma: nocover
+        client.amm.stop()
 
 
 # Compatibility. A lot of tests simply use `c` as fixture name
@@ -698,7 +698,7 @@ def cluster(
                         nthreads = await s.ncores_running()
                         if len(nthreads) == nworkers:
                             break
-                        if time() - start > 5:
+                        if time() - start > 5:  # pragma: nocover
                             raise Exception("Timeout on cluster creation")
 
             _run_and_close_tornado(wait_for_workers)
