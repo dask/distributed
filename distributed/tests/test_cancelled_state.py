@@ -1050,7 +1050,7 @@ async def test_secede_cancelled_or_resumed_scheduler(c, s, a):
 
     # Test that the scheduler receives a delayed {op: long-running}
     assert ws.long_running
-    assert not ws.processing
+    assert ws.processing
 
     await ev4.set()
     assert await x == 123

@@ -677,20 +677,34 @@ class WorkerState:
             if self not in dts.who_has:
                 self._inc_needs_replica(dts)
 
+    def add_to_long_running(self, ts: TaskState) -> None:
+        self._remove_from_task_groups_count(ts)
+        # Cannot remove from processing since we're using this for things like
+        # idleness detection. Idle workers are typically targeted for
+        # downscaling but we should not downscale workers with long running
+        # tasks
+        self.long_running.add(ts)
+
     def remove_from_processing(self, ts: TaskState) -> None:
         """Remove a task from a workers processing"""
         if ts not in self.processing:
             return
+        if ts in self.long_running:
+            self.long_running.discard(ts)
+        else:
+            self._remove_from_task_groups_count(ts)
+        self.processing.remove(ts)
+        for dts in ts.dependencies:
+            if dts in self.needs_what:
+                self._dec_needs_replica(dts)
+
+    def _remove_from_task_groups_count(self, ts: TaskState) -> None:
         self.task_groups_count[ts.group.name] -= 1
         self.scheduler.task_groups_count_global[ts.group.name] -= 1
         if not self.task_groups_count[ts.group.name]:
             del self.task_groups_count[ts.group.name]
         if not self.scheduler.task_groups_count_global[ts.group.name]:
             del self.scheduler.task_groups_count_global[ts.group.name]
-        self.processing.remove(ts)
-        for dts in ts.dependencies:
-            if dts in self.needs_what:
-                self._dec_needs_replica(dts)
 
     def remove_replica(self, ts: TaskState) -> None:
         """The worker no longer has a task in memory"""
@@ -2251,7 +2265,7 @@ class SchedulerState:
                 assert ts.processing_on
                 wss = ts.processing_on
                 assert wss
-                assert ts in wss.processing or ts in wss.long_running
+                assert ts in wss.processing
                 del wss
                 assert not ts.waiting_on
                 assert not ts.who_has, (ts, ts.who_has)
@@ -5229,12 +5243,7 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 ts.prefix.duration_average = (old_duration + compute_duration) / 2
 
-        ws.remove_from_processing(ts)
-        # Cannot remove from processing since we're using this for things like
-        # idleness detection. Idle workers are typically targeted for
-        # downscaling but we should not downscale workers with long running
-        # tasks
-        ws.long_running.add(ts)
+        ws.add_to_long_running(ts)
         self.check_idle_saturated(ws)
 
     def handle_worker_status_change(
@@ -7590,7 +7599,6 @@ class Scheduler(SchedulerState, ServerNode):
             self.queued
             or self.unrunnable
             or any([ws.processing for ws in self.workers.values()])
-            or any([ws.long_running for ws in self.workers.values()])
         ):
             self.idle_since = None
             return
@@ -7775,7 +7783,6 @@ def _exit_processing_common(
     if state.workers.get(ws.address) is not ws:  # may have been removed
         return None
     ws.remove_from_processing(ts)
-    ws.long_running.discard(ts)
 
     state.check_idle_saturated(ws)
     state.release_resources(ts, ws)
