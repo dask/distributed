@@ -132,7 +132,7 @@ It is injected on the fly by :meth:`distributed.Client.retire_workers` and whene
 an adaptive cluster is being scaled down.
 This policy supervises moving all tasks, that are in memory exclusively on the worker
 being retired, to different workers. Once the worker does not uniquely hold the data for
-any task, this policy uninstall itself automatically from the Active Memory Manager and
+any task, this policy uninstalls itself automatically from the Active Memory Manager and
 the worker is shut down.
 
 If multiple workers are being retired at the same time, there will be multiple instances
