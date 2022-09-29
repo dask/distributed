@@ -4,10 +4,11 @@ import logging
 
 from distributed.http.prometheus import PrometheusCollector
 from distributed.http.utils import RequestHandler
+from distributed.worker import Worker
 
 
 class WorkerMetricCollector(PrometheusCollector):
-    def __init__(self, server):
+    def __init__(self, server: Worker):
         super().__init__(server)
         self.logger = logging.getLogger("distributed.dask_worker")
         self.subsystem = "worker"

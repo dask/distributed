@@ -16,8 +16,9 @@ import dask.config
 from dask.sizeof import sizeof
 
 from distributed import Lock
+from distributed.client import wait
 from distributed.utils import is_valid_xml
-from distributed.utils_test import gen_cluster, inc, lock_inc, slowinc
+from distributed.utils_test import div, gen_cluster, inc, lock_inc, slowinc
 
 DEFAULT_ROUTES = dask.config.get("distributed.scheduler.http.routes")
 
@@ -169,6 +170,43 @@ async def test_prometheus_collect_task_states(c, s, a, b):
     assert active_metrics.keys() == expected
     assert sum(active_metrics.values()) == 0.0
     assert sum(forgotten_tasks) == 0.0
+
+
+@gen_cluster(client=True, clean_kwargs={"threads": False})
+async def test_prometheus_collect_task_prefix_counts(c, s, a, b):
+    pytest.importorskip("prometheus_client")
+    from prometheus_client.parser import text_string_to_metric_families
+
+    http_client = AsyncHTTPClient()
+
+    async def fetch_metrics():
+        port = s.http_server.port
+        response = await http_client.fetch(f"http://localhost:{port}/metrics")
+        txt = response.body.decode("utf8")
+        families = {
+            family.name: family for family in text_string_to_metric_families(txt)
+        }
+
+        prefix_state_counts = {
+            (sample.labels["task_prefix_name"], sample.labels["state"]): sample.value
+            for sample in families["dask_scheduler_prefix_state_totals"].samples
+        }
+
+        return prefix_state_counts
+
+    # do some compute and check the counts for each prefix and state
+    futures = c.map(inc, range(10))
+    await c.gather(futures)
+
+    prefix_state_counts = await fetch_metrics()
+    assert prefix_state_counts.get(("inc", "memory")) == 10
+    assert prefix_state_counts.get(("inc", "erred"), 0) == 0
+
+    f = c.submit(div, 1, 0)
+    await wait(f)
+
+    prefix_state_counts = await fetch_metrics()
+    assert prefix_state_counts.get(("div", "erred")) == 1
 
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})
