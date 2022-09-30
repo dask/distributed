@@ -2374,7 +2374,6 @@ async def test_get_task_duration(c, s, a, b):
     assert len(s.unknown_durations["slowinc"]) == 1
 
 
-@pytest.mark.skip(reason="no idea what's wrong")
 @gen_cluster(client=True)
 async def test_default_task_duration_splits(c, s, a, b):
     """Ensure that the default task durations for shuffle split tasks are, by default,
