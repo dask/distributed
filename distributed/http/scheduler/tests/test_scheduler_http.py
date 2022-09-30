@@ -107,6 +107,7 @@ async def test_prometheus(c, s, a, b):
         "dask_scheduler_tasks",
         "dask_scheduler_tasks_suspicious",
         "dask_scheduler_tasks_forgotten",
+        "dask_scheduler_prefix_state_totals",
     }
 
     assert active_metrics.keys() == expected_metrics
