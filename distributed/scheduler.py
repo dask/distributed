@@ -7681,7 +7681,7 @@ def _queueable_to_processing(
     if not state.idle:
         return {ts.key: "queued"}, {}, {}
 
-    fam = family(ts, 20)  # TODO maxsize as config/what?!
+    fam = family(ts, min(state.total_nthreads, 512))  # TODO maxsize as config/what?!
     ws = state.decide_worker_from_family(fam)
     # ^ NOTE: This is all we need to for good (re)scheduling when the cluster changes size.
 
