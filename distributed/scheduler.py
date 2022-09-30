@@ -1894,8 +1894,12 @@ class SchedulerState:
             candidates: defaultdict[WorkerState, int] = defaultdict(lambda: 0)
             for ts in siblings:
                 for ws in ts.who_has:
-                    candidates[ws] += ts.get_nbytes()
-                if ts.processing_on:  # NOTE: exclusive with `ts.who_has`
+                    if ws.status == Status.running:
+                        candidates[ws] += ts.get_nbytes()
+                if (
+                    ts.processing_on  # NOTE: exclusive with `ts.who_has`
+                    and ts.processing_on.status == Status.running
+                ):
                     tg = ts.group
                     nbytes_estimate = (
                         round(tg.nbytes_total / nmem)
