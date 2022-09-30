@@ -713,7 +713,7 @@ class TaskPrefix:
     #: Task groups associated to this prefix
     groups: list[TaskGroup]
 
-    #: foo
+    #: Accumulate count of number of tasks in each state
     state_counts: defaultdict[str, int]
 
     __slots__ = tuple(__annotations__)
