@@ -258,6 +258,10 @@ class PipInstall(WorkerPlugin):
        file system. Each worker might try to install the packages
        simultaneously.
 
+    .. warning::
+
+       This plugin is experimental and does not support pip's legacy resolver.
+
     Parameters
     ----------
     packages : List[str]
