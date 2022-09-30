@@ -4,20 +4,19 @@ import operator
 
 from tlz import partition_all
 
-from dask import delayed
+import dask
 
 from distributed.scheduler import family
 from distributed.utils_test import async_wait_for, gen_cluster, slowidentity, slowinc
 
-ident = delayed(slowidentity, pure=True)
-inc = delayed(slowinc, pure=True)
-add = delayed(operator.add, pure=True)
-dsum = delayed(sum, pure=True)
+ident = dask.delayed(slowidentity, pure=True)
+inc = dask.delayed(slowinc, pure=True)
+add = dask.delayed(operator.add, pure=True)
+dsum = dask.delayed(sum, pure=True)
 
 
 async def submit_delayed(client, scheduler, x):
     "Submit a delayed object or list of them; wait until tasks are processed on scheduler"
-
     # dask.visualize(x, optimize_graph=True, collapse_outputs=True)
     fs = client.compute(x)
     await async_wait_for(lambda: scheduler.tasks, 5)
@@ -38,9 +37,9 @@ async def test_family(c, s):
      / \   |   / \   |   / \   |
     a   b  c  a   b  c  a   b  c
     """
-    ax = [delayed(i, name=f"a-{i}") for i in range(3)]
-    bx = [delayed(i, name=f"b-{i}") for i in range(3)]
-    cx = [delayed(i, name=f"c-{i}") for i in range(3)]
+    ax = [dask.delayed(i, name=f"a-{i}") for i in range(3)]
+    bx = [dask.delayed(i, name=f"b-{i}") for i in range(3)]
+    cx = [dask.delayed(i, name=f"c-{i}") for i in range(3)]
 
     zs = [(a + b) + c for a, b, c in zip(ax, bx, cx)]
 
@@ -95,7 +94,7 @@ async def test_family_linear_chains(c, s):
        \   \   \   \   \  \  /   /   /  /   /   /    /   /
                             r
     """
-    root = delayed(0, name="root")
+    root = dask.delayed(0, name="root")
     ax = [
         ident(ident(inc(root, dask_key_name=f"a-{i}"))) for i in range(3)  # 2-chain(z)
     ]
@@ -184,8 +183,8 @@ async def test_family_linear_chains_plus_widely_shared(c, s):
     | | | | s | | |
     r r r r r r r r
     """
-    shared = delayed(0, name="shared")
-    roots = [delayed(i, name=f"r-{i}") for i in range(8)]
+    shared = dask.delayed(0, name="shared")
+    roots = [dask.delayed(i, name=f"r-{i}") for i in range(8)]
     ax = [add(r, shared, dask_key_name=f"a-{i}") for i, r in enumerate(roots)]
     sx = [
         dsum(axs, dask_key_name=f"s-{i}") for i, axs in enumerate(partition_all(3, ax))
@@ -214,7 +213,7 @@ async def test_family_triangle(c, s):
     \ |
       x
     """
-    x = delayed(0, name="x")
+    x = dask.delayed(0, name="x")
     y = inc(x, dask_key_name="y")
     z = add(x, y, dask_key_name="z")
 
@@ -246,7 +245,7 @@ async def test_family_wide_gather_downstream(c, s):
     | | | | | | | |
     r r r r r r r r
     """
-    roots = [delayed(i, name=f"r-{i}") for i in range(8)]
+    roots = [dask.delayed(i, name=f"r-{i}") for i in range(8)]
     incs = [inc(r, dask_key_name=f"i-{i}") for i, r in enumerate(roots)]
     sum = dsum(incs, dask_key_name="sum")
 
