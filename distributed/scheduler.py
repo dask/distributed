@@ -5015,7 +5015,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         assert task_group_counts.keys() == self.task_groups_count_global.keys()
         for name, global_count in self.task_groups_count_global.items():
-            assert task_group_counts[name] == global_count, name
+            assert (
+                task_group_counts[name] == global_count
+            ), f"{name}: {task_group_counts[name]} (actual), {global_count} (global)"
 
         for ws in self.running:
             assert ws.status == Status.running
@@ -7791,9 +7793,9 @@ def _exit_processing_common(
     assert ws
     ts.processing_on = None
 
+    ws.remove_from_processing(ts)
     if state.workers.get(ws.address) is not ws:  # may have been removed
         return None
-    ws.remove_from_processing(ts)
 
     state.check_idle_saturated(ws)
     state.release_resources(ts, ws)
