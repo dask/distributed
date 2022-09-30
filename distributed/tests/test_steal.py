@@ -1688,7 +1688,7 @@ async def _dependency_balance_test_permutation(
 
     # Re-evaluate idle/saturated classification to avoid outdated classifications due to
     # the initialization order of workers. On a real cluster, this would get constantly
-    # updated by tasks completing (except for stragglers).
+    # updated by tasks being added or completing.
     for ws in s.workers.values():
         s.check_idle_saturated(ws)
 
