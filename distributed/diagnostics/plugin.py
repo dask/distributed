@@ -260,7 +260,8 @@ class PipInstall(WorkerPlugin):
 
     .. warning::
 
-       This plugin is experimental and does not support pip's legacy resolver.
+       This plugin is experimental and can stop working without warning
+       when pip changes. It also does not support pip's legacy resolver.
 
     Parameters
     ----------
