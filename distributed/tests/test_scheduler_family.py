@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import operator
 
-from tlz import partition_all
+from tlz import partition, partition_all
 
 import dask
 
@@ -270,3 +270,29 @@ async def test_family_wide_gather_downstream(c, s):
 # TODO test family commutativity. Given any node X in any graph, calculate `family(X)`.
 # For each sibling S, `family(S)` should give the same family, regardless of the
 # starting node.
+# EXECPT THIS ISN'T TRUE
+
+
+@gen_cluster(nthreads=[], client=True)
+async def test_family_non_commutative(c, s):
+    roots = [dask.delayed(i, name=f"r-{i}") for i in range(16)]
+    aggs = [dsum(rs) for rs in partition(4, roots)]
+    extra = dsum([roots[::4]], dask_key_name="extra")
+
+    _ = await submit_delayed(c, s, aggs + [extra])
+
+    rts = [s.tasks[r.key] for r in roots]
+    ats = [s.tasks[a.key] for a in aggs]
+    ets = s.tasks["extra"]
+
+    fam = family(rts[0], 1000, 1000)
+    assert fam
+    sibs, downstream = fam
+    assert sibs == set(rts[1:4]) | {rts[4], rts[8], rts[12]}
+    assert downstream == {ats[0], ets}
+
+    fam = family(rts[1], 1000, 1000)
+    assert fam
+    sibs, downstream = fam
+    assert sibs == {rts[0], rts[2], rts[3]}
+    assert downstream == {ats[0]}
