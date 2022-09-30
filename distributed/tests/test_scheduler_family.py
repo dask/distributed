@@ -31,6 +31,13 @@ async def submit_delayed(client, scheduler, x):
 
 @gen_cluster(nthreads=[], client=True)
 async def test_family(c, s):
+    r"""
+          z         z         z
+        /  |      /  |      /  |
+      x    |    x    |    x    |
+     / \   |   / \   |   / \   |
+    a   b  c  a   b  c  a   b  c
+    """
     ax = [delayed(i, name=f"a-{i}") for i in range(3)]
     bx = [delayed(i, name=f"b-{i}") for i in range(3)]
     cx = [delayed(i, name=f"c-{i}") for i in range(3)]
@@ -43,27 +50,27 @@ async def test_family(c, s):
     b1 = s.tasks["b-1"]
     c1 = s.tasks["c-1"]
 
-    fam = family(a1, 1000)
+    fam = family(a1, 1000, 1000)
     assert fam
     sibs, downstream = fam
     assert sibs == {b1}
     assert len(downstream) == 1
     add_1_1 = next(iter(downstream))
 
-    fam = family(c1, 1000)
+    fam = family(c1, 1000, 1000)
     assert fam
     sibs, downstream = fam
     assert sibs == {add_1_1}
     assert len(downstream) == 1  # don't know keys
     add_1_2 = next(iter(downstream))
 
-    fam = family(add_1_1, 1000)
+    fam = family(add_1_1, 1000, 1000)
     assert fam
     sibs, downstream = fam
     assert sibs == {c1}
     assert downstream == {add_1_2}
 
-    assert family(add_1_2, 1000) is None
+    assert family(add_1_2, 1000, 1000) is None
 
 
 @gen_cluster(nthreads=[], client=True)
@@ -121,7 +128,7 @@ async def test_family_linear_chains(c, s):
 
     # `a` traverses chains up and down to find `b` and `c`
     # Does *not* include `d`: `d` is not required to compute `s1`
-    fam = family(a1, 4)
+    fam = family(a1, 1000, 4)
     assert fam
     sibs, downstream = fam
     assert sibs == {b1, c1}
@@ -129,7 +136,7 @@ async def test_family_linear_chains(c, s):
 
     # `d` traverses chains up to find `s2`
     # does not traverse down past `s2`
-    fam = family(d1, 4)
+    fam = family(d1, 1000, 4)
     assert fam
     sibs, downstream = fam
     assert sibs == {s1_1}
@@ -137,14 +144,14 @@ async def test_family_linear_chains(c, s):
 
     # Don't traverse a linear chain past self
     mid_chain = next(iter(a1.dependents))
-    fam = family(mid_chain, 4)
+    fam = family(mid_chain, 1000, 4)
     assert fam
     sibs, downstream = fam
     assert sibs == {b1, c1}
     assert downstream == {s1_1}
 
-    # `root` has no family with small cutoff
-    assert family(root, 4) is None
+    # `root` has no family with small widely-shared cutoff
+    assert family(root, 1000, 4) is None
 
     # With large cutoff, `root` has no siblings.
     # But the `s1` and `s2` tasks are all considered downstream, if you
@@ -153,7 +160,7 @@ async def test_family_linear_chains(c, s):
     # Note that `s1`s could be considered both siblings and downstreams
     # (siblings, since they need to be in memory along with root to compute `s2`).
     # But tasks that meet this criteria are explicitly labeled as only downstream.
-    fam = family(root, 1000)
+    fam = family(root, 1000, 1000)
     assert fam
     sibs, downstream = fam
     assert sibs == set()
@@ -169,6 +176,14 @@ async def test_family_linear_chains(c, s):
 
 @gen_cluster(nthreads=[], client=True)
 async def test_family_linear_chains_plus_widely_shared(c, s):
+    r"""
+      s     s    s
+     /|\   /|\   /\
+    a a a a a a a a
+    |\|\|\|\|/|/|/|
+    | | | | s | | |
+    r r r r r r r r
+    """
     shared = delayed(0, name="shared")
     roots = [delayed(i, name=f"r-{i}") for i in range(8)]
     ax = [add(r, shared, dask_key_name=f"a-{i}") for i, r in enumerate(roots)]
@@ -183,7 +198,7 @@ async def test_family_linear_chains_plus_widely_shared(c, s):
     r2 = s.tasks["r-2"]
     s0 = s.tasks["s-0"]
 
-    fam = family(r0, 4)
+    fam = family(r0, 1000, 4)
     assert fam
     sibs, downstream = fam
     assert sibs == {r1, r2}
@@ -209,14 +224,50 @@ async def test_family_triangle(c, s):
     y = s.tasks["y"]
     z = s.tasks["z"]
 
-    fam = family(x, 4)
+    fam = family(x, 1000, 1000)
     assert fam
     sibs, downstream = fam
     assert sibs == set()
     assert downstream == {z}  # `y` is just a linear chain, not downstream
 
-    fam = family(y, 4)
+    fam = family(y, 1000, 1000)
     assert fam
     sibs, downstream = fam
     assert sibs == {x}
     assert downstream == {z}
+
+
+@gen_cluster(nthreads=[], client=True)
+async def test_family_wide_gather_downstream(c, s):
+    r"""
+            s
+     / / / /|\ \ \
+    i i i i i i i i
+    | | | | | | | |
+    r r r r r r r r
+    """
+    roots = [delayed(i, name=f"r-{i}") for i in range(8)]
+    incs = [inc(r, dask_key_name=f"i-{i}") for i, r in enumerate(roots)]
+    sum = dsum(incs, dask_key_name="sum")
+
+    _ = await submit_delayed(c, s, sum)
+
+    rts = [s.tasks[r.key] for r in roots]
+    sts = s.tasks["sum"]
+
+    fam = family(rts[0], 4, 1000)
+    assert fam
+    sibs, downstream = fam
+    assert sibs == set()
+    assert downstream == set()  # `sum` not downstream because it's too large
+
+    fam = family(rts[0], 1000, 1000)
+    assert fam
+    sibs, downstream = fam
+    assert sibs == set(rts[1:])
+    assert downstream == {sts}
+
+
+# TODO test family commutativity. Given any node X in any graph, calculate `family(X)`.
+# For each sibling S, `family(S)` should give the same family, regardless of the
+# starting node.

@@ -17,7 +17,7 @@ from unittest import mock
 import cloudpickle
 import psutil
 import pytest
-from tlz import concat, first, merge, valmap
+from tlz import concat, first, merge, partition, valmap
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
@@ -405,6 +405,68 @@ async def test_queued_remove_add_worker(c, s, a, b):
     # Add a new worker
     async with Worker(s.address, nthreads=2) as w:
         await async_wait_for(lambda: len(s.queued) == 6, timeout=5)
+
+        await event.set()
+        await wait(fs)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 6,
+    config={"distributed.scheduler.worker-saturation": 1.0},
+)
+async def test_utilization_over_co_assignment(c, s, *workers):
+    event = Event()
+    roots = [delayed(event.wait)(5, dask_key_name=f"r-{i}") for i in range(6)]
+    aggs = [
+        delayed(list)(rs, dask_key_name=f"a-{i}")
+        for i, rs in enumerate(partition(2, roots))
+    ]
+    fs = c.compute(aggs)
+
+    await async_wait_for(lambda: any(w.state.tasks for w in workers), timeout=5)
+
+    # All workers should be used, even though it breaks up co-assignment
+    assert not s.idle
+    rts = [s.tasks[r.key] for r in roots]
+    assert {ts.processing_on for ts in rts} == set(s.workers.values())
+
+    await event.set()
+    await wait(fs)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 2)] * 2,
+    config={"distributed.scheduler.worker-saturation": 1.0},
+)
+async def test_co_assign_scale_up(c, s, a, b):
+    event = Event()
+    devent = delayed(event)
+    roots = [devent.wait(5, dask_key_name=f"r-{i}") for i in range(16)]
+    aggs = [
+        delayed(list)(rs, dask_key_name=f"a-{i}")
+        for i, rs in enumerate(partition(4, roots))
+    ]
+    fs = c.compute(aggs)
+
+    await async_wait_for(lambda: s.queued, timeout=5)
+
+    # Each family of roots should be processing on the same worker, or not at all
+    for agg in aggs:
+        tss = s.tasks[agg.key].dependencies
+        proc = [ts.processing_on for ts in tss]
+        assert proc == proc[:1] * len(proc)
+
+    async with Worker(s.address, nthreads=2) as w:
+        await async_wait_for(lambda: w.state.tasks, timeout=5)
+        assert len(w.state.tasks) == 5  # 4 `r` + the Event
+
+        # Each family of roots should be processing on the same worker, or not at all
+        for agg in aggs:
+            tss = s.tasks[agg.key].dependencies
+            proc = [ts.processing_on for ts in tss]
+            assert len(set(proc)) == 1, proc
 
         await event.set()
         await wait(fs)

@@ -7681,7 +7681,8 @@ def _queueable_to_processing(
     if not state.idle:
         return {ts.key: "queued"}, {}, {}
 
-    fam = family(ts, min(state.total_nthreads, 512))  # TODO maxsize as config/what?!
+    # TODO maxsize as config/what?!
+    fam = family(ts, maxsize=20, widely_shared_cutoff=len(state.workers))
     ws = state.decide_worker_from_family(fam)
     # ^ NOTE: This is all we need to for good (re)scheduling when the cluster changes size.
 
@@ -7691,9 +7692,36 @@ def _queueable_to_processing(
 
     recommendations: Recs = {}
     if fam:
-        siblings, downstream = fam
         # Schedule other tasks that will all need to be in memory
         # with this task on the same worker at once.
+        siblings, downstream = fam
+        sorted_siblings = sorted(siblings, key=operator.attrgetter("priority"))
+
+        # Check that we're parallelism-constrained before saturating a worker
+        if len(siblings) > ws.nthreads:
+            # In the somewhat rare case that we have more workers than families,
+            # parallelism is abundant. We should give up some co-assignment so that we
+            # don't leave workers idle. This is quite hard to determine statically,
+            # because we have no idea a) how many total root tasks there are, and b) how
+            # many total root families there are.
+
+            # We can _very brittlely_ guess via `TaskGroup`s. _We generally assume the
+            # graph structure of root tasks is homogeneous_, which is typically true
+            # with Dask collections, but certainly not true in general.
+            # The downstreams' TaskGroups give a guess as to the number of families (a
+            # downstream is effectively the output of a family).
+            # If we assume every family is the same size as this one (also typically the
+            # case with collections, but not true in general), then each family will
+            # under-schedule by this factor, fully filling all workers.
+            est_total_families = (
+                (sum(len(dts.group) for dts in downstream) // len(downstream))
+                if downstream
+                else 0
+            )
+            family_saturation = est_total_families / len(state.workers)
+            if family_saturation < 1:
+                max_siblings = round(len(siblings) * family_saturation)
+                sorted_siblings = sorted_siblings[:max_siblings]
 
         # TODO what about when the first task in a family that's already on a worker completes,
         # but not the whole family? We want to wait for the whole family to be done before assigning
@@ -7702,7 +7730,7 @@ def _queueable_to_processing(
         # If workers could be responsible with memory, this would be okay. Because if everything in the previous
         # family is done execpt one input to the downstream, then yes, we might as well get started on a new family
         # while we're waiting, as long as we have the memory capacity to do so.
-        for fts in sorted(siblings, key=operator.attrgetter("priority")):
+        for fts in sorted_siblings:
             # FIXME these tasks may not all necessarily be runnable.
             # Or maybe some are even in memory?
             # When does this happen, and how should we handle them?
@@ -7726,20 +7754,13 @@ def _queueable_to_processing(
 
             assert fts.state in ("released", "waiting", "queued"), (fts, ts)
 
-            # TODO when is this not the case, and what should we do then?
-            # Violates the assumption that all siblings are runnable together
-            # (which is a bad assumption anyway).
-            # In that case, we have a task that's going to run later, once its deps
-            # are available. I guess it should just schedule near those deps.
-            # Unless they're widely-shared, in which case it should schedule near its family.
-            # In which case it should look root-ish, so it should come back here.
-            # Therefore, we again need a `decide_worker_from_family` that co-locates with
-            # in-memory or processing tasks.
-
+            # When `fts` is not runnable yet, that means it's waiting for deps. So it
+            # should just schedule near those deps. Unless they're widely-shared, in
+            # which case it should schedule near its family. In which case it should
+            # look root-ish, so it should come back here.
             if (
                 not fts.waiting_on
             ):  # wtf if it's released?? then this hasn't been set yet.
-                # assert not fts.waiting_on, (fts, fts.waiting_on, ts)
                 update_msgs(worker_msgs, _add_to_processing(state, fts, ws))
 
                 # This recommendation will be a no-op. It's just to remove any existing
@@ -8246,13 +8267,13 @@ def _worker_full(ws: WorkerState, saturation_factor: float) -> bool:
     return _task_slots_available(ws, saturation_factor) <= 0
 
 
-def _previous_in_linear_chain(ts: TaskState, maxsize: int) -> TaskState | None:
-    if len(ts.dependents) != 1 or len(ts.dependencies) > maxsize:
+def _previous_in_linear_chain(ts: TaskState, cutoff: int) -> TaskState | None:
+    if len(ts.dependents) != 1 or len(ts.dependencies) > cutoff:
         return None
 
     prev: TaskState | None = None
     for dts in ts.dependencies:
-        if len(dts.dependents) > maxsize:  # widely-shared; ignore it
+        if len(dts.dependents) > cutoff:  # widely-shared; ignore it
             continue
         if prev:
             return None
@@ -8261,15 +8282,15 @@ def _previous_in_linear_chain(ts: TaskState, maxsize: int) -> TaskState | None:
     return prev
 
 
-def _next_in_linear_chain(ts: TaskState, maxsize: int) -> TaskState | None:
-    if len(ts.dependents) != 1 or len(ts.dependencies) > maxsize:
+def _next_in_linear_chain(ts: TaskState, cutoff: int) -> TaskState | None:
+    if len(ts.dependents) != 1 or len(ts.dependencies) > cutoff:
         return None
 
     # Check if this is part of a linear chain:
     # exactly 1 dependency, excluding widely-shared tasks.
     non_widely_shared = 0
     for dts in ts.dependencies:
-        if len(dts.dependents) > maxsize:  # widely-shared; ignore it
+        if len(dts.dependents) > cutoff:  # widely-shared; ignore it
             continue
         if non_widely_shared:
             return None
@@ -8278,7 +8299,9 @@ def _next_in_linear_chain(ts: TaskState, maxsize: int) -> TaskState | None:
     return next(iter(ts.dependents))
 
 
-def family(ts: TaskState, maxsize: int) -> tuple[set[TaskState], set[TaskState]] | None:
+def family(
+    ts: TaskState, maxsize: int, widely_shared_cutoff: int
+) -> tuple[set[TaskState], set[TaskState]] | None:
     """
     All tasks in a family must be in memory at once to compute at least one common dependency.
 
@@ -8291,16 +8314,16 @@ def family(ts: TaskState, maxsize: int) -> tuple[set[TaskState], set[TaskState]]
     For the purposes of identifying families:
 
     * Linear chains are collapsed (traversed up and down)
-    * Widely-shared tasks (tasks with > ``maxsize`` dependents) are ignored
+    * Widely-shared tasks (tasks with > ``widely_shared_cutoff`` dependents) are ignored
 
     If the task's family is too large, or empty, returns None.
-    That is, if ``siblings`` or ``downstream`` would be larger than ``maxsize``,
-    or ``ts.dependents`` is empty, returns None
+    That is, if ``siblings`` would be larger than ``maxsize``, or ``downstream`` would be
+    larger than ``widely_shared_cutoff``, or ``ts.dependents`` is empty, returns None.
     """
     # TODO potentially could be useful to distinguish between 'too big'
     # and empty family---we might want to schedule them differently.
     # That is, maybe `None` and `(set(), set())` might not be synonymous.
-    if not ts.dependents or len(ts.dependents) > maxsize:
+    if not ts.dependents or len(ts.dependents) > widely_shared_cutoff:
         return None
 
     siblings: set[TaskState] = set()
@@ -8308,14 +8331,13 @@ def family(ts: TaskState, maxsize: int) -> tuple[set[TaskState], set[TaskState]]
     # TODO maintain `seen` set to avoid repeated traversal? Should we add on the way down, or just back up?
     for dts in ts.dependents:  # TODO even support multiple dependents?
         # Traverse down linear chains
-        while ndts := _next_in_linear_chain(dts, maxsize):
+        while ndts := _next_in_linear_chain(dts, widely_shared_cutoff):
             # TODO check seen
             dts = ndts
 
         if dts in downstream:
             # No need to traverse from a task we've already seen
             continue
-        downstream.add(dts)
 
         if dts in siblings:
             # `siblings` and `downstream` are exclusive, and `siblings` takes priority
@@ -8325,22 +8347,25 @@ def family(ts: TaskState, maxsize: int) -> tuple[set[TaskState], set[TaskState]]
         sibs = dts.dependencies
         if len(sibs) == 1:
             # Faster path: this is just a linear chain, so no siblings besides `ts`
+            downstream.add(dts)
             continue
 
         if len(sibs) < maxsize:
+            downstream.add(dts)
             for sts in sibs:
                 # Traverse linear chains _back_ to root tasks
                 while (
                     sts is not ts
                     and sts not in downstream
-                    and (psts := _previous_in_linear_chain(sts, maxsize))
+                    and (psts := _previous_in_linear_chain(sts, widely_shared_cutoff))
                 ):
                     # TODO check seen
                     sts = psts
 
                 if (
                     sts is ts
-                    or len(sts.dependents) > maxsize  # ignore widely-shared siblings
+                    or len(sts.dependents)
+                    >= widely_shared_cutoff  # ignore widely-shared siblings
                     or sts in downstream  # a->b, b->c, a->c. downstream takes priority.
                 ):
                     continue
