@@ -665,6 +665,9 @@ class WorkerState:
 
     def add_to_processing(self, ts: TaskState) -> None:
         """Assign a task to this worker for compute."""
+        if self.scheduler.validate:
+            assert ts not in self.processing
+
         tg = ts.group
         self.task_groups_count[tg.name] += 1
         self.scheduler.task_groups_count_global[tg.name] += 1
@@ -674,6 +677,10 @@ class WorkerState:
                 self._inc_needs_replica(dts)
 
     def add_to_long_running(self, ts: TaskState) -> None:
+        if self.scheduler.validate:
+            assert ts in self.processing
+            assert ts not in self.processing
+
         self._remove_from_task_groups_count(ts)
         # Cannot remove from processing since we're using this for things like
         # idleness detection. Idle workers are typically targeted for
@@ -683,8 +690,9 @@ class WorkerState:
 
     def remove_from_processing(self, ts: TaskState) -> None:
         """Remove a task from a workers processing"""
-        if ts not in self.processing:
-            return
+        if self.scheduler.validate:
+            assert ts in self.processing
+
         if ts in self.long_running:
             self.long_running.discard(ts)
         else:
@@ -7767,7 +7775,6 @@ def _add_to_processing(
     """Set a task as processing on a worker and return the worker messages to send."""
     if state.validate:
         _validate_ready(state, ts)
-        assert ts not in ws.processing
         assert ws in state.running, state.running
         assert (o := state.workers.get(ws.address)) is ws, (ws, o)
 
