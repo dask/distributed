@@ -472,6 +472,38 @@ async def test_co_assign_scale_up(c, s, a, b):
         await wait(fs)
 
 
+@gen_cluster(
+    client=True,
+    nthreads=[("", 2)] * 3,
+    config={"distributed.scheduler.worker-saturation": 1.0},
+)
+async def test_co_assign_scale_down(c, s, *workers):
+    event = Event()
+    roots = [delayed(event.wait)(5, dask_key_name=f"r-{i}") for i in range(16)]
+    aggs = [
+        delayed(list)(rs, dask_key_name=f"a-{i}")
+        for i, rs in enumerate(partition(4, roots))
+    ]
+    # pin roots so we can check where they are at the end
+    fs = c.compute(aggs + roots)
+
+    await async_wait_for(lambda: s.queued, timeout=5)
+
+    await workers[0].close()
+    await event.set()
+    await wait(fs)
+
+    for r in roots:
+        ts = s.tasks[r.key]
+        assert len(ts.who_has) == 1, ts.who_has
+
+    for w in workers:
+        assert not w.transfer_incoming_log
+
+
+# TODO test _where_ tasks get assigned on scale-down. They should prefer to go near their siblings.
+
+
 @pytest.mark.parametrize(
     "saturation, expected_task_counts",
     [
