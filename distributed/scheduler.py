@@ -701,11 +701,11 @@ class WorkerState:
         else:
             del self.task_groups_count[ts.group.name]
 
-        count = self.task_groups_count_global[ts.group.name] - 1
+        count = self.scheduler.task_groups_count_global[ts.group.name] - 1
         if count:
-            self.task_groups_count_global[ts.group.name] = count
+            self.scheduler.task_groups_count_global[ts.group.name] = count
         else:
-            del self.task_groups_count_global[ts.group.name]
+            del self.scheduler.task_groups_count_global[ts.group.name]
 
     def remove_replica(self, ts: TaskState) -> None:
         """The worker no longer has a task in memory"""
@@ -2312,9 +2312,10 @@ class SchedulerState:
             s: set = self.unknown_durations.pop(ts.prefix.name, set())
             tts: TaskState
             steal = self.extensions.get("stealing")
-            for tts in s:
-                if tts.processing_on and steal:
-                    steal.recalculate_cost(tts)
+            if steal:
+                for tts in s:
+                    if tts.processing_on:
+                        steal.recalculate_cost(tts)
 
             ############################
             # Update State Information #
@@ -5002,7 +5003,7 @@ class Scheduler(SchedulerState, ServerNode):
                 assert not ws.occupancy
                 if ws.status == Status.running:
                     assert ws.address in self.idle
-            assert not ws.needs_what.keys() & ws.has_what.keys()
+            assert not ws.needs_what.keys() & ws.has_what
             actual_needs_what: defaultdict[TaskState, int] = defaultdict(int)
             for ts in ws.processing:
                 for tss in ts.dependencies:
