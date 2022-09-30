@@ -11,6 +11,7 @@ from time import sleep
 
 import psutil
 import pytest
+from tlz import merge
 
 import dask.config
 
@@ -20,7 +21,13 @@ from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import Status
 from distributed.metrics import monotonic
 from distributed.spill import has_zict_210
-from distributed.utils_test import captured_logger, gen_cluster, inc, wait_for_state
+from distributed.utils_test import (
+    NO_AMM,
+    captured_logger,
+    gen_cluster,
+    inc,
+    wait_for_state,
+)
 from distributed.worker_memory import parse_memory_limit
 from distributed.worker_state_machine import (
     ComputeTaskEvent,
@@ -589,11 +596,14 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
 @gen_cluster(
     client=True,
     nthreads=[("", 1), ("", 1)],
-    config={
-        "distributed.worker.memory.target": False,
-        "distributed.worker.memory.spill": False,
-        "distributed.worker.memory.pause": False,
-    },
+    config=merge(
+        NO_AMM,
+        {
+            "distributed.worker.memory.target": False,
+            "distributed.worker.memory.spill": False,
+            "distributed.worker.memory.pause": False,
+        },
+    ),
 )
 async def test_pause_prevents_deps_fetch(c, s, a, b):
     """A worker is paused while there are dependencies ready to fetch, but all other

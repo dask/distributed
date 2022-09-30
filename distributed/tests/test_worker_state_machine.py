@@ -17,6 +17,7 @@ from distributed.protocol.serialize import Serialize
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.utils import recursive_to_dict
 from distributed.utils_test import (
+    NO_AMM,
     _LockedCommPool,
     assert_story,
     freeze_data_fetching,
@@ -598,7 +599,11 @@ async def test_fetch_via_amm_to_compute(c, s, a, b):
 
 
 @pytest.mark.parametrize("as_deps", [False, True])
-@gen_cluster(client=True, nthreads=[("", 1)] * 3)
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 3,
+    config=NO_AMM,
+)
 async def test_lose_replica_during_fetch(c, s, w1, w2, w3, as_deps):
     """
     as_deps=True
@@ -779,7 +784,7 @@ async def test_cancelled_while_in_flight(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_in_memory_while_in_flight(c, s, a, b):
     """
     1. A client scatters x to a
@@ -1010,30 +1015,40 @@ async def test_deprecated_worker_attributes(s, a, b):
         assert a.data_needed == set()
 
 
+@pytest.mark.parametrize("n_remote_workers", [1, 2])
 @pytest.mark.parametrize(
-    "nbytes,n_in_flight",
+    "nbytes,n_in_flight_per_worker",
     [
         (int(10e6), 3),
         (int(20e6), 2),
         (int(30e6), 1),
+        (int(60e6), 1),
     ],
 )
-def test_aggregate_gather_deps(ws, nbytes, n_in_flight):
+def test_aggregate_gather_deps(ws, nbytes, n_in_flight_per_worker, n_remote_workers):
     ws.transfer_message_bytes_limit = int(50e6)
-    ws2 = "127.0.0.1:2"
+    wss = [f"127.0.0.1:{2 + i}" for i in range(n_remote_workers)]
+    who_has = {f"x{i}": [wss[i // 3]] for i in range(3 * n_remote_workers)}
     instructions = ws.handle_stimulus(
         AcquireReplicasEvent(
-            who_has={"x1": [ws2], "x2": [ws2], "x3": [ws2]},
-            nbytes={"x1": nbytes, "x2": nbytes, "x3": nbytes},
+            who_has=who_has,
+            nbytes={task: nbytes for task in who_has.keys()},
             stimulus_id="s1",
         )
     )
-    assert instructions == [GatherDep.match(worker=ws2, stimulus_id="s1")]
-    assert len(instructions[0].to_gather) == n_in_flight
-    assert len(ws.in_flight_tasks) == n_in_flight
-    assert ws.transfer_incoming_bytes == nbytes * n_in_flight
-    assert ws.transfer_incoming_count == 1
-    assert ws.transfer_incoming_count_total == 1
+    assert instructions == [
+        GatherDep.match(worker=remote, stimulus_id="s1") for remote in wss
+    ]
+    assert all(
+        len(instruction.to_gather) == n_in_flight_per_worker
+        for instruction in instructions
+    )
+    assert len(ws.in_flight_tasks) == n_in_flight_per_worker * n_remote_workers
+    assert (
+        ws.transfer_incoming_bytes == nbytes * n_in_flight_per_worker * n_remote_workers
+    )
+    assert ws.transfer_incoming_count == n_remote_workers
+    assert ws.transfer_incoming_count_total == n_remote_workers
 
 
 def test_gather_priority(ws):
@@ -1358,6 +1373,7 @@ def test_throttling_does_not_affect_first_transfer(ws):
     ws.transfer_incoming_count_limit = 100
     ws.transfer_incoming_bytes_limit = 100
     ws.transfer_incoming_bytes_throttle_threshold = 1
+    ws.transfer_message_bytes_limit = 100
     ws2 = "127.0.0.1:2"
     ws.handle_stimulus(
         ComputeTaskEvent.dummy(
@@ -1368,6 +1384,25 @@ def test_throttling_does_not_affect_first_transfer(ws):
         )
     )
     assert ws.tasks["a"].state == "flight"
+
+
+def test_message_target_does_not_affect_first_transfer_on_different_worker(ws):
+    ws.transfer_incoming_count_limit = 100
+    ws.transfer_incoming_bytes_limit = 600
+    ws.transfer_message_bytes_limit = 100
+    ws.transfer_incoming_bytes_throttle_threshold = 1
+    ws2 = "127.0.0.1:2"
+    ws3 = "127.0.0.1:3"
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "c",
+            who_has={"a": [ws2], "b": [ws3]},
+            nbytes={"a": 200, "b": 200},
+            stimulus_id="s1",
+        )
+    )
+    assert ws.tasks["a"].state == "flight"
+    assert ws.tasks["b"].state == "flight"
 
 
 def test_throttle_incoming_transfers_on_count_limit(ws):

@@ -43,6 +43,7 @@ from distributed.protocol.pickle import dumps, loads
 from distributed.scheduler import KilledWorker, MemoryState, Scheduler, WorkerState
 from distributed.utils import TimeoutError
 from distributed.utils_test import (
+    NO_AMM,
     BrokenComm,
     async_wait_for,
     captured_logger,
@@ -1354,7 +1355,7 @@ async def test_workers_to_close_grouped(c, s, *workers):
     # Assert that *total* byte count in group determines group priority
     av = await c.scatter("a" * 100, workers=workers[0].address)
     bv = await c.scatter("b" * 75, workers=workers[2].address)
-    bv2 = await c.scatter("b" * 75, workers=workers[3].address)
+    cv = await c.scatter("c" * 75, workers=workers[3].address)
 
     assert set(s.workers_to_close(key=key)) == {workers[0].address, workers[1].address}
 
@@ -1897,7 +1898,7 @@ async def test_retries(c, s, a, b):
     exc_info.match("one")
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3, config=NO_AMM)
 async def test_missing_data_errant_worker(c, s, w1, w2, w3):
     with dask.config.set({"distributed.comm.timeouts.connect": "1s"}):
         np = pytest.importorskip("numpy")
@@ -2425,7 +2426,7 @@ class NoSchedulerDelayWorker(Worker):
         pass
 
 
-@gen_cluster(client=True, Worker=NoSchedulerDelayWorker)
+@gen_cluster(client=True, Worker=NoSchedulerDelayWorker, config=NO_AMM)
 async def test_task_groups(c, s, a, b):
     start = time()
     da = pytest.importorskip("dask.array")
@@ -3116,7 +3117,7 @@ async def assert_ndata(client, by_addr, total=None):
     client=True,
     Worker=Nanny,
     worker_kwargs={"memory_limit": "1 GiB"},
-    config={"distributed.worker.memory.rebalance.sender-min": 0.3},
+    config=merge(NO_AMM, {"distributed.worker.memory.rebalance.sender-min": 0.3}),
 )
 async def test_rebalance(c, s, a, b):
     # We used nannies to have separate processes for each worker
@@ -3146,11 +3147,14 @@ async def test_rebalance(c, s, a, b):
 # Set rebalance() to work predictably on small amounts of managed memory. By default, it
 # uses optimistic memory, which would only be possible to test by allocating very large
 # amounts of managed memory, so that they would hide variations in unmanaged memory.
-REBALANCE_MANAGED_CONFIG = {
-    "distributed.worker.memory.rebalance.measure": "managed",
-    "distributed.worker.memory.rebalance.sender-min": 0,
-    "distributed.worker.memory.rebalance.sender-recipient-gap": 0,
-}
+REBALANCE_MANAGED_CONFIG = merge(
+    NO_AMM,
+    {
+        "distributed.worker.memory.rebalance.measure": "managed",
+        "distributed.worker.memory.rebalance.sender-min": 0,
+        "distributed.worker.memory.rebalance.sender-recipient-gap": 0,
+    },
+)
 
 
 @gen_cluster(client=True, config=REBALANCE_MANAGED_CONFIG)
@@ -3183,14 +3187,14 @@ async def test_rebalance_workers_and_keys(client, s, a, b, c):
         await s.rebalance(workers=["notexist"])
 
 
-@gen_cluster()
+@gen_cluster(config=NO_AMM)
 async def test_rebalance_missing_data1(s, a, b):
     """key never existed"""
     out = await s.rebalance(keys=["notexist"])
     assert out == {"status": "partial-fail", "keys": ["notexist"]}
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_rebalance_missing_data2(c, s, a, b):
     """keys exist but belong to unfinished futures. Unlike Client.rebalance(),
     Scheduler.rebalance() does not wait for unfinished futures.
@@ -3239,7 +3243,7 @@ async def test_rebalance_no_workers(s):
 @gen_cluster(
     client=True,
     worker_kwargs={"memory_limit": 0},
-    config={"distributed.worker.memory.rebalance.measure": "managed"},
+    config=merge(NO_AMM, {"distributed.worker.memory.rebalance.measure": "managed"}),
 )
 async def test_rebalance_no_limit(c, s, a, b):
     futures = await c.scatter(range(100), workers=[a.address])
@@ -3255,11 +3259,14 @@ async def test_rebalance_no_limit(c, s, a, b):
     client=True,
     Worker=Nanny,
     worker_kwargs={"memory_limit": "1000 MiB"},
-    config={
-        "distributed.worker.memory.rebalance.measure": "managed",
-        "distributed.worker.memory.rebalance.sender-min": 0.2,
-        "distributed.worker.memory.rebalance.recipient-max": 0.1,
-    },
+    config=merge(
+        NO_AMM,
+        {
+            "distributed.worker.memory.rebalance.measure": "managed",
+            "distributed.worker.memory.rebalance.sender-min": 0.2,
+            "distributed.worker.memory.rebalance.recipient-max": 0.1,
+        },
+    ),
 )
 async def test_rebalance_no_recipients(c, s, a, b):
     """There are sender workers, but no recipient workers"""
@@ -3277,7 +3284,7 @@ async def test_rebalance_no_recipients(c, s, a, b):
     nthreads=[("", 1)] * 3,
     client=True,
     worker_kwargs={"memory_limit": 0},
-    config={"distributed.worker.memory.rebalance.measure": "managed"},
+    config=merge(NO_AMM, {"distributed.worker.memory.rebalance.measure": "managed"}),
 )
 async def test_rebalance_skip_recipient(client, s, a, b, c):
     """A recipient is skipped because it already holds a copy of the key to be sent"""
@@ -3292,7 +3299,7 @@ async def test_rebalance_skip_recipient(client, s, a, b, c):
 @gen_cluster(
     client=True,
     worker_kwargs={"memory_limit": 0},
-    config={"distributed.worker.memory.rebalance.measure": "managed"},
+    config=merge(NO_AMM, {"distributed.worker.memory.rebalance.measure": "managed"}),
 )
 async def test_rebalance_skip_all_recipients(c, s, a, b):
     """All recipients are skipped because they already hold copies"""
@@ -3308,7 +3315,7 @@ async def test_rebalance_skip_all_recipients(c, s, a, b):
     client=True,
     Worker=Nanny,
     worker_kwargs={"memory_limit": "1000 MiB"},
-    config={"distributed.worker.memory.rebalance.measure": "managed"},
+    config=merge(NO_AMM, {"distributed.worker.memory.rebalance.measure": "managed"}),
 )
 async def test_rebalance_sender_below_mean(c, s, *_):
     """A task remains on the sender because moving it would send it below the mean"""
@@ -3327,10 +3334,13 @@ async def test_rebalance_sender_below_mean(c, s, *_):
     client=True,
     Worker=Nanny,
     worker_kwargs={"memory_limit": "1000 MiB"},
-    config={
-        "distributed.worker.memory.rebalance.measure": "managed",
-        "distributed.worker.memory.rebalance.sender-min": 0.3,
-    },
+    config=merge(
+        NO_AMM,
+        {
+            "distributed.worker.memory.rebalance.measure": "managed",
+            "distributed.worker.memory.rebalance.sender-min": 0.3,
+        },
+    ),
 )
 async def test_rebalance_least_recently_inserted_sender_min(c, s, *_):
     """
@@ -3433,7 +3443,7 @@ async def test_gather_on_worker_key_not_on_sender_replicated(
     assert c.data[x.key] == "x"
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3, config=NO_AMM)
 async def test_gather_on_worker_duplicate_task(client, s, a, b, c):
     """Race condition where the recipient worker receives the same task twice.
     Test that the task nbytes are not double-counted on the recipient.
@@ -3458,7 +3468,10 @@ async def test_gather_on_worker_duplicate_task(client, s, a, b, c):
 
 
 @gen_cluster(
-    client=True, nthreads=[("127.0.0.1", 1)] * 3, scheduler_kwargs={"timeout": "100ms"}
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 3,
+    scheduler_kwargs={"timeout": "100ms"},
+    config=NO_AMM,
 )
 async def test_rebalance_dead_recipient(client, s, a, b, c):
     """A key fails to be rebalanced due to recipient failure.
@@ -3483,7 +3496,7 @@ async def test_rebalance_dead_recipient(client, s, a, b, c):
     assert await client.has_what() == {a.address: (y.key,), b.address: (x.key,)}
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_delete_worker_data(c, s, a, b):
     # delete only copy of x
     # delete one of the copies of y

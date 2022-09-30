@@ -6,6 +6,7 @@ import builtins
 import errno
 import functools
 import logging
+import math
 import os
 import pathlib
 import random
@@ -568,8 +569,6 @@ class Worker(BaseWorker, ServerNode):
             local_directory = (
                 dask.config.get("temporary-directory") or tempfile.gettempdir()
             )
-
-        os.makedirs(local_directory, exist_ok=True)
         local_directory = os.path.join(local_directory, "dask-worker-space")
 
         with warn_on_duration(
@@ -579,7 +578,7 @@ class Worker(BaseWorker, ServerNode):
             "Consider specifying a local-directory to point workers to write "
             "scratch data to a local disk.",
         ):
-            self._workspace = WorkSpace(os.path.abspath(local_directory))
+            self._workspace = WorkSpace(local_directory)
             self._workdir = self._workspace.new_work_dir(prefix="worker-")
             self.local_directory = self._workdir.dir_path
 
@@ -748,7 +747,7 @@ class Worker(BaseWorker, ServerNode):
             memory_pause_fraction=memory_pause_fraction,
         )
 
-        transfer_incoming_bytes_limit = None
+        transfer_incoming_bytes_limit = math.inf
         transfer_incoming_bytes_fraction = dask.config.get(
             "distributed.worker.memory.transfer"
         )

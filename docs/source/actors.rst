@@ -227,3 +227,7 @@ Actors offer advanced capabilities, but with some cost:
     computations no diagnostics are available about these computations.
 3.  **No Load balancing:** Actors are allocated onto workers evenly, without
     serious consideration given to avoiding communication.
+4.  **No dynamic clusters:** Actors cannot be migrated to other workers.
+    A worker holding an actor can be retired neither through
+    :meth:`~distributed.Client.retire_workers` nor through
+    :class:`~distributed.deploy.Adaptive`.

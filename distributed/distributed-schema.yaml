@@ -277,7 +277,7 @@ properties:
 
           active-memory-manager:
             type: object
-            required: [start, interval, policies]
+            required: [start, interval, measure, policies]
             additionalProperties: false
             properties:
               start:
@@ -287,6 +287,14 @@ properties:
                 type: string
                 description:
                   Time expression, e.g. "2s". Run the AMM cycle every <interval>.
+              measure:
+                enum:
+                  - process
+                  - optimistic
+                  - managed
+                  - managed_in_memory
+                description:
+                  One of the attributes of distributed.scheduler.MemoryState
               policies:
                 type: array
                 items:
@@ -349,7 +357,12 @@ properties:
                   - string
                   - integer
                 description: |
-                  The maximum size of a message sent between workers
+                  The maximum amount of data for a worker to request from another in a single gather operation
+
+                  Tasks are gathered in batches, and if the first task in a batch is larger than this value,
+                  the task will still be gathered to ensure progress. Hence, this limit is not absolute. 
+                  Note that this limit applies to a single gather operation and a worker may gather data from
+                  multiple workers in parallel.
           connections:
             type: object
             description: |
