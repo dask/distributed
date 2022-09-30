@@ -163,8 +163,7 @@ async def test_exitcode():
 
 
 def assert_exit_code(proc: AsyncProcess, expect: signal.Signals) -> None:
-    # Note: can't use WINDOWS constant as it upsets mypy
-    if sys.platform == "win32":
+    if WINDOWS:
         # multiprocessing.Process.terminate() sets exit code -15 like in Linux, but
         # os.kill(pid, signal.SIGTERM) sets exit code +15
         assert proc.exitcode in (-expect, expect)
