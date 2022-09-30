@@ -679,7 +679,7 @@ class WorkerState:
     def add_to_long_running(self, ts: TaskState) -> None:
         if self.scheduler.validate:
             assert ts in self.processing
-            assert ts not in self.processing
+            assert ts not in self.long_running
 
         self._remove_from_task_groups_count(ts)
         # Cannot remove from processing since we're using this for things like
