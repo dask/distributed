@@ -286,3 +286,21 @@ def test_workspace_concurrency(tmpdir):
 
     # We attempted to purge most directories at some point
     assert n_purged >= 0.5 * n_created > 0
+
+
+@pytest.mark.skipif(WINDOWS, reason="Need POSIX filesystem permissions and UIDs")
+def test_unwritable_base_dir(tmpdir):
+    os.mkdir(f"{tmpdir}/bad", mode=0o500)
+    with pytest.raises(PermissionError):
+        open(f"{tmpdir}/bad/tryme", "w")
+
+    ws = WorkSpace(f"{tmpdir}/bad")
+    assert ws.base_dir == f"{tmpdir}/bad-{os.getuid()}"
+
+    os.chmod(f"{tmpdir}/bad-{os.getuid()}", 0o500)
+    with pytest.raises(PermissionError):
+        open(f"{tmpdir}/bad-{os.getuid()}/tryme", "w")
+
+    ws = WorkSpace(f"{tmpdir}/bad")
+    assert ws.base_dir.startswith(f"{tmpdir}/bad-")
+    assert ws.base_dir != f"{tmpdir}/bad-{os.getuid()}"
