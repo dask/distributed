@@ -7747,20 +7747,27 @@ def _queueable_to_processing(
                 continue
             #     # assert ws in fts.who_has, (fts.who_has, ws)
 
-            if fts.state == "queued":
+            if fts.state == "released":
+                # FIXME if `fts` just went `memory->released`, `waiting_on` will inaccurately be empty.
+                # 1) this manual transition feels like bad practice
+                # 2) we can't be certain it shouldn't actually to to `forgotten` (without duplicating logic from `memory->released`)
+                # 3) it's just kinda weird that tasks can be in this broken `released` state at all.
+                #    it feels degenerate to me. i kinda don't think `released->waiting` should be a transition, but rather
+                #    a shared helper function like `handle_released_task` or something.
+                # TODO add a test that triggers the need for this
+                state._transition(fts.key, "waiting", "qtp")
+            elif fts.state == "queued":
                 if state.validate:
                     assert fts in state.queued
                 state.queued.discard(fts)
 
-            assert fts.state in ("released", "waiting", "queued"), (fts, ts)
+            assert fts.state in ("waiting", "queued"), (fts, ts)
 
             # When `fts` is not runnable yet, that means it's waiting for deps. So it
             # should just schedule near those deps. Unless they're widely-shared, in
             # which case it should schedule near its family. In which case it should
             # look root-ish, so it should come back here.
-            if (
-                not fts.waiting_on
-            ):  # wtf if it's released?? then this hasn't been set yet.
+            if not fts.waiting_on:
                 update_msgs(worker_msgs, _add_to_processing(state, fts, ws))
 
                 # This recommendation will be a no-op. It's just to remove any existing
