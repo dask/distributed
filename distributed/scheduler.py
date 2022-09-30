@@ -709,14 +709,20 @@ class WorkerState:
 
     def remove_replica(self, ts: TaskState) -> None:
         """The worker no longer has a task in memory"""
-        if ts in self.needs_what:
-            self._inc_needs_replica(ts)
+        if self.scheduler.validate:
+            assert self in ts.who_has
+            assert ts in self.has_what
+            assert ts not in self.needs_what
+
         self.nbytes -= ts.get_nbytes()
         del self._has_what[ts]
         ts.who_has.remove(self)
 
     def _inc_needs_replica(self, ts: TaskState) -> None:
         """Assign a task fetch to this worker and update network occupancies"""
+        if self.scheduler.validate:
+            assert self not in ts.who_has
+            assert ts not in self.has_what
         if ts not in self.needs_what:
             self.needs_what[ts] = 1
             nbytes = ts.get_nbytes()
@@ -726,16 +732,22 @@ class WorkerState:
             self.needs_what[ts] += 1
 
     def _dec_needs_replica(self, ts: TaskState) -> None:
-        if ts in self.needs_what:
-            self.needs_what[ts] -= 1
-            if not self.needs_what[ts]:
-                del self.needs_what[ts]
-                nbytes = ts.get_nbytes()
-                self._network_occ -= nbytes
-                self.scheduler._network_occ_global -= nbytes
+        if self.scheduler.validate:
+            assert ts in self.needs_what
+
+        self.needs_what[ts] -= 1
+        if self.needs_what[ts] == 0:
+            del self.needs_what[ts]
+            nbytes = ts.get_nbytes()
+            self._network_occ -= nbytes
+            self.scheduler._network_occ_global -= nbytes
 
     def add_replica(self, ts: TaskState) -> None:
         """The worker acquired a replica of task"""
+        if self.scheduler.validate:
+            assert self not in ts.who_has
+            assert ts not in self.has_what
+
         nbytes = ts.get_nbytes()
         if ts in self.needs_what:
             del self.needs_what[ts]
@@ -3179,9 +3191,6 @@ class SchedulerState:
 
     def add_replica(self, ts: TaskState, ws: WorkerState):
         """Note that a worker holds a replica of a task with state='memory'"""
-        if self.validate:
-            assert ws not in ts.who_has
-            assert ts not in ws.has_what
         ws.add_replica(ts)
         if len(ts.who_has) == 2:
             self.replicated_tasks.add(ts)
