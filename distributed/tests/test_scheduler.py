@@ -1499,19 +1499,21 @@ async def test_include_communication_in_occupancy(c, s, a, b):
         ts = s.tasks[z.key]
         ws = s.workers[b.address]
         assert ts.processing_on == ws
-        # Occ should be 0.5s (CPU, unknown) + 1s (network)
+        # Occ should be 0.5s (CPU, unknown) + 2s (network)
         occ = ws.occupancy
-        assert occ > 2
+        assert occ == 2.5
         z2 = c.submit(add_blocked, x, y, event=event, pure=False, workers=b.address)
         while z2.key not in s.tasks or not s.tasks[z2.key].processing_on:
             await asyncio.sleep(0.01)
+        # Occ should be 2 * 0.5 (CPU, unknown) + 2s (network)
         # Network cost for the same key should only cost once
         occ2 = ws.occupancy
-        assert occ < occ2 <= 3
+        assert occ2 == 3
     while s.tasks[x.key] not in ws.has_what:
         await asyncio.sleep(0.01)
     occ3 = ws.occupancy
-    assert occ3 < occ < occ2 <= 3
+    # Occ should be 2 * 0.5 (CPU, unknown)
+    assert occ3 == 1
     await event.set()
     await wait(z)
 
