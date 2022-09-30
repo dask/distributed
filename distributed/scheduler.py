@@ -4722,7 +4722,6 @@ class Scheduler(SchedulerState, ServerNode):
         ts: TaskState
         for ts in list(ws.processing):
             k = ts.key
-            ws.remove_from_processing(ts)
             recommendations[k] = "released"
             if not safe:
                 ts.suspicious += 1
