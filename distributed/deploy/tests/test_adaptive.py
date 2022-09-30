@@ -117,50 +117,47 @@ async def test_adaptive_scale_down_override():
 
 @gen_test()
 async def test_min_max():
-    cluster = await LocalCluster(
+    async with LocalCluster(
         n_workers=0,
         silence_logs=False,
         processes=False,
         dashboard_address=":0",
         asynchronous=True,
         threads_per_worker=1,
-    )
-    try:
+    ) as cluster:
         adapt = cluster.adapt(minimum=1, maximum=2, interval="20 ms", wait_count=10)
-        c = await Client(cluster, asynchronous=True)
+        async with Client(cluster, asynchronous=True) as c:
+            start = time()
+            while not cluster.scheduler.workers:
+                await asyncio.sleep(0.01)
+                assert time() < start + 1
 
-        start = time()
-        while not cluster.scheduler.workers:
-            await asyncio.sleep(0.01)
-            assert time() < start + 1
+            await asyncio.sleep(0.2)
+            assert len(cluster.scheduler.workers) == 1
+            assert len(adapt.log) == 1 and adapt.log[-1][1] == {"status": "up", "n": 1}
 
-        await asyncio.sleep(0.2)
-        assert len(cluster.scheduler.workers) == 1
-        assert len(adapt.log) == 1 and adapt.log[-1][1] == {"status": "up", "n": 1}
+            futures = c.map(slowinc, range(100), delay=0.1)
 
-        futures = c.map(slowinc, range(100), delay=0.1)
+            start = time()
+            while len(cluster.scheduler.workers) < 2:
+                await asyncio.sleep(0.01)
+                assert time() < start + 1
 
-        start = time()
-        while len(cluster.scheduler.workers) < 2:
-            await asyncio.sleep(0.01)
-            assert time() < start + 1
+            assert len(cluster.scheduler.workers) == 2
+            await asyncio.sleep(0.5)
+            assert len(cluster.scheduler.workers) == 2
+            assert len(cluster.workers) == 2
+            assert len(adapt.log) == 2 and all(
+                d["status"] == "up" for _, d in adapt.log
+            )
 
-        assert len(cluster.scheduler.workers) == 2
-        await asyncio.sleep(0.5)
-        assert len(cluster.scheduler.workers) == 2
-        assert len(cluster.workers) == 2
-        assert len(adapt.log) == 2 and all(d["status"] == "up" for _, d in adapt.log)
+            del futures
 
-        del futures
-
-        start = time()
-        while len(cluster.scheduler.workers) != 1:
-            await asyncio.sleep(0.01)
-            assert time() < start + 2
-        assert adapt.log[-1][1]["status"] == "down"
-    finally:
-        await c.close()
-        await cluster.close()
+            start = time()
+            while len(cluster.scheduler.workers) != 1:
+                await asyncio.sleep(0.01)
+                assert time() < start + 2
+            assert adapt.log[-1][1]["status"] == "down"
 
 
 @gen_test()
@@ -194,16 +191,14 @@ async def test_adapt_quickly():
     Instead we want to wait a few beats before removing a worker in case the
     user is taking a brief pause between work
     """
-    cluster = await LocalCluster(
+    async with LocalCluster(
         n_workers=0,
         asynchronous=True,
         processes=False,
         silence_logs=False,
         dashboard_address=":0",
-    )
-    client = await Client(cluster, asynchronous=True)
-    adapt = cluster.adapt(interval="20 ms", wait_count=5, maximum=10)
-    try:
+    ) as cluster, Client(cluster, asynchronous=True) as client:
+        adapt = cluster.adapt(interval="20 ms", wait_count=5, maximum=10)
         future = client.submit(slowinc, 1, delay=0.100)
         await wait(future)
         assert len(adapt.log) == 1
@@ -241,9 +236,6 @@ async def test_adapt_quickly():
 
         await asyncio.sleep(0.1)
         assert len(cluster.workers) == 1
-    finally:
-        await client.close()
-        await cluster.close()
 
 
 @gen_test()
@@ -255,20 +247,19 @@ async def test_adapt_down():
         processes=False,
         silence_logs=False,
         dashboard_address=":0",
-    ) as cluster:
-        async with Client(cluster, asynchronous=True) as client:
-            cluster.adapt(interval="20ms", maximum=5)
+    ) as cluster, Client(cluster, asynchronous=True) as client:
+        cluster.adapt(interval="20ms", maximum=5)
 
-            futures = client.map(slowinc, range(1000), delay=0.1)
-            while len(cluster.scheduler.workers) < 5:
-                await asyncio.sleep(0.1)
+        futures = client.map(slowinc, range(1000), delay=0.1)
+        while len(cluster.scheduler.workers) < 5:
+            await asyncio.sleep(0.1)
 
-            cluster.adapt(maximum=2)
+        cluster.adapt(maximum=2)
 
-            start = time()
-            while len(cluster.scheduler.workers) != 2:
-                await asyncio.sleep(0.1)
-                assert time() < start + 60
+        start = time()
+        while len(cluster.scheduler.workers) != 2:
+            await asyncio.sleep(0.1)
+            assert time() < start + 60
 
 
 @gen_test()
@@ -311,7 +302,11 @@ def test_basic_no_loop(cleanup):
 @gen_test()
 async def test_target_duration():
     with dask.config.set(
-        {"distributed.scheduler.default-task-durations": {"slowinc": 1}}
+        {
+            "distributed.scheduler.default-task-durations": {"slowinc": 1},
+            # adaptive target for queued tasks doesn't yet consider default or learned task durations
+            "distributed.scheduler.worker-saturation": float("inf"),
+        }
     ):
         async with LocalCluster(
             n_workers=0,

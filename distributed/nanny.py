@@ -37,6 +37,7 @@ from distributed.core import (
     error_message,
 )
 from distributed.diagnostics.plugin import _get_plugin_name
+from distributed.diskutils import WorkSpace
 from distributed.metrics import time
 from distributed.node import ServerNode
 from distributed.process import AsyncProcess
@@ -89,20 +90,19 @@ class Nanny(ServerNode):
             2. Existing environment variables
             3. Dask configuration
 
-        Note
-        ----
-        Some environment variables, like ``OMP_NUM_THREADS``, must be set before
-        importing numpy to have effect. Others, like ``MALLOC_TRIM_THRESHOLD_`` (see
-        :ref:`memtrim`), must be set before starting the Linux process. Such variables
-        would be ineffective if set here or in ``distributed.nanny.environ``; they
-        must be set in ``distributed.nanny.pre-spawn-environ`` so that they are set
-        before spawning the subprocess, even if this means poisoning the
-        process running the Nanny.
+        .. note::
+           Some environment variables, like ``OMP_NUM_THREADS``, must be set before
+           importing numpy to have effect. Others, like ``MALLOC_TRIM_THRESHOLD_`` (see
+           :ref:`memtrim`), must be set before starting the Linux process. Such
+           variables would be ineffective if set here or in
+           ``distributed.nanny.environ``; they must be set in
+           ``distributed.nanny.pre-spawn-environ`` so that they are set before spawning
+           the subprocess, even if this means poisoning the process running the Nanny.
 
-        For the same reason, be warned that changing
-        ``distributed.worker.multiprocessing-method`` from ``spawn`` to ``fork`` or
-        ``forkserver`` may inhibit some environment variables; if you do, you should
-        set the variables yourself in the shell before you start ``dask-worker``.
+           For the same reason, be warned that changing
+           ``distributed.worker.multiprocessing-method`` from ``spawn`` to ``fork`` or
+           ``forkserver`` may inhibit some environment variables; if you do, you should
+           set the variables yourself in the shell before you start ``dask-worker``.
 
     See Also
     --------
@@ -180,9 +180,9 @@ class Nanny(ServerNode):
         else:
             self._original_local_dir = local_directory
 
-        self.local_directory = local_directory
-        if not os.path.exists(self.local_directory):
-            os.makedirs(self.local_directory, exist_ok=True)
+        # Create directory if it doesn't exist and test for write access.
+        # In case of PermissionError, change the name.
+        self.local_directory = WorkSpace(local_directory).base_dir
 
         self.preload = preload
         if self.preload is None:
@@ -231,7 +231,7 @@ class Nanny(ServerNode):
             {k: str(v) for k, v in env.items()} if env else {},
         )
 
-        self.config = config or dask.config.config
+        self.config = merge(dask.config.config, config or {})
         worker_kwargs.update(
             {
                 "port": worker_port,
@@ -639,7 +639,17 @@ class WorkerProcess:
         self.Worker = worker
         self.env = env
         self.pre_spawn_env = pre_spawn_env
-        self.config = config
+        self.config = config.copy()
+
+        # Ensure default clients don't propagate to subprocesses
+        try:
+            from distributed.client import default_client
+
+            default_client()
+            self.config.pop("scheduler", None)
+            self.config.pop("shuffle", None)
+        except ValueError:
+            pass
 
         # Initialized when worker is ready
         self.worker_dir = None
@@ -780,9 +790,11 @@ class WorkerProcess:
         logger.info("Nanny asking worker to close")
 
         process = self.process
-        assert self.process
+        assert process
+        queue = self.child_stop_q
+        assert queue
         wait_timeout = timeout * 0.8
-        self.child_stop_q.put(
+        queue.put(
             {
                 "op": "stop",
                 "timeout": wait_timeout,
@@ -790,19 +802,25 @@ class WorkerProcess:
             }
         )
         await asyncio.sleep(0)  # otherwise we get broken pipe errors
-        self.child_stop_q.close()
+        queue.close()
+        del queue
 
         try:
-            await process.join(wait_timeout)
-            return
-        except asyncio.TimeoutError:
-            pass
+            try:
+                await process.join(wait_timeout)
+                return
+            except asyncio.TimeoutError:
+                pass
 
-        logger.warning(
-            f"Worker process still alive after {wait_timeout} seconds, killing"
-        )
-        await process.kill()
-        await process.join(max(0, deadline - time()))
+            logger.warning(
+                f"Worker process still alive after {wait_timeout} seconds, killing"
+            )
+            await process.kill()
+            await process.join(max(0, deadline - time()))
+        except ValueError as e:
+            if "invalid operation on closed AsyncProcess" in str(e):
+                return
+            raise
 
     async def _wait_until_connected(self, uid):
         while True:
@@ -838,6 +856,7 @@ class WorkerProcess:
     ):  # pragma: no cover
         try:
             os.environ.update(env)
+            dask.config.refresh()
             dask.config.set(config)
 
             from dask.multiprocessing import default_initializer

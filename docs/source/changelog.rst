@@ -1,6 +1,152 @@
 Changelog
 =========
 
+.. _v2022.9.1:
+
+2022.9.1
+--------
+
+Released on September 16, 2022
+
+Enhancements
+^^^^^^^^^^^^
+- Add dashboard component for size of open data transfers (:pr:`6982`) `Hendrik Makait`_
+- Allow very fast keys and very expensive transfers as stealing candidates (:pr:`7022`) `Florian Jetter`_
+
+Bug Fixes
+^^^^^^^^^
+- No longer double count transfer cost in stealing (:pr:`7036`) `Hendrik Makait`_
+
+Maintenance
+^^^^^^^^^^^
+- Make ``test_wait_first_completed`` robust (:pr:`7039`) `Florian Jetter`_
+- Partial annotations for ``SchedulerState`` (:pr:`7023`) `crusaderky`_
+- Add more type annotations to ``stealing.py`` (:pr:`7009`) `Florian Jetter`_
+- Update codecov settings (:pr:`7015`) `Florian Jetter`_
+- Speed up ``test_balance`` (:pr:`7008`) `Florian Jetter`_
+- Fix test report after queuing job added (:pr:`7012`) `Gabe Joseph`_
+- Clean up env variables in Gihub Actions (:pr:`7001`) `crusaderky`_
+- Make ``test_steal_reschedule_reset_in_flight_occupancy`` non timing dependent (:pr:`7010`) `Florian Jetter`_
+- Replaced ``distributed.utils.key_split`` with ``dask.utils.key_split`` (:pr:`7005`) `Luke Conibear`_
+- Revert "Revert "Limit incoming data transfers by amount of data" (:pr:`6994)" (:pr:`7007`) `Florian Jetter`_
+- CI job running tests with queuing on (:pr:`6989`) `Gabe Joseph`_
+- Fix ``distributed/tests/test_client_executor.py::test_wait`` (:pr:`6990`) `Florian Jetter`_
+
+
+.. _v2022.9.0:
+
+2022.9.0
+--------
+
+Released on September 2, 2022
+
+Enhancements
+^^^^^^^^^^^^
+- Limit incoming data transfers by amount of data (:pr:`6975`) `Hendrik Makait`_
+- Expose transfer-related metrics in ``Worker.get_metrics`` and ``WorkerMetricCollector`` (:pr:`6936`) `Hendrik Makait`_
+- Withhold root tasks (no co assignment) (:pr:`6614`) `Gabe Joseph`_
+- Improve differentiation between incoming/outgoing connections and transfers (:pr:`6933`) `Hendrik Makait`_
+- Change memory bars color on spilling/paused status (:pr:`6959`) `crusaderky`_
+- Ensure restart clears taskgroups et al (:pr:`6944`) `Florian Jetter`_
+- Optimise ``scheduler.get_comm_cost`` set difference (:pr:`6931`) `Lawrence Mitchell`_
+- Expose setting multiple protocols and ports via the ``dask-scheduler`` CLI (:pr:`6898`) `Jacob Tomlinson`_
+- Make ``TextProgressBar`` clear the line when finished (:pr:`5968`) `Vincenzo Eduardo Padulano`_
+
+Bug Fixes
+^^^^^^^^^
+- Revert ``getaddrinfo`` fast path for Python 3.8 (:pr:`6978`) `Florian Jetter`_
+- cancelled/resumed->long-running transitions (:pr:`6916`) `crusaderky`_
+
+Deprecations
+^^^^^^^^^^^^
+- Deprecate default value for ``Client.wait_for_workers`` (:pr:`6942`) `Florian Jetter`_
+
+Documentation
+^^^^^^^^^^^^^
+- Document ``Scheduler`` and ``Worker`` state machine (:pr:`6948`) `crusaderky`_
+- Insert ``memory_limit`` parameter into ``LocalCluster`` docstring (:pr:`6839`) `Crislana Rafael`_
+
+Maintenance
+^^^^^^^^^^^
+- Revert "Limit incoming data transfers by amount of data" (:pr:`6994`) `Florian Jetter`_
+- Cache conda environment between CI test runs (:pr:`6855`) `Charles Blackmon-Luca`_
+- Revert "Fix co-assignment for binary operations" (:pr:`6985`) `Gabe Joseph`_
+- Cache ``test_report`` shelves in CI (:pr:`6937`) `Florian Jetter`_
+- Cleanup ``ipywidgets`` mocking (:pr:`6918`) `Thomas Grainger`_
+- Improve testing of ``{Scheduler|Worker}MetricCollector`` (:pr:`6945`) `Hendrik Makait`_
+- Clean up nanny ``WorkerProcess.kill`` (:pr:`6972`) `Gabe Joseph`_
+- Rewrite ``test_reconnect`` to use subprocess to kill scheduler reliably (:pr:`6967`) `Florian Jetter`_
+- Task state domain on the scheduler side (:pr:`6929`) `crusaderky`_
+- Remove ``@avoid_ci`` from ``test_steal`` (:pr:`6872`) `crusaderky`_
+- Use ``async with Worker`` in tests (:pr:`6958`) `crusaderky`_
+- Ignore spurious warnings in ``test_quiet_close_process`` (:pr:`6955`) `crusaderky`_
+- Fix tests on Windows (:pr:`6954`) `Hendrik Makait`_
+- Prevent duplicates in ``HeapSet.sorted()`` (:pr:`6952`) `crusaderky`_
+- Propagate worker address and improve ``_remove_from_processing`` behavior (:pr:`6946`) `Hendrik Makait`_
+- Add ``HeapSet._sorted`` internal flag (:pr:`6949`) `Gabe Joseph`_
+- Add ``HeapSet.peekn`` (:pr:`6947`) `Gabe Joseph`_
+- Fix ``pyright`` error when importing from ``distributed`` (:pr:`6904`) `Ian Liu Rodrigues`_
+- Always return ``ws.address`` from ``_remove_from_processing`` (:pr:`6884`) `Hendrik Makait`_
+- Use ``async with Client:`` in tests (:pr:`6921`) `Thomas Grainger`_
+- Ensure relative memory limits work as percentage of system memory (:pr:`6923`) `Florian Jetter`_
+
+
+.. _v2022.8.1:
+
+2022.8.1
+--------
+
+Released on August 19, 2022
+
+New Features
+^^^^^^^^^^^^
+
+Enhancements
+^^^^^^^^^^^^
+- Drop comparison of versions against all clients (:pr:`6861`) `Hendrik Makait`_
+- Log the worker name if set (:pr:`6866`) `Johannes Lange`_
+- Skip ``getaddrinfo`` thread if host is already resolved, using ``socket.AI_NUMERIC*`` (:pr:`6847`) `Thomas Grainger`_
+- Display unexpected state in ``Worker.execute`` validation (:pr:`6856`) `James Bourbeau`_
+- ``pre-spawn-environ`` (:pr:`6841`) `crusaderky`_
+- Dump ``has_what``, ``missing_dep_flight`` (:pr:`6830`) `Gabe Joseph`_
+
+Bug Fixes
+^^^^^^^^^
+- ``cancelled`` / ``resumed`` -> ``rescheduled`` transition (:pr:`6913`) `crusaderky`_
+- Fix resource deallocation for resumed tasks (:pr:`6914`) `crusaderky`_
+- Only close scheduler in ``SpecCluster`` if it exists (:pr:`6888`) `Matthew Rocklin`_
+- Fix issue if ``exc.reason`` is ``None`` (:pr:`6881`) `Hendrik Makait`_
+- Always close ``BatchedSend`` write coroutines (:pr:`6865`) `Gabe Joseph`_
+- Harden preamble of ``Worker.execute`` against race conditions (:pr:`6878`) `crusaderky`_
+
+Documentation
+^^^^^^^^^^^^^
+- Fix typo (:pr:`6870`) `Pieter Gijsbers`_
+
+Maintenance
+^^^^^^^^^^^
+- Use retries for the test report (:pr:`6926`) `Florian Jetter`_
+- Duplicated code: ``in_flight_tasks`` validation (:pr:`6917`) `crusaderky`_
+- ``ipywidgets`` 8 compatibility (:pr:`6912`) `James Bourbeau`_
+- Overhaul transitions for the ``resumed`` state (:pr:`6699`) `crusaderky`_
+- Don't upgrade to ``ipywidgets`` 8 (:pr:`6910`) `crusaderky`_
+- Clean up ``cluster`` process reaping (:pr:`6840`) `Gabe Joseph`_
+- Don't use ``bokeh`` ``Figure`` in tests (:pr:`6721`) `Bryan Van de Ven`_
+- Work around incompatibility of crick with setuptools 65 (:pr:`6887`) `crusaderky`_
+- Add max version constraint for ``dask-core`` in nightlies (:pr:`6862`) `Charles Blackmon-Luca`_
+- Replace ``port = random.randint(`` with ``port = d.utils.open_port`` (:pr:`6883`) `Thomas Grainger`_
+- Fix flaky ``test_wall_clock`` (:pr:`6879`) `crusaderky`_
+- Add descriptive error message to assert (:pr:`6871`) `Hendrik Makait`_
+- Increase timeout in ``test_quiet_process`` (:pr:`6857`) `Florian Jetter`_
+- Descriptive title for test report (:pr:`6849`) `Hendrik Makait`_
+- Add ``flake8-bugbear`` as plugin to ``pre-commit`` (:pr:`6809`) `Hendrik Makait`_
+- Remove redundant use of ``with clean():`` (:pr:`6852`) `Thomas Grainger`_
+- Show actual Job URL on test report (:pr:`6837`) `Florian Jetter`_
+- Update ``pre-commit`` dependencies (:pr:`6851`) `Hendrik Makait`_
+- Call exit callback even if ``AsyncProcess`` is reaped elsewhere (:pr:`6684`) `Thomas Grainger`_
+- Avoid function calls in argument defaults (:pr:`6812`) `Hendrik Makait`_
+- Ignore warning for unclose ``SSHCluster`` in tests (:pr:`6827`) `Florian Jetter`_
+
 .. _v2022.8.0:
 
 2022.8.0
@@ -4034,3 +4180,9 @@ significantly without many new features.
 .. _`Lawrence Mitchell`: https://github.com/wence-
 .. _`Iain Dorrington`: https://github.com/idorrington92
 .. _`Martí Zamora`: https://github.com/z4m0
+.. _`Johannes Lange`: https://github.com/jolange
+.. _`Pieter Gijsbers`: https://github.com/PGijsbers
+.. _`Crislana Rafael`: https://github.com/crislanarafael
+.. _`Ian Liu Rodrigues`: https://github.com/ianliu
+.. _`Vincenzo Eduardo Padulano`: https://github.com/vepadulano
+.. _`Luke Conibear`: https://github.com/lukeconibear

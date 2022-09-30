@@ -7,9 +7,9 @@ logging_names: dict[str | int, int | str] = {}
 logging_names.update(logging._levelToName)  # type: ignore
 logging_names.update(logging._nameToLevel)  # type: ignore
 
-LINUX = sys.platform == "linux"
-MACOS = sys.platform == "darwin"
-WINDOWS = sys.platform == "win32"
+LINUX: bool = sys.platform == "linux"
+MACOS: bool = sys.platform == "darwin"
+WINDOWS: bool = sys.platform == "win32"
 
 
 if sys.version_info >= (3, 9):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import ClassVar
 
 from distributed.http.prometheus import PrometheusCollector
 from distributed.http.utils import RequestHandler
@@ -37,8 +38,11 @@ class WorkerMetricCollector(PrometheusCollector):
 
         yield GaugeMetricFamily(
             self.build_name("concurrent_fetch_requests"),
-            "Number of open fetch requests to other workers.",
-            value=len(self.server.state.in_flight_workers),
+            (
+                "[Deprecated: This metric has been renamed to transfer_incoming_count.] "
+                "Number of open fetch requests to other workers."
+            ),
+            value=self.server.state.transfer_incoming_count,
         )
 
         yield GaugeMetricFamily(
@@ -51,6 +55,48 @@ class WorkerMetricCollector(PrometheusCollector):
             self.build_name("latency_seconds"),
             "Latency of worker connection.",
             value=self.server.latency,
+        )
+
+        yield GaugeMetricFamily(
+            self.build_name("transfer_incoming_bytes"),
+            "Total size of open data transfers from other workers.",
+            value=self.server.state.transfer_incoming_bytes,
+        )
+
+        yield GaugeMetricFamily(
+            self.build_name("transfer_incoming_count"),
+            "Number of open data transfers from other workers.",
+            value=self.server.state.transfer_incoming_bytes,
+        )
+
+        yield GaugeMetricFamily(
+            self.build_name("transfer_incoming_count_total"),
+            (
+                "Total number of data transfers from other workers "
+                "since the worker was started."
+            ),
+            value=self.server.state.transfer_incoming_count_total,
+        )
+
+        yield GaugeMetricFamily(
+            self.build_name("transfer_outgoing_bytes"),
+            "Total size of open data transfers to other workers.",
+            value=self.server.transfer_outgoing_bytes,
+        )
+
+        yield GaugeMetricFamily(
+            self.build_name("transfer_outgoing_count"),
+            "Number of open data transfers to other workers.",
+            value=self.server.transfer_outgoing_count,
+        )
+
+        yield GaugeMetricFamily(
+            self.build_name("transfer_outgoing_count_total"),
+            (
+                "Total number of data transfers to other workers "
+                "since the worker was started."
+            ),
+            value=self.server.transfer_outgoing_count_total,
         )
 
         # all metrics using digests require crick to be installed
@@ -78,19 +124,22 @@ class WorkerMetricCollector(PrometheusCollector):
 
 
 class PrometheusHandler(RequestHandler):
-    _initialized = False
+    _collector: ClassVar[WorkerMetricCollector | None] = None
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, dask_server=None, **kwargs):
         import prometheus_client
 
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, dask_server=dask_server, **kwargs)
 
-        if PrometheusHandler._initialized:
+        if PrometheusHandler._collector:
+            # Especially during testing, multiple workers are started
+            # sequentially in the same python process
+            PrometheusHandler._collector.server = self.server
             return
 
-        prometheus_client.REGISTRY.register(WorkerMetricCollector(self.server))
-
-        PrometheusHandler._initialized = True
+        PrometheusHandler._collector = WorkerMetricCollector(self.server)
+        # Register collector
+        prometheus_client.REGISTRY.register(PrometheusHandler._collector)
 
     def get(self):
         import prometheus_client

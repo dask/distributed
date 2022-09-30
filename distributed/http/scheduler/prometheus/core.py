@@ -69,7 +69,8 @@ class SchedulerMetricCollector(PrometheusCollector):
         )
 
         for state in ALL_TASK_STATES:
-            tasks.add_metric([state], task_counter.get(state, 0.0))
+            if state != "forgotten":
+                tasks.add_metric([state], task_counter.get(state, 0.0))
         yield tasks
 
         prefix_state_counts = CounterMetricFamily(

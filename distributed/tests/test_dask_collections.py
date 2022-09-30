@@ -21,6 +21,11 @@ dfs = [
 ]
 
 
+ignore_single_machine_warning = pytest.mark.filterwarnings(
+    "ignore:Running on a single-machine scheduler:UserWarning"
+)
+
+
 def assert_equal(a, b):
     assert type(a) == type(b)
     if isinstance(a, pd.DataFrame):
@@ -33,6 +38,7 @@ def assert_equal(a, b):
         assert a == b
 
 
+@ignore_single_machine_warning
 @gen_cluster(client=True)
 async def test_dataframes(c, s, a, b):
     df = pd.DataFrame(
@@ -66,6 +72,7 @@ async def test_dataframes(c, s, a, b):
         assert_equal(local, remote)
 
 
+@ignore_single_machine_warning
 @gen_cluster(client=True)
 async def test_dask_array_collections(c, s, a, b):
     import dask.array as da
@@ -153,6 +160,7 @@ async def test_loc(c, s, a, b):
     await future
 
 
+@ignore_single_machine_warning
 def test_dataframe_groupby_tasks(client):
     df = make_time_dataframe()
 

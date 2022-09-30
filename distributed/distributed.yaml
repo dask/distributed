@@ -22,6 +22,7 @@ distributed:
     events-log-length: 100000
     work-stealing: True     # workers should steal tasks from each other
     work-stealing-interval: 100ms  # Callback time for work stealing
+    worker-saturation: .inf # Send this fraction of nthreads root tasks to workers
     worker-ttl: "5 minutes" # like '60s'. Time to live for workers.  They must heartbeat faster than this
     pickle: True            # Is the scheduler allowed to deserialize arbitrary bytestrings
     preload: []             # Run custom modules with Scheduler
@@ -65,18 +66,26 @@ distributed:
       # Set to true to auto-start the Active Memory Manager on Scheduler start; if false
       # you'll have to either manually start it with client.amm.start() or run it once
       # with client.amm.run_once().
-      start: false
+      start: true
+
       # Once started, run the AMM cycle every <interval>
       interval: 2s
+
+      # Memory measure to use. Must be one of the attributes of
+      # distributed.scheduler.MemoryState.
+      measure: optimistic
+
+      # Policies that should be executed at every cycle. Any additional keys in each
+      # object are passed as keyword arguments to the policy constructor.
       policies:
-        # Policies that should be executed at every cycle. Any additional keys in each
-        # object are passed as keyword arguments to the policy constructor.
         - class: distributed.active_memory_manager.ReduceReplicas
 
   worker:
     blocked-handlers: []
     multiprocessing-method: spawn
     use-file-locking: True
+    transfer:
+      message-bytes-limit: 50MB
     connections:            # Maximum concurrent connections for data
       outgoing: 50          # This helps to control network saturation
       incoming: 10
@@ -142,6 +151,9 @@ distributed:
 
       # Fractions of worker process memory at which we take action to avoid memory
       # blowup. Set any of the values to False to turn off the behavior entirely.
+      # All fractions are relative to each worker's memory_limit.
+      transfer: 0.10  # fractional size of incoming data transfers where we start 
+                       # throttling incoming data transfers
       target: 0.60     # fraction of managed memory where we start spilling to disk
       spill: 0.70      # fraction of process memory where we start spilling to disk
       pause: 0.80      # fraction of process memory at which we pause worker threads

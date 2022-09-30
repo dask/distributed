@@ -27,7 +27,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 
 @click.command(context_settings=dict(ignore_unknown_options=True))
 @click.option("--host", type=str, default="", help="URI, IP or hostname of this server")
-@click.option("--port", type=int, default=None, help="Serving port")
+@click.option("--port", type=str, default=None, help="Serving port")
 @click.option(
     "--interface",
     type=str,
@@ -130,6 +130,8 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 def main(
     host,
     port,
+    protocol,
+    interface,
     bokeh_port,
     show,
     dashboard,
@@ -162,8 +164,29 @@ def main(
         )
         dashboard = bokeh
 
+    if interface and "," in interface:
+        interface = interface.split(",")
+
+    if protocol and "," in protocol:
+        protocol = protocol.split(",")
+
+    if port:
+        if "," in port:
+            port = [int(p) for p in port.split(",")]
+        else:
+            port = int(port)
+
     if port is None and (not host or not re.search(r":\d", host)):
-        port = 8786
+        if isinstance(protocol, list):
+            port = [8786] + [0] * (len(protocol) - 1)
+        else:
+            port = 8786
+
+    if isinstance(protocol, list) or isinstance(port, list):
+        if (not isinstance(protocol, list) or not isinstance(port, list)) or len(
+            port
+        ) != len(protocol):
+            raise ValueError("--protocol and --port must both be lists of equal length")
 
     sec = {
         k: v
@@ -202,6 +225,8 @@ def main(
             security=sec,
             host=host,
             port=port,
+            protocol=protocol,
+            interface=interface,
             dashboard=dashboard,
             dashboard_address=dashboard_address,
             http_prefix=dashboard_prefix,

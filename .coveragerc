@@ -25,6 +25,7 @@ exclude_lines =
     # always ignore type checking blocks
     TYPE_CHECKING
     except ImportError
+    @overload
 
 [html]
 directory = coverage_html_report

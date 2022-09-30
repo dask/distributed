@@ -1329,7 +1329,9 @@ class Client(SyncMethodMixin):
         except OSError:
             logger.debug("Not able to query scheduler for identity")
 
-    async def _wait_for_workers(self, n_workers=0, timeout=None):
+    async def _wait_for_workers(
+        self, n_workers: int, timeout: float | None = None
+    ) -> None:
         info = await self.scheduler.identity()
         self._scheduler_identity = SchedulerInfo(info)
         if timeout:
@@ -1346,7 +1348,7 @@ class Client(SyncMethodMixin):
                 ]
             )
 
-        while n_workers and running_workers(info) < n_workers:
+        while running_workers(info) < n_workers:
             if deadline and time() > deadline:
                 raise TimeoutError(
                     "Only %d/%d workers arrived after %s"
@@ -1356,7 +1358,11 @@ class Client(SyncMethodMixin):
             info = await self.scheduler.identity()
             self._scheduler_identity = SchedulerInfo(info)
 
-    def wait_for_workers(self, n_workers=0, timeout=None):
+    def wait_for_workers(
+        self,
+        n_workers: int | str = no_default,
+        timeout: float | None = None,
+    ) -> None:
         """Blocking call to wait for n workers before continuing
 
         Parameters
@@ -1367,6 +1373,16 @@ class Client(SyncMethodMixin):
             Time in seconds after which to raise a
             ``dask.distributed.TimeoutError``
         """
+        if n_workers is no_default:
+            warnings.warn(
+                "Please specify the `n_workers` argument when using `Client.wait_for_workers`. Not specifying `n_workers` will no longer be supported in future versions.",
+                FutureWarning,
+            )
+            n_workers = 0
+        elif not isinstance(n_workers, int) or n_workers < 1:
+            raise ValueError(
+                f"`n_workers` must be a positive integer. Instead got {n_workers}."
+            )
         return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
 
     def _heartbeat(self):
@@ -2354,6 +2370,11 @@ class Client(SyncMethodMixin):
         broadcast : bool (defaults to False)
             Whether to send each data element to all workers.
             By default we round-robin based on number of cores.
+
+            .. note::
+               Setting this flag to True is incompatible with the Active Memory
+               Manager's :ref:`ReduceReplicas` policy. If you wish to use it, you must
+               first disable the policy or disable the AMM entirely.
         direct : bool (defaults to automatically check)
             Whether or not to connect directly to the workers, or to ask
             the scheduler to serve as intermediary.  This can also be set when
@@ -3425,8 +3446,11 @@ class Client(SyncMethodMixin):
         """Upload local package to workers
 
         This sends a local file up to all worker nodes.  This file is placed
-        into a temporary directory on Python's system path so any .py,  .egg
-        or .zip  files will be importable.
+        into the working directory of the running worker, see config option
+        ``temporary-directory`` (defaults to :py:func:`tempfile.gettempdir`).
+
+        This directory will be added to the Python's system path so any .py,
+        .egg or .zip  files will be importable.
 
         Parameters
         ----------
@@ -3494,11 +3518,16 @@ class Client(SyncMethodMixin):
         """Set replication of futures within network
 
         Copy data onto many workers.  This helps to broadcast frequently
-        accessed data and it helps to improve resilience.
+        accessed data and can improve resilience.
 
         This performs a tree copy of the data throughout the network
         individually on each piece of data.  This operation blocks until
         complete.  It does not guarantee replication of data to future workers.
+
+        .. note::
+           This method is incompatible with the Active Memory Manager's
+           :ref:`ReduceReplicas` policy. If you wish to use it, you must first disable
+           the policy or disable the AMM entirely.
 
         Parameters
         ----------
@@ -4139,8 +4168,8 @@ class Client(SyncMethodMixin):
             single argument `event` which is a tuple `(timestamp, msg)` where
             timestamp refers to the clock on the scheduler.
 
-        Example
-        -------
+        Examples
+        --------
 
         >>> import logging
         >>> logger = logging.getLogger("myLogger")  # Log config not shown
@@ -4722,9 +4751,9 @@ def wait(fs, timeout=None, return_when=ALL_COMPLETED):
     Parameters
     ----------
     fs : List[Future]
-    timeout : number, optional
-        Time in seconds after which to raise a
-        ``dask.distributed.TimeoutError``
+    timeout : number, string, optional
+        Time after which to raise a ``dask.distributed.TimeoutError``.
+        Can be a string like ``"10 minutes"`` or a number of seconds to wait.
     return_when : str, optional
         One of `ALL_COMPLETED` or `FIRST_COMPLETED`
 
@@ -4732,6 +4761,8 @@ def wait(fs, timeout=None, return_when=ALL_COMPLETED):
     -------
     Named tuple of completed, not completed
     """
+    if timeout is not None and isinstance(timeout, (Number, str)):
+        timeout = parse_timedelta(timeout, default="s")
     client = default_client()
     result = client.sync(_wait, fs, timeout=timeout, return_when=return_when)
     return result

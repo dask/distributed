@@ -24,7 +24,7 @@ import threading
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import contextmanager, nullcontext, suppress
 from itertools import count
 from time import sleep
@@ -33,11 +33,13 @@ from typing import IO, Any, Generator, Iterator, Literal
 import pytest
 import yaml
 from tlz import assoc, memoize, merge
+from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import IOLoop
 
 import dask
+from dask.sizeof import sizeof
 
-from distributed import Scheduler, system
+from distributed import Event, Scheduler, system
 from distributed import versions as version_module
 from distributed.batched import BatchedSend
 from distributed.client import Client, _global_clients, default_client
@@ -109,6 +111,11 @@ logging_levels = {
 
 _TEST_TIMEOUT = 30
 _offload_executor.submit(lambda: None).result()  # create thread during import
+
+# Dask configuration to completely disable the Active Memory Manager.
+# This is typically used with @gen_cluster(config=NO_AMM)
+# or @gen_cluster(config=merge(NO_AMM, {<more config options})).
+NO_AMM = {"distributed.scheduler.active-memory-manager.start": False}
 
 
 async def cleanup_global_workers():
@@ -286,6 +293,10 @@ def slowidentity(*args, **kwargs):
 def lock_inc(x, lock):
     with lock:
         return x + 1
+
+
+def block_on_event(event: Event) -> None:
+    event.wait()
 
 
 class _UnhashableCallable:
@@ -525,6 +536,24 @@ def client(loop, cluster_fixture):
         yield client
 
 
+@pytest.fixture
+def client_no_amm(client):
+    """Sync client with the Active Memory Manager (AMM) turned off.
+    This works regardless of the AMM being on or off in the dask config.
+    """
+    before = client.amm.running()
+    if before:
+        client.amm.stop()  # pragma: nocover
+
+    yield client
+
+    after = client.amm.running()
+    if before and not after:
+        client.amm.start()  # pragma: nocover
+    elif not before and after:  # pragma: nocover
+        client.amm.stop()
+
+
 # Compatibility. A lot of tests simply use `c` as fixture name
 c = client
 
@@ -568,14 +597,14 @@ def security():
     return tls_only_security()
 
 
-def _kill_join(proc, timeout):
-    proc.kill()
-    proc.join(timeout)
-    if proc.is_alive():
-        raise multiprocessing.TimeoutError(
-            f"Process {proc} did not shut down within {timeout}s"
-        )
-    proc.close()
+def _kill_join_processes(processes):
+    # Join may hang or cause issues, so make sure all are killed first.
+    # Note that we don't use a timeout, but rely on the overall pytest timeout.
+    for proc in processes:
+        proc.kill()
+    for proc in processes:
+        proc.join()
+        proc.close()
 
 
 def _close_queue(q):
@@ -590,7 +619,6 @@ def cluster(
     nanny=False,
     worker_kwargs=None,
     active_rpc_timeout=10,
-    shutdown_timeout=20,
     scheduler_kwargs=None,
     config=None,
 ):
@@ -598,7 +626,6 @@ def cluster(
     scheduler_kwargs = scheduler_kwargs or {}
     config = config or {}
 
-    ws = weakref.WeakSet()
     enable_proctitle_on_children()
 
     with check_process_leak(check=True), check_instances(), config_for_cluster_tests():
@@ -608,6 +635,8 @@ def cluster(
             _run_worker = run_worker
 
         with contextlib.ExitStack() as stack:
+            processes = []
+            stack.callback(_kill_join_processes, processes)
             # The scheduler queue will receive the scheduler's address
             scheduler_q = get_mp_context().Queue()
             stack.callback(_close_queue, scheduler_q)
@@ -620,9 +649,8 @@ def cluster(
                 kwargs=scheduler_kwargs,
                 daemon=True,
             )
-            ws.add(scheduler)
             scheduler.start()
-            stack.callback(_kill_join, scheduler, shutdown_timeout)
+            processes.append(scheduler)
 
             # Launch workers
             workers_by_pid = {}
@@ -642,9 +670,8 @@ def cluster(
                     args=(q, scheduler_q, config),
                     kwargs=kwargs,
                 )
-                ws.add(proc)
                 proc.start()
-                stack.callback(_kill_join, proc, shutdown_timeout)
+                processes.append(proc)
                 workers_by_pid[proc.pid] = {"proc": proc}
 
             saddr_or_exception = scheduler_q.get()
@@ -671,7 +698,7 @@ def cluster(
                         nthreads = await s.ncores_running()
                         if len(nthreads) == nworkers:
                             break
-                        if time() - start > 5:
+                        if time() - start > 5:  # pragma: nocover
                             raise Exception("Timeout on cluster creation")
 
             _run_and_close_tornado(wait_for_workers)
@@ -928,11 +955,24 @@ def gen_cluster(
         @config_for_cluster_tests(**{"distributed.comm.timeouts.connect": "5s"})
         @clean(**clean_kwargs)
         def test_func(*outer_args, **kwargs):
-            async def async_fn():
-                result = None
-                with dask.config.set(config):
-                    workers = []
-                    s = False
+            @contextlib.asynccontextmanager
+            async def _client_factory(s):
+                if client:
+                    async with Client(
+                        s.address,
+                        security=security,
+                        asynchronous=True,
+                        **client_kwargs,
+                    ) as c:
+                        yield c
+                else:
+                    yield
+
+            @contextlib.asynccontextmanager
+            async def _cluster_factory():
+                workers = []
+                s = False
+                try:
 
                     for _ in range(60):
                         try:
@@ -953,81 +993,79 @@ def gen_cluster(
                             await asyncio.sleep(1)
                         else:
                             workers[:] = ws
-                            args = [s] + workers
                             break
                     if s is False:
                         raise Exception("Could not start cluster")
-                    if client:
-                        c = await Client(
-                            s.address,
-                            security=security,
-                            asynchronous=True,
-                            **client_kwargs,
-                        )
-                        args = [c] + args
+                    yield s, workers
+                finally:
+                    await end_cluster(s, workers)
+                    await asyncio.wait_for(cleanup_global_workers(), 1)
+
+            async def async_fn():
+                result = None
+                with dask.config.set(config):
+                    async with _cluster_factory() as (s, workers), _client_factory(
+                        s
+                    ) as c:
+                        args = [s] + workers
+                        if c is not None:
+                            args = [c] + args
+                        try:
+                            coro = func(*args, *outer_args, **kwargs)
+                            task = asyncio.create_task(coro)
+                            coro2 = asyncio.wait_for(asyncio.shield(task), timeout)
+                            result = await coro2
+                            validate_state(s, *workers)
+
+                        except asyncio.TimeoutError:
+                            assert task
+                            buffer = io.StringIO()
+                            # This stack indicates where the coro/test is suspended
+                            task.print_stack(file=buffer)
+
+                            if cluster_dump_directory:
+                                await dump_cluster_state(
+                                    s=s,
+                                    ws=workers,
+                                    output_dir=cluster_dump_directory,
+                                    func_name=func.__name__,
+                                )
+
+                            task.cancel()
+                            while not task.cancelled():
+                                await asyncio.sleep(0.01)
+
+                            # Hopefully, the hang has been caused by inconsistent
+                            # state, which should be much more meaningful than the
+                            # timeout
+                            validate_state(s, *workers)
+
+                            # Remove as much of the traceback as possible; it's
+                            # uninteresting boilerplate from utils_test and asyncio
+                            # and not from the code being tested.
+                            raise asyncio.TimeoutError(
+                                f"Test timeout after {timeout}s.\n"
+                                "========== Test stack trace starts here ==========\n"
+                                f"{buffer.getvalue()}"
+                            ) from None
+
+                        except pytest.xfail.Exception:
+                            raise
+
+                        except Exception:
+                            if cluster_dump_directory and not has_pytestmark(
+                                test_func, "xfail"
+                            ):
+                                await dump_cluster_state(
+                                    s=s,
+                                    ws=workers,
+                                    output_dir=cluster_dump_directory,
+                                    func_name=func.__name__,
+                                )
+                            raise
 
                     try:
-                        coro = func(*args, *outer_args, **kwargs)
-                        task = asyncio.create_task(coro)
-                        coro2 = asyncio.wait_for(asyncio.shield(task), timeout)
-                        result = await coro2
-                        validate_state(s, *workers)
-
-                    except asyncio.TimeoutError:
-                        assert task
-                        buffer = io.StringIO()
-                        # This stack indicates where the coro/test is suspended
-                        task.print_stack(file=buffer)
-
-                        if cluster_dump_directory:
-                            await dump_cluster_state(
-                                s,
-                                ws,
-                                output_dir=cluster_dump_directory,
-                                func_name=func.__name__,
-                            )
-
-                        task.cancel()
-                        while not task.cancelled():
-                            await asyncio.sleep(0.01)
-
-                        # Hopefully, the hang has been caused by inconsistent
-                        # state, which should be much more meaningful than the
-                        # timeout
-                        validate_state(s, *workers)
-
-                        # Remove as much of the traceback as possible; it's
-                        # uninteresting boilerplate from utils_test and asyncio
-                        # and not from the code being tested.
-                        raise asyncio.TimeoutError(
-                            f"Test timeout after {timeout}s.\n"
-                            "========== Test stack trace starts here ==========\n"
-                            f"{buffer.getvalue()}"
-                        ) from None
-
-                    except pytest.xfail.Exception:
-                        raise
-
-                    except Exception:
-                        if cluster_dump_directory and not has_pytestmark(
-                            test_func, "xfail"
-                        ):
-                            await dump_cluster_state(
-                                s,
-                                ws,
-                                output_dir=cluster_dump_directory,
-                                func_name=func.__name__,
-                            )
-                        raise
-
-                    finally:
-                        if client and c.status not in ("closing", "closed"):
-                            await c._close(fast=s.status == Status.closed)
-                        await end_cluster(s, workers)
-                        await asyncio.wait_for(cleanup_global_workers(), 1)
-
-                    try:
-                        c = await default_client()
+                        c = default_client()
                     except ValueError:
                         pass
                     else:
@@ -2272,13 +2310,13 @@ def freeze_data_fetching(w: Worker, *, jump_start: bool = False) -> Iterator[Non
         If True, trigger ensure_communicating on exit; this simulates e.g. an unrelated
         worker moving out of in_flight_workers.
     """
-    old_out_connections = w.state.total_out_connections
-    old_comm_threshold = w.state.comm_threshold_bytes
-    w.state.total_out_connections = 0
-    w.state.comm_threshold_bytes = 0
+    old_count_limit = w.state.transfer_incoming_count_limit
+    old_threshold = w.state.transfer_incoming_bytes_throttle_threshold
+    w.state.transfer_incoming_count_limit = 0
+    w.state.transfer_incoming_bytes_throttle_threshold = 0
     yield
-    w.state.total_out_connections = old_out_connections
-    w.state.comm_threshold_bytes = old_comm_threshold
+    w.state.transfer_incoming_count_limit = old_count_limit
+    w.state.transfer_incoming_bytes_throttle_threshold = old_threshold
     if jump_start:
         w.status = Status.paused
         w.status = Status.running
@@ -2320,6 +2358,8 @@ async def wait_for_state(
     """Wait for a task to appear on a Worker or on the Scheduler and to be in a specific
     state.
     """
+    tasks: Mapping[str, SchedulerTaskState | WorkerTaskState]
+
     if isinstance(dask_worker, Worker):
         tasks = dask_worker.state.tasks
     elif isinstance(dask_worker, Scheduler):
@@ -2431,3 +2471,42 @@ def requires_default_ports(name_of_test):
         raise TimeoutError(f"Default ports didn't open up in time for {name_of_test}")
 
     yield
+
+
+async def fetch_metrics(port: int, prefix: str | None = None) -> dict[str, Any]:
+    from prometheus_client.parser import text_string_to_metric_families
+
+    http_client = AsyncHTTPClient()
+    response = await http_client.fetch(f"http://localhost:{port}/metrics")
+    assert response.code == 200
+    txt = response.body.decode("utf8")
+    families = {
+        family.name: family
+        for family in text_string_to_metric_families(txt)
+        if prefix is None or family.name.startswith(prefix)
+    }
+    return families
+
+
+class SizeOf:
+    """
+    An object that returns exactly nbytes when inspected by dask.sizeof.sizeof
+    """
+
+    def __init__(self, nbytes: int) -> None:
+        if not isinstance(nbytes, int):
+            raise TypeError(f"Expected integer for nbytes but got {type(nbytes)}")
+        size_obj = sizeof(object())
+        if nbytes < size_obj:
+            raise ValueError(
+                f"Expected a value larger than {size_obj} integer but got {nbytes}."
+            )
+        self._nbytes = nbytes - size_obj
+
+    def __sizeof__(self) -> int:
+        return self._nbytes
+
+
+def gen_nbytes(nbytes: int) -> SizeOf:
+    """A function that emulates exactly nbytes on the worker data structure."""
+    return SizeOf(nbytes)

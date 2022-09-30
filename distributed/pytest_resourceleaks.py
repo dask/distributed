@@ -158,7 +158,8 @@ class FDChecker(ResourceChecker, name="fds"):
         if sys.platform == "win32":
             # Don't use num_handles(); you'll get tens of thousands of reported leaks
             return 0
-        return psutil.Process().num_fds()
+        else:
+            return psutil.Process().num_fds()
 
     def has_leak(self, before: int, after: int) -> bool:
         return after > before

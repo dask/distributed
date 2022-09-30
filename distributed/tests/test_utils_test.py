@@ -19,6 +19,7 @@ import yaml
 from tornado import gen
 
 import dask.config
+from dask.sizeof import sizeof
 
 from distributed import Client, Event, Nanny, Scheduler, Worker, config, default_client
 from distributed.batched import BatchedSend
@@ -29,6 +30,7 @@ from distributed.metrics import time
 from distributed.tests.test_batched import EchoServer
 from distributed.utils import get_mp_context
 from distributed.utils_test import (
+    SizeOf,
     _LockedCommPool,
     _UnhashableCallable,
     assert_story,
@@ -39,6 +41,7 @@ from distributed.utils_test import (
     dump_cluster_state,
     freeze_batched_send,
     gen_cluster,
+    gen_nbytes,
     gen_test,
     inc,
     new_config,
@@ -273,6 +276,8 @@ def test_new_config():
 def test_lingering_client():
     @gen_cluster()
     async def f(s, a, b):
+        # TODO: force async-with here?
+        # see https://github.com/dask/distributed/issues/6616
         await Client(s.address, asynchronous=True)
 
     f()
@@ -282,6 +287,7 @@ def test_lingering_client():
 
 
 def test_lingering_client_2(loop):
+    # TODO: assert where the client went
     with cluster() as (s, [a, b]):
         client = Client(s["address"], loop=loop)
 
@@ -1021,3 +1027,23 @@ def test_ws_with_running_task(ws_with_running_task):
     assert ws.available_resources == {"R": 0}
     assert ws.total_resources == {"R": 1}
     assert ts.state in ("executing", "long-running")
+
+
+def test_sizeof():
+    assert sizeof(SizeOf(100)) == 100
+    assert isinstance(gen_nbytes(100), SizeOf)
+    assert sizeof(gen_nbytes(100)) == 100
+
+
+@pytest.mark.parametrize(
+    "input, exc, msg",
+    [
+        (12345.0, TypeError, "Expected integer"),
+        (-1, ValueError, "larger than"),
+        (0, ValueError, "larger than"),
+        (10, ValueError, "larger than"),
+    ],
+)
+def test_sizeof_error(input, exc, msg):
+    with pytest.raises(exc, match=msg):
+        SizeOf(input)

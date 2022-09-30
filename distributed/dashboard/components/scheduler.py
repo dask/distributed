@@ -64,6 +64,7 @@ from dask.utils import (
     parse_timedelta,
 )
 
+from distributed.core import Status
 from distributed.dashboard.components import add_periodic_callback
 from distributed.dashboard.components.shared import (
     DashboardComponent,
@@ -239,20 +240,63 @@ class ProcessingHistogram(DashboardComponent):
         self.source.data.update({"left": x[:-1], "right": x[1:], "top": counts})
 
 
-def _memory_color(current: int, limit: int) -> str:
-    """Dynamic color used by WorkersMemory and ClusterMemory"""
-    if limit and current > limit:
-        return "red"
-    if limit and current > limit / 2:
-        return "orange"
-    return "blue"
+class MemoryColor:
+    """Change the color of the memory bars from blue to orange when process memory goes
+    above the ``target`` threshold and to red when the worker pauses.
+    Workers in ``closing_gracefully`` state will also be orange.
+
+    If ``target`` is disabled, change to orange on ``spill`` instead.
+    If spilling is completely disabled, never turn orange.
+
+    If pausing is disabled, change to red when passing the ``terminate`` threshold
+    instead. If both pause and terminate are disabled, turn red when passing
+    ``memory_limit``.
+
+    Note
+    ----
+    A worker will start spilling when managed memory alone passes the target threshold.
+    However, here we're switching to orange when the process memory goes beyond target,
+    which is usually earlier.
+    This is deliberate for the sake of simplicity and also because, when the process
+    memory passes the spill threshold, it will keep spilling until it falls below the
+    target threshold - so it's not completely wrong. Again, we don't want to track
+    the hysteresis cycle of the spill system here for the sake of simplicity.
+
+    In short, orange should be treated as "the worker *may* be spilling".
+    """
+
+    orange: float
+    red: float
+
+    def __init__(self):
+        target = dask.config.get("distributed.worker.memory.target")
+        spill = dask.config.get("distributed.worker.memory.spill")
+        terminate = dask.config.get("distributed.worker.memory.terminate")
+        # These values can be False. It's also common to configure them to impossibly
+        # high values to achieve the same effect.
+        self.orange = min(target or math.inf, spill or math.inf)
+        self.red = min(terminate or math.inf, 1.0)
+
+    def _memory_color(self, current: int, limit: int, status: Status) -> str:
+        if status != Status.running:
+            return "red"
+        if not limit:
+            return "blue"
+        if current >= limit * self.red:
+            return "red"
+        if current >= limit * self.orange:
+            return "orange"
+        return "blue"
 
 
-class ClusterMemory(DashboardComponent):
+class ClusterMemory(DashboardComponent, MemoryColor):
     """Total memory usage on the cluster"""
 
     @log_errors
     def __init__(self, scheduler, width=600, **kwargs):
+        DashboardComponent.__init__(self)
+        MemoryColor.__init__(self)
+
         self.scheduler = scheduler
         self.source = ColumnDataSource(
             {
@@ -327,12 +371,30 @@ class ClusterMemory(DashboardComponent):
         )
         self.root.add_tools(hover)
 
+    def _cluster_memory_color(self) -> str:
+        colors = {
+            self._memory_color(
+                current=ws.memory.process,
+                limit=getattr(ws, "memory_limit", 0),
+                status=ws.status,
+            )
+            for ws in self.scheduler.workers.values()
+        }
+
+        assert colors.issubset({"red", "orange", "blue"})
+        if "red" in colors:
+            return "red"
+        elif "orange" in colors:
+            return "orange"
+        else:
+            return "blue"
+
     @without_property_validation
     @log_errors
     def update(self):
         limit = sum(ws.memory_limit for ws in self.scheduler.workers.values())
         meminfo = self.scheduler.memory
-        color = _memory_color(meminfo.process, limit)
+        color = self._cluster_memory_color()
 
         width = [
             meminfo.managed_in_memory,
@@ -363,11 +425,14 @@ class ClusterMemory(DashboardComponent):
         update(self.source, result)
 
 
-class WorkersMemory(DashboardComponent):
+class WorkersMemory(DashboardComponent, MemoryColor):
     """Memory usage for single workers"""
 
     @log_errors
     def __init__(self, scheduler, width=600, **kwargs):
+        DashboardComponent.__init__(self)
+        MemoryColor.__init__(self)
+
         self.scheduler = scheduler
         self.source = ColumnDataSource(
             {
@@ -414,12 +479,10 @@ class WorkersMemory(DashboardComponent):
         self.root.x_range = Range1d(start=0)
         self.root.yaxis.visible = False
         self.root.ygrid.visible = False
+        self.root.toolbar_location = None
 
         tap = TapTool(callback=OpenURL(url="./info/worker/@escaped_worker.html"))
         self.root.add_tools(tap)
-
-        self.root.toolbar_location = None
-        self.root.yaxis.visible = False
 
         hover = HoverTool(
             point_policy="follow_mouse",
@@ -477,7 +540,7 @@ class WorkersMemory(DashboardComponent):
             meminfo = ws.memory
             limit = getattr(ws, "memory_limit", 0)
             max_limit = max(max_limit, limit, meminfo.process + meminfo.managed_spilled)
-            color_i = _memory_color(meminfo.process, limit)
+            color_i = self._memory_color(meminfo.process, limit, ws.status)
 
             width += [
                 meminfo.managed_in_memory,
@@ -565,6 +628,119 @@ class WorkersMemoryHistogram(DashboardComponent):
         counts, x = np.histogram(nbytes, bins=40)
         d = {"left": x[:-1], "right": x[1:], "top": counts}
         update(self.source, d)
+
+
+class WorkersTransferBytes(DashboardComponent):
+    """Size of open data transfers from/to other workers per worker"""
+
+    @log_errors
+    def __init__(self, scheduler, width=600, **kwargs):
+        self.scheduler = scheduler
+        self.source = ColumnDataSource(
+            {
+                "escaped_worker": [],
+                "transfer_incoming_bytes": [],
+                "transfer_outgoing_bytes": [],
+                "worker": [],
+                "y_incoming": [],
+                "y_outgoing": [],
+            }
+        )
+
+        self.root = figure(
+            title=f"Bytes transferring: {format_bytes(0)}",
+            tools="",
+            id="bk-workers-transfer-bytes-plot",
+            width=int(width / 2),
+            name="workers_transfer_bytes",
+            min_border_bottom=50,
+            **kwargs,
+        )
+
+        # transfer_incoming_bytes
+        self.root.hbar(
+            name="transfer_incoming_bytes",
+            y="y_incoming",
+            right="transfer_incoming_bytes",
+            line_color=None,
+            left=0,
+            height=0.5,
+            fill_color="red",
+            source=self.source,
+        )
+
+        # transfer_outgoing_bytes
+        self.root.hbar(
+            name="transfer_outgoing_bytes",
+            y="y_outgoing",
+            right="transfer_outgoing_bytes",
+            line_color=None,
+            left=0,
+            height=0.5,
+            fill_color="blue",
+            source=self.source,
+        )
+
+        self.root.axis[0].ticker = BasicTicker(**TICKS_1024)
+        self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+        self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
+        self.root.xaxis.minor_tick_line_alpha = 0
+        self.root.x_range = Range1d(start=0)
+        self.root.yaxis.visible = False
+        self.root.ygrid.visible = False
+        self.root.toolbar_location = None
+
+        tap = TapTool(callback=OpenURL(url="./info/worker/@escaped_worker.html"))
+        hover = HoverTool(
+            tooltips=[
+                ("Worker", "@worker"),
+                ("Incoming", "@transfer_incoming_bytes{0.00 b}"),
+                ("Outgoing", "@transfer_outgoing_bytes{0.00 b}"),
+            ],
+            point_policy="follow_mouse",
+        )
+        self.root.add_tools(hover, tap)
+
+    @without_property_validation
+    @log_errors
+    def update(self):
+        wss = self.scheduler.workers.values()
+
+        h = 0.1
+        y_incoming = [i + 0.75 + i * h for i in range(len(wss))]
+        y_outgoing = [i + 0.25 + i * h for i in range(len(wss))]
+
+        transfer_incoming_bytes = [
+            ws.metrics["transfer"]["incoming_bytes"] for ws in wss
+        ]
+        transfer_outgoing_bytes = [
+            ws.metrics["transfer"]["outgoing_bytes"] for ws in wss
+        ]
+        workers = [ws.address for ws in wss]
+        escaped_workers = [escape.url_escape(worker) for worker in workers]
+
+        if wss:
+            x_limit = max(
+                max(transfer_incoming_bytes),
+                max(transfer_outgoing_bytes),
+                max(ws.memory_limit for ws in wss),
+            )
+        else:
+            x_limit = 0
+        self.root.x_range.end = x_limit
+
+        result = {
+            "escaped_worker": escaped_workers,
+            "transfer_incoming_bytes": transfer_incoming_bytes,
+            "transfer_outgoing_bytes": transfer_outgoing_bytes,
+            "worker": workers,
+            "y_incoming": y_incoming,
+            "y_outgoing": y_outgoing,
+        }
+        self.root.title.text = (
+            f"Bytes transferring: {format_bytes(sum(transfer_incoming_bytes))}"
+        )
+        update(self.source, result)
 
 
 class Hardware(DashboardComponent):
@@ -1718,7 +1894,7 @@ class StealingEvents(DashboardComponent):
         self.last = 0
         self.source = ColumnDataSource(
             {
-                "time": [time() - 20, time()],
+                "time": [time() - 60, time()],
                 "level": [0, 15],
                 "color": ["white", "white"],
                 "duration": [0, 0],
@@ -1763,7 +1939,7 @@ class StealingEvents(DashboardComponent):
         """Convert a log message to a glyph"""
         total_duration = 0
         for msg in msgs:
-            time, level, key, duration, sat, occ_sat, idl, occ_idl = msg
+            time, level, key, duration, sat, occ_sat, idl, occ_idl = msg[:8]
             total_duration += duration
 
         try:
@@ -2097,8 +2273,8 @@ class TaskGraph(DashboardComponent):
 
         node_colors = factor_cmap(
             "state",
-            factors=["waiting", "processing", "memory", "released", "erred"],
-            palette=["gray", "green", "red", "blue", "black"],
+            factors=["waiting", "queued", "processing", "memory", "released", "erred"],
+            palette=["gray", "yellow", "green", "red", "blue", "black"],
         )
 
         self.root = figure(title="Task Graph", **kwargs)
@@ -2986,7 +3162,7 @@ class TaskProgress(DashboardComponent):
         self.scheduler = scheduler
 
         data = progress_quads(
-            dict(all={}, memory={}, erred={}, released={}, processing={})
+            dict(all={}, memory={}, erred={}, released={}, processing={}, queued={})
         )
         self.source = ColumnDataSource(data=data)
 
@@ -3058,6 +3234,18 @@ class TaskProgress(DashboardComponent):
             fill_alpha=0.35,
             line_alpha=0,
         )
+        self.root.quad(
+            source=self.source,
+            top="top",
+            bottom="bottom",
+            left="processing-loc",
+            right="queued-loc",
+            fill_color="gray",
+            hatch_pattern="/",
+            hatch_color="white",
+            fill_alpha=0.35,
+            line_alpha=0,
+        )
         self.root.text(
             source=self.source,
             text="show-name",
@@ -3094,16 +3282,20 @@ class TaskProgress(DashboardComponent):
                     <span style="font-size: 10px; font-family: Monaco, monospace;">@all</span>
                 </div>
                 <div>
+                    <span style="font-size: 14px; font-weight: bold;">Queued:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@queued</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Processing:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@processing</span>
+                </div>
+                <div>
                     <span style="font-size: 14px; font-weight: bold;">Memory:</span>&nbsp;
                     <span style="font-size: 10px; font-family: Monaco, monospace;">@memory</span>
                 </div>
                 <div>
                     <span style="font-size: 14px; font-weight: bold;">Erred:</span>&nbsp;
                     <span style="font-size: 10px; font-family: Monaco, monospace;">@erred</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Ready:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@processing</span>
                 </div>
                 """,
         )
@@ -3118,6 +3310,7 @@ class TaskProgress(DashboardComponent):
             "released": {},
             "processing": {},
             "waiting": {},
+            "queued": {},
         }
 
         for tp in self.scheduler.task_prefixes.values():
@@ -3128,6 +3321,7 @@ class TaskProgress(DashboardComponent):
                 state["released"][tp.name] = active_states["released"]
                 state["processing"][tp.name] = active_states["processing"]
                 state["waiting"][tp.name] = active_states["waiting"]
+                state["queued"][tp.name] = active_states["queued"]
 
         state["all"] = {k: sum(v[k] for v in state.values()) for k in state["memory"]}
 
@@ -3140,7 +3334,7 @@ class TaskProgress(DashboardComponent):
 
         totals = {
             k: sum(state[k].values())
-            for k in ["all", "memory", "erred", "released", "waiting"]
+            for k in ["all", "memory", "erred", "released", "waiting", "queued"]
         }
         totals["processing"] = totals["all"] - sum(
             v for k, v in totals.items() if k != "all"
@@ -3148,8 +3342,10 @@ class TaskProgress(DashboardComponent):
 
         self.root.title.text = (
             "Progress -- total: %(all)s, "
-            "in-memory: %(memory)s, processing: %(processing)s, "
             "waiting: %(waiting)s, "
+            "queued: %(queued)s, "
+            "processing: %(processing)s, "
+            "in-memory: %(memory)s, "
             "erred: %(erred)s" % totals
         )
 
@@ -4035,6 +4231,7 @@ def status_doc(scheduler, extra, doc):
 
     if len(scheduler.workers) <= 100:
         workers_memory = WorkersMemory(scheduler, sizing_mode="stretch_both")
+
         processing = CurrentLoad(scheduler, sizing_mode="stretch_both")
 
         processing_root = processing.processing_figure
@@ -4046,16 +4243,19 @@ def status_doc(scheduler, extra, doc):
 
     current_load = CurrentLoad(scheduler, sizing_mode="stretch_both")
     occupancy = Occupancy(scheduler, sizing_mode="stretch_both")
+    workers_transfer_bytes = WorkersTransferBytes(scheduler, sizing_mode="stretch_both")
 
     cpu_root = current_load.cpu_figure
     occupancy_root = occupancy.root
 
     workers_memory.update()
+    workers_transfer_bytes.update()
     processing.update()
     current_load.update()
     occupancy.update()
 
     add_periodic_callback(doc, workers_memory, 100)
+    add_periodic_callback(doc, workers_transfer_bytes, 100)
     add_periodic_callback(doc, processing, 100)
     add_periodic_callback(doc, current_load, 100)
     add_periodic_callback(doc, occupancy, 100)
@@ -4065,8 +4265,9 @@ def status_doc(scheduler, extra, doc):
     tab1 = Panel(child=processing_root, title="Processing")
     tab2 = Panel(child=cpu_root, title="CPU")
     tab3 = Panel(child=occupancy_root, title="Occupancy")
+    tab4 = Panel(child=workers_transfer_bytes.root, title="Data Transfer")
 
-    proc_tabs = Tabs(tabs=[tab1, tab2, tab3], name="processing_tabs")
+    proc_tabs = Tabs(tabs=[tab1, tab2, tab3, tab4], name="processing_tabs")
     doc.add_root(proc_tabs)
 
     task_stream = TaskStream(
