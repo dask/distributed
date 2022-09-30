@@ -361,7 +361,7 @@ async def test_queued_paused_unpaused(c, s, a, b, queue):
 
     f1s = c.map(slowinc, range(16))
     f2s = c.map(slowinc, f1s)
-    final = c.submit(sum, *f2s)
+    final = c.submit(sum, f2s)
     del f1s, f2s
 
     while not a.data or not b.data:
