@@ -1481,18 +1481,6 @@ async def test_balance_many_workers_2(c, s, *workers):
     assert {len(w.has_what) for w in s.workers.values()} == {3}
 
 
-@pytest.mark.skip(reason="Hard coded default task duration")
-@gen_cluster(client=True)
-async def test_learn_occupancy_multiple_workers(c, s, a, b):
-    x = c.submit(slowinc, 1, delay=0.2, workers=a.address)
-    await asyncio.sleep(0.05)
-    futures = c.map(slowinc, range(100), delay=0.2)
-
-    await wait(x)
-
-    assert not any(v == 0.5 for w in s.workers.values() for v in w.processing.values())
-
-
 @gen_cluster(client=True)
 async def test_include_communication_in_occupancy(c, s, a, b):
     x = c.submit(operator.mul, b"0", int(s.bandwidth) * 2, workers=a.address)
