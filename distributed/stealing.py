@@ -447,7 +447,7 @@ class WorkStealing(SchedulerPlugin):
                         occ_thief = self._combined_occupancy(thief)
                         occ_victim = self._combined_occupancy(victim)
                         comm_cost_thief = self.scheduler.get_comm_cost(ts, thief)
-                        comm_cost_victim = self.scheduler.get_comm_cost(ts, thief)
+                        comm_cost_victim = self.scheduler.get_comm_cost(ts, victim)
                         compute = self.scheduler.get_task_duration(ts)
 
                         if (

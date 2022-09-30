@@ -487,6 +487,12 @@ class WorkerState:
     task_groups_count: defaultdict[str, int]
     _network_occ: float
     _occupancy_cache: float | None
+
+    #: Keys that may need to be fetched to this worker, and the number of tasks that need them.
+    #: All tasks are currently in `memory` on a worker other than this one.
+    #: Much like `processing`, this does not exactly reflect worker state:
+    #: keys here may be queued to fetch, in flight, or already in memory
+    #: on the worker.
     needs_what: dict[TaskState, int]
 
     __slots__ = tuple(__annotations__)
@@ -689,12 +695,17 @@ class WorkerState:
                 self._dec_needs_replica(dts)
 
     def _remove_from_task_groups_count(self, ts: TaskState) -> None:
-        self.task_groups_count[ts.group.name] -= 1
-        self.scheduler.task_groups_count_global[ts.group.name] -= 1
-        if not self.task_groups_count[ts.group.name]:
+        count = self.task_groups_count[ts.group.name] - 1
+        if count:
+            self.task_groups_count[ts.group.name] = count
+        else:
             del self.task_groups_count[ts.group.name]
-        if not self.scheduler.task_groups_count_global[ts.group.name]:
-            del self.scheduler.task_groups_count_global[ts.group.name]
+
+        count = self.task_groups_count_global[ts.group.name] - 1
+        if count:
+            self.task_groups_count_global[ts.group.name] = count
+        else:
+            del self.task_groups_count_global[ts.group.name]
 
     def remove_replica(self, ts: TaskState) -> None:
         """The worker no longer has a task in memory"""
@@ -705,7 +716,7 @@ class WorkerState:
         ts.who_has.remove(self)
 
     def _inc_needs_replica(self, ts: TaskState) -> None:
-        """Assign a task to this worker and update occupancies"""
+        """Assign a task fetch to this worker and update network occupancies"""
         if ts not in self.needs_what:
             self.needs_what[ts] = 1
             nbytes = ts.get_nbytes()
@@ -1665,7 +1676,7 @@ class SchedulerState:
                     duration = self.UNKNOWN_TASK_DURATION
             res += duration * count
         occ = res + network_occ / self.bandwidth
-        assert occ >= 0
+        assert occ >= 0, occ
         return occ
 
     #####################
@@ -4991,7 +5002,7 @@ class Scheduler(SchedulerState, ServerNode):
                 assert not ws.occupancy
                 if ws.status == Status.running:
                     assert ws.address in self.idle
-            assert not (set(ws.needs_what) & set(ws.has_what))
+            assert not ws.needs_what.keys() & ws.has_what.keys()
             actual_needs_what: defaultdict[TaskState, int] = defaultdict(int)
             for ts in ws.processing:
                 for tss in ts.dependencies:

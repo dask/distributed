@@ -1035,6 +1035,7 @@ async def test_secede_cancelled_or_resumed_scheduler(c, s, a):
     ts = a.state.tasks["x"]
     assert ts.state == "executing"
     assert ws.processing
+    assert not ws.long_running
 
     x.release()
     await wait_for_state("x", "cancelled", a)
