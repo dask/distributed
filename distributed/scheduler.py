@@ -5017,7 +5017,7 @@ class Scheduler(SchedulerState, ServerNode):
         for name, global_count in self.task_groups_count_global.items():
             assert (
                 task_group_counts[name] == global_count
-            ), f"{name}: {task_group_counts[name]} (actual), {global_count} (global)"
+            ), f"{name}: {task_group_counts[name]} (wss), {global_count} (global)"
 
         for ws in self.running:
             assert ws.status == Status.running
