@@ -135,7 +135,7 @@ class WorkSpace:
         """
         base_dir = os.path.abspath(base_dir)
         try_dirs = [base_dir]
-        # Note: can't use WINDOWS constant as it upsets mypy
+        # Note: WINDOWS constant doesn't work with `mypy --platform win32`
         if sys.platform != "win32":
             # - os.getlogin() raises OSError on containerized environments
             # - os.getuid() does not exist in Windows
