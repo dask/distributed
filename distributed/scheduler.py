@@ -1891,6 +1891,7 @@ class SchedulerState:
         if family:
             siblings, downstream = family
             # If any tasks are in memory or processing, use the worker that holds the most data already.
+            # TODO what if that worker is saturated? Should we skip it?
             candidates: defaultdict[WorkerState, int] = defaultdict(lambda: 0)
             for ts in siblings:
                 for ws in ts.who_has:
