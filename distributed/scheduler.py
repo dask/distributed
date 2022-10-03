@@ -7732,21 +7732,24 @@ def _queueable_to_processing(
         # family is done execpt one input to the downstream, then yes, we might as well get started on a new family
         # while we're waiting, as long as we have the memory capacity to do so.
         for fts in sorted_siblings:
-            # FIXME these tasks may not all necessarily be runnable.
-            # Or maybe some are even in memory?
-            # When does this happen, and how should we handle them?
             assert fts is not ts
 
-            # breaks our assumption that all siblings must be runnable at the same time
-            assert fts.state != "processing", (fts, fts.processing_on, ts, ws)
-            # if fts.state == "processing":
-            #     assert fts.processing_on is ws, (fts.processing_on, ws)
+            # Rare: siblings already running, or ran, somewhere else.
+            # Since all siblings are scheduled onto the same worker at the same time, they'll also
+            # usually share the same fate if that worker dies, and all be re-scheduled at once too.
+            # The exceptions are:
+            # - Some in-memory tasks could have been replicated to other workers, but not all.
+            # - Non-commutative families (siblings set is different depending on which root you start from).
+            # - Scale up/down could cross the `widely_shared_cutoff`, leading to different assessment of a family.
+            # TODO tests for these cases
+            if fts.state == "processing":
+                logger.info(f"Skipping processing {fts}, {fts.processing_on=}, {ws=}")
+                continue
 
             if fts.state == "memory":
                 # only can happen in the case of rescheduling, and replicas already exist
-                logger.info(f"Skipping in memory {fts}")
+                logger.info(f"Skipping in memory {fts}, {ws in fts.who_has=}, {ws=}")
                 continue
-            #     # assert ws in fts.who_has, (fts.who_has, ws)
 
             if fts.state == "released":
                 # FIXME if `fts` just went `memory->released`, `waiting_on` will inaccurately be empty.
@@ -7765,9 +7768,9 @@ def _queueable_to_processing(
             assert fts.state in ("waiting", "queued"), (fts, ts)
 
             # When `fts` is not runnable yet, that means it's waiting for deps. So it
-            # should just schedule near those deps. Unless they're widely-shared, in
-            # which case it should schedule near its family. In which case it should
-            # look root-ish, so it should come back here.
+            # should just schedule near those deps using `decide_worker_non_rootish`.
+            # Unless they're widely-shared, in which case it should schedule near its
+            # family. In which case it should look root-ish, so it should come back here.
             if not fts.waiting_on:
                 update_msgs(worker_msgs, _add_to_processing(state, fts, ws))
 
