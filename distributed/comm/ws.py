@@ -441,8 +441,18 @@ class WSSConnector(WSConnector):
     comm_class = WSS
 
     def _get_connect_args(self, **connection_args):
-        ctx = connection_args.get("ssl_context")
-        return {"ssl_options": ctx, **connection_args.get("extra_conn_args", {})}
+        wss_args = {
+            "ssl_options": connection_args.get("ssl_context"),
+            **connection_args.get("extra_conn_args", {}),
+        }
+
+        if connection_args.get("server_hostname"):
+            wss_args["headers"] = {
+                **wss_args.get("headers", {}),
+                **{"Host": connection_args["server_hostname"]},
+            }
+
+        return wss_args
 
 
 class WSBackend(BaseTCPBackend):
