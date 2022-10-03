@@ -1890,24 +1890,30 @@ class SchedulerState:
 
         if family:
             siblings, downstream = family
-            # If any tasks are in memory or processing, use the worker that holds the most data already.
-            # TODO what if that worker is saturated? Should we skip it?
+            # If any tasks are in memory or processing, use the non-saturated worker that holds the most data already.
+            # Ignoring saturated workers avoids a 'dogpile' in the case of unusual graph structures.
+            # ^ TODO test this
             candidates: defaultdict[WorkerState, int] = defaultdict(lambda: 0)
+            sws: WorkerState | None
             for ts in siblings:
-                for ws in ts.who_has:
-                    if ws.status == Status.running:
-                        candidates[ws] += ts.get_nbytes()
+                for sws in ts.who_has:
+                    if sws.status == Status.running and not _worker_full(
+                        sws, self.WORKER_SATURATION
+                    ):
+                        candidates[sws] += ts.get_nbytes()
                 if (
-                    ts.processing_on  # NOTE: exclusive with `ts.who_has`
-                    and ts.processing_on.status == Status.running
+                    (sws := ts.processing_on)  # NOTE: exclusive with `ts.who_has`
+                    and sws.status == Status.running
+                    and not _worker_full(sws, self.WORKER_SATURATION)
                 ):
+                    # NOTE: siblings processing on different workers is a rare case
                     tg = ts.group
                     nbytes_estimate = (
                         round(tg.nbytes_total / nmem)
                         if (nmem := tg.states["memory"])
                         else DEFAULT_DATA_SIZE
                     )
-                    candidates[ts.processing_on] += nbytes_estimate
+                    candidates[sws] += nbytes_estimate
             if candidates:
                 ws, _ = max(candidates.items(), key=operator.itemgetter(1))
                 logger.info(
