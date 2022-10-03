@@ -496,6 +496,7 @@ class Worker(BaseWorker, ServerNode):
         memory_pause_fraction: float | Literal[False] | None = None,
         ###################################
         # Parameters to Server
+        scheduler_sni: str | None = None,
         **kwargs,
     ):
         if reconnect is not None:
@@ -640,6 +641,8 @@ class Worker(BaseWorker, ServerNode):
         self.connection_args = self.security.get_connection_args("worker")
 
         self.loop = self.io_loop = IOLoop.current()
+        if scheduler_sni:
+            self.connection_args["server_hostname"] = scheduler_sni
 
         # Common executors always available
         self.executors = {
