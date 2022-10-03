@@ -592,7 +592,7 @@ async def test_dump_cluster_unresponsive_remote_worker(c, s, a, b, tmpdir):
     clog_fut.cancel()
 
 
-# Note: can't use WINDOWS constant as it upsets mypy
+# Note: WINDOWS constant doesn't work with `mypy --platform win32`
 if sys.platform == "win32":
     TERM_SIGNALS = (signal.SIGTERM, signal.SIGINT)
 else:
