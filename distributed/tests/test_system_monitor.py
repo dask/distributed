@@ -9,22 +9,31 @@ from distributed.system_monitor import SystemMonitor
 
 def test_SystemMonitor():
     sm = SystemMonitor()
-    a = sm.update()
+
+    # __init__ calls update()
+    a = sm.recent()
+    assert any(v > 0 for v in a.values())
+
     sleep(0.01)
     b = sm.update()
-
-    assert sm.cpu
-    assert sm.memory
     assert set(a) == set(b)
-    assert all(rb >= 0 for rb in sm.read_bytes)
-    assert all(wb >= 0 for wb in sm.write_bytes)
-    assert all(len(q) == 3 for q in sm.quantities.values())
+
+    for name in (
+        "cpu",
+        "memory",
+        "time",
+        "host_net_io.read_bps",
+        "host_net_io.write_bps",
+    ):
+        assert all(v >= 0 for v in sm.quantities[name])
+
+    assert all(len(q) == 2 for q in sm.quantities.values())
 
     assert "cpu" in repr(sm)
 
 
 def test_count():
-    sm = SystemMonitor(n=5)
+    sm = SystemMonitor(maxlen=5)
     assert sm.count == 1
     sm.update()
     assert sm.count == 2
@@ -38,7 +47,7 @@ def test_count():
 
 
 def test_range_query():
-    sm = SystemMonitor(n=5)
+    sm = SystemMonitor(maxlen=5)
 
     assert all(len(v) == 1 for v in sm.range_query(0).values())
     assert all(len(v) == 0 for v in sm.range_query(123).values())
@@ -60,9 +69,28 @@ def test_range_query():
 def test_disk_config():
     sm = SystemMonitor()
     a = sm.update()
-    assert "read_bytes_disk" in sm.quantities
+    assert "host_disk_io.read_bps" in a
+
+    sm = SystemMonitor(monitor_disk_io=False)
+    a = sm.update()
+    assert "host_disk_io.read_bps" not in a
 
     with dask.config.set({"distributed.admin.system-monitor.disk": False}):
         sm = SystemMonitor()
         a = sm.update()
-        assert "read_bytes_disk" not in sm.quantities
+        assert "host_disk_io.read_bps" not in a
+
+
+def test_host_cpu():
+    sm = SystemMonitor()
+    a = sm.update()
+    assert "host_cpu.user" not in a
+
+    sm = SystemMonitor(monitor_host_cpu=True)
+    a = sm.update()
+    assert "host_cpu.user" in a
+
+    with dask.config.set({"distributed.admin.system-monitor.host-cpu": True}):
+        sm = SystemMonitor()
+        a = sm.update()
+        assert "host_cpu.user" in a

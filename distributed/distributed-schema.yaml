@@ -1117,6 +1117,9 @@ properties:
               disk:
                 type: boolean
                 description: Should we include disk metrics?  (they can cause issues in some systems)
+              host-cpu:
+                type: boolean
+                description: Should we include host-wide CPU usage, with very granular breakdown?
 
       rmm:
         type: object

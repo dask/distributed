@@ -12,7 +12,6 @@ from itertools import product
 from textwrap import dedent
 from time import sleep
 from typing import ClassVar, Collection
-from unittest import mock
 
 import cloudpickle
 import psutil
@@ -2756,7 +2755,7 @@ async def test_configurable_events_log_length(c, s, a, b):
 @gen_cluster()
 async def test_get_worker_monitor_info(s, a, b):
     res = await s.get_worker_monitor_info()
-    ms = ["cpu", "time", "read_bytes", "write_bytes"]
+    ms = ["cpu", "time", "host_net_io.read_bps", "host_net_io.write_bps"]
     if not WINDOWS:
         ms += ["num_fds"]
     for w in (a, b):
@@ -3052,24 +3051,12 @@ async def test_memory_no_workers(s):
     assert s.memory.managed == 0
 
 
-@gen_cluster(client=True, nthreads=[])
-async def test_memory_is_none(c, s):
-    """If Worker.heartbeat() runs before Worker.monitor.update(), then
-    Worker.metrics["memory"] will be None and will need special handling in
-    Worker.memory and Scheduler.heartbeat_worker().
+@gen_cluster(config={"distributed.admin.system-monitor.interval": "999s"})
+async def test_infrequent_sysmon(s, a, b):
+    """It doesn't matter how infrequently SystemMonitor.update() is called; there's
+    always one invocation before the first heartbeat.
     """
-    with mock.patch("distributed.system_monitor.SystemMonitor.update"):
-        async with Worker(s.address, nthreads=1) as w:
-            await c.wait_for_workers(1)
-            f = await c.scatter(123)
-            await w.heartbeat()
-            assert s.memory.process == 0  # Forced from None
-            assert s.memory.managed == 0  # Capped by process even if we do have keys
-            assert s.memory.managed_in_memory == 0
-            assert s.memory.managed_spilled == 0
-            assert s.memory.unmanaged == 0
-            assert s.memory.unmanaged_old == 0
-            assert s.memory.unmanaged_recent == 0
+    assert s.memory.process > 0
 
 
 @gen_cluster()

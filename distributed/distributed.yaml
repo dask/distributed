@@ -305,7 +305,8 @@ distributed:
     pdb-on-err: False       # enter debug mode on scheduling error
     system-monitor:
       interval: 500ms
-      disk: true
+      disk: true  # Monitor host-wide disk I/O
+      host-cpu: false  # Monitor host-wide CPU usage, with very grandular breakdown
     event-loop: tornado
   rmm:
     pool-size: null

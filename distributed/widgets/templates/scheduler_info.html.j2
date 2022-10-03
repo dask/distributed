@@ -121,10 +121,10 @@
                     </tr>
                     <tr>
                         <td style="text-align: left;">
-                            <strong>Read bytes: </strong> {{ worker["metrics"]["read_bytes"] | format_bytes }}
+                            <strong>Read bytes: </strong> {{ worker["metrics"]["host_net_io"]["read_bps"] | format_bytes }}
                         </td>
                         <td style="text-align: left;">
-                            <strong>Write bytes: </strong> {{ worker["metrics"]["write_bytes"] | format_bytes }}
+                            <strong>Write bytes: </strong> {{ worker["metrics"]["host_net_io"]["write_bps"] | format_bytes }}
                         </td>
                     </tr>
                     {% endif %}

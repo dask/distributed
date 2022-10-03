@@ -3914,13 +3914,11 @@ class Scheduler(SchedulerState, ServerNode):
             if size == memory_unmanaged_old:
                 memory_unmanaged_old = 0  # recalculate min()
 
-        # metrics["memory"] is None if the worker sent a heartbeat before its
-        # SystemMonitor ever had a chance to run.
         # ws._nbytes is updated at a different time and sizeof() may not be accurate,
         # so size may be (temporarily) negative; floor it to zero.
         size = max(
             0,
-            (metrics["memory"] or 0) - ws.nbytes + metrics["spilled_nbytes"]["memory"],
+            metrics["memory"] - ws.nbytes + metrics["spilled_nbytes"]["memory"],
         )
 
         ws._memory_unmanaged_history.append((local_now, size))
