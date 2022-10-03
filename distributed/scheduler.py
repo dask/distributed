@@ -8305,15 +8305,15 @@ def _next_in_linear_chain(ts: TaskState, cutoff: int) -> TaskState | None:
 
     # Check if this is part of a linear chain:
     # exactly 1 dependency, excluding widely-shared tasks.
-    next: TaskState | None = None
+    non_widely_shared = 0
     for dts in ts.dependencies:
         if len(dts.dependents) > cutoff:  # widely-shared; ignore it
             continue
-        if next:
+        if non_widely_shared:
             return None
-        next = dts
+        non_widely_shared += 1
 
-    return next
+    return next(iter(ts.dependents))
 
 
 def family(
