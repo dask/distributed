@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from collections import deque
 from typing import Any
 
@@ -157,7 +158,8 @@ class SystemMonitor:
                 result["host_cpu." + k] = round(delta / duration, 2)
             self._last_host_cpu_counters = host_cpu
 
-        if not WINDOWS:
+        # Note: WINDOWS constant doesn't work with `mypy --platform win32`
+        if sys.platform != "win32":
             result["num_fds"] = self.proc.num_fds()
 
         if self.gpu_name:
