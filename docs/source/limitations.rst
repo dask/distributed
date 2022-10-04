@@ -15,7 +15,7 @@ Performance
    decision, but non-optimal situations do occur.
 -  The workers are just Python processes, and inherit all capabilities and
    limitations of Python.  They do not bound or limit themselves in any way.
-   In production you may wish to run dask workers within containers.
+   In production you may wish to run Dask workers within containers.
 
 Assumptions on Functions and Data
 ---------------------------------
