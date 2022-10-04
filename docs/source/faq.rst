@@ -34,8 +34,8 @@ doing you can change the limits on Linux by editing
 Level FD Limits":
 http://www.cyberciti.biz/faq/linux-increase-the-maximum-number-of-open-files/
 
-Error when running dask worker about ``OMP_NUM_THREADS``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Error when running ``dask worker`` about ``OMP_NUM_THREADS``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 For more problems with OMP_NUM_THREADS, see
 http://stackoverflow.com/questions/39422092/error-with-omp-num-threads-when-using-dask-distributed

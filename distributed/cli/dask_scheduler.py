@@ -138,7 +138,7 @@ def main(
 
     if "dask-scheduler" in sys.argv[0]:
         warnings.warn(
-            "dask-scheduler is deprecated and will be removed in a future release; use `dask scheduler`",
+            "dask-scheduler is deprecated and will be removed in a future release; use `dask scheduler` instead",
             FutureWarning,
         )
 

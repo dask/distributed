@@ -148,7 +148,7 @@ def main(
 ):
     if "dask-ssh" in sys.argv[0]:
         warnings.warn(
-            "dask-ssh is deprecated and will be removed in a future release; use `dask ssh`",
+            "dask-ssh is deprecated and will be removed in a future release; use `dask ssh` instead",
             FutureWarning,
         )
 

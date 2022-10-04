@@ -264,7 +264,7 @@ def main(  # type: ignore[no-untyped-def]
 
     if "dask-worker" in sys.argv[0]:
         warnings.warn(
-            "dask-worker is deprecated and will be removed in a future release; use `dask worker`",
+            "dask-worker is deprecated and will be removed in a future release; use `dask worker` instead",
             FutureWarning,
         )
 
