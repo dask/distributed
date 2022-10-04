@@ -1360,11 +1360,8 @@ class SystemTimeseries(DashboardComponent):
             net_write_bps += ws.metrics["host_net_io"]["write_bps"]
             cpu += ws.metrics["cpu"]
             memory += ws.metrics["memory"]
-            try:
-                disk_read_bps += ws.metrics["host_disk_io"]["read_bps"]
-                disk_write_bps += ws.metrics["host_disk_io"]["write_bps"]
-            except KeyError:
-                pass
+            disk_read_bps += ws.metrics.get("host_disk_io", {}).get("read_bps", 0)
+            disk_write_bps += ws.metrics.get("host_disk_io", {}).get("write_bps", 0)
             time += ws.metrics["time"]
 
         result = {

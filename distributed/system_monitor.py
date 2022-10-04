@@ -52,7 +52,8 @@ class SystemMonitor:
         try:
             self._last_net_io_counters = psutil.net_io_counters()
         except Exception:
-            self.monitor_net_io = False  # FIXME is this possible?
+            # FIXME is this possible?
+            self.monitor_net_io = False  # pragma: nocover
         else:
             self.monitor_net_io = True
             self.quantities["host_net_io.read_bps"] = deque(maxlen=maxlen)
@@ -64,9 +65,11 @@ class SystemMonitor:
             try:
                 disk_ioc = psutil.disk_io_counters()
             except Exception:
-                monitor_disk_io = False  # FIXME is this possible?
+                # FIXME is this possible?
+                monitor_disk_io = False  # pragma: nocover
             else:
-                if disk_ioc is None:  # diskless machine
+                if disk_ioc is None:  # pragma: nocover
+                    # diskless machine
                     # FIXME https://github.com/python/typeshed/pull/8829
                     monitor_disk_io = False  # type: ignore[unreachable]
                 else:
