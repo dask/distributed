@@ -17,7 +17,7 @@ import pytest
 from tlz import merge, sliding_window
 
 import dask
-from dask.utils import key_split
+from dask.utils import key_split, parse_bytes
 
 from distributed import (
     Client,
@@ -1855,3 +1855,17 @@ def assert_task_placement(expected, s, workers):
     """Assert that tasks are placed on the workers as expected."""
     actual = _get_task_placement(s, workers)
     assert _equal_placement(actual, expected)
+
+
+# Reproducer from https://github.com/dask/distributed/issues/6573
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 4,
+)
+async def test_trivial_workload_should_not_cause_work_stealing(c, s, *workers):
+    root = dask.delayed(lambda n: "x" * n)(parse_bytes("1MiB"), dask_key_name="root")
+    results = [dask.delayed(lambda *args: None)(root, i) for i in range(1000)]
+    futs = c.compute(results)
+    await c.gather(futs)
+    events = s.events["stealing"]
+    assert len(events) == 0
