@@ -400,7 +400,7 @@ class WorkStealing(SchedulerPlugin):
         with log_errors():
             i = 0
             # Paused and closing workers must never become thieves
-            potential_thieves = set(s.idle.values())
+            potential_thieves = s.idle.copy()
             if not potential_thieves or len(potential_thieves) == len(s.workers):
                 return
             victim: WorkerState | None
