@@ -12,6 +12,7 @@ ucp = pytest.importorskip("ucp")
 
 from distributed import Client, Scheduler, wait
 from distributed.comm import connect, listen, parse_address, ucx
+from distributed.comm.core import CommClosedError
 from distributed.comm.registry import backends, get_backend
 from distributed.deploy.local import LocalCluster
 from distributed.diagnostics.nvml import has_cuda_context
@@ -367,3 +368,15 @@ async def test_ucx_unreachable(
 ):
     with pytest.raises(OSError, match="Timed out trying to connect to"):
         await Client("ucx://255.255.255.255:12345", timeout=1, asynchronous=True)
+
+
+@gen_test()
+async def test_comm_closed_on_read_error():
+    reader, writer = await get_comm_pair()
+
+    # Depending on the UCP protocol selected, it may raise either
+    # `asyncio.TimeoutError` or `CommClosedError`, so validate either one.
+    with pytest.raises((asyncio.TimeoutError, CommClosedError)):
+        await asyncio.wait_for(reader.read(), 0.01)
+
+    assert reader.closed()
