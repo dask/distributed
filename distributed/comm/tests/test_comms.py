@@ -275,8 +275,9 @@ async def test_tcp_specific(tcp):
     assert set(l) == {1234} | set(range(N))
 
 
+@pytest.mark.parametrize("sni", [None, "localhost"])
 @gen_test()
-async def test_tls_specific(tcp):
+async def test_tls_specific(tcp, sni):
     """
     Test concrete TLS API.
     """
@@ -303,7 +304,9 @@ async def test_tls_specific(tcp):
 
     async def client_communicate(key, delay=0):
         addr = "%s:%d" % (host, port)
-        comm = await connect(listener.contact_address, ssl_context=client_ctx)
+        comm = await connect(
+            listener.contact_address, ssl_context=client_ctx, server_hostname=sni
+        )
         try:
             assert comm.peer_address == "tls://" + addr
             check_tls_extra(comm.extra_info)

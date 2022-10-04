@@ -557,8 +557,9 @@ async def test_release_retry(c, s, a, b):
     },
 )
 async def test_release_failure(c, s, a, b):
-    """Don't raise even if release fails: lease will be cleaned up by the lease-validation after
-    a specified interval anyways (see config parameters used)."""
+    """Don't raise even if release fails: lease will be cleaned up by the
+    lease-validation after a specified interval anyway (see config parameters used).
+    """
 
     with dask.config.set({"distributed.comm.retry.count": 1}):
         pool = await FlakyConnectionPool(failing_connections=5)

@@ -20,6 +20,7 @@ from distributed.active_memory_manager import (
 )
 from distributed.core import Status
 from distributed.utils_test import (
+    NO_AMM,
     BlockedGatherDep,
     assert_story,
     captured_logger,
@@ -31,8 +32,6 @@ from distributed.utils_test import (
     wait_for_state,
 )
 from distributed.worker_state_machine import AcquireReplicasEvent
-
-NO_AMM_START = {"distributed.scheduler.active-memory-manager.start": False}
 
 
 @contextmanager
@@ -250,7 +249,7 @@ async def test_multi_start(c, s, a, b):
     assert len(s.tasks["z"].who_has) == 1
 
 
-@gen_cluster(client=True, config=NO_AMM_START)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_not_registered(c, s, a, b):
     futures = await c.scatter({"x": 1}, broadcast=True)
     assert len(s.tasks["x"].who_has) == 2
@@ -267,16 +266,17 @@ async def test_not_registered(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-def test_client_proxy_sync(client):
-    assert not client.amm.running()
-    client.amm.start()
-    assert client.amm.running()
-    client.amm.stop()
-    assert not client.amm.running()
-    client.amm.run_once()
+def test_client_proxy_sync(client_no_amm):
+    c = client_no_amm
+    assert not c.amm.running()
+    c.amm.start()
+    assert c.amm.running()
+    c.amm.stop()
+    assert not c.amm.running()
+    c.amm.run_once()
 
 
-@gen_cluster(client=True, config=NO_AMM_START)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_client_proxy_async(c, s, a, b):
     assert not await c.amm.running()
     await c.amm.start()
@@ -318,7 +318,7 @@ async def test_drop_with_waiter(c, s, a, b):
     assert not y2.done()
 
 
-@gen_cluster(client=True, config=NO_AMM_START)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_double_drop(c, s, a, b):
     """An AMM drop policy runs once to drop one of the two replicas of a key.
     Then it runs again, before the recommendations from the first iteration had the time
@@ -832,7 +832,7 @@ async def test_RetireWorker_with_ReduceReplicas(c, s, *workers, use_ReduceReplic
     assert {ts.key for ts in ws_b.has_what} == {"x", "y", "z", "w"}
 
 
-@gen_cluster(client=True, nthreads=[("", 1)] * 3, config=NO_AMM_START)
+@gen_cluster(client=True, nthreads=[("", 1)] * 3, config=NO_AMM)
 async def test_RetireWorker_all_replicas_are_being_retired(c, s, w1, w2, w3):
     """There are multiple replicas of a key, but they all reside on workers that are
     being retired
@@ -917,7 +917,6 @@ async def test_RetireWorker_all_recipients_are_paused(c, s, a, b):
         "distributed.scheduler.active-memory-manager.start": True,
         "distributed.scheduler.active-memory-manager.policies": [],
     },
-    timeout=15,
 )
 async def test_RetireWorker_new_keys_arrive_after_all_keys_moved_away(c, s, a, b):
     """
@@ -950,22 +949,22 @@ async def test_RetireWorker_new_keys_arrive_after_all_keys_moved_away(c, s, a, b
 
     t = asyncio.create_task(c.retire_workers([a.address]))
 
+    amm: ActiveMemoryManagerExtension = s.extensions["amm"]
+    while not amm.policies:
+        await asyncio.sleep(0)
+    policy = next(iter(amm.policies))
+    assert isinstance(policy, RetireWorker)
+
     # Wait for all `xs` to be replicated.
-    while not len(ws_b.has_what) == len(xs):
+    while len(ws_b.has_what) != len(xs):
         await asyncio.sleep(0)
 
     # `_track_retire_worker` _should_ now be sleeping for 0.5s, because there were >=200
     # keys on A. In this test, everything from the beginning of the transfers needs to
     # happen within 0.5s.
 
-    # Simulate the policy running again. Because the default 2s AMM interval is longer
-    # than the 0.5s wait, what we're about to trigger is unlikely, but still possible
-    # for the times to line up. (Especially with a custom AMM interval.)
-    amm: ActiveMemoryManagerExtension = s.extensions["amm"]
-    assert len(amm.policies) == 1
-    policy = next(iter(amm.policies))
-    assert isinstance(policy, RetireWorker)
-
+    # Simulate waiting for the policy to run again.
+    # Note that the interval at which the policy runs is inconsequential for this test.
     amm.run_once()
 
     # The policy has removed itself, because all `xs` have been replicated.
@@ -979,8 +978,9 @@ async def test_RetireWorker_new_keys_arrive_after_all_keys_moved_away(c, s, a, b
 
     if a.address not in s.workers:
         # It took more than 0.5s to get here, and the scheduler closed our worker. Dang.
-        pytest.skip(
-            "Timing didn't work out: `_track_retire_worker` finished before `extra` completed."
+        pytest.xfail(
+            "Timing didn't work out: `_track_retire_worker` finished before "
+            "`extra` completed."
         )
 
     # `retire_workers` doesn't hang
@@ -1082,7 +1082,7 @@ async def test_dont_replicate_actors(c, s, a, b):
 
 
 @pytest.mark.parametrize("has_proxy", [False, True])
-@gen_cluster(client=True, config=NO_AMM_START)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_RetireWorker_with_actor(c, s, a, b, has_proxy):
     """A worker holding one or more original actor objects cannot be retired"""
     x = c.submit(Counter, key="x", actor=True, workers=[a.address])
@@ -1108,7 +1108,7 @@ async def test_RetireWorker_with_actor(c, s, a, b, has_proxy):
         assert "y" in b.data
 
 
-@gen_cluster(client=True, config=NO_AMM_START)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_RetireWorker_with_actor_proxy(c, s, a, b):
     """A worker holding an Actor proxy object can be retired as normal."""
     x = c.submit(Counter, key="x", actor=True, workers=[a.address])
@@ -1162,7 +1162,7 @@ async def tensordot_stress(c):
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 4,
-    config=NO_AMM_START,
+    config=NO_AMM,
 )
 async def test_noamm_stress(c, s, *workers):
     """Test the tensordot_stress helper without AMM. This is to figure out if a

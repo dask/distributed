@@ -37,6 +37,7 @@ from distributed.core import (
     error_message,
 )
 from distributed.diagnostics.plugin import _get_plugin_name
+from distributed.diskutils import WorkSpace
 from distributed.metrics import time
 from distributed.node import ServerNode
 from distributed.process import AsyncProcess
@@ -179,9 +180,9 @@ class Nanny(ServerNode):
         else:
             self._original_local_dir = local_directory
 
-        self.local_directory = local_directory
-        if not os.path.exists(self.local_directory):
-            os.makedirs(self.local_directory, exist_ok=True)
+        # Create directory if it doesn't exist and test for write access.
+        # In case of PermissionError, change the name.
+        self.local_directory = WorkSpace(local_directory).base_dir
 
         self.preload = preload
         if self.preload is None:

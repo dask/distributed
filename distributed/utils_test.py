@@ -112,6 +112,11 @@ logging_levels = {
 _TEST_TIMEOUT = 30
 _offload_executor.submit(lambda: None).result()  # create thread during import
 
+# Dask configuration to completely disable the Active Memory Manager.
+# This is typically used with @gen_cluster(config=NO_AMM)
+# or @gen_cluster(config=merge(NO_AMM, {<more config options})).
+NO_AMM = {"distributed.scheduler.active-memory-manager.start": False}
+
 
 async def cleanup_global_workers():
     for worker in Worker._instances:
@@ -531,6 +536,24 @@ def client(loop, cluster_fixture):
         yield client
 
 
+@pytest.fixture
+def client_no_amm(client):
+    """Sync client with the Active Memory Manager (AMM) turned off.
+    This works regardless of the AMM being on or off in the dask config.
+    """
+    before = client.amm.running()
+    if before:
+        client.amm.stop()  # pragma: nocover
+
+    yield client
+
+    after = client.amm.running()
+    if before and not after:
+        client.amm.start()  # pragma: nocover
+    elif not before and after:  # pragma: nocover
+        client.amm.stop()
+
+
 # Compatibility. A lot of tests simply use `c` as fixture name
 c = client
 
@@ -675,7 +698,7 @@ def cluster(
                         nthreads = await s.ncores_running()
                         if len(nthreads) == nworkers:
                             break
-                        if time() - start > 5:
+                        if time() - start > 5:  # pragma: nocover
                             raise Exception("Timeout on cluster creation")
 
             _run_and_close_tornado(wait_for_workers)

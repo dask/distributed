@@ -161,9 +161,12 @@ async def test_http_and_comm_server(dashboard, protocol, security, port):
                 assert result == 11
 
 
-@pytest.mark.parametrize("protocol", ["ws://", "wss://"])
+@pytest.mark.parametrize(
+    "protocol,sni",
+    [("ws://", True), ("ws://", False), ("wss://", True), ("wss://", False)],
+)
 @gen_test()
-async def test_connection_made_with_extra_conn_args(protocol):
+async def test_connection_made_with_extra_conn_args(protocol, sni):
     if protocol == "ws://":
         security = Security(
             extra_conn_args={"headers": {"Authorization": "Token abcd"}}
@@ -178,8 +181,27 @@ async def test_connection_made_with_extra_conn_args(protocol):
         protocol=protocol, security=security, dashboard_address=":0"
     ) as s:
         connection_args = security.get_connection_args("worker")
+        if sni:
+            connection_args["server_hostname"] = "sni.example.host"
         comm = await connect(s.address, **connection_args)
         assert comm.sock.request.headers.get("Authorization") == "Token abcd"
+
+        await comm.close()
+
+
+@gen_test()
+async def test_connection_made_with_sni():
+    xfail_ssl_issue5601()
+    pytest.importorskip("cryptography")
+    security = Security.temporary()
+    async with Scheduler(
+        protocol="wss://", security=security, dashboard_address=":0"
+    ) as s:
+        connection_args = security.get_connection_args("worker")
+        connection_args["server_hostname"] = "sni.example.host"
+        comm = await connect(s.address, **connection_args)
+        assert comm.sock.request.headers.get("Host") == "sni.example.host"
+
         await comm.close()
 
 
