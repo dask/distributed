@@ -504,7 +504,9 @@ class WorkStealing(SchedulerPlugin):
         keys = {key.key if not isinstance(key, str) else key for key in keys_or_ts}
         out = []
         for _, L in self.scheduler.get_events(topic="stealing"):
-            if not isinstance(L, list):
+            if L[0] == "request":
+                L = L[1]
+            else:
                 L = [L]
             for t in L:
                 if any(x in keys for x in t):
