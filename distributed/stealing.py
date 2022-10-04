@@ -481,7 +481,7 @@ class WorkStealing(SchedulerPlugin):
                     )
 
             if log:
-                self.log(log)
+                self.log(("request", log))
                 self.count += 1
             stop = time()
             if s.digests:
