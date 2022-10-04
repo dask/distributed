@@ -5,7 +5,6 @@ import json
 import re
 import ssl
 import sys
-from time import sleep
 
 import pytest
 
@@ -18,6 +17,7 @@ import dask
 from dask.core import flatten
 from dask.utils import stringify
 
+from distributed import Event
 from distributed.client import wait
 from distributed.core import Status
 from distributed.dashboard import scheduler
@@ -53,22 +53,39 @@ from distributed.dashboard.scheduler import applications
 from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.metrics import time
 from distributed.utils import format_dashboard_link
-from distributed.utils_test import dec, div, gen_cluster, get_cert, inc, slowinc
+from distributed.utils_test import (
+    block_on_event,
+    dec,
+    div,
+    gen_cluster,
+    get_cert,
+    inc,
+    slowinc,
+)
 from distributed.worker import Worker
 
 # Imported from distributed.dashboard.utils
 scheduler.PROFILING = False  # type: ignore
 
 
+blocklist_apps = {
+    # /hardware performs a hardware benchmarks. Particularly on CI this is quite
+    # stressful and can cause timeouts.
+    "/hardware",
+}
+
+
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
 async def test_simple(c, s, a, b):
     port = s.http_server.port
-
-    future = c.submit(sleep, 1)
+    ev = Event()
+    future = c.submit(block_on_event, ev)
     await asyncio.sleep(0.1)
 
     http_client = AsyncHTTPClient()
     for suffix in applications:
+        if suffix in blocklist_apps:
+            continue
         response = await http_client.fetch(f"http://localhost:{port}{suffix}")
         body = response.body.decode()
         assert "bokeh" in body.lower()
@@ -79,6 +96,9 @@ async def test_simple(c, s, a, b):
     )
     response = json.loads(response.body.decode())
     assert response
+
+    await ev.set()
+    await future
 
 
 @gen_cluster(client=True, worker_kwargs={"dashboard": True})
@@ -1109,9 +1129,18 @@ async def test_shuffling(c, s, a, b):
         assert time() < start + 5
 
 
-@gen_cluster(client=True, nthreads=[], scheduler_kwargs={"dashboard": True})
-async def test_hardware(c, s):
+@gen_cluster(client=True, scheduler_kwargs={"dashboard": True}, timeout=60)
+async def test_hardware(c, s, *workers):
     plot = Hardware(s)
     while not plot.disk_data:
         await asyncio.sleep(0.1)
         plot.update()
+
+
+@gen_cluster(client=True, nthreads=[], scheduler_kwargs={"dashboard": True})
+async def test_hardware_endpoint(c, s):
+    port = s.http_server.port
+    http_client = AsyncHTTPClient()
+    response = await http_client.fetch(f"http://localhost:{port}/hardware")
+    body = response.body.decode()
+    assert "bokeh" in body.lower()
