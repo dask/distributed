@@ -684,26 +684,21 @@ def test_error_during_startup(monkeypatch, nanny, loop):
                 assert worker.wait(10) == 1
 
 
-def test_deprecated_single_executable(loop):
-    port = open_port()
-    scheduler_addr = f"tcp://127.0.0.1:{port}"
-    with popen(
-        [
-            "dask",
-            "scheduler",
-            "--no-dashboard",
-            f"--port={port}",
-        ],
-    ) as _:
-        with Client(f"127.0.0.1:{port}", loop=loop) as c:
-            with popen(
-                [
-                    "dask-worker",
-                    scheduler_addr,
-                    f"--worker-port={port}",
-                ],
-                capture_output=True,
-            ) as worker:
-                stdout, stderr = worker.communicate()
-                logs = stdout.decode()
-                assert "FutureWarning: dask-worker is deprecated" in logs
+@pytest.mark.slow
+@gen_cluster(nthreads=[], client=True)
+async def test_deprecated_single_executable(c, s):
+    # make sure it works still
+    with popen(["dask-worker", s.address]) as worker:
+
+        def f():
+            return 1 + 1
+
+        await c.wait_for_workers(1)
+        results = await c.run(f)
+        assert all(r == 2 for r in results.values())
+
+    # test for the deprecation warning
+    with popen(["dask-worker", s.address], capture_output=True) as worker:
+        stdout, stderr = worker.communicate()
+        logs = stdout.decode()
+        assert "FutureWarning: dask-worker is deprecated" in logs
