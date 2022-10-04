@@ -1621,6 +1621,7 @@ def _run_dependency_balance_test(
             client=True,
             nthreads=[("", 1)] * len(task_placement),
             config=merge(
+                NO_AMM,
                 config or {},
                 {
                     "distributed.scheduler.unknown-task-duration": "1s",
