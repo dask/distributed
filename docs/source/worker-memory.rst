@@ -8,7 +8,7 @@ keyword argument, which sets the memory limit per worker processes launched
 by dask worker ::
 
     $ dask worker tcp://scheduler:port --memory-limit=auto  # TOTAL_MEMORY * min(1, nthreads / total_nthreads)
-    $ dask wworker tcp://scheduler:port --memory-limit="4 GiB"  # four gigabytes per worker process.
+    $ dask worker tcp://scheduler:port --memory-limit="4 GiB"  # four gigabytes per worker process.
 
 Workers use a few different heuristics to keep memory use beneath this limit:
 
