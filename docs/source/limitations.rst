@@ -40,6 +40,6 @@ Security
 --------
 
 As a distributed computing framework, Dask enables the remote execution of
-arbitrary code.  You should only host dask workers within networks that you
+arbitrary code.  You should only host Dask workers within networks that you
 trust.  This is standard among distributed computing frameworks, but is worth
 repeating.
