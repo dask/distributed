@@ -754,12 +754,16 @@ class TaskPrefix:
     #: Task groups associated to this prefix
     groups: list[TaskGroup]
 
+    #: Accumulate count of number of tasks in each state
+    state_counts: defaultdict[str, int]
+
     __slots__ = tuple(__annotations__)
 
     def __init__(self, name: str):
         self.name = name
         self.groups = []
         self.all_durations = defaultdict(float)
+        self.state_counts = defaultdict(int)
         task_durations = dask.config.get("distributed.scheduler.default-task-durations")
         if self.name in task_durations:
             self.duration_average = parse_timedelta(task_durations[self.name])
@@ -1189,6 +1193,7 @@ class TaskState:
         self.group.states[self._state] -= 1
         self.group.states[value] += 1
         self._state = value
+        self.prefix.state_counts[value] += 1
 
     def add_dependency(self, other: TaskState) -> None:
         """Add another task as a dependency of this task"""

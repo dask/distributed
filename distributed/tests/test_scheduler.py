@@ -4014,3 +4014,18 @@ async def test_KilledWorker_informative_message(s, a, b):
     assert str(s.allowed_failures) in msg
     assert "worker logs" in msg
     assert "https://distributed.dask.org/en/stable/killed.html" in msg
+
+
+@gen_cluster(client=True)
+async def test_count_task_prefix(c, s, a, b):
+    futures = c.map(inc, range(10))
+    await c.gather(futures)
+
+    assert s.task_prefixes["inc"].state_counts["memory"] == 10
+    assert s.task_prefixes["inc"].state_counts["erred"] == 0
+
+    futures = c.map(inc, range(10, 20))
+    await c.gather(futures)
+
+    assert s.task_prefixes["inc"].state_counts["memory"] == 20
+    assert s.task_prefixes["inc"].state_counts["erred"] == 0
