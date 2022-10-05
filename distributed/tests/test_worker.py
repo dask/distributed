@@ -1698,7 +1698,8 @@ async def test_pip_install_fails(c, s, a, b):
         with mock.patch(
             "distributed.diagnostics.plugin.subprocess.Popen", return_value=mocked
         ) as Popen:
-            await c.register_worker_plugin(PipInstall(packages=["not-a-package"]))
+            with pytest.raises(RuntimeError):
+                await c.register_worker_plugin(PipInstall(packages=["not-a-package"]))
 
             assert Popen.call_count == 1
             logs = logger.getvalue()
