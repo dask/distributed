@@ -5583,9 +5583,28 @@ async def test_nested_compute(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_task_metadata(c, s, a, b):
+    with pytest.raises(KeyError):
+        await c.get_metadata("x")
+    with pytest.raises(KeyError):
+        await c.get_metadata(["x"])
+    result = await c.get_metadata("x", None)
+    assert result is None
+    result = await c.get_metadata(["x"], None)
+    assert result is None
+
+    with pytest.raises(KeyError):
+        await c.get_metadata(["x", "y"])
+    result = await c.get_metadata(["x", "y"], None)
+    assert result is None
+
     await c.set_metadata("x", 1)
     result = await c.get_metadata("x")
     assert result == 1
+
+    with pytest.raises(TypeError):
+        await c.get_metadata(["x", "y"])
+    with pytest.raises(TypeError):
+        await c.get_metadata(["x", "y"], None)
 
     future = c.submit(inc, 1)
     key = future.key

@@ -6939,10 +6939,10 @@ class Scheduler(SchedulerState, ServerNode):
 
     def get_metadata(self, keys: list[str], default=no_default):
         metadata = self.task_metadata
-        for key in keys[:-1]:
-            metadata = metadata[key]
         try:
-            return metadata[keys[-1]]
+            for key in keys:
+                metadata = metadata[key]
+            return metadata
         except KeyError:
             if default != no_default:
                 return default
