@@ -971,9 +971,7 @@ def gen_cluster(
             @contextlib.asynccontextmanager
             async def _cluster_factory():
                 workers = []
-                s = False
                 try:
-
                     for _ in range(60):
                         try:
                             s, ws = await start_cluster(
@@ -994,11 +992,13 @@ def gen_cluster(
                         else:
                             workers[:] = ws
                             break
-                    if s is False:
+                    else:
                         raise Exception("Could not start cluster")
-                    yield s, workers
+                    try:
+                        yield s, workers
+                    finally:
+                        await end_cluster(s, workers)
                 finally:
-                    await end_cluster(s, workers)
                     await asyncio.wait_for(cleanup_global_workers(), 1)
 
             async def async_fn():
