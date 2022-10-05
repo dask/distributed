@@ -298,7 +298,7 @@ class PipInstall(WorkerPlugin):
                 )
                 stdout, stderr = proc.communicate()
                 returncode = proc.wait()
-                if returncode:
+                if returncode != 0:
                     logger.error(
                         "Pip install failed with '%s'", stderr.decode().strip()
                     )
@@ -312,9 +312,7 @@ class PipInstall(WorkerPlugin):
             if self.restart and worker.nanny and not await self._is_restarted(worker):
                 logger.info("Restarting worker to refresh environment")
                 await self._set_restarted(worker)
-                worker.loop.add_callback(
-                    worker.close_gracefully, restart=True
-                )  # restart
+                worker.loop.add_callback(worker.close_gracefully, restart=True)
 
     async def _is_installed(self, worker):
         return await worker.client.get_metadata(
