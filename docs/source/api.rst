@@ -66,6 +66,8 @@ The client connects to and submits computation to a Dask cluster (such as a :cla
    get_task_stream
    get_task_metadata
    performance_report
+   print
+   warn
 
 
 **Utilities**
@@ -188,6 +190,8 @@ Other
 .. autoclass:: get_task_stream
 .. autoclass:: get_task_metadata
 .. autoclass:: performance_report
+.. autofunction:: distributed.print
+.. autofunction:: distributed.warn
 
 
 Utilities
