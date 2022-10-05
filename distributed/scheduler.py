@@ -8336,7 +8336,7 @@ def family(
     # TODO potentially could be useful to distinguish between 'too big'
     # and empty family---we might want to schedule them differently.
     # That is, maybe `None` and `(set(), set())` might not be synonymous.
-    if not ts.dependents or len(ts.dependents) > widely_shared_cutoff:
+    if not ts.dependents or len(ts.dependents) > min(widely_shared_cutoff, maxsize):
         return None
 
     siblings: set[TaskState] = set()
