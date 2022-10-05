@@ -25,10 +25,10 @@ import warnings
 import weakref
 from collections import defaultdict
 from collections.abc import Callable, Mapping
-from contextlib import contextmanager, nullcontext, suppress
+from contextlib import AsyncExitStack, contextmanager, nullcontext, suppress
 from itertools import count
 from time import sleep
-from typing import IO, Any, Generator, Iterator, Literal
+from typing import IO, Any, AsyncGenerator, Generator, Iterator, Literal
 
 import pytest
 import yaml
@@ -47,14 +47,7 @@ from distributed.comm import Comm
 from distributed.comm.tcp import TCP
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.config import initialize_logging
-from distributed.core import (
-    CommClosedError,
-    ConnectionPool,
-    Status,
-    clean_exception,
-    connect,
-    rpc,
-)
+from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.deploy import SpecCluster
 from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.metrics import time
@@ -763,59 +756,63 @@ def gen_test(
     return _
 
 
-async def start_cluster(
+@contextlib.asynccontextmanager
+async def _start_cluster(
     nthreads: list[tuple[str, int] | tuple[str, int, dict]],
     scheduler_addr: str,
     security: Security | dict[str, Any] | None = None,
-    Worker: type[ServerNode] = Worker,
+    WorkerClass: type[ServerNode] = Worker,
     scheduler_kwargs: dict[str, Any] | None = None,
     worker_kwargs: dict[str, Any] | None = None,
-) -> tuple[Scheduler, list[ServerNode]]:
+) -> AsyncGenerator[tuple[Scheduler, list[ServerNode]], None]:
     scheduler_kwargs = scheduler_kwargs or {}
     worker_kwargs = worker_kwargs or {}
-
-    s = await Scheduler(
-        validate=True,
-        security=security,
-        port=0,
-        host=scheduler_addr,
-        **scheduler_kwargs,
-    )
-
-    workers = [
-        Worker(
-            s.address,
-            nthreads=ncore[1],
-            name=i,
-            security=security,
-            validate=True,
-            host=ncore[0],
-            **(
-                merge(worker_kwargs, ncore[2])  # type: ignore
-                if len(ncore) > 2
-                else worker_kwargs
-            ),
+    async with AsyncExitStack() as stack:
+        s = await stack.enter_async_context(
+            Scheduler(
+                validate=True,
+                security=security,
+                port=0,
+                host=scheduler_addr,
+                **scheduler_kwargs,
+            )
         )
-        for i, ncore in enumerate(nthreads)
-    ]
 
-    await asyncio.gather(*workers)
+        workers_stack = [
+            stack.enter_async_context(
+                WorkerClass(
+                    s.address,
+                    nthreads=ncore[1],
+                    name=i,
+                    security=security,
+                    validate=True,
+                    host=ncore[0],
+                    **(
+                        merge(worker_kwargs, ncore[2])  # type: ignore
+                        if len(ncore) > 2
+                        else worker_kwargs
+                    ),
+                )
+            )
+            for i, ncore in enumerate(nthreads)
+        ]
+        try:
+            workers = await asyncio.gather(*workers_stack)
 
-    start = time()
-    while (
-        len(s.workers) < len(nthreads)
-        or any(ws.status != Status.running for ws in s.workers.values())
-        or any(comm.comm is None for comm in s.stream_comms.values())
-    ):
-        await asyncio.sleep(0.01)
-        if time() > start + 30:
-            await asyncio.gather(*(w.close(timeout=1) for w in workers))
-            await s.close()
+            start = time()
+            while (
+                len(s.workers) < len(nthreads)
+                or any(ws.status != Status.running for ws in s.workers.values())
+                or any(comm.comm is None for comm in s.stream_comms.values())
+            ):
+                await asyncio.sleep(0.01)
+                if time() > start + 30:
+                    raise TimeoutError("Cluster creation timeout")
+            yield s, workers
+        finally:
             check_invalid_worker_transitions(s)
             check_invalid_task_states(s)
             check_worker_fail_hard(s)
-            raise TimeoutError("Cluster creation timeout")
-    return s, workers
 
 
 def check_invalid_worker_transitions(s: Scheduler) -> None:
@@ -858,21 +855,6 @@ def check_worker_fail_hard(s: Scheduler) -> None:
         _, exc, tb = clean_exception(**msg)
         assert exc
         raise exc.with_traceback(tb)
-
-
-async def end_cluster(s, workers):
-    logger.debug("Closing out test cluster")
-
-    async def end_worker(w):
-        with suppress(asyncio.TimeoutError, CommClosedError, EnvironmentError):
-            await w.close()
-
-    await asyncio.gather(*(end_worker(w) for w in workers))
-    await s.close()  # wait until scheduler stops completely
-    s.stop()
-    check_invalid_worker_transitions(s)
-    check_invalid_task_states(s)
-    check_worker_fail_hard(s)
 
 
 def gen_cluster(
@@ -970,18 +952,18 @@ def gen_cluster(
 
             @contextlib.asynccontextmanager
             async def _cluster_factory():
-                workers = []
                 try:
                     for _ in range(60):
                         try:
-                            s, ws = await start_cluster(
+                            yield _start_cluster(
                                 nthreads,
                                 scheduler,
                                 security=security,
-                                Worker=Worker,
+                                WorkerClass=Worker,
                                 scheduler_kwargs=scheduler_kwargs,
                                 worker_kwargs=worker_kwargs,
                             )
+                            break
                         except Exception as e:
                             logger.error(
                                 "Failed to start gen_cluster: "
@@ -989,15 +971,6 @@ def gen_cluster(
                                 exc_info=True,
                             )
                             await asyncio.sleep(1)
-                        else:
-                            workers[:] = ws
-                            break
-                    else:
-                        raise Exception("Could not start cluster")
-                    try:
-                        yield s, workers
-                    finally:
-                        await end_cluster(s, workers)
                 finally:
                     await asyncio.wait_for(cleanup_global_workers(), 1)
 
