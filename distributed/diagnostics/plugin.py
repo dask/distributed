@@ -299,10 +299,9 @@ class PipInstall(WorkerPlugin):
                 stdout, stderr = proc.communicate()
                 returncode = proc.wait()
                 if returncode != 0:
-                    logger.error(
-                        "Pip install failed with '%s'", stderr.decode().strip()
-                    )
-                    return
+                    msg = f"Pip install failed with '{stderr.decode().strip()}'"
+                    logger.error(msg)
+                    raise RuntimeError(msg)
             else:
                 logger.info(
                     "The following packages have already been installed: %s",
