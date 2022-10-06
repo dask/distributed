@@ -413,9 +413,10 @@ async def test_queued_remove_add_worker(c, s, a, b):
 @pytest.mark.parametrize(
     "saturation_config, expected_task_counts",
     [
-        (2.5, (5, 2)),
-        ("2.5", (5, 2)),
+        (2.5, (5, 3)),
+        ("2.5", (5, 3)),
         (2.0, (4, 2)),
+        (1.1, (3, 2)),
         (1.0, (2, 1)),
         (-1.0, (1, 1)),
         (float("inf"), (6, 4))

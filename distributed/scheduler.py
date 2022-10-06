@@ -8199,7 +8199,7 @@ def _task_slots_available(ws: WorkerState, saturation_factor: float) -> int:
     "Number of tasks that can be sent to this worker without oversaturating it"
     assert not math.isinf(saturation_factor)
     nthreads = ws.nthreads
-    return max(int(saturation_factor * nthreads), 1) - (
+    return max(math.ceil(saturation_factor * nthreads), 1) - (
         len(ws.processing) - len(ws.long_running)
     )
 
