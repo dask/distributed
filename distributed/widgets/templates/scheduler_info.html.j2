@@ -116,7 +116,7 @@
                             <strong>Memory usage: </strong> {{ worker["metrics"]["memory"] | format_bytes}}
                         </td>
                         <td style="text-align: left;">
-                            <strong>Spilled bytes: </strong> {{ worker["metrics"]["spilled_nbytes"]["disk"] | format_bytes }}
+                            <strong>Spilled bytes: </strong> {{ worker["metrics"]["spilled_bytes"]["disk"] | format_bytes }}
                         </td>
                     </tr>
                     <tr>

@@ -19,7 +19,8 @@ class WorkerMetricCollector(PrometheusCollector):
         except ImportError:
             self.crick_available = False
             self.logger.info(
-                "Not all prometheus metrics available are exported. Digest-based metrics require crick to be installed"
+                "Not all prometheus metrics available are exported. "
+                "Digest-based metrics require crick to be installed"
             )
 
     def collect(self):
@@ -57,18 +58,33 @@ class WorkerMetricCollector(PrometheusCollector):
             value=self.server.latency,
         )
 
+        try:
+            spilled_memory, spilled_disk = self.server.data.spilled_total
+        except AttributeError:
+            spilled_memory, spilled_disk = 0, 0  # spilling is disabled
+        managed_memory = self.server.state.nbytes - spilled_memory
+        process_memory = self.server.monitor.get_process_memory()
+
+        memory = GaugeMetricFamily(
+            self.build_name("memory"),
+            "Memory breakdown",
+            labels=["type"],
+        )
+        memory.add_metric(["managed"], managed_memory)
+        memory.add_metric(["unmanaged"], max(0, process_memory - managed_memory))
+        memory.add_metric(["spilled"], spilled_disk)
+        yield memory
+
         yield GaugeMetricFamily(
             self.build_name("transfer_incoming_bytes"),
             "Total size of open data transfers from other workers.",
             value=self.server.state.transfer_incoming_bytes,
         )
-
         yield GaugeMetricFamily(
             self.build_name("transfer_incoming_count"),
             "Number of open data transfers from other workers.",
-            value=self.server.state.transfer_incoming_bytes,
+            value=self.server.state.transfer_incoming_count,
         )
-
         yield GaugeMetricFamily(
             self.build_name("transfer_incoming_count_total"),
             (
@@ -83,13 +99,11 @@ class WorkerMetricCollector(PrometheusCollector):
             "Total size of open data transfers to other workers.",
             value=self.server.transfer_outgoing_bytes,
         )
-
         yield GaugeMetricFamily(
             self.build_name("transfer_outgoing_count"),
             "Number of open data transfers to other workers.",
             value=self.server.transfer_outgoing_count,
         )
-
         yield GaugeMetricFamily(
             self.build_name("transfer_outgoing_count_total"),
             (

@@ -3510,7 +3510,11 @@ class WorkerTable(DashboardComponent):
         "in_memory",
         "ready",
         "time",
-        "spilled_nbytes",
+        # Use scheduler.WorkerState.memory.managed instead of
+        # scheduler.WorkerState.metrics["managed_bytes"]; the two measures are slightly
+        # different. See explanation in scheduler.WorkerState.memory().
+        "managed_bytes",
+        "spilled_bytes",
     }
 
     def __init__(self, scheduler, width=800, **kwargs):

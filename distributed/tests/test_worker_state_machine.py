@@ -43,6 +43,7 @@ from distributed.worker_state_machine import (
     RecommendationsConflict,
     RefreshWhoHasEvent,
     ReleaseWorkerDataMsg,
+    RemoveReplicasEvent,
     RescheduleEvent,
     RescheduleMsg,
     SecedeEvent,
@@ -1573,3 +1574,49 @@ def test_throttle_on_transfer_bytes_regardless_of_threshold(ws):
     )
     assert ws.tasks["c"].state == "fetch"
     assert ws.transfer_incoming_bytes == 1
+
+
+def test_worker_nbytes(ws_with_running_task):
+    ws = ws_with_running_task
+    ws2 = "127.0.0.1:2"
+    assert ws.nbytes == 0
+
+    # executing->memory
+    ws.handle_stimulus(ExecuteSuccessEvent.dummy("x", nbytes=12, stimulus_id="s1"))
+    assert ws.nbytes == 12
+
+    # flight->memory
+    ws.handle_stimulus(
+        AcquireReplicasEvent(who_has={"y": [ws2]}, nbytes={"y": 13}, stimulus_id="s2")
+    )
+    assert ws.nbytes == 12
+    ws.handle_stimulus(
+        GatherDepSuccessEvent(
+            worker=ws2,
+            data={"y": "foo"},
+            total_nbytes=13,
+            stimulus_id="s3",
+        )
+    )
+    assert ws.nbytes == 12 + 13
+
+    # released -> memory (scatter)
+    ws.handle_stimulus(
+        UpdateDataEvent(data={"z": "bar"}, report=False, stimulus_id="s3")
+    )
+    assert ws.nbytes == 12 + 13 + sizeof("bar")
+
+    # actors
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy("w", actor=True, stimulus_id="s4"),
+        ExecuteSuccessEvent.dummy("w", nbytes=14, stimulus_id="s5"),
+    )
+    assert ws.nbytes == 12 + 13 + sizeof("bar") + 14
+
+    # memory -> released by FreeKeysEvent
+    ws.handle_stimulus(FreeKeysEvent(keys=["z"], stimulus_id="s6"))
+    assert ws.nbytes == 12 + 13 + 14
+
+    # memory -> released by RemoveReplicasEvent
+    ws.handle_stimulus(RemoveReplicasEvent(keys=["x", "y", "w"], stimulus_id="s7"))
+    assert ws.nbytes == 0
