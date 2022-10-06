@@ -294,7 +294,6 @@ async def test_graph_execution_width(c, s, *workers):
     assert max(Refcount.log) <= s.total_nthreads
 
 
-@pytest.mark.parametrize("queue", [True, False])
 @gen_cluster(
     client=True,
     nthreads=[("", 2)] * 2,
@@ -303,14 +302,10 @@ async def test_graph_execution_width(c, s, *workers):
         "distributed.worker.memory.target": False,
         "distributed.worker.memory.spill": False,
         "distributed.scheduler.work-stealing": False,
+        "distributed.scheduler.worker-saturation": 1.0,
     },
 )
-async def test_queued_paused_new_worker(c, s, a, b, queue):
-    if queue:
-        s.WORKER_SATURATION = 1.0
-    else:
-        s.WORKER_SATURATION = float("inf")
-
+async def test_queued_paused_new_worker(c, s, a, b):
     f1s = c.map(slowinc, range(16))
     f2s = c.map(slowinc, f1s)
     final = c.submit(sum, *f2s)
@@ -383,7 +378,9 @@ async def test_queued_paused_unpaused(c, s, a, b, queue):
     while not s.running:
         await asyncio.sleep(0.01)
 
-    assert not s.idle  # workers should have been (or already were) filled
+    if queue:
+        assert not s.idle  # workers should have been (or already were) filled
+    # If queuing is disabled, all workers might already be saturated when they un-pause.
 
     await wait(final)
 
