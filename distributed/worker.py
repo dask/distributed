@@ -3198,8 +3198,10 @@ def add_gpu_metrics():
 
 def print(*args, **kwargs):
     """Dask print function
-    This prints both wherever this function is run, and also in the user's
-    client session
+
+    This is a wrapper around Python's built-in :external+python:py:func:`print` function
+    that prints both wherever this function is run, and also in the user's
+    client session.
     """
     try:
         worker = get_worker()
@@ -3217,8 +3219,10 @@ def print(*args, **kwargs):
 
 def warn(*args, **kwargs):
     """Dask warn function
-    This raises a warning both wherever this function is run, and also
-    in the user's client session
+
+    This is a wrapper around Python's built-in :py:func:`warnings.warn` function
+    that emits a warning both wherever this function is run, and also
+    in the user's client session.
     """
     try:
         worker = get_worker()
