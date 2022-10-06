@@ -15,6 +15,7 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from numbers import Number
 from operator import add
+from textwrap import dedent
 from time import sleep
 from unittest import mock
 
@@ -1653,6 +1654,28 @@ async def test_pip_install(c, s, a):
             assert "Pip installing" in logs
             assert "failed" not in logs
             assert "restart" not in logs
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_pip_install_restarts_on_nanny(c, s):
+    preload = dedent(
+        """\
+        from unittest import mock
+
+        mock.patch(
+            "distributed.diagnostics.plugin.PipInstall._install", return_value=None
+        ).start()
+        """
+    )
+    async with Nanny(s.address, preload=preload):
+        (addr,) = s.workers
+        await c.register_worker_plugin(
+            PipInstall(packages=["requests"], pip_options=["--upgrade"], restart=True)
+        )
+
+        # Wait until the worker is restarted
+        while len(s.workers) != 1 or set(s.workers) == {addr}:
+            await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True, nthreads=[("", 1), ("", 1)])

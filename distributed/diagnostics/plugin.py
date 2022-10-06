@@ -289,19 +289,7 @@ class PipInstall(WorkerPlugin):
             if not await self._is_installed(worker):
                 logger.info("Pip installing the following packages: %s", self.packages)
                 await self._set_installed(worker)
-                proc = subprocess.Popen(
-                    [sys.executable, "-m", "pip", "install"]
-                    + self.pip_options
-                    + self.packages,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                )
-                stdout, stderr = proc.communicate()
-                returncode = proc.wait()
-                if returncode != 0:
-                    msg = f"Pip install failed with '{stderr.decode().strip()}'"
-                    logger.error(msg)
-                    raise RuntimeError(msg)
+                self._install()
             else:
                 logger.info(
                     "The following packages have already been installed: %s",
@@ -312,6 +300,19 @@ class PipInstall(WorkerPlugin):
                 logger.info("Restarting worker to refresh environment")
                 await self._set_restarted(worker)
                 worker.loop.add_callback(worker.close_gracefully, restart=True)
+
+    def _install(self):
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "pip", "install"] + self.pip_options + self.packages,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        _, stderr = proc.communicate()
+        returncode = proc.wait()
+        if returncode != 0:
+            msg = f"Pip install failed with '{stderr.decode().strip()}'"
+            logger.error(msg)
+            raise RuntimeError(msg)
 
     async def _is_installed(self, worker):
         return await worker.client.get_metadata(
