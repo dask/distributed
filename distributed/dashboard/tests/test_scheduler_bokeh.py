@@ -589,14 +589,20 @@ async def test_WorkerNetworkBandwidth_metrics(c, s, a, b):
             nb.update()
 
             for idx, ws in enumerate(s.workers.values()):
-                assert ws.metrics["read_bytes"] == nb.source.data["x_read"][idx]
-                assert ws.metrics["write_bytes"] == nb.source.data["x_write"][idx]
                 assert (
-                    ws.metrics.get("read_bytes_disk", 0)
+                    ws.metrics["host_net_io"]["read_bps"]
+                    == nb.source.data["x_read"][idx]
+                )
+                assert (
+                    ws.metrics["host_net_io"]["write_bps"]
+                    == nb.source.data["x_write"][idx]
+                )
+                assert (
+                    ws.metrics.get("host_disk_io", {}).get("read_bps", 0)
                     == nb.source.data["x_read_disk"][idx]
                 )
                 assert (
-                    ws.metrics.get("write_bytes_disk", 0)
+                    ws.metrics.get("host_disk_io", {}).get("write_bps", 0)
                     == nb.source.data["x_write_disk"][idx]
                 )
 
@@ -617,11 +623,11 @@ async def test_SystemTimeseries(c, s, a, b):
     workers = s.workers.values()
 
     assert all(len(v) == 1 for v in systs.source.data.values())
-    assert systs.source.data["read_bytes"][0] == sum(
-        ws.metrics["read_bytes"] for ws in workers
+    assert systs.source.data["host_net_io.read_bps"][0] == sum(
+        ws.metrics["host_net_io"]["read_bps"] for ws in workers
     ) / len(workers)
-    assert systs.source.data["write_bytes"][0] == sum(
-        ws.metrics["write_bytes"] for ws in workers
+    assert systs.source.data["host_net_io.write_bps"][0] == sum(
+        ws.metrics["host_net_io"]["write_bps"] for ws in workers
     ) / len(workers)
     assert systs.source.data["cpu"][0] == sum(
         ws.metrics["cpu"] for ws in workers
@@ -629,11 +635,11 @@ async def test_SystemTimeseries(c, s, a, b):
     assert systs.source.data["memory"][0] == sum(
         ws.metrics["memory"] for ws in workers
     ) / len(workers)
-    assert systs.source.data["read_bytes_disk"][0] == sum(
-        ws.metrics["read_bytes_disk"] for ws in workers
+    assert systs.source.data["host_disk_io.read_bps"][0] == sum(
+        ws.metrics["host_disk_io"]["read_bps"] for ws in workers
     ) / len(workers)
-    assert systs.source.data["write_bytes_disk"][0] == sum(
-        ws.metrics["write_bytes_disk"] for ws in workers
+    assert systs.source.data["host_disk_io.write_bps"][0] == sum(
+        ws.metrics["host_disk_io"]["write_bps"] for ws in workers
     ) / len(workers)
     assert (
         systs.source.data["time"][0]
@@ -647,11 +653,11 @@ async def test_SystemTimeseries(c, s, a, b):
     systs.update()
 
     assert all(len(v) == 2 for v in systs.source.data.values())
-    assert systs.source.data["read_bytes"][1] == sum(
-        ws.metrics["read_bytes"] for ws in workers
+    assert systs.source.data["host_net_io.read_bps"][1] == sum(
+        ws.metrics["host_net_io"]["read_bps"] for ws in workers
     ) / len(workers)
-    assert systs.source.data["write_bytes"][1] == sum(
-        ws.metrics["write_bytes"] for ws in workers
+    assert systs.source.data["host_net_io.write_bps"][1] == sum(
+        ws.metrics["host_net_io"]["write_bps"] for ws in workers
     ) / len(workers)
     assert systs.source.data["cpu"][1] == sum(
         ws.metrics["cpu"] for ws in workers
@@ -659,11 +665,11 @@ async def test_SystemTimeseries(c, s, a, b):
     assert systs.source.data["memory"][1] == sum(
         ws.metrics["memory"] for ws in workers
     ) / len(workers)
-    assert systs.source.data["read_bytes_disk"][1] == sum(
-        ws.metrics["read_bytes_disk"] for ws in workers
+    assert systs.source.data["host_disk_io.read_bps"][1] == sum(
+        ws.metrics["host_disk_io"]["read_bps"] for ws in workers
     ) / len(workers)
-    assert systs.source.data["write_bytes_disk"][1] == sum(
-        ws.metrics["write_bytes_disk"] for ws in workers
+    assert systs.source.data["host_disk_io.write_bps"][1] == sum(
+        ws.metrics["host_disk_io"]["write_bps"] for ws in workers
     ) / len(workers)
     assert (
         systs.source.data["time"][1]

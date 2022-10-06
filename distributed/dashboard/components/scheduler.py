@@ -1050,7 +1050,8 @@ class BandwidthWorkers(DashboardComponent):
 class WorkerNetworkBandwidth(DashboardComponent):
     """Worker network bandwidth chart
 
-    Plots horizontal bars with the read_bytes and write_bytes worker state
+    Plots horizontal bars with the host_net_io.read_bps and host_net_io.write_bps worker
+    state
     """
 
     @log_errors
@@ -1075,7 +1076,7 @@ class WorkerNetworkBandwidth(DashboardComponent):
             **kwargs,
         )
 
-        # read_bytes
+        # host_net_io.read_bps
         self.bandwidth.hbar(
             y="y_read",
             right="x_read",
@@ -1087,7 +1088,7 @@ class WorkerNetworkBandwidth(DashboardComponent):
             source=self.source,
         )
 
-        # write_bytes
+        # host_net_io.write_bps
         self.bandwidth.hbar(
             y="y_write",
             right="x_write",
@@ -1116,7 +1117,7 @@ class WorkerNetworkBandwidth(DashboardComponent):
             **kwargs,
         )
 
-        # read_bytes_disk
+        # host_disk_io.read_bps
         self.disk.hbar(
             y="y_read",
             right="x_read_disk",
@@ -1128,7 +1129,7 @@ class WorkerNetworkBandwidth(DashboardComponent):
             source=self.source,
         )
 
-        # write_bytes_disk
+        # host_disk_io.write_bps
         self.disk.hbar(
             y="y_write",
             right="x_write_disk",
@@ -1164,10 +1165,10 @@ class WorkerNetworkBandwidth(DashboardComponent):
         x_write_disk = []
 
         for ws in workers:
-            x_read.append(ws.metrics["read_bytes"])
-            x_write.append(ws.metrics["write_bytes"])
-            x_read_disk.append(ws.metrics.get("read_bytes_disk", 0))
-            x_write_disk.append(ws.metrics.get("write_bytes_disk", 0))
+            x_read.append(ws.metrics["host_net_io"]["read_bps"])
+            x_write.append(ws.metrics["host_net_io"]["write_bps"])
+            x_read_disk.append(ws.metrics.get("host_disk_io", {}).get("read_bps", 0))
+            x_write_disk.append(ws.metrics.get("host_disk_io", {}).get("write_bps", 0))
 
         if self.scheduler.workers:
             self.bandwidth.x_range.end = max(
@@ -1202,15 +1203,19 @@ class WorkerNetworkBandwidth(DashboardComponent):
 class SystemTimeseries(DashboardComponent):
     """Timeseries for worker network bandwidth, cpu, memory and disk.
 
-    bandwidth: plots the average of read_bytes and write_bytes for the workers
-    as a function of time.
-    cpu: plots the average of cpu for the workers as a function of time.
-    memory: plots the average of memory for the workers as a function of time.
-    disk: plots the average of read_bytes_disk and write_bytes_disk for the workers
-    as a function of time.
+    bandwidth
+        Plots the average of host_net_io.read_bps and host_net_io.write_bps for the
+        workers as a function of time
+    cpu
+        Plots the average of cpu for the workers as a function of time
+    memory
+        Plots the average of memory for the workers as a function of time
+    disk
+        Plots the average of host_disk_io.read_bps and host_disk_io.write_bps for the
+        workers as a function of time
 
-    The metrics plotted come from the aggregation of
-    from ws.metrics["val"] for ws in scheduler.workers.values() divided by nuber of workers.
+    The metrics plotted come from the aggregation of from ws.metrics[key] for ws in
+    scheduler.workers.values() divided by nuber of workers.
     """
 
     @log_errors
@@ -1219,12 +1224,12 @@ class SystemTimeseries(DashboardComponent):
         self.source = ColumnDataSource(
             {
                 "time": [],
-                "read_bytes": [],
-                "write_bytes": [],
+                "host_net_io.read_bps": [],
+                "host_net_io.write_bps": [],
                 "cpu": [],
                 "memory": [],
-                "read_bytes_disk": [],
-                "write_bytes_disk": [],
+                "host_disk_io.read_bps": [],
+                "host_disk_io.write_bps": [],
             }
         )
 
@@ -1248,14 +1253,14 @@ class SystemTimeseries(DashboardComponent):
         self.bandwidth.line(
             source=self.source,
             x="time",
-            y="read_bytes",
+            y="host_net_io.read_bps",
             color="red",
             legend_label="read (mean)",
         )
         self.bandwidth.line(
             source=self.source,
             x="time",
-            y="write_bytes",
+            y="host_net_io.write_bps",
             color="blue",
             legend_label="write (mean)",
         )
@@ -1321,14 +1326,14 @@ class SystemTimeseries(DashboardComponent):
         self.disk.line(
             source=self.source,
             x="time",
-            y="read_bytes_disk",
+            y="host_disk_io.read_bps",
             color="red",
             legend_label="read (mean)",
         )
         self.disk.line(
             source=self.source,
             x="time",
-            y="write_bytes_disk",
+            y="host_disk_io.write_bps",
             color="blue",
             legend_label="write (mean)",
         )
@@ -1343,31 +1348,31 @@ class SystemTimeseries(DashboardComponent):
     def get_data(self):
         workers = self.scheduler.workers.values()
 
-        read_bytes = 0
-        write_bytes = 0
+        net_read_bps = 0
+        net_write_bps = 0
         cpu = 0
         memory = 0
-        read_bytes_disk = 0
-        write_bytes_disk = 0
+        disk_read_bps = 0
+        disk_write_bps = 0
         time = 0
         for ws in workers:
-            read_bytes += ws.metrics["read_bytes"]
-            write_bytes += ws.metrics["write_bytes"]
+            net_read_bps += ws.metrics["host_net_io"]["read_bps"]
+            net_write_bps += ws.metrics["host_net_io"]["write_bps"]
             cpu += ws.metrics["cpu"]
             memory += ws.metrics["memory"]
-            read_bytes_disk += ws.metrics.get("read_bytes_disk", 0)
-            write_bytes_disk += ws.metrics.get("write_bytes_disk", 0)
+            disk_read_bps += ws.metrics.get("host_disk_io", {}).get("read_bps", 0)
+            disk_write_bps += ws.metrics.get("host_disk_io", {}).get("write_bps", 0)
             time += ws.metrics["time"]
 
         result = {
             # use `or` to avoid ZeroDivision when no workers
             "time": [time / (len(workers) or 1) * 1000],
-            "read_bytes": [read_bytes / (len(workers) or 1)],
-            "write_bytes": [write_bytes / (len(workers) or 1)],
+            "host_net_io.read_bps": [net_read_bps / (len(workers) or 1)],
+            "host_net_io.write_bps": [net_write_bps / (len(workers) or 1)],
             "cpu": [cpu / (len(workers) or 1)],
             "memory": [memory / (len(workers) or 1)],
-            "read_bytes_disk": [read_bytes_disk / (len(workers) or 1)],
-            "write_bytes_disk": [write_bytes_disk / (len(workers) or 1)],
+            "host_disk_io.read_bps": [disk_read_bps / (len(workers) or 1)],
+            "host_disk_io.write_bps": [disk_write_bps / (len(workers) or 1)],
         }
         return result
 
@@ -3523,8 +3528,10 @@ class WorkerTable(DashboardComponent):
             "memory_unmanaged_recent",
             "memory_spilled",
             "num_fds",
-            "read_bytes",
-            "write_bytes",
+            "host_net_io.read_bps",
+            "host_net_io.write_bps",
+            "host_disk_io.read_bps",
+            "host_disk_io.write_bps",
             "cpu_fraction",
         ]
         workers = self.scheduler.workers.values()
@@ -3551,8 +3558,10 @@ class WorkerTable(DashboardComponent):
             "memory_unmanaged_recent",
             "memory_spilled",
             "num_fds",
-            "read_bytes",
-            "write_bytes",
+            "host_net_io.read_bps",
+            "host_net_io.write_bps",
+            "host_disk_io.read_bps",
+            "host_disk_io.write_bps",
         ]
         column_title_renames = {
             "memory_limit": "limit",
@@ -3562,10 +3571,10 @@ class WorkerTable(DashboardComponent):
             "memory_unmanaged_recent": "unmanaged recent",
             "memory_spilled": "spilled",
             "num_fds": "# fds",
-            "read_bytes": "net read",
-            "write_bytes": "net write",
-            "read_bytes_disk": "disk read",
-            "write_bytes_disk": "disk write",
+            "host_net_io.read_bps": "net read",
+            "host_net_io.write_bps": "net write",
+            "host_disk_io.read_bps": "disk read",
+            "host_disk_io.write_bps": "disk write",
         }
 
         self.source = ColumnDataSource({k: [] for k in self.names})
@@ -3584,12 +3593,12 @@ class WorkerTable(DashboardComponent):
             "memory_unmanaged_old": NumberFormatter(format="0.0 b"),
             "memory_unmanaged_recent": NumberFormatter(format="0.0 b"),
             "memory_spilled": NumberFormatter(format="0.0 b"),
-            "read_bytes": NumberFormatter(format="0 b"),
-            "write_bytes": NumberFormatter(format="0 b"),
+            "host_net_io.read_bps": NumberFormatter(format="0 b"),
+            "host_net_io.write_bps": NumberFormatter(format="0 b"),
             "num_fds": NumberFormatter(format="0"),
             "nthreads": NumberFormatter(format="0"),
-            "read_bytes_disk": NumberFormatter(format="0 b"),
-            "write_bytes_disk": NumberFormatter(format="0 b"),
+            "host_disk_io.read_bps": NumberFormatter(format="0 b"),
+            "host_disk_io.write_bps": NumberFormatter(format="0 b"),
         }
 
         table = DataTable(
@@ -3707,7 +3716,13 @@ class WorkerTable(DashboardComponent):
             minfo = ws.memory
 
             for name in self.names + self.extra_names:
-                data[name].append(ws.metrics.get(name, None))
+                if "." in name:
+                    n0, _, n1 = name.partition(".")
+                    v = ws.metrics.get(n0, {}).get(n1, None)
+                else:
+                    v = ws.metrics.get(name, None)
+                data[name].append(v)
+
             data["name"][-1] = ws.name if ws.name is not None else i
             data["address"][-1] = ws.address
             if ws.memory_limit:

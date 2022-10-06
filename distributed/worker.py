@@ -1014,7 +1014,15 @@ class Worker(BaseWorker, ServerNode):
             },
             event_loop_interval=self._tick_interval_observed,
         )
-        out.update(self.monitor.recent())
+
+        monitor_recent = self.monitor.recent()
+        # Convert {foo.bar: 123} to {foo: {bar: 123}}
+        for k, v in monitor_recent.items():
+            if "." in k:
+                k0, _, k1 = k.partition(".")
+                out.setdefault(k0, {})[k1] = v
+            else:
+                out[k] = v
 
         for k, metric in self.metrics.items():
             try:
@@ -1308,8 +1316,8 @@ class Worker(BaseWorker, ServerNode):
             return {"status": "OK"}
 
     def get_monitor_info(
-        self, recent: bool = False, start: float = 0
-    ) -> dict[str, Any]:
+        self, recent: bool = False, start: int = 0
+    ) -> dict[str, float]:
         result = dict(
             range_query=(
                 self.monitor.recent()
