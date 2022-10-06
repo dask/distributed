@@ -19,7 +19,13 @@ from distributed.compatibility import LINUX, WINDOWS
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
 from distributed.utils import open_port
-from distributed.utils_test import gen_cluster, popen, requires_ipv6, wait_for_log_line
+from distributed.utils_test import (
+    inc,
+    gen_cluster,
+    popen,
+    requires_ipv6,
+    wait_for_log_line,
+)
 
 
 @pytest.mark.parametrize(
@@ -687,18 +693,10 @@ def test_error_during_startup(monkeypatch, nanny, loop):
 @pytest.mark.slow
 @gen_cluster(nthreads=[], client=True)
 async def test_deprecated_single_executable(c, s):
-    # make sure it works still
-    with popen(["dask-worker", s.address]) as worker:
-
-        def f():
-            return 1 + 1
-
-        await c.wait_for_workers(1)
-        results = await c.run(f)
-        assert all(r == 2 for r in results.values())
-
-    # test for the deprecation warning
     with popen(["dask-worker", s.address], capture_output=True) as worker:
-        stdout, stderr = worker.communicate()
-        logs = stdout.decode()
-        assert "FutureWarning: dask-worker is deprecated" in logs
+        # ensure deprecation warning is emitted
+        wait_for_log_line(b"FutureWarning: dask-worker is deprecated", worker.stdout)
+        # make sure the worker still works
+        await c.wait_for_workers(1)
+        results = await c.submit(inc, 1).result()
+        assert results == 2
