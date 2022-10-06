@@ -20,8 +20,8 @@ from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
 from distributed.utils import open_port
 from distributed.utils_test import (
-    inc,
     gen_cluster,
+    inc,
     popen,
     requires_ipv6,
     wait_for_log_line,
