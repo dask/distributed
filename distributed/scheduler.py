@@ -605,8 +605,8 @@ class WorkerState:
         4. When the heartbeat arrives, process memory goes down and so does the
            unmanaged_recent.
 
-        This is OK - one of the main reasons for the unmanged_recent / unmanaged_old
-        split is exactly to concentrate all the noise in unmanged_recent and exclude it
+        This is OK - one of the main reasons for the unmanaged_recent / unmanaged_old
+        split is exactly to concentrate all the noise in unmanaged_recent and exclude it
         from optimistic memory, which is used for heuristics.
         """
         return MemoryState(
