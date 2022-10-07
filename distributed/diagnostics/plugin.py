@@ -361,7 +361,7 @@ class PackageInstall(WorkerPlugin):
             )
         except Exception as e:
             msg = "conda install failed"
-            logger.error(msg, e)
+            logger.error(msg)
             raise RuntimeError(msg) from e
 
         if returncode != 0:

@@ -1647,13 +1647,39 @@ async def test_pip_install(c, s, a):
                     packages=["requests"], installer="pip", options=["--upgrade"]
                 )
             )
-
+            assert Popen.call_count == 1
             args = Popen.call_args[0][0]
             assert "python" in args[0]
             assert args[1:] == ["-m", "pip", "install", "--upgrade", "requests"]
-            assert Popen.call_count == 1
             logs = logger.getvalue()
             assert "pip installing" in logs
+            assert "failed" not in logs
+            assert "restart" not in logs
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_conda_install(c, s, a):
+    with captured_logger(
+        "distributed.diagnostics.plugin", level=logging.INFO
+    ) as logger:
+        run_command_mock = mock.Mock(name="run_command_mock")
+        run_command_mock.configure_mock(return_value=(b"", b"", 0))
+        module_mock = mock.Mock(name="conda_cli_python_api_mock")
+        module_mock.run_command = run_command_mock
+        module_mock.Commands.INSTALL = "INSTALL"
+        with mock.patch.dict("sys.modules", {"conda.cli.python_api": module_mock}):
+            await c.register_worker_plugin(
+                PackageInstall(
+                    packages=["requests"], installer="conda", options=["--update-deps"]
+                )
+            )
+            assert run_command_mock.call_count == 1
+            command = run_command_mock.call_args[0][0]
+            assert command == "INSTALL"
+            arguments = run_command_mock.call_args[0][1]
+            assert arguments == ["--update-deps", "requests"]
+            logs = logger.getvalue()
+            assert "conda installing" in logs
             assert "failed" not in logs
             assert "restart" not in logs
 
@@ -1685,6 +1711,68 @@ async def test_pip_install_fails(c, s, a, b):
             logs = logger.getvalue()
             assert "install failed" in logs
             assert "not-a-package" in logs
+
+
+@gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
+async def test_conda_install_fails_when_conda_raises(c, s, a, b):
+    with captured_logger(
+        "distributed.diagnostics.plugin", level=logging.ERROR
+    ) as logger:
+        run_command_mock = mock.Mock(name="run_command_mock")
+        run_command_mock.configure_mock(side_effect=RuntimeError)
+        module_mock = mock.Mock(name="conda_cli_python_api_mock")
+        module_mock.run_command = run_command_mock
+        module_mock.Commands.INSTALL = "INSTALL"
+        with mock.patch.dict("sys.modules", {"conda.cli.python_api": module_mock}):
+            with pytest.raises(RuntimeError):
+                await c.register_worker_plugin(
+                    PackageInstall(packages=["not-a-package"], installer="conda")
+                )
+            assert run_command_mock.call_count == 1
+            logs = logger.getvalue()
+            assert "install failed" in logs
+
+
+@gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
+async def test_conda_install_fails_on_returncode(c, s, a, b):
+    with captured_logger(
+        "distributed.diagnostics.plugin", level=logging.ERROR
+    ) as logger:
+        run_command_mock = mock.Mock(name="run_command_mock")
+        run_command_mock.configure_mock(return_value=(b"", b"", 1))
+        module_mock = mock.Mock(name="conda_cli_python_api_mock")
+        module_mock.run_command = run_command_mock
+        module_mock.Commands.INSTALL = "INSTALL"
+        with mock.patch.dict("sys.modules", {"conda.cli.python_api": module_mock}):
+            with pytest.raises(RuntimeError):
+                await c.register_worker_plugin(
+                    PackageInstall(packages=["not-a-package"], installer="conda")
+                )
+            assert run_command_mock.call_count == 1
+            logs = logger.getvalue()
+            assert "install failed" in logs
+
+
+@pytest.mark.parametrize("installer", ["conda", "pip"])
+@gen_cluster(client=True, nthreads=[("", 1), ("", 1)])
+async def test_package_install_installs_once_with_multiple_workers(
+    c, s, a, b, installer
+):
+    with captured_logger(
+        "distributed.diagnostics.plugin", level=logging.INFO
+    ) as logger:
+        install_mock = mock.Mock(name="install")
+        install_mock.return_value = None
+        with mock.patch.object(PackageInstall, f"_{installer}_install", install_mock):
+            await c.register_worker_plugin(
+                PackageInstall(
+                    packages=["requests"],
+                    installer=installer,
+                )
+            )
+            assert install_mock.call_count == 1
+            logs = logger.getvalue()
+            assert "already been installed" in logs
 
 
 @pytest.mark.parametrize("installer", ["conda", "pip"])
@@ -1740,33 +1828,6 @@ async def test_package_install_failing_does_not_restart_on_nanny(c, s, installer
         # Nanny does not restart
         assert n.status is Status.running
         assert set(s.workers) == {addr}
-
-
-@gen_cluster(client=True, nthreads=[("", 1), ("", 1)])
-async def test_pip_install_multiple_workers(c, s, a, b):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.INFO
-    ) as logger:
-        mocked = mock.Mock()
-        mocked.configure_mock(
-            **{"communicate.return_value": (b"", b""), "wait.return_value": 0}
-        )
-        with mock.patch(
-            "distributed.diagnostics.plugin.subprocess.Popen", return_value=mocked
-        ) as Popen:
-            await c.register_worker_plugin(
-                PackageInstall(
-                    packages=["requests"], installer="pip", options=["--upgrade"]
-                )
-            )
-
-            args = Popen.call_args[0][0]
-            assert "python" in args[0]
-            assert args[1:] == ["-m", "pip", "install", "--upgrade", "requests"]
-            assert Popen.call_count == 1
-            logs = logger.getvalue()
-            assert "pip installing" in logs
-            assert "already been installed" in logs
 
 
 @gen_cluster(nthreads=[])
