@@ -7389,10 +7389,6 @@ def test_print_local(capsys):
     out, err = capsys.readouterr()
     assert "Hello!:123\n" == out
 
-    print("Hello!", 123, sep=":", local_too=False)
-    out, err = capsys.readouterr()
-    assert "" == out
-
 
 def _verify_cluster_dump(
     url: str | pathlib.PosixPath, format: str, addresses: set[str]
