@@ -3283,21 +3283,63 @@ def print(
     builtins.print(*args, sep=sep, end=end, file=file, flush=flush)
 
 
-def warn(*args, **kwargs):
+def warn(
+    message: str | Warning,
+    category: type[Warning] | None = UserWarning,
+    stacklevel: int = 1,
+    source: Any = None,
+) -> None:
     """
-    Dask warn function
+    A drop-in replacement of the built-in ``warnings.warn()`` function for
+    issuing warnings remotely from workers to clients.
 
-    This raises a warning both wherever this function is run, and also
-    in the user's client session
+    If called from outside a dask worker, its arguments are passed directly to
+    ``warnings.warn()``. If called by code running on a worker, then in addition
+    to emitting a warning locally, any clients connected (possibly remotely) to
+    the scheduler managing this worker will receive an event instructing them to
+    emit the same warning (subject to their own local filters, etc.). When
+    implementing computations that may run on a worker, the user can call this
+    ``warn`` function to ensure that any remote client sessions will see their
+    warnings, for example in a Jupyter output cell.
+
+    While all of the arguments are respected by the locally emitted warning
+    (with same meanings as in ``warnings.warn()``), ``stacklevel`` and
+    ``source`` are ignored by clients because they would not be meaningful in
+    the client's thread.
+
+    Example
+    -------
+    >>> from dask.distributed import Client, warn
+    >>> client = Client()
+    >>> def do_warn():
+    ...    warn("A warning from a worker.")
+    >>> client.submit(do_warn).result()
+    /path/to/distributed/client.py:678: UserWarning: A warning from a worker.
     """
     try:
         worker = get_worker()
     except ValueError:  # pragma: no cover
         pass
     else:
-        worker.log_event("warn", {"args": args, "kwargs": kwargs})
+        # We are in a worker: log a warn event with args serialized to the
+        # client. We have to pickle message and category into bytes ourselves
+        # because msgpack cannot handle them. The expectations is that these are
+        # always small objects.
+        worker.log_event(
+            "warn",
+            {
+                "message": pickle.dumps(message),
+                "category": pickle.dumps(category),
+                # We ignore stacklevel because it will be meaningless in the
+                # client's thread/process.
+                # We ignore source because we don't want to serialize arbitrary
+                # objects.
+            },
+        )
 
-    warnings.warn(*args, **kwargs)
+    # add 1 to stacklevel so that, at least in the worker's local stderr, we'll
+    # see the source line that called us
+    warnings.warn(message, category, stacklevel + 1, source)
 
 
 def benchmark_disk(

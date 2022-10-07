@@ -7,6 +7,7 @@ import inspect
 import json
 import logging
 import os
+import pickle
 import re
 import sys
 import threading
@@ -661,10 +662,23 @@ def _handle_print(event):
 
 def _handle_warn(event):
     _, msg = event
-    if isinstance(msg, dict) and "args" in msg and "kwargs" in msg:
-        warnings.warn(*msg["args"], **msg["kwargs"])
-    else:
+    if not isinstance(msg, dict):
+        # someone must have manually logged a warn event with a hand-crafted
+        # payload, rather than by calling worker.warn(). In that case simply
+        # warn the payload and hope it works.
         warnings.warn(msg)
+    else:
+        if "message" not in msg:
+            # TypeError makes sense here because it's analogous to calling a
+            # function without a required positional argument
+            raise TypeError(
+                "_handle_warn: client receive warn a event missing the required "
+                '"message" argument.'
+            )
+        warnings.warn(
+            pickle.loads(msg["message"]),
+            category=pickle.loads(msg.get("category", None)),
+        )
 
 
 def _maybe_call_security_loader(address):
