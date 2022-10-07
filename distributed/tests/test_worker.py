@@ -1687,14 +1687,16 @@ async def test_pip_install_fails(c, s, a, b):
             assert "not-a-package" in logs
 
 
+@pytest.mark.parametrize("installer", ["conda", "pip"])
 @gen_cluster(client=True, nthreads=[])
-async def test_pip_install_restarts_on_nanny(c, s):
+async def test_package_install_restarts_on_nanny(c, s, installer):
     preload = dedent(
-        """\
+        f"""\
         from unittest import mock
 
         mock.patch(
-            "distributed.diagnostics.plugin.PackageInstall._pip_install", return_value=None
+            "distributed.diagnostics.plugin.PackageInstall._{installer}_install",
+            return_value=None,
         ).start()
         """
     )
@@ -1703,8 +1705,7 @@ async def test_pip_install_restarts_on_nanny(c, s):
         await c.register_worker_plugin(
             PackageInstall(
                 packages=["requests"],
-                installer="pip",
-                options=["--upgrade"],
+                installer=installer,
                 restart=True,
             )
         )
@@ -1713,14 +1714,16 @@ async def test_pip_install_restarts_on_nanny(c, s):
             await asyncio.sleep(0.01)
 
 
+@pytest.mark.parametrize("installer", ["conda", "pip"])
 @gen_cluster(client=True, nthreads=[])
-async def test_pip_install_failing_does_not_restart_on_nanny(c, s):
+async def test_package_install_failing_does_not_restart_on_nanny(c, s, installer):
     preload = dedent(
-        """\
+        f"""\
         from unittest import mock
 
         mock.patch(
-            "distributed.diagnostics.plugin.PackageInstall._pip_install", side_effect=RuntimeError
+            "distributed.diagnostics.plugin.PackageInstall._{installer}_install",
+            side_effect=RuntimeError,
         ).start()
         """
     )
@@ -1730,8 +1733,7 @@ async def test_pip_install_failing_does_not_restart_on_nanny(c, s):
             await c.register_worker_plugin(
                 PackageInstall(
                     packages=["requests"],
-                    installer="pip",
-                    options=["--upgrade"],
+                    installer=installer,
                     restart=True,
                 )
             )
