@@ -254,10 +254,6 @@ class PipInstall(WorkerPlugin):
        libraries in the worker environment or image. This is
        primarily intended for experimentation and debugging.
 
-       Additional issues may arise if multiple workers share the same
-       file system. Each worker might try to install the packages
-       simultaneously.
-
     Parameters
     ----------
     packages : List[str]
@@ -282,34 +278,74 @@ class PipInstall(WorkerPlugin):
         self.packages = packages
         self.restart = restart
         self.pip_options = pip_options or []
+        self.id = f"pip-install-{uuid.uuid4()}"
 
     async def setup(self, worker):
-        from distributed.lock import Lock
+        from distributed.semaphore import Semaphore
 
-        async with Lock(socket.gethostname()):  # don't clobber one installation
-            logger.info("Pip installing the following packages: %s", self.packages)
-            proc = subprocess.Popen(
-                [sys.executable, "-m", "pip", "install"]
-                + self.pip_options
-                + self.packages,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            stdout, stderr = proc.communicate()
-            returncode = proc.wait()
+        async with (
+            await Semaphore(max_leases=1, name=socket.gethostname(), register=True)
+        ):
+            if not await self._is_installed(worker):
+                logger.info("Pip installing the following packages: %s", self.packages)
+                await self._set_installed(worker)
+                self._install()
+            else:
+                logger.info(
+                    "The following packages have already been installed: %s",
+                    self.packages,
+                )
 
-            if returncode:
-                logger.error("Pip install failed with '%s'", stderr.decode().strip())
-                return
+            if self.restart and worker.nanny and not await self._is_restarted(worker):
+                logger.info("Restarting worker to refresh interpreter.")
+                await self._set_restarted(worker)
+                worker.loop.add_callback(worker.close_gracefully, restart=True)
 
-            if self.restart and worker.nanny:
-                lines = stdout.strip().split(b"\n")
-                if not all(
-                    line.startswith(b"Requirement already satisfied") for line in lines
-                ):
-                    worker.loop.add_callback(
-                        worker.close_gracefully, restart=True
-                    )  # restart
+    def _install(self):
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "pip", "install"] + self.pip_options + self.packages,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        _, stderr = proc.communicate()
+        returncode = proc.wait()
+        if returncode != 0:
+            msg = f"Pip install failed with '{stderr.decode().strip()}'"
+            logger.error(msg)
+            raise RuntimeError(msg)
+
+    async def _is_installed(self, worker):
+        return await worker.client.get_metadata(
+            self._compose_installed_key(), default=False
+        )
+
+    async def _set_installed(self, worker):
+        await worker.client.set_metadata(
+            self._compose_installed_key(),
+            True,
+        )
+
+    def _compose_installed_key(self):
+        return [
+            self.id,
+            "installed",
+            socket.gethostname(),
+        ]
+
+    async def _is_restarted(self, worker):
+        return await worker.client.get_metadata(
+            self._compose_restarted_key(worker),
+            default=False,
+        )
+
+    async def _set_restarted(self, worker):
+        await worker.client.set_metadata(
+            self._compose_restarted_key(worker),
+            True,
+        )
+
+    def _compose_restarted_key(self, worker):
+        return [self.id, "restarted", worker.nanny]
 
 
 # Adapted from https://github.com/dask/distributed/issues/3560#issuecomment-596138522
