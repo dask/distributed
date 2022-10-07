@@ -71,7 +71,7 @@ class WorkerMetricCollector(PrometheusCollector):
             labels=["type"],
         )
         memory.add_metric(["managed"], managed_memory)
-        memory.add_metric(["unmanaged"], max(0, process_memory - managed_memory))
+        memory.add_metric(["unmanaged"], process_memory - managed_memory)
         memory.add_metric(["spilled"], spilled_disk)
         yield memory
 
