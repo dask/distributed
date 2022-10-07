@@ -26,7 +26,6 @@ from collections.abc import (
     Iterable,
     Iterator,
     Mapping,
-    Sequence,
     Set,
 )
 from contextlib import suppress
@@ -1312,8 +1311,7 @@ class SchedulerState:
     #: Workers that are currently in running state
     running: set[WorkerState]
     #: Workers that are currently in running state and not fully utilized
-    #: (actually a SortedDict, but the sortedcontainers package isn't annotated)
-    idle: dict[str, WorkerState]
+    idle: set[WorkerState]
     #: Workers that are fully utilized. May include non-running workers.
     saturated: set[WorkerState]
     total_nthreads: int
@@ -1413,7 +1411,7 @@ class SchedulerState:
         self.clients["fire-and-forget"] = ClientState("fire-and-forget")
         self.extensions = {}
         self.host_info = host_info
-        self.idle = SortedDict()
+        self.idle = set()
         self.n_tasks = 0
         self.resources = resources
         self.saturated = set()
@@ -1610,32 +1608,12 @@ class SchedulerState:
                 b_recs, b_cmsgs, b_wmsgs = func(self, key, stimulus_id)
 
                 recommendations.update(a_recs)
-                for c, new_msgs in a_cmsgs.items():
-                    msgs = client_msgs.get(c)
-                    if msgs is not None:
-                        msgs.extend(new_msgs)
-                    else:
-                        client_msgs[c] = new_msgs
-                for w, new_msgs in a_wmsgs.items():
-                    msgs = worker_msgs.get(w)
-                    if msgs is not None:
-                        msgs.extend(new_msgs)
-                    else:
-                        worker_msgs[w] = new_msgs
+                update_msgs(client_msgs, a_cmsgs)
+                update_msgs(worker_msgs, a_wmsgs)
 
                 recommendations.update(b_recs)
-                for c, new_msgs in b_cmsgs.items():
-                    msgs = client_msgs.get(c)
-                    if msgs is not None:
-                        msgs.extend(new_msgs)
-                    else:
-                        client_msgs[c] = new_msgs
-                for w, new_msgs in b_wmsgs.items():
-                    msgs = worker_msgs.get(w)
-                    if msgs is not None:
-                        msgs.extend(new_msgs)
-                    else:
-                        worker_msgs[w] = new_msgs
+                update_msgs(client_msgs, b_cmsgs)
+                update_msgs(worker_msgs, b_wmsgs)
 
                 start = "released"
             else:
@@ -1715,19 +1693,13 @@ class SchedulerState:
             new = self._transition(key, finish, stimulus_id)
             new_recs, new_cmsgs, new_wmsgs = new
 
+            # Put recommendations at end of dict, so they're processed in the next cycle
+            for k in new_recs:
+                if k != key:
+                    recommendations.pop(k, None)
             recommendations.update(new_recs)
-            for c, new_msgs in new_cmsgs.items():
-                msgs = client_msgs.get(c)
-                if msgs is not None:
-                    msgs.extend(new_msgs)
-                else:
-                    client_msgs[c] = new_msgs
-            for w, new_msgs in new_wmsgs.items():
-                msgs = worker_msgs.get(w)
-                if msgs is not None:
-                    msgs.extend(new_msgs)
-                else:
-                    worker_msgs[w] = new_msgs
+            update_msgs(client_msgs, new_cmsgs)
+            update_msgs(worker_msgs, new_wmsgs)
 
         if self.validate:
             # FIXME downcast antipattern
@@ -1883,7 +1855,7 @@ class SchedulerState:
             # See root-ish-ness note below in `decide_worker_rootish_queuing_enabled`
             assert math.isinf(self.WORKER_SATURATION)
 
-        pool = self.idle.values() if self.idle else self.running
+        pool = self.idle or self.running
         if not pool:
             return None
 
@@ -1912,30 +1884,9 @@ class SchedulerState:
 
         return ws
 
-    def decide_worker_rootish_queuing_enabled(self) -> WorkerState | None:
-        """Pick a worker for a runnable root-ish task, if not all are busy.
-
-        Picks the least-busy worker out of the ``idle`` workers (idle workers have fewer
-        tasks running than threads, as set by ``distributed.scheduler.worker-saturation``).
-        It does not consider the location of dependencies, since they'll end up on every
-        worker anyway.
-
-        If all workers are full, returns None, meaning the task should transition to
-        ``queued``. The scheduler will wait to send it to a worker until a thread opens
-        up. This ensures that downstream tasks always run before new root tasks are
-        started.
-
-        This does not try to schedule sibling tasks on the same worker; in fact, it
-        usually does the opposite. Even though this increases subsequent data transfer,
-        it typically reduces overall memory use by eliminating root task overproduction.
-
-        Returns
-        -------
-        ws: WorkerState | None
-            The worker to assign the task to. If there are no idle workers, returns
-            None, in which case the task should be transitioned to ``queued``.
-
-        """
+    def decide_worker_from_family(
+        self, family: tuple[set[TaskState], set[TaskState]] | None
+    ) -> WorkerState:
         if self.validate:
             # We don't `assert self.is_rootish(ts)` here, because that check is dependent on
             # cluster size. It's possible a task looked root-ish when it was queued, but the
@@ -1943,23 +1894,49 @@ class SchedulerState:
             # If `is_rootish` changes to a static definition, then add that assertion here
             # (and actually pass in the task).
             assert not math.isinf(self.WORKER_SATURATION)
+            assert self.idle
 
-        if not self.idle:
-            # All workers busy? Task gets/stays queued.
-            return None
+        if family:
+            siblings, downstream = family
+            # If any tasks are in memory or processing, use the non-saturated worker that holds the most data already.
+            # Ignoring saturated workers avoids a 'dogpile' in the case of unusual graph structures.
+            # ^ TODO test this
+            candidates: defaultdict[WorkerState, int] = defaultdict(lambda: 0)
+            sws: WorkerState | None
+            for ts in siblings:
+                for sws in ts.who_has:
+                    if sws.status == Status.running and not _worker_full(
+                        sws, self.WORKER_SATURATION
+                    ):
+                        candidates[sws] += ts.get_nbytes()
+                if (
+                    (sws := ts.processing_on)  # NOTE: exclusive with `ts.who_has`
+                    and sws.status == Status.running
+                    and not _worker_full(sws, self.WORKER_SATURATION)
+                ):
+                    # NOTE: siblings processing on different workers is a rare case
+                    tg = ts.group
+                    nbytes_estimate = (
+                        round(tg.nbytes_total / nmem)
+                        if (nmem := tg.states["memory"])
+                        else DEFAULT_DATA_SIZE
+                    )
+                    candidates[sws] += nbytes_estimate
+            if candidates:
+                ws, _ = max(candidates.items(), key=operator.itemgetter(1))
+                logger.info(
+                    f"Scheduling family on sibling worker {ws}, {candidates=}, {family=}"
+                )
+                return ws
 
-        # Just pick the least busy worker.
-        # NOTE: this will lead to worst-case scheduling with regards to co-assignment.
-        ws = min(self.idle.values(), key=lambda ws: len(ws.processing) / ws.nthreads)
+        # No siblings are anywhere else (or no family at all). Pick the least busy worker.
+        ws = min(self.idle, key=lambda ws: len(ws.processing) / ws.nthreads)
         if self.validate:
+            assert self.workers.get(ws.address) is ws
             assert not _worker_full(ws, self.WORKER_SATURATION), (
                 ws,
                 _task_slots_available(ws, self.WORKER_SATURATION),
             )
-            assert ws in self.running, (ws, self.running)
-
-        if self.validate and ws is not None:
-            assert self.workers.get(ws.address) is ws
             assert ws in self.running, (ws, self.running)
 
         return ws
@@ -2004,13 +1981,11 @@ class SchedulerState:
             # group is also smaller than the cluster.
 
             # Fastpath when there are no related tasks or restrictions
-            worker_pool = self.idle or self.workers
-            # FIXME idle and workers are SortedDict's declared as dicts
-            #       because sortedcontainers is not annotated
-            wp_vals = cast("Sequence[WorkerState]", worker_pool.values())
-            n_workers: int = len(wp_vals)
+            # FIXME making a list here is silly, but so is this whole code path
+            worker_pool = list(self.idle or self.workers.values())
+            n_workers: int = len(worker_pool)
             if n_workers < 20:  # smart but linear in small case
-                ws = min(wp_vals, key=operator.attrgetter("occupancy"))
+                ws = min(worker_pool, key=operator.attrgetter("occupancy"))
                 assert ws
                 if ws.occupancy == 0:
                     # special case to use round-robin; linear search
@@ -2020,12 +1995,12 @@ class SchedulerState:
                     start: int = self.n_tasks % n_workers
                     i: int
                     for i in range(n_workers):
-                        wp_i = wp_vals[(i + start) % n_workers]
+                        wp_i = worker_pool[(i + start) % n_workers]
                         if wp_i.occupancy == 0:
                             ws = wp_i
                             break
             else:  # dumb but fast in large case
-                ws = wp_vals[self.n_tasks % n_workers]
+                ws = worker_pool[self.n_tasks % n_workers]
 
         if self.validate and ws is not None:
             assert self.workers.get(ws.address) is ws
@@ -2050,8 +2025,7 @@ class SchedulerState:
                     if not (ws := self.decide_worker_rootish_queuing_disabled(ts)):
                         return {ts.key: "no-worker"}, {}, {}
                 else:
-                    if not (ws := self.decide_worker_rootish_queuing_enabled()):
-                        return {ts.key: "queued"}, {}, {}
+                    return _queueable_to_processing(self, ts)
             else:
                 if not (ws := self.decide_worker_non_rootish(ts)):
                     return {ts.key: "no-worker"}, {}, {}
@@ -2670,20 +2644,12 @@ class SchedulerState:
     def transition_queued_processing(self, key, stimulus_id):
         try:
             ts: TaskState = self.tasks[key]
-            recommendations: Recs = {}
-            client_msgs: dict = {}
-            worker_msgs: dict = {}
 
             if self.validate:
                 assert not ts.actor, f"Actors can't be queued: {ts}"
                 assert ts in self.queued
 
-            if ws := self.decide_worker_rootish_queuing_enabled():
-                self.queued.discard(ts)
-                worker_msgs = _add_to_processing(self, ts, ws)
-            # If no worker, task just stays `queued`
-
-            return recommendations, client_msgs, worker_msgs
+            return _queueable_to_processing(self, ts)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2907,10 +2873,10 @@ class SchedulerState:
             else not _worker_full(ws, self.WORKER_SATURATION)
         ):
             if ws.status == Status.running:
-                idle[ws.address] = ws
+                idle.add(ws)
             saturated.discard(ws)
         else:
-            idle.pop(ws.address, None)
+            idle.discard(ws)
 
             if p > nc:
                 pending: float = occ * (p - nc) / (p * nc)
@@ -4622,7 +4588,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.rpc.remove(address)
         del self.stream_comms[address]
         del self.aliases[ws.name]
-        self.idle.pop(ws.address, None)
+        self.idle.discard(ws)
         self.saturated.discard(ws)
         del self.workers[address]
         ws.status = Status.closed
@@ -4898,21 +4864,21 @@ class Scheduler(SchedulerState, ServerNode):
         if not (set(self.workers) == set(self.stream_comms)):
             raise ValueError("Workers not the same in all collections")
 
-        assert self.running.issuperset(self.idle.values()), (
+        assert self.running.issuperset(self.idle), (
             self.running,
-            list(self.idle.values()),
+            self.idle,
         )
         for w, ws in self.workers.items():
             assert isinstance(w, str), (type(w), w)
             assert isinstance(ws, WorkerState), (type(ws), ws)
             assert ws.address == w
             if ws.status != Status.running:
-                assert ws.address not in self.idle
+                assert ws not in self.idle
             assert ws.long_running.issubset(ws.processing)
             if not ws.processing:
                 assert not ws.occupancy
                 if ws.status == Status.running:
-                    assert ws.address in self.idle
+                    assert ws in self.idle
             assert (ws.status == Status.running) == (ws in self.running)
 
         for ws in self.running:
@@ -5211,7 +5177,7 @@ class Scheduler(SchedulerState, ServerNode):
                 self.send_all(client_msgs, worker_msgs)
         else:
             self.running.discard(ws)
-            self.idle.pop(ws.address, None)
+            self.idle.discard(ws)
 
     async def handle_request_refresh_who_has(
         self, keys: Iterable[str], worker: str, stimulus_id: str
@@ -7716,6 +7682,115 @@ def _validate_ready(state: SchedulerState, ts: TaskState) -> None:
     assert all(dts.who_has for dts in ts.dependencies)
 
 
+def _queueable_to_processing(
+    state: SchedulerState, ts: TaskState
+) -> tuple[Recs, dict[str, list[Any]], dict[str, list[Any]]]:
+    "Common logic for transitioning a queueable (root-ish) task to processing, along with the rest of its family"
+    # Fastpath: skip family search and everything else if no workers are free.
+    # Since all siblings are assigned at once, this means `ts` belongs to a family we haven't processed yet.
+    # This means that we've already filled the cluster with root task families, and shouldn't schedule any more.
+    if not state.idle:
+        return {ts.key: "queued"}, {}, {}
+
+    # TODO maxsize as config/what?!
+    fam = family(ts, maxsize=20, widely_shared_cutoff=len(state.workers))
+    ws = state.decide_worker_from_family(fam)
+    # ^ NOTE: This is all we need to for good (re)scheduling when the cluster changes size.
+
+    if ts.state == "queued":
+        state.queued.remove(ts)
+    worker_msgs: dict[str, list[Any]] = _add_to_processing(state, ts, ws)
+
+    recommendations: Recs = {}
+    if fam:
+        # Schedule other tasks that will all need to be in memory
+        # with this task on the same worker at once.
+        siblings, downstream = fam
+        sorted_siblings = sorted(siblings, key=operator.attrgetter("priority"))
+
+        # Check that we're parallelism-constrained before saturating a worker
+        if len(siblings) > ws.nthreads:
+            # In the somewhat rare case that we have more workers than families,
+            # parallelism is abundant. We should give up some co-assignment so that we
+            # don't leave workers idle. This is quite hard to determine statically,
+            # because we have no idea a) how many total root tasks there are, and b) how
+            # many total root families there are.
+
+            # We can _very brittlely_ guess via `TaskGroup`s. _We generally assume the
+            # graph structure of root tasks is homogeneous_, which is typically true
+            # with Dask collections, but certainly not true in general.
+            # The downstreams' TaskGroups give a guess as to the number of families (a
+            # downstream is effectively the output of a family).
+            # If we assume every family is the same size as this one (also typically the
+            # case with collections, but not true in general), then each family will
+            # under-schedule by this factor, fully filling all workers.
+            est_total_families = (
+                (sum(len(dts.group) for dts in downstream) // len(downstream))
+                if downstream
+                else 0
+            )
+            family_saturation = est_total_families / len(state.workers)
+            if family_saturation < 1:
+                max_siblings = round(len(siblings) * family_saturation)
+                sorted_siblings = sorted_siblings[:max_siblings]
+
+        # TODO what about when the first task in a family that's already on a worker completes,
+        # but not the whole family? We want to wait for the whole family to be done before assigning
+        # another one. We don't want to take a slot that could be used for the downstream task in the future.
+
+        # If workers could be responsible with memory, this would be okay. Because if everything in the previous
+        # family is done execpt one input to the downstream, then yes, we might as well get started on a new family
+        # while we're waiting, as long as we have the memory capacity to do so.
+        for fts in sorted_siblings:
+            assert fts is not ts
+
+            # Rare: siblings already running, or ran, somewhere else.
+            # Since all siblings are scheduled onto the same worker at the same time, they'll also
+            # usually share the same fate if that worker dies, and all be re-scheduled at once too.
+            # The exceptions are:
+            # - Some in-memory tasks could have been replicated to other workers, but not all.
+            # - Non-commutative families (siblings set is different depending on which root you start from).
+            # - Scale up/down could cross the `widely_shared_cutoff`, leading to different assessment of a family.
+            # TODO tests for these cases
+            if fts.state == "processing":
+                logger.info(f"Skipping processing {fts}, {fts.processing_on=}, {ws=}")
+                continue
+
+            if fts.state == "memory":
+                # only can happen in the case of rescheduling, and replicas already exist
+                logger.info(f"Skipping in memory {fts}, {ws in fts.who_has=}, {ws=}")
+                continue
+
+            if fts.state == "released":
+                # FIXME if `fts` just went `memory->released`, `waiting_on` will inaccurately be empty.
+                # 1) this manual transition feels like bad practice
+                # 2) we can't be certain it shouldn't actually to to `forgotten` (without duplicating logic from `memory->released`)
+                # 3) it's just kinda weird that tasks can be in this broken `released` state at all.
+                #    it feels degenerate to me. i kinda don't think `released->waiting` should be a transition, but rather
+                #    a shared helper function like `handle_released_task` or something.
+                # TODO add a test that triggers the need for this
+                state._transition(fts.key, "waiting", "qtp")
+            elif fts.state == "queued":
+                if state.validate:
+                    assert fts in state.queued
+                state.queued.discard(fts)
+
+            assert fts.state in ("waiting", "queued"), (fts, ts)
+
+            # When `fts` is not runnable yet, that means it's waiting for deps. So it
+            # should just schedule near those deps using `decide_worker_non_rootish`.
+            # Unless they're widely-shared, in which case it should schedule near its
+            # family. In which case it should look root-ish, so it should come back here.
+            if not fts.waiting_on:
+                update_msgs(worker_msgs, _add_to_processing(state, fts, ws))
+
+                # This recommendation will be a no-op. It's just to remove any existing
+                # recommendation for the key from the recommendations queue.
+                recommendations[fts.key] = "processing"
+
+    return recommendations, {}, worker_msgs
+
+
 def _add_to_processing(
     state: SchedulerState, ts: TaskState, ws: WorkerState
 ) -> dict[str, list]:
@@ -8211,6 +8286,127 @@ def _worker_full(ws: WorkerState, saturation_factor: float) -> bool:
     if math.isinf(saturation_factor):
         return False
     return _task_slots_available(ws, saturation_factor) <= 0
+
+
+def _previous_in_linear_chain(ts: TaskState, cutoff: int) -> TaskState | None:
+    if len(ts.dependents) != 1 or len(ts.dependencies) > cutoff:
+        return None
+
+    prev: TaskState | None = None
+    for dts in ts.dependencies:
+        if len(dts.dependents) > cutoff:  # widely-shared; ignore it
+            continue
+        if prev:
+            return None
+        prev = dts
+
+    return prev
+
+
+def _next_in_linear_chain(ts: TaskState, cutoff: int) -> TaskState | None:
+    if len(ts.dependents) != 1 or len(ts.dependencies) > cutoff:
+        return None
+
+    # Check if this is part of a linear chain:
+    # exactly 1 dependency, excluding widely-shared tasks.
+    non_widely_shared = False
+    for dts in ts.dependencies:
+        if len(dts.dependents) > cutoff:  # widely-shared; ignore it
+            continue
+        if non_widely_shared:
+            return None
+        non_widely_shared = True
+
+    return next(iter(ts.dependents))
+
+
+def family(
+    ts: TaskState, maxsize: int, widely_shared_cutoff: int
+) -> tuple[set[TaskState], set[TaskState]] | None:
+    """
+    All tasks in a family must be in memory at once to compute at least one common dependency.
+
+    Returns these ``sibling`` tasks, and the set of ``downstream`` (dependent) tasks that
+    the siblings will used to compute.
+
+    All ``siblings`` and ``downstream`` should be scheduled onto the same worker.
+    All ``siblings`` should be be scheduled at once---there's no benefit to queuing them.
+
+    For the purposes of identifying families:
+
+    * Linear chains are collapsed (traversed up and down)
+    * Widely-shared tasks (tasks with > ``widely_shared_cutoff`` dependents) are ignored
+
+    If the task's family is too large, or empty, returns None.
+    That is, if ``siblings`` would be larger than ``maxsize``, or ``downstream`` would be
+    larger than ``widely_shared_cutoff``, or ``ts.dependents`` is empty, returns None.
+    """
+    # TODO potentially could be useful to distinguish between 'too big'
+    # and empty family---we might want to schedule them differently.
+    # That is, maybe `None` and `(set(), set())` might not be synonymous.
+    if not ts.dependents or len(ts.dependents) > min(widely_shared_cutoff, maxsize):
+        return None
+
+    siblings: set[TaskState] = set()
+    downstream: set[TaskState] = set()
+    # TODO maintain `seen` set to avoid repeated traversal? Should we add on the way down, or just back up?
+    for dts in ts.dependents:  # TODO even support multiple dependents?
+        # Traverse down linear chains
+        while ndts := _next_in_linear_chain(dts, widely_shared_cutoff):
+            # TODO check seen
+            dts = ndts
+
+        if dts in downstream:
+            # No need to traverse from a task we've already seen
+            continue
+
+        if dts in siblings:
+            # `siblings` and `downstream` are exclusive, and `siblings` takes priority
+            siblings.remove(dts)
+            continue
+
+        sibs = dts.dependencies
+        if len(sibs) == 1:
+            # Faster path: this is just a linear chain, so no siblings besides `ts`
+            downstream.add(dts)
+            continue
+
+        if len(sibs) < maxsize:
+            downstream.add(dts)
+            for sts in sibs:
+                # Traverse linear chains _back_ to root tasks
+                while (
+                    sts is not ts
+                    and sts not in downstream
+                    and (psts := _previous_in_linear_chain(sts, widely_shared_cutoff))
+                ):
+                    # TODO check seen
+                    sts = psts
+
+                if (
+                    sts is ts
+                    or len(sts.dependents)
+                    >= widely_shared_cutoff  # ignore widely-shared siblings
+                    or sts in downstream  # a->b, b->c, a->c. downstream takes priority.
+                ):
+                    continue
+
+                siblings.add(sts)
+                if len(siblings) > maxsize:
+                    return None
+
+    # NOTE: `downstream` isn't used for scheduling yet, since family scheduling
+    # only applies to root tasks. But it would be used for STA.
+    return siblings, downstream
+
+
+def update_msgs(msgs: dict[str, list[Any]], new: dict[str, list[Any]]) -> None:
+    for k, new_msgs in new.items():
+        m = msgs.get(k)
+        if m is not None:
+            m.extend(new_msgs)
+        else:
+            msgs[k] = new_msgs
 
 
 class KilledWorker(Exception):

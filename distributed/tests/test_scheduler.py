@@ -16,7 +16,7 @@ from typing import ClassVar, Collection
 import cloudpickle
 import psutil
 import pytest
-from tlz import concat, first, merge, valmap
+from tlz import concat, first, merge, partition, valmap
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
@@ -136,6 +136,7 @@ async def test_decide_worker_with_restrictions(client, s, a, b, c):
     assert x.key in a.data or x.key in b.data
 
 
+@pytest.mark.parametrize("sat", [float("inf"), 1.0])
 @pytest.mark.parametrize("ndeps", [0, 1, 4])
 @pytest.mark.parametrize(
     "nthreads",
@@ -144,13 +145,13 @@ async def test_decide_worker_with_restrictions(client, s, a, b, c):
         [("127.0.0.1", 3), ("127.0.0.1", 2), ("127.0.0.1", 1)],
     ],
 )
-def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
+def test_decide_worker_coschedule_order_neighbors(sat, ndeps, nthreads):
     @gen_cluster(
         client=True,
         nthreads=nthreads,
         config={
             "distributed.scheduler.work-stealing": False,
-            "distributed.scheduler.worker-saturation": float("inf"),
+            "distributed.scheduler.worker-saturation": sat,
         },
     )
     async def test_decide_worker_coschedule_order_neighbors_(c, s, *workers):
@@ -200,6 +201,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
                 **trivial_deps,
             )
 
+        # dask.visualize(x, x.sum(axis=1, split_every=20), optimize_graph=True)
         xx, xsum = dask.persist(x, x.sum(axis=1, split_every=20))
         await xsum
 
@@ -251,7 +253,6 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
     test_decide_worker_coschedule_order_neighbors_()
 
 
-@pytest.mark.slow
 @gen_cluster(
     nthreads=[("", 2)] * 4,
     client=True,
@@ -355,7 +356,7 @@ async def test_queued_paused_unpaused(c, s, a, b, queue):
 
     f1s = c.map(slowinc, range(16))
     f2s = c.map(slowinc, f1s)
-    final = c.submit(sum, *f2s)
+    final = c.submit(sum, f2s)
     del f1s, f2s
 
     while not a.data or not b.data:
@@ -404,6 +405,100 @@ async def test_queued_remove_add_worker(c, s, a, b):
 
         await event.set()
         await wait(fs)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 6,
+    config={"distributed.scheduler.worker-saturation": 1.0},
+)
+async def test_utilization_over_co_assignment(c, s, *workers):
+    event = Event()
+    roots = [delayed(event.wait)(5, dask_key_name=f"r-{i}") for i in range(6)]
+    aggs = [
+        delayed(list)(rs, dask_key_name=f"a-{i}")
+        for i, rs in enumerate(partition(2, roots))
+    ]
+    fs = c.compute(aggs)
+
+    await async_wait_for(lambda: any(w.state.tasks for w in workers), timeout=5)
+
+    # All workers should be used, even though it breaks up co-assignment
+    assert not s.idle
+    rts = [s.tasks[r.key] for r in roots]
+    assert {ts.processing_on for ts in rts} == set(s.workers.values())
+
+    await event.set()
+    await wait(fs)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 2)] * 2,
+    config={"distributed.scheduler.worker-saturation": 1.0},
+)
+async def test_co_assign_scale_up(c, s, a, b):
+    event = Event()
+    devent = delayed(event)
+    roots = [devent.wait(5, dask_key_name=f"r-{i}") for i in range(16)]
+    aggs = [
+        delayed(list)(rs, dask_key_name=f"a-{i}")
+        for i, rs in enumerate(partition(4, roots))
+    ]
+    fs = c.compute(aggs)
+
+    await async_wait_for(lambda: s.queued, timeout=5)
+
+    # Each family of roots should be processing on the same worker, or not at all
+    for agg in aggs:
+        tss = s.tasks[agg.key].dependencies
+        proc = [ts.processing_on for ts in tss]
+        assert proc == proc[:1] * len(proc)
+
+    async with Worker(s.address, nthreads=2) as w:
+        await async_wait_for(lambda: w.state.tasks, timeout=5)
+        assert len(w.state.tasks) == 5  # 4 `r` + the Event
+
+        # Each family of roots should be processing on the same worker, or not at all
+        for agg in aggs:
+            tss = s.tasks[agg.key].dependencies
+            proc = [ts.processing_on for ts in tss]
+            assert len(set(proc)) == 1, proc
+
+        await event.set()
+        await wait(fs)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 2)] * 3,
+    config={"distributed.scheduler.worker-saturation": 1.0},
+)
+async def test_co_assign_scale_down(c, s, *workers):
+    event = Event()
+    roots = [delayed(event.wait)(5, dask_key_name=f"r-{i}") for i in range(16)]
+    aggs = [
+        delayed(list)(rs, dask_key_name=f"a-{i}")
+        for i, rs in enumerate(partition(4, roots))
+    ]
+    # pin roots so we can check where they are at the end
+    fs = c.compute(aggs + roots)
+
+    await async_wait_for(lambda: s.queued, timeout=5)
+
+    await workers[0].close()
+    await event.set()
+    await wait(fs)
+
+    for r in roots:
+        ts = s.tasks[r.key]
+        assert len(ts.who_has) == 1, ts.who_has
+
+    for w in workers:
+        assert not w.transfer_incoming_log
+
+
+# TODO test _where_ tasks get assigned on scale-down. They should prefer to go near their siblings.
 
 
 @pytest.mark.parametrize(
