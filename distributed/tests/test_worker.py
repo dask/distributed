@@ -45,7 +45,7 @@ from distributed.comm.registry import backends
 from distributed.compatibility import LINUX, WINDOWS, to_thread
 from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
-from distributed.diagnostics.plugin import PackageInstall
+from distributed.diagnostics.plugin import PackageInstall, PipInstall
 from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
@@ -1828,6 +1828,34 @@ async def test_package_install_failing_does_not_restart_on_nanny(c, s, installer
         # Nanny does not restart
         assert n.status is Status.running
         assert set(s.workers) == {addr}
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_deprecated_pip_install(c, s, a):
+    with captured_logger(
+        "distributed.diagnostics.plugin", level=logging.INFO
+    ) as logger:
+        mocked = mock.Mock()
+        mocked.configure_mock(
+            **{"communicate.return_value": (b"", b""), "wait.return_value": 0}
+        )
+        with mock.patch(
+            "distributed.diagnostics.plugin.subprocess.Popen", return_value=mocked
+        ) as Popen:
+            with pytest.warns(
+                DeprecationWarning, match="PipInstall plugin is deprecated"
+            ):
+                await c.register_worker_plugin(
+                    PipInstall(packages=["requests"], pip_options=["--upgrade"])
+                )
+            assert Popen.call_count == 1
+            args = Popen.call_args[0][0]
+            assert "python" in args[0]
+            assert args[1:] == ["-m", "pip", "install", "--upgrade", "requests"]
+            logs = logger.getvalue()
+            assert "pip installing" in logs
+            assert "failed" not in logs
+            assert "restart" not in logs
 
 
 @gen_cluster(nthreads=[])

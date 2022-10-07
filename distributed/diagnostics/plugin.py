@@ -6,6 +6,7 @@ import socket
 import subprocess
 import sys
 import uuid
+import warnings
 import zipfile
 from collections.abc import Awaitable
 from typing import TYPE_CHECKING, Any, Literal
@@ -240,7 +241,6 @@ def _get_plugin_name(plugin: SchedulerPlugin | WorkerPlugin | NannyPlugin) -> st
         return funcname(type(plugin)) + "-" + str(uuid.uuid4())
 
 
-# TODO: Reinstantiate PipInstall plugin for deprecation cycle
 class PackageInstall(WorkerPlugin):
     """A Worker Plugin to install a set of packages using conda or pip
 
@@ -401,6 +401,49 @@ class PackageInstall(WorkerPlugin):
 
     def _compose_restarted_key(self, worker):
         return [self.name, "restarted", worker.nanny]
+
+
+class PipInstall(PackageInstall):
+    """A Worker Plugin to pip install a set of packages
+
+    This accepts a set of packages to install on all workers.
+    You can also optionally ask for the worker to restart itself after
+    performing this installation.
+
+    .. note::
+
+       This will increase the time it takes to start up
+       each worker. If possible, we recommend including the
+       libraries in the worker environment or image. This is
+       primarily intended for experimentation and debugging.
+
+    Parameters
+    ----------
+    packages : List[str]
+        A list of strings to place after "pip install" command
+    pip_options : List[str]
+        Additional options to pass to pip.
+    restart : bool, default False
+        Whether or not to restart the worker after pip installing
+        Only functions if the worker has an attached nanny process
+
+    Examples
+    --------
+    >>> from dask.distributed import PipInstall
+    >>> plugin = PipInstall(packages=["scikit-learn"], pip_options=["--upgrade"])
+
+    >>> client.register_worker_plugin(plugin)
+    """
+
+    def __init__(self, packages, pip_options=None, restart=False):
+        warnings.warn(
+            "the PipInstall plugin is deprecated, use the PackageInstall plugin instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(
+            packages, installer="pip", options=pip_options, restart=restart
+        )
 
 
 # Adapted from https://github.com/dask/distributed/issues/3560#issuecomment-596138522
