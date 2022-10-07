@@ -8,7 +8,7 @@ import sys
 import uuid
 import zipfile
 from collections.abc import Awaitable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from dask.utils import funcname, tmpfile
 
@@ -240,8 +240,9 @@ def _get_plugin_name(plugin: SchedulerPlugin | WorkerPlugin | NannyPlugin) -> st
         return funcname(type(plugin)) + "-" + str(uuid.uuid4())
 
 
-class PipInstall(WorkerPlugin):
-    """A Worker Plugin to pip install a set of packages
+# TODO: Reinstantiate PipInstall plugin for deprecation cycle
+class PackageInstall(WorkerPlugin):
+    """A Worker Plugin to install a set of packages using conda or pip
 
     This accepts a set of packages to install on all workers.
     You can also optionally ask for the worker to restart itself after
@@ -256,40 +257,70 @@ class PipInstall(WorkerPlugin):
 
     Parameters
     ----------
-    packages : List[str]
-        A list of strings to place after "pip install" command
-    pip_options : List[str]
-        Additional options to pass to pip.
-    restart : bool, default False
-        Whether or not to restart the worker after pip installing
+    packages
+        A list of packages (with optional versions) to install
+    options
+        Additional options to pass to the package installer
+    restart
+        Whether or not to restart the worker after installing the packages
         Only functions if the worker has an attached nanny process
 
     Examples
     --------
-    >>> from dask.distributed import PipInstall
-    >>> plugin = PipInstall(packages=["scikit-learn"], pip_options=["--upgrade"])
-
+    >>> from dask.distributed import PackageInstall
+    >>> plugin = PackageInstall(
+    ...     packages=["scikit-learn"], installer="pip", options=["--upgrade"]
+    ... )
     >>> client.register_worker_plugin(plugin)
     """
 
-    name = "pip"
+    INSTALLERS: set[str] = {"conda", "pip"}
 
-    def __init__(self, packages, pip_options=None, restart=False):
+    name: str
+    packages: list[str]
+    installer: Literal["conda", "pip"]
+    options: list[str]
+    restart: bool
+
+    def __init__(
+        self,
+        packages: list[str],
+        installer: Literal["conda", "pip"] = "pip",
+        options: list[str] | None = None,
+        restart: bool = False,
+    ):
         self.packages = packages
+        self._validate_installer(installer)
+        self.installer = installer
         self.restart = restart
-        self.pip_options = pip_options or []
-        self.id = f"pip-install-{uuid.uuid4()}"
+        self.options = options or []
+        self.name = f"{installer}-install-{uuid.uuid4()}"
+
+    @classmethod
+    def _validate_installer(cls, installer: str) -> None:
+        if installer not in cls.INSTALLERS:
+            raise ValueError(
+                f"Expected installer to be in {cls.INSTALLERS}; got '{installer}'"
+            )
 
     async def setup(self, worker):
+        self._validate_installer(self.installer)
+
         from distributed.semaphore import Semaphore
 
         async with (
             await Semaphore(max_leases=1, name=socket.gethostname(), register=True)
         ):
             if not await self._is_installed(worker):
-                logger.info("Pip installing the following packages: %s", self.packages)
+                logger.info(
+                    f"{self.installer} installing the following packages: %s",
+                    self.packages,
+                )
                 await self._set_installed(worker)
-                self._install()
+                if self.installer == "conda":
+                    self._conda_install()
+                else:
+                    self._pip_install()
             else:
                 logger.info(
                     "The following packages have already been installed: %s",
@@ -301,16 +332,40 @@ class PipInstall(WorkerPlugin):
                 await self._set_restarted(worker)
                 worker.loop.add_callback(worker.close_gracefully, restart=True)
 
-    def _install(self):
+    def _pip_install(self):
         proc = subprocess.Popen(
-            [sys.executable, "-m", "pip", "install"] + self.pip_options + self.packages,
+            [sys.executable, "-m", "pip", "install"] + self.options + self.packages,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
         _, stderr = proc.communicate()
         returncode = proc.wait()
         if returncode != 0:
-            msg = f"Pip install failed with '{stderr.decode().strip()}'"
+            msg = f"pip install failed with '{stderr.decode().strip()}'"
+            logger.error(msg)
+            raise RuntimeError(msg)
+
+    def _conda_install(self):
+        try:
+            from conda.cli.python_api import Commands, run_command
+        except ModuleNotFoundError as e:
+            msg = (
+                "conda install failed because conda could not be found. "
+                "Please make sure that conda is installed."
+            )
+            logger.error(msg)
+            raise RuntimeError(msg) from e
+        try:
+            _, stderr, returncode = run_command(
+                Commands.INSTALL, self.options + self.packages
+            )
+        except Exception as e:
+            msg = "conda install failed"
+            logger.error(msg, e)
+            raise RuntimeError(msg) from e
+
+        if returncode != 0:
+            msg = f"conda install failed with '{stderr.decode().strip()}'"
             logger.error(msg)
             raise RuntimeError(msg)
 
@@ -327,7 +382,7 @@ class PipInstall(WorkerPlugin):
 
     def _compose_installed_key(self):
         return [
-            self.id,
+            self.name,
             "installed",
             socket.gethostname(),
         ]
@@ -345,7 +400,7 @@ class PipInstall(WorkerPlugin):
         )
 
     def _compose_restarted_key(self, worker):
-        return [self.id, "restarted", worker.nanny]
+        return [self.name, "restarted", worker.nanny]
 
 
 # Adapted from https://github.com/dask/distributed/issues/3560#issuecomment-596138522

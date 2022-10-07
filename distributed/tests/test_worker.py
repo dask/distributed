@@ -45,7 +45,7 @@ from distributed.comm.registry import backends
 from distributed.compatibility import LINUX, WINDOWS, to_thread
 from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
-from distributed.diagnostics.plugin import PipInstall
+from distributed.diagnostics.plugin import PackageInstall
 from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.scheduler import Scheduler
@@ -1643,7 +1643,9 @@ async def test_pip_install(c, s, a):
             "distributed.diagnostics.plugin.subprocess.Popen", return_value=mocked
         ) as Popen:
             await c.register_worker_plugin(
-                PipInstall(packages=["requests"], pip_options=["--upgrade"])
+                PackageInstall(
+                    packages=["requests"], installer="pip", options=["--upgrade"]
+                )
             )
 
             args = Popen.call_args[0][0]
@@ -1651,7 +1653,7 @@ async def test_pip_install(c, s, a):
             assert args[1:] == ["-m", "pip", "install", "--upgrade", "requests"]
             assert Popen.call_count == 1
             logs = logger.getvalue()
-            assert "Pip installing" in logs
+            assert "pip installing" in logs
             assert "failed" not in logs
             assert "restart" not in logs
 
@@ -1675,7 +1677,9 @@ async def test_pip_install_fails(c, s, a, b):
             "distributed.diagnostics.plugin.subprocess.Popen", return_value=mocked
         ) as Popen:
             with pytest.raises(RuntimeError):
-                await c.register_worker_plugin(PipInstall(packages=["not-a-package"]))
+                await c.register_worker_plugin(
+                    PackageInstall(packages=["not-a-package"], installer="pip")
+                )
 
             assert Popen.call_count == 1
             logs = logger.getvalue()
@@ -1690,16 +1694,20 @@ async def test_pip_install_restarts_on_nanny(c, s):
         from unittest import mock
 
         mock.patch(
-            "distributed.diagnostics.plugin.PipInstall._install", return_value=None
+            "distributed.diagnostics.plugin.PackageInstall._pip_install", return_value=None
         ).start()
         """
     )
-    async with Nanny(s.address, preload=preload):
+    async with Nanny(s.address, preload=preload) as n:
         (addr,) = s.workers
         await c.register_worker_plugin(
-            PipInstall(packages=["requests"], pip_options=["--upgrade"], restart=True)
+            PackageInstall(
+                packages=["requests"],
+                installer="pip",
+                options=["--upgrade"],
+                restart=True,
+            )
         )
-
         # Wait until the worker is restarted
         while len(s.workers) != 1 or set(s.workers) == {addr}:
             await asyncio.sleep(0.01)
@@ -1712,7 +1720,7 @@ async def test_pip_install_failing_does_not_restart_on_nanny(c, s):
         from unittest import mock
 
         mock.patch(
-            "distributed.diagnostics.plugin.PipInstall._install", side_effect=RuntimeError
+            "distributed.diagnostics.plugin.PackageInstall._pip_install", side_effect=RuntimeError
         ).start()
         """
     )
@@ -1720,8 +1728,11 @@ async def test_pip_install_failing_does_not_restart_on_nanny(c, s):
         (addr,) = s.workers
         with pytest.raises(RuntimeError):
             await c.register_worker_plugin(
-                PipInstall(
-                    packages=["requests"], pip_options=["--upgrade"], restart=True
+                PackageInstall(
+                    packages=["requests"],
+                    installer="pip",
+                    options=["--upgrade"],
+                    restart=True,
                 )
             )
         # Nanny does not restart
@@ -1742,7 +1753,9 @@ async def test_pip_install_multiple_workers(c, s, a, b):
             "distributed.diagnostics.plugin.subprocess.Popen", return_value=mocked
         ) as Popen:
             await c.register_worker_plugin(
-                PipInstall(packages=["requests"], pip_options=["--upgrade"])
+                PackageInstall(
+                    packages=["requests"], installer="pip", options=["--upgrade"]
+                )
             )
 
             args = Popen.call_args[0][0]
@@ -1750,7 +1763,7 @@ async def test_pip_install_multiple_workers(c, s, a, b):
             assert args[1:] == ["-m", "pip", "install", "--upgrade", "requests"]
             assert Popen.call_count == 1
             logs = logger.getvalue()
-            assert "Pip installing" in logs
+            assert "pip installing" in logs
             assert "already been installed" in logs
 
 

@@ -31,7 +31,7 @@ from distributed.deploy import Adaptive, LocalCluster, SpecCluster, SSHCluster
 from distributed.diagnostics.plugin import (
     Environ,
     NannyPlugin,
-    PipInstall,
+    PackageInstall,
     SchedulerPlugin,
     UploadDirectory,
     UploadFile,
@@ -118,7 +118,7 @@ __all__ = [
     "MultiLock",
     "Nanny",
     "NannyPlugin",
-    "PipInstall",
+    "PackageInstall",
     "Pub",
     "Queue",
     "Reschedule",
