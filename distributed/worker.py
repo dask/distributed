@@ -1000,7 +1000,8 @@ class Worker(BaseWorker, ServerNode):
                 "workers": dict(self.bandwidth_workers),
                 "types": keymap(typename, self.bandwidth_types),
             },
-            spilled_nbytes={
+            managed_bytes=self.state.nbytes,
+            spilled_bytes={
                 "memory": spilled_memory,
                 "disk": spilled_disk,
             },

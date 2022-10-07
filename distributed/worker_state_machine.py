@@ -1208,6 +1208,9 @@ class WorkerState:
     #: and cancelled tasks. See also :meth:`executing_count`.
     executed_count: int
 
+    #: Total size of all tasks in memory
+    nbytes: int
+
     #: Actor tasks. See :doc:`actors`.
     actors: dict[str, object]
 
@@ -1293,6 +1296,7 @@ class WorkerState:
         self.constrained = HeapSet(key=operator.attrgetter("priority"))
         self.executing = set()
         self.in_flight_tasks = set()
+        self.nbytes = 0
         self.executed_count = 0
         self.long_running = set()
         self.transfer_message_bytes_limit = transfer_message_bytes_limit
@@ -1811,6 +1815,7 @@ class WorkerState:
         ts.state = "memory"
         if ts.nbytes is None:
             ts.nbytes = sizeof(value)
+        self.nbytes += ts.nbytes
 
         ts.type = type(value)
 
@@ -1950,6 +1955,8 @@ class WorkerState:
     def _transition_memory_released(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
+        assert ts.nbytes is not None
+        self.nbytes -= ts.nbytes
         recs, instructions = self._transition_generic_released(
             ts, stimulus_id=stimulus_id
         )
@@ -2881,7 +2888,8 @@ class WorkerState:
                     priority=priority,
                     stimulus_id=ev.stimulus_id,
                 )
-                self.tasks[dep_key].nbytes = nbytes
+                if dep_ts.state != "memory":
+                    dep_ts.nbytes = nbytes
 
                 # link up to child / parents
                 ts.dependencies.add(dep_ts)
@@ -3473,6 +3481,11 @@ class WorkerState:
             self.long_running,
         ):
             assert self.tasks[ts.key] is ts
+
+        expect_nbytes = sum(
+            self.tasks[key].nbytes or 0 for key in chain(self.data, self.actors)
+        )
+        assert self.nbytes == expect_nbytes, f"{self.nbytes=}; expected {expect_nbytes}"
 
         for ts in self.tasks.values():
             self.validate_task(ts)

@@ -6,7 +6,8 @@ import json
 import pytest
 from tornado.httpclient import AsyncHTTPClient
 
-from distributed import Event
+from distributed import Event, Worker, wait
+from distributed.sizeof import sizeof
 from distributed.utils_test import fetch_metrics, gen_cluster
 
 
@@ -15,12 +16,12 @@ async def test_prometheus(c, s, a):
     pytest.importorskip("prometheus_client")
 
     active_metrics = await fetch_metrics(a.http_server.port, prefix="dask_worker_")
-
     expected_metrics = {
         "dask_worker_tasks",
         "dask_worker_concurrent_fetch_requests",
         "dask_worker_threads",
         "dask_worker_latency_seconds",
+        "dask_worker_memory_bytes",
         "dask_worker_transfer_incoming_bytes",
         "dask_worker_transfer_incoming_count",
         "dask_worker_transfer_incoming_count_total",
@@ -42,7 +43,7 @@ async def test_prometheus(c, s, a):
             }
         )
 
-    assert active_metrics.keys() == expected_metrics
+    assert set(active_metrics) == expected_metrics
 
     # request data twice since there once was a case where metrics got registered
     # multiple times resulting in prometheus_client errors
@@ -61,7 +62,6 @@ async def test_prometheus_collect_task_states(c, s, a):
         }
         return active_metrics
 
-    expected_metrics = {"stored", "executing", "ready", "waiting"}
     assert not a.state.tasks
     active_metrics = await fetch_state_metrics()
     assert active_metrics == {
@@ -129,3 +129,92 @@ async def test_sitemap(s, a, b):
     assert "/sitemap.json" in out["paths"]
     assert "/health" in out["paths"]
     assert "/statics/css/base.css" in out["paths"]
+
+
+async def fetch_memory_metrics(w: Worker) -> dict[str, float]:
+    families = await fetch_metrics(w.http_server.port, prefix="dask_worker_")
+    active_metrics = {
+        sample.labels["type"]: sample.value
+        for sample in families["dask_worker_memory_bytes"].samples
+    }
+    assert active_metrics.keys() == {"managed", "unmanaged", "spilled"}
+    return active_metrics
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_prometheus_collect_memory_metrics(c, s, a):
+    pytest.importorskip("prometheus_client")
+
+    metrics = await fetch_memory_metrics(a)
+    assert metrics["managed"] == 0
+    assert metrics["spilled"] == 0
+    assert metrics["unmanaged"] > 50 * 2**20
+
+    x = c.submit(lambda: "foo", key="x")
+    await wait(x)
+    metrics = await fetch_memory_metrics(a)
+    assert metrics["managed"] == sizeof("foo")
+    assert metrics["spilled"] == 0
+
+    a.data.evict()
+    metrics = await fetch_memory_metrics(a)
+    assert metrics["managed"] == 0
+    assert metrics["spilled"] > 0
+    assert metrics["spilled"] != sizeof("foo")  # pickled bytes
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    config={
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": False,
+    },
+)
+async def test_prometheus_collect_memory_metrics_spill_disabled(c, s, a):
+    pytest.importorskip("prometheus_client")
+    assert isinstance(a.data, dict)
+
+    metrics = await fetch_memory_metrics(a)
+    assert metrics["managed"] == 0
+    assert metrics["spilled"] == 0
+    assert metrics["unmanaged"] > 50 * 2**20
+
+    x = c.submit(lambda: "foo", key="x")
+    await wait(x)
+    metrics = await fetch_memory_metrics(a)
+    assert metrics["managed"] == sizeof("foo")
+    assert metrics["spilled"] == 0
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    config={
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": False,
+    },
+)
+async def test_prometheus_collect_memory_metrics_bogus_sizeof(c, s, a):
+    """Test that managed memory never goes above process memory and that unmanaged
+    memory never goes below 0, no matter how large the output of sizeof() is
+    """
+    pytest.importorskip("prometheus_client")
+
+    metrics = await fetch_memory_metrics(a)
+    assert metrics["managed"] == 0
+    assert metrics["unmanaged"] > 50 * 2**20
+    assert metrics["spilled"] == 0
+
+    class C:
+        def __sizeof__(self):
+            return 2**40
+
+    x = c.submit(C, key="x")
+    await wait(x)
+    assert a.state.nbytes > 2**40
+
+    metrics = await fetch_memory_metrics(a)
+    assert 50 * 2**20 < metrics["managed"] < 100 * 2**30  # capped to process memory
+    assert metrics["unmanaged"] == 0  # floored to 0
+    assert metrics["spilled"] == 0

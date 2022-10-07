@@ -567,15 +567,68 @@ class WorkerState:
 
     @property
     def memory(self) -> MemoryState:
+        """Polished memory metrics for the worker.
+
+        **Design note on managed memory**
+
+        There are two measures available for managed memory:
+
+        - ``self.nbytes``
+        - ``self.metrics["managed_bytes"]``
+
+        At rest, the two numbers must be identical. However, ``self.nbytes`` is
+        immediately updated through the batched comms as soon as each task lands in
+        memory on the worker; ``self.metrics["managed_bytes"]`` instead is updated by
+        the heartbeat, which can lag several seconds behind.
+
+        Below we are mixing likely newer managed memory info from ``self.nbytes`` with
+        process and spilled memory from the heartbeat. This is deliberate, so that
+        managed memory total is updated more frequently.
+
+        Managed memory directly and immediately contributes to optimistic memory, which
+        is in turn used in Active Memory Manager heuristics (at the moment of writing;
+        more uses will likely be added in the future). So it's important to have it
+        up to date; much more than it is for process memory.
+
+        Having up-to-date managed memory info as soon as the scheduler learns about
+        task completion also substantially simplifies unit tests.
+
+        The flip side of this design is that it may cause some noise in the
+        unmanaged_recent measure. e.g.:
+
+        1. Delete 100MB of managed data
+        2. The updated managed memory reaches the scheduler faster than the
+           updated process memory
+        3. There's a blip where the scheduler thinks that there's a sudden 100MB
+           increase in unmanaged_recent, since process memory hasn't changed but managed
+           memory has decreased by 100MB
+        4. When the heartbeat arrives, process memory goes down and so does the
+           unmanaged_recent.
+
+        This is OK - one of the main reasons for the unmanaged_recent / unmanaged_old
+        split is exactly to concentrate all the noise in unmanaged_recent and exclude it
+        from optimistic memory, which is used for heuristics.
+
+        Something that is less OK, but also less frequent, is that the sudden deletion
+        of spilled keys will cause a negative blip of managed_in_memory:
+
+        1. Delete 100MB of spilled data
+        2. The updated managed memory *total* reaches the scheduler faster than the
+           updated spilled portion
+        3. This causes managed_in_memory to temporarily plummet and be replaced by
+           unmanaged_recent, while managed_spilled remains unaltered
+        4. When the heartbeat arrives, managed_in_memory goes back up, unmanaged_recent
+           goes back down, and managed_spilled goes down by 100MB as it should have to
+           begin with.
+
+        https://github.com/dask/distributed/issues/6002 will let us solve this.
+        """
         return MemoryState(
-            # metrics["memory"] is None if the worker sent a heartbeat before its
-            # SystemMonitor ever had a chance to run
-            process=self.metrics["memory"] or 0,
-            # self.nbytes is instantaneous; metrics may lag behind by a heartbeat
+            process=self.metrics["memory"],
             managed_in_memory=max(
-                0, self.nbytes - self.metrics["spilled_nbytes"]["memory"]
+                0, self.nbytes - self.metrics["spilled_bytes"]["memory"]
             ),
-            managed_spilled=self.metrics["spilled_nbytes"]["disk"],
+            managed_spilled=self.metrics["spilled_bytes"]["disk"],
             unmanaged_old=self._memory_unmanaged_old,
         )
 
@@ -3922,8 +3975,7 @@ class Scheduler(SchedulerState, ServerNode):
         # ws._nbytes is updated at a different time and sizeof() may not be accurate,
         # so size may be (temporarily) negative; floor it to zero.
         size = max(
-            0,
-            metrics["memory"] - ws.nbytes + metrics["spilled_nbytes"]["memory"],
+            0, metrics["memory"] - ws.nbytes + metrics["spilled_bytes"]["memory"]
         )
 
         ws._memory_unmanaged_history.append((local_now, size))
