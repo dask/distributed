@@ -23,7 +23,7 @@ async def test_prometheus(c, s, a):
         "dask_worker_concurrent_fetch_requests",
         "dask_worker_threads",
         "dask_worker_latency_seconds",
-        "dask_worker_memory",
+        "dask_worker_memory_bytes",
         "dask_worker_transfer_incoming_bytes",
         "dask_worker_transfer_incoming_count",
         "dask_worker_transfer_incoming_count_total",
@@ -64,7 +64,6 @@ async def test_prometheus_collect_task_states(c, s, a):
         }
         return active_metrics
 
-    expected_metrics = {"stored", "executing", "ready", "waiting"}
     assert not a.state.tasks
     active_metrics = await fetch_state_metrics()
     assert active_metrics == {
@@ -143,7 +142,7 @@ async def test_prometheus_collect_memory_metrics(c, s, spill):
         families = await fetch_metrics(w.http_server.port, prefix="dask_worker_")
         active_metrics = {
             sample.labels["type"]: sample.value
-            for sample in families["dask_worker_memory"].samples
+            for sample in families["dask_worker_memory_bytes"].samples
         }
         assert active_metrics.keys() == {"managed", "unmanaged", "spilled"}
         return active_metrics

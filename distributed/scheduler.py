@@ -608,6 +608,20 @@ class WorkerState:
         This is OK - one of the main reasons for the unmanaged_recent / unmanaged_old
         split is exactly to concentrate all the noise in unmanaged_recent and exclude it
         from optimistic memory, which is used for heuristics.
+
+        Something that is less OK, but also less frequent, is that the sudden deletion
+        of spilled keys will cause a negative blip of managed_in_memory:
+
+        1. Delete 100MB of spilled data
+        2. The updated managed memory *total* reaches the scheduler faster than the
+           updated spilled portion
+        3. This causes managed_in_memory to temporarily plummet and be replaced by
+           unmanaged_recent, while managed_spilled remains unaltered
+        4. When the heartbeat arrives, managed_in_memory goes back up, unmanaged_recent
+           goes back down, and managed_spilled goes down by 100MB as it should have to
+           begin with.
+
+        https://github.com/dask/distributed/issues/6002 will let us solve this.
         """
         return MemoryState(
             # metrics["memory"] is None if the worker sent a heartbeat before its

@@ -66,7 +66,7 @@ class WorkerMetricCollector(PrometheusCollector):
         process_memory = self.server.monitor.get_process_memory()
 
         memory = GaugeMetricFamily(
-            self.build_name("memory"),
+            self.build_name("memory_bytes"),
             "Memory breakdown",
             labels=["type"],
         )
