@@ -28,7 +28,7 @@ from concurrent.futures import Executor
 from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TextIO, TypeVar, cast
 
 from tlz import first, keymap, pluck
 from tornado.ioloop import IOLoop, PeriodicCallback
@@ -43,7 +43,6 @@ from dask.utils import (
     key_split,
     parse_bytes,
     parse_timedelta,
-    stringify,
     tmpdir,
     typename,
 )
@@ -3204,27 +3203,90 @@ def add_gpu_metrics():
     DEFAULT_STARTUP_INFORMATION["gpu"] = gpu_startup
 
 
-def print(*args, **kwargs):
-    """Dask print function
-    This prints both wherever this function is run, and also in the user's
-    client session
+def print(
+    *args,
+    sep: str | None = " ",
+    end: str | None = "\n",
+    file: TextIO | None = None,
+    flush: bool = False,
+) -> None:
+    """
+    A drop-in replacement of the built-in ``print`` function for remote printing
+    from workers to clients. If called from outside a dask worker, its arguments
+    are passed directly to ``builtins.print()``. If called by code running on a
+    worker, then in addition to printing locally, any clients connected
+    (possibly remotely) to the scheduler managing this worker will receive an
+    event instructing them to print the same output to their own standard output
+    or standard error streams. For example, the user can perform simple
+    debugging of remote computations by including calls to this ``print``
+    function in the submitted code and inspecting the output in a local Jupyter
+    notebook or interpreter session.
+
+    All arguments behave the same as those of ``builtins.print()``, with the
+    exception that the ``file`` keyword argument, if specified, must either be
+    ``sys.stdout`` or ``sys.stderr``; arbitrary file-like objects are not
+    allowed.
+
+    All non-keyword arguments are converted to strings using ``str()`` and
+    written to the stream, separated by ``sep`` and followed by ``end``. Both
+    ``sep`` and ``end`` must be strings; they can also be ``None``, which means
+    to use the default values. If no objects are given, ``print()`` will just
+    write ``end``.
+
+    Optional keyword arguments
+    --------------------------
+    sep : str, optional
+        String inserted between values, default a space.
+    end : str, optional
+        String appended after the last value, default a newline.
+    file : ``sys.stdout`` or ``sys.stderr``, optional
+        Defaults to the current sys.stdout.
+    flush : bool, default False
+        Whether to forcibly flush the stream.
+
+    Example
+    -------
+    >>> from dask.distributed import Client, print
+    >>> client = distributed.Client(...)
+    >>> def worker_function():
+    ...     print("Hello from worker!")
+    >>> client.submit(worker_function)
+    <Future: finished, type: NoneType, key: worker_function-...>
+    Hello from worker!
     """
     try:
         worker = get_worker()
     except ValueError:
         pass
     else:
+        # We are in a worker: prepare all of the print args and kwargs to be
+        # serialized over the wire to the client.
         msg = {
-            "args": tuple(stringify(arg) for arg in args),
-            "kwargs": {k: stringify(v) for k, v in kwargs.items()},
+            # According to the Python stdlib docs, builtin print() simply calls
+            # str() on each positional argument, so we do the same here.
+            "args": tuple(map(str, args)),
+            "sep": sep,
+            "end": end,
+            "flush": flush,
         }
+        if file == sys.stdout:
+            msg["file"] = 1  # type: ignore
+        elif file == sys.stderr:
+            msg["file"] = 2  # type: ignore
+        elif file is not None:
+            raise TypeError(
+                f"Remote printing to arbitrary file objects is not supported. file "
+                f"kwarg must be one of None, sys.stdout, or sys.stderr; got: {file!r}"
+            )
         worker.log_event("print", msg)
 
-    builtins.print(*args, **kwargs)
+    builtins.print(*args, sep=sep, end=end, file=file, flush=flush)
 
 
 def warn(*args, **kwargs):
-    """Dask warn function
+    """
+    Dask warn function
+
     This raises a warning both wherever this function is run, and also
     in the user's client session
     """

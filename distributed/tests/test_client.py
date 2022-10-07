@@ -7278,16 +7278,69 @@ async def test_log_event_warn_dask_warns(c, s, a, b):
 
 
 @gen_cluster(client=True, Worker=Nanny)
-async def test_print(c, s, a, b, capsys):
+async def test_print_remote(c, s, a, b, capsys):
     from dask.distributed import print
 
     def foo():
+        print("Hello!", 123)
+
+    def bar():
         print("Hello!", 123, sep=":")
 
-    await c.submit(foo)
+    def baz():
+        print("Hello!", 123, sep=":", end="")
 
+    def frotz():
+        # like builtin print(), None values for kwargs should be same as
+        # defaults " ", "\n", sys.stdout, False, respectively.
+        # (But note we don't really have a good way to test for flushes.)
+        print("Hello!", 123, sep=None, end=None, file=None, flush=None)
+
+    def plugh():
+        # no positional arguments
+        print(sep=":", end=".")
+
+    def print_stdout():
+        print("meow", file=sys.stdout)
+
+    def print_stderr():
+        print("meow", file=sys.stderr)
+
+    def print_badfile():
+        print("meow", file="my arbitrary file object")
+
+    capsys.readouterr()  # drop any output captured so far
+
+    await c.submit(foo)
     out, err = capsys.readouterr()
-    assert "Hello!:123" in out
+    assert "Hello! 123\n" == out
+
+    await c.submit(bar)
+    out, err = capsys.readouterr()
+    assert "Hello!:123\n" == out
+
+    await c.submit(baz)
+    out, err = capsys.readouterr()
+    assert "Hello!:123" == out
+
+    await c.submit(frotz)
+    out, err = capsys.readouterr()
+    assert "Hello! 123\n" == out
+
+    await c.submit(plugh)
+    out, err = capsys.readouterr()
+    assert "." == out
+
+    await c.submit(print_stdout)
+    out, err = capsys.readouterr()
+    assert "meow\n" == out and "" == err
+
+    await c.submit(print_stderr)
+    out, err = capsys.readouterr()
+    assert "meow\n" == err and "" == out
+
+    with pytest.raises(TypeError):
+        await c.submit(print_badfile)
 
 
 @gen_cluster(client=True, Worker=Nanny)
@@ -7303,13 +7356,18 @@ async def test_print_non_msgpack_serializable(c, s, a, b, capsys):
     assert "<object object at" in out
 
 
-def test_print_simple(capsys):
+def test_print_local(capsys):
     from dask.distributed import print
 
-    print("Hello!", 123, sep=":")
+    capsys.readouterr()  # drop any output captured so far
 
+    print("Hello!", 123, sep=":")
     out, err = capsys.readouterr()
-    assert "Hello!:123" in out
+    assert "Hello!:123\n" == out
+
+    print("Hello!", 123, sep=":", local_too=False)
+    out, err = capsys.readouterr()
+    assert "" == out
 
 
 def _verify_cluster_dump(
