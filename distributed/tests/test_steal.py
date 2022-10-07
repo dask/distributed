@@ -17,7 +17,7 @@ import pytest
 from tlz import merge, sliding_window
 
 import dask
-from dask.utils import key_split
+from dask.utils import key_split, parse_bytes
 
 from distributed import (
     Client,
@@ -60,11 +60,6 @@ pytestmark = pytest.mark.ci1
 # Most tests here are timing-dependent
 setup_module = nodebug_setup_module
 teardown_module = nodebug_teardown_module
-
-
-@pytest.fixture(params=[True, False])
-def recompute_saturation(request):
-    yield request.param
 
 
 @gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
@@ -666,7 +661,7 @@ async def test_steal_more_attractive_tasks(c, s, a, *rest):
     assert any(future.key in w.state.tasks for w in rest)
 
 
-async def assert_balanced(inp, expected, recompute_saturation, c, s, *workers):
+async def assert_balanced(inp, expected, c, s, *workers):
     steal = s.extensions["stealing"]
     await steal.stop()
     ev = Event()
@@ -700,9 +695,7 @@ async def assert_balanced(inp, expected, recompute_saturation, c, s, *workers):
 
     while len([ts for ts in s.tasks.values() if ts.processing_on]) < len(futures):
         await asyncio.sleep(0.001)
-    if recompute_saturation:
-        for ws in s.workers.values():
-            s._reevaluate_occupancy_worker(ws)
+
     try:
         for _ in range(10):
             steal.balance()
@@ -767,9 +760,9 @@ async def assert_balanced(inp, expected, recompute_saturation, c, s, *workers):
         ),
     ],
 )
-def test_balance(inp, expected, recompute_saturation):
+def test_balance(inp, expected):
     async def test_balance_(*args, **kwargs):
-        await assert_balanced(inp, expected, recompute_saturation, *args, **kwargs)
+        await assert_balanced(inp, expected, *args, **kwargs)
 
     config = {
         "distributed.scheduler.default-task-durations": {str(i): 1 for i in range(10)}
@@ -834,20 +827,25 @@ async def test_do_not_steal_communication_heavy_tasks(c, s, a, b):
 
 @gen_cluster(
     client=True,
-    config={"distributed.scheduler.default-task-durations": {"slowadd": 0.001}},
+    config={"distributed.scheduler.default-task-durations": {"blocked_add": 0.001}},
 )
 async def test_steal_communication_heavy_tasks(c, s, a, b):
     steal = s.extensions["stealing"]
     await steal.stop()
     x = c.submit(mul, b"0", int(s.bandwidth), workers=a.address)
     y = c.submit(mul, b"1", int(s.bandwidth), workers=b.address)
+    event = Event()
+
+    def blocked_add(x, y, event):
+        event.wait()
+        return x + y
 
     futures = [
         c.submit(
-            slowadd,
+            blocked_add,
             x,
             y,
-            delay=1,
+            event=event,
             pure=False,
             workers=a.address,
             allow_other_workers=True,
@@ -858,9 +856,11 @@ async def test_steal_communication_heavy_tasks(c, s, a, b):
     while not any(f.key in s.tasks and s.tasks[f.key].processing_on for f in futures):
         await asyncio.sleep(0.01)
 
+    await steal.start()
     steal.balance()
-
     await steal.stop()
+    await event.set()
+    await c.gather(futures)
 
 
 @gen_cluster(client=True)
@@ -962,7 +962,7 @@ async def test_dont_steal_long_running_tasks(c, s, a, b):
     await c.submit(inc, 1)  # learn duration
 
     long_tasks = c.map(long, [0.5, 0.6], workers=a.address, allow_other_workers=True)
-    while sum(len(ws.processing) for ws in s.workers.values()) < 2:  # let them start
+    while sum(len(ws.long_running) for ws in s.workers.values()) < 2:  # let them start
         await asyncio.sleep(0.01)
 
     start = time()
@@ -976,7 +976,6 @@ async def test_dont_steal_long_running_tasks(c, s, a, b):
     incs = c.map(inc, range(100), workers=a.address, allow_other_workers=True)
 
     await asyncio.sleep(0.2)
-
     await wait(long_tasks)
 
     for t in long_tasks:
@@ -1152,15 +1151,11 @@ async def test_steal_concurrent_simple(c, s, *workers):
     assert not ws2.has_what
 
 
-@gen_cluster(
-    client=True,
-    config={
-        "distributed.scheduler.work-stealing-interval": 1_000_000,
-    },
-)
+@gen_cluster(client=True)
 async def test_steal_reschedule_reset_in_flight_occupancy(c, s, *workers):
     # https://github.com/dask/distributed/issues/5370
     steal = s.extensions["stealing"]
+    await steal.stop()
     w0 = workers[0]
     roots = c.map(
         inc,
@@ -1356,6 +1351,7 @@ async def test_reschedule_concurrent_requests_deadlock(c, s, *workers):
     assert msgs in (expect1, expect2, expect3)
 
 
+@pytest.mark.skip("executing heartbeats not considered yet")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 async def test_correct_bad_time_estimate(c, s, *workers):
     """Initial time estimation causes the task to not be considered for
@@ -1446,7 +1442,7 @@ async def test_steal_very_fast_tasks(c, s, *workers):
     assert (ntasks_per_worker < ideal * 1.5).all(), (ideal, ntasks_per_worker)
 
 
-def test_balance_even_with_replica(recompute_saturation):
+def test_balance_even_with_replica():
     dependencies = {"a": 1}
     dependency_placement = [["a"], ["a"]]
     task_placement = [[["a"], ["a"]], []]
@@ -1463,11 +1459,10 @@ def test_balance_even_with_replica(recompute_saturation):
         dependency_placement,
         task_placement,
         _correct_placement,
-        recompute_saturation,
     )
 
 
-def test_balance_to_replica(recompute_saturation):
+def test_balance_to_replica():
     dependencies = {"a": 2}
     dependency_placement = [["a"], ["a"], []]
     task_placement = [[["a"], ["a"]], [], []]
@@ -1485,11 +1480,10 @@ def test_balance_to_replica(recompute_saturation):
         dependency_placement,
         task_placement,
         _correct_placement,
-        recompute_saturation,
     )
 
 
-def test_balance_multiple_to_replica(recompute_saturation):
+def test_balance_multiple_to_replica():
     dependencies = {"a": 6}
     dependency_placement = [["a"], ["a"], []]
     task_placement = [[["a"], ["a"], ["a"], ["a"], ["a"], ["a"], ["a"], ["a"]], [], []]
@@ -1514,11 +1508,10 @@ def test_balance_multiple_to_replica(recompute_saturation):
         dependency_placement,
         task_placement,
         _correct_placement,
-        recompute_saturation,
     )
 
 
-def test_balance_to_larger_dependency(recompute_saturation):
+def test_balance_to_larger_dependency():
     dependencies = {"a": 2, "b": 1}
     dependency_placement = [["a", "b"], ["a"], ["b"]]
     task_placement = [[["a", "b"], ["a", "b"], ["a", "b"]], [], []]
@@ -1536,12 +1529,10 @@ def test_balance_to_larger_dependency(recompute_saturation):
         dependency_placement,
         task_placement,
         _correct_placement,
-        recompute_saturation,
     )
 
 
 def test_balance_prefers_busier_with_dependency():
-    recompute_saturation = True
     dependencies = {"a": 5, "b": 1}
     dependency_placement = [["a"], ["a", "b"], []]
     task_placement = [
@@ -1570,7 +1561,6 @@ def test_balance_prefers_busier_with_dependency():
         dependency_placement,
         task_placement,
         _correct_placement,
-        recompute_saturation,
         # This test relies on disabling queueing to flag workers as idle
         config={
             "distributed.scheduler.worker-saturation": float("inf"),
@@ -1583,7 +1573,6 @@ def _run_dependency_balance_test(
     dependency_placement: list[list[str]],
     task_placement: list[list[list[str]]],
     correct_placement_fn: Callable[[list[list[list[str]]]], bool],
-    recompute_saturation: bool,
     config: dict | None = None,
 ) -> None:
     """Run a test for balancing with task dependencies according to the provided
@@ -1604,8 +1593,6 @@ def _run_dependency_balance_test(
         index of the outer list. Each task is a list of names of dependencies.
     correct_placement_fn
         Callable used to determine if stealing placed the tasks as expected.
-    recompute_saturation
-        Whether to recompute worker saturation before stealing.
     config
         Optional configuration to apply to the test.
     See Also
@@ -1625,7 +1612,6 @@ def _run_dependency_balance_test(
                 dependency_placement,
                 task_placement,
                 correct_placement_fn,
-                recompute_saturation,
                 permutation,
                 *args,
                 **kwargs,
@@ -1635,6 +1621,7 @@ def _run_dependency_balance_test(
             client=True,
             nthreads=[("", 1)] * len(task_placement),
             config=merge(
+                NO_AMM,
                 config or {},
                 {
                     "distributed.scheduler.unknown-task-duration": "1s",
@@ -1648,7 +1635,6 @@ async def _dependency_balance_test_permutation(
     dependency_placement: list[list[str]],
     task_placement: list[list[list[str]]],
     correct_placement_fn: Callable[[list[list[list[str]]]], bool],
-    recompute_saturation: bool,
     permutation: list[int],
     c: Client,
     s: Scheduler,
@@ -1669,8 +1655,6 @@ async def _dependency_balance_test_permutation(
         index of the outer list. Each task is a list of names of dependencies.
     correct_placement_fn
         Callable used to determine if stealing placed the tasks as expected.
-    recompute_saturation
-        Whether to recompute worker saturation before stealing.
     permutation
         Permutation of workers to use for this run.
 
@@ -1698,9 +1682,12 @@ async def _dependency_balance_test_permutation(
         workers,
     )
 
-    if recompute_saturation:
-        for ws in s.workers.values():
-            s._reevaluate_occupancy_worker(ws)
+    # Re-evaluate idle/saturated classification to avoid outdated classifications due to
+    # the initialization order of workers. On a real cluster, this would get constantly
+    # updated by tasks being added or completing.
+    for ws in s.workers.values():
+        s.check_idle_saturated(ws)
+
     try:
         for _ in range(20):
             steal.balance()
@@ -1869,3 +1856,17 @@ def assert_task_placement(expected, s, workers):
     """Assert that tasks are placed on the workers as expected."""
     actual = _get_task_placement(s, workers)
     assert _equal_placement(actual, expected)
+
+
+# Reproducer from https://github.com/dask/distributed/issues/6573
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 4,
+)
+async def test_trivial_workload_should_not_cause_work_stealing(c, s, *workers):
+    root = dask.delayed(lambda n: "x" * n)(parse_bytes("1MiB"), dask_key_name="root")
+    results = [dask.delayed(lambda *args: None)(root, i) for i in range(1000)]
+    futs = c.compute(results)
+    await c.gather(futs)
+    events = s.events["stealing"]
+    assert len(events) == 0

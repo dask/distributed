@@ -1973,7 +1973,7 @@ class StealingEvents(DashboardComponent):
         current = len(self.scheduler.events["stealing"])
         n = current - self.last
 
-        log = [log[-i][1] for i in range(1, n + 1) if isinstance(log[-i][1], list)]
+        log = [log[-i][1][1] for i in range(1, n + 1) if log[-i][1][0] == "request"]
         self.last = current
 
         if log:

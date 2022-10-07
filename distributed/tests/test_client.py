@@ -5158,13 +5158,10 @@ async def test_long_running_not_in_occupancy(c, s, a, raise_exception):
         await asyncio.sleep(0.01)
     await a.heartbeat()
 
-    s._set_duration_estimate(ts, ws)
     assert s.workers[a.address].occupancy == 0
     assert s.total_occupancy == 0
     assert ws.occupancy == 0
 
-    s._ongoing_background_tasks.call_soon(s.reevaluate_occupancy, 0)
-    assert s.workers[a.address].occupancy == 0
     await l.release()
 
     with (

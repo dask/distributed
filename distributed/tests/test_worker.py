@@ -3198,7 +3198,7 @@ async def test_worker_status_sync(s, a):
             "prev-status": "running",
             "status": "closing_gracefully",
         },
-        {"action": "remove-worker", "processing-tasks": {}},
+        {"action": "remove-worker", "processing-tasks": set()},
         {"action": "retired"},
     ]
 

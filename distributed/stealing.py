@@ -257,6 +257,7 @@ class WorkStealing(SchedulerPlugin):
         cost_multiplier = transfer_time / compute_time
 
         level = int(round(log2(cost_multiplier) + 6))
+
         if level < 1:
             level = 1
         elif level >= len(self.cost_multipliers):
@@ -286,8 +287,11 @@ class WorkStealing(SchedulerPlugin):
                 thief.occupancy,
             )
 
-            victim_duration = victim.processing[ts]
-
+            # TODO: occupancy no longer concats linearily so we can't easily
+            # assume that the network cost would go down by that much
+            victim_duration = self.scheduler.get_task_duration(
+                ts
+            ) + self.scheduler.get_comm_cost(ts, victim)
             thief_duration = self.scheduler.get_task_duration(
                 ts
             ) + self.scheduler.get_comm_cost(ts, thief)
@@ -343,10 +347,7 @@ class WorkStealing(SchedulerPlugin):
         try:
             _log_msg = [key, state, victim.address, thief.address, stimulus_id]
 
-            if ts.state != "processing":
-                self.scheduler._reevaluate_occupancy_worker(thief)
-                self.scheduler._reevaluate_occupancy_worker(victim)
-            elif (
+            if (
                 state in _WORKER_STATE_UNDEFINED
                 # If our steal information is somehow stale we need to reschedule
                 or state in _WORKER_STATE_CONFIRM
@@ -367,15 +368,8 @@ class WorkStealing(SchedulerPlugin):
             elif state in _WORKER_STATE_CONFIRM:
                 self.remove_key_from_stealable(ts)
                 ts.processing_on = thief
-                duration = victim.processing.pop(ts)
-                victim.occupancy -= duration
-                self.scheduler.total_occupancy -= duration
-                if not victim.processing:
-                    self.scheduler.total_occupancy -= victim.occupancy
-                    victim.occupancy = 0
-                thief.processing[ts] = info["thief_duration"]
-                thief.occupancy += info["thief_duration"]
-                self.scheduler.total_occupancy += info["thief_duration"]
+                victim.remove_from_processing(ts)
+                thief.add_to_processing(ts)
                 self.put_key_in_stealable(ts)
 
                 self.scheduler.send_task_to_worker(thief.address, ts)
@@ -446,19 +440,19 @@ class WorkStealing(SchedulerPlugin):
                         i += 1
                         if not (thief := _get_thief(s, ts, potential_thieves)):
                             continue
-                        task_occ_on_victim = victim.processing.get(ts)
-                        if task_occ_on_victim is None:
+                        if ts not in victim.processing:
                             stealable.discard(ts)
                             continue
 
                         occ_thief = self._combined_occupancy(thief)
                         occ_victim = self._combined_occupancy(victim)
-                        comm_cost = self.scheduler.get_comm_cost(ts, thief)
+                        comm_cost_thief = self.scheduler.get_comm_cost(ts, thief)
+                        comm_cost_victim = self.scheduler.get_comm_cost(ts, victim)
                         compute = self.scheduler.get_task_duration(ts)
 
                         if (
-                            occ_thief + comm_cost + compute
-                            <= occ_victim - task_occ_on_victim / 2
+                            occ_thief + comm_cost_thief + compute
+                            <= occ_victim - (comm_cost_victim + compute) / 2
                         ):
                             self.move_task_request(ts, victim, thief)
                             log.append(
@@ -466,7 +460,7 @@ class WorkStealing(SchedulerPlugin):
                                     start,
                                     level,
                                     ts.key,
-                                    task_occ_on_victim,
+                                    comm_cost_victim + compute,
                                     victim.address,
                                     occ_victim,
                                     thief.address,
@@ -487,7 +481,7 @@ class WorkStealing(SchedulerPlugin):
                     )
 
             if log:
-                self.log(log)
+                self.log(("request", log))
                 self.count += 1
             stop = time()
             if s.digests:
@@ -510,7 +504,9 @@ class WorkStealing(SchedulerPlugin):
         keys = {key.key if not isinstance(key, str) else key for key in keys_or_ts}
         out = []
         for _, L in self.scheduler.get_events(topic="stealing"):
-            if not isinstance(L, list):
+            if L[0] == "request":
+                L = L[1]
+            else:
                 L = [L]
             for t in L:
                 if any(x in keys for x in t):
