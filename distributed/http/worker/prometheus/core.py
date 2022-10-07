@@ -62,8 +62,8 @@ class WorkerMetricCollector(PrometheusCollector):
             spilled_memory, spilled_disk = self.server.data.spilled_total
         except AttributeError:
             spilled_memory, spilled_disk = 0, 0  # spilling is disabled
-        managed_memory = self.server.state.nbytes - spilled_memory
         process_memory = self.server.monitor.get_process_memory()
+        managed_memory = min(process_memory, self.server.state.nbytes - spilled_memory)
 
         memory = GaugeMetricFamily(
             self.build_name("memory_bytes"),

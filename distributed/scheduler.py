@@ -624,12 +624,7 @@ class WorkerState:
         https://github.com/dask/distributed/issues/6002 will let us solve this.
         """
         return MemoryState(
-            # metrics["memory"] is None if the worker sent a heartbeat before its
-            # SystemMonitor ever had a chance to run
-            process=self.metrics["memory"] or 0,
-            # Since the two measures are misaligned in time, the sudden deletion of
-            # spilled keys may result in a temporary blip where managed_in_memory goes
-            # into negative territory.
+            process=self.metrics["memory"],
             managed_in_memory=max(
                 0, self.nbytes - self.metrics["spilled_bytes"]["memory"]
             ),
