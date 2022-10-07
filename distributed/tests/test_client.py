@@ -7265,6 +7265,14 @@ async def test_log_event_warn(c, s, a, b):
     with pytest.warns(UserWarning, match="Hello!"):
         await c.submit(foo)
 
+    def bar():
+        # missing "message" key should log TypeError
+        get_worker().log_event("warn", {})
+
+    with captured_logger(logging.getLogger("distributed.client")) as log:
+        await c.submit(bar)
+        assert "TypeError" in log.getvalue()
+
 
 @gen_cluster(client=True)
 async def test_log_event_warn_dask_warns(c, s, a, b):
@@ -7365,6 +7373,36 @@ async def test_print_remote(c, s, a, b, capsys):
 
     with pytest.raises(TypeError):
         await c.submit(print_badfile)
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_print_manual(c, s, a, b, capsys):
+    def foo():
+        get_worker().log_event("print", "Hello!")
+
+    capsys.readouterr()  # drop any output captured so far
+
+    await c.submit(foo)
+    out, err = capsys.readouterr()
+    assert "Hello!\n" == out
+
+    def print_otherfile():
+        # this should log a TypeError in the client
+        get_worker().log_event("print", {"args": ("hello",), "file": "bad value"})
+
+    with captured_logger(logging.getLogger("distributed.client")) as log:
+        await c.submit(print_otherfile)
+        assert "TypeError" in log.getvalue()
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_print_manual_bad_args(c, s, a, b, capsys):
+    def foo():
+        get_worker().log_event("print", {"args": "not a tuple"})
+
+    with captured_logger(logging.getLogger("distributed.client")) as log:
+        await c.submit(foo)
+        assert "TypeError" in log.getvalue()
 
 
 @gen_cluster(client=True, Worker=Nanny)
