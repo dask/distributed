@@ -15,6 +15,7 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from numbers import Number
 from operator import add
+from textwrap import dedent
 from time import sleep
 from unittest import mock
 
@@ -1629,51 +1630,128 @@ async def test_bad_startup(s):
         pass
 
 
-@gen_cluster(client=True)
-async def test_pip_install(c, s, a, b):
-    with mock.patch(
-        "distributed.diagnostics.plugin.subprocess.Popen.communicate",
-        return_value=(b"", b""),
-    ) as p1:
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_pip_install(c, s, a):
+    with captured_logger(
+        "distributed.diagnostics.plugin", level=logging.INFO
+    ) as logger:
+        mocked = mock.Mock()
+        mocked.configure_mock(
+            **{"communicate.return_value": (b"", b""), "wait.return_value": 0}
+        )
         with mock.patch(
-            "distributed.diagnostics.plugin.subprocess.Popen", return_value=p1
-        ) as p2:
-            p1.communicate.return_value = b"", b""
-            p1.wait.return_value = 0
+            "distributed.diagnostics.plugin.subprocess.Popen", return_value=mocked
+        ) as Popen:
             await c.register_worker_plugin(
                 PipInstall(packages=["requests"], pip_options=["--upgrade"])
             )
 
-            args = p2.call_args[0][0]
+            args = Popen.call_args[0][0]
             assert "python" in args[0]
             assert args[1:] == ["-m", "pip", "install", "--upgrade", "requests"]
+            assert Popen.call_count == 1
+            logs = logger.getvalue()
+            assert "Pip installing" in logs
+            assert "failed" not in logs
+            assert "restart" not in logs
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
 async def test_pip_install_fails(c, s, a, b):
     with captured_logger(
         "distributed.diagnostics.plugin", level=logging.ERROR
     ) as logger:
-        with mock.patch(
-            "distributed.diagnostics.plugin.subprocess.Popen.communicate",
-            return_value=(b"", b"error"),
-        ) as p1:
-            with mock.patch(
-                "distributed.diagnostics.plugin.subprocess.Popen", return_value=p1
-            ) as p2:
-                p1.communicate.return_value = (
+        mocked = mock.Mock()
+        mocked.configure_mock(
+            **{
+                "communicate.return_value": (
                     b"",
                     b"Could not find a version that satisfies the requirement not-a-package",
-                )
-                p1.wait.return_value = 1
+                ),
+                "wait.return_value": 1,
+            }
+        )
+        with mock.patch(
+            "distributed.diagnostics.plugin.subprocess.Popen", return_value=mocked
+        ) as Popen:
+            with pytest.raises(RuntimeError):
                 await c.register_worker_plugin(PipInstall(packages=["not-a-package"]))
 
-                assert "not-a-package" in logger.getvalue()
+            assert Popen.call_count == 1
+            logs = logger.getvalue()
+            assert "install failed" in logs
+            assert "not-a-package" in logs
 
 
-#             args = p2.call_args[0][0]
-#             assert "python" in args[0]
-#             assert args[1:] == ["-m", "pip", "--upgrade", "install", "requests"]
+@gen_cluster(client=True, nthreads=[])
+async def test_pip_install_restarts_on_nanny(c, s):
+    preload = dedent(
+        """\
+        from unittest import mock
+
+        mock.patch(
+            "distributed.diagnostics.plugin.PipInstall._install", return_value=None
+        ).start()
+        """
+    )
+    async with Nanny(s.address, preload=preload):
+        (addr,) = s.workers
+        await c.register_worker_plugin(
+            PipInstall(packages=["requests"], pip_options=["--upgrade"], restart=True)
+        )
+
+        # Wait until the worker is restarted
+        while len(s.workers) != 1 or set(s.workers) == {addr}:
+            await asyncio.sleep(0.01)
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_pip_install_failing_does_not_restart_on_nanny(c, s):
+    preload = dedent(
+        """\
+        from unittest import mock
+
+        mock.patch(
+            "distributed.diagnostics.plugin.PipInstall._install", side_effect=RuntimeError
+        ).start()
+        """
+    )
+    async with Nanny(s.address, preload=preload) as n:
+        (addr,) = s.workers
+        with pytest.raises(RuntimeError):
+            await c.register_worker_plugin(
+                PipInstall(
+                    packages=["requests"], pip_options=["--upgrade"], restart=True
+                )
+            )
+        # Nanny does not restart
+        assert n.status is Status.running
+        assert set(s.workers) == {addr}
+
+
+@gen_cluster(client=True, nthreads=[("", 1), ("", 1)])
+async def test_pip_install_multiple_workers(c, s, a, b):
+    with captured_logger(
+        "distributed.diagnostics.plugin", level=logging.INFO
+    ) as logger:
+        mocked = mock.Mock()
+        mocked.configure_mock(
+            **{"communicate.return_value": (b"", b""), "wait.return_value": 0}
+        )
+        with mock.patch(
+            "distributed.diagnostics.plugin.subprocess.Popen", return_value=mocked
+        ) as Popen:
+            await c.register_worker_plugin(
+                PipInstall(packages=["requests"], pip_options=["--upgrade"])
+            )
+
+            args = Popen.call_args[0][0]
+            assert "python" in args[0]
+            assert args[1:] == ["-m", "pip", "install", "--upgrade", "requests"]
+            assert Popen.call_count == 1
+            logs = logger.getvalue()
+            assert "Pip installing" in logs
+            assert "already been installed" in logs
 
 
 @gen_cluster(nthreads=[])
