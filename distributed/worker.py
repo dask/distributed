@@ -3233,8 +3233,8 @@ def print(
     to use the default values. If no objects are given, ``print()`` will just
     write ``end``.
 
-    Optional keyword arguments
-    --------------------------
+    Parameters
+    ----------
     sep : str, optional
         String inserted between values, default a space.
     end : str, optional
@@ -3244,8 +3244,8 @@ def print(
     flush : bool, default False
         Whether to forcibly flush the stream.
 
-    Example
-    -------
+    Examples
+    --------
     >>> from dask.distributed import Client, print
     >>> client = distributed.Client(...)
     >>> def worker_function():
@@ -3307,8 +3307,8 @@ def warn(
     ``source`` are ignored by clients because they would not be meaningful in
     the client's thread.
 
-    Example
-    -------
+    Examples
+    --------
     >>> from dask.distributed import Client, warn
     >>> client = Client()
     >>> def do_warn():
