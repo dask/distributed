@@ -254,27 +254,28 @@ class UCX(Comm):
     ) -> int:
         if self.closed():
             raise CommClosedError("Endpoint is closed -- unable to send message")
-        try:
-            if serializers is None:
-                serializers = ("cuda", "dask", "pickle", "error")
-            # msg can also be a list of dicts when sending batched messages
-            frames = await to_frames(
-                msg,
-                serializers=serializers,
-                on_error=on_error,
-                allow_offload=self.allow_offload,
-            )
-            nframes = len(frames)
-            cuda_frames = tuple(hasattr(f, "__cuda_array_interface__") for f in frames)
-            sizes = tuple(nbytes(f) for f in frames)
-            cuda_send_frames, send_frames = zip(
-                *(
-                    (is_cuda, each_frame)
-                    for is_cuda, each_frame in zip(cuda_frames, frames)
-                    if nbytes(each_frame) > 0
-                )
-            )
 
+        if serializers is None:
+            serializers = ("cuda", "dask", "pickle", "error")
+        # msg can also be a list of dicts when sending batched messages
+        frames = await to_frames(
+            msg,
+            serializers=serializers,
+            on_error=on_error,
+            allow_offload=self.allow_offload,
+        )
+        nframes = len(frames)
+        cuda_frames = tuple(hasattr(f, "__cuda_array_interface__") for f in frames)
+        sizes = tuple(nbytes(f) for f in frames)
+        cuda_send_frames, send_frames = zip(
+            *(
+                (is_cuda, each_frame)
+                for is_cuda, each_frame in zip(cuda_frames, frames)
+                if nbytes(each_frame) > 0
+            )
+        )
+
+        try:
             # Send meta data
 
             # Send close flag and number of frames (_Bool, int64)
