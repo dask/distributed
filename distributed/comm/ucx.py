@@ -364,12 +364,18 @@ class UCX(Comm):
                 raise CommClosedError(
                     f"Connection closed by writer.\nInner exception: {e!r}"
                 )
-            msg = await from_frames(
-                frames,
-                deserialize=self.deserialize,
-                deserializers=deserializers,
-                allow_offload=self.allow_offload,
-            )
+
+            try:
+                msg = await from_frames(
+                    frames,
+                    deserialize=self.deserialize,
+                    deserializers=deserializers,
+                    allow_offload=self.allow_offload,
+                )
+            except EOFError:
+                # Frames possibly garbled or truncated by communication error
+                self.abort()
+                raise CommClosedError("Aborted stream on truncated data")
             return msg
 
     async def close(self):
