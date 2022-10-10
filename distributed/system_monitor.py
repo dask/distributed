@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 from collections import deque
-from typing import Any
+from typing import Any, cast
 
 import psutil
 
@@ -70,8 +70,7 @@ class SystemMonitor:
             else:
                 if disk_ioc is None:  # pragma: nocover
                     # diskless machine
-                    # FIXME https://github.com/python/typeshed/pull/8829
-                    monitor_disk_io = False  # type: ignore[unreachable]
+                    monitor_disk_io = False
                 else:
                     self._last_disk_io_counters = disk_ioc
                     self.quantities["host_disk_io.read_bps"] = deque(maxlen=maxlen)
@@ -142,7 +141,7 @@ class SystemMonitor:
             self._last_net_io_counters = net_ioc
 
         if self.monitor_disk_io:
-            disk_ioc = psutil.disk_io_counters()
+            disk_ioc = cast(psutil._common.sdiskio, psutil.disk_io_counters())
             last_disk = self._last_disk_io_counters
             result["host_disk_io.read_bps"] = (
                 disk_ioc.read_bytes - last_disk.read_bytes
