@@ -672,7 +672,7 @@ def _handle_warn(event):
             # TypeError makes sense here because it's analogous to calling a
             # function without a required positional argument
             raise TypeError(
-                "_handle_warn: client receive warn a event missing the required "
+                "_handle_warn: client received a warn event missing the required "
                 '"message" argument.'
             )
         warnings.warn(
