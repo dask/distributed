@@ -327,7 +327,7 @@ class UCX(Comm):
             header = struct.unpack(header_fmt, header)
             cuda_frames, sizes = header[:nframes], header[nframes:]
         except BaseException as e:
-            # In addition to UCX exceptions, may be CancelledError or a another
+            # In addition to UCX exceptions, may be CancelledError or another
             # "low-level" exception. The only safe thing to do is to abort.
             # (See also https://github.com/dask/distributed/pull/6574).
             self.abort()
@@ -357,7 +357,7 @@ class UCX(Comm):
                 for each_frame in recv_frames:
                     await self.ep.recv(each_frame)
             except BaseException as e:
-                # In addition to UCX exceptions, may be CancelledError or a another
+                # In addition to UCX exceptions, may be CancelledError or another
                 # "low-level" exception. The only safe thing to do is to abort.
                 # (See also https://github.com/dask/distributed/pull/6574).
                 self.abort()
