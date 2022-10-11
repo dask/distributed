@@ -141,7 +141,8 @@ class SystemMonitor:
             self._last_net_io_counters = net_ioc
 
         if self.monitor_disk_io:
-            disk_ioc = cast(psutil._common.sdiskio, psutil.disk_io_counters())
+            disk_ioc = psutil.disk_io_counters()
+            assert disk_ioc is not None
             last_disk = self._last_disk_io_counters
             result["host_disk_io.read_bps"] = (
                 disk_ioc.read_bytes - last_disk.read_bytes
