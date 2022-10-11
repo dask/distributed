@@ -49,6 +49,7 @@ from distributed.utils_test import (
     cluster,
     dec,
     div,
+    freeze_data_fetching,
     gen_cluster,
     gen_test,
     inc,
@@ -294,7 +295,6 @@ async def test_graph_execution_width(c, s, *workers):
     assert max(Refcount.log) <= s.total_nthreads
 
 
-@pytest.mark.parametrize("queue", [True, False])
 @gen_cluster(
     client=True,
     nthreads=[("", 2)] * 2,
@@ -303,14 +303,10 @@ async def test_graph_execution_width(c, s, *workers):
         "distributed.worker.memory.target": False,
         "distributed.worker.memory.spill": False,
         "distributed.scheduler.work-stealing": False,
+        "distributed.scheduler.worker-saturation": 1.0,
     },
 )
-async def test_queued_paused_new_worker(c, s, a, b, queue):
-    if queue:
-        s.WORKER_SATURATION = 1.0
-    else:
-        s.WORKER_SATURATION = float("inf")
-
+async def test_queued_paused_new_worker(c, s, a, b):
     f1s = c.map(slowinc, range(16))
     f2s = c.map(slowinc, f1s)
     final = c.submit(sum, *f2s)
@@ -383,7 +379,9 @@ async def test_queued_paused_unpaused(c, s, a, b, queue):
     while not s.running:
         await asyncio.sleep(0.01)
 
-    assert not s.idle  # workers should have been (or already were) filled
+    if queue:
+        assert not s.idle  # workers should have been (or already were) filled
+    # If queuing is disabled, all workers might already be saturated when they un-pause.
 
     await wait(final)
 
@@ -412,9 +410,10 @@ async def test_queued_remove_add_worker(c, s, a, b):
 @pytest.mark.parametrize(
     "saturation_config, expected_task_counts",
     [
-        (2.5, (5, 2)),
-        ("2.5", (5, 2)),
+        (2.5, (5, 3)),
+        ("2.5", (5, 3)),
         (2.0, (4, 2)),
+        (1.1, (3, 2)),
         (1.0, (2, 1)),
         (-1.0, (1, 1)),
         (float("inf"), (6, 4))
@@ -656,14 +655,14 @@ async def test_scheduler_init_pulls_blocked_handlers_from_config(s):
 @gen_cluster()
 async def test_feed(s, a, b):
     def func(scheduler):
-        return dumps(dict(scheduler.workers))
+        return dumps({addr: ws.clean() for addr, ws in scheduler.workers.items()})
 
     comm = await connect(s.address)
     await comm.write({"op": "feed", "function": dumps(func), "interval": 0.01})
 
     for _ in range(5):
         response = await comm.read()
-        expected = dict(s.workers)
+        expected = {addr: ws.clean() for addr, ws in s.workers.items()}
         assert cloudpickle.loads(response) == expected
 
     await comm.close()
@@ -1453,21 +1452,6 @@ async def test_learn_occupancy_2(c, s, a, b):
     assert nproc * 0.1 < s.total_occupancy < nproc * 0.4
 
 
-@gen_cluster(client=True)
-async def test_occupancy_cleardown(c, s, a, b):
-    s.validate = False
-
-    # Inject excess values in s.occupancy
-    s.workers[a.address].occupancy = 2
-    s.total_occupancy += 2
-    futures = c.map(slowinc, range(100), delay=0.01)
-    await wait(futures)
-
-    # Verify that occupancy values have been zeroed out
-    assert abs(s.total_occupancy) < 0.01
-    assert all(ws.occupancy == 0 for ws in s.workers.values())
-
-
 @nodebug
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 30)
 async def test_balance_many_workers(c, s, *workers):
@@ -1495,31 +1479,40 @@ async def test_balance_many_workers_2(c, s, *workers):
 
 
 @gen_cluster(client=True)
-async def test_learn_occupancy_multiple_workers(c, s, a, b):
-    x = c.submit(slowinc, 1, delay=0.2, workers=a.address)
-    await asyncio.sleep(0.05)
-    futures = c.map(slowinc, range(100), delay=0.2)
-
-    await wait(x)
-
-    assert not any(v == 0.5 for w in s.workers.values() for v in w.processing.values())
-
-
-@gen_cluster(client=True)
 async def test_include_communication_in_occupancy(c, s, a, b):
-    await c.submit(slowadd, 1, 2, delay=0)
-    x = c.submit(operator.mul, b"0", int(s.bandwidth), workers=a.address)
-    y = c.submit(operator.mul, b"1", int(s.bandwidth * 1.5), workers=b.address)
+    x = c.submit(operator.mul, b"0", int(s.bandwidth) * 2, workers=a.address)
+    y = c.submit(operator.mul, b"1", int(s.bandwidth * 3), workers=b.address)
+    event = Event()
 
-    z = c.submit(slowadd, x, y, delay=1)
-    while z.key not in s.tasks or not s.tasks[z.key].processing_on:
+    def add_blocked(x, y, event):
+        event.wait()
+        return x + y
+
+    with freeze_data_fetching(b):
+        z = c.submit(add_blocked, x, y, event=event, pure=False)
+        while z.key not in s.tasks or not s.tasks[z.key].processing_on:
+            await asyncio.sleep(0.01)
+
+        ts = s.tasks[z.key]
+        ws = s.workers[b.address]
+        assert ts.processing_on == ws
+        # Occ should be 0.5s (CPU, unknown) + 2s (network)
+        occ = ws.occupancy
+        assert occ == 2.5
+        z2 = c.submit(add_blocked, x, y, event=event, pure=False, workers=b.address)
+        while z2.key not in s.tasks or not s.tasks[z2.key].processing_on:
+            await asyncio.sleep(0.01)
+        # Occ should be 2 * 0.5 (CPU, unknown) + 2s (network)
+        # Network cost for the same key should only cost once
+        occ2 = ws.occupancy
+        assert occ2 == 3
+    while s.tasks[x.key] not in ws.has_what:
         await asyncio.sleep(0.01)
-
-    ts = s.tasks[z.key]
-    assert ts.processing_on == s.workers[b.address]
-    assert s.workers[b.address].processing[ts] > 1
+    occ3 = ws.occupancy
+    # Occ should be 2 * 0.5 (CPU, unknown)
+    assert occ3 == 1
+    await event.set()
     await wait(z)
-    del z
 
 
 @gen_cluster(nthreads=[])
