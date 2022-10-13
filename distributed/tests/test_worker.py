@@ -1684,6 +1684,15 @@ async def test_conda_install(c, s, a):
             assert "restart" not in logs
 
 
+def test_package_install_fails_with_unknown_installer():
+    with pytest.raises(ValueError):
+        PackageInstall(packages=["requests"], installer="not-an-installer")
+
+    plugin = PackageInstall(packages=["not-a-package"], installer="pip")
+    with pytest.raises(ValueError):
+        plugin.installer = "not-an-installer"
+
+
 @gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
 async def test_pip_install_fails(c, s, a, b):
     with captured_logger(

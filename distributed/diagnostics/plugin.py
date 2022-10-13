@@ -278,9 +278,9 @@ class PackageInstall(WorkerPlugin):
 
     name: str
     packages: list[str]
-    installer: Literal["conda", "pip"]
     options: list[str]
     restart: bool
+    _installer: Literal["conda", "pip"]
 
     def __init__(
         self,
@@ -290,22 +290,24 @@ class PackageInstall(WorkerPlugin):
         restart: bool = False,
     ):
         self.packages = packages
-        self._validate_installer(installer)
         self.installer = installer
         self.restart = restart
         self.options = options or []
         self.name = f"{installer}-install-{uuid.uuid4()}"
 
-    @classmethod
-    def _validate_installer(cls, installer: str) -> None:
-        if installer not in cls.INSTALLERS:
+    @property
+    def installer(self) -> Literal["conda", "pip"]:
+        return self._installer
+
+    @installer.setter
+    def installer(self, value: Literal["conda", "pip"]) -> None:
+        if value not in self.INSTALLERS:
             raise ValueError(
-                f"Expected installer to be in {cls.INSTALLERS}; got '{installer}'"
+                f"Expected installer to be in {self.INSTALLERS}; got '{value}'"
             )
+        self._installer = value
 
     async def setup(self, worker):
-        self._validate_installer(self.installer)
-
         from distributed.semaphore import Semaphore
 
         async with (
