@@ -1,15 +1,15 @@
 from __future__ import annotations
 
+import abc
 import logging
 import os
 import socket
 import subprocess
 import sys
 import uuid
-import warnings
 import zipfile
 from collections.abc import Awaitable
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from dask.utils import funcname, tmpfile
 
@@ -241,7 +241,7 @@ def _get_plugin_name(plugin: SchedulerPlugin | WorkerPlugin | NannyPlugin) -> st
         return funcname(type(plugin)) + "-" + str(uuid.uuid4())
 
 
-class PackageInstall(WorkerPlugin):
+class PackageInstall(WorkerPlugin, abc.ABC):
     """A Worker Plugin to install a set of packages using conda or pip
 
     This accepts a set of packages to install on all workers.
@@ -274,38 +274,22 @@ class PackageInstall(WorkerPlugin):
     >>> client.register_worker_plugin(plugin)
     """
 
-    INSTALLERS: set[str] = {"conda", "pip"}
-
     name: str
     packages: list[str]
-    options: list[str]
     restart: bool
-    _installer: Literal["conda", "pip"]
 
     def __init__(
         self,
         packages: list[str],
-        installer: Literal["conda", "pip"] = "pip",
-        options: list[str] | None = None,
-        restart: bool = False,
+        restart: bool,
     ):
         self.packages = packages
-        self.installer = installer
         self.restart = restart
-        self.options = options or []
-        self.name = f"{installer}-install-{uuid.uuid4()}"
+        self.name = f"{self.installer}-install-{uuid.uuid4()}"
 
-    @property
-    def installer(self) -> Literal["conda", "pip"]:
-        return self._installer
-
-    @installer.setter
-    def installer(self, value: Literal["conda", "pip"]) -> None:
-        if value not in self.INSTALLERS:
-            raise ValueError(
-                f"Expected installer to be in {self.INSTALLERS}; got '{value}'"
-            )
-        self._installer = value
+    @abc.abstractproperty
+    def installer(self) -> str:
+        raise NotImplementedError
 
     async def setup(self, worker):
         from distributed.semaphore import Semaphore
@@ -319,10 +303,7 @@ class PackageInstall(WorkerPlugin):
                     self.packages,
                 )
                 await self._set_installed(worker)
-                if self.installer == "conda":
-                    self._conda_install()
-                else:
-                    self._pip_install()
+                self._install()
             else:
                 logger.info(
                     "The following packages have already been installed: %s",
@@ -334,42 +315,9 @@ class PackageInstall(WorkerPlugin):
                 await self._set_restarted(worker)
                 worker.loop.add_callback(worker.close_gracefully, restart=True)
 
-    def _pip_install(self):
-        proc = subprocess.Popen(
-            [sys.executable, "-m", "pip", "install"] + self.options + self.packages,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        _, stderr = proc.communicate()
-        returncode = proc.wait()
-        if returncode != 0:
-            msg = f"pip install failed with '{stderr.decode().strip()}'"
-            logger.error(msg)
-            raise RuntimeError(msg)
-
-    def _conda_install(self):
-        try:
-            from conda.cli.python_api import Commands, run_command
-        except ModuleNotFoundError as e:
-            msg = (
-                "conda install failed because conda could not be found. "
-                "Please make sure that conda is installed."
-            )
-            logger.error(msg)
-            raise RuntimeError(msg) from e
-        try:
-            _, stderr, returncode = run_command(
-                Commands.INSTALL, self.options + self.packages
-            )
-        except Exception as e:
-            msg = "conda install failed"
-            logger.error(msg)
-            raise RuntimeError(msg) from e
-
-        if returncode != 0:
-            msg = f"conda install failed with '{stderr.decode().strip()}'"
-            logger.error(msg)
-            raise RuntimeError(msg)
+    @abc.abstractmethod
+    def _install(self) -> None:
+        raise NotImplementedError
 
     async def _is_installed(self, worker):
         return await worker.client.get_metadata(
@@ -405,6 +353,44 @@ class PackageInstall(WorkerPlugin):
         return [self.name, "restarted", worker.nanny]
 
 
+class CondaInstall(PackageInstall):
+    _INSTALLER: str = "conda"
+
+    conda_options: list[str]
+
+    def __init__(self, packages, conda_options=None, restart=False):
+        super().__init__(packages, restart=restart)
+        self.conda_options = conda_options or []
+
+    @property
+    def installer(self) -> str:
+        return self._INSTALLER
+
+    def _install(self):
+        try:
+            from conda.cli.python_api import Commands, run_command
+        except ModuleNotFoundError as e:
+            msg = (
+                "conda install failed because conda could not be found. "
+                "Please make sure that conda is installed."
+            )
+            logger.error(msg)
+            raise RuntimeError(msg) from e
+        try:
+            _, stderr, returncode = run_command(
+                Commands.INSTALL, self.conda_options + self.packages
+            )
+        except Exception as e:
+            msg = "conda install failed"
+            logger.error(msg)
+            raise RuntimeError(msg) from e
+
+        if returncode != 0:
+            msg = f"conda install failed with '{stderr.decode().strip()}'"
+            logger.error(msg)
+            raise RuntimeError(msg)
+
+
 class PipInstall(PackageInstall):
     """A Worker Plugin to pip install a set of packages
 
@@ -437,15 +423,30 @@ class PipInstall(PackageInstall):
     >>> client.register_worker_plugin(plugin)
     """
 
+    _INSTALLER: str = "pip"
+
+    pip_options: list[str]
+
     def __init__(self, packages, pip_options=None, restart=False):
-        warnings.warn(
-            "the PipInstall plugin is deprecated, use the PackageInstall plugin instead",
-            DeprecationWarning,
-            stacklevel=2,
+        super().__init__(packages, restart=restart)
+        self.pip_options = pip_options or []
+
+    @property
+    def installer(self) -> str:
+        return self._INSTALLER
+
+    def _install(self) -> None:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "pip", "install"] + self.pip_options + self.packages,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
-        super().__init__(
-            packages, installer="pip", options=pip_options, restart=restart
-        )
+        _, stderr = proc.communicate()
+        returncode = proc.wait()
+        if returncode != 0:
+            msg = f"pip install failed with '{stderr.decode().strip()}'"
+            logger.error(msg)
+            raise RuntimeError(msg)
 
 
 # Adapted from https://github.com/dask/distributed/issues/3560#issuecomment-596138522
