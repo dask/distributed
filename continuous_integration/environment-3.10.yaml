@@ -42,7 +42,7 @@ dependencies:
   - zict  # overridden by git tip below
   - zstandard >=0.9.0
   - pip:
-      - git+https://github.com/douglasdavis/dask@new-cli
+      - git+https://github.com/dask/dask
       - git+https://github.com/dask/s3fs
       - git+https://github.com/dask/zict
       - git+https://github.com/fsspec/filesystem_spec

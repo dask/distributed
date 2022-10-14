@@ -2,7 +2,7 @@ numpydoc
 tornado
 toolz
 cloudpickle
-git+https://github.com/douglasdavis/dask@new-cli
+git+https://github.com/dask/dask
 sphinx
 dask-sphinx-theme>=3.0.0
 sphinx-click
