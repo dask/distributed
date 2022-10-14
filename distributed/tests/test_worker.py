@@ -1756,14 +1756,14 @@ async def test_conda_install_fails_on_returncode(c, s, a, b):
 
 
 class StubInstall(PackageInstall):
-    INSTALLER = "stub"
+    _INSTALLER = "stub"
 
     def __init__(self, packages: list[str], restart: bool = False):
         super().__init__(packages=packages, restart=restart)
 
     @property
     def installer(self) -> str:
-        return self.INSTALLER
+        return self._INSTALLER
 
     def _install(self) -> None:
         pass
@@ -1801,14 +1801,14 @@ async def test_package_install_restarts_on_nanny(c, s, a):
 
 
 class FailingInstall(PackageInstall):
-    INSTALLER = "fail"
+    _INSTALLER = "fail"
 
     def __init__(self, packages: list[str], restart: bool = False):
         super().__init__(packages=packages, restart=restart)
 
     @property
     def installer(self) -> str:
-        return self.INSTALLER
+        return self._INSTALLER
 
     def _install(self) -> None:
         raise RuntimeError()
