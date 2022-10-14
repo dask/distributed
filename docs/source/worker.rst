@@ -63,14 +63,14 @@ considered the same worker.
 
 If your computations are mostly numeric in nature (for example NumPy and Pandas
 computations) and release the GIL entirely then it is advisable to run
-``dask-worker`` processes with many threads and one process.  This reduces
+``dask worker`` processes with many threads and one process.  This reduces
 communication costs and generally simplifies deployment.
 
 If your computations are mostly Python code and don't release the GIL then it
-is advisable to run ``dask-worker`` processes with many processes and one
+is advisable to run ``dask worker`` processes with many processes and one
 thread per process::
 
-   $ dask-worker scheduler:8786 --nworkers 8 --nthreads 1
+   $ dask worker scheduler:8786 --nworkers 8 --nthreads 1
 
 This will launch 8 worker processes each of which has its own
 ThreadPoolExecutor of size 1.
@@ -85,7 +85,7 @@ code then this topic probably doesn't apply.
 Command Line tool
 -----------------
 
-Use the ``dask-worker`` command line tool to start an individual worker. For
+Use the ``dask worker`` command line tool to start an individual worker. For
 more details on the command line options, please have a look at the
 `command line tools documentation
 <https://docs.dask.org/en/latest/setup/cli.html#dask-worker>`_.

@@ -57,7 +57,7 @@ for more information on RabbitMQ and how to consume the messages.
        plugin = RabbitMQPlugin()
        scheduler.add_plugin(plugin)
 
-Run with: ``dask-scheduler --preload <filename.py>``
+Run with: ``dask scheduler --preload <filename.py>``
 
 Accessing Full Task State
 -------------------------

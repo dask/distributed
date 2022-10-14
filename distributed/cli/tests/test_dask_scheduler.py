@@ -40,7 +40,7 @@ def _get_dashboard_port(client: Client) -> int:
 
 
 def test_defaults(loop, requires_default_ports):
-    with popen(["dask-scheduler"]):
+    with popen(["dask", "scheduler"]):
 
         async def f():
             # Default behaviour is to listen on all addresses
@@ -53,7 +53,7 @@ def test_defaults(loop, requires_default_ports):
 
 def test_hostport(loop):
     port = open_port()
-    with popen(["dask-scheduler", "--no-dashboard", "--host", f"127.0.0.1:{port}"]):
+    with popen(["dask", "scheduler", "--no-dashboard", "--host", f"127.0.0.1:{port}"]):
 
         async def f():
             # The scheduler's main port can't be contacted from the outside
@@ -65,7 +65,7 @@ def test_hostport(loop):
 
 
 def test_no_dashboard(loop, requires_default_ports):
-    with popen(["dask-scheduler", "--no-dashboard"]):
+    with popen(["dask", "scheduler", "--no-dashboard"]):
         with Client(f"127.0.0.1:{Scheduler.default_port}", loop=loop):
             response = requests.get("http://127.0.0.1:8787/status/")
             assert response.status_code == 404
@@ -76,7 +76,7 @@ def test_dashboard(loop):
     port = open_port()
 
     with popen(
-        ["dask-scheduler", "--host", f"127.0.0.1:{port}"],
+        ["dask", "scheduler", "--host", f"127.0.0.1:{port}"],
     ):
 
         with Client(f"127.0.0.1:{port}", loop=loop) as c:
@@ -110,7 +110,8 @@ def test_dashboard_non_standard_ports(loop):
     port2 = open_port()
     with popen(
         [
-            "dask-scheduler",
+            "dask",
+            "scheduler",
             f"--port={port1}",
             f"--dashboard-address=:{port2}",
         ]
@@ -136,7 +137,8 @@ def test_multiple_protocols(loop):
     port2 = open_port()
     with popen(
         [
-            "dask-scheduler",
+            "dask",
+            "scheduler",
             "--protocol=tcp,ws",
             f"--port={port1},{port2}",
         ]
@@ -156,7 +158,8 @@ def test_dashboard_allowlist(loop):
     port = open_port()
     with popen(
         [
-            "dask-scheduler",
+            "dask",
+            "scheduler",
             f"--port={port}",
         ]
     ) as proc:
@@ -195,7 +198,8 @@ def test_interface(loop):
     port = open_port()
     with popen(
         [
-            "dask-scheduler",
+            "dask",
+            "scheduler",
             f"--port={port}",
             "--no-dashboard",
             "--interface",
@@ -204,7 +208,8 @@ def test_interface(loop):
     ) as s:
         with popen(
             [
-                "dask-worker",
+                "dask",
+                "worker",
                 f"127.0.0.1:{port}",
                 "--no-dashboard",
                 "--interface",
@@ -247,13 +252,14 @@ def test_pid_file(loop):
             assert proc.pid == pid
 
     with tmpfile() as s:
-        with popen(["dask-scheduler", "--pid-file", s, "--no-dashboard"]) as sched:
+        with popen(["dask", "scheduler", "--pid-file", s, "--no-dashboard"]) as sched:
             check_pidfile(sched, s)
 
         with tmpfile() as w:
             with popen(
                 [
-                    "dask-worker",
+                    "dask",
+                    "worker",
                     f"127.0.0.1:{port}",
                     "--pid-file",
                     w,
@@ -266,7 +272,15 @@ def test_pid_file(loop):
 def test_scheduler_port_zero(loop):
     with tmpfile() as fn:
         with popen(
-            ["dask-scheduler", "--no-dashboard", "--scheduler-file", fn, "--port", "0"]
+            [
+                "dask",
+                "scheduler",
+                "--no-dashboard",
+                "--scheduler-file",
+                fn,
+                "--port",
+                "0",
+            ]
         ):
             with Client(scheduler_file=fn, loop=loop) as c:
                 assert c.scheduler.port
@@ -278,7 +292,8 @@ def test_dashboard_port_zero(loop):
     port = open_port()
     with popen(
         [
-            "dask-scheduler",
+            "dask",
+            "scheduler",
             "--host",
             f"127.0.0.1:{port}",
             "--dashboard-address",
@@ -314,7 +329,8 @@ def test_preload_file(loop, tmp_path):
     with tmpfile() as fn:
         with popen(
             [
-                "dask-scheduler",
+                "dask",
+                "scheduler",
                 "--scheduler-file",
                 fn,
                 "--preload",
@@ -343,7 +359,8 @@ def test_preload_module(loop, tmp_path):
     with tmpfile() as fn:
         with popen(
             [
-                "dask-scheduler",
+                "dask",
+                "scheduler",
                 "--scheduler-file",
                 fn,
                 "--preload",
@@ -365,7 +382,8 @@ def test_preload_remote_module(loop, tmp_path):
     ):
         with popen(
             [
-                "dask-scheduler",
+                "dask",
+                "scheduler",
                 "--scheduler-file",
                 str(tmp_path / "scheduler-file.json"),
                 "--preload",
@@ -385,12 +403,12 @@ def test_preload_remote_module(loop, tmp_path):
 
 
 def test_preload_config(loop):
-    # Ensure dask-scheduler pulls the preload from the Dask config if
+    # Ensure dask scheduler pulls the preload from the Dask config if
     # not specified via a command line option
     with tmpfile() as fn:
         env = os.environ.copy()
         env["DASK_DISTRIBUTED__SCHEDULER__PRELOAD"] = PRELOAD_TEXT
-        with popen(["dask-scheduler", "--scheduler-file", fn], env=env):
+        with popen(["dask", "scheduler", "--scheduler-file", fn], env=env):
             with Client(scheduler_file=fn, loop=loop) as c:
                 assert (
                     c.run_on_scheduler(lambda dask_scheduler: dask_scheduler.foo)
@@ -428,7 +446,8 @@ def test_preload_command(loop):
             print(fn)
             with popen(
                 [
-                    "dask-scheduler",
+                    "dask",
+                    "scheduler",
                     "--scheduler-file",
                     fn,
                     "--preload",
@@ -458,7 +477,7 @@ def test_preload_command_default(loop):
         with tmpfile() as fn2:
             print(fn2)
             with popen(
-                ["dask-scheduler", "--scheduler-file", fn2, "--preload", path],
+                ["dask", "scheduler", "--scheduler-file", fn2, "--preload", path],
                 stdout=sys.stdout,
                 stderr=sys.stderr,
             ):
@@ -511,11 +530,12 @@ def dask_setup(worker):
 """
     port = open_port()
     with popen(
-        ["dask-scheduler", "--no-dashboard", "--host", f"127.0.0.1:{port}"]
+        ["dask", "scheduler", "--no-dashboard", "--host", f"127.0.0.1:{port}"]
     ) as s:
         with popen(
             [
-                "dask-worker",
+                "dask",
+                "worker",
                 f"localhost:{port}",
                 "--no-dashboard",
                 "--preload",
@@ -534,9 +554,11 @@ def dask_setup(worker):
 
 def test_multiple_workers(loop):
     scheduler_address = f"127.0.0.1:{open_port()}"
-    with popen(["dask-scheduler", "--no-dashboard", "--host", scheduler_address]) as s:
-        with popen(["dask-worker", scheduler_address, "--no-dashboard"]) as a:
-            with popen(["dask-worker", scheduler_address, "--no-dashboard"]) as b:
+    with popen(
+        ["dask", "scheduler", "--no-dashboard", "--host", scheduler_address]
+    ) as s:
+        with popen(["dask", "worker", scheduler_address, "--no-dashboard"]) as a:
+            with popen(["dask", "worker", scheduler_address, "--no-dashboard"]) as b:
                 with Client(scheduler_address, loop=loop) as c:
                     start = time()
                     while len(c.nthreads()) < 2:
@@ -571,3 +593,22 @@ def test_signal_handling(loop, sig):
         assert scheduler.returncode == 0
         assert "scheduler closing" in logs
         assert "end scheduler" in logs
+
+
+@pytest.mark.skipif(WINDOWS, reason="POSIX only")
+def test_deprecated_single_executable(loop):
+    port = open_port()
+    with popen(
+        [
+            "dask-scheduler",
+            "--no-dashboard",
+            f"--port={port}",
+        ],
+        capture_output=True,
+    ) as scheduler:
+        with Client(f"127.0.0.1:{port}", loop=loop) as c:
+            pass
+        scheduler.send_signal(signal.SIGTERM)
+        stdout, stderr = scheduler.communicate()
+        logs = stdout.decode()
+        assert "FutureWarning: dask-scheduler is deprecated" in logs

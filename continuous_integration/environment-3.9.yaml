@@ -48,5 +48,5 @@ dependencies:
   - zict
   - zstandard >=0.9.0
   - pip:
-      - git+https://github.com/dask/dask
+      - git+https://github.com/douglasdavis/dask@new-cli
       - keras

@@ -3327,10 +3327,10 @@ class Scheduler(SchedulerState, ServerNode):
     It maintains a consistent and valid view of the world even when listening
     to several clients at once.
 
-    A Scheduler is typically started either with the ``dask-scheduler``
+    A Scheduler is typically started either with the ``dask scheduler``
     executable::
 
-         $ dask-scheduler
+         $ dask scheduler
          Scheduler started at 127.0.0.1:8786
 
     Or within a LocalCluster a Client starts up without connection
@@ -3714,7 +3714,7 @@ class Scheduler(SchedulerState, ServerNode):
         for name, extension in extensions.items():
             self.extensions[name] = extension(self)
 
-        setproctitle("dask-scheduler [not started]")
+        setproctitle("dask scheduler [not started]")
         Scheduler._instances.add(self)
         self.rpc.allow_offload = False
 
@@ -3920,7 +3920,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.start_periodic_callbacks()
 
-        setproctitle(f"dask-scheduler [{self.address}]")
+        setproctitle(f"dask scheduler [{self.address}]")
         return self
 
     async def close(self, fast=None, close_workers=None):
@@ -3952,7 +3952,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.status = Status.closing
 
         logger.info("Scheduler closing...")
-        setproctitle("dask-scheduler [closing]")
+        setproctitle("dask scheduler [closing]")
 
         for preload in self.preloads:
             try:
@@ -4001,7 +4001,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.stop()
         await super().close()
 
-        setproctitle("dask-scheduler [closed]")
+        setproctitle("dask scheduler [closed]")
         disable_gc_diagnosis()
 
     ###########

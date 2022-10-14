@@ -282,12 +282,13 @@ def test_queue_in_task(loop):
     # worker in a separate Python process than the client
     with popen(
         [
-            "dask-scheduler",
+            "dask",
+            "scheduler",
             "--no-dashboard",
             f"--port={port}",
         ]
     ):
-        with popen(["dask-worker", f"127.0.0.1:{port}"]):
+        with popen(["dask", "worker", f"127.0.0.1:{port}"]):
             with Client(f"tcp://127.0.0.1:{port}", loop=loop) as c:
                 c.wait_for_workers(1)
 

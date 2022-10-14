@@ -61,7 +61,7 @@ class Worker(Process):
     remote_python: str
         Path to Python on remote node to run this worker.
     kwargs: dict
-        These will be passed through the dask-worker CLI to the
+        These will be passed through the dask worker CLI to the
         dask.distributed.Worker class
     """
 
@@ -204,7 +204,7 @@ class Scheduler(Process):
     remote_python: str
         Path to Python on remote node to run this scheduler.
     kwargs: dict
-        These will be passed through the dask-scheduler CLI to the
+        These will be passed through the dask scheduler CLI to the
         dask.distributed.Scheduler class
     """
 

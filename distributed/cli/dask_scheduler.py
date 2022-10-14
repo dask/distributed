@@ -25,7 +25,7 @@ logger = logging.getLogger("distributed.scheduler")
 pem_file_option_type = click.Path(exists=True, resolve_path=True)
 
 
-@click.command(context_settings=dict(ignore_unknown_options=True))
+@click.command(name="scheduler", context_settings=dict(ignore_unknown_options=True))
 @click.option("--host", type=str, default="", help="URI, IP or hostname of this server")
 @click.option("--port", type=str, default=None, help="Serving port")
 @click.option(
@@ -57,9 +57,6 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 )
 # XXX default port (or URI) values should be centralized somewhere
 @click.option(
-    "--bokeh-port", type=int, default=None, help="Deprecated.  See --dashboard-address"
-)
-@click.option(
     "--dashboard-address",
     type=str,
     default=":8787",
@@ -72,13 +69,6 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     default=True,
     required=False,
     help="Launch the Dashboard [default: --dashboard]",
-)
-@click.option(
-    "--bokeh/--no-bokeh",
-    "bokeh",
-    default=None,
-    required=False,
-    help="Deprecated.  See --dashboard/--no-dashboard.",
 )
 @click.option(
     "--jupyter/--no-jupyter",
@@ -132,10 +122,8 @@ def main(
     port,
     protocol,
     interface,
-    bokeh_port,
     show,
     dashboard,
-    bokeh,
     dashboard_prefix,
     use_xheaders,
     pid_file,
@@ -146,23 +134,19 @@ def main(
     jupyter,
     **kwargs,
 ):
+    """Launch a distributed scheduler."""
+
+    if "dask-scheduler" in sys.argv[0]:
+        warnings.warn(
+            "dask-scheduler is deprecated and will be removed in a future release; use `dask scheduler` instead",
+            FutureWarning,
+        )
+
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
     gc.set_threshold(g0 * 3, g1 * 3, g2 * 3)
 
     enable_proctitle_on_current()
     enable_proctitle_on_children()
-
-    if bokeh_port is not None:
-        warnings.warn(
-            "The --bokeh-port flag has been renamed to --dashboard-address. "
-            "Consider adding ``--dashboard-address :%d`` " % bokeh_port
-        )
-        dashboard_address = bokeh_port
-    if bokeh is not None:
-        warnings.warn(
-            "The --bokeh/--no-bokeh flag has been renamed to --dashboard/--no-dashboard. "
-        )
-        dashboard = bokeh
 
     if interface and "," in interface:
         interface = interface.split(",")
