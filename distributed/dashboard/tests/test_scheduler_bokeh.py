@@ -1082,7 +1082,8 @@ async def test_compute_per_key(c, s, a, b):
     await x
     y = await dask.delayed(inc)(1).persist()
     z = (x + x.T) - x.mean(axis=0)
-    await c.compute(z.sum())
+    zsum = z.sum()
+    await c.compute(zsum)
 
     mbk.update()
     http_client = AsyncHTTPClient()
