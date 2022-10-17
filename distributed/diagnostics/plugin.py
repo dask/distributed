@@ -389,7 +389,12 @@ class CondaInstall(PackageInstall):
 
     conda_options: list[str]
 
-    def __init__(self, packages: list[str], conda_options: list[str] | None = None, restart: bool = False):
+    def __init__(
+        self,
+        packages: list[str],
+        conda_options: list[str] | None = None,
+        restart: bool = False,
+    ):
         super().__init__(packages, restart=restart)
         self.conda_options = conda_options or []
 
