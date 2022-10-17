@@ -63,6 +63,7 @@ from dask.widgets import get_template
 
 from distributed import cluster_dump, preloading, profile
 from distributed import versions as version_module
+from distributed._coassignmnet_group import coassignmnet_groups
 from distributed._stories import scheduler_story
 from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
 from distributed.batched import BatchedSend
@@ -1306,6 +1307,8 @@ class TaskState:
 
     #: Task annotations
     annotations: dict[str, Any]
+
+    cogroup: int
 
     #: Cached hash of :attr:`~TaskState.client_key`
     _hash: int
@@ -4573,7 +4576,16 @@ class Scheduler(SchedulerState, ServerNode):
         # Compute recommendations
         recommendations: dict = {}
 
-        for ts in sorted(runnables, key=operator.attrgetter("priority"), reverse=True):
+        sorted_tasks = sorted(
+            runnables, key=operator.attrgetter("priority"), reverse=True
+        )
+
+        self.cogroups = coassignmnet_groups(sorted_tasks, start=max(self.cogroups) + 1)
+        for gr_ix, tss in self.cogroups.items():
+            for ts in tss:
+                ts.cogroup = gr_ix
+
+        for ts in sorted_tasks:
             if ts.state == "released" and ts.run_spec:
                 recommendations[ts.key] = "waiting"
 
