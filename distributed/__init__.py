@@ -29,8 +29,10 @@ from distributed.client import (
 from distributed.core import Status, connect, rpc
 from distributed.deploy import Adaptive, LocalCluster, SpecCluster, SSHCluster
 from distributed.diagnostics.plugin import (
+    CondaInstall,
     Environ,
     NannyPlugin,
+    PackageInstall,
     PipInstall,
     SchedulerPlugin,
     UploadDirectory,
@@ -109,6 +111,7 @@ __all__ = [
     "CancelledError",
     "Client",
     "CompatibleExecutor",
+    "CondaInstall",
     "Environ",
     "Event",
     "Future",
@@ -118,6 +121,7 @@ __all__ = [
     "MultiLock",
     "Nanny",
     "NannyPlugin",
+    "PackageInstall",
     "PipInstall",
     "Pub",
     "Queue",
