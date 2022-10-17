@@ -1249,12 +1249,10 @@ def popen(
         kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
 
     args = list(args)
-    if sys.platform.startswith("win"):
-        args[0] = os.path.join(sys.prefix, "Scripts", args[0])
-    else:
-        args[0] = os.path.join(
-            os.environ.get("DESTDIR", "") + sys.prefix, "bin", args[0]
-        )
+    # if sys.platform.startswith("win"):
+    #     args[0] = os.path.join(sys.prefix, "Scripts", args[0])
+    # else:
+    args[0] = os.path.join(os.environ.get("DESTDIR", "") + sys.prefix, "bin", args[0])
     with subprocess.Popen(args, **kwargs) as proc:
         try:
             yield proc
