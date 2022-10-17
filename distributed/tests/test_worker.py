@@ -1756,14 +1756,10 @@ async def test_conda_install_fails_on_returncode(c, s, a, b):
 
 
 class StubInstall(PackageInstall):
-    _INSTALLER = "stub"
+    INSTALLER = "stub"
 
     def __init__(self, packages: list[str], restart: bool = False):
         super().__init__(packages=packages, restart=restart)
-
-    @property
-    def installer(self) -> str:
-        return self._INSTALLER
 
     def install(self) -> None:
         pass
@@ -1774,8 +1770,8 @@ async def test_package_install_installs_once_with_multiple_workers(c, s, a, b):
     with captured_logger(
         "distributed.diagnostics.plugin", level=logging.INFO
     ) as logger:
-        install_mock = mock.Mock(name="_install")
-        with mock.patch.object(StubInstall, "_install", install_mock):
+        install_mock = mock.Mock(name="install")
+        with mock.patch.object(StubInstall, "install", install_mock):
             await c.register_worker_plugin(
                 StubInstall(
                     packages=["requests"],
@@ -1801,14 +1797,10 @@ async def test_package_install_restarts_on_nanny(c, s, a):
 
 
 class FailingInstall(PackageInstall):
-    _INSTALLER = "fail"
+    INSTALLER = "fail"
 
     def __init__(self, packages: list[str], restart: bool = False):
         super().__init__(packages=packages, restart=restart)
-
-    @property
-    def installer(self) -> str:
-        return self._INSTALLER
 
     def install(self) -> None:
         raise RuntimeError()
