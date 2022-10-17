@@ -2488,6 +2488,29 @@ async def fetch_metrics(port: int, prefix: str | None = None) -> dict[str, Any]:
     return families
 
 
+async def fetch_metrics_sample_names(port: int, prefix: str | None = None) -> set[str]:
+    """
+    Get all the names of samples returned by Prometheus.
+
+    This mostly matches list of metric families, but when there's `foo` (gauge) and `foo_total` (count)
+    these will both have `foo` as the family.
+    """
+    from prometheus_client.parser import text_string_to_metric_families
+
+    http_client = AsyncHTTPClient()
+    response = await http_client.fetch(f"http://localhost:{port}/metrics")
+    assert response.code == 200
+    txt = response.body.decode("utf8")
+    sample_names = set().union(
+        *[
+            {sample.name for sample in family.samples}
+            for family in text_string_to_metric_families(txt)
+            if prefix is None or family.name.startswith(prefix)
+        ]
+    )
+    return sample_names
+
+
 class SizeOf:
     """
     An object that returns exactly nbytes when inspected by dask.sizeof.sizeof

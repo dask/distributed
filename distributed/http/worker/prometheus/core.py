@@ -24,7 +24,7 @@ class WorkerMetricCollector(PrometheusCollector):
             )
 
     def collect(self):
-        from prometheus_client.core import GaugeMetricFamily
+        from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
 
         tasks = GaugeMetricFamily(
             self.build_name("tasks"),
@@ -85,7 +85,8 @@ class WorkerMetricCollector(PrometheusCollector):
             "Number of open data transfers from other workers.",
             value=self.server.state.transfer_incoming_count,
         )
-        yield GaugeMetricFamily(
+
+        yield CounterMetricFamily(
             self.build_name("transfer_incoming_count_total"),
             (
                 "Total number of data transfers from other workers "
@@ -104,7 +105,8 @@ class WorkerMetricCollector(PrometheusCollector):
             "Number of open data transfers to other workers.",
             value=self.server.transfer_outgoing_count,
         )
-        yield GaugeMetricFamily(
+
+        yield CounterMetricFamily(
             self.build_name("transfer_outgoing_count_total"),
             (
                 "Total number of data transfers to other workers "

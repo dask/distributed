@@ -8,14 +8,20 @@ from tornado.httpclient import AsyncHTTPClient
 
 from distributed import Event, Worker, wait
 from distributed.sizeof import sizeof
-from distributed.utils_test import fetch_metrics, gen_cluster
+from distributed.utils_test import (
+    fetch_metrics,
+    fetch_metrics_sample_names,
+    gen_cluster,
+)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_prometheus(c, s, a):
     pytest.importorskip("prometheus_client")
 
-    active_metrics = await fetch_metrics(a.http_server.port, prefix="dask_worker_")
+    active_metrics = await fetch_metrics_sample_names(
+        a.http_server.port, prefix="dask_worker_"
+    )
     expected_metrics = {
         "dask_worker_tasks",
         "dask_worker_concurrent_fetch_requests",
@@ -43,7 +49,7 @@ async def test_prometheus(c, s, a):
             }
         )
 
-    assert set(active_metrics) == expected_metrics
+    assert active_metrics == expected_metrics
 
     # request data twice since there once was a case where metrics got registered
     # multiple times resulting in prometheus_client errors
