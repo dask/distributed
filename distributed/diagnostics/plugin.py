@@ -460,7 +460,12 @@ class PipInstall(PackageInstall):
 
     pip_options: list[str]
 
-    def __init__(self, packages, pip_options=None, restart=False):
+    def __init__(
+        self,
+        packages: list[str],
+        pip_options: list[str] | None = None,
+        restart: bool = False,
+    ):
         super().__init__(packages, restart=restart)
         self.pip_options = pip_options or []
 
