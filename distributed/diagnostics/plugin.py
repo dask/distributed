@@ -285,7 +285,6 @@ class PackageInstall(WorkerPlugin, abc.ABC):
     @abc.abstractproperty
     def installer(self) -> str:
         """Return the name of the installer"""
-        raise NotImplementedError
 
     async def setup(self, worker):
         from distributed.semaphore import Semaphore
@@ -314,7 +313,6 @@ class PackageInstall(WorkerPlugin, abc.ABC):
     @abc.abstractmethod
     def _install(self) -> None:
         """Install the requested packages"""
-        raise NotImplementedError
 
     async def _is_installed(self, worker):
         return await worker.client.get_metadata(
