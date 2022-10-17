@@ -393,7 +393,7 @@ class CondaInstall(PackageInstall):
         super().__init__(packages, restart=restart)
         self.conda_options = conda_options or []
 
-    def install(self):
+    def install(self) -> None:
         try:
             from conda.cli.python_api import Commands, run_command
         except ModuleNotFoundError as e:  # pragma: nocover
