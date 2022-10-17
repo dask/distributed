@@ -269,6 +269,8 @@ class PackageInstall(WorkerPlugin, abc.ABC):
     PipInstall
     """
 
+    INSTALLER: ClassVar[str]
+
     name: str
     packages: list[str]
     restart: bool
@@ -280,11 +282,7 @@ class PackageInstall(WorkerPlugin, abc.ABC):
     ):
         self.packages = packages
         self.restart = restart
-        self.name = f"{self.installer}-install-{uuid.uuid4()}"
-
-    @abc.abstractproperty
-    def installer(self) -> str:
-        """Return the name of the installer"""
+        self.name = f"{self.INSTALLER}-install-{uuid.uuid4()}"
 
     async def setup(self, worker):
         from distributed.semaphore import Semaphore
@@ -294,7 +292,8 @@ class PackageInstall(WorkerPlugin, abc.ABC):
         ):
             if not await self._is_installed(worker):
                 logger.info(
-                    f"{self.installer} installing the following packages: %s",
+                    "%s installing the following packages: %s",
+                    self.INSTALLER,
                     self.packages,
                 )
                 await self._set_installed(worker)
@@ -375,7 +374,7 @@ class CondaInstall(PackageInstall):
 
     Examples
     --------
-    >>> from dask.distributed import PipInstall
+    >>> from dask.distributed import CondaInstall
     >>> plugin = CondaInstall(packages=["scikit-learn"], conda_options=["--update-deps"])
 
     >>> client.register_worker_plugin(plugin)
@@ -386,7 +385,7 @@ class CondaInstall(PackageInstall):
     PipInstall
     """
 
-    _INSTALLER: ClassVar[str] = "conda"
+    INSTALLER = "conda"
 
     conda_options: list[str]
 
@@ -394,14 +393,10 @@ class CondaInstall(PackageInstall):
         super().__init__(packages, restart=restart)
         self.conda_options = conda_options or []
 
-    @property
-    def installer(self) -> str:
-        return self._INSTALLER
-
     def _install(self):
         try:
             from conda.cli.python_api import Commands, run_command
-        except ModuleNotFoundError as e:
+        except ModuleNotFoundError as e:  # pragma: nocover
             msg = (
                 "conda install failed because conda could not be found. "
                 "Please make sure that conda is installed."
@@ -461,17 +456,13 @@ class PipInstall(PackageInstall):
     CondaInstall
     """
 
-    _INSTALLER: ClassVar[str] = "pip"
+    INSTALLER = "pip"
 
     pip_options: list[str]
 
     def __init__(self, packages, pip_options=None, restart=False):
         super().__init__(packages, restart=restart)
         self.pip_options = pip_options or []
-
-    @property
-    def installer(self) -> str:
-        return self._INSTALLER
 
     def _install(self) -> None:
         proc = subprocess.Popen(
