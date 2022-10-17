@@ -8485,7 +8485,13 @@ def coassignmnet_groups(
             while len(next.dependents) == 1:
                 dep = list(next.dependents)[0]
                 if len(dep.dependencies) != 1:
-                    # This algorithm has the shortcoming that groups may grow too large if the dependent of a group
+                    # This algorithm has the shortcoming that groups may grow
+                    # too large if we walk straight to the dependent of a group.
+                    # Especially in staged reductions (e.g. tree reductions, the
+                    # next "jump" would combine multiple cogroups). For now,
+                    # just ignore these. This means that we'll practically only
+                    # have cogroups at the bottom of a graph but this is where
+                    # it matters the most anyhow
                     group_dependents_seen.add(dep)
                     break
                 next = dep
