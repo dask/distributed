@@ -4,15 +4,21 @@ import pytest
 
 import dask
 
-from distributed._coassignment_group import coassignmnet_groups
-from distributed.scheduler import TaskGroup, TaskState
+from distributed.scheduler import TaskGroup, TaskState, coassignmnet_groups
 
 
 def f(*args):
     return None
 
 
-@pytest.fixture(params=["abcde", "edcba"])
+def assert_disjoint_sets(cogroups):
+    seen = set()
+    for values in cogroups.values():
+        assert not (seen & values)
+        seen.update(values)
+
+
+@pytest.fixture(params=["abcde"])
 def abcde(request):
     return request.param
 
@@ -26,8 +32,14 @@ def dummy_dsk_to_taskstate(dsk: dict) -> list[TaskState]:
         ts.group = task_groups.get(ts.group_key, TaskGroup(ts.group_key))
         task_groups[ts.group_key] = ts.group
         ts.priority = priority[key]
-    for key, (_, *deps) in dsk.items():
-        for d in deps:
+    for key, vals in dsk.items():
+        stack = list(vals[1:])
+        while stack:
+            d = stack.pop()
+            if isinstance(d, list):
+                stack.extend(d)
+                continue
+            assert isinstance(d, (str, tuple, int))
             if d not in tasks:
                 raise ValueError(f"Malformed example. {d} not part of dsk")
             tasks[key].add_dependency(tasks[d])
@@ -57,6 +69,7 @@ def test_tree_reduce(abcde):
     tasks = dummy_dsk_to_taskstate(dsk)
     assert isinstance(tasks, list)
     cogroups = coassignmnet_groups(tasks)
+    assert_disjoint_sets(cogroups)
     assert len(cogroups) == 3
 
 
@@ -90,6 +103,7 @@ def test_nearest_neighbor(abcde):
     tasks = dummy_dsk_to_taskstate(dsk)
     assert isinstance(tasks, list)
     cogroups = coassignmnet_groups(tasks)
+    assert_disjoint_sets(cogroups)
     assert len(cogroups) == 0
 
 
@@ -115,6 +129,7 @@ def test_deep_bases_win_over_dependents(abcde):
     tasks = dummy_dsk_to_taskstate(dsk)
     assert isinstance(tasks, list)
     cogroups = coassignmnet_groups(tasks)
+    assert_disjoint_sets(cogroups)
     assert len(cogroups) == 1
     assert len(cogroups[0]) == 3
 
@@ -143,8 +158,9 @@ def test_base_of_reduce_preferred(abcde):
     tasks = dummy_dsk_to_taskstate(dsk)
     assert isinstance(tasks, list)
     cogroups = coassignmnet_groups(tasks)
+    assert_disjoint_sets(cogroups)
 
-    assert len(cogroups) == 2
+    assert len(cogroups) == 1
     assert {ts.key for ts in cogroups[0]} == {
         c,
         (b, 0),
@@ -152,7 +168,6 @@ def test_base_of_reduce_preferred(abcde):
         (a, 0),
         (a, 1),
     }
-    assert sum(map(len, cogroups.values())) == len(tasks)
 
 
 def test_map_overlap(abcde):
@@ -190,6 +205,7 @@ def test_map_overlap(abcde):
     tasks = dummy_dsk_to_taskstate(dsk)
     assert isinstance(tasks, list)
     cogroups = coassignmnet_groups(tasks)
+    assert_disjoint_sets(cogroups)
     assert len(cogroups) == 2
 
     assert {ts.key for ts in cogroups[0]} == {
@@ -212,3 +228,71 @@ def test_map_overlap(abcde):
     }
     # Not all belong to a cogroup
     assert sum(map(len, cogroups.values())) != len(tasks)
+
+
+def test_repartition():
+    ddf = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-17",
+        dtypes={"x": float, "y": float},
+        freq="1d",
+    )
+    assert ddf.npartitions == 16
+    ddf_repart = ddf.repartition(npartitions=ddf.npartitions // 2)
+    dsk = ddf_repart.dask.to_dict()
+    for k, _ in list(dsk.items()):
+        if k[0].startswith("make-timeseries"):
+            dsk[k] = (f,)
+    tasks = dummy_dsk_to_taskstate(dsk)
+    cogroups = coassignmnet_groups(tasks)
+    assert_disjoint_sets(cogroups)
+
+    assert len(cogroups) == ddf.npartitions // 2
+
+
+def test_repartition_reduce(abcde):
+    a, b, c, d, e = abcde
+    a1, a2, a3, a4, a5, a6, a7, a8 = (a + i for i in "12345678")
+    b1, b2, b3, b4 = (b + i for i in "1234")
+    c1, c2, c3, c4 = (c + i for i in "1234")
+    d1, d2 = (d + i for i in "12")
+
+    dsk = {
+        # Roots
+        a1: (f,),
+        a2: (f,),
+        a3: (f,),
+        a4: (f,),
+        a5: (f,),
+        a6: (f,),
+        a7: (f,),
+        a8: (f,),
+        # Trivial reduce, e.g. repartition
+        b1: (f, a1, a2),
+        b2: (f, a3, a4),
+        b3: (f, a5, a6),
+        b4: (f, a7, a8),
+        # A linear chain
+        c1: (f, b1),
+        c2: (f, b2),
+        c3: (f, b3),
+        c4: (f, b4),
+        # Tree reduce
+        d1: (f, c1, c2),
+        d2: (f, c3, c4),
+        e: (f, d1, d2),
+    }
+    tasks = dummy_dsk_to_taskstate(dsk)
+    cogroups = coassignmnet_groups(tasks)
+    assert_disjoint_sets(cogroups)
+
+    assert all(
+        [1 == sum([ts.key.startswith("b") for ts in gr]) for gr in cogroups.values()]
+    )
+    assert all(
+        [1 == sum([ts.key.startswith("c") for ts in gr]) for gr in cogroups.values()]
+    )
+    assert all(
+        [2 == sum([ts.key.startswith("a") for ts in gr]) for gr in cogroups.values()]
+    )
+    assert len(cogroups) == 4
