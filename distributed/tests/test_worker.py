@@ -1765,7 +1765,7 @@ class StubInstall(PackageInstall):
     def installer(self) -> str:
         return self._INSTALLER
 
-    def _install(self) -> None:
+    def install(self) -> None:
         pass
 
 
@@ -1810,7 +1810,7 @@ class FailingInstall(PackageInstall):
     def installer(self) -> str:
         return self._INSTALLER
 
-    def _install(self) -> None:
+    def install(self) -> None:
         raise RuntimeError()
 
 

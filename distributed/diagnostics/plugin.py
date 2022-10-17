@@ -297,7 +297,7 @@ class PackageInstall(WorkerPlugin, abc.ABC):
                     self.packages,
                 )
                 await self._set_installed(worker)
-                self._install()
+                self.install()
             else:
                 logger.info(
                     "The following packages have already been installed: %s",
@@ -310,7 +310,7 @@ class PackageInstall(WorkerPlugin, abc.ABC):
                 worker.loop.add_callback(worker.close_gracefully, restart=True)
 
     @abc.abstractmethod
-    def _install(self) -> None:
+    def install(self) -> None:
         """Install the requested packages"""
 
     async def _is_installed(self, worker):
@@ -393,7 +393,7 @@ class CondaInstall(PackageInstall):
         super().__init__(packages, restart=restart)
         self.conda_options = conda_options or []
 
-    def _install(self):
+    def install(self):
         try:
             from conda.cli.python_api import Commands, run_command
         except ModuleNotFoundError as e:  # pragma: nocover
@@ -469,7 +469,7 @@ class PipInstall(PackageInstall):
         super().__init__(packages, restart=restart)
         self.pip_options = pip_options or []
 
-    def _install(self) -> None:
+    def install(self) -> None:
         proc = subprocess.Popen(
             [sys.executable, "-m", "pip", "install"] + self.pip_options + self.packages,
             stdout=subprocess.PIPE,
