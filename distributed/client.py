@@ -3455,6 +3455,44 @@ class Client(SyncMethodMixin):
             self._restart, timeout=timeout, wait_for_workers=wait_for_workers
         )
 
+    def restart_workers(self, workers: list[str]):
+        """Restart certain workers
+
+        .. note::
+
+            Only workers being monitored by nannies can be restarted
+
+        See :meth:`distributed.Nanny.restart` for more details.
+
+        Parameters
+        ----------
+        workers : list[str]
+            Workers to restart.
+
+        Examples
+        --------
+        You can get information about active workers using the following:
+
+        >>> workers = client.scheduler_info()['workers']
+
+        From that list you may want to select some workers to restart
+
+        >>> client.restart_workers(workers=['tcp://address:port', ...])
+
+        See Also
+        --------
+        Client.restart
+        """
+        info = self.scheduler_info()
+        for worker in workers:
+            if info["workers"][worker]["nanny"] is None:
+                raise ValueError(
+                    f"Restarting workers requires a nanny to be used. Worker {worker} has type {info['workers'][worker]['type']}."
+                )
+        return self.sync(
+            self.scheduler.broadcast, msg={"op": "restart"}, workers=workers, nanny=True
+        )
+
     async def _upload_large_file(self, local_filename, remote_filename=None):
         if remote_filename is None:
             remote_filename = os.path.split(local_filename)[1]
