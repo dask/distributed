@@ -56,7 +56,7 @@ jobs:
           mv test_report.html test_short_report.html deploy/
 
       - name: Deploy 🚀
-        uses: JamesIves/github-pages-deploy-action@4.1.7
+        uses: JamesIves/github-pages-deploy-action@v4.4.1
         with:
           branch: gh-pages
           folder: deploy
