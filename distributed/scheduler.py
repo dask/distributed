@@ -5701,7 +5701,7 @@ class Scheduler(SchedulerState, ServerNode):
         """
         stimulus_id = f"restart-{time()}"
 
-        logger.info("Restarting workers.")
+        logger.info("Restarting workers and releasing all keys.")
         for cs in self.clients.values():
             self.client_releases_keys(
                 keys=[ts.key for ts in cs.wants_what],
