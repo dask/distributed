@@ -42,7 +42,7 @@ from distributed.compatibility import WINDOWS
 from distributed.core import Status
 from distributed.metrics import monotonic
 from distributed.spill import ManualEvictProto, SpillBuffer
-from distributed.utils import log_errors
+from distributed.utils import has_arg, log_errors
 from distributed.utils_perf import ThrottledGC
 
 if TYPE_CHECKING:
@@ -75,6 +75,8 @@ class WorkerMemoryManager:
         data: (
             MutableMapping[str, Any]  # pre-initialised
             | Callable[[], MutableMapping[str, Any]]  # constructor
+            # constructor, passed worker.local_directory
+            | Callable[[str], MutableMapping[str, Any]]
             | tuple[
                 Callable[..., MutableMapping[str, Any]], dict[str, Any]
             ]  # (constructor, kwargs to constructor)
@@ -109,9 +111,20 @@ class WorkerMemoryManager:
         if isinstance(data, MutableMapping):
             self.data = data
         elif callable(data):
-            self.data = data()
+            if has_arg(data, "worker_local_directory"):
+                data = cast(Callable[[str], MutableMapping[str, Any]], data)
+                self.data = data(worker.local_directory)
+            else:
+                data = cast(Callable[[], MutableMapping[str, Any]], data)
+                self.data = data()
         elif isinstance(data, tuple):
-            self.data = data[0](**data[1])
+            func, kwargs = data
+            if not callable(func):
+                raise ValueError("Expecting a callable")
+            if has_arg(func, "worker_local_directory"):
+                self.data = func(worker.local_directory, **kwargs)
+            else:
+                self.data = func(**kwargs)
         elif self.memory_limit and (
             self.memory_target_fraction or self.memory_spill_fraction
         ):
