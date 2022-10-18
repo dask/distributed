@@ -187,6 +187,8 @@ jobs:
 
       - name: Coverage
         uses: codecov/codecov-action@v3
+        with:
+          functionalities: network
 
       - name: Upload test results
         # ensure this runs even if pytest fails
