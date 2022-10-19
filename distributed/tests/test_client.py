@@ -4873,6 +4873,21 @@ async def test_restart_workers_no_nanny_raises(c, s, a, b):
     assert a.address in msg
 
 
+class SlowKillNanny(Nanny):
+    async def kill(self, timeout=2):
+        await asyncio.sleep(2)
+        return await super().kill(timeout=timeout)
+
+
+@gen_cluster(client=True, Worker=SlowKillNanny)
+async def test_restart_workers_timeout(c, s, a, b):
+    with pytest.raises(TimeoutError) as excinfo:
+        await c.restart_workers(workers=[a.worker_address], timeout=0.001)
+    msg = str(excinfo.value).lower()
+    assert "workers failed to restart" in msg
+    assert a.worker_address in msg
+
+
 class MyException(Exception):
     pass
 
