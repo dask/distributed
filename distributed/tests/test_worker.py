@@ -3721,3 +3721,21 @@ async def test_deprecation_of_renamed_worker_attributes(s, a, b):
     )
     with pytest.warns(DeprecationWarning, match=msg):
         assert a.outgoing_current_count == a.transfer_outgoing_count
+
+
+@gen_cluster(nthreads=[])
+async def test_worker_log_memory_limit_too_high(s):
+    with captured_logger("distributed.worker_memory") as caplog:
+        # caplog.set_level(logging.WARN, logger="distributed.worker")
+        async with Worker(s.address, memory_limit="1PB"):
+            pass
+
+        expected_snippets = [
+            ("ignore", "ignoring"),
+            ("memory limit", "memory_limit"),
+            ("system"),
+            ("1PB"),
+        ]
+        for snippets in expected_snippets:
+            # assert any(snip in caplog.text for snip in snippets)
+            assert any(snip in caplog.getvalue().lower() for snip in snippets)
