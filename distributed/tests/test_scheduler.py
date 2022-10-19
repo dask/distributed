@@ -866,27 +866,28 @@ async def test_ready_remove_worker(s, a, b):
 
 @gen_cluster(client=True, Worker=Nanny, timeout=60)
 async def test_restart(c, s, a, b):
+    with captured_logger("distributed.scheduler") as caplog:
+        futures = c.map(inc, range(20))
+        await wait(futures)
 
-    futures = c.map(inc, range(20))
-    await wait(futures)
+        await s.restart()
 
-    await s.restart()
+        assert not s.computations
+        assert not s.task_prefixes
+        assert not s.task_groups
 
-    assert not s.computations
-    assert not s.task_prefixes
-    assert not s.task_groups
+        assert len(s.workers) == 2
 
-    assert len(s.workers) == 2
+        for ws in s.workers.values():
+            assert not ws.occupancy
+            assert not ws.processing
 
-    for ws in s.workers.values():
-        assert not ws.occupancy
-        assert not ws.processing
+        assert not s.tasks
 
-    assert not s.tasks
-
-    assert all(f.status == "cancelled" for f in futures)
-    x = c.submit(inc, 1)
-    assert await x == 2
+        assert all(f.status == "cancelled" for f in futures)
+        x = c.submit(inc, 1)
+        assert await x == 2
+    assert "restart" in caplog.getvalue().lower()
 
 
 @pytest.mark.slow
