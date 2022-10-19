@@ -25,10 +25,17 @@ import logging
 import os
 import sys
 import warnings
-from collections.abc import Callable, MutableMapping
 from contextlib import suppress
 from functools import partial
-from typing import TYPE_CHECKING, Any, Container, Literal, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Container,
+    Literal,
+    MutableMapping,
+    cast,
+)
 
 import psutil
 from tornado.ioloop import PeriodicCallback
