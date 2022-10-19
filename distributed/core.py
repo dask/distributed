@@ -825,12 +825,16 @@ class Server:
 
                 if not comm.closed():
                     for msg in msgs:
-                        if msg == "OK":  # from close
+                        if msg == "OK":
                             break
                         op = msg.pop("op")
                         if op:
                             if op == "close-stream":
                                 closed = True
+                                logger.info(
+                                    "Received 'close-stream' from %s; closing.",
+                                    comm.peer_address,
+                                )
                                 break
                             handler = self.stream_handlers[op]
                             if iscoroutinefunction(handler):
@@ -844,8 +848,8 @@ class Server:
                             logger.error("odd message %s", msg)
                     await asyncio.sleep(0)
 
-        except OSError:
-            pass
+        except OSError as e:
+            logger.info("Lost connection to %s: %s", comm.peer_address, e)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
