@@ -385,7 +385,7 @@ def parse_memory_limit(
 ) -> int | None:
     if memory_limit is None:
         return None
-
+    orig = memory_limit
     if memory_limit == "auto":
         memory_limit = int(system.MEMORY_LIMIT * min(1, nthreads / total_cores))
     with suppress(ValueError, TypeError):
@@ -401,7 +401,15 @@ def parse_memory_limit(
     assert isinstance(memory_limit, int)
     if memory_limit == 0:
         return None
-    return min(memory_limit, system.MEMORY_LIMIT)
+    if system.MEMORY_LIMIT < memory_limit:
+        logger.warning(
+            "Ignoring provided memory limit %s due system memory limit of %s",
+            orig,
+            system.MEMORY_LIMIT,
+        )
+        return system.MEMORY_LIMIT
+    else:
+        return memory_limit
 
 
 def _parse_threshold(
