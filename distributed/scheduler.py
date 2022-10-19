@@ -8478,12 +8478,14 @@ def coassignment_groups(
         # over ix and check if the next is a dependent or not. I chose to go
         # this route because this is what we wrote down initially
         next = min(current.dependents, key=lambda ts: ts.priority)
-        next_ix = tasks.index(next)
+        next_ix = ix
+        while tasks[next_ix] is not next:
+            next_ix += 1
 
         # Detect a jump
         if next_ix != ix + 1:
             while len(next.dependents) == 1:
-                dep = list(next.dependents)[0]
+                (dep,) = next.dependents
                 if len(dep.dependencies) != 1:
                     # This algorithm has the shortcoming that groups may grow
                     # too large if we walk straight to the dependent of a group.
@@ -8495,7 +8497,9 @@ def coassignment_groups(
                     group_dependents_seen.add(dep)
                     break
                 next = dep
-            max_prio = tasks.index(next) + 1
+            while tasks[next_ix] is not next:
+                next_ix += 1
+            max_prio = next_ix + 1
             groups[group] = set(tasks[min_prio:max_prio])
             group += 1
             ix = max_prio
