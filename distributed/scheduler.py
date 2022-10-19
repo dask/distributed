@@ -5701,7 +5701,7 @@ class Scheduler(SchedulerState, ServerNode):
         """
         stimulus_id = f"restart-{time()}"
 
-        logger.info("Releasing all requested keys")
+        logger.info("Restarting workers and releasing all keys.")
         for cs in self.clients.values():
             self.client_releases_keys(
                 keys=[ts.key for ts in cs.wants_what],
@@ -5802,6 +5802,7 @@ class Scheduler(SchedulerState, ServerNode):
                             "will always time out. Do not use `Client.restart` in that case."
                         )
                     raise TimeoutError(msg) from None
+        logger.info("Restarting finished.")
 
     async def broadcast(
         self,
