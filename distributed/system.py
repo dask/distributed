@@ -5,6 +5,9 @@ import sys
 
 import psutil
 
+__all__ = ("memory_limit", "MEMORY_LIMIT")
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -51,7 +54,7 @@ def memory_limit() -> int:
             hard_limit = resource.getrlimit(resource.RLIMIT_RSS)[1]
             if 0 < hard_limit < limit:
                 logger.debug(
-                    "Limiting system memory limit based on RLIMIT_RSS to %s", hard_limit
+                    "Limiting system memory based on RLIMIT_RSS to %s", hard_limit
                 )
                 limit = hard_limit
         except (ImportError, OSError):
