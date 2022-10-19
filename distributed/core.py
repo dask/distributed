@@ -848,8 +848,8 @@ class Server:
                             logger.error("odd message %s", msg)
                     await asyncio.sleep(0)
 
-        except OSError as e:
-            logger.info("Lost connection to %s: %s", comm.peer_address, e)
+        except OSError:
+            logger.exception("Lost connection to %s.", comm.peer_address)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
