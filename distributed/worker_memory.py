@@ -403,7 +403,7 @@ def parse_memory_limit(
         return None
     if system.MEMORY_LIMIT < memory_limit:
         logger.warning(
-            "Ignoring provided memory limit %s due system memory limit of %s",
+            "Ignoring provided memory limit %s due to system memory limit of %s",
             orig,
             system.MEMORY_LIMIT,
         )
