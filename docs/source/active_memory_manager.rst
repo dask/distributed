@@ -1,7 +1,8 @@
 Active Memory Manager
 =====================
 The Active Memory Manager, or *AMM*, is an experimental daemon that optimizes memory
-usage of workers across the Dask cluster. It is disabled by default.
+usage of workers across the Dask cluster. It is enabled by default but can be
+disabled/configured.  See `Enabling the Active Memory Manager`_ for details.
 
 
 Memory imbalance and duplication
