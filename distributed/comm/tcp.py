@@ -112,7 +112,7 @@ def set_tcp_timeout(comm):
             TCP_USER_TIMEOUT = 18  # since Linux 2.6.37
             sock.setsockopt(socket.SOL_TCP, TCP_USER_TIMEOUT, timeout * 1000)
     except OSError as e:
-        logger.warning("Could not set timeout on TCP stream: %s", e)
+        logger.error("Could not set timeout on TCP stream: %s", e)
 
 
 def get_stream_address(comm):
