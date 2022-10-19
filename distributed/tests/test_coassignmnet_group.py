@@ -296,3 +296,41 @@ def test_repartition_reduce(abcde):
         [2 == sum([ts.key.startswith("a") for ts in gr]) for gr in cogroups.values()]
     )
     assert len(cogroups) == 4
+
+
+def test_vorticity(abcde):
+    # See https://gist.github.com/TomNicholas/fe9c6b6c415d4fa42523216c87e2fff2
+    # https://github.com/dask/distributed/discussions/7128#discussioncomment-3910328
+    a, b, c, d, e = abcde
+    d1, d2, d3, d4, d5, d6, d7 = (d + i for i in "1234567")
+    e1, e2, e3, e4, e5 = (e + i for i in "12345")
+
+    def _gen_branch(ix):
+        return {
+            f"a{ix}": (f,),
+            f"b{ix}": (f, f"a{ix}"),
+            f"c{ix}": (f, f"a{ix}"),
+            f"d{ix}": (f, f"b{ix}", f"c{ix}"),
+        }
+
+    dsk = {}
+    for ix in range(1, 8):
+        dsk.update(_gen_branch(ix))
+
+    dsk.update(
+        {
+            e1: (f, d1, d2, d3, d4, d5),
+            e2: (f, d3, d4, d5, d6, d7),
+        }
+    )
+    from dask.base import visualize
+
+    visualize(dsk, color="order")
+    ordered = dask.order.order(dsk)
+    tasks = dummy_dsk_to_taskstate(dsk)
+    cogroups = coassignment_groups(tasks)
+    assert_disjoint_sets(cogroups)
+
+    assert len(cogroups) == 7
+    assert all(len(group) == 4 for group in cogroups.values())
+    assert not any(e1 in group or e2 in group for group in cogroups.values())
