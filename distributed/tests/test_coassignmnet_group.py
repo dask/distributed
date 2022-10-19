@@ -4,7 +4,7 @@ import pytest
 
 import dask
 
-from distributed.scheduler import TaskGroup, TaskState, coassignmnet_groups
+from distributed.scheduler import TaskGroup, TaskState, coassignment_groups
 
 
 def f(*args):
@@ -68,7 +68,7 @@ def test_tree_reduce(abcde):
     }
     tasks = dummy_dsk_to_taskstate(dsk)
     assert isinstance(tasks, list)
-    cogroups = coassignmnet_groups(tasks)
+    cogroups = coassignment_groups(tasks)
     assert_disjoint_sets(cogroups)
     assert len(cogroups) == 3
 
@@ -102,7 +102,7 @@ def test_nearest_neighbor(abcde):
     }
     tasks = dummy_dsk_to_taskstate(dsk)
     assert isinstance(tasks, list)
-    cogroups = coassignmnet_groups(tasks)
+    cogroups = coassignment_groups(tasks)
     assert_disjoint_sets(cogroups)
     assert len(cogroups) == 0
 
@@ -128,7 +128,7 @@ def test_deep_bases_win_over_dependents(abcde):
 
     tasks = dummy_dsk_to_taskstate(dsk)
     assert isinstance(tasks, list)
-    cogroups = coassignmnet_groups(tasks)
+    cogroups = coassignment_groups(tasks)
     assert_disjoint_sets(cogroups)
     assert len(cogroups) == 1
     assert len(cogroups[0]) == 3
@@ -157,7 +157,7 @@ def test_base_of_reduce_preferred(abcde):
 
     tasks = dummy_dsk_to_taskstate(dsk)
     assert isinstance(tasks, list)
-    cogroups = coassignmnet_groups(tasks)
+    cogroups = coassignment_groups(tasks)
     assert_disjoint_sets(cogroups)
 
     assert len(cogroups) == 1
@@ -204,7 +204,7 @@ def test_map_overlap(abcde):
 
     tasks = dummy_dsk_to_taskstate(dsk)
     assert isinstance(tasks, list)
-    cogroups = coassignmnet_groups(tasks)
+    cogroups = coassignment_groups(tasks)
     assert_disjoint_sets(cogroups)
     assert len(cogroups) == 2
 
@@ -244,7 +244,7 @@ def test_repartition():
         if k[0].startswith("make-timeseries"):
             dsk[k] = (f,)
     tasks = dummy_dsk_to_taskstate(dsk)
-    cogroups = coassignmnet_groups(tasks)
+    cogroups = coassignment_groups(tasks)
     assert_disjoint_sets(cogroups)
 
     assert len(cogroups) == ddf.npartitions // 2
@@ -283,7 +283,7 @@ def test_repartition_reduce(abcde):
         e: (f, d1, d2),
     }
     tasks = dummy_dsk_to_taskstate(dsk)
-    cogroups = coassignmnet_groups(tasks)
+    cogroups = coassignment_groups(tasks)
     assert_disjoint_sets(cogroups)
 
     assert all(

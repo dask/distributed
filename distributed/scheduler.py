@@ -4611,7 +4611,7 @@ class Scheduler(SchedulerState, ServerNode):
             start = max(self.cogroups.keys()) + 1
         else:
             start = 0
-        cogroups = coassignmnet_groups(sorted_tasks[::-1], start=start)
+        cogroups = coassignment_groups(sorted_tasks[::-1], start=start)
         self.cogroups.update(cogroups)
         for gr_ix, tss in self.cogroups.items():
             for ts in tss:
@@ -8454,7 +8454,7 @@ class CollectTaskMetaDataPlugin(SchedulerPlugin):
                 self.keys.discard(key)
 
 
-def coassignmnet_groups(
+def coassignment_groups(
     tasks: Sequence[TaskState], start: int = 0
 ) -> dict[int, set[TaskState]]:
     groups = {}

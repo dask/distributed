@@ -70,7 +70,7 @@ class SystemMonitor:
             else:
                 if disk_ioc is None:  # pragma: nocover
                     # diskless machine
-                    monitor_disk_io = False  # type: ignore[unreachable]
+                    monitor_disk_io = False
                 else:
                     self._last_disk_io_counters = disk_ioc
                     self.quantities["host_disk_io.read_bps"] = deque(maxlen=maxlen)
