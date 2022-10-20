@@ -7262,13 +7262,20 @@ async def test_log_event_warn(c, s, a, b):
     with pytest.warns(UserWarning, match="Hello!"):
         await c.submit(foo)
 
-    def bar():
+    def no_message():
         # missing "message" key should log TypeError
         get_worker().log_event("warn", {})
 
     with captured_logger(logging.getLogger("distributed.client")) as log:
-        await c.submit(bar)
+        await c.submit(no_message)
         assert "TypeError" in log.getvalue()
+
+    def no_category():
+        # missing "category" defaults to `UserWarning`
+        get_worker().log_event("warn", {"message": pickle.dumps("asdf")})
+
+    with pytest.warns(UserWarning, match="asdf"):
+        await c.submit(no_category)
 
 
 @gen_cluster(client=True)
