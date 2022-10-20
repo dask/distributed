@@ -5751,7 +5751,10 @@ class Scheduler(SchedulerState, ServerNode):
                         # FIXME does not raise if the process fails to shut down,
                         # see https://github.com/dask/distributed/pull/6427/files#r894917424
                         # NOTE: Nanny will automatically restart worker process when it's killed
-                        nanny.kill(timeout=timeout),
+                        nanny.kill(
+                            reason="Scheduler is restarting all workers.",
+                            timeout=timeout,
+                        ),
                         timeout,
                     )
                     for nanny in nannies

@@ -15,7 +15,7 @@ from contextlib import suppress
 from inspect import isawaitable
 from queue import Empty
 from time import sleep as sync_sleep
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 from toolz import merge
 from tornado import gen
@@ -255,7 +255,7 @@ class Nanny(ServerNode):
         handlers = {
             "instantiate": self.instantiate,
             "kill": self.kill,
-            "restart": self.restart,
+            "restart": self.restart,  # TODO: Is this being used anywhere?
             # cannot call it 'close' on the rpc side for naming conflict
             "get_logs": self.get_logs,
             "terminate": self.close,
@@ -373,7 +373,7 @@ class Nanny(ServerNode):
 
         return self
 
-    async def kill(self, timeout=2):
+    async def kill(self, timeout: float = 2, reason: str = "unknown") -> None:
         """Kill the local worker process
 
         Blocks until both the process is down and the scheduler is properly
@@ -383,7 +383,7 @@ class Nanny(ServerNode):
             return
 
         deadline = time() + timeout
-        await self.process.kill(timeout=0.8 * (deadline - time()))
+        await self.process.kill(reason=reason, timeout=0.8 * (deadline - time()))
 
     async def instantiate(self) -> Status:
         """Start a local worker process
@@ -464,7 +464,7 @@ class Nanny(ServerNode):
                 msg = error_message(e)
                 return msg
         if getattr(plugin, "restart", False):
-            await self.restart()
+            await self.restart(reason=f"Nanny plugin {name} requested restart.")
 
         return {"status": "OK"}
 
@@ -483,10 +483,12 @@ class Nanny(ServerNode):
 
         return {"status": "OK"}
 
-    async def restart(self, timeout=30):
+    async def restart(
+        self, timeout: float = 30, reason: str = "unknown"
+    ) -> Literal["OK", "timed out"]:
         async def _():
             if self.process is not None:
-                await self.kill()
+                await self.kill(reason=reason)
                 await self.instantiate()
 
         try:
@@ -764,7 +766,9 @@ class WorkerProcess:
             if self.on_exit is not None:
                 self.on_exit(r)
 
-    async def kill(self, timeout: float = 2, executor_wait: bool = True) -> None:
+    async def kill(
+        self, reason: str, timeout: float = 2, executor_wait: bool = True
+    ) -> None:
         """
         Ensure the worker process is stopped, waiting at most
         ``timeout * 0.8`` seconds before killing it abruptly.
@@ -787,7 +791,7 @@ class WorkerProcess:
             Status.failed,  # process failed to start, but hasn't been joined yet
         ), self.status
         self.status = Status.stopping
-        logger.info("Nanny asking worker to close")
+        logger.info("Nanny asking worker to close. Reason: %", reason)
 
         process = self.process
         assert process
