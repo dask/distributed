@@ -56,7 +56,6 @@ from distributed.comm.addressing import address_from_user_args
 from distributed.comm.utils import OFFLOAD_THRESHOLD
 from distributed.compatibility import randbytes, to_thread
 from distributed.core import (
-    CommClosedError,
     ConnectionPool,
     Status,
     coerce_to_address,
@@ -1237,17 +1236,12 @@ class Worker(BaseWorker, ServerNode):
             )
             self.bandwidth_workers.clear()
             self.bandwidth_types.clear()
-        except CommClosedError:
-            logger.warning("Heartbeat to scheduler failed", exc_info=True)
+        except OSError:
+            logger.exception("Failed to communicate with scheduler during heartbeat.")
+        except Exception as e:
+            logger.exception("Unexpected exception during heartbeat. Closing worker.")
             await self.close()
-        except OSError as e:
-            # Scheduler is gone. Respect distributed.comm.timeouts.connect
-            if "Timed out trying to connect" in str(e):
-                logger.info("Timed out while trying to connect during heartbeat")
-                await self.close()
-            else:
-                logger.exception(e)
-                raise e
+            raise e
         finally:
             self.heartbeat_active = False
 

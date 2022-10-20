@@ -1873,10 +1873,10 @@ async def test_heartbeat_comm_closed(s, monkeypatch):
             monkeypatch.setattr(w.scheduler, "heartbeat_worker", bad_heartbeat_worker)
 
             await w.heartbeat()
-            assert w.status == Status.closed
-            while s.workers:
-                await asyncio.sleep(0.01)
-    assert "Heartbeat to scheduler failed" in logger.getvalue()
+            assert w.status == Status.running
+    logs = logger.getvalue()
+    assert "Failed to communicate with scheduler during heartbeat" in logs
+    assert "Traceback" in logs
 
 
 @gen_cluster(nthreads=[("", 1)], worker_kwargs={"heartbeat_interval": "100s"})
