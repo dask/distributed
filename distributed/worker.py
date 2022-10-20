@@ -31,7 +31,7 @@ from inspect import isawaitable
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, TextIO, TypeVar, cast
 
 from tlz import first, keymap, pluck
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import IOLoop
 
 import dask
 from dask.core import istask
@@ -54,7 +54,7 @@ from distributed.comm import Comm, connect, get_address_host, parse_address
 from distributed.comm import resolve_address as comm_resolve_address
 from distributed.comm.addressing import address_from_user_args
 from distributed.comm.utils import OFFLOAD_THRESHOLD
-from distributed.compatibility import randbytes, to_thread
+from distributed.compatibility import PeriodicCallback, randbytes, to_thread
 from distributed.core import (
     ConnectionPool,
     Status,

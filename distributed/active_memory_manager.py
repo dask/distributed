@@ -12,11 +12,10 @@ from collections import defaultdict
 from collections.abc import Generator
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
-from tornado.ioloop import PeriodicCallback
-
 import dask
 from dask.utils import parse_timedelta
 
+from distributed.compatibility import PeriodicCallback
 from distributed.core import Status
 from distributed.metrics import time
 from distributed.utils import import_term, log_errors

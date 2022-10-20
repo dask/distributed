@@ -31,14 +31,13 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, Container, Literal, cast
 
 import psutil
-from tornado.ioloop import PeriodicCallback
 
 import dask.config
 from dask.system import CPU_COUNT
 from dask.utils import format_bytes, parse_bytes, parse_timedelta
 
 from distributed import system
-from distributed.compatibility import WINDOWS
+from distributed.compatibility import WINDOWS, PeriodicCallback
 from distributed.core import Status
 from distributed.metrics import monotonic
 from distributed.spill import ManualEvictProto, SpillBuffer

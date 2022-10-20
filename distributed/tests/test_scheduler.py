@@ -17,7 +17,7 @@ import cloudpickle
 import psutil
 import pytest
 from tlz import concat, first, merge, valmap
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import IOLoop
 
 import dask
 from dask import delayed
@@ -35,7 +35,7 @@ from distributed import (
     wait,
 )
 from distributed.comm.addressing import parse_host_port
-from distributed.compatibility import LINUX, MACOS, WINDOWS
+from distributed.compatibility import LINUX, MACOS, WINDOWS, PeriodicCallback
 from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps, loads
