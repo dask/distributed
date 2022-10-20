@@ -207,7 +207,10 @@ async def _force_close(self):
     2.  If it doesn't, log and kill the process
     """
     try:
-        await asyncio.wait_for(self.close(nanny=False, executor_wait=False), 30)
+        await asyncio.wait_for(
+            self.close(nanny=False, executor_wait=False, reason="Worker failed hard."),
+            30,
+        )
     except (KeyboardInterrupt, SystemExit):  # pragma: nocover
         raise
     except BaseException:  # pragma: nocover
@@ -1455,7 +1458,7 @@ class Worker(BaseWorker, ServerNode):
         timeout: float = 30,
         executor_wait: bool = True,
         nanny: bool = True,
-        reason: str = "unknown",
+        reason: str | None = None,
     ) -> str | None:
         """Close the worker
 

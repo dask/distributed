@@ -373,7 +373,7 @@ class Nanny(ServerNode):
 
         return self
 
-    async def kill(self, timeout: float = 2, reason: str = "unknown") -> None:
+    async def kill(self, timeout: float = 2, reason: str | None = None) -> None:
         """Kill the local worker process
 
         Blocks until both the process is down and the scheduler is properly
@@ -484,7 +484,7 @@ class Nanny(ServerNode):
         return {"status": "OK"}
 
     async def restart(
-        self, timeout: float = 30, reason: str = "unknown"
+        self, timeout: float = 30, reason: str | None = None
     ) -> Literal["OK", "timed out"]:
         async def _():
             if self.process is not None:
@@ -767,7 +767,7 @@ class WorkerProcess:
                 self.on_exit(r)
 
     async def kill(
-        self, reason: str, timeout: float = 2, executor_wait: bool = True
+        self, timeout: float = 2, executor_wait: bool = True, reason: str | None = None
     ) -> None:
         """
         Ensure the worker process is stopped, waiting at most
@@ -791,7 +791,7 @@ class WorkerProcess:
             Status.failed,  # process failed to start, but hasn't been joined yet
         ), self.status
         self.status = Status.stopping
-        logger.info("Nanny asking worker to close. Reason: %", reason)
+        logger.info("Nanny asking worker to close. Reason: %s", reason)
 
         process = self.process
         assert process
