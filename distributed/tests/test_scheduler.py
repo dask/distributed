@@ -610,7 +610,7 @@ async def test_clear_events_client_removal(c, s, a, b):
 @gen_cluster(client=True, nthreads=[])
 async def test_add_worker(c, s):
     x = c.submit(inc, 1, key="x")
-    await wait_for_state("x", "no-worker", s)
+    await wait_for_state("x", ("queued", "no-worker"), s)
     s.validate_state()
 
     async with Worker(s.address) as w:
