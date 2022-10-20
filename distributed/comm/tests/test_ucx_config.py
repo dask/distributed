@@ -34,7 +34,7 @@ async def test_ucx_config(ucx_loop, cleanup):
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
-        ucx_config = _prepare_ucx_config()
+        ucx_config, _ = _prepare_ucx_config()
         assert ucx_config.get("TLS") == "rc,tcp,cuda_copy,cuda_ipc"
         assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "tcp"
 
@@ -47,7 +47,7 @@ async def test_ucx_config(ucx_loop, cleanup):
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
-        ucx_config = _prepare_ucx_config()
+        ucx_config, _ = _prepare_ucx_config()
         assert ucx_config.get("TLS") == "rc,tcp"
         assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "tcp"
 
@@ -60,7 +60,7 @@ async def test_ucx_config(ucx_loop, cleanup):
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
-        ucx_config = _prepare_ucx_config()
+        ucx_config, _ = _prepare_ucx_config()
         assert ucx_config.get("TLS") == "rc,tcp,cuda_copy"
         assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "rdmacm"
 
@@ -73,7 +73,7 @@ async def test_ucx_config(ucx_loop, cleanup):
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
-        ucx_config = _prepare_ucx_config()
+        ucx_config, _ = _prepare_ucx_config()
         assert ucx_config == {}
 
     with dask.config.set(
@@ -84,9 +84,9 @@ async def test_ucx_config(ucx_loop, cleanup):
             }
         }
     ):
-        ucx_config = _prepare_ucx_config()
-        assert ucx_config["LOG_LEVEL"] == "DEBUG"
-        assert ucx_config["MEMTRACK_DEST"] == "stdout"
+        ucx_config, ucx_environment = _prepare_ucx_config()
+        assert ucx_environment["UCX_LOG_LEVEL"] == "DEBUG"
+        assert ucx_environment["UCX_MEMTRACK_DEST"] == "stdout"
 
 
 @pytest.mark.flaky(
