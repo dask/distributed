@@ -110,7 +110,7 @@ class Nanny(ServerNode):
     """
 
     _instances: ClassVar[weakref.WeakSet[Nanny]] = weakref.WeakSet()
-    process = None
+    process: WorkerProcess | None
     memory_manager: NannyMemoryManager
 
     env: dict[str, str]
@@ -162,6 +162,7 @@ class Nanny(ServerNode):
                 stacklevel=2,
             )
 
+        self.process = None
         self._setup_logging(logger)
         self.loop = self.io_loop = IOLoop.current()
 
@@ -617,6 +618,7 @@ class WorkerProcess:
     running: asyncio.Event
     stopped: asyncio.Event
 
+    process: AsyncProcess | None
     env: dict[str, str]
     pre_spawn_env: dict[str, str]
 
