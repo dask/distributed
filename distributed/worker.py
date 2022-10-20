@@ -422,7 +422,6 @@ class Worker(BaseWorker, ServerNode):
     scheduler_delay: float
     stream_comms: dict[str, BatchedSend]
     heartbeat_interval: float
-    heartbeat_active: bool
     services: dict[str, Any] = {}
     service_specs: dict[str, Any]
     metrics: dict[str, Callable[[Worker], Any]]
@@ -668,7 +667,6 @@ class Worker(BaseWorker, ServerNode):
         self.name = name
         self.scheduler_delay = 0
         self.stream_comms = {}
-        self.heartbeat_active = False
 
         if self.local_directory not in sys.path:
             sys.path.insert(0, self.local_directory)
@@ -1193,10 +1191,6 @@ class Worker(BaseWorker, ServerNode):
             self.digests["latency"].add(latency)
 
     async def heartbeat(self) -> None:
-        if self.heartbeat_active:
-            logger.debug("Heartbeat skipped: channel busy")
-            return
-        self.heartbeat_active = True
         logger.debug("Heartbeat: %s", self.address)
         try:
             start = time()
@@ -1238,12 +1232,10 @@ class Worker(BaseWorker, ServerNode):
             self.bandwidth_types.clear()
         except OSError:
             logger.exception("Failed to communicate with scheduler during heartbeat.")
-        except Exception as e:
+        except Exception:
             logger.exception("Unexpected exception during heartbeat. Closing worker.")
             await self.close()
-            raise e
-        finally:
-            self.heartbeat_active = False
+            raise
 
     @fail_hard
     async def handle_scheduler(self, comm: Comm) -> None:

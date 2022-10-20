@@ -55,7 +55,7 @@ else:
             return secrets.token_bytes(size)
 
 
-if tornado.version_info >= (6, 2):
+if tornado.version_info >= (6, 2, 0, 0):
     from tornado.ioloop import PeriodicCallback
 else:
     # Backport from https://github.com/tornadoweb/tornado/blob/a4f08a31a348445094d1efa17880ed5472db9f7d/tornado/ioloop.py#L838-L962

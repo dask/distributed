@@ -160,18 +160,12 @@ class WorkerMemoryManager:
         If process memory rises above the pause threshold (80%), stop execution of new
         tasks.
         """
-        if self._memory_monitoring:
-            return
-        self._memory_monitoring = True
-        try:
-            # Don't use psutil directly; instead read from the same API that is used
-            # to send info to the Scheduler (e.g. for the benefit of Active Memory
-            # Manager) and which can be easily mocked in unit tests.
-            memory = worker.monitor.get_process_memory()
-            self._maybe_pause_or_unpause(worker, memory)
-            await self._maybe_spill(worker, memory)
-        finally:
-            self._memory_monitoring = False
+        # Don't use psutil directly; instead read from the same API that is used
+        # to send info to the Scheduler (e.g. for the benefit of Active Memory
+        # Manager) and which can be easily mocked in unit tests.
+        memory = worker.monitor.get_process_memory()
+        self._maybe_pause_or_unpause(worker, memory)
+        await self._maybe_spill(worker, memory)
 
     def _maybe_pause_or_unpause(self, worker: Worker, memory: int) -> None:
         if self.memory_pause_fraction is False:
