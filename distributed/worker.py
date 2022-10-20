@@ -1508,7 +1508,7 @@ class Worker(BaseWorker, ServerNode):
         disable_gc_diagnosis()
 
         try:
-            logger.info("Stopping worker at %s. Reason: ", self.address, reason)
+            logger.info("Stopping worker at %s. Reason: %s", self.address, reason)
         except ValueError:  # address not available if already closed
             logger.info("Stopping worker. Reason: %s", reason)
         if self.status not in WORKER_ANY_RUNNING:
