@@ -848,7 +848,12 @@ class Server:
                             logger.error("odd message %s", msg)
                     await asyncio.sleep(0)
         except CommClosedError:
-            logger.info("Connection to %s already closed", comm.peer_address)
+            logger.info("Connection to %s already closed.", comm.peer_address)
+        except OSError:
+            logger.exception(
+                "Unable to communicate with %s; closing.",
+                comm.peer_address,
+            )
         except Exception as e:
             logger.exception(
                 "Unexpected exception while handling stream from %s; closing.",
