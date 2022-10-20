@@ -1461,6 +1461,7 @@ class Worker(BaseWorker, ServerNode):
         timeout: float = 30,
         executor_wait: bool = True,
         nanny: bool = True,
+        reason: str = "unknown",
     ) -> str | None:
         """Close the worker
 
@@ -1469,12 +1470,14 @@ class Worker(BaseWorker, ServerNode):
 
         Parameters
         ----------
-        timeout : float, default 30
+        timeout
             Timeout in seconds for shutting down individual instructions
-        executor_wait : bool, default True
+        executor_wait
             If True, shut down executors synchronously, otherwise asynchronously
-        nanny : bool, default True
+        nanny
             If True, close the nanny
+        reason
+            Reason for closing the worker
 
         Returns
         -------
@@ -1486,6 +1489,11 @@ class Worker(BaseWorker, ServerNode):
         # nanny+worker, the nanny must be notified first. ==> Remove kwarg
         # nanny, see also Scheduler.retire_workers
         if self.status in (Status.closed, Status.closing, Status.failed):
+            logging.debug(
+                "Attempted to close worker that is already %s. Reason: %s",
+                self.status,
+                reason,
+            )
             await self.finished()
             return None
 
@@ -1503,9 +1511,9 @@ class Worker(BaseWorker, ServerNode):
         disable_gc_diagnosis()
 
         try:
-            logger.info("Stopping worker at %s", self.address)
+            logger.info("Stopping worker at %s. Reason: ", self.address, reason)
         except ValueError:  # address not available if already closed
-            logger.info("Stopping worker")
+            logger.info("Stopping worker. Reason: %s", reason)
         if self.status not in WORKER_ANY_RUNNING:
             logger.info("Closed worker has not yet started: %s", self.status)
         if not executor_wait:

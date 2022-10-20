@@ -464,7 +464,7 @@ class Nanny(ServerNode):
                 msg = error_message(e)
                 return msg
         if getattr(plugin, "restart", False):
-            await self.restart(reason=f"Nanny plugin {name} requested restart.")
+            await self.restart(reason=f"Nanny plugin {name} requests restart.")
 
         return {"status": "OK"}
 
@@ -594,7 +594,7 @@ class Nanny(ServerNode):
         self.stop()
         try:
             if self.process is not None:
-                await self.kill(timeout=timeout)
+                await self.kill(timeout=timeout, reason="Nanny is closing.")
         except Exception:
             logger.exception("Error in Nanny killing Worker subprocess")
         self.process = None

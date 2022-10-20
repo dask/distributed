@@ -3981,7 +3981,7 @@ class Scheduler(SchedulerState, ServerNode):
             if not comm.closed():
                 # This closes the Worker and ensures that if a Nanny is around,
                 # it is closed as well
-                comm.send({"op": "close"})
+                comm.send({"op": "close", "reason": "Scheduler is closing."})
                 comm.send({"op": "close-stream"})
                 # ^ TODO remove? `Worker.close` will close the stream anyway.
             with suppress(AttributeError):
@@ -4729,7 +4729,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         logger.info("Closing worker %s", worker)
         self.log_event(worker, {"action": "close-worker"})
-        self.worker_send(worker, {"op": "close"})
+        self.worker_send(
+            worker, {"op": "close", "reason": "Scheduler asks worker to close."}
+        )
 
     @log_errors
     async def remove_worker(
@@ -4768,7 +4770,9 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Remove worker %s", ws)
         if close:
             with suppress(AttributeError, CommClosedError):
-                self.stream_comms[address].send({"op": "close"})
+                self.stream_comms[address].send(
+                    {"op": "close", "reason": "Scheduler removes worker."}
+                )
 
         self.remove_resources(address)
 
@@ -5752,7 +5756,7 @@ class Scheduler(SchedulerState, ServerNode):
                         # see https://github.com/dask/distributed/pull/6427/files#r894917424
                         # NOTE: Nanny will automatically restart worker process when it's killed
                         nanny.kill(
-                            reason="Scheduler is restarting all workers.",
+                            reason="Scheduler restarts all workers.",
                             timeout=timeout,
                         ),
                         timeout,
