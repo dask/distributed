@@ -902,7 +902,6 @@ class Worker(BaseWorker, ServerNode):
     transition_counter_max = DeprecatedWorkerStateAttribute()
     validate = DeprecatedWorkerStateAttribute()
     validate_task = DeprecatedWorkerStateAttribute()
-    waiting_for_data_count = DeprecatedWorkerStateAttribute()
 
     @property
     def data_needed(self) -> set[TaskState]:
@@ -913,11 +912,20 @@ class Worker(BaseWorker, ServerNode):
         )
         return {ts for tss in self.state.data_needed.values() for ts in tss}
 
+    @property
+    def waiting_for_data_count(self) -> int:
+        warnings.warn(
+            "The `Worker.waiting_for_data_count` attribute has been removed; "
+            "use `len(Worker.state.waiting)`",
+            FutureWarning,
+        )
+        return len(self.state.waiting)
+
     ##################
     # Administrative #
     ##################
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         name = f", name: {self.name}" if self.name != self.address_safe else ""
         return (
             f"<{self.__class__.__name__} {self.address_safe!r}{name}, "
@@ -926,7 +934,7 @@ class Worker(BaseWorker, ServerNode):
             f"running: {self.state.executing_count}/{self.state.nthreads}, "
             f"ready: {len(self.state.ready)}, "
             f"comm: {self.state.in_flight_tasks_count}, "
-            f"waiting: {self.state.waiting_for_data_count}>"
+            f"waiting: {len(self.state.waiting)}>"
         )
 
     @property
@@ -989,10 +997,7 @@ class Worker(BaseWorker, ServerNode):
             spilled_memory, spilled_disk = 0, 0
 
         out = dict(
-            executing=self.state.executing_count,
-            in_memory=len(self.data),
-            ready=len(self.state.ready),
-            in_flight=self.state.in_flight_tasks_count,
+            task_counts=self.state.task_counts,
             bandwidth={
                 "total": self.bandwidth,
                 "workers": dict(self.bandwidth_workers),

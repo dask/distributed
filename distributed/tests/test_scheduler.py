@@ -61,6 +61,7 @@ from distributed.utils_test import (
     slowinc,
     tls_only_security,
     varying,
+    wait_for_state,
 )
 from distributed.worker import dumps_function, dumps_task, get_worker
 
@@ -606,26 +607,17 @@ async def test_clear_events_client_removal(c, s, a, b):
         assert time() < start + 2
 
 
-@gen_cluster()
-async def test_add_worker(s, a, b):
-    w = Worker(s.address, nthreads=3)
-    w.data["x-5"] = 6
-    w.data["y"] = 1
-
-    dsk = {("x-%d" % i): (inc, i) for i in range(10)}
-    s.update_graph(
-        tasks=valmap(dumps_task, dsk),
-        keys=list(dsk),
-        client="client",
-        dependencies={k: set() for k in dsk},
-    )
-    s.validate_state()
-    await w
+@gen_cluster(client=True, nthreads=[])
+async def test_add_worker(c, s):
+    x = c.submit(inc, 1, key="x")
+    await wait_for_state("x", "no-worker", s)
     s.validate_state()
 
-    assert w.ip in s.host_info
-    assert s.host_info[w.ip]["addresses"] == {a.address, b.address, w.address}
-    await w.close()
+    async with Worker(s.address) as w:
+        s.validate_state()
+        assert w.ip in s.host_info
+        assert s.host_info[w.ip]["addresses"] == {w.address}
+        assert await x == 2
 
 
 @gen_cluster(scheduler_kwargs={"blocked_handlers": ["feed"]})
