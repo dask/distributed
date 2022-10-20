@@ -851,12 +851,15 @@ class Server:
         except OSError:
             logger.exception("Lost connection to %s.", comm.peer_address)
         except Exception as e:
-            logger.exception(e)
+            logger.exception(
+                "Unexpected exception while handling stream from %s; closing.",
+                comm.peer_address,
+            )
             if LOG_PDB:
                 import pdb
 
                 pdb.set_trace()
-            raise
+            raise e
         finally:
             await comm.close()
             assert comm.closed()
