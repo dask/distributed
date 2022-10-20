@@ -814,7 +814,7 @@ class Server:
 
     async def handle_stream(self, comm, extra=None):
         extra = extra or {}
-        logger.info("Starting established connection")
+        logger.info("Starting established connection to %s", comm.peer_address)
 
         closed = False
         try:
@@ -847,9 +847,8 @@ class Server:
                         else:
                             logger.error("odd message %s", msg)
                     await asyncio.sleep(0)
-
-        except OSError:
-            logger.exception("Lost connection to %s.", comm.peer_address)
+        except CommClosedError:
+            logger.info("Connection to %s already closed", comm.peer_address)
         except Exception as e:
             logger.exception(
                 "Unexpected exception while handling stream from %s; closing.",
