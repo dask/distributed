@@ -128,9 +128,10 @@ def init_once():
     ucp = _ucp
 
     with patch.dict(os.environ, ucx_environment):
-        # This means that low-level settings in
-        # distributed.comm.ucx.environment
-        # override the high-level ones.
+        # We carefully ensure that ucx_environment only contains things
+        # that don't override ucx_config or existing slots in the
+        # environment, so the user's external environment can safely
+        # override things here.
         ucp.init(options=ucx_config, env_takes_precedence=True)
 
     pool_size_str = dask.config.get("distributed.rmm.pool-size")

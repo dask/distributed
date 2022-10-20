@@ -78,14 +78,15 @@ async def test_ucx_config(ucx_loop, cleanup):
 
     with dask.config.set(
         {
+            "distributed.comm.ucx": {"nvlink": True},
             "distributed.comm.ucx.environment": {
-                "log-level": "DEBUG",
+                "tls": "all",
                 "memtrack-dest": "stdout",
-            }
+            },
         }
     ):
         ucx_config, ucx_environment = _prepare_ucx_config()
-        assert ucx_environment["UCX_LOG_LEVEL"] == "DEBUG"
+        assert "UCX_TLS" not in ucx_environment
         assert ucx_environment["UCX_MEMTRACK_DEST"] == "stdout"
 
 
