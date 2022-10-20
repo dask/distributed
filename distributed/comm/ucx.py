@@ -89,7 +89,7 @@ def init_once():
         return
 
     # remove/process dask.ucx flags for valid ucx options
-    ucx_config = _scrub_ucx_config()
+    ucx_config = _prepare_ucx_config()
 
     # We ensure the CUDA context is created before initializing UCX. This can't
     # be safely handled externally because communications in Dask start before
@@ -551,17 +551,24 @@ class UCXBackend(Backend):
 backends["ucx"] = UCXBackend()
 
 
-def _scrub_ucx_config():
-    """Function to scrub dask config options for valid UCX config options"""
+def _prepare_ucx_config():
+    """Translate dask config options to appropriate UCX config options
+
+    Returns
+    -------
+    dict
+        Options suitable for passing to ``ucp.init``
+    """
 
     # configuration of UCX can happen in two ways:
     # 1) high level on/off flags which correspond to UCX configuration
-    # 2) explicitly defined UCX configuration flags
+    # 2) explicitly defined UCX configuration flags in distributed.comm.ucx.environment
+    # High-level settings in (1) are preferred to settings in (2)
 
     # import does not initialize ucp -- this will occur outside this function
     from ucp import get_config
 
-    options = {}
+    high_level_options = {}
 
     # if any of the high level flags are set, as long as they are not Null/None,
     # we assume we should configure basic TLS settings for UCX, otherwise we
@@ -596,14 +603,25 @@ def _scrub_ucx_config():
         if dask.config.get("distributed.comm.ucx.nvlink"):
             tls = tls + ",cuda_ipc"
 
-        options = {"TLS": tls, "SOCKADDR_TLS_PRIORITY": tls_priority}
+        high_level_options = {"TLS": tls, "SOCKADDR_TLS_PRIORITY": tls_priority}
 
-    # ANY UCX options defined in config will overwrite high level dask.ucx flags
-    valid_ucx_vars = list(get_config().keys())
-    for k, v in options.items():
+    # Pick up any other ucx environment settings
+    # {"some-name": value} is translated to {"SOME_NAME": value}
+    def normalise(k):
+        return "_".join(map(str.upper, k.split("-")))
+
+    environment_options = {
+        normalise(k): v
+        for k, v in dask.config.get("distributed.comm.ucx.environment", {}).items()
+    }
+
+    # High level options override general environment ones.
+    environment_options.update(high_level_options)
+    valid_ucx_vars = set(get_config().keys())
+    for k, v in environment_options.items():
         if k not in valid_ucx_vars:
             logger.debug(
                 f"Key: {k} with value: {v} not a valid UCX configuration option"
             )
 
-    return options
+    return environment_options
