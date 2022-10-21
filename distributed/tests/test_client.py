@@ -6602,29 +6602,31 @@ async def test_log_event(c, s, a):
 
 @gen_cluster(client=True, nthreads=[])
 async def test_log_event_multiple_clients(c, s):
-    c2 = await Client(s.address, set_as_default=False, asynchronous=True)
+        async with Client(s.address, asynchronous=True) as c2, Client(
+            s.address, asynchronous=True
+        ) as c3:
+            received_events = []
 
-    received_events = []
+            def get_event_handler(handler_id):
+                def handler(event):
+                    received_events.append((handler_id, event))
 
-    def get_event_handler(handler_id):
-        def handler(event):
-            received_events.append((handler_id, event))
+                return handler
 
-        return handler
+            c.subscribe_topic("test-topic", get_event_handler(1))
+            c2.subscribe_topic("test-topic", get_event_handler(2))
 
-    c.subscribe_topic("test-topic", get_event_handler(1))
-    c2.subscribe_topic("test-topic", get_event_handler(2))
+            while len(s.event_subscriber["test-topic"]) != 2:
+                await asyncio.sleep(0.01)
 
-    while len(s.event_subscriber["test-topic"]) != 2:
-        await asyncio.sleep(0.01)
+            await c.log_event("test-topic", {})
 
-    await c.log_event("test-topic", {})
+            while len(received_events) < 2:
+                await asyncio.sleep(0.01)
 
-    while len(received_events) < 2:
-        await asyncio.sleep(0.01)
-
-    assert len(received_events) == 2
-    assert {ev[0] for ev in received_events} == {1, 2}
+            assert len(received_events) == 2
+            assert {handler_id for handler_id, _ in received_events} == {1, 2}
+            assert "ValueError" not in logger.getvalue()
 
 
 @gen_cluster(client=True)
