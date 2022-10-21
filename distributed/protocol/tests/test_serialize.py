@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import copy
 import pickle
 from array import array
@@ -32,8 +34,8 @@ from distributed.protocol import (
     to_serialize,
 )
 from distributed.protocol.serialize import check_dask_serializable
-from distributed.utils import nbytes
-from distributed.utils_test import gen_test, inc
+from distributed.utils import ensure_memoryview, nbytes
+from distributed.utils_test import NO_AMM, gen_test, inc
 
 
 class MyObj:
@@ -88,18 +90,44 @@ def test_serialize_bytestrings():
         assert bb == b
 
 
+def test_serialize_empty_array():
+    a = array("I")
+
+    # serialize array
+    header, frames = serialize(a)
+    assert frames[0] == memoryview(a)
+    # drop empty frame
+    del frames[:]
+    # deserialize with no frames
+    a2 = deserialize(header, frames)
+    assert type(a2) == type(a)
+    assert a2.typecode == a.typecode
+    assert a2 == a
+
+
 @pytest.mark.parametrize(
     "typecode", ["b", "B", "h", "H", "i", "I", "l", "L", "q", "Q", "f", "d"]
 )
 def test_serialize_arrays(typecode):
-    a = array(typecode)
-    a.extend(range(5))
+    a = array(typecode, range(5))
+
+    # handle normal round trip through serialization
     header, frames = serialize(a)
     assert frames[0] == memoryview(a)
     a2 = deserialize(header, frames)
     assert type(a2) == type(a)
     assert a2.typecode == a.typecode
     assert a2 == a
+
+    # split up frames to test joining them back together
+    header, frames = serialize(a)
+    (f,) = frames
+    f = ensure_memoryview(f)
+    frames = [f[:1], f[1:2], f[2:-1], f[-1:]]
+    a3 = deserialize(header, frames)
+    assert type(a3) == type(a)
+    assert a3.typecode == a.typecode
+    assert a3 == a
 
 
 def test_Serialize():
@@ -180,7 +208,7 @@ async def test_object_in_graph(c, s, a, b):
     assert result.data == 123
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_scatter(c, s, a, b):
     o = MyObj(123)
     [future] = await c._scatter([o])
@@ -242,8 +270,8 @@ def test_serialize_bytes(kwargs):
         "abc",
         np.arange(5),
         b"ab" * int(40e6),
-        int(2 ** 26) * b"ab",
-        (int(2 ** 25) * b"ab", int(2 ** 25) * b"ab"),
+        int(2**26) * b"ab",
+        (int(2**25) * b"ab", int(2**25) * b"ab"),
     ]:
         b = serialize_bytes(x, **kwargs)
         assert isinstance(b, bytes)
@@ -415,14 +443,14 @@ def test_serialize_raises():
     assert "Hello-123" in str(info.value)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_profile_nested_sizeof():
     # https://github.com/dask/distributed/issues/1674
     n = 500
     original = outer = {}
     inner = {}
 
-    for i in range(n):
+    for _ in range(n):
         outer["children"] = inner
         outer, inner = inner, {}
 
@@ -447,14 +475,14 @@ def test_different_compression_families():
         if not isinstance(obj, MyObjWithCompression):
             raise NotImplementedError()
         header = {"compression": [True]}
-        return header, [bytes(2 ** 20)]
+        return header, [bytes(2**20)]
 
     def my_dumps_no_compression(obj, context=None):
         if not isinstance(obj, MyObjWithNoCompression):
             raise NotImplementedError()
 
         header = {"compression": [False]}
-        return header, [bytes(2 ** 20)]
+        return header, [bytes(2**20)]
 
     def my_loads(header, frames):
         return pickle.loads(frames[0])
@@ -473,7 +501,7 @@ def test_different_compression_families():
 
 @gen_test()
 async def test_frame_split():
-    data = b"1234abcd" * (2 ** 20)  # 8 MiB
+    data = b"1234abcd" * (2**20)  # 8 MiB
     assert dask.sizeof.sizeof(data) == dask.utils.parse_bytes("8MiB")
 
     size = dask.utils.parse_bytes("3MiB")
@@ -562,6 +590,27 @@ def test_ser_memoryview_object():
     data_in = memoryview(np.array(["hello"], dtype=object))
     with pytest.raises(TypeError):
         serialize(data_in, on_error="raise")
+
+
+def test_ser_empty_1d_memoryview():
+    mv = memoryview(b"")
+
+    # serialize empty `memoryview`
+    header, frames = serialize(mv)
+    assert frames[0] == mv
+    # deserialize empty `memoryview`
+    mv2 = deserialize(header, frames)
+    assert type(mv2) == type(mv)
+    assert mv2.format == mv.format
+    assert mv2 == mv
+
+
+def test_ser_empty_nd_memoryview():
+    mv = memoryview(b"12").cast("B", (1, 2))[:0]
+
+    # serialize empty `memoryview`
+    with pytest.raises(TypeError):
+        serialize(mv, on_error="raise")
 
 
 @gen_cluster(client=True, Worker=Nanny)

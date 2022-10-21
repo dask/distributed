@@ -43,6 +43,17 @@ properties:
 
               For a list of handlers see the `dask.distributed.Scheduler.handlers` attribute.
 
+          contact-address:
+            type:
+            - string
+            - "null"
+            description: |
+              The address that the scheduler advertises to workers for communication with it.
+
+              To be specified when the address to which the scheduler binds cannot be the same
+              as the address that workers use to contact the scheduler (e.g. because the former
+              is private and the scheduler is in a different network than the workers).
+
           default-data-size:
             type:
             - string
@@ -106,6 +117,30 @@ properties:
             description: |
               How frequently to balance worker loads
 
+          worker-saturation:
+            type: number
+            exclusiveMinimum: 0
+            description: |
+              Controls how many root tasks are sent to workers (like a `readahead`).
+
+              Up to worker-saturation * nthreads root tasks are sent to a
+              worker at a time. If `.inf`, all runnable tasks are immediately sent to workers.
+              The target number is rounded up, so any `worker-saturation` value > 1.0 guarantees
+              at least one extra task will be sent to workers.
+
+              Allowing oversaturation (> 1.0) means a worker may start running a new root task as
+              soon as it completes the previous, even if there is a higher-priority downstream task
+              to run. This reduces worker idleness, by letting workers do something while waiting for
+              further instructions from the scheduler, even if it's not the most efficient
+              thing to do.
+
+              This generally comes  at the expense of increased memory usage. It leads to "wider"
+              (more breadth-first) execution of the graph.
+
+              Compute-bound workloads may benefit from oversaturation. Memory-bound workloads should
+              generally leave `worker-saturation` at 1.0, though 1.25-1.5 could slightly improve
+              performance if ample memory is available.
+
           worker-ttl:
             type:
             - string
@@ -131,14 +166,14 @@ properties:
               Run custom modules during the lifetime of the scheduler
 
               You can run custom modules when the scheduler starts up and closes down.
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           preload-argv:
             type: array
             description: |
               Arguments to pass into the preload scripts described above
 
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           unknown-task-duration:
             type: string
@@ -226,7 +261,7 @@ properties:
 
           http:
             type: object
-            decription: Settings for Dask's embedded HTTP Server
+            description: Settings for Dask's embedded HTTP Server
             properties:
               routes:
                 type: array
@@ -244,7 +279,7 @@ properties:
 
           active-memory-manager:
             type: object
-            required: [start, interval, policies]
+            required: [start, interval, measure, policies]
             additionalProperties: false
             properties:
               start:
@@ -254,6 +289,14 @@ properties:
                 type: string
                 description:
                   Time expression, e.g. "2s". Run the AMM cycle every <interval>.
+              measure:
+                enum:
+                  - process
+                  - optimistic
+                  - managed
+                  - managed_in_memory
+                description:
+                  One of the attributes of distributed.scheduler.MemoryState
               policies:
                 type: array
                 items:
@@ -286,7 +329,10 @@ properties:
               For a list of handlers see the `dask.distributed.Scheduler.handlers` attribute.
 
           multiprocessing-method:
-            type: string
+            enum:
+              - spawn
+              - fork
+              - forkserver
             description: |
               How we create new workers, one of "spawn", "forkserver", or "fork"
 
@@ -303,6 +349,22 @@ properties:
               To avoid this, Dask usually used a file-based lock.
               However, on some systems file-based locks don't work.
               This is particularly common on HPC NFS systems, where users may want to set this to false.
+          transfer:
+            type: object
+            description: |
+              Configuration setting for data transfer between workers
+            properties:
+              message-bytes-limit:
+                type:
+                  - string
+                  - integer
+                description: |
+                  The maximum amount of data for a worker to request from another in a single gather operation
+
+                  Tasks are gathered in batches, and if the first task in a batch is larger than this value,
+                  the task will still be gathered to ensure progress. Hence, this limit is not absolute.
+                  Note that this limit applies to a single gather operation and a worker may gather data from
+                  multiple workers in parallel.
           connections:
             type: object
             description: |
@@ -321,14 +383,14 @@ properties:
               Run custom modules during the lifetime of the worker
 
               You can run custom modules when the worker starts up and closes down.
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           preload-argv:
             type: array
             description: |
               Arguments to pass into the preload scripts described above
 
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           daemon:
             type: boolean
@@ -391,6 +453,10 @@ properties:
               This data gets collected into statistical profiling information,
               which is then periodically bundled together and sent along to the scheduler.
             properties:
+              enabled:
+                type: boolean
+                description: |
+                  Whether or not to enable profiling
               interval:
                 type: string
                 description: |
@@ -468,13 +534,21 @@ properties:
                       donate data and only nodes below 45% will receive them. This helps
                       avoid data from bouncing around the cluster repeatedly.
 
+              transfer:
+                oneOf:
+                  - {type: number, minimum: 0, maximum: 1}
+                  - {enum: [false]}
+                description: >-
+                  When the total size of incoming data transfers gets above this amount,
+                  we start throttling incoming data transfers
+
               target:
                 oneOf:
                   - {type: number, minimum: 0, maximum: 1}
                   - {enum: [false]}
                 description: >-
                   When the process memory (as observed by the operating system) gets
-                  above this amount we start spilling the dask keys holding the largest
+                  above this amount, we start spilling the dask keys holding the oldest
                   chunks of data to disk
 
               spill:
@@ -483,7 +557,9 @@ properties:
                   - {enum: [false]}
                 description: >-
                   When the process memory (as observed by the operating system) gets
-                  above this amount we spill all data to disk.
+                  above this amount, we spill data to disk, starting from the dask keys
+                  holding the oldest chunks of data, until the process memory falls below
+                  the target threshold.
 
               pause:
                 oneOf:
@@ -491,7 +567,8 @@ properties:
                   - {enum: [false]}
                 description: >-
                   When the process memory (as observed by the operating system) gets
-                  above this amount we no longer start new tasks on this worker.
+                  above this amount, we no longer start new tasks or fetch new
+                  data on the worker.
 
               terminate:
                 oneOf:
@@ -501,9 +578,22 @@ properties:
                   When the process memory reaches this level the nanny process will kill
                   the worker (if a nanny is present)
 
+              max-spill:
+                oneOf:
+                  - type: string
+                  - {type: number, minimum: 0}
+                  - enum: [false]
+                description: >-
+                  Limit of number of bytes to be spilled on disk.
+
+              monitor-interval:
+                type: string
+                description: >-
+                  Interval between checks for the spill, pause, and terminate thresholds
+
           http:
             type: object
-            decription: Settings for Dask's embedded HTTP Server
+            description: Settings for Dask's embedded HTTP Server
             properties:
               routes:
                 type: array
@@ -522,22 +612,32 @@ properties:
           preload:
             type: array
             description: |
-              Run custom modules during the lifetime of the scheduler
+              Run custom modules during the lifetime of the nanny
 
-              You can run custom modules when the scheduler starts up and closes down.
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              You can run custom modules when the nanny starts up and closes down.
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           preload-argv:
             type: array
             description: |
               Arguments to pass into the preload scripts described above
 
-              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
 
           environ:
             type: object
             description: |
-              Environment variables to set on all worker processes started by nannies
+              Environment variables to set on all worker processes started by nannies.
+              These variables are set in the worker process after it has started.
+
+          pre-spawn-environ:
+            type: object
+            description: |
+              Environment variables to set on all worker processes started by nannies.
+              These variables are set within the Nanny process,
+              before spawning the worker process.
+              Should be used for variables that must be set before
+              process startup, interpreter startup, or imports.
 
       client:
         type: object
@@ -556,6 +656,32 @@ properties:
           scheduler-info-interval:
             type: string
             description: Interval between scheduler-info updates
+
+          security-loader:
+            type: [string, 'null']
+            description: |
+              A fully qualified name (e.g. ``module.submodule.function``) of
+              a callback to use for loading security credentials for the
+              client. If no security object is explicitly passed when creating
+              a ``Client``, this callback is called with a dict containing
+              client information (currently just ``address``), and should
+              return a ``Security`` object to use for this client, or ``None``
+              to fallback to the default security configuration.
+          preload:
+            type: array
+            description: |
+              Run custom modules during the lifetime of the client
+
+              You can run custom modules when the client starts up and closes down.
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
+
+          preload-argv:
+            type: array
+            description: |
+              Arguments to pass into the preload scripts described above
+
+              See https://docs.dask.org/en/latest/how-to/customize-initialization.html for more information
+
 
       deploy:
         type: object
@@ -645,7 +771,7 @@ properties:
             description: |
               The compression algorithm to use
 
-              This could be one of lz4, snappy, zstd, or blosc
+              This could be one of lz4, snappy, zstd
 
           offload:
             type:
@@ -826,24 +952,6 @@ properties:
                 description: |
                   Set environment variables to enable UCX RDMA connection manager support,
                   requires ``distributed.comm.ucx.infiniband=True``.
-              net-devices:
-                type: [string, 'null']
-                description: |
-                  Interface(s) used by workers for UCX communication. Can be a string (like
-                  ``"eth0"`` for NVLink or ``"mlx5_0:1"``/``"ib0"`` for InfiniBand), ``"auto"``
-                  (requires ``distributed.comm.ucx.infiniband=True``) to pick the optimal interface per-worker based on
-                  the system's topology, or ``None`` to stay with the default value of ``"all"`` (use
-                  all available interfaces). Setting to ``"auto"`` requires UCX-Py to be installed
-                  and compiled with hwloc support. Unexpected errors can occur when using
-                  ``"auto"`` if any interfaces are disconnected or improperly configured.
-              reuse-endpoints:
-                type: [boolean, 'null']
-                description: |
-                  Enable UCX-Py reuse endpoints mechanism if ``True`` or if it's not specified and
-                  UCX < 1.11 is installed, otherwise disable reuse endpoints. This was primarily
-                  introduced to resolve an issue with CUDA IPC that has been fixed in UCX 1.10, but
-                  can cause establishing endpoints to be very slow, this is particularly noticeable in
-                  clusters of more than a few dozen workers.
               create-cuda-context:
                 type: [boolean, 'null']
                 description: |
@@ -900,6 +1008,14 @@ properties:
                   A list of modules which are ignored when trying to collect the
                   code context when submitting a computation. Accepts regular
                   expressions.
+          erred-tasks:
+            type: object
+            properties:
+              max-history:
+                type: integer
+                minimum: 0
+                description: |
+                  The maximum number of erred tasks to remember.
 
       dashboard:
         type: object
@@ -952,6 +1068,9 @@ properties:
               limit :
                 type: string
                 description: The time allowed before triggering a warning
+              cycle :
+                type: string
+                description: The time in between verifying event loop speed
 
           max-error-length:
             type: integer
@@ -997,6 +1116,12 @@ properties:
               interval:
                 type: string
                 description: Polling time to query cpu/memory statistics default 500ms
+              disk:
+                type: boolean
+                description: Should we include disk metrics?  (they can cause issues in some systems)
+              host-cpu:
+                type: boolean
+                description: Should we include host-wide CPU usage, with very granular breakdown?
 
       rmm:
         type: object

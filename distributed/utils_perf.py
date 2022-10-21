@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import gc
 import logging
 import threading
@@ -5,8 +7,7 @@ from collections import deque
 
 from dask.utils import format_bytes
 
-from .compatibility import PYPY
-from .metrics import thread_time
+from distributed.metrics import thread_time
 
 logger = _logger = logging.getLogger(__name__)
 
@@ -144,8 +145,6 @@ class GCDiagnosis:
         self._enabled = False
 
     def enable(self):
-        if PYPY:
-            return
         assert not self._enabled
         self._fractional_timer = FractionalTimer(n_samples=self.N_SAMPLES)
         try:
@@ -162,8 +161,6 @@ class GCDiagnosis:
         self._enabled = True
 
     def disable(self):
-        if PYPY:
-            return
         assert self._enabled
         gc.callbacks.remove(self._gc_callback)
         self._enabled = False
@@ -176,7 +173,7 @@ class GCDiagnosis:
         self.enable()
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type, exc_value, traceback):
         self.disable()
 
     def _gc_callback(self, phase, info):
@@ -229,8 +226,6 @@ def enable_gc_diagnosis():
     """
     Ask to enable global GC diagnosis.
     """
-    if PYPY:
-        return
     global _gc_diagnosis_users
     with _gc_diagnosis_lock:
         if _gc_diagnosis_users == 0:
@@ -244,8 +239,6 @@ def disable_gc_diagnosis(force=False):
     """
     Ask to disable global GC diagnosis.
     """
-    if PYPY:
-        return
     global _gc_diagnosis_users
     with _gc_diagnosis_lock:
         if _gc_diagnosis_users > 0:

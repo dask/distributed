@@ -1,3 +1,12 @@
+Plugins
+~~~~~~~
+
+Dask's plugin system enables you to run custom Python code for certain events. You can use plugins
+that are specific to schedulers, workers, or nannies. A worker plugin, for example,
+allows you to run custom Python code on all your workers at certain event in the worker's lifecycle (e.g. when the worker process is started).
+In each section below, you'll see how to create your own plugin or use a Dask-provided built-in
+plugin.
+
 Scheduler Plugins
 =================
 
@@ -48,7 +57,7 @@ for more information on RabbitMQ and how to consume the messages.
        plugin = RabbitMQPlugin()
        scheduler.add_plugin(plugin)
 
-Run with: ``dask-scheduler --preload <filename.py>``
+Run with: ``dask scheduler --preload <filename.py>``
 
 Accessing Full Task State
 -------------------------
@@ -81,6 +90,15 @@ Worker Plugins
 for creating your own worker plugins. In addition, Dask provides some
 :ref:`built-in plugins <plugins.builtin>`.
 
+Watch the video below for an example using a ``WorkerPlugin`` to add a
+:py:class:`concurrent.futures.ProcessPoolExecutor`:
+
+.. raw:: html
+
+    <iframe width="560"
+            height="315" src="https://www.youtube.com/embed/vF2VItVU5zg?start=468"
+            style="margin: 0 auto 20px auto; display: block;" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
 .. autoclass:: distributed.diagnostics.plugin.WorkerPlugin
    :members:
 
@@ -90,6 +108,7 @@ Built-In Worker Plugins
 -----------------------
 
 .. autoclass:: distributed.diagnostics.plugin.PipInstall
+.. autoclass:: distributed.diagnostics.plugin.CondaInstall
 .. autoclass:: distributed.diagnostics.plugin.UploadFile
 
 

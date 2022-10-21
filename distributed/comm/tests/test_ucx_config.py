@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 from time import sleep
 
@@ -10,7 +12,7 @@ import dask
 from distributed import Client
 from distributed.comm.ucx import _scrub_ucx_config
 from distributed.utils import get_ip
-from distributed.utils_test import popen
+from distributed.utils_test import gen_test, popen
 
 try:
     HOST = get_ip()
@@ -21,70 +23,51 @@ ucp = pytest.importorskip("ucp")
 rmm = pytest.importorskip("rmm")
 
 
-@pytest.mark.asyncio
-async def test_ucx_config(cleanup):
-    ucx_110 = ucp.get_ucx_version() >= (1, 10, 0)
-
+@gen_test()
+async def test_ucx_config(ucx_loop, cleanup):
     ucx = {
         "nvlink": True,
         "infiniband": True,
         "rdmacm": False,
-        "net-devices": "",
         "tcp": True,
         "cuda-copy": True,
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
         ucx_config = _scrub_ucx_config()
-        if ucx_110:
-            assert ucx_config.get("TLS") == "rc,tcp,cuda_copy,cuda_ipc"
-            assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "tcp"
-        else:
-            assert ucx_config.get("TLS") == "rc,tcp,sockcm,cuda_copy,cuda_ipc"
-            assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "sockcm"
-        assert ucx_config.get("NET_DEVICES") is None
+        assert ucx_config.get("TLS") == "rc,tcp,cuda_copy,cuda_ipc"
+        assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "tcp"
 
     ucx = {
         "nvlink": False,
         "infiniband": True,
         "rdmacm": False,
-        "net-devices": "mlx5_0:1",
         "tcp": True,
         "cuda-copy": False,
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
         ucx_config = _scrub_ucx_config()
-        if ucx_110:
-            assert ucx_config.get("TLS") == "rc,tcp"
-            assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "tcp"
-        else:
-            assert ucx_config.get("TLS") == "rc,tcp,sockcm"
-            assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "sockcm"
-        assert ucx_config.get("NET_DEVICES") == "mlx5_0:1"
+        assert ucx_config.get("TLS") == "rc,tcp"
+        assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "tcp"
 
     ucx = {
         "nvlink": False,
         "infiniband": True,
         "rdmacm": True,
-        "net-devices": "all",
         "tcp": True,
         "cuda-copy": True,
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
         ucx_config = _scrub_ucx_config()
-        if ucx_110:
-            assert ucx_config.get("TLS") == "rc,tcp,cuda_copy"
-        else:
-            assert ucx_config.get("TLS") == "rc,tcp,rdmacm,cuda_copy"
+        assert ucx_config.get("TLS") == "rc,tcp,cuda_copy"
         assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "rdmacm"
 
     ucx = {
         "nvlink": None,
         "infiniband": None,
         "rdmacm": None,
-        "net-devices": None,
         "tcp": None,
         "cuda-copy": None,
     }
@@ -95,23 +78,29 @@ async def test_ucx_config(cleanup):
 
 
 @pytest.mark.flaky(
-    reruns=10, reruns_delay=5, condition=ucp.get_ucx_version() < (1, 11, 0)
+    reruns=10,
+    reruns_delay=5,
 )
-def test_ucx_config_w_env_var(cleanup, loop):
+def test_ucx_config_w_env_var(ucx_loop, cleanup, loop):
     env = os.environ.copy()
     env["DASK_RMM__POOL_SIZE"] = "1000.00 MB"
 
     port = "13339"
-    sched_addr = f"ucx://{HOST}:{port}"
+    # Using localhost appears to be less flaky than {HOST}. Additionally, this is
+    # closer to how other dask worker tests are written.
+    sched_addr = f"ucx://127.0.0.1:{port}"
 
     with popen(
-        ["dask-scheduler", "--no-dashboard", "--protocol", "ucx", "--port", port],
+        ["dask", "scheduler", "--no-dashboard", "--protocol", "ucx", "--port", port],
         env=env,
-    ) as sched:
+    ):
         with popen(
             [
-                "dask-worker",
+                "dask",
+                "worker",
                 sched_addr,
+                "--host",
+                "127.0.0.1",
                 "--no-dashboard",
                 "--protocol",
                 "ucx",
@@ -119,7 +108,7 @@ def test_ucx_config_w_env_var(cleanup, loop):
             ],
             env=env,
         ):
-            with Client(sched_addr, loop=loop, timeout=10) as c:
+            with Client(sched_addr, loop=loop, timeout=60) as c:
                 while not c.scheduler_info()["workers"]:
                     sleep(0.1)
 

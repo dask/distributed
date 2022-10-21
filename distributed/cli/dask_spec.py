@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import sys
@@ -13,7 +15,7 @@ from distributed.deploy.spec import run_spec
 @click.option("--spec", type=str, default="", help="")
 @click.option("--spec-file", type=str, default=None, help="")
 @click.version_option()
-def main(args, spec: str, spec_file: str):
+def main(args: list, spec: str, spec_file: str) -> None:
 
     if spec and spec_file or not spec and not spec_file:
         print("Must specify exactly one of --spec and --spec-file")
@@ -36,7 +38,7 @@ def main(args, spec: str, spec_file: str):
         except KeyboardInterrupt:
             await asyncio.gather(*(w.close() for w in servers.values()))
 
-    asyncio.get_event_loop().run_until_complete(run())
+    asyncio.run(run())
 
 
 if __name__ == "__main__":

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import functools
 import warnings
 
@@ -18,7 +20,8 @@ if parse_version(bokeh.__version__) < parse_version("2.1.1"):
     raise ImportError("Dask needs bokeh >= 2.1.1")
 
 
-def BokehApplication(applications, server, prefix="/", template_variables={}):
+def BokehApplication(applications, server, prefix="/", template_variables=None):
+    template_variables = template_variables or {}
     prefix = "/" + prefix.strip("/") + "/" if prefix else "/"
 
     extra = {"prefix": prefix, **template_variables}

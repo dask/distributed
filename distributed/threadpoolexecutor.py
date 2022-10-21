@@ -20,14 +20,16 @@ which is included as a comment at the end of this file:
 
    Copyright 2001-2016 Python Software Foundation; All Rights Reserved
 """
+from __future__ import annotations
+
 import itertools
 import logging
 import os
 import queue
 import threading
 
-from . import _concurrent_futures_thread as thread
-from .metrics import time
+from distributed import _concurrent_futures_thread as thread
+from distributed.metrics import time
 
 logger = logging.getLogger(__name__)
 

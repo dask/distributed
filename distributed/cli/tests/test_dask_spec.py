@@ -1,23 +1,24 @@
+from __future__ import annotations
+
 import sys
 
-import pytest
 import yaml
 
 from distributed import Client
-from distributed.scheduler import COMPILED
-from distributed.utils_test import gen_test, popen
+from distributed.utils import open_port
+from distributed.utils_test import gen_cluster, gen_test, popen
 
 
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 @gen_test(timeout=120)
 async def test_text():
+    port = open_port()
     with popen(
         [
             sys.executable,
             "-m",
             "distributed.cli.dask_spec",
             "--spec",
-            '{"cls": "dask.distributed.Scheduler", "opts": {"port": 9373}}',
+            '{"cls": "dask.distributed.Scheduler", "opts": {"port": %d}}' % port,
         ]
     ):
         with popen(
@@ -25,12 +26,12 @@ async def test_text():
                 sys.executable,
                 "-m",
                 "distributed.cli.dask_spec",
-                "tcp://localhost:9373",
+                "tcp://localhost:%d" % port,
                 "--spec",
                 '{"cls": "dask.distributed.Worker", "opts": {"nanny": false, "nthreads": 3, "name": "foo"}}',
             ]
         ):
-            async with Client("tcp://localhost:9373", asynchronous=True) as client:
+            async with Client("tcp://localhost:%d" % port, asynchronous=True) as client:
                 await client.wait_for_workers(1)
                 info = await client.scheduler.identity()
                 [w] = info["workers"].values()
@@ -38,9 +39,8 @@ async def test_text():
                 assert w["nthreads"] == 3
 
 
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
-@pytest.mark.asyncio
-async def test_file(cleanup, tmp_path):
+@gen_cluster(client=True, nthreads=[])
+async def test_file(c, s, tmp_path):
     fn = str(tmp_path / "foo.yaml")
     with open(fn, "w") as f:
         yaml.dump(
@@ -50,24 +50,21 @@ async def test_file(cleanup, tmp_path):
             },
             f,
         )
-
-    with popen(["dask-scheduler", "--port", "9373", "--no-dashboard"]):
-        with popen(
-            [
-                sys.executable,
-                "-m",
-                "distributed.cli.dask_spec",
-                "tcp://localhost:9373",
-                "--spec-file",
-                fn,
-            ]
-        ):
-            async with Client("tcp://localhost:9373", asynchronous=True) as client:
-                await client.wait_for_workers(1)
-                info = await client.scheduler.identity()
-                [w] = info["workers"].values()
-                assert w["name"] == "foo"
-                assert w["nthreads"] == 3
+    with popen(
+        [
+            sys.executable,
+            "-m",
+            "distributed.cli.dask_spec",
+            s.address,
+            "--spec-file",
+            fn,
+        ]
+    ):
+        await c.wait_for_workers(1)
+        info = await c.scheduler.identity()
+        [w] = info["workers"].values()
+        assert w["name"] == "foo"
+        assert w["nthreads"] == 3
 
 
 def test_errors():
@@ -80,13 +77,17 @@ def test_errors():
             '{"foo": "bar"}',
             "--spec-file",
             "foo.yaml",
-        ]
+        ],
+        capture_output=True,
     ) as proc:
         line = proc.stdout.readline().decode()
         assert "exactly one" in line
         assert "--spec" in line and "--spec-file" in line
 
-    with popen([sys.executable, "-m", "distributed.cli.dask_spec"]) as proc:
+    with popen(
+        [sys.executable, "-m", "distributed.cli.dask_spec"],
+        capture_output=True,
+    ) as proc:
         line = proc.stdout.readline().decode()
         assert "exactly one" in line
         assert "--spec" in line and "--spec-file" in line

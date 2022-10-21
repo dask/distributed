@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import uuid
@@ -10,11 +12,10 @@ from tornado.ioloop import PeriodicCallback
 import dask
 from dask.utils import parse_timedelta
 
+from distributed.metrics import time
+from distributed.utils import SyncMethodMixin, log_errors
 from distributed.utils_comm import retry_operation
-
-from .metrics import time
-from .utils import SyncMethodMixin, log_errors
-from .worker import get_client, get_worker
+from distributed.worker import get_client, get_worker
 
 logger = logging.getLogger(__name__)
 
@@ -70,8 +71,6 @@ class SemaphoreExtension:
             }
         )
 
-        self.scheduler.extensions["semaphores"] = self
-
         # {metric_name: {semaphore_name: metric}}
         self.metrics = {
             "acquire_total": defaultdict(int),  # counter
@@ -92,11 +91,11 @@ class SemaphoreExtension:
             dask.config.get("distributed.scheduler.locks.lease-timeout"), default="s"
         )
 
-    async def get_value(self, comm=None, name=None):
+    async def get_value(self, name=None):
         return len(self.leases[name])
 
     # `comm` here is required by the handler interface
-    def create(self, comm=None, name=None, max_leases=None):
+    def create(self, name=None, max_leases=None):
         # We use `self.max_leases` as the point of truth to find out if a semaphore with a specific
         # `name` has been created.
         if name not in self.max_leases:
@@ -109,20 +108,18 @@ class SemaphoreExtension:
                     % (max_leases, self.max_leases[name])
                 )
 
-    def refresh_leases(self, comm=None, name=None, lease_ids=None):
-        with log_errors():
-            now = time()
-            logger.debug(
-                "Refresh leases for %s with ids %s at %s", name, lease_ids, now
-            )
-            for id_ in lease_ids:
-                if id_ not in self.leases[name]:
-                    logger.critical(
-                        f"Refreshing an unknown lease ID {id_} for {name}. This might be due to leases "
-                        f"timing out and may cause overbooking of the semaphore!"
-                        f"This is often caused by long-running GIL-holding in the task which acquired the lease."
-                    )
-                self.leases[name][id_] = now
+    @log_errors
+    def refresh_leases(self, name=None, lease_ids=None):
+        now = time()
+        logger.debug("Refresh leases for %s with ids %s at %s", name, lease_ids, now)
+        for id_ in lease_ids:
+            if id_ not in self.leases[name]:
+                logger.critical(
+                    f"Refreshing an unknown lease ID {id_} for {name}. This might be due to leases "
+                    f"timing out and may cause overbooking of the semaphore!"
+                    f"This is often caused by long-running GIL-holding in the task which acquired the lease."
+                )
+            self.leases[name][id_] = now
 
     def _get_lease(self, name, lease_id):
         result = True
@@ -145,72 +142,73 @@ class SemaphoreExtension:
             return False
         return True
 
-    async def acquire(self, comm=None, name=None, timeout=None, lease_id=None):
-        with log_errors():
-            if not self._semaphore_exists(name):
-                raise RuntimeError(f"Semaphore `{name}` not known or already closed.")
+    @log_errors
+    async def acquire(self, name=None, timeout=None, lease_id=None):
+        if not self._semaphore_exists(name):
+            raise RuntimeError(f"Semaphore `{name}` not known or already closed.")
 
-            if isinstance(name, list):
-                name = tuple(name)
-            w = _Watch(timeout)
-            w.start()
+        if isinstance(name, list):
+            name = tuple(name)
+        w = _Watch(timeout)
+        w.start()
 
-            self.metrics["pending"][name] += 1
-            while True:
-                logger.debug(
-                    "Trying to acquire %s for %s with %s seconds left.",
-                    lease_id,
-                    name,
-                    w.leftover(),
+        self.metrics["pending"][name] += 1
+        while True:
+            logger.debug(
+                "Trying to acquire %s for %s with %s seconds left.",
+                lease_id,
+                name,
+                w.leftover(),
+            )
+            # Reset the event and try to get a release. The event will be set if the state
+            # is changed and helps to identify when it is worth to retry an acquire
+            self.events[name].clear()
+
+            result = self._get_lease(name, lease_id)
+
+            # If acquiring fails, we wait for the event to be set, i.e. something has
+            # been released and we can try to acquire again (continue loop)
+            if not result:
+                future = asyncio.wait_for(
+                    self.events[name].wait(), timeout=w.leftover()
                 )
-                # Reset the event and try to get a release. The event will be set if the state
-                # is changed and helps to identify when it is worth to retry an acquire
-                self.events[name].clear()
+                try:
+                    await future
+                    continue
+                except TimeoutError:
+                    result = False
+            logger.debug(
+                "Acquisition of lease %s for %s is %s after waiting for %ss.",
+                lease_id,
+                name,
+                result,
+                w.elapsed(),
+            )
+            # We're about to return, so the lease is no longer "pending"
+            self.metrics["average_pending_lease_time"][name] = (
+                self.metrics["average_pending_lease_time"][name] + w.elapsed()
+            ) / 2
+            self.metrics["pending"][name] -= 1
 
-                result = self._get_lease(name, lease_id)
+            return result
 
-                # If acquiring fails, we wait for the event to be set, i.e. something has
-                # been released and we can try to acquire again (continue loop)
-                if not result:
-                    future = asyncio.wait_for(
-                        self.events[name].wait(), timeout=w.leftover()
-                    )
-                    try:
-                        await future
-                        continue
-                    except TimeoutError:
-                        result = False
-                logger.debug(
-                    "Acquisition of lease %s for %s is %s after waiting for %ss.",
-                    lease_id,
-                    name,
-                    result,
-                    w.elapsed(),
-                )
-                # We're about to return, so the lease is no longer "pending"
-                self.metrics["average_pending_lease_time"][name] = (
-                    self.metrics["average_pending_lease_time"][name] + w.elapsed()
-                ) / 2
-                self.metrics["pending"][name] -= 1
-
-                return result
-
-    def release(self, comm=None, name=None, lease_id=None):
-        with log_errors():
-            if not self._semaphore_exists(name):
-                logger.warning(
-                    f"Tried to release semaphore `{name}` but it is not known or already closed."
-                )
-                return
-            if isinstance(name, list):
-                name = tuple(name)
-            if name in self.leases and lease_id in self.leases[name]:
-                self._release_value(name, lease_id)
-            else:
-                logger.warning(
-                    f"Tried to release semaphore but it was already released: "
-                    f"name={name}, lease_id={lease_id}. This can happen if the semaphore timed out before."
-                )
+    @log_errors
+    def release(self, name=None, lease_id=None):
+        if not self._semaphore_exists(name):
+            logger.warning(
+                f"Tried to release semaphore `{name}` but it is not known or already closed."
+            )
+            return
+        if isinstance(name, list):
+            name = tuple(name)
+        if name in self.leases and lease_id in self.leases[name]:
+            self._release_value(name, lease_id)
+        else:
+            logger.warning(
+                "Tried to release semaphore but it was already released: "
+                f"{name=}, {lease_id=}. "
+                "This can happen if the semaphore timed out before."
+            )
 
     def _release_value(self, name, lease_id):
         logger.debug("Releasing %s for %s", lease_id, name)
@@ -241,32 +239,32 @@ class SemaphoreExtension:
                     )
                     self._release_value(name=name, lease_id=_id)
 
-    def close(self, comm=None, name=None):
+    @log_errors
+    def close(self, name=None):
         """Hard close the semaphore without warning clients which still hold a lease."""
-        with log_errors():
-            if not self._semaphore_exists(name):
-                return
+        if not self._semaphore_exists(name):
+            return
 
-            del self.max_leases[name]
-            if name in self.events:
-                del self.events[name]
-            if name in self.leases:
-                if self.leases[name]:
-                    warnings.warn(
-                        f"Closing semaphore {name} but there remain unreleased leases {sorted(self.leases[name])}",
-                        RuntimeWarning,
-                    )
-                del self.leases[name]
-            if name in self.metrics["pending"]:
-                if self.metrics["pending"][name]:
-                    warnings.warn(
-                        f"Closing semaphore {name} but there remain pending leases",
-                        RuntimeWarning,
-                    )
-            # Clean-up state of semaphore metrics
-            for _, metric_dict in self.metrics.items():
-                if name in metric_dict:
-                    del metric_dict[name]
+        del self.max_leases[name]
+        if name in self.events:
+            del self.events[name]
+        if name in self.leases:
+            if self.leases[name]:
+                warnings.warn(
+                    f"Closing semaphore {name} but there remain unreleased leases {sorted(self.leases[name])}",
+                    RuntimeWarning,
+                )
+            del self.leases[name]
+        if name in self.metrics["pending"]:
+            if self.metrics["pending"][name]:
+                warnings.warn(
+                    f"Closing semaphore {name} but there remain pending leases",
+                    RuntimeWarning,
+                )
+        # Clean-up state of semaphore metrics
+        for _, metric_dict in self.metrics.items():
+            if name in metric_dict:
+                del metric_dict[name]
 
 
 class Semaphore(SyncMethodMixin):
@@ -379,7 +377,7 @@ class Semaphore(SyncMethodMixin):
         except ValueError:
             client = get_client()
             self.scheduler = scheduler_rpc or client.scheduler
-            self.loop = loop or client.io_loop
+            self.loop = loop or client.loop
 
         self.name = name or "semaphore-" + uuid.uuid4().hex
         self.max_leases = max_leases
@@ -531,14 +529,14 @@ class Semaphore(SyncMethodMixin):
         self.acquire()
         return self
 
-    def __exit__(self, *args, **kwargs):
+    def __exit__(self, exc_type, exc_value, traceback):
         self.release()
 
     async def __aenter__(self):
         await self.acquire()
         return self
 
-    async def __aexit__(self, *args, **kwargs):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         await self.release()
 
     def __getstate__(self):

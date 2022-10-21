@@ -8,17 +8,16 @@ import sys
 import weakref
 from abc import ABC, abstractmethod
 from contextlib import suppress
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import dask
 from dask.utils import parse_timedelta
 
-from ..metrics import time
-from ..protocol import pickle
-from ..protocol.compression import get_default_compression
-from ..utils import TimeoutError
-from . import registry
-from .addressing import parse_address
+from distributed.comm import registry
+from distributed.comm.addressing import parse_address
+from distributed.metrics import time
+from distributed.protocol import pickle
+from distributed.protocol.compression import get_default_compression
 
 logger = logging.getLogger(__name__)
 
@@ -44,14 +43,20 @@ class Comm(ABC):
     """
 
     _instances: ClassVar[weakref.WeakSet[Comm]] = weakref.WeakSet()
+    name: str | None
+    local_info: dict
+    remote_info: dict
+    handshake_options: dict
+    deserialize: bool
 
-    def __init__(self):
+    def __init__(self, deserialize: bool = True):
         self._instances.add(self)
         self.allow_offload = True  # for deserialization in utils.from_frames
         self.name = None
         self.local_info = {}
         self.remote_info = {}
         self.handshake_options = {}
+        self.deserialize = deserialize
 
     # XXX add set_close_callback()?
 
@@ -197,7 +202,7 @@ class Listener(ABC):
         await self.start()
         return self
 
-    async def __aexit__(self, *exc):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         future = self.stop()
         if inspect.isawaitable(future):
             await future
@@ -209,7 +214,9 @@ class Listener(ABC):
 
         return _().__await__()
 
-    async def on_connection(self, comm: Comm, handshake_overrides=None):
+    async def on_connection(
+        self, comm: Comm, handshake_overrides: dict[str, Any] | None = None
+    ) -> None:
         local_info = {**comm.handshake_info(), **(handshake_overrides or {})}
 
         timeout = dask.config.get("distributed.comm.timeouts.connect")
@@ -288,16 +295,18 @@ async def connect(
             break
         except FatalCommClosedError:
             raise
-        # CommClosed, EnvironmentError inherit from OSError
-        except (TimeoutError, OSError) as exc:
+        # Note: CommClosed inherits from OSError
+        except (asyncio.TimeoutError, OSError) as exc:
             active_exception = exc
 
-            # The intermediate capping is mostly relevant for the initial
-            # connect. Afterwards we should be more forgiving
-            intermediate_cap = intermediate_cap * 1.5
+            # As descibed above, the intermediate timeout is used to distributed
+            # initial, bulk connect attempts homogeneously. In particular with
+            # the jitter upon retries we should not be worred about overloading
+            # any more DNS servers
+            intermediate_cap = timeout
             # FullJitter see https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
 
-            upper_cap = min(time_left(), backoff_base * (2 ** attempt))
+            upper_cap = min(time_left(), backoff_base * (2**attempt))
             backoff = random.uniform(0, upper_cap)
             attempt += 1
             logger.debug(

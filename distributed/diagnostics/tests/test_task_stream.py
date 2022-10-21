@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 from time import sleep
 
@@ -131,18 +133,18 @@ def test_client_sync(client):
 
 @gen_cluster(client=True)
 async def test_get_task_stream_plot(c, s, a, b):
-    bokeh = pytest.importorskip("bokeh")
+    bkm = pytest.importorskip("bokeh.models")
     await c.get_task_stream()
 
     futures = c.map(slowinc, range(10), delay=0.1)
     await wait(futures)
 
     data, figure = await c.get_task_stream(plot=True)
-    assert isinstance(figure, bokeh.plotting.Figure)
+    assert isinstance(figure, bkm.Plot)
 
 
 def test_get_task_stream_save(client, tmpdir):
-    bokeh = pytest.importorskip("bokeh")
+    bkm = pytest.importorskip("bokeh.models")
     tmpdir = str(tmpdir)
     fn = os.path.join(tmpdir, "foo.html")
 
@@ -153,4 +155,4 @@ def test_get_task_stream_save(client, tmpdir):
     assert "inc" in data
     assert "bokeh" in data
 
-    assert isinstance(ts.figure, bokeh.plotting.Figure)
+    assert isinstance(ts.figure, bkm.Plot)

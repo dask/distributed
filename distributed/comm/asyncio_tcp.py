@@ -5,23 +5,25 @@ import collections
 import logging
 import os
 import socket
+import ssl
 import struct
+import sys
 import weakref
 from itertools import islice
 from typing import Any
 
-try:
-    import ssl
-except ImportError:
-    ssl = None  # type: ignore
-
 import dask
 
-from ..utils import ensure_ip, get_ip, get_ipv6
-from .addressing import parse_host_port, unparse_host_port
-from .core import Comm, CommClosedError, Connector, Listener
-from .registry import Backend
-from .utils import ensure_concrete_host, from_frames, to_frames
+from distributed.comm.addressing import parse_host_port, unparse_host_port
+from distributed.comm.core import Comm, CommClosedError, Connector, Listener
+from distributed.comm.registry import Backend
+from distributed.comm.utils import (
+    ensure_concrete_host,
+    from_frames,
+    host_array,
+    to_frames,
+)
+from distributed.utils import ensure_ip, ensure_memoryview, get_ip, get_ipv6
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +123,7 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
         self._using_default_buffer = True
 
         self._default_len = max(min_read_size, 16)  # need at least 16 bytes of buffer
-        self._default_buffer = memoryview(bytearray(self._default_len))
+        self._default_buffer = host_array(self._default_len)
         # Index in default_buffer pointing to the first unparsed byte
         self._default_start = 0
         # Index in default_buffer pointing to the last written byte
@@ -258,7 +260,7 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
         self._default_start += 8 * n_read
 
         if n_read == needed:
-            self._frames = [memoryview(bytearray(n)) for n in self._frame_lengths]
+            self._frames = [host_array(n) for n in self._frame_lengths]
             self._frame_index = 0
             self._frame_nbytes_needed = (
                 self._frame_lengths[0] if self._frame_lengths else 0
@@ -374,7 +376,9 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
             await drain_waiter
 
         # Ensure all memoryviews are in single-byte format
-        frames = [f.cast("B") if isinstance(f, memoryview) else f for f in frames]
+        frames = [
+            ensure_memoryview(f) if isinstance(f, memoryview) else f for f in frames
+        ]
 
         nframes = len(frames)
         frames_nbytes = [len(f) for f in frames]
@@ -404,7 +408,7 @@ class TCP(Comm):
 
     def __init__(
         self,
-        protocol,
+        protocol: DaskCommProtocol,
         local_addr: str,
         peer_addr: str,
         deserialize: bool = True,
@@ -412,9 +416,8 @@ class TCP(Comm):
         self._protocol = protocol
         self._local_addr = local_addr
         self._peer_addr = peer_addr
-        self.deserialize = deserialize
         self._closed = False
-        super().__init__()
+        super().__init__(deserialize=deserialize)
 
         # setup a finalizer to close the protocol if the comm was never explicitly closed
         self._finalizer = weakref.finalize(
@@ -496,7 +499,7 @@ def _expect_tls_context(connection_args):
         raise TypeError(
             "TLS expects a `ssl_context` argument of type "
             "ssl.SSLContext (perhaps check your TLS configuration?)"
-            "  Instead got %s" % str(ctx)
+            f" Instead got {ctx!r}"
         )
     return ctx
 
@@ -772,10 +775,14 @@ class _ZeroCopyWriter:
     # (which would be very large), and set a limit on the number of buffers to
     # pass to sendmsg.
     if hasattr(socket.socket, "sendmsg"):
-        try:
-            SENDMSG_MAX_COUNT = os.sysconf("SC_IOV_MAX")
-        except Exception:
-            SENDMSG_MAX_COUNT = 16  # Should be supported on all systems
+        # Note: WINDOWS constant doesn't work with `mypy --platform win32`
+        if sys.platform == "win32":
+            SENDMSG_MAX_COUNT = 16  # No os.sysconf available
+        else:
+            try:
+                SENDMSG_MAX_COUNT = os.sysconf("SC_IOV_MAX")
+            except Exception:
+                SENDMSG_MAX_COUNT = 16  # Should be supported on all systems
     else:
         SENDMSG_MAX_COUNT = 1  # sendmsg not supported, use send instead
 
@@ -810,7 +817,11 @@ class _ZeroCopyWriter:
         # Initialize the buffer limits
         self.set_write_buffer_limits()
 
-    def set_write_buffer_limits(self, high: int = None, low: int = None):
+    def set_write_buffer_limits(
+        self,
+        high: int | None = None,
+        low: int | None = None,
+    ) -> None:
         """Set the write buffer limits"""
         # Copied almost verbatim from asyncio.transports._FlowControlMixin
         if high is None:
@@ -843,12 +854,9 @@ class _ZeroCopyWriter:
 
     def _buffer_append(self, data: bytes) -> None:
         """Append new data to the send buffer"""
-        if not isinstance(data, memoryview):
-            data = memoryview(data)
-        if data.format != "B":
-            data = data.cast("B")
-        self._size += len(data)
-        self._buffers.append(data)
+        mv = ensure_memoryview(data)
+        self._size += len(mv)
+        self._buffers.append(mv)
 
     def _buffer_peek(self) -> list[memoryview]:
         """Get one or more buffers to write to the socket"""
