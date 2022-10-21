@@ -839,6 +839,8 @@ def test_fail_hard(sync):
 
                 while a.status != Status.closed:
                     await asyncio.sleep(0.01)
+            method_name = "fail_sync" if sync else "fail_async"
+            assert f"worker-{method_name}-fail-hard" in logger.getvalue()
 
         test_done = True
 

@@ -166,11 +166,11 @@ WORKER_ANY_RUNNING = {
 }
 
 
-# TODO: Parametrize with reason
 def fail_hard(method: Callable[P, T]) -> Callable[P, T]:
     """
     Decorator to close the worker if this method encounters an exception.
     """
+    reason = f"worker-{method.__name__}-fail-hard"
     if iscoroutinefunction(method):
 
         @functools.wraps(method)
@@ -181,7 +181,7 @@ def fail_hard(method: Callable[P, T]) -> Callable[P, T]:
                 if self.status not in (Status.closed, Status.closing):
                     self.log_event("worker-fail-hard", error_message(e))
                     logger.exception(e)
-                await _force_close(self)
+                await _force_close(self, reason)
                 raise
 
     else:
@@ -194,13 +194,13 @@ def fail_hard(method: Callable[P, T]) -> Callable[P, T]:
                 if self.status not in (Status.closed, Status.closing):
                     self.log_event("worker-fail-hard", error_message(e))
                     logger.exception(e)
-                self.loop.add_callback(_force_close, self)
+                self.loop.add_callback(_force_close, self, reason)
                 raise
 
     return wrapper  # type: ignore
 
 
-async def _force_close(self):
+async def _force_close(self, reason: str):
     """
     Used with the fail_hard decorator defined above
 
@@ -209,7 +209,7 @@ async def _force_close(self):
     """
     try:
         await asyncio.wait_for(
-            self.close(nanny=False, executor_wait=False, reason="worker-fail-hard"),
+            self.close(nanny=False, executor_wait=False, reason=reason),
             30,
         )
     except (KeyboardInterrupt, SystemExit):  # pragma: nocover
