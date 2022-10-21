@@ -1635,7 +1635,9 @@ class Worker(BaseWorker, ServerNode):
         setproctitle("dask worker [closed]")
         return "OK"
 
-    async def close_gracefully(self, reason="worker-close-gracefully"):
+    async def close_gracefully(
+        self, restart=None, reason: str = "worker-close-gracefully"
+    ):
         """Gracefully shut down a worker
 
         This first informs the scheduler that we're shutting down, and asks it
@@ -1657,7 +1659,9 @@ class Worker(BaseWorker, ServerNode):
             remove=False,
             stimulus_id=f"worker-close-gracefully-{time()}",
         )
-        await self.close(nanny=not self.lifetime_restart, reason=reason)
+        if restart is None:
+            restart = self.lifetime_restart
+        await self.close(nanny=not restart, reason=reason)
 
     async def wait_until_closed(self):
         warnings.warn("wait_until_closed has moved to finished()")
