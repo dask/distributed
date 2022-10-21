@@ -11,7 +11,6 @@ import functools
 import logging
 import os
 import struct
-import warnings
 import weakref
 from collections.abc import Awaitable, Callable, Collection
 from typing import TYPE_CHECKING, Any
@@ -59,13 +58,13 @@ _warning_suffix = (
 
 
 def _warn_existing_cuda_context(ctx, pid):
-    warnings.warn(
+    logger.warning(
         f"A CUDA context for device {ctx} already exists on process ID {pid}. {_warning_suffix}"
     )
 
 
 def _warn_cuda_context_wrong_device(ctx_expected, ctx_actual, pid):
-    warnings.warn(
+    logger.warning(
         f"Worker with process ID {pid} should have a CUDA context assigned to device "
         f"{ctx_expected}, but instead the CUDA context is on device {ctx_actual}. "
         f"{_warning_suffix}"
@@ -167,7 +166,7 @@ def init_once():
                 )
 
         if pool_size_str is not None:
-            warnings.warn(
+            logger.warning(
                 "Initial RMM pool size defined, but RMM is not available. "
                 "Please consider installing RMM or removing the pool size option."
             )
