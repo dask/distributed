@@ -543,7 +543,7 @@ class Nanny(ServerNode):
                 logger.warning("Restarting worker")
                 await self.instantiate()
             elif self.status == Status.closing_gracefully:
-                await self.close(reason="nanny-closing-gracefully")
+                await self.close(reason="nanny-close-gracefully")
 
         except Exception:
             logger.error(

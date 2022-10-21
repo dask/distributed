@@ -166,6 +166,7 @@ WORKER_ANY_RUNNING = {
 }
 
 
+# TODO: Parametrize with reason
 def fail_hard(method: Callable[P, T]) -> Callable[P, T]:
     """
     Decorator to close the worker if this method encounters an exception.
@@ -208,7 +209,7 @@ async def _force_close(self):
     """
     try:
         await asyncio.wait_for(
-            self.close(nanny=False, executor_wait=False, reason="Worker failed hard."),
+            self.close(nanny=False, executor_wait=False, reason="worker-fail-hard"),
             30,
         )
     except (KeyboardInterrupt, SystemExit):  # pragma: nocover
@@ -827,7 +828,9 @@ class Worker(BaseWorker, ServerNode):
 
         if lifetime:
             lifetime += (random.random() * 2 - 1) * lifetime_stagger
-            self.io_loop.call_later(lifetime, self.close_gracefully)
+            self.io_loop.call_later(
+                lifetime, self.close_gracefully, reason="worker-lifetime-reached"
+            )
         self.lifetime = lifetime
 
         Worker._instances.add(self)
@@ -1458,7 +1461,7 @@ class Worker(BaseWorker, ServerNode):
         timeout: float = 30,
         executor_wait: bool = True,
         nanny: bool = True,
-        reason: str | None = None,
+        reason: str = "worker-close",
     ) -> str | None:
         """Close the worker
 
@@ -1632,7 +1635,7 @@ class Worker(BaseWorker, ServerNode):
         setproctitle("dask worker [closed]")
         return "OK"
 
-    async def close_gracefully(self, restart=None):
+    async def close_gracefully(self, reason="worker-close-gracefully"):
         """Gracefully shut down a worker
 
         This first informs the scheduler that we're shutting down, and asks it
@@ -1644,10 +1647,7 @@ class Worker(BaseWorker, ServerNode):
         if self.status == Status.closed:
             return
 
-        if restart is None:
-            restart = self.lifetime_restart
-
-        logger.info("Closing worker gracefully: %s", self.address)
+        logger.info("Closing worker gracefully: %s. Reason: %s", self.address, reason)
         # Wait for all tasks to leave the worker and don't accept any new ones.
         # Scheduler.retire_workers will set the status to closing_gracefully and push it
         # back to this worker.
@@ -1657,7 +1657,7 @@ class Worker(BaseWorker, ServerNode):
             remove=False,
             stimulus_id=f"worker-close-gracefully-{time()}",
         )
-        await self.close(nanny=not restart)
+        await self.close(nanny=not self.lifetime_restart, reason=reason)
 
     async def wait_until_closed(self):
         warnings.warn("wait_until_closed has moved to finished()")
