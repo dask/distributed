@@ -614,18 +614,25 @@ def _prepare_ucx_config():
         high_level_options = {"TLS": tls, "SOCKADDR_TLS_PRIORITY": tls_priority}
 
     # Pick up any other ucx environment settings
-    # {"some-name": value} is translated to {"UCX_SOME_NAME": value}
-    def normalise(k):
-        return "_".join(map(str.upper, ("UCX", *k.split("-"))))
-
-    environment_options = {
-        key: v
-        for k, v in dask.config.get("distributed.comm.ucx.environment", {}).items()
-        # High-level settings take precedence over low-level
-        # environment configuration, as do settings already in the
-        # environment (set externally)
-        if (key := normalise(k)) not in os.environ and key[4:] not in high_level_options
-    }
+    environment_options = {}
+    for k, v in dask.config.get("distributed.comm.ucx.environment", {}).items():
+        # {"some-name": value} is translated to {"UCX_SOME_NAME": value}
+        key = "_".join(map(str.upper, ("UCX", *k.split("-"))))
+        if (hl_key := key[4:]) in high_level_options:
+            logger.warning(
+                f"Ignoring {k}={v} ({key=}) in ucx.environment, "
+                f"preferring {hl_key}={high_level_options[hl_key]} "
+                "from high level options"
+            )
+        elif key in os.environ:
+            # This is only info because setting UCX configuration via
+            # environment variables is a reasonably common approach
+            logger.info(
+                f"Ignoring {k}={v} ({key=}) in ucx.environment, "
+                f"preferring {key}={os.environ[key]} from external environment"
+            )
+        else:
+            environment_options[key] = v
 
     valid_ucx_vars = set(get_config().keys())
     for k, v in high_level_options.items():
