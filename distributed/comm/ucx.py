@@ -94,8 +94,20 @@ def init_once():
     # We ensure the CUDA context is created before initializing UCX. This can't
     # be safely handled externally because communications in Dask start before
     # preload scripts run.
-    if dask.config.get("distributed.comm.ucx.create-cuda-context") is True or (
-        "TLS" in ucx_config and "cuda_copy" in ucx_config["TLS"]
+    # Precedence:
+    # 1. external environment
+    # 2. ucx_config (high level settings passed to ucp.init)
+    # 3. ucx_environment (low level settings equivalent to environment variables)
+    ucx_tls = os.environ.get(
+        "UCX_TLS",
+        ucx_config.get("TLS", ucx_environment.get("UCX_TLS", "")),
+    )
+    if (
+        dask.config.get("distributed.comm.ucx.create-cuda-context") is True
+        # This is not foolproof, if UCX_TLS=all we might require CUDA
+        # depending on configuration of UCX, but this is better than
+        # nothing
+        or ("cuda" in ucx_tls and "^cuda" not in ucx_tls)
     ):
         try:
             import numba.cuda
