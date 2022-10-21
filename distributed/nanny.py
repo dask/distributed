@@ -256,7 +256,7 @@ class Nanny(ServerNode):
         handlers = {
             "instantiate": self.instantiate,
             "kill": self.kill,
-            "restart": self.restart,  # TODO: Is this being used anywhere?
+            "restart": self.restart,
             # cannot call it 'close' on the rpc side for naming conflict
             "get_logs": self.get_logs,
             "terminate": self.close,
@@ -805,6 +805,7 @@ class WorkerProcess:
                 "op": "stop",
                 "timeout": wait_timeout,
                 "executor_wait": executor_wait,
+                "reason": reason,
             }
         )
         await asyncio.sleep(0)  # otherwise we get broken pipe errors
@@ -877,12 +878,13 @@ class WorkerProcess:
             loop.make_current()
             worker = Worker(**worker_kwargs)
 
-            async def do_stop(timeout=5, executor_wait=True):
+            async def do_stop(timeout=5, executor_wait=True, reason=None):
                 try:
                     await worker.close(
                         nanny=False,
                         executor_wait=executor_wait,
                         timeout=timeout,
+                        reason=reason,
                     )
                 finally:
                     loop.stop()
