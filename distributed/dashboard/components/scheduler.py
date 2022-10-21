@@ -3251,6 +3251,18 @@ class TaskProgress(DashboardComponent):
             fill_alpha=0.35,
             line_alpha=0,
         )
+        self.root.quad(
+            source=self.source,
+            top="top",
+            bottom="bottom",
+            left="queued-loc",
+            right="no-worker-loc",
+            fill_color="red",
+            hatch_pattern="/",
+            hatch_color="black",
+            fill_alpha=0.35,
+            line_alpha=0,
+        )
         self.root.text(
             source=self.source,
             text="show-name",
@@ -3291,6 +3303,10 @@ class TaskProgress(DashboardComponent):
                     <span style="font-size: 10px; font-family: Monaco, monospace;">@queued</span>
                 </div>
                 <div>
+                    <span style="font-size: 14px; font-weight: bold;">No-worker:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@no_worker</span>
+                </div>
+                <div>
                     <span style="font-size: 14px; font-weight: bold;">Processing:</span>&nbsp;
                     <span style="font-size: 10px; font-family: Monaco, monospace;">@processing</span>
                 </div>
@@ -3316,6 +3332,7 @@ class TaskProgress(DashboardComponent):
             "processing": {},
             "waiting": {},
             "queued": {},
+            "no_worker": {},
         }
 
         for tp in self.scheduler.task_prefixes.values():
@@ -3327,6 +3344,7 @@ class TaskProgress(DashboardComponent):
                 state["processing"][tp.name] = active_states["processing"]
                 state["waiting"][tp.name] = active_states["waiting"]
                 state["queued"][tp.name] = active_states["queued"]
+                state["no_worker"][tp.name] = active_states["no-worker"]
 
         state["all"] = {k: sum(v[k] for v in state.values()) for k in state["memory"]}
 
@@ -3339,7 +3357,15 @@ class TaskProgress(DashboardComponent):
 
         totals = {
             k: sum(state[k].values())
-            for k in ["all", "memory", "erred", "released", "waiting", "queued"]
+            for k in [
+                "all",
+                "memory",
+                "erred",
+                "released",
+                "waiting",
+                "queued",
+                "no_worker",
+            ]
         }
         totals["processing"] = totals["all"] - sum(
             v for k, v in totals.items() if k != "all"
@@ -3351,6 +3377,7 @@ class TaskProgress(DashboardComponent):
             "queued: %(queued)s, "
             "processing: %(processing)s, "
             "in-memory: %(memory)s, "
+            "no-worker: %(no_worker)s, "
             "erred: %(erred)s" % totals
         )
 
