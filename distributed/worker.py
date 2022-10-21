@@ -1260,7 +1260,7 @@ class Worker(BaseWorker, ServerNode):
             self.address,
             self.status,
         )
-        await self.close()
+        await self.close(reason="worker-handle-scheduler-connection-broken")
 
     async def upload_file(
         self, filename: str, data: str | bytes, load: bool = True
