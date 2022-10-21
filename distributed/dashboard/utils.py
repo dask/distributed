@@ -5,7 +5,7 @@ from numbers import Number
 import bokeh
 from bokeh.core.properties import without_property_validation
 from bokeh.io import curdoc
-from packaging.version import parse as parse_version
+from packaging.version import Version
 from tlz.curried import first
 
 try:
@@ -13,7 +13,7 @@ try:
 except ImportError:
     np = None  # type: ignore
 
-BOKEH_VERSION = parse_version(bokeh.__version__)
+BOKEH_VERSION = Version(bokeh.__version__)
 
 PROFILING = False
 

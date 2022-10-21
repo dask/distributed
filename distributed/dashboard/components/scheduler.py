@@ -32,7 +32,6 @@ from bokeh.models import (
     NumberFormatter,
     NumeralTickFormatter,
     OpenURL,
-    Panel,
     PanTool,
     Range1d,
     ResetTool,
@@ -72,6 +71,7 @@ from distributed.dashboard.components.shared import (
     ProfileTimePlot,
     SystemMonitor,
 )
+from distributed.dashboard.core import TabPanel
 from distributed.dashboard.utils import BOKEH_VERSION, PROFILING, transpose, update
 from distributed.diagnostics.graph_layout import GraphLayout
 from distributed.diagnostics.progress import GroupTiming
@@ -1465,7 +1465,7 @@ class ComputePerKey(DashboardComponent):
         )
 
         self.fig = fig
-        tab1 = Panel(child=fig, title="Bar Chart")
+        tab1 = TabPanel(child=fig, title="Bar Chart")
 
         fig2 = figure(
             title="Compute Time Per Task",
@@ -1509,7 +1509,7 @@ class ComputePerKey(DashboardComponent):
         hover.point_policy = "follow_mouse"
         fig2.add_tools(hover)
         self.wedge_fig = fig2
-        tab2 = Panel(child=fig2, title="Pie Chart")
+        tab2 = TabPanel(child=fig2, title="Pie Chart")
 
         self.root = Tabs(tabs=[tab1, tab2])
 
@@ -4281,10 +4281,10 @@ def status_doc(scheduler, extra, doc):
 
     doc.add_root(workers_memory.root)
 
-    tab1 = Panel(child=processing_root, title="Processing")
-    tab2 = Panel(child=cpu_root, title="CPU")
-    tab3 = Panel(child=occupancy_root, title="Occupancy")
-    tab4 = Panel(child=workers_transfer_bytes.root, title="Data Transfer")
+    tab1 = TabPanel(child=processing_root, title="Processing")
+    tab2 = TabPanel(child=cpu_root, title="CPU")
+    tab3 = TabPanel(child=occupancy_root, title="Occupancy")
+    tab4 = TabPanel(child=workers_transfer_bytes.root, title="Data Transfer")
 
     proc_tabs = Tabs(tabs=[tab1, tab2, tab3, tab4], name="processing_tabs")
     doc.add_root(proc_tabs)
