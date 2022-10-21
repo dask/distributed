@@ -573,9 +573,6 @@ def _prepare_ucx_config():
     # High-level settings in (1) are preferred to settings in (2)
     # Settings in the external environment override both
 
-    # import does not initialize ucp -- this will occur outside this function
-    from ucp import get_config
-
     high_level_options = {}
 
     # if any of the high level flags are set, as long as they are not Null/None,
@@ -633,12 +630,5 @@ def _prepare_ucx_config():
             )
         else:
             environment_options[key] = v
-
-    valid_ucx_vars = set(get_config().keys())
-    for k, v in high_level_options.items():
-        if k not in valid_ucx_vars:
-            logger.debug(
-                f"Key: {k} with value: {v} not a valid UCX configuration option"
-            )
 
     return high_level_options, environment_options
