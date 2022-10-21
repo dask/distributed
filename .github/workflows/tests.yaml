@@ -108,7 +108,7 @@ jobs:
         if: steps.skip-caching.outputs.trigger-found == 'true' || steps.cache.outputs.cache-hit != 'true'
 
       - name: Install dev bokeh
-        if: matrix.python-version == "3.9"
+        if: matrix.python-version == '3.9'
         shell: bash -l {0}
         run: |
           conda uninstall --force bokeh
