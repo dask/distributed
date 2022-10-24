@@ -1542,7 +1542,7 @@ class Worker(BaseWorker, ServerNode):
 
         if nanny and self.nanny:
             with self.rpc(self.nanny) as r:
-                await r.close_gracefully()
+                await r.close_gracefully(reason=reason)
 
         setproctitle("dask worker [closing]")
 

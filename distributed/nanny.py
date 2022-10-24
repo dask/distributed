@@ -558,14 +558,16 @@ class Nanny(ServerNode):
         warnings.warn("Worker._close has moved to Worker.close", stacklevel=2)
         return self.close(*args, **kwargs)
 
-    # TODO: Include reason
-    def close_gracefully(self):
+    def close_gracefully(self, reason: str = "nanny-close-gracefully") -> None:
         """
         A signal that we shouldn't try to restart workers if they go away
 
         This is used as part of the cluster shutdown process.
         """
         self.status = Status.closing_gracefully
+        logger.info(
+            "Closing Nanny gracefully at %r. Reason: %s", self.address_safe, reason
+        )
 
     async def close(
         self, timeout: float = 5, reason: str = "nanny-close"

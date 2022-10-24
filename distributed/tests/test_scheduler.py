@@ -869,8 +869,9 @@ async def test_restart(c, s, a, b):
     with captured_logger("distributed.scheduler") as caplog:
         futures = c.map(inc, range(20))
         await wait(futures)
-
-        await s.restart()
+        with captured_logger("distributed.nanny") as nanny_logger:
+            await s.restart()
+        assert "Reason: scheduler-restart" in nanny_logger.getvalue()
 
         assert not s.computations
         assert not s.task_prefixes
