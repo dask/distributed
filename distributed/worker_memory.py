@@ -25,17 +25,10 @@ import logging
 import os
 import sys
 import warnings
+from collections.abc import Callable, MutableMapping
 from contextlib import suppress
 from functools import partial
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Callable,
-    Container,
-    Literal,
-    MutableMapping,
-    cast,
-)
+from typing import TYPE_CHECKING, Any, Container, Literal, cast
 
 import psutil
 from tornado.ioloop import PeriodicCallback
@@ -61,6 +54,25 @@ logger = logging.getLogger(__name__)
 
 
 class WorkerMemoryManager:
+    """Management of worker memory usage
+
+    Parameters
+    ----------
+    worker
+        Worker to manage
+
+    For meaning of the remaining parameters, see the matching
+    parameter names in :class:`~.distributed.worker.Worker`.
+
+    Notes
+    -----
+
+    If the ``data`` argument is a callable and has a named parameter
+    ``worker_local_directory`` it will be passed the location of the
+    worker's :attr:`~distributed.worker.Worker.local_directory`.
+
+    """
+
     data: MutableMapping[str, object]  # {task key: task payload}
     memory_limit: int | None
     memory_target_fraction: float | Literal[False]
@@ -119,17 +131,19 @@ class WorkerMemoryManager:
             self.data = data
         elif callable(data):
             if has_arg(data, "worker_local_directory"):
-                data = cast(Callable[[str], MutableMapping[str, Any]], data)
+                data = cast("Callable[[str], MutableMapping[str, Any]]", data)
                 self.data = data(worker.local_directory)
             else:
-                data = cast(Callable[[], MutableMapping[str, Any]], data)
+                data = cast("Callable[[], MutableMapping[str, Any]]", data)
                 self.data = data()
         elif isinstance(data, tuple):
             func, kwargs = data
             if not callable(func):
                 raise ValueError("Expecting a callable")
             if has_arg(func, "worker_local_directory"):
-                self.data = func(worker.local_directory, **kwargs)
+                self.data = func(
+                    worker_local_directory=worker.local_directory, **kwargs
+                )
             else:
                 self.data = func(**kwargs)
         elif self.memory_limit and (
