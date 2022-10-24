@@ -47,7 +47,9 @@ class LocalCluster(SpecCluster):
         Whether to use processes (True) or threads (False).  Defaults to True, unless
         worker_class=Worker, in which case it defaults to False.
     threads_per_worker: int
-        Number of threads per each worker
+        The number of threads in each worker's
+        :class:`python:ThreadPoolExecutor` where tasks are executed.
+        See also :doc:`dask:array-best-practices` for more information.
     scheduler_port: int
         Port of the scheduler.  8786 by default, use 0 to choose a random port
     silence_logs: logging level
