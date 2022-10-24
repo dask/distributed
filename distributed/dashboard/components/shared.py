@@ -56,7 +56,7 @@ class Processing(DashboardComponent):
             title="Processing and Pending",
             tools="",
             x_range=x_range,
-            id="bk-processing-stacks-plot",
+            # id="bk-processing-stacks-plot",
             **kwargs,
         )
         fig.quad(
