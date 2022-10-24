@@ -1113,8 +1113,8 @@ class WorkerState:
     #: with the Worker: ``WorkerState.running == (Worker.status is Status.running)``.
     running: bool
 
-    #: A count of how many tasks are currently waiting for data
-    waiting_for_data_count: int
+    #: Tasks that are currently waiting for data
+    waiting: set[TaskState]
 
     #: ``{worker address: {ts.key, ...}``.
     #: The data that we care about that we think a worker has
@@ -1125,6 +1125,10 @@ class WorkerState:
     #: ``TaskState.state == 'fetch'`` are in this collection. A :class:`TaskState` with
     #: multiple entries in :attr:`~TaskState.who_has` will appear multiple times here.
     data_needed: defaultdict[str, HeapSet[TaskState]]
+
+    #: Total number of tasks in fetch state. If a task is in more than one data_needed
+    #: heap, it's only counted once.
+    fetch_count: int
 
     #: Number of bytes to gather from the same worker in a single call to
     #: :meth:`BaseWorker.gather_dep`. Multiple small tasks that can be gathered from the
@@ -1279,11 +1283,12 @@ class WorkerState:
         self.validate = validate
         self.tasks = {}
         self.running = True
-        self.waiting_for_data_count = 0
+        self.waiting = set()
         self.has_what = defaultdict(set)
         self.data_needed = defaultdict(
             partial(HeapSet[TaskState], key=operator.attrgetter("priority"))
         )
+        self.fetch_count = 0
         self.in_flight_workers = {}
         self.busy_workers = set()
         self.transfer_incoming_count_limit = transfer_incoming_count_limit
@@ -1479,6 +1484,7 @@ class WorkerState:
         self.executing.discard(ts)
         self.long_running.discard(ts)
         self.in_flight_tasks.discard(ts)
+        self.waiting.discard(ts)
 
     def _should_throttle_incoming_transfers(self) -> bool:
         """Decides whether the WorkerState should throttle data transfers from other workers.
@@ -1822,7 +1828,6 @@ class WorkerState:
         for dep in ts.dependents:
             dep.waiting_for_data.discard(ts)
             if not dep.waiting_for_data and dep.state == "waiting":
-                self.waiting_for_data_count -= 1
                 recommendations[dep] = "ready"
 
         self.log.append((ts.key, "put-in-memory", stimulus_id, time()))
@@ -1838,6 +1843,7 @@ class WorkerState:
 
         ts.state = "fetch"
         ts.done = False
+        self.fetch_count += 1
         assert ts.priority
         for w in ts.who_has:
             self.data_needed[w].add(ts)
@@ -1928,12 +1934,11 @@ class WorkerState:
                 dep_ts.waiters.add(ts)
                 recommendations[dep_ts] = "fetch"
 
-        if ts.waiting_for_data:
-            self.waiting_for_data_count += 1
-        else:
+        if not ts.waiting_for_data:
             recommendations[ts] = "ready"
 
         ts.state = "waiting"
+        self.waiting.add(ts)
         return recommendations, []
 
     def _transition_fetch_flight(
@@ -1950,7 +1955,20 @@ class WorkerState:
         ts.state = "flight"
         ts.coming_from = worker
         self.in_flight_tasks.add(ts)
+        self.fetch_count -= 1
         return {}, []
+
+    def _transition_fetch_missing(
+        self, ts: TaskState, *, stimulus_id: str
+    ) -> RecsInstrs:
+        self.fetch_count -= 1
+        return self._transition_generic_missing(ts, stimulus_id=stimulus_id)
+
+    def _transition_fetch_released(
+        self, ts: TaskState, *, stimulus_id: str
+    ) -> RecsInstrs:
+        self.fetch_count -= 1
+        return self._transition_generic_released(ts, stimulus_id=stimulus_id)
 
     def _transition_memory_released(
         self, ts: TaskState, *, stimulus_id: str
@@ -1977,6 +1995,7 @@ class WorkerState:
             assert ts not in self.ready
             assert ts not in self.constrained
         ts.state = "constrained"
+        self.waiting.remove(ts)
         self.constrained.add(ts)
         return self._ensure_computing()
 
@@ -2012,6 +2031,7 @@ class WorkerState:
 
         ts.state = "ready"
         assert ts.priority is not None
+        self.waiting.remove(ts)
         self.ready.add(ts)
 
         return self._ensure_computing()
@@ -2504,8 +2524,8 @@ class WorkerState:
         ("executing", "released"): _transition_executing_released,
         ("executing", "rescheduled"): _transition_executing_rescheduled,
         ("fetch", "flight"): _transition_fetch_flight,
-        ("fetch", "missing"): _transition_generic_missing,
-        ("fetch", "released"): _transition_generic_released,
+        ("fetch", "missing"): _transition_fetch_missing,
+        ("fetch", "released"): _transition_fetch_released,
         ("flight", "error"): _transition_generic_error,
         ("flight", "fetch"): _transition_flight_fetch,
         ("flight", "memory"): _transition_flight_memory,
@@ -3244,6 +3264,33 @@ class WorkerState:
         info = {k: v for k, v in info.items() if k not in exclude}
         return recursive_to_dict(info, exclude=exclude)
 
+    @property
+    def task_counts(self) -> dict[TaskStateState | Literal["other"], int]:
+        # Actors can be in any state other than {fetch, flight, missing}
+        n_actors_in_memory = sum(
+            self.tasks[key].state == "memory" for key in self.actors
+        )
+
+        out: dict[TaskStateState | Literal["other"], int] = {
+            # Key measure for occupancy.
+            # Also includes cancelled(executing) and resumed(executing->fetch)
+            "executing": len(self.executing),
+            # Also includes cancelled(long-running) and resumed(long-running->fetch)
+            "long-running": len(self.long_running),
+            "memory": len(self.data) + n_actors_in_memory,
+            "ready": len(self.ready),
+            "constrained": len(self.constrained),
+            "waiting": len(self.waiting),
+            "fetch": self.fetch_count,
+            "missing": len(self.missing_dep_flight),
+            # Also includes cancelled(flight) and resumed(flight->waiting)
+            "flight": len(self.in_flight_tasks),
+        }
+        # released | error
+        out["other"] = other = len(self.tasks) - sum(out.values())
+        assert other >= 0
+        return out
+
     ##############
     # Validation #
     ##############
@@ -3274,6 +3321,10 @@ class WorkerState:
         assert ts.run_spec is not None
         assert ts.key not in self.data
         assert not ts.waiting_for_data
+
+        for dep in ts.dependents:
+            assert dep not in self.ready
+            assert dep not in self.constrained
 
         # FIXME https://github.com/dask/distributed/issues/6893
         # This assertion can be false for
@@ -3309,8 +3360,16 @@ class WorkerState:
     def _validate_task_waiting(self, ts: TaskState) -> None:
         assert ts.key not in self.data
         assert not ts.done
-        if ts.dependencies and ts.run_spec:
-            assert not all(dep.key in self.data for dep in ts.dependencies)
+        assert ts in self.waiting
+        assert ts.waiting_for_data
+        assert ts.waiting_for_data == {
+            dep
+            for dep in ts.dependencies
+            if dep.key not in self.data and dep.key not in self.actors
+        }
+        for dep in ts.dependents:
+            assert dep not in self.ready
+            assert dep not in self.constrained
 
     def _validate_task_flight(self, ts: TaskState) -> None:
         """Validate tasks:
@@ -3320,6 +3379,7 @@ class WorkerState:
         - ts.state == resumed, ts.previous == flight, ts.next == waiting
         """
         assert ts.key not in self.data
+        assert ts.key not in self.actors
         assert ts in self.in_flight_tasks
         for dep in ts.dependents:
             assert dep not in self.ready
@@ -3330,19 +3390,27 @@ class WorkerState:
 
     def _validate_task_fetch(self, ts: TaskState) -> None:
         assert ts.key not in self.data
+        assert ts.key not in self.actors
         assert self.address not in ts.who_has
         assert not ts.done
         assert ts.who_has
         for w in ts.who_has:
             assert ts.key in self.has_what[w]
             assert ts in self.data_needed[w]
+        for dep in ts.dependents:
+            assert dep not in self.ready
+            assert dep not in self.constrained
 
     def _validate_task_missing(self, ts: TaskState) -> None:
         assert ts.key not in self.data
+        assert ts.key not in self.actors
         assert not ts.who_has
         assert not ts.done
         assert not any(ts.key in has_what for has_what in self.has_what.values())
         assert ts in self.missing_dep_flight
+        for dep in ts.dependents:
+            assert dep not in self.ready
+            assert dep not in self.constrained
 
     def _validate_task_cancelled(self, ts: TaskState) -> None:
         assert ts.next is None
@@ -3360,9 +3428,13 @@ class WorkerState:
             assert ts.previous == "flight"
             assert ts.next == "waiting"
             self._validate_task_flight(ts)
+        for dep in ts.dependents:
+            assert dep not in self.ready
+            assert dep not in self.constrained
 
     def _validate_task_released(self, ts: TaskState) -> None:
         assert ts.key not in self.data
+        assert ts.key not in self.actors
         assert not ts.next
         assert not ts.previous
         for tss in self.data_needed.values():
@@ -3434,11 +3506,6 @@ class WorkerState:
                 assert self.tasks[ts_wait.key] is ts_wait
                 assert ts_wait.state in WAITING_FOR_DATA, ts_wait
 
-        # FIXME https://github.com/dask/distributed/issues/6319
-        # assert self.waiting_for_data_count == sum(
-        #     bool(ts.waiting_for_data) for ts in self.tasks.values()
-        # )
-
         for worker, keys in self.has_what.items():
             assert worker != self.address
             for k in keys:
@@ -3446,10 +3513,14 @@ class WorkerState:
                 assert worker in self.tasks[k].who_has
 
         # Test contents of the various sets of TaskState objects
+        fetch_tss = set()
         for worker, tss in self.data_needed.items():
             for ts in tss:
+                fetch_tss.add(ts)
                 assert ts.state == "fetch"
                 assert worker in ts.who_has
+        assert len(fetch_tss) == self.fetch_count
+
         for ts in self.missing_dep_flight:
             assert ts.state == "missing"
         for ts in self.ready:
@@ -3468,6 +3539,8 @@ class WorkerState:
             assert ts.state == "flight" or (
                 ts.state in ("cancelled", "resumed") and ts.previous == "flight"
             ), ts
+        for ts in self.waiting:
+            assert ts.state == "waiting"
 
         # Test that there aren't multiple TaskState objects with the same key in any
         # Set[TaskState]. See note in TaskState.__hash__.
@@ -3479,6 +3552,7 @@ class WorkerState:
             self.in_flight_tasks,
             self.executing,
             self.long_running,
+            self.waiting,
         ):
             assert self.tasks[ts.key] is ts
 
@@ -3486,6 +3560,11 @@ class WorkerState:
             self.tasks[key].nbytes or 0 for key in chain(self.data, self.actors)
         )
         assert self.nbytes == expect_nbytes, f"{self.nbytes=}; expected {expect_nbytes}"
+
+        for key in self.data:
+            assert key in self.tasks, key
+        for key in self.actors:
+            assert key in self.tasks, key
 
         for ts in self.tasks.values():
             self.validate_task(ts)

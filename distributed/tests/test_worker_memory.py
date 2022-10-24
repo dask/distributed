@@ -703,10 +703,9 @@ async def test_override_data_worker(s):
     async with Worker(s.address, data=UserDict) as w:
         assert type(w.data) is UserDict
 
-    data = UserDict({"x": 1})
+    data = UserDict()
     async with Worker(s.address, data=data) as w:
         assert w.data is data
-        assert w.data == {"x": 1}
 
 
 @gen_cluster(
