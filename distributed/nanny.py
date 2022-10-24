@@ -881,9 +881,7 @@ class WorkerProcess:
             if silence_logs:
                 logger.setLevel(silence_logs)
 
-            IOLoop.clear_instance()
-            loop = IOLoop()
-            loop.make_current()
+            loop = IOLoop.current()
             worker = Worker(**worker_kwargs)
 
             async def do_stop(

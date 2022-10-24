@@ -106,7 +106,6 @@ from distributed.utils_test import (
     map_varying,
     nodebug,
     popen,
-    pristine_loop,
     randominc,
     save_sys_modules,
     slowadd,
@@ -2208,11 +2207,12 @@ async def test_multi_client(s, a, b):
 
 
 def long_running_client_connection(address):
-    with pristine_loop():
+    async def run():
         c = Client(address)
         x = c.submit(lambda x: x + 1, 10)
-        x.result()
         sleep(100)
+
+    asyncio.new_event_loop().run_until_complete(run())
 
 
 @gen_cluster()
@@ -5597,23 +5597,18 @@ async def test_future_auto_inform(c, s, a, b):
             await asyncio.sleep(0.01)
 
 
-@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
-@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
-@pytest.mark.filterwarnings("ignore:clear_current is deprecated:DeprecationWarning")
 def test_client_async_before_loop_starts(cleanup):
-    async def close():
+    async def run():
+        loop = IOLoop.current()
+        client = Client(asynchronous=True, loop=loop)
+        assert client.asynchronous
+        assert isinstance(client.close(), NoOpAwaitable)
         async with client:
             pass
 
-    with pristine_loop() as loop:
-        with pytest.warns(
-            DeprecationWarning,
-            match=r"Constructing LoopRunner\(loop=loop\) without a running loop is deprecated",
-        ):
-            client = Client(asynchronous=True, loop=loop)
-        assert client.asynchronous
-        assert isinstance(client.close(), NoOpAwaitable)
-        loop.run_sync(close)  # TODO: client.close() does not unset global client
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(run())
+    loop.close()
 
 
 # FIXME shouldn't consistently fail on windows, may be an actual bug
