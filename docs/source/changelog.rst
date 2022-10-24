@@ -10,7 +10,7 @@ Released on October 14, 2022
 
 .. note::
 
-    This releases deprecates ``dask-scheduler``, ``dask-worker``, and ``dask-ssh``
+    This release deprecates ``dask-scheduler``, ``dask-worker``, and ``dask-ssh``
     CLIs in favor of ``dask scheduler``, ``dask worker``, and ``dask ssh``,
     respectively. The old-style CLIs will continue to work for a time, but will be
     removed in a future release.
