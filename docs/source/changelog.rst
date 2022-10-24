@@ -8,6 +8,18 @@ Changelog
 
 Released on October 14, 2022
 
+.. note::
+
+    This releases deprecates ``dask-scheduler``, ``dask-worker``, and ``dask-ssh``
+    CLIs in favor of ``dask scheduler``, ``dask worker``, and ``dask ssh``,
+    respectively. The old-style CLIs will continue to work for a time, but will be
+    removed in a future release.
+
+    As part of this migration the ``--reconnect``, ``--nprocs``, ``--bokeh``,
+    ``--bokeh-port`` CLI options have also been removed for both the old- and new-style
+    CLIs. These options had already previously been deprecated.
+    
+
 Enhancements
 ^^^^^^^^^^^^
 - Use of new dask CLI (:pr:`6735`) `Doug Davis`_
