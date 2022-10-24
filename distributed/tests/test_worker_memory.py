@@ -97,6 +97,51 @@ async def test_dict_data_if_no_spill_to_disk(s, w):
     assert type(w.data) is dict
 
 
+class WorkerData(dict):
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.kwargs = kwargs
+
+
+class WorkerDataLocalDirectory(dict):
+    def __init__(self, worker_local_directory, **kwargs):
+        super().__init__()
+        self.local_directory = worker_local_directory
+        self.kwargs = kwargs
+
+
+@gen_cluster(
+    nthreads=[("", 1)], Worker=Worker, worker_kwargs={"data": WorkerDataLocalDirectory}
+)
+async def test_worker_data_callable_local_directory(s, w):
+    assert type(w.memory_manager.data) is WorkerDataLocalDirectory
+    assert w.memory_manager.data.local_directory == w.local_directory
+
+
+@gen_cluster(
+    nthreads=[("", 1)],
+    Worker=Worker,
+    worker_kwargs={"data": (WorkerDataLocalDirectory, {"a": "b"})},
+)
+async def test_worker_data_callable_local_directory_kwargs(s, w):
+    assert type(w.memory_manager.data) is WorkerDataLocalDirectory
+    assert w.memory_manager.data.local_directory == w.local_directory
+    assert w.memory_manager.data.kwargs == {"a": "b"}
+
+
+@gen_cluster(nthreads=[("", 1)], Worker=Worker, worker_kwargs={"data": WorkerData})
+async def test_worker_data_callable(s, w):
+    assert type(w.memory_manager.data) is WorkerData
+
+
+@gen_cluster(
+    nthreads=[("", 1)], Worker=Worker, worker_kwargs={"data": (WorkerData, {"a": "b"})}
+)
+async def test_worker_data_callable_kwargs(s, w):
+    assert type(w.memory_manager.data) is WorkerData
+    assert w.memory_manager.data.kwargs == {"a": "b"}
+
+
 class CustomError(Exception):
     pass
 
