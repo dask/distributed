@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from dask.base import tokenize
-from dask.delayed import Delayed
-from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
+from dask.highlevelgraph import HighLevelGraph
+from dask.layers import SimpleShuffleLayer
 
 from distributed.shuffle.shuffle_extension import ShuffleId, ShuffleWorkerExtension
 
@@ -70,49 +70,91 @@ def rearrange_by_column_p2p(
             )  # TODO: we fail at non-string object dtypes
     empty[column] = empty[column].astype("int64")  # TODO: this shouldn't be necesssary
 
-    transferred = df.map_partitions(
-        shuffle_transfer,
-        id=token,
-        npartitions=npartitions,
-        column=column,
-        meta=df,
-        enforce_metadata=False,
-        transform_divisions=False,
-    )
-
-    barrier_key = "shuffle-barrier-" + token
-    barrier_dsk = {barrier_key: (shuffle_barrier, token, transferred.__dask_keys__())}
-    barrier = Delayed(
-        barrier_key,
-        HighLevelGraph.from_collections(
-            barrier_key, barrier_dsk, dependencies=[transferred]
-        ),
-    )
-
-    name = "shuffle-unpack-" + token
-    dsk = {
-        (name, i): (shuffle_unpack, token, i, barrier_key) for i in range(npartitions)
-    }
-    layer = MaterializedLayer(dsk, annotations={"shuffle": lambda key: key[1]})
-    # TODO: update to use blockwise.
-    # Changes task names, so breaks setting worker restrictions at the moment.
-    # Also maybe would be nice if the `DataFrameIOLayer` interface supported this?
-    # dsk = blockwise(
-    #     shuffle_unpack,
-    #     name,
-    #     "i",
-    #     token,
-    #     None,
-    #     BlockwiseDepDict({(i,): i for i in range(npartitions)}),
-    #     "i",
-    #     barrier_key,
-    #     None,
-    #     numblocks={},
-    # )
-
-    return DataFrame(
-        HighLevelGraph.from_collections(name, layer, [barrier]),
+    name = f"shuffle-p2p-{token}"
+    layer = P2PShuffleLayer(
         name,
-        df._meta,
+        column,
+        npartitions,
+        npartitions_input=df.npartitions,
+        ignore_index=True,
+        name_input=df._name,
+        meta_input=empty,
+    )
+    return DataFrame(
+        HighLevelGraph.from_collections(name, layer, [df]),
+        name,
+        empty,
         [None] * (npartitions + 1),
     )
+
+
+class P2PShuffleLayer(SimpleShuffleLayer):
+    def __init__(
+        self,
+        name,
+        column,
+        npartitions,
+        npartitions_input,
+        ignore_index,
+        name_input,
+        meta_input,
+        parts_out=None,
+        annotations=None,
+    ):
+        annotations = annotations or {}
+        annotations.update({"shuffle": lambda key: key[1]})
+        super().__init__(
+            name,
+            column,
+            npartitions,
+            npartitions_input,
+            ignore_index,
+            name_input,
+            meta_input,
+            parts_out,
+            annotations=annotations,
+        )
+
+    def get_split_keys(self):
+        # TODO: This is doing some funky stuff to set priorities but we don't need this
+        return []
+
+    def __repr__(self):
+        return (
+            f"{type(self).__name__}<name='{self.name}', npartitions={self.npartitions}>"
+        )
+
+    def _cull(self, parts_out):
+        return P2PShuffleLayer(
+            self.name,
+            self.column,
+            self.npartitions,
+            self.npartitions_input,
+            self.ignore_index,
+            self.name_input,
+            self.meta_input,
+            parts_out=parts_out,
+        )
+
+    def _construct_graph(self, deserializing=None):
+        token = tokenize(self.name_input, self.column, self.npartitions, self.parts_out)
+        dsk = {}
+        barrier_key = "shuffle-barrier-" + token
+        name = "shuffle-transfer-" + token
+        tranfer_keys = list()
+        for i in range(self.npartitions_input):
+            tranfer_keys.append((name, i))
+            dsk[(name, i)] = (
+                shuffle_transfer,
+                (self.name_input, i),
+                token,
+                self.npartitions,
+                self.column,
+            )
+
+        dsk[barrier_key] = (shuffle_barrier, token, tranfer_keys)
+
+        name = self.name
+        for part_out in self.parts_out:
+            dsk[(name, part_out)] = (shuffle_unpack, token, part_out, barrier_key)
+        return dsk
