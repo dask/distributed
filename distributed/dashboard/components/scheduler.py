@@ -2264,12 +2264,13 @@ class TaskGraph(DashboardComponent):
         )
         self.edge_source = ColumnDataSource({"x": [], "y": [], "visible": []})
 
-        node_view = CDSView(
-            filters=[GroupFilter(column_name="visible", group="True")],
-        )
-        edge_view = CDSView(
-            filters=[GroupFilter(column_name="visible", group="True")],
-        )
+        filter = GroupFilter(column_name="visible", group="True")
+        if BOKEH_VERSION.major < 3:
+            filter_kwargs = {"filters": [filter]}
+        else:
+            filter_kwargs = {"filter": filter}
+        node_view = CDSView(**filter_kwargs)
+        edge_view = CDSView(**filter_kwargs)
 
         # Bokeh >= 3.0 automatically infers the source to use
         if BOKEH_VERSION.major < 3:
