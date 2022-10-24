@@ -7489,7 +7489,10 @@ class Scheduler(SchedulerState, ServerNode):
         sysmon.update()
 
         # Scheduler logs
-        from distributed.dashboard.components.scheduler import SchedulerLogs
+        from distributed.dashboard.components.scheduler import (
+            _BOKEH_STYLES_KWARGS,
+            SchedulerLogs,
+        )
 
         logs = SchedulerLogs(self, start=start)
 
@@ -7538,19 +7541,7 @@ class Scheduler(SchedulerState, ServerNode):
             dask_version=dask.__version__,
             distributed_version=distributed.__version__,
         )
-        html = Div(
-            text=html,
-            # **{
-            #     "width": "100%",
-            #     "height": "100%",
-            #     "max-width": "1920px",
-            #     "max-height": "1080px",
-            #     "padding": "12px",
-            #     "border": "1px solid lightgray",
-            #     "box-shadow": "inset 1px 0 8px 0 lightgray",
-            #     "overflow": "auto",
-            # },
-        )
+        html = Div(text=html, **_BOKEH_STYLES_KWARGS)
 
         html = TabPanel(child=html, title="Summary")
         compute = TabPanel(child=compute, title="Worker Profile (compute)")
