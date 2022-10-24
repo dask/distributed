@@ -302,7 +302,12 @@ class Worker(BaseWorker, ServerNode):
     scheduler_file: str, optional
     host: str, optional
     data: MutableMapping, type, None
-        The object to use for storage, builds a disk-backed LRU dict by default
+        The object to use for storage, builds a disk-backed LRU dict by default.
+
+        If a callable to construct the storage object is provided, it
+        will receive the worker's attr:``local_directory`` as an
+        argument if the calling signature has an argument named
+        ``worker_local_directory``.
     nthreads: int, optional
     local_directory: str, optional
         Directory where we place local resources
@@ -483,6 +488,8 @@ class Worker(BaseWorker, ServerNode):
         data: (
             MutableMapping[str, Any]  # pre-initialised
             | Callable[[], MutableMapping[str, Any]]  # constructor
+            # constructor receiving self.local_directory
+            | Callable[[str], MutableMapping[str, Any]]
             | tuple[
                 Callable[..., MutableMapping[str, Any]], dict[str, Any]
             ]  # (constructor, kwargs to constructor)
