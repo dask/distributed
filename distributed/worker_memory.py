@@ -67,9 +67,8 @@ class WorkerMemoryManager:
     Notes
     -----
 
-    If the ``data`` argument is a callable and has a named parameter
-    ``worker_local_directory`` it will be passed the location of the
-    worker's :attr:`~distributed.worker.Worker.local_directory`.
+    If data is a callable and has the argument ``worker_local_directory`` in its
+    signature, it will be filled with the worker's attr:``local_directory``.
 
     """
 
