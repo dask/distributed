@@ -129,11 +129,6 @@ async def test_worker_data_callable_local_directory_kwargs(s, w):
     assert w.memory_manager.data.kwargs == {"a": "b"}
 
 
-@gen_cluster(nthreads=[("", 1)], Worker=Worker, worker_kwargs={"data": WorkerData})
-async def test_worker_data_callable(s, w):
-    assert type(w.memory_manager.data) is WorkerData
-
-
 @gen_cluster(
     nthreads=[("", 1)], Worker=Worker, worker_kwargs={"data": (WorkerData, {"a": "b"})}
 )
