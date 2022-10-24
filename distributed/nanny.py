@@ -256,7 +256,7 @@ class Nanny(ServerNode):
         handlers = {
             "instantiate": self.instantiate,
             "kill": self.kill,
-            "restart": self.restart,  # TODO: Remove since this is not being used anywhere
+            "restart": self.restart,
             "get_logs": self.get_logs,
             # cannot call it 'close' on the rpc side for naming conflict
             "terminate": self.close,
