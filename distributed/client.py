@@ -4174,6 +4174,15 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self.scheduler.log_event, topic=topic, msg=msg)
 
+    def log_on_scheduler(self, msg: str, *args: Any, level: int = logging.INFO) -> None:
+        """Log 'msg % args' with the integer severity 'level' on the scheduler.
+
+        See Also
+        --------
+        logging.log
+        """
+        return self.sync(self.scheduler.log_message, msg=msg % args, level=level)
+
     def get_events(self, topic: str | None = None):
         """Retrieve structured topic logs
 

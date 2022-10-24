@@ -3636,6 +3636,7 @@ class Scheduler(SchedulerState, ServerNode):
             "get_logs": self.get_logs,
             "logs": self.get_logs,
             "worker_logs": self.get_worker_logs,
+            "log_message": self.log_message,
             "log_event": self.log_event,
             "events": self.get_events,
             "nbytes": self.get_nbytes,
@@ -7600,6 +7601,10 @@ class Scheduler(SchedulerState, ServerNode):
             msg={"op": "get_logs", "n": n}, workers=workers, nanny=nanny
         )
         return results
+
+    @staticmethod
+    def log_message(msg: str, level: int = logging.INFO) -> None:
+        logger.log(level, msg)
 
     def log_event(self, topic: str | Collection[str], msg: Any) -> None:
         event = (time(), msg)

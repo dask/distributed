@@ -7744,3 +7744,12 @@ async def test_wait_for_workers_n_workers_value_check(c, s, a, b, value, excepti
         ctx = nullcontext()
     with ctx:
         await c.wait_for_workers(value)
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_log_message(c, s):
+    with captured_logger("distributed.scheduler", level=logging.INFO) as logger:
+        await c.log_on_scheduler("test info with %s", "parameter", level=logging.INFO)
+        await c.log_on_scheduler("test debug with %s", "parameter", level=logging.DEBUG)
+    assert "test info with parameter" in logger.getvalue()
+    assert "test debug with parameter" not in logger.getvalue()

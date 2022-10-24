@@ -4010,3 +4010,12 @@ async def test_count_task_prefix(c, s, a, b):
 
     assert s.task_prefixes["inc"].state_counts["memory"] == 20
     assert s.task_prefixes["inc"].state_counts["erred"] == 0
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_log_message(c, s):
+    with captured_logger("distributed.scheduler", level=logging.INFO) as logger:
+        s.log_message("test info", level=logging.INFO)
+        s.log_message("test debug ", level=logging.DEBUG)
+    assert "test info" in logger.getvalue()
+    assert "test debug" not in logger.getvalue()
