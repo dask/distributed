@@ -446,7 +446,7 @@ class ShuffleSchedulerExtension:
                 if ts.worker_restrictions:
                     worker = list(ts.worker_restrictions)[0]
                 else:
-                    worker = worker_for(part, workers, npartitions)
+                    worker = get_worker_for(part, workers, npartitions)
                 mapping[part] = worker
                 output_workers.add(worker)
                 self.scheduler.set_restrictions({ts.key: {worker}})
@@ -483,7 +483,7 @@ class ShuffleSchedulerExtension:
                 del self.heartbeats[id]
 
 
-def worker_for(output_partition: int, workers: list[str], npartitions: int) -> str:
+def get_worker_for(output_partition: int, workers: list[str], npartitions: int) -> str:
     "Get the address of the worker which should hold this output partition number"
     i = len(workers) * output_partition // npartitions
     return workers[i]

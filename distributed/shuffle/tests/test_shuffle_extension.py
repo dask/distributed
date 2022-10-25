@@ -7,9 +7,9 @@ dd = pytest.importorskip("dask.dataframe")
 
 from distributed.shuffle.shuffle_extension import (
     ShuffleWorkerExtension,
+    get_worker_for,
     split_by_partition,
     split_by_worker,
-    worker_for,
 )
 from distributed.utils_test import gen_cluster
 
@@ -52,10 +52,10 @@ def test_split_by_worker_many_workers():
     npartitions = 10
 
     out = split_by_worker(df, "_partition", npartitions, workers)
-    assert worker_for(5, workers, npartitions) in out
-    assert worker_for(0, workers, npartitions) in out
-    assert worker_for(7, workers, npartitions) in out
-    assert worker_for(1, workers, npartitions) in out
+    assert get_worker_for(5, workers, npartitions) in out
+    assert get_worker_for(0, workers, npartitions) in out
+    assert get_worker_for(7, workers, npartitions) in out
+    assert get_worker_for(1, workers, npartitions) in out
 
     assert sum(map(len, out.values())) == len(df)
 
