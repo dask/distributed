@@ -861,8 +861,9 @@ async def test_restart(c, s, a, b):
     with captured_logger("distributed.scheduler") as caplog:
         futures = c.map(inc, range(20))
         await wait(futures)
-
-        await s.restart()
+        with captured_logger("distributed.nanny") as nanny_logger:
+            await s.restart()
+        assert "Reason: scheduler-restart" in nanny_logger.getvalue()
 
         assert not s.computations
         assert not s.task_prefixes
@@ -909,12 +910,14 @@ class SlowStopNanny(Nanny):
         self.stop_worker_called = asyncio.Event()
         super().__init__(*args, **kwargs)
 
-    async def stop_worker(self, *, graceful_timeout):
+    async def stop_worker(self, *, graceful_timeout, reason=None):
         self.stop_worker_called.set()
         print("stop_worker called")
         await asyncio.wait_for(self.stop_worker_proceed.wait(), graceful_timeout)
         print("stop_worker proceed")
-        return await super().stop_worker(graceful_timeout=graceful_timeout)
+        return await super().stop_worker(
+            graceful_timeout=graceful_timeout, reason=reason
+        )
 
 
 @gen_cluster(client=True, Worker=SlowStopNanny, nthreads=[("", 1)] * 2)

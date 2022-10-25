@@ -111,13 +111,15 @@ def progress_quads(msg, nrows=8, ncols=3):
     d["erred-loc"] = []
     d["processing-loc"] = []
     d["queued-loc"] = []
+    d["no-worker-loc"] = []
     d["done"] = []
-    for r, m, e, p, q, a, l in zip(
+    for r, m, e, p, q, nw, a, l in zip(
         d["released"],
         d["memory"],
         d["erred"],
         d["processing"],
         d["queued"],
+        d.get("no_worker", [0] * n),
         d["all"],
         d["left"],
     ):
@@ -126,12 +128,14 @@ def progress_quads(msg, nrows=8, ncols=3):
         el = width * (r + m + e) / a + l
         pl = width * (p + r + m + e) / a + l
         ql = width * (p + r + m + e + q) / a + l
+        nwl = width * (p + r + m + e + q + nw) / a + l
         done = "%d / %d" % (r + m + e, a)
         d["released-loc"].append(rl)
         d["memory-loc"].append(ml)
         d["erred-loc"].append(el)
         d["processing-loc"].append(pl)
         d["queued-loc"].append(ql)
+        d["no-worker-loc"].append(nwl)
         d["done"].append(done)
 
     return d

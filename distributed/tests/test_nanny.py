@@ -113,12 +113,14 @@ async def test_no_hang_when_scheduler_closes(s, a, b):
     Worker=Nanny, nthreads=[("127.0.0.1", 1)], worker_kwargs={"reconnect": False}
 )
 async def test_close_on_disconnect(s, w):
-    await s.close()
+    with captured_logger("distributed.nanny") as logger:
+        await s.close()
 
-    start = time()
-    while w.status != Status.closed:
-        await asyncio.sleep(0.05)
-        assert time() < start + 9
+        start = time()
+        while w.status != Status.closed:
+            await asyncio.sleep(0.05)
+            assert time() < start + 9
+    assert "Reason: scheduler-close" in logger.getvalue()
 
 
 class Something(Worker):
