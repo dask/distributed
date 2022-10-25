@@ -847,16 +847,12 @@ class Server:
                         else:
                             logger.error("odd message %s", msg)
                     await asyncio.sleep(0)
-        except Exception as e:
-            logger.exception(
-                "Error handling stream from %s; closing.",
-                comm.peer_address,
-            )
+        except Exception:
             if LOG_PDB:
                 import pdb
 
                 pdb.set_trace()
-            raise e
+            raise
         finally:
             await comm.close()
             assert comm.closed()

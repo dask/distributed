@@ -53,6 +53,7 @@ from distributed.collections import LRU
 from distributed.comm import Comm, connect, get_address_host, parse_address
 from distributed.comm import resolve_address as comm_resolve_address
 from distributed.comm.addressing import address_from_user_args
+from distributed.comm.core import CommClosedError
 from distributed.comm.utils import OFFLOAD_THRESHOLD
 from distributed.compatibility import randbytes, to_thread
 from distributed.core import (
@@ -1267,6 +1268,10 @@ class Worker(BaseWorker, ServerNode):
     async def handle_scheduler(self, comm: Comm) -> None:
         try:
             await self.handle_stream(comm)
+        except CommClosedError:
+            logger.info(
+                "Connection to scheduler %s has been closed.", comm.peer_address
+            )
         finally:
             await self.close(reason="worker-handle-scheduler-connection-broken")
 
