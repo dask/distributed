@@ -75,7 +75,6 @@ class Shuffle:
             load=load_arrow,
             directory=os.path.join(self.worker.local_directory, "shuffle-%s" % self.id),
             sizeof=_sizeof,
-            loop=self.worker.io_loop,
         )
 
         async def send(address: str, shards: list[bytes]) -> None:
@@ -84,10 +83,7 @@ class Shuffle:
                 shuffle_id=self.id,
             )
 
-        self.multi_comm = MultiComm(
-            send=send,
-            loop=self.worker.io_loop,
-        )
+        self.multi_comm = MultiComm(send=send)
         # TODO: reduce number of connections to number of workers
         # MultiComm.max_connections = min(10, n_workers)
 
@@ -138,6 +134,12 @@ class Shuffle:
             "diagnostics": self.diagnostics,
             "start": self.start_time,
         }
+
+    async def send(self, address: str, shards: list[bytes]) -> None:
+        return await self.worker.rpc(address).shuffle_receive(
+            data=to_serialize(shards),
+            shuffle_id=self.id,
+        )
 
     async def receive(self, data: list[pa.Buffer]) -> None:
         task = asyncio.create_task(self._receive(data))

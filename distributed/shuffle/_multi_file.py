@@ -72,7 +72,6 @@ class MultiFile:
         dump: Callable[[Any, BinaryIO], None] = pickle.dump,
         load: Callable[[BinaryIO], Any] = pickle.load,
         sizeof: Callable[[list[pa.Table]], int] = sizeof,
-        loop: object = None,
     ):
         self.directory = pathlib.Path(directory)
         if not os.path.exists(self.directory):
@@ -96,7 +95,7 @@ class MultiFile:
         self.diagnostics = defaultdict(float)
 
         self._communicate_future = asyncio.create_task(self.communicate())
-        self._loop = loop or asyncio.get_event_loop()
+        self._loop = asyncio.get_event_loop()
         self._exception = None
 
     @property

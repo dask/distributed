@@ -64,7 +64,6 @@ class MultiComm:
     def __init__(
         self,
         send: Callable[[str, list[bytes]], Awaitable[None]],
-        loop: asyncio.AbstractEventLoop | None = None,
     ):
         self.send = send
         self.shards: dict[str, list[bytes]] = defaultdict(list)
@@ -75,7 +74,7 @@ class MultiComm:
         self._futures: set[asyncio.Task] = set()
         self._done = False
         self.diagnostics: dict[str, float] = defaultdict(float)
-        self._loop = loop or asyncio.get_event_loop()
+        self._loop = asyncio.get_event_loop()
 
         self._communicate_task = asyncio.create_task(self.communicate())
         self._exception: Exception | None = None
