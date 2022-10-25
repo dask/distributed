@@ -1860,7 +1860,9 @@ async def test_shutdown_on_scheduler_comm_closed(s, a):
         assert a.status == Status.closed
         assert not s.workers
         assert not s.stream_comms
-        assert "Connection to scheduler broken" in logger.getvalue()
+        assert (
+            f"Connection to scheduler {s.address} has been closed" in logger.getvalue()
+        )
 
 
 @gen_cluster(nthreads=[])
