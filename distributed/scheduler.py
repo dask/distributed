@@ -5745,21 +5745,23 @@ class Scheduler(SchedulerState, ServerNode):
                 )
             )
 
-            resps = await asyncio.gather(
+            responses = await asyncio.gather(
                 *(
                     nanny.restart(graceful_timeout=timeout, reason="scheduler-restart")
                     for nanny in nannies
                 ),
                 return_exceptions=True,
             )
-            bad_nannies = [
-                addr for addr, resp in zip(nanny_workers, resps) if resp is not None
-            ]
-
-            raise RuntimeError(
-                f"{len(bad_nannies)} nannies failed to restart.",
-                bad_nannies,
-            )
+            bad_nannies = {
+                addr: response
+                for addr, response in zip(nanny_workers, responses)
+                if isinstance(response, Exception)
+            }
+            if bad_nannies:
+                raise RuntimeError(
+                    f"{len(bad_nannies)} nannies failed to restart.",
+                    bad_nannies,
+                )
 
         self.log_event([client, "all"], {"action": "restart", "client": client})
         logger.info("Successfully restarted.")

@@ -490,22 +490,12 @@ class Nanny(ServerNode):
         return {"status": "OK"}
 
     async def restart(
-        self, timeout: float = 30, reason: str = "nanny-restart"
-    ) -> Literal["OK", "timed out"]:
-        async def _():
-            if self.process is not None:
-                await self.stop_worker(graceful_timeout=timeout, reason=reason)
-                await self.instantiate()
-
-        try:
-            await asyncio.wait_for(_(), timeout)
-        except TimeoutError:
-            logger.exception(
-                f"Restart timed out after {timeout}s; returning before finished"
-            )
-            return "timed out"
-        else:
-            return "OK"
+        self, graceful_timeout: float = 30, reason: str = "nanny-restart"
+    ) -> Literal["OK"]:
+        if self.process is not None:
+            await self.stop_worker(graceful_timeout=graceful_timeout, reason=reason)
+            await self.instantiate()
+        return "OK"
 
     def is_alive(self):
         return self.process is not None and self.process.is_alive()

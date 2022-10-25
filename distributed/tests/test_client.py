@@ -3512,7 +3512,7 @@ def test_get_returns_early(c):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True)
+@gen_cluster(client=True, Worker=Nanny)
 async def test_Client_clears_references_after_restart(c, s, a, b):
     x = c.submit(inc, 1)
     assert x.key in c.refcount
