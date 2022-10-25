@@ -7878,7 +7878,11 @@ def _exit_processing_common(
     state.release_resources(ts, ws)
 
     # If a slot has opened up for a queued task, schedule it.
-    if state.queued and not _worker_full(ws, state.WORKER_SATURATION):
+    if (
+        state.queued
+        and ws.status == Status.running
+        and not _worker_full(ws, state.WORKER_SATURATION)
+    ):
         qts = state.queued.peek()
         if state.validate:
             assert qts.state == "queued", qts.state
