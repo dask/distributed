@@ -140,6 +140,14 @@ class Shuffle:
         }
 
     async def receive(self, data: list[pa.Buffer]) -> None:
+        task = asyncio.create_task(self._receive(data))
+        if (
+            self.multi_file.total_size + sum(map(len, data))
+            > self.multi_file.memory_limit
+        ):
+            await task  # backpressure
+
+    async def _receive(self, data: list[pa.Buffer]) -> None:
         # This is actually ok.  Our local barrier might have finished,
         # but barriers on other workers might still be running and sending us
         # data
@@ -252,12 +260,7 @@ class ShuffleWorkerExtension:
         Using an unknown ``shuffle_id`` is an error.
         """
         shuffle = await self._get_shuffle(shuffle_id)
-        task = asyncio.create_task(shuffle.receive(data))
-        if (
-            shuffle.multi_file.total_size + sum(map(len, data))
-            > shuffle.multi_file.memory_limit
-        ):
-            await task  # backpressure
+        await shuffle.receive(data)
 
     async def shuffle_inputs_done(self, comm: object, shuffle_id: ShuffleId) -> None:
         """
