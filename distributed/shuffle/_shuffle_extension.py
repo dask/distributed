@@ -13,14 +13,14 @@ from typing import TYPE_CHECKING, Any, BinaryIO, NewType, TypeVar, overload
 import toolz
 
 from distributed.protocol import to_serialize
-from distributed.shuffle.arrow import (
+from distributed.shuffle._arrow import (
     deserialize_schema,
     dump_batch,
     list_of_buffers_to_table,
     load_arrow,
 )
-from distributed.shuffle.multi_comm import MultiComm
-from distributed.shuffle.multi_file import MultiFile
+from distributed.shuffle._multi_comm import MultiComm
+from distributed.shuffle._multi_file import MultiFile
 from distributed.utils import log_errors, sync
 
 if TYPE_CHECKING:

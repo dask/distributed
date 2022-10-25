@@ -6,7 +6,7 @@ from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import SimpleShuffleLayer
 
-from distributed.shuffle.shuffle_extension import ShuffleId, ShuffleWorkerExtension
+from distributed.shuffle._shuffle_extension import ShuffleId, ShuffleWorkerExtension
 
 if TYPE_CHECKING:
     import pandas as pd
