@@ -913,8 +913,11 @@ def test_dumps_task():
     assert set(d) == {"function", "args"}
 
 
+@pytest.mark.parametrize("worker_saturation", [1.0, float("inf")])
 @gen_cluster()
-async def test_ready_remove_worker(s, a, b):
+async def test_ready_remove_worker(s, a, b, worker_saturation):
+    s.WORKER_SATURATION = worker_saturation
+
     s.update_graph(
         tasks={"x-%d" % i: dumps_task((inc, i)) for i in range(20)},
         keys=["x-%d" % i for i in range(20)],
