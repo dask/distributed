@@ -8,7 +8,16 @@ import time
 from collections import defaultdict
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any, BinaryIO, Callable, NewType, Sized, TypeVar
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    BinaryIO,
+    Callable,
+    NewType,
+    Sized,
+    TypeVar,
+    overload,
+)
 
 import toolz
 
@@ -265,24 +274,25 @@ class ShuffleWorkerExtension:
         Using an unknown ``shuffle_id`` is an error.
         """
         with log_errors():
-            shuffle = await self._get_shuffle(shuffle_id)
-            await shuffle.multi_comm.flush()
-            shuffle.inputs_done()
-            if shuffle.done():
-                # If the shuffle has no output partitions, remove it now;
-                # `get_output_partition` will never be called.
-                # This happens when there are fewer output partitions than workers.
-                assert not shuffle.multi_file.shards
-                await shuffle.multi_file.flush()
-                del self.shuffles[shuffle_id]
-                shuffle.close()
+            if shuffle_id in self.shuffles:
+                shuffle = await self._get_shuffle(shuffle_id)
+                await shuffle.multi_comm.flush()
+                shuffle.inputs_done()
+                if shuffle.done():
+                    # If the shuffle has no output partitions, remove it now;
+                    # `get_output_partition` will never be called.
+                    # This happens when there are fewer output partitions than workers.
+                    assert not shuffle.multi_file.shards
+                    await shuffle.multi_file.flush()
+                    del self.shuffles[shuffle_id]
+                    shuffle.close()
 
     def add_partition(
         self,
         data: pd.DataFrame,
         shuffle_id: ShuffleId,
-        npartitions: int | None = None,
-        column: str | None = None,
+        npartitions: int,
+        column: str,
     ) -> None:
         shuffle = self.get_shuffle(
             shuffle_id, empty=data, npartitions=npartitions, column=column
@@ -302,6 +312,10 @@ class ShuffleWorkerExtension:
         # Tell all peers that we've reached the barrier
         # Note that this will call `shuffle_inputs_done` on our own worker as well
         shuffle = await self._get_shuffle(shuffle_id)
+        # FIXME: This should restrict communication to only workers
+        # participating in this specific shuffle. This will not only reduce the
+        # number of workers we need to contact but will also simplify error
+        # handling, e.g. if a non-participating worker is not reachable in time
         out = await self.worker.scheduler.broadcast(
             msg={"op": "shuffle_inputs_done", "shuffle_id": shuffle_id}
         )
@@ -334,6 +348,23 @@ class ShuffleWorkerExtension:
             )
         return output
 
+    @overload
+    async def _get_shuffle(
+        self,
+        shuffle_id: ShuffleId,
+    ) -> Shuffle:
+        ...
+
+    @overload
+    async def _get_shuffle(
+        self,
+        shuffle_id: ShuffleId,
+        empty: pd.DataFrame,
+        column: str,
+        npartitions: int,
+    ) -> Shuffle:
+        ...
+
     async def _get_shuffle(
         self,
         shuffle_id: ShuffleId,
@@ -347,12 +378,13 @@ class ShuffleWorkerExtension:
         try:
             return self.shuffles[shuffle_id]
         except KeyError:
+            assert column is not None
+            assert npartitions is not None
+            assert empty is not None
             try:
                 result = await self.worker.scheduler.shuffle_get(
                     id=shuffle_id,
-                    schema=pa.Schema.from_pandas(empty).serialize().to_pybytes()
-                    if empty is not None
-                    else None,
+                    schema=pa.Schema.from_pandas(empty).serialize().to_pybytes(),
                     npartitions=npartitions,
                     column=column,
                 )
@@ -378,6 +410,23 @@ class ShuffleWorkerExtension:
                     )
                     self.shuffles[shuffle_id] = shuffle
                 return self.shuffles[shuffle_id]
+
+    @overload
+    def get_shuffle(
+        self,
+        shuffle_id: ShuffleId,
+        empty: pd.DataFrame,
+        column: str,
+        npartitions: int,
+    ) -> Shuffle:
+        ...
+
+    @overload
+    def get_shuffle(
+        self,
+        shuffle_id: ShuffleId,
+    ) -> Shuffle:
+        ...
 
     def get_shuffle(
         self,
@@ -438,14 +487,11 @@ class ShuffleSchedulerExtension:
     def get(
         self,
         id: ShuffleId,
-        schema: bytes | None,
-        column: str | None,
-        npartitions: int | None,
+        schema: bytes,
+        column: str,
+        npartitions: int,
     ) -> dict:
         if id not in self.worker_for:
-            assert schema is not None
-            assert column is not None
-            assert npartitions is not None
             workers = list(self.scheduler.workers)
             output_workers = set()
 
@@ -545,10 +591,7 @@ def split_by_worker(
     return out
 
 
-def split_by_partition(
-    t: pa.Table,
-    column: str,
-) -> dict:
+def split_by_partition(t: pa.Table, column: str) -> dict:
     """
     Split data into many arrow batches, partitioned by final partition
     """
