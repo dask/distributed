@@ -274,18 +274,17 @@ class ShuffleWorkerExtension:
         Using an unknown ``shuffle_id`` is an error.
         """
         with log_errors():
-            if shuffle_id in self.shuffles:
-                shuffle = await self._get_shuffle(shuffle_id)
-                await shuffle.multi_comm.flush()
-                shuffle.inputs_done()
-                if shuffle.done():
-                    # If the shuffle has no output partitions, remove it now;
-                    # `get_output_partition` will never be called.
-                    # This happens when there are fewer output partitions than workers.
-                    assert not shuffle.multi_file.shards
-                    await shuffle.multi_file.flush()
-                    del self.shuffles[shuffle_id]
-                    shuffle.close()
+            shuffle = await self._get_shuffle(shuffle_id)
+            await shuffle.multi_comm.flush()
+            shuffle.inputs_done()
+            if shuffle.done():
+                # If the shuffle has no output partitions, remove it now;
+                # `get_output_partition` will never be called.
+                # This happens when there are fewer output partitions than workers.
+                assert not shuffle.multi_file.shards
+                await shuffle.multi_file.flush()
+                del self.shuffles[shuffle_id]
+                shuffle.close()
 
     def add_partition(
         self,
