@@ -47,7 +47,6 @@ class Shuffle:
         schema: pa.Schema,
         id: ShuffleId,
         worker: Worker,
-        executor: ThreadPoolExecutor,
     ):
 
         import pandas as pd
@@ -57,7 +56,7 @@ class Shuffle:
         self.schema = schema
         self.worker = worker
         self.output_workers = output_workers
-        self.executor = executor
+        self.executor = ThreadPoolExecutor(worker.state.nthreads)
 
         partitions_of = defaultdict(list)
         for part, address in worker_for.items():
@@ -231,7 +230,6 @@ class ShuffleWorkerExtension:
         # Initialize
         self.worker: Worker = worker
         self.shuffles: dict[ShuffleId, Shuffle] = {}
-        self.executor = ThreadPoolExecutor(worker.state.nthreads)
 
     # Handlers
     ##########
@@ -374,7 +372,6 @@ class ShuffleWorkerExtension:
                         worker=self.worker,
                         schema=deserialize_schema(result["schema"]),
                         id=shuffle_id,
-                        executor=self.executor,
                     )
                     self.shuffles[shuffle_id] = shuffle
                 return self.shuffles[shuffle_id]
@@ -391,7 +388,6 @@ class ShuffleWorkerExtension:
         )
 
     def close(self):
-        self.executor.shutdown()
         while self.shuffles:
             _, shuffle = self.shuffles.popitem()
             shuffle.close()
