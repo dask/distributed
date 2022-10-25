@@ -374,10 +374,12 @@ class Nanny(ServerNode):
         return self
 
     async def stop_worker(self, graceful_timeout=2):
-        """Kill the local worker process
+        """Stop the local worker process
 
-        Blocks until both the process is down and the scheduler is properly
-        informed
+        Waits at most ``graceful_timeout`` seconds for the worker process to shutdown
+        gracefully before killing it abruptly.
+        When ``stop_worker`` returns, the process is down and the scheduler is properly
+        informed.
         """
         if self.process is None:
             return
