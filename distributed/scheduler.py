@@ -5752,7 +5752,7 @@ class Scheduler(SchedulerState, ServerNode):
                         # see https://github.com/dask/distributed/pull/6427/files#r894917424
                         # NOTE: Nanny will automatically restart worker process when it's killed
                         nanny.stop_worker(graceful_timeout=timeout),
-                        timeout,
+                        timeout + 5,
                     )
                     for nanny in nannies
                 ),
