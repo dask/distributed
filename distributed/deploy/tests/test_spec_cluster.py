@@ -156,7 +156,7 @@ async def test_adaptive_killed_worker():
 
                 # Kill the only worker.
                 [worker_id] = cluster.workers
-                await cluster.workers[worker_id].kill()
+                await cluster.workers[worker_id].stop_worker()
 
                 # Wait for the worker to re-spawn and finish sleeping.
                 await future
