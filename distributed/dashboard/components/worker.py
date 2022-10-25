@@ -90,7 +90,7 @@ class StateTable(DashboardComponent):
             "Stored": [len(w.data)],
             "Executing": ["%d / %d" % (w.state.executing_count, w.state.nthreads)],
             "Ready": [len(w.state.ready)],
-            "Waiting": [w.state.waiting_for_data_count],
+            "Waiting": [len(w.state.waiting)],
             "Connections": [w.state.transfer_incoming_count],
             "Serving": [len(w._comms)],
         }

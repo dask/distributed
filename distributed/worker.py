@@ -56,7 +56,6 @@ from distributed.comm.addressing import address_from_user_args
 from distributed.comm.utils import OFFLOAD_THRESHOLD
 from distributed.compatibility import randbytes, to_thread
 from distributed.core import (
-    CommClosedError,
     ConnectionPool,
     Status,
     coerce_to_address,
@@ -171,6 +170,7 @@ def fail_hard(method: Callable[P, T]) -> Callable[P, T]:
     """
     Decorator to close the worker if this method encounters an exception.
     """
+    reason = f"worker-{method.__name__}-fail-hard"
     if iscoroutinefunction(method):
 
         @functools.wraps(method)
@@ -181,7 +181,7 @@ def fail_hard(method: Callable[P, T]) -> Callable[P, T]:
                 if self.status not in (Status.closed, Status.closing):
                     self.log_event("worker-fail-hard", error_message(e))
                     logger.exception(e)
-                await _force_close(self)
+                await _force_close(self, reason)
                 raise
 
     else:
@@ -194,13 +194,13 @@ def fail_hard(method: Callable[P, T]) -> Callable[P, T]:
                 if self.status not in (Status.closed, Status.closing):
                     self.log_event("worker-fail-hard", error_message(e))
                     logger.exception(e)
-                self.loop.add_callback(_force_close, self)
+                self.loop.add_callback(_force_close, self, reason)
                 raise
 
     return wrapper  # type: ignore
 
 
-async def _force_close(self):
+async def _force_close(self, reason: str):
     """
     Used with the fail_hard decorator defined above
 
@@ -208,7 +208,10 @@ async def _force_close(self):
     2.  If it doesn't, log and kill the process
     """
     try:
-        await asyncio.wait_for(self.close(nanny=False, executor_wait=False), 30)
+        await asyncio.wait_for(
+            self.close(nanny=False, executor_wait=False, reason=reason),
+            30,
+        )
     except (KeyboardInterrupt, SystemExit):  # pragma: nocover
         raise
     except BaseException:  # pragma: nocover
@@ -303,7 +306,12 @@ class Worker(BaseWorker, ServerNode):
     scheduler_file: str, optional
     host: str, optional
     data: MutableMapping, type, None
-        The object to use for storage, builds a disk-backed LRU dict by default
+        The object to use for storage, builds a disk-backed LRU dict by default.
+
+        If a callable to construct the storage object is provided, it
+        will receive the worker's attr:``local_directory`` as an
+        argument if the calling signature has an argument named
+        ``worker_local_directory``.
     nthreads: int, optional
     local_directory: str, optional
         Directory where we place local resources
@@ -484,6 +492,8 @@ class Worker(BaseWorker, ServerNode):
         data: (
             MutableMapping[str, Any]  # pre-initialised
             | Callable[[], MutableMapping[str, Any]]  # constructor
+            # constructor receiving self.local_directory
+            | Callable[[str], MutableMapping[str, Any]]
             | tuple[
                 Callable[..., MutableMapping[str, Any]], dict[str, Any]
             ]  # (constructor, kwargs to constructor)
@@ -825,7 +835,9 @@ class Worker(BaseWorker, ServerNode):
 
         if lifetime:
             lifetime += (random.random() * 2 - 1) * lifetime_stagger
-            self.io_loop.call_later(lifetime, self.close_gracefully)
+            self.io_loop.call_later(
+                lifetime, self.close_gracefully, reason="worker-lifetime-reached"
+            )
         self.lifetime = lifetime
 
         Worker._instances.add(self)
@@ -903,7 +915,6 @@ class Worker(BaseWorker, ServerNode):
     transition_counter_max = DeprecatedWorkerStateAttribute()
     validate = DeprecatedWorkerStateAttribute()
     validate_task = DeprecatedWorkerStateAttribute()
-    waiting_for_data_count = DeprecatedWorkerStateAttribute()
 
     @property
     def data_needed(self) -> set[TaskState]:
@@ -914,11 +925,20 @@ class Worker(BaseWorker, ServerNode):
         )
         return {ts for tss in self.state.data_needed.values() for ts in tss}
 
+    @property
+    def waiting_for_data_count(self) -> int:
+        warnings.warn(
+            "The `Worker.waiting_for_data_count` attribute has been removed; "
+            "use `len(Worker.state.waiting)`",
+            FutureWarning,
+        )
+        return len(self.state.waiting)
+
     ##################
     # Administrative #
     ##################
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         name = f", name: {self.name}" if self.name != self.address_safe else ""
         return (
             f"<{self.__class__.__name__} {self.address_safe!r}{name}, "
@@ -927,7 +947,7 @@ class Worker(BaseWorker, ServerNode):
             f"running: {self.state.executing_count}/{self.state.nthreads}, "
             f"ready: {len(self.state.ready)}, "
             f"comm: {self.state.in_flight_tasks_count}, "
-            f"waiting: {self.state.waiting_for_data_count}>"
+            f"waiting: {len(self.state.waiting)}>"
         )
 
     @property
@@ -990,10 +1010,7 @@ class Worker(BaseWorker, ServerNode):
             spilled_memory, spilled_disk = 0, 0
 
         out = dict(
-            executing=self.state.executing_count,
-            in_memory=len(self.data),
-            ready=len(self.state.ready),
-            in_flight=self.state.in_flight_tasks_count,
+            task_counts=self.state.task_counts,
             bandwidth={
                 "total": self.bandwidth,
                 "workers": dict(self.bandwidth_workers),
@@ -1237,17 +1254,12 @@ class Worker(BaseWorker, ServerNode):
             )
             self.bandwidth_workers.clear()
             self.bandwidth_types.clear()
-        except CommClosedError:
-            logger.warning("Heartbeat to scheduler failed", exc_info=True)
+        except OSError:
+            logger.exception("Failed to communicate with scheduler during heartbeat.")
+        except Exception as e:
+            logger.exception("Unexpected exception during heartbeat. Closing worker.")
             await self.close()
-        except OSError as e:
-            # Scheduler is gone. Respect distributed.comm.timeouts.connect
-            if "Timed out trying to connect" in str(e):
-                logger.info("Timed out while trying to connect during heartbeat")
-                await self.close()
-            else:
-                logger.exception(e)
-                raise e
+            raise e
         finally:
             self.heartbeat_active = False
 
@@ -1256,7 +1268,7 @@ class Worker(BaseWorker, ServerNode):
         try:
             await self.handle_stream(comm)
         finally:
-            await self.close()
+            await self.close(reason="worker-handle-scheduler-connection-broken")
 
     async def upload_file(
         self, filename: str, data: str | bytes, load: bool = True
@@ -1457,6 +1469,7 @@ class Worker(BaseWorker, ServerNode):
         timeout: float = 30,
         executor_wait: bool = True,
         nanny: bool = True,
+        reason: str = "worker-close",
     ) -> str | None:
         """Close the worker
 
@@ -1465,12 +1478,14 @@ class Worker(BaseWorker, ServerNode):
 
         Parameters
         ----------
-        timeout : float, default 30
+        timeout
             Timeout in seconds for shutting down individual instructions
-        executor_wait : bool, default True
+        executor_wait
             If True, shut down executors synchronously, otherwise asynchronously
-        nanny : bool, default True
+        nanny
             If True, close the nanny
+        reason
+            Reason for closing the worker
 
         Returns
         -------
@@ -1482,6 +1497,11 @@ class Worker(BaseWorker, ServerNode):
         # nanny+worker, the nanny must be notified first. ==> Remove kwarg
         # nanny, see also Scheduler.retire_workers
         if self.status in (Status.closed, Status.closing, Status.failed):
+            logging.debug(
+                "Attempted to close worker that is already %s. Reason: %s",
+                self.status,
+                reason,
+            )
             await self.finished()
             return None
 
@@ -1499,9 +1519,9 @@ class Worker(BaseWorker, ServerNode):
         disable_gc_diagnosis()
 
         try:
-            logger.info("Stopping worker at %s", self.address)
+            logger.info("Stopping worker at %s. Reason: %s", self.address, reason)
         except ValueError:  # address not available if already closed
-            logger.info("Stopping worker")
+            logger.info("Stopping worker. Reason: %s", reason)
         if self.status not in WORKER_ANY_RUNNING:
             logger.info("Closed worker has not yet started: %s", self.status)
         if not executor_wait:
@@ -1530,7 +1550,7 @@ class Worker(BaseWorker, ServerNode):
 
         if nanny and self.nanny:
             with self.rpc(self.nanny) as r:
-                await r.close_gracefully()
+                await r.close_gracefully(reason=reason)
 
         setproctitle("dask worker [closing]")
 
@@ -1623,7 +1643,9 @@ class Worker(BaseWorker, ServerNode):
         setproctitle("dask worker [closed]")
         return "OK"
 
-    async def close_gracefully(self, restart=None):
+    async def close_gracefully(
+        self, restart=None, reason: str = "worker-close-gracefully"
+    ):
         """Gracefully shut down a worker
 
         This first informs the scheduler that we're shutting down, and asks it
@@ -1635,10 +1657,7 @@ class Worker(BaseWorker, ServerNode):
         if self.status == Status.closed:
             return
 
-        if restart is None:
-            restart = self.lifetime_restart
-
-        logger.info("Closing worker gracefully: %s", self.address)
+        logger.info("Closing worker gracefully: %s. Reason: %s", self.address, reason)
         # Wait for all tasks to leave the worker and don't accept any new ones.
         # Scheduler.retire_workers will set the status to closing_gracefully and push it
         # back to this worker.
@@ -1648,7 +1667,9 @@ class Worker(BaseWorker, ServerNode):
             remove=False,
             stimulus_id=f"worker-close-gracefully-{time()}",
         )
-        await self.close(nanny=not restart)
+        if restart is None:
+            restart = self.lifetime_restart
+        await self.close(nanny=not restart, reason=reason)
 
     async def wait_until_closed(self):
         warnings.warn("wait_until_closed has moved to finished()")

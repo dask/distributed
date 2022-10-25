@@ -3981,7 +3981,7 @@ class Scheduler(SchedulerState, ServerNode):
             if not comm.closed():
                 # This closes the Worker and ensures that if a Nanny is around,
                 # it is closed as well
-                comm.send({"op": "close"})
+                comm.send({"op": "close", "reason": "scheduler-close"})
                 comm.send({"op": "close-stream"})
                 # ^ TODO remove? `Worker.close` will close the stream anyway.
             with suppress(AttributeError):
@@ -4729,7 +4729,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         logger.info("Closing worker %s", worker)
         self.log_event(worker, {"action": "close-worker"})
-        self.worker_send(worker, {"op": "close"})
+        self.worker_send(worker, {"op": "close", "reason": "scheduler-close-worker"})
 
     @log_errors
     async def remove_worker(
@@ -4768,7 +4768,9 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Remove worker %s", ws)
         if close:
             with suppress(AttributeError, CommClosedError):
-                self.stream_comms[address].send({"op": "close"})
+                self.stream_comms[address].send(
+                    {"op": "close", "reason": "scheduler-remove-worker"}
+                )
 
         self.remove_resources(address)
 
@@ -5701,7 +5703,7 @@ class Scheduler(SchedulerState, ServerNode):
         """
         stimulus_id = f"restart-{time()}"
 
-        logger.info("Releasing all requested keys")
+        logger.info("Restarting workers and releasing all keys.")
         for cs in self.clients.values():
             self.client_releases_keys(
                 keys=[ts.key for ts in cs.wants_what],
@@ -5751,7 +5753,10 @@ class Scheduler(SchedulerState, ServerNode):
                         # FIXME does not raise if the process fails to shut down,
                         # see https://github.com/dask/distributed/pull/6427/files#r894917424
                         # NOTE: Nanny will automatically restart worker process when it's killed
-                        nanny.kill(timeout=timeout),
+                        nanny.kill(
+                            reason="scheduler-restart",
+                            timeout=timeout,
+                        ),
                         timeout,
                     )
                     for nanny in nannies
@@ -5802,6 +5807,7 @@ class Scheduler(SchedulerState, ServerNode):
                             "will always time out. Do not use `Client.restart` in that case."
                         )
                     raise TimeoutError(msg) from None
+        logger.info("Restarting finished.")
 
     async def broadcast(
         self,
