@@ -378,13 +378,12 @@ class ShuffleWorkerExtension:
         try:
             return self.shuffles[shuffle_id]
         except KeyError:
-            assert column is not None
-            assert npartitions is not None
-            assert empty is not None
             try:
                 result = await self.worker.scheduler.shuffle_get(
                     id=shuffle_id,
-                    schema=pa.Schema.from_pandas(empty).serialize().to_pybytes(),
+                    schema=pa.Schema.from_pandas(empty).serialize().to_pybytes()
+                    if empty is not None
+                    else None,
                     npartitions=npartitions,
                     column=column,
                 )
@@ -487,11 +486,14 @@ class ShuffleSchedulerExtension:
     def get(
         self,
         id: ShuffleId,
-        schema: bytes,
-        column: str,
-        npartitions: int,
+        schema: bytes | None,
+        column: str | None,
+        npartitions: int | None,
     ) -> dict:
         if id not in self.worker_for:
+            assert schema is not None
+            assert column is not None
+            assert npartitions is not None
             workers = list(self.scheduler.workers)
             output_workers = set()
 
