@@ -462,7 +462,7 @@ def main(  # type: ignore[no-untyped-def]
 def _apportion_ports(
     worker_port: str | None,
     nanny_port: str | None,
-    dashboard_address: str | None,
+    dashboard_address: str,
     n_workers: int,
     nanny: bool,
 ) -> list[dict[str, Any]]:
@@ -486,12 +486,12 @@ def _apportion_ports(
                     seen.add(port)
                     yield port
 
-    def parse_address_unique(s: str | None) -> Iterator[str | None]:
-        if s is None:
+    def parse_address_unique(s: str) -> Iterator[str]:
+        addresses = clean_dashboard_address(s)
+        if len(addresses) == 1 and addresses[0]["port"] in (0, None):
             for _ in range(n_workers):
-                yield None
+                yield unparse_host_port(addresses[0]["address"], addresses[0]["port"])
         else:
-            addresses = clean_dashboard_address(s)
             for item in addresses:
                 yield unparse_host_port(item["address"], item["port"])
 
@@ -541,7 +541,7 @@ def _apportion_ports(
             address = next(dashboard_addresses_iter)
         except StopIteration:
             raise ValueError(
-                f"Not enough ports in range --dashboard_address {dashboard_address} "
+                f"Not enough addresses in --dashboard_address {dashboard_address} "
                 f"for {n_workers} workers"
             )
 

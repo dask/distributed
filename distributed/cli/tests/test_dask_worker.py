@@ -35,112 +35,155 @@ from distributed.utils_test import (
     [
         # Single worker
         (
-            (None, None, 1, False),
-            [{"port": None}],
+            (None, None, ":0", 1, False),
+            [{"port": None, "dashboard_address": ":0"}],
         ),
         (
-            (None, None, 1, True),
-            [{"port": None, "worker_port": None}],
+            (None, None, ":0", 1, True),
+            [{"port": None, "worker_port": None, "dashboard_address": ":0"}],
         ),
-        (("123", None, 1, False), [{"port": 123}]),
+        (("123", None, ":0", 1, False), [{"port": 123, "dashboard_address": ":0"}]),
         (
-            ("123", None, 1, True),
-            [{"port": None, "worker_port": 123}],
-        ),
-        (
-            (None, "456", 1, True),
-            [{"port": 456, "worker_port": None}],
+            ("123", None, ":0", 1, True),
+            [{"port": None, "worker_port": 123, "dashboard_address": ":0"}],
         ),
         (
-            ("123", "456", 1, True),
-            [{"port": 456, "worker_port": 123}],
+            (None, "456", ":0", 1, True),
+            [{"port": 456, "worker_port": None, "dashboard_address": ":0"}],
+        ),
+        (
+            ("123", "456", ":0", 1, True),
+            [{"port": 456, "worker_port": 123, "dashboard_address": ":0"}],
+        ),
+        (
+            ("123", "456", "789", 1, True),
+            [{"port": 456, "worker_port": 123, "dashboard_address": ":789"}],
+        ),
+        (
+            ("123", "456", ":789", 1, True),
+            [{"port": 456, "worker_port": 123, "dashboard_address": ":789"}],
         ),
         # port=None or 0 and multiple workers
         (
-            (None, None, 2, False),
+            (None, None, ":0", 2, False),
             [
-                {"port": None},
-                {"port": None},
+                {"port": None, "dashboard_address": ":0"},
+                {"port": None, "dashboard_address": ":0"},
             ],
         ),
         (
-            (None, None, 2, True),
+            (None, None, ":0", 2, True),
             [
-                {"port": None, "worker_port": None},
-                {"port": None, "worker_port": None},
+                {"port": None, "worker_port": None, "dashboard_address": ":0"},
+                {"port": None, "worker_port": None, "dashboard_address": ":0"},
             ],
         ),
         (
-            (0, "0", 2, True),
+            (0, "0", ":0", 2, True),
             [
-                {"port": 0, "worker_port": 0},
-                {"port": 0, "worker_port": 0},
+                {"port": 0, "worker_port": 0, "dashboard_address": ":0"},
+                {"port": 0, "worker_port": 0, "dashboard_address": ":0"},
             ],
         ),
         (
-            ("0", None, 2, True),
+            ("0", None, ":0", 2, True),
             [
-                {"port": None, "worker_port": 0},
-                {"port": None, "worker_port": 0},
+                {"port": None, "worker_port": 0, "dashboard_address": ":0"},
+                {"port": None, "worker_port": 0, "dashboard_address": ":0"},
             ],
         ),
         # port ranges
         (
-            ("100:103", None, 1, False),
-            [{"port": [100, 101, 102, 103]}],
+            ("100:103", None, ":0", 1, False),
+            [{"port": [100, 101, 102, 103], "dashboard_address": ":0"}],
         ),
         (
-            ("100:103", None, 2, False),
+            ("100:103", None, ":0", 2, False),
             [
-                {"port": [100, 102]},  # Round robin apportion
-                {"port": [101, 103]},
+                {
+                    "port": [100, 102],
+                    "dashboard_address": ":0",
+                },  # Round robin apportion
+                {"port": [101, 103], "dashboard_address": ":0"},
+            ],
+        ),
+        # multiple dashboard addresses
+        (
+            (None, None, "123,456", 1, False),
+            [{"port": None, "dashboard_address": ":123"}],
+        ),
+        (
+            (None, None, "123,456", 2, False),
+            [
+                {"port": None, "dashboard_address": ":123"},
+                {"port": None, "dashboard_address": ":456"},
             ],
         ),
         # port range is not an exact multiple of n_workers
         (
-            ("100:107", None, 3, False),
+            ("100:107", None, ":0", 3, False),
             [
-                {"port": [100, 103, 106]},
-                {"port": [101, 104, 107]},
-                {"port": [102, 105]},
+                {"port": [100, 103, 106], "dashboard_address": ":0"},
+                {"port": [101, 104, 107], "dashboard_address": ":0"},
+                {"port": [102, 105], "dashboard_address": ":0"},
             ],
         ),
         (
-            ("100:103", None, 2, True),
+            ("100:103", None, ":0", 2, True),
             [
-                {"port": None, "worker_port": [100, 102]},
-                {"port": None, "worker_port": [101, 103]},
+                {"port": None, "worker_port": [100, 102], "dashboard_address": ":0"},
+                {"port": None, "worker_port": [101, 103], "dashboard_address": ":0"},
             ],
         ),
         (
-            (None, "110:113", 2, True),
+            (None, "110:113", ":0", 2, True),
             [
-                {"port": [110, 112], "worker_port": None},
-                {"port": [111, 113], "worker_port": None},
+                {"port": [110, 112], "worker_port": None, "dashboard_address": ":0"},
+                {"port": [111, 113], "worker_port": None, "dashboard_address": ":0"},
             ],
         ),
         # port ranges have different length between nannies and workers
         (
-            ("100:103", "110:114", 2, True),
+            ("100:103", "110:114", ":0", 2, True),
             [
-                {"port": [110, 112, 114], "worker_port": [100, 102]},
-                {"port": [111, 113], "worker_port": [101, 103]},
+                {
+                    "port": [110, 112, 114],
+                    "worker_port": [100, 102],
+                    "dashboard_address": ":0",
+                },
+                {
+                    "port": [111, 113],
+                    "worker_port": [101, 103],
+                    "dashboard_address": ":0",
+                },
+            ],
+        ),
+        # dashboard addresses have different length from workers
+        (
+            ("100:101", None, "123,456,789", 2, False),
+            [
+                {"port": 100, "dashboard_address": ":123"},
+                {"port": 101, "dashboard_address": ":456"},
             ],
         ),
         # identical port ranges
         (
-            ("100:103", "100:103", 2, True),
+            ("100:103", "100:103", ":0", 2, True),
             [
-                {"port": 101, "worker_port": 100},
-                {"port": 103, "worker_port": 102},
+                {"port": 101, "worker_port": 100, "dashboard_address": ":0"},
+                {"port": 103, "worker_port": 102, "dashboard_address": ":0"},
             ],
         ),
         # overlapping port ranges
         (
-            ("100:105", "104:106", 2, True),
+            ("100:105", "104:106", ":0", 2, True),
             [
-                {"port": [104, 106], "worker_port": [100, 102]},
-                {"port": 105, "worker_port": [101, 103]},
+                {
+                    "port": [104, 106],
+                    "worker_port": [100, 102],
+                    "dashboard_address": ":0",
+                },
+                {"port": 105, "worker_port": [101, 103], "dashboard_address": ":0"},
             ],
         ),
     ],
@@ -151,19 +194,21 @@ def test_apportion_ports(args, expect):
 
 def test_apportion_ports_bad():
     with pytest.raises(ValueError, match="Not enough ports in range"):
-        _apportion_ports("100:102", None, 4, False)
+        _apportion_ports("100:102", None, ":0", 4, False)
     with pytest.raises(ValueError, match="Not enough ports in range"):
-        _apportion_ports(None, "100:102", 4, False)
+        _apportion_ports(None, "100:102", ":0", 4, False)
     with pytest.raises(ValueError, match="Not enough ports in range"):
-        _apportion_ports("100:102", "100:102", 3, True)
+        _apportion_ports("100:102", "100:102", ":0", 3, True)
     with pytest.raises(ValueError, match="Not enough ports in range"):
-        _apportion_ports("100:102", "102:104", 3, True)
+        _apportion_ports("100:102", "102:104", ":0", 3, True)
     with pytest.raises(ValueError, match="port_stop must be greater than port_start"):
-        _apportion_ports("102:100", None, 4, False)
+        _apportion_ports("102:100", None, ":0", 4, False)
     with pytest.raises(ValueError, match="invalid literal for int"):
-        _apportion_ports("foo", None, 1, False)
+        _apportion_ports("foo", None, ":0", 1, False)
     with pytest.raises(ValueError, match="too many values to unpack"):
-        _apportion_ports("100:101:102", None, 1, False)
+        _apportion_ports("100:101:102", None, ":0", 1, False)
+    with pytest.raises(ValueError, match="Not enough addresses in"):
+        _apportion_ports(None, None, "123,456", 3, False)
 
 
 @pytest.mark.slow
