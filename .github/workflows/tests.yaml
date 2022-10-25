@@ -24,7 +24,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.8", "3.9", "3.10"]
-        queuing: [no_queue]
+        queuing: [queue]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
         exclude:
@@ -33,11 +33,11 @@ jobs:
         include:
           - os: ubuntu-latest
             python-version: 3.9
-            queuing: queue
+            queuing: no_queue
             partition: "ci1"
           - os: ubuntu-latest
             python-version: 3.9
-            queuing: queue
+            queuing: no_queue
             partition: "not ci1"
 
         # Uncomment to stress-test the test suite for random failures.
@@ -144,8 +144,8 @@ jobs:
 
       - name: Set up dask env for job queuing
         shell: bash -l {0}
-        if: ${{ matrix.queuing == 'queue' }}
-        run: echo "DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=1.0" >> $GITHUB_ENV
+        if: ${{ matrix.queuing == 'no_queue' }}
+        run: echo "DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=inf" >> $GITHUB_ENV
 
       - name: Print host info
         shell: bash -l {0}
