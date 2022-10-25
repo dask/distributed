@@ -22,7 +22,10 @@ async def test_installation(s, a):
     assert a.handlers["shuffle_inputs_done"] == ext.shuffle_inputs_done
 
 
-@pytest.mark.skip
+def _gen_worker_for_series():
+    return
+
+
 def test_split_by_worker():
     df = pd.DataFrame(
         {
@@ -33,7 +36,9 @@ def test_split_by_worker():
     workers = ["alice", "bob"]
     npartitions = 3
 
-    out = split_by_worker(df, "_partition", npartitions, workers)
+    worker_for = _gen_worker_for_series()
+
+    out = split_by_worker(df, "_partition", npartitions, worker_for)
     assert set(out) == {"alice", "bob"}
     assert out["alice"].column_names == list(df.columns)
 

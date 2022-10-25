@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import functools
 import logging
 import os
 import time
 from collections import defaultdict
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, NewType
+from typing import TYPE_CHECKING, Any, BinaryIO, Callable, NewType, Sized, TypeVar
 
 import toolz
 
@@ -28,10 +27,11 @@ if TYPE_CHECKING:
     import pandas as pd
     import pyarrow as pa
 
+    from distributed.scheduler import Scheduler, WorkerState
     from distributed.worker import Worker
 
 ShuffleId = NewType("ShuffleId", str)
-
+T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
@@ -64,14 +64,17 @@ class Shuffle:
         self.partitions_of = dict(partitions_of)
         self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
 
+        def _dump_batch(batch: Any, file: BinaryIO) -> None:
+            return dump_batch(batch, file, self.schema)
+
+        def _sizeof(shards: list[Sized]) -> int:
+            return sum(map(len, shards))
+
         self.multi_file = MultiFile(
-            dump=functools.partial(
-                dump_batch,
-                schema=self.schema,
-            ),
+            dump=_dump_batch,
             load=load_arrow,
             directory=os.path.join(self.worker.local_directory, "shuffle-%s" % self.id),
-            sizeof=lambda L: sum(map(len, L)),
+            sizeof=_sizeof,
             loop=self.worker.io_loop,
         )
 
@@ -104,7 +107,7 @@ class Shuffle:
         stop = time.time()
         self.diagnostics[name] += stop - start
 
-    async def offload(self, func, *args):
+    async def offload(self, func: Callable[..., T], *args: Any) -> T:
         # return func(*args)
         return await asyncio.get_event_loop().run_in_executor(
             self.executor,
@@ -112,7 +115,7 @@ class Shuffle:
             *args,
         )
 
-    def heartbeat(self):
+    def heartbeat(self) -> dict[str, Any]:
         return {
             "disk": {
                 "memory": self.multi_file.total_size,
@@ -214,7 +217,7 @@ class Shuffle:
     def done(self) -> bool:
         return self.transferred and self.output_partitions_left == 0
 
-    def close(self):
+    def close(self) -> None:
         self.multi_file.close()
 
 
@@ -235,7 +238,7 @@ class ShuffleWorkerExtension:
     ##########
     # NOTE: handlers are not threadsafe, but they're called from async comms, so that's okay
 
-    def heartbeat(self):
+    def heartbeat(self) -> dict:
         return {id: shuffle.heartbeat() for id, shuffle in self.shuffles.items()}
 
     async def shuffle_receive(
@@ -387,7 +390,7 @@ class ShuffleWorkerExtension:
             self.worker.loop, self._get_shuffle, shuffle_id, empty, column, npartitions
         )
 
-    def close(self):
+    def close(self) -> None:
         while self.shuffles:
             _, shuffle = self.shuffles.popitem()
             shuffle.close()
@@ -405,7 +408,15 @@ class ShuffleSchedulerExtension:
     ShuffleWorkerExtension
     """
 
-    def __init__(self, scheduler):
+    scheduler: Scheduler
+    worker_for: dict[ShuffleId, dict[int, str]]
+    heartbeats: defaultdict[ShuffleId, dict]
+    schemas: dict[ShuffleId, bytes]
+    columns: dict[ShuffleId, str]
+    output_workers: dict[ShuffleId, set[str]]
+    completed_workers: dict[ShuffleId, set[str]]
+
+    def __init__(self, scheduler: Scheduler):
         self.scheduler = scheduler
         self.scheduler.handlers.update(
             {
@@ -420,7 +431,7 @@ class ShuffleSchedulerExtension:
         self.output_workers = {}
         self.completed_workers = {}
 
-    def heartbeat(self, ws, data):
+    def heartbeat(self, ws: WorkerState, data: dict) -> None:
         for shuffle_id, d in data.items():
             self.heartbeats[shuffle_id][ws.address].update(d)
 
