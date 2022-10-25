@@ -559,7 +559,9 @@ def split_by_worker(
     if not nrows:
         return {}
     # assert len(df) == nrows  # Not true if some outputs aren't wanted
-    t = pa.Table.from_pandas(df)
+    # FIXME: If we do not preserve the index something is corrupting the
+    # bytestream such that it cannot be deserialized anymore
+    t = pa.Table.from_pandas(df, preserve_index=True)
     t = t.sort_by("_worker")
     codes = np.asarray(t.select(["_worker"]))[0]
     t = t.drop(["_worker"])
