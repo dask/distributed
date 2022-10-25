@@ -272,16 +272,22 @@ class MultiFile:
 
         await self._communicate_future
 
-    def close(self) -> None:
-        self._done = True
-        with contextlib.suppress(FileNotFoundError):
-            shutil.rmtree(self.directory)
+    async def close(self) -> None:
+        try:
+            # XXX If there is an exception this will raise again during
+            # teardown. I don't think this is what we want to. Likely raising
+            # the exception on flushing is not ideal
+            if not self._done:
+                await self.flush()
+        finally:
+            with contextlib.suppress(FileNotFoundError):
+                shutil.rmtree(self.directory)
 
-    def __enter__(self) -> MultiFile:
+    async def __aenter__(self) -> MultiFile:
         return self
 
-    def __exit__(self, exc: Any, typ: Any, traceback: Any) -> None:
-        self.close()
+    async def __aexit__(self, exc: Any, typ: Any, traceback: Any) -> None:
+        await self.close()
 
     @contextlib.contextmanager
     def time(self, name: str) -> Iterator[None]:

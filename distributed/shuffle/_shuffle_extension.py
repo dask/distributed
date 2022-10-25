@@ -182,6 +182,8 @@ class Shuffle:
             self._exception = e
 
     def add_partition(self, data: pd.DataFrame) -> None:
+        if self.transferred:
+            raise RuntimeError(f"Cannot add more partitions to shuffle {self}")
         with self.time("cpu"):
             out = split_by_worker(
                 data,
@@ -225,8 +227,8 @@ class Shuffle:
     def done(self) -> bool:
         return self.transferred and self.output_partitions_left == 0
 
-    def close(self) -> None:
-        self.multi_file.close()
+    async def close(self) -> None:
+        await self.multi_file.close()
 
 
 class ShuffleWorkerExtension:
@@ -278,7 +280,7 @@ class ShuffleWorkerExtension:
                 assert not shuffle.multi_file.shards
                 await shuffle.multi_file.flush()
                 del self.shuffles[shuffle_id]
-                shuffle.close()
+                await shuffle.close()
 
     def add_partition(
         self,
@@ -327,18 +329,21 @@ class ShuffleWorkerExtension:
 
         Calling this for a ``shuffle_id`` which is unknown or incomplete is an error.
         """
-        shuffle = self.get_shuffle(shuffle_id)
+        assert shuffle_id in self.shuffles, "Shuffle worker restrictions misbehaving"
+        shuffle = self.shuffles[shuffle_id]
         output = shuffle.get_output_partition(output_partition)
         # key missing if another thread got to it first
         if shuffle.done() and shuffle_id in self.shuffles:
             shuffle = self.shuffles.pop(shuffle_id)
-            shuffle.close()
-            sync(
-                self.worker.loop,
-                self.worker.scheduler.shuffle_register_complete,
-                id=shuffle_id,
-                worker=self.worker.address,
-            )
+
+            async def _() -> None:
+                await shuffle.close()
+                await self.worker.scheduler.shuffle_register_complete(
+                    id=shuffle_id,
+                    worker=self.worker.address,
+                )
+
+            sync(self.worker.loop, _)
         return output
 
     @overload
@@ -431,10 +436,10 @@ class ShuffleWorkerExtension:
             self.worker.loop, self._get_shuffle, shuffle_id, empty, column, npartitions
         )
 
-    def close(self) -> None:
+    async def close(self) -> None:
         while self.shuffles:
             _, shuffle = self.shuffles.popitem()
-            shuffle.close()
+            await shuffle.close()
 
 
 class ShuffleSchedulerExtension:

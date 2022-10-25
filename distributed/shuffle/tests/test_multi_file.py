@@ -22,7 +22,7 @@ def load(f):
 
 @gen_test()
 async def test_basic(tmp_path):
-    with MultiFile(directory=tmp_path, dump=dump, load=load) as mf:
+    async with MultiFile(directory=tmp_path, dump=dump, load=load) as mf:
         await mf.put({"x": [b"0" * 1000], "y": [b"1" * 500]})
         await mf.put({"x": [b"0" * 1000], "y": [b"1" * 500]})
 
@@ -40,7 +40,7 @@ async def test_basic(tmp_path):
 @pytest.mark.parametrize("count", [2, 100, 1000])
 @gen_test()
 async def test_many(tmp_path, count):
-    with MultiFile(directory=tmp_path, dump=dump, load=load) as mf:
+    async with MultiFile(directory=tmp_path, dump=dump, load=load) as mf:
         d = {i: [str(i).encode() * 100] for i in range(count)}
 
         for _ in range(10):
@@ -60,7 +60,7 @@ async def test_exceptions(tmp_path):
     def dump(data, f):
         raise Exception(123)
 
-    with MultiFile(directory=tmp_path, dump=dump, load=load) as mf:
+    async with MultiFile(directory=tmp_path, dump=dump, load=load) as mf:
         await mf.put({"x": [b"0" * 1000], "y": [b"1" * 500]})
 
         while not mf._exception:
