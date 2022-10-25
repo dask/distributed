@@ -19,6 +19,7 @@ def test_progress_quads():
         "released": {"inc": 1, "dec": 0, "add": 1},
         "processing": {"inc": 1, "dec": 0, "add": 2},
         "queued": {"inc": 1, "dec": 0, "add": 2},
+        "no-worker": {"inc": 1, "dec": 0, "add": 0},
     }
 
     d = progress_quads(msg, nrows=2)
@@ -37,12 +38,14 @@ def test_progress_quads():
         "erred": [0, 0, 1],
         "processing": [1, 2, 0],
         "queued": [1, 2, 0],
+        "no-worker": [1, 0, 0],
         "done": ["3 / 5", "2 / 4", "1 / 1"],
         "released-loc": [0.9 * 1 / 5, 0.25 * 0.9, 1.0],
         "memory-loc": [0.9 * 3 / 5, 0.5 * 0.9, 1.0],
         "erred-loc": [0.9 * 3 / 5, 0.5 * 0.9, 1.9],
         "processing-loc": [0.9 * 4 / 5, 1 * 0.9, 1 * 0.9 + 1],
         "queued-loc": [1 * 0.9, 1.5 * 0.9, 1 * 0.9 + 1],
+        "no-worker-loc": [1 * 0.9, 1.5 * 0.9, 1 * 0.9 + 1],
     }
     assert d == expected
 
