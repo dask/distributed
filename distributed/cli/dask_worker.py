@@ -20,14 +20,14 @@ from dask.system import CPU_COUNT
 
 from distributed import Nanny
 from distributed._signals import wait_for_signals
-from distributed.comm import get_address_host_port
+from distributed.comm import get_address_host_port, unparse_host_port
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.preloading import validate_preload_argv
 from distributed.proctitle import (
     enable_proctitle_on_children,
     enable_proctitle_on_current,
 )
-from distributed.utils import import_term, parse_ports
+from distributed.utils import clean_dashboard_address, import_term, parse_ports
 
 logger = logging.getLogger("distributed.dask_worker")
 
@@ -77,7 +77,11 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "--dashboard-address",
     type=str,
     default=":0",
-    help="Address on which to listen for diagnostics dashboard",
+    help="Address on which to listen for diagnostics dashboard. "
+    "When creating multiple workers with --nworkers, dashboard addresses "
+    "can be specified by using commas to separate multiple ip addresses. "
+    "For example, --dashboard-address=3000,3001,3002 will use ports "
+    "3000, 3001, 3002.",
 )
 @click.option(
     "--dashboard/--no-dashboard",
@@ -367,7 +371,9 @@ def main(  # type: ignore[no-untyped-def]
 
     worker_class = import_term(worker_class)
 
-    port_kwargs = _apportion_ports(worker_port, nanny_port, n_workers, nanny)
+    port_kwargs = _apportion_ports(
+        worker_port, nanny_port, dashboard_address, n_workers, nanny
+    )
     assert len(port_kwargs) == n_workers
 
     if nanny:
@@ -404,7 +410,6 @@ def main(  # type: ignore[no-untyped-def]
                 contact_address=contact_address,
                 host=host,
                 dashboard=dashboard,
-                dashboard_address=dashboard_address,
                 name=name
                 if n_workers == 1 or name is None or name == ""
                 else str(name) + "-" + str(i),
@@ -455,18 +460,22 @@ def main(  # type: ignore[no-untyped-def]
 
 
 def _apportion_ports(
-    worker_port: str | None, nanny_port: str | None, n_workers: int, nanny: bool
+    worker_port: str | None,
+    nanny_port: str | None,
+    dashboard_address: str | None,
+    n_workers: int,
+    nanny: bool,
 ) -> list[dict[str, Any]]:
     """Spread out evenly --worker-port and/or --nanny-port ranges to the workers and
     nannies, avoiding overlap.
 
     Returns
     =======
-    List of kwargs to pass to the Worker or Nanny construtors
+    List of kwargs to pass to the Worker or Nanny constructors
     """
     seen = set()
 
-    def parse_unique(s: str | None) -> Iterator[int | None]:
+    def parse_port_unique(s: str | None) -> Iterator[int | None]:
         ports = parse_ports(s)
         if ports in ([0], [None]):
             for _ in range(n_workers):
@@ -477,8 +486,17 @@ def _apportion_ports(
                     seen.add(port)
                     yield port
 
-    worker_ports_iter = parse_unique(worker_port)
-    nanny_ports_iter = parse_unique(nanny_port)
+    def parse_address_unique(s: str | None) -> Iterator[str | None]:
+        if s is None:
+            for _ in range(n_workers):
+                yield None
+        else:
+            addresses = clean_dashboard_address(s)
+            for item in addresses:
+                yield unparse_host_port(item["address"], item["port"])
+
+    worker_ports_iter = parse_port_unique(worker_port)
+    nanny_ports_iter = parse_port_unique(nanny_port)
 
     # [(worker ports, nanny ports), ...]
     ports: list[tuple[set[int | None], set[int | None]]] = [
@@ -506,6 +524,7 @@ def _apportion_ports(
             more_nps = False
 
     kwargs = []
+    dashboard_addresses_iter = parse_address_unique(dashboard_address)
     for worker_ports_i, nanny_ports_i in ports:
         if not worker_ports_i or not nanny_ports_i:
             if nanny:
@@ -518,6 +537,13 @@ def _apportion_ports(
                     f"Not enough ports in range --worker_port {worker_port} "
                     f"for {n_workers} workers"
                 )
+        try:
+            address = next(dashboard_addresses_iter)
+        except StopIteration:
+            raise ValueError(
+                f"Not enough ports in range --dashboard_address {dashboard_address} "
+                f"for {n_workers} workers"
+            )
 
         # None and int can't be sorted together,
         # but None and 0 are guaranteed to be alone
@@ -528,9 +554,9 @@ def _apportion_ports(
             np: Any = sorted(nanny_ports_i)
             if len(np) == 1:
                 np = np[0]
-            kwargs_i = {"port": np, "worker_port": wp}
+            kwargs_i = {"port": np, "worker_port": wp, "dashboard_address": address}
         else:
-            kwargs_i = {"port": wp}
+            kwargs_i = {"port": wp, "dashboard_address": address}
 
         kwargs.append(kwargs_i)
 
