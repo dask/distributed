@@ -59,7 +59,7 @@ async def test_submit_after_failed_worker_async(c, s, a, b, compute_on_failed):
         L = c.map(inc, range(10))
         await wait(L)
 
-        kill_task = asyncio.create_task(n.kill())
+        kill_task = asyncio.create_task(n.stop_worker())
         compute_addr = n.worker_address if compute_on_failed else a.address
         total = c.submit(sum, L, workers=[compute_addr], allow_other_workers=True)
         assert await total == sum(range(1, 11))
@@ -342,7 +342,7 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
         await wait(futures)
         result_fut = c.submit(sink, futures, workers=a.address)
 
-        await n.kill(timeout=1)
+        await n.stop_worker(graceful_timeout=1)
         while len(s.workers) > 2:
             await asyncio.sleep(0.01)
 

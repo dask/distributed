@@ -254,7 +254,7 @@ class Nanny(ServerNode):
 
         handlers = {
             "instantiate": self.instantiate,
-            "kill": self.kill,
+            "stop_worker": self.stop_worker,
             "restart": self.restart,
             # cannot call it 'close' on the rpc side for naming conflict
             "get_logs": self.get_logs,
@@ -373,7 +373,7 @@ class Nanny(ServerNode):
 
         return self
 
-    async def kill(self, timeout=2):
+    async def stop_worker(self, graceful_timeout=2):
         """Kill the local worker process
 
         Blocks until both the process is down and the scheduler is properly
@@ -382,8 +382,7 @@ class Nanny(ServerNode):
         if self.process is None:
             return
 
-        deadline = time() + timeout
-        await self.process.kill(timeout=0.8 * (deadline - time()))
+        await self.process.stop(graceful_timeout)
 
     async def instantiate(self) -> Status:
         """Start a local worker process
@@ -486,13 +485,13 @@ class Nanny(ServerNode):
     async def restart(self, timeout=30):
         async def _():
             if self.process is not None:
-                await self.kill()
+                await self.stop_worker(graceful_timeout=timeout)
                 await self.instantiate()
 
         try:
             await asyncio.wait_for(_(), timeout)
         except TimeoutError:
-            logger.error(
+            logger.exception(
                 f"Restart timed out after {timeout}s; returning before finished"
             )
             return "timed out"
@@ -592,7 +591,7 @@ class Nanny(ServerNode):
         self.stop()
         try:
             if self.process is not None:
-                await self.kill(timeout=timeout)
+                await self.stop_worker(graceful_timeout=timeout)
         except Exception:
             logger.exception("Error in Nanny killing Worker subprocess")
         self.process = None
@@ -764,18 +763,15 @@ class WorkerProcess:
             if self.on_exit is not None:
                 self.on_exit(r)
 
-    async def kill(self, timeout: float = 2, executor_wait: bool = True) -> None:
+    async def stop(
+        self, graceful_timeout: float = 2, executor_wait: bool = True
+    ) -> None:
         """
         Ensure the worker process is stopped, waiting at most
-        ``timeout * 0.8`` seconds before killing it abruptly.
+        ``graceful_timeout`` seconds before killing it abruptly.
 
         When `kill` returns, the worker process has been joined.
-
-        If the worker process does not terminate within ``timeout`` seconds,
-        even after being killed, `asyncio.TimeoutError` is raised.
         """
-        deadline = time() + timeout
-
         if self.status == Status.stopped:
             return
         if self.status == Status.stopping:
@@ -793,11 +789,10 @@ class WorkerProcess:
         assert process
         queue = self.child_stop_q
         assert queue
-        wait_timeout = timeout * 0.8
         queue.put(
             {
                 "op": "stop",
-                "timeout": wait_timeout,
+                "timeout": graceful_timeout,
                 "executor_wait": executor_wait,
             }
         )
@@ -807,16 +802,16 @@ class WorkerProcess:
 
         try:
             try:
-                await process.join(wait_timeout)
+                await process.join(graceful_timeout)
                 return
             except asyncio.TimeoutError:
                 pass
 
             logger.warning(
-                f"Worker process still alive after {wait_timeout} seconds, killing"
+                f"Worker process still alive after {graceful_timeout} seconds, killing"
             )
             await process.kill()
-            await process.join(max(0, deadline - time()))
+            await process.join()
         except ValueError as e:
             if "invalid operation on closed AsyncProcess" in str(e):
                 return
