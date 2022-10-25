@@ -451,6 +451,7 @@ async def test_add_some_results(c, s, a, b):
     clean_scheduler(s)
 
 
+@pytest.mark.slow
 @gen_cluster(client=True)
 async def test_clean_after_close(c, s, a, b):
     df = dask.datasets.timeseries(

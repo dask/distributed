@@ -71,7 +71,7 @@ class MultiComm:
         self.sizes: dict[str, int] = defaultdict(int)
         self.total_size = 0
         self.total_moved = 0
-        self.thread_condition = threading.Condition()
+        self._wait_on_memory = threading.Condition()
         self._futures: set[asyncio.Task] = set()
         self._done = False
         self.diagnostics: dict[str, float] = defaultdict(float)
@@ -102,6 +102,8 @@ class MultiComm:
         """
         if self._exception:
             raise self._exception
+        if self._done:
+            raise RuntimeError("Putting data on already closed comm.")
         with self.lock:
             for address, shards in data.items():
                 size = sum(map(len, shards))
@@ -115,8 +117,8 @@ class MultiComm:
 
         while MultiComm.total_size > MultiComm.memory_limit:
             with self.time("waiting-on-memory"):
-                with self.thread_condition:
-                    self.thread_condition.wait(1)  # Block until memory calms down
+                with self._wait_on_memory:
+                    self._wait_on_memory.wait(1)  # Block until memory calms down
 
     async def communicate(self) -> None:
         """
@@ -163,11 +165,11 @@ class MultiComm:
 
                 assert set(self.sizes) == set(self.shards)
                 assert shards
-                task = asyncio.create_task(self.process(address, shards, size))
+                task = asyncio.create_task(self._process(address, shards, size))
                 del shards
                 self._futures.add(task)
 
-    async def process(self, address: str, shards: list, size: int) -> None:
+    async def _process(self, address: str, shards: list, size: int) -> None:
         """Send one message off to a neighboring worker"""
         with log_errors():
 
@@ -183,6 +185,7 @@ class MultiComm:
                 except Exception as e:
                     self._exception = e
                     self._done = True
+                    raise
                 stop = time.time()
                 self.diagnostics["avg_size"] = (
                     0.95 * self.diagnostics["avg_size"] + 0.05 * size
@@ -194,8 +197,8 @@ class MultiComm:
                 with self.lock:
                     self.total_size -= size
                     MultiComm.total_size -= size
-                with self.thread_condition:
-                    self.thread_condition.notify()
+                with self._wait_on_memory:
+                    self._wait_on_memory.notify()
                 await self.queue.put(None)
 
     async def flush(self) -> None:
@@ -217,6 +220,12 @@ class MultiComm:
 
         self._done = True
         await self._communicate_task
+
+    async def close(self) -> None:
+        try:
+            await self.flush()
+        except Exception:
+            pass
 
     @contextlib.contextmanager
     def time(self, name: str) -> Iterator[None]:

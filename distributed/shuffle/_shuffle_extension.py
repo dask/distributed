@@ -57,7 +57,7 @@ class Shuffle:
         self.worker = worker
         self.output_workers = output_workers
         self.executor = ThreadPoolExecutor(worker.state.nthreads)
-
+        self._tasks: set[asyncio.Task] = set()
         partitions_of = defaultdict(list)
         for part, address in worker_for.items():
             partitions_of[address].append(part)
@@ -141,6 +141,8 @@ class Shuffle:
 
     async def receive(self, data: list[pa.Buffer]) -> None:
         task = asyncio.create_task(self._receive(data))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
         if (
             self.multi_file.total_size + sum(map(len, data))
             > self.multi_file.memory_limit
@@ -156,6 +158,8 @@ class Shuffle:
             raise self._exception
 
         self.total_recvd += sum(map(len, data))
+        # TODO: Is it actually a good idea to dispatch multiple times instead of
+        # onyl once?
         # An ugly way of turning these batches back into an arrow table
         with self.time("cpu"):
             data = await self.offload(
@@ -210,7 +214,7 @@ class Shuffle:
             self.output_partitions_left > 0
         ), f"No outputs remaining, but requested output partition {i} on {self.worker.address}."
 
-        sync(self.worker.loop, self.multi_file.flush)
+        sync(self.worker.loop, self.flush_receive)
         try:
             df = self.multi_file.read(i)
             with self.time("cpu"):
@@ -227,8 +231,20 @@ class Shuffle:
     def done(self) -> bool:
         return self.transferred and self.output_partitions_left == 0
 
+    async def flush_receive(self) -> None:
+        await asyncio.gather(*self._tasks)
+        await self.multi_file.flush()
+
     async def close(self) -> None:
+        for t in self._tasks:
+            t.cancel()
+        asyncio.gather(*self._tasks)
+        await self.multi_comm.close()
         await self.multi_file.close()
+        try:
+            self.executor.shutdown(cancel_futures=True)
+        except Exception:
+            self.executor.shutdown()
 
 
 class ShuffleWorkerExtension:
@@ -278,9 +294,8 @@ class ShuffleWorkerExtension:
                 # `get_output_partition` will never be called.
                 # This happens when there are fewer output partitions than workers.
                 assert not shuffle.multi_file.shards
-                await shuffle.multi_file.flush()
                 del self.shuffles[shuffle_id]
-                await shuffle.close()
+                await self._register_complete(shuffle)
 
     def add_partition(
         self,
@@ -321,6 +336,13 @@ class ShuffleWorkerExtension:
             )
         # TODO handle errors from workers and scheduler, and cancellation.
 
+    async def _register_complete(self, shuffle: Shuffle) -> None:
+        await shuffle.close()
+        await self.worker.scheduler.shuffle_register_complete(
+            id=shuffle.id,
+            worker=self.worker.address,
+        )
+
     def get_output_partition(
         self, shuffle_id: ShuffleId, output_partition: int
     ) -> pd.DataFrame:
@@ -335,15 +357,7 @@ class ShuffleWorkerExtension:
         # key missing if another thread got to it first
         if shuffle.done() and shuffle_id in self.shuffles:
             shuffle = self.shuffles.pop(shuffle_id)
-
-            async def _() -> None:
-                await shuffle.close()
-                await self.worker.scheduler.shuffle_register_complete(
-                    id=shuffle_id,
-                    worker=self.worker.address,
-                )
-
-            sync(self.worker.loop, _)
+            sync(self.worker.loop, self._register_complete, shuffle)
         return output
 
     @overload
@@ -530,7 +544,7 @@ class ShuffleSchedulerExtension:
             return
         self.completed_workers[id].add(worker)
 
-        if self.completed_workers[id] == self.output_workers[id]:
+        if self.output_workers[id].issubset(self.completed_workers[id]):
             del self.worker_for[id]
             del self.schemas[id]
             del self.columns[id]
