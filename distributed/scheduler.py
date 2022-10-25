@@ -5415,6 +5415,8 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Starting worker compute stream, %s", worker)
         try:
             await self.handle_stream(comm=comm, extra={"worker": worker})
+        except CommClosedError:
+            logger.info("Connection to worker %s has been closed.", comm.peer_address)
         finally:
             if worker in self.stream_comms:
                 worker_comm.abort()
