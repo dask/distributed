@@ -214,31 +214,31 @@ class Shuffle:
         if self._exception:
             raise self._exception
 
-        self.total_recvd += sum(map(len, data))
-        # TODO: Is it actually a good idea to dispatch multiple times instead of
-        # onyl once?
-        # An ugly way of turning these batches back into an arrow table
-        with self.time("cpu"):
-            data = await self.offload(
-                list_of_buffers_to_table,
-                data,
-                self.schema,
-            )
-
-            groups = await self.offload(split_by_partition, data, self.column)
-
-        assert len(data) == sum(map(len, groups.values()))
-        del data
-
-        with self.time("cpu"):
-            groups = await self.offload(
-                lambda: {
-                    k: [batch.serialize() for batch in v.to_batches()]
-                    for k, v in groups.items()
-                }
-            )
         try:
-            await self.multi_file.put(groups)
+            self.total_recvd += sum(map(len, data))
+            # TODO: Is it actually a good idea to dispatch multiple times instead of
+            # onyl once?
+            # An ugly way of turning these batches back into an arrow table
+            with self.time("cpu"):
+                data = await self.offload(
+                    list_of_buffers_to_table,
+                    data,
+                    self.schema,
+                )
+
+                groups = await self.offload(split_by_partition, data, self.column)
+
+            assert len(data) == sum(map(len, groups.values()))
+            del data
+
+            with self.time("cpu"):
+                groups = await self.offload(
+                    lambda: {
+                        k: [batch.serialize() for batch in v.to_batches()]
+                        for k, v in groups.items()
+                    }
+                )
+                await self.multi_file.put(groups)
         except Exception as e:
             self._exception = e
 
@@ -290,6 +290,8 @@ class Shuffle:
 
     async def flush_receive(self) -> None:
         await asyncio.gather(*self._tasks)
+        if self._exception:
+            raise self._exception
         await self.multi_file.flush()
 
     async def close(self) -> None:
