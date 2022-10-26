@@ -11,7 +11,9 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, BinaryIO, NewType, TypeVar, overload
 
 import toolz
+from tornado.ioloop import IOLoop
 
+from distributed.core import PooledRPCCall
 from distributed.protocol import to_serialize
 from distributed.shuffle._arrow import (
     deserialize_schema,
@@ -37,30 +39,76 @@ logger = logging.getLogger(__name__)
 
 
 class Shuffle:
-    """State for a single active shuffle"""
+    """State for a single active shuffle
+
+    This object is responsible for splitting, sending, receiving and combining
+    data shards.
+
+    It is entirely agnostic to the distributed system and can perform a shuffle
+    with other `Shuffle` instances using `rpc` and `broadcast`.
+
+    The user of this needs to guarantee that only `Shuffle`s of the same unique
+    `ShuffleID` interact.
+
+    Paramters
+    ---------
+    worker_for:
+        A mapping partition_id -> worker_address.
+    output_workers:
+        A set of all participating worker (addresses).
+    column:
+        The data column we split the input partition by.
+    schema:
+        The schema of the payload data.
+    id:
+        A unique `ShuffleID` this belongs to.
+    local_address:
+        The local address this Shuffle can be contacted by using `rpc`.
+    directory:
+        The scratch directory to buffer data in.
+    nthreads:
+        How many background threads to use for compute.
+    loop:
+        The event loop.
+    rpc:
+        A callable returning a PooledRPCCall to contact other Shuffle instances.
+        Typically a ConnectionPool.
+    broadcast:
+        A function that ensures a RPC is evaluated on all `Shuffle` instances of
+        a given `ShuffleID`.
+    """
 
     def __init__(
         self,
-        column: str,
         worker_for: dict[int, str],
         output_workers: set,
+        column: str,
         schema: pa.Schema,
         id: ShuffleId,
-        worker: Worker,
+        local_address: str,
+        directory: str,
+        nthreads: int,
+        loop: IOLoop,
+        rpc: Callable[[str], PooledRPCCall],
+        broadcast: Callable,
     ):
 
         import pandas as pd
 
+        self.broadcast = broadcast
+        self.rpc = rpc
         self.column = column
+        assert loop
+        self.loop = loop
         self.id = id
         self.schema = schema
-        self.worker = worker
         self.output_workers = output_workers
-        self.executor = ThreadPoolExecutor(worker.state.nthreads)
+        self.executor = ThreadPoolExecutor(nthreads)
         self._tasks: set[asyncio.Task] = set()
         partitions_of = defaultdict(list)
-        for part, address in worker_for.items():
-            partitions_of[address].append(part)
+        self.local_address = local_address
+        for part, addr in worker_for.items():
+            partitions_of[addr].append(part)
         self.partitions_of = dict(partitions_of)
         self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
 
@@ -73,24 +121,17 @@ class Shuffle:
         self.multi_file = MultiFile(
             dump=_dump_batch,
             load=load_arrow,
-            directory=os.path.join(self.worker.local_directory, "shuffle-%s" % self.id),
+            directory=directory,
             sizeof=_sizeof,
+            loop=self.loop,
         )
 
-        async def send(address: str, shards: list[bytes]) -> None:
-            return await self.worker.rpc(address).shuffle_receive(
-                data=to_serialize(shards),
-                shuffle_id=self.id,
-            )
-
-        self.multi_comm = MultiComm(send=send)
+        self.multi_comm = MultiComm(send=self.send, loop=self.loop)
         # TODO: reduce number of connections to number of workers
         # MultiComm.max_connections = min(10, n_workers)
 
         self.diagnostics: dict[str, float] = defaultdict(float)
-        self.output_partitions_left = len(
-            self.partitions_of.get(self.worker.address, ())
-        )
+        self.output_partitions_left = len(self.partitions_of.get(local_address, ()))
         self.transferred = False
         self.total_recvd = 0
         self.start_time = time.time()
@@ -103,9 +144,29 @@ class Shuffle:
         stop = time.time()
         self.diagnostics[name] += stop - start
 
+    async def barrier(self) -> None:
+        # FIXME: This should restrict communication to only workers
+        # participating in this specific shuffle. This will not only reduce the
+        # number of workers we need to contact but will also simplify error
+        # handling, e.g. if a non-participating worker is not reachable in time
+        out = await self.broadcast(
+            msg={"op": "shuffle_inputs_done", "shuffle_id": self.id}
+        )
+        if not self.output_workers.issubset(set(out)):
+            raise ValueError(
+                "Some critical workers have left",
+                set(self.output_workers) - set(out),
+            )
+        # TODO handle errors from workers and scheduler, and cancellation.
+
+    async def send(self, address: str, shards: list[bytes]) -> None:
+        return await self.rpc(address).shuffle_receive(
+            data=to_serialize(shards),
+            shuffle_id=self.id,
+        )
+
     async def offload(self, func: Callable[..., T], *args: Any) -> T:
-        # return func(*args)
-        return await asyncio.get_event_loop().run_in_executor(
+        return await asyncio.get_running_loop().run_in_executor(
             self.executor,
             func,
             *args,
@@ -134,12 +195,6 @@ class Shuffle:
             "diagnostics": self.diagnostics,
             "start": self.start_time,
         }
-
-    async def send(self, address: str, shards: list[bytes]) -> None:
-        return await self.worker.rpc(address).shuffle_receive(
-            data=to_serialize(shards),
-            shuffle_id=self.id,
-        )
 
     async def receive(self, data: list[pa.Buffer]) -> None:
         task = asyncio.create_task(self._receive(data))
@@ -202,21 +257,20 @@ class Shuffle:
             }
         self.multi_comm.put(out)
 
-    def get_output_partition(self, i: int) -> pd.DataFrame:
+    async def get_output_partition(self, i: int) -> pd.DataFrame:
         assert self.transferred, "`get_output_partition` called before barrier task"
 
-        assert self.worker_for[i] == self.worker.address, (
+        assert self.worker_for[i] == self.local_address, (
             f"Output partition {i} belongs on {self.worker_for[i]}, "
-            f"not {self.worker.address}. "
+            f"not {self.local_address}. "
         )
         # ^ NOTE: this check isn't necessary, just a nice validation to prevent incorrect
         # data in the case something has gone very wrong
 
         assert (
             self.output_partitions_left > 0
-        ), f"No outputs remaining, but requested output partition {i} on {self.worker.address}."
-
-        sync(self.worker.loop, self.flush_receive)
+        ), f"No outputs remaining, but requested output partition {i} on {self.local_address}."
+        await self.flush_receive()
         try:
             df = self.multi_file.read(i)
             with self.time("cpu"):
@@ -226,9 +280,10 @@ class Shuffle:
         self.output_partitions_left -= 1
         return out
 
-    def inputs_done(self) -> None:
+    async def inputs_done(self) -> None:
         assert not self.transferred, "`inputs_done` called multiple times"
         self.transferred = True
+        await self.multi_comm.flush()
 
     def done(self) -> bool:
         return self.transferred and self.output_partitions_left == 0
@@ -250,7 +305,16 @@ class Shuffle:
 
 
 class ShuffleWorkerExtension:
-    "Extend the Worker with routes and state for peer-to-peer shuffles"
+    """Interface between a Worker and a Shuffle.
+
+    This extension is responsible for
+
+    - Lifecycle of Shuffle instances
+    - ensuring connectivity between remote shuffle instances
+    - ensuring connectivity and integration with the scheduler
+    - routing concurrent calls to the appropriate `Shuffle` based on its `ShuffleID`
+    - collecting instrumentation of ongoing shuffles and route to scheduler/worker
+    """
 
     def __init__(self, worker: Worker) -> None:
         # Attach to worker
@@ -289,8 +353,7 @@ class ShuffleWorkerExtension:
         """
         with log_errors():
             shuffle = await self._get_shuffle(shuffle_id)
-            await shuffle.multi_comm.flush()
-            shuffle.inputs_done()
+            await shuffle.inputs_done()
             if shuffle.done():
                 # If the shuffle has no output partitions, remove it now;
                 # `get_output_partition` will never be called.
@@ -311,9 +374,6 @@ class ShuffleWorkerExtension:
         )
         shuffle.add_partition(data=data)
 
-    def barrier(self, shuffle_id: ShuffleId) -> None:
-        sync(self.worker.loop, self._barrier, shuffle_id)
-
     async def _barrier(self, shuffle_id: ShuffleId) -> None:
         """
         Task: Note that the barrier task has been reached (`add_partition` called for all input partitions)
@@ -324,19 +384,7 @@ class ShuffleWorkerExtension:
         # Tell all peers that we've reached the barrier
         # Note that this will call `shuffle_inputs_done` on our own worker as well
         shuffle = await self._get_shuffle(shuffle_id)
-        # FIXME: This should restrict communication to only workers
-        # participating in this specific shuffle. This will not only reduce the
-        # number of workers we need to contact but will also simplify error
-        # handling, e.g. if a non-participating worker is not reachable in time
-        out = await self.worker.scheduler.broadcast(
-            msg={"op": "shuffle_inputs_done", "shuffle_id": shuffle_id}
-        )
-        if not shuffle.output_workers.issubset(set(out)):
-            raise ValueError(
-                "Some critical workers have left",
-                set(shuffle.output_workers) - set(out),
-            )
-        # TODO handle errors from workers and scheduler, and cancellation.
+        await shuffle.barrier()
 
     async def _register_complete(self, shuffle: Shuffle) -> None:
         await shuffle.close()
@@ -344,23 +392,6 @@ class ShuffleWorkerExtension:
             id=shuffle.id,
             worker=self.worker.address,
         )
-
-    def get_output_partition(
-        self, shuffle_id: ShuffleId, output_partition: int
-    ) -> pd.DataFrame:
-        """
-        Task: Retrieve a shuffled output partition from the ShuffleExtension.
-
-        Calling this for a ``shuffle_id`` which is unknown or incomplete is an error.
-        """
-        assert shuffle_id in self.shuffles, "Shuffle worker restrictions misbehaving"
-        shuffle = self.shuffles[shuffle_id]
-        output = shuffle.get_output_partition(output_partition)
-        # key missing if another thread got to it first
-        if shuffle.done() and shuffle_id in self.shuffles:
-            shuffle = self.shuffles.pop(shuffle_id)
-            sync(self.worker.loop, self._register_complete, shuffle)
-        return output
 
     @overload
     async def _get_shuffle(
@@ -417,12 +448,31 @@ class ShuffleWorkerExtension:
                         column=result["column"],
                         worker_for=result["worker_for"],
                         output_workers=result["output_workers"],
-                        worker=self.worker,
                         schema=deserialize_schema(result["schema"]),
                         id=shuffle_id,
+                        directory=os.path.join(
+                            self.worker.local_directory, f"shuffle-{shuffle_id}"
+                        ),
+                        nthreads=self.worker.state.nthreads,
+                        local_address=self.worker.address,
+                        rpc=self.worker.rpc,
+                        loop=self.worker.loop,
+                        broadcast=self.worker.scheduler.broadcast,
                     )
                     self.shuffles[shuffle_id] = shuffle
                 return self.shuffles[shuffle_id]
+
+    async def close(self) -> None:
+        while self.shuffles:
+            _, shuffle = self.shuffles.popitem()
+            await shuffle.close()
+
+    #############################
+    # Methods for worker thread #
+    #############################
+
+    def barrier(self, shuffle_id: ShuffleId) -> None:
+        sync(self.worker.loop, self._barrier, shuffle_id)
 
     @overload
     def get_shuffle(
@@ -449,13 +499,30 @@ class ShuffleWorkerExtension:
         npartitions: int | None = None,
     ) -> Shuffle:
         return sync(
-            self.worker.loop, self._get_shuffle, shuffle_id, empty, column, npartitions
+            self.worker.loop,
+            self._get_shuffle,
+            shuffle_id,
+            empty,
+            column,
+            npartitions,
         )
 
-    async def close(self) -> None:
-        while self.shuffles:
-            _, shuffle = self.shuffles.popitem()
-            await shuffle.close()
+    def get_output_partition(
+        self, shuffle_id: ShuffleId, output_partition: int
+    ) -> pd.DataFrame:
+        """
+        Task: Retrieve a shuffled output partition from the ShuffleExtension.
+
+        Calling this for a ``shuffle_id`` which is unknown or incomplete is an error.
+        """
+        assert shuffle_id in self.shuffles, "Shuffle worker restrictions misbehaving"
+        shuffle = self.shuffles[shuffle_id]
+        output = sync(self.worker.loop, shuffle.get_output_partition, output_partition)
+        # key missing if another thread got to it first
+        if shuffle.done() and shuffle_id in self.shuffles:
+            shuffle = self.shuffles.pop(shuffle_id)
+            sync(self.worker.loop, self._register_complete, shuffle)
+        return output
 
 
 class ShuffleSchedulerExtension:

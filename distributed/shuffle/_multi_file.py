@@ -12,6 +12,8 @@ from collections import defaultdict
 from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any, BinaryIO
 
+from tornado.ioloop import IOLoop
+
 from dask.sizeof import sizeof
 from dask.utils import parse_bytes
 
@@ -69,6 +71,7 @@ class MultiFile:
     def __init__(
         self,
         directory: str,
+        loop: IOLoop,
         dump: Callable[[Any, BinaryIO], None] = pickle.dump,
         load: Callable[[BinaryIO], Any] = pickle.load,
         sizeof: Callable[[list[pa.Table]], int] = sizeof,
@@ -95,7 +98,7 @@ class MultiFile:
         self.diagnostics = defaultdict(float)
 
         self._communicate_future = asyncio.create_task(self.communicate())
-        self._loop = asyncio.get_event_loop()
+        self._loop = loop
         self._exception = None
 
     @property

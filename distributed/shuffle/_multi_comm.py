@@ -9,6 +9,8 @@ from collections import defaultdict
 from collections.abc import Iterator
 from typing import Awaitable, Callable, Sequence
 
+from tornado.ioloop import IOLoop
+
 from dask.utils import parse_bytes
 
 from distributed.utils import log_errors
@@ -56,7 +58,7 @@ class MultiComm:
     memory_limit = parse_bytes("100 MiB")
     max_connections = 10
     _queues: weakref.WeakKeyDictionary[
-        asyncio.AbstractEventLoop, asyncio.Queue[None]
+        IOLoop, asyncio.Queue[None]
     ] = weakref.WeakKeyDictionary()
     total_size = 0
     lock = threading.Lock()
@@ -64,6 +66,7 @@ class MultiComm:
     def __init__(
         self,
         send: Callable[[str, list[bytes]], Awaitable[None]],
+        loop: IOLoop,
     ):
         self.send = send
         self.shards: dict[str, list[bytes]] = defaultdict(list)
@@ -74,8 +77,7 @@ class MultiComm:
         self._futures: set[asyncio.Task] = set()
         self._done = False
         self.diagnostics: dict[str, float] = defaultdict(float)
-        self._loop = asyncio.get_event_loop()
-
+        self._loop = loop
         self._communicate_task = asyncio.create_task(self.communicate())
         self._exception: Exception | None = None
 
@@ -211,20 +213,23 @@ class MultiComm:
 
         while self.shards:
             await asyncio.sleep(0.05)
-
+        # FIXME: This needs lock protection to guarantee that shards are indeed
+        # empty and all associated futures are in self._futures but _process is
+        # locking as well. Either we'll need a RLock or a second lock
         await asyncio.gather(*self._futures)
         self._futures.clear()
 
         assert not self.total_size
-
         self._done = True
         await self._communicate_task
 
     async def close(self) -> None:
-        try:
-            await self.flush()
-        except Exception:
-            pass
+        # TODO: Should we flush here?
+        # TODO: Should this raise an exception if there is one?
+        # TODO: Should finished tasks remove themselves from futures, s.t. we only raise once. We do not raise multiple times, do we?
+        await self.flush()
+        self._done = True
+        await self._communicate_task
 
     @contextlib.contextmanager
     def time(self, name: str) -> Iterator[None]:
