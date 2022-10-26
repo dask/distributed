@@ -5736,7 +5736,7 @@ class Scheduler(SchedulerState, ServerNode):
             raise RuntimeError(
                 (
                     "Expected all workers to have a nanny, encountered "
-                    f"{len(non_nannies)} workers without nannies."
+                    f"{len(non_nannies)} worker(s) without a nanny."
                 ),
                 non_nannies,
             )
