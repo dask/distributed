@@ -1126,6 +1126,9 @@ async def test_shuffling(c, s, a, b):
         ss.update()
         await asyncio.sleep(0.1)
         assert time() < start + 5
+    # FIXME: If this is still running while the test is running, this raises
+    # awkward CancelledErrors
+    await df2
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True}, timeout=60)

@@ -36,14 +36,14 @@ def get_ext() -> ShuffleWorkerExtension:
 def shuffle_transfer(
     input: pd.DataFrame,
     id: ShuffleId,
-    npartitions: int | None = None,
-    column: str | None = None,
+    npartitions: int,
+    column: str,
 ) -> None:
     get_ext().add_partition(input, id, npartitions=npartitions, column=column)
 
 
 def shuffle_unpack(
-    id: ShuffleId, output_partition: int, barrier: object = None
+    id: ShuffleId, output_partition: int, barrier: object
 ) -> pd.DataFrame:
     return get_ext().get_output_partition(id, output_partition)
 

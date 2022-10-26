@@ -9,12 +9,16 @@ import shutil
 import time
 import weakref
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from typing import TYPE_CHECKING, Any, BinaryIO
 
 from dask.sizeof import sizeof
 from dask.utils import parse_bytes
 
 from distributed.utils import log_errors
+
+if TYPE_CHECKING:
+    import pyarrow as pa
 
 
 class MultiFile:
@@ -56,13 +60,19 @@ class MultiFile:
     concurrent_files = 2
     total_size = 0
 
+    shards: defaultdict[str, list]
+    sizes: defaultdict[str, int]
+    _futures: set[asyncio.Future]
+    diagnostics: defaultdict[str, float]
+    _exception: Exception | None
+
     def __init__(
         self,
-        directory,
-        dump=pickle.dump,
-        load=pickle.load,
-        sizeof=sizeof,
-        loop=None,
+        directory: str,
+        dump: Callable[[Any, BinaryIO], None] = pickle.dump,
+        load: Callable[[BinaryIO], Any] = pickle.load,
+        sizeof: Callable[[list[pa.Table]], int] = sizeof,
+        loop: object = None,
     ):
         self.directory = pathlib.Path(directory)
         if not os.path.exists(self.directory):
@@ -90,17 +100,17 @@ class MultiFile:
         self._exception = None
 
     @property
-    def queue(self):
+    def queue(self) -> asyncio.Queue[None]:
         try:
             return MultiFile._queues[self._loop]
         except KeyError:
-            queue = asyncio.Queue()
+            queue: asyncio.Queue[None] = asyncio.Queue()
             for _ in range(MultiFile.concurrent_files):
                 queue.put_nowait(None)
             MultiFile._queues[self._loop] = queue
             return queue
 
-    async def put(self, data: dict[str, list[object]]) -> None:
+    async def put(self, data: dict[str, list[pa.Table]]) -> None:
         """
         Writes many objects into the local buffers, blocks until ready for more
 
@@ -114,16 +124,16 @@ class MultiFile:
             raise self._exception
 
         this_size = 0
-        for id, shard in data.items():
-            size = self.sizeof(shard)
-            self.shards[id].extend(shard)
+        for id, shards in data.items():
+            size = self.sizeof(shards)
+            self.shards[id].extend(shards)
             self.sizes[id] += size
             self.total_size += size
             MultiFile.total_size += size
             self.total_received += size
             this_size += size
 
-        del data, shard
+        del data, shards
 
         while MultiFile.total_size > MultiFile.memory_limit:
             with self.time("waiting-on-memory"):
@@ -136,7 +146,7 @@ class MultiFile:
                     except asyncio.TimeoutError:
                         continue
 
-    async def communicate(self):
+    async def communicate(self) -> None:
         """
         Continuously find the largest batch and trigger writes
 
@@ -160,7 +170,7 @@ class MultiFile:
 
                     await self.queue.get()
 
-                id = max(self.sizes, key=self.sizes.get)
+                id = max(self.sizes, key=self.sizes.__getitem__)
                 shards = self.shards.pop(id)
                 size = self.sizes.pop(id)
 
@@ -170,7 +180,7 @@ class MultiFile:
                 async with self.condition:
                     self.condition.notify()
 
-    async def process(self, id: str, shards: list, size: int) -> None:
+    async def process(self, id: str, shards: list[pa.Table], size: int) -> None:
         """Write one buffer to file
 
         This function was built to offload the disk IO, but since then we've
@@ -215,7 +225,7 @@ class MultiFile:
                 self.condition.notify()
             await self.queue.put(None)
 
-    def read(self, id):
+    def read(self, id: int) -> pa.Table:
         """Read a complete file back into memory"""
         if self._exception:
             raise self._exception
@@ -243,7 +253,7 @@ class MultiFile:
         else:
             raise KeyError(id)
 
-    async def flush(self):
+    async def flush(self) -> None:
         """Wait until all writes are finished"""
         if self._exception:
             await self._communicate_future
@@ -262,15 +272,15 @@ class MultiFile:
 
         await self._communicate_future
 
-    def close(self):
+    def close(self) -> None:
         self._done = True
         with contextlib.suppress(FileNotFoundError):
             shutil.rmtree(self.directory)
 
-    def __enter__(self):
+    def __enter__(self) -> MultiFile:
         return self
 
-    def __exit__(self, exc, typ, traceback):
+    def __exit__(self, exc: Any, typ: Any, traceback: Any) -> None:
         self.close()
 
     @contextlib.contextmanager
