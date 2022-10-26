@@ -140,6 +140,7 @@ competing interests that might motivate our choice:
     the memory footprint small
 4.  Run tasks that are related so that large chunks of work can be completely
     eliminated before running new chunks of work
+5.  Run tasks that use existing work before starting tasks that create new work
 
 Accomplishing all of these objectives simultaneously is impossible.  Optimizing
 for any of these objectives perfectly can result in costly overhead.  The
@@ -192,6 +193,31 @@ at a *coarse* level, if not a fine-grained one.
 Dask's scheduling policies are short-term-efficient and long-term-fair
 to multiple clients.
 
+.. _queuing:
+
+Avoid over-saturating workers
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When there are many initial tasks to run, workers don't need to know about all of them
+up front::
+
+     o   o   o   o   o   o   o   o   o   o
+    / \ / \ / \ / \ / \ / \ / \ / \ / \ / \
+    o o o o o o o o o o o o o o o o o o o o
+    | | | | | | | | | | | | | | | | | | | |
+    * * * * * * * * * * * * * * * * * * * *  <-- initial tasks
+
+The scheduler only submits initial tasks (``*`` tasks in the figure above) to workers
+until all worker threads are filled up. The remaining initial tasks are put in a queue
+on the scheduler, ordered by priority.
+
+Tasks are popped off this queue and scheduled whenever a thread opens up on a worker
+*and* there are no other higher-priority tasks (``o`` tasks in this diagram) that could
+run instead.
+
+This ensures we finish existing streams of work before starting on new work. This keeps
+memory use as low as possible and generally gives much more stable execution compared to
+submitting all initial tasks at once.
 
 Where these decisions are made
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -214,8 +240,14 @@ scheduler, and workers at various points in the computation.
     submit, persist, map, or any operation that generates futures).
 3.  Whenever a task is ready to run (its dependencies, if any, are complete),
     the scheduler assigns it to a worker. When multiple tasks are ready at once,
-    they are all submitted to workers, in priority order.
+    they are submitted to workers, in priority order. If scheduler-side queuing
+    is active, they are submitted until all workers are full, then any leftover
+    runnable tasks are put in the scheduler queue. If queuing is disabled, then
+    all runnable tasks are submitted at once.
 4.  However, when the worker receives these tasks, it considers their priorities
     when determining which tasks to prioritize for fetching data or for
     computation.  The worker maintains a heap of all ready-to-run tasks ordered
     by this priority.
+5.  If scheduler-side queuing is active: when any task completes on a worker,
+    if there are no other higher-priority tasks to run, the scheduler pops off
+    the next queued task and runs it on that worker.
