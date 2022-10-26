@@ -10,11 +10,11 @@ from time import time
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, cast
 
 from tlz import topk
-from tornado.ioloop import PeriodicCallback
 
 import dask
 from dask.utils import parse_timedelta
 
+from distributed.compatibility import PeriodicCallback
 from distributed.core import CommClosedError
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.utils import log_errors, recursive_to_dict

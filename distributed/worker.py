@@ -31,7 +31,7 @@ from inspect import isawaitable
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, TextIO, TypeVar, cast
 
 from tlz import first, keymap, pluck
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import IOLoop
 
 import dask
 from dask.core import istask
@@ -54,7 +54,7 @@ from distributed.comm import Comm, connect, get_address_host, parse_address
 from distributed.comm import resolve_address as comm_resolve_address
 from distributed.comm.addressing import address_from_user_args
 from distributed.comm.utils import OFFLOAD_THRESHOLD
-from distributed.compatibility import randbytes, to_thread
+from distributed.compatibility import PeriodicCallback, randbytes, to_thread
 from distributed.core import (
     ConnectionPool,
     Status,
@@ -431,7 +431,6 @@ class Worker(BaseWorker, ServerNode):
     scheduler_delay: float
     stream_comms: dict[str, BatchedSend]
     heartbeat_interval: float
-    heartbeat_active: bool
     services: dict[str, Any] = {}
     service_specs: dict[str, Any]
     metrics: dict[str, Callable[[Worker], Any]]
@@ -679,7 +678,6 @@ class Worker(BaseWorker, ServerNode):
         self.name = name
         self.scheduler_delay = 0
         self.stream_comms = {}
-        self.heartbeat_active = False
 
         if self.local_directory not in sys.path:
             sys.path.insert(0, self.local_directory)
@@ -1211,10 +1209,6 @@ class Worker(BaseWorker, ServerNode):
             self.digests["latency"].add(latency)
 
     async def heartbeat(self) -> None:
-        if self.heartbeat_active:
-            logger.debug("Heartbeat skipped: channel busy")
-            return
-        self.heartbeat_active = True
         logger.debug("Heartbeat: %s", self.address)
         try:
             start = time()
@@ -1256,12 +1250,10 @@ class Worker(BaseWorker, ServerNode):
             self.bandwidth_types.clear()
         except OSError:
             logger.exception("Failed to communicate with scheduler during heartbeat.")
-        except Exception as e:
+        except Exception:
             logger.exception("Unexpected exception during heartbeat. Closing worker.")
             await self.close()
-            raise e
-        finally:
-            self.heartbeat_active = False
+            raise
 
     @fail_hard
     async def handle_scheduler(self, comm: Comm) -> None:

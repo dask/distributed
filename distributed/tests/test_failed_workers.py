@@ -422,8 +422,6 @@ async def test_worker_time_to_live(c, s, a, b):
     assert set(s.workers) == {a.address, b.address}
 
     a.periodic_callbacks["heartbeat"].stop()
-    while a.heartbeat_active:
-        await asyncio.sleep(0.01)
 
     start = time()
     while set(s.workers) == {a.address, b.address}:
