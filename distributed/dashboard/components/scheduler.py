@@ -134,7 +134,6 @@ class Occupancy(DashboardComponent):
             title="Occupancy",
             tools="",
             toolbar_location="above",
-            # id="bk-occupancy-plot",
             x_axis_type="datetime",
             min_border_bottom=50,
             **kwargs,
@@ -211,7 +210,6 @@ class ProcessingHistogram(DashboardComponent):
 
         self.root = figure(
             title="Tasks Processing (count)",
-            # id="bk-nprocessing-histogram-plot",
             name="processing",
             y_axis_label="frequency",
             tools="",
@@ -316,7 +314,6 @@ class ClusterMemory(DashboardComponent, MemoryColor):
         self.root = figure(
             title="Bytes stored on cluster",
             tools="",
-            # id="bk-cluster-memory-plot",
             width=int(width / 2),
             name="cluster_memory",
             min_border_bottom=50,
@@ -454,7 +451,6 @@ class WorkersMemory(DashboardComponent, MemoryColor):
         self.root = figure(
             title="Bytes stored per worker",
             tools="",
-            # id="bk-workers-memory-plot",
             width=int(width / 2),
             name="workers_memory",
             min_border_bottom=50,
@@ -595,7 +591,6 @@ class WorkersMemoryHistogram(DashboardComponent):
         self.root = figure(
             title="Bytes stored per worker",
             name="workers_memory",
-            # id="bk-workers-memory-histogram-plot",
             y_axis_label="frequency",
             tools="",
             **kwargs,
@@ -650,7 +645,6 @@ class WorkersTransferBytes(DashboardComponent):
         self.root = figure(
             title=f"Bytes transferring: {format_bytes(0)}",
             tools="",
-            # id="bk-workers-transfer-bytes-plot",
             width=int(width / 2),
             name="workers_transfer_bytes",
             min_border_bottom=50,
@@ -902,7 +896,6 @@ class BandwidthTypes(DashboardComponent):
         self.root = figure(
             title="Bandwidth by Type",
             tools="",
-            # id="bk-bandwidth-type-plot",
             name="bandwidth_type_histogram",
             y_range=["a", "b"],
             **kwargs,
@@ -973,7 +966,6 @@ class BandwidthWorkers(DashboardComponent):
         self.root = figure(
             title="Bandwidth by Worker",
             tools="",
-            # id="bk-bandwidth-worker-plot",
             name="bandwidth_worker_heatmap",
             x_range=["a", "b"],
             y_range=["a", "b"],
@@ -1071,7 +1063,6 @@ class WorkerNetworkBandwidth(DashboardComponent):
         self.bandwidth = figure(
             title="Worker Network Bandwidth",
             tools="",
-            # id="bk-worker-net-bandwidth",
             name="worker_network_bandwidth",
             **kwargs,
         )
@@ -1112,7 +1103,6 @@ class WorkerNetworkBandwidth(DashboardComponent):
         self.disk = figure(
             title="Workers Disk",
             tools="",
-            # id="bk-workers-disk",
             name="worker_disk",
             **kwargs,
         )
@@ -1245,7 +1235,6 @@ class SystemTimeseries(DashboardComponent):
             x_axis_type="datetime",
             tools=tools,
             x_range=x_range,
-            # id="bk-worker-network-bandwidth-ts",
             name="worker_network_bandwidth-timeseries",
             **kwargs,
         )
@@ -1277,7 +1266,6 @@ class SystemTimeseries(DashboardComponent):
             x_axis_type="datetime",
             tools=tools,
             x_range=x_range,
-            # id="bk-worker-cpu-ts",
             name="worker_cpu-timeseries",
             **kwargs,
         )
@@ -1297,7 +1285,6 @@ class SystemTimeseries(DashboardComponent):
             x_axis_type="datetime",
             tools=tools,
             x_range=x_range,
-            # id="bk-worker-memory-ts",
             name="worker_memory-timeseries",
             **kwargs,
         )
@@ -1318,7 +1305,6 @@ class SystemTimeseries(DashboardComponent):
             x_axis_type="datetime",
             tools=tools,
             x_range=x_range,
-            # id="bk-worker-disk-ts",
             name="worker_disk-timeseries",
             **kwargs,
         )
@@ -1420,7 +1406,6 @@ class ComputePerKey(DashboardComponent):
         fig = figure(
             title="Compute Time Per Task",
             tools="",
-            # id="bk-Compute-by-key-plot",
             name="compute_time_per_key",
             x_range=["a", "b"],
             **kwargs,
@@ -1470,7 +1455,6 @@ class ComputePerKey(DashboardComponent):
         fig2 = figure(
             title="Compute Time Per Task",
             tools="",
-            # id="bk-Compute-by-key-pie",
             name="compute_time_per_key-pie",
             x_range=(-0.5, 1.0),
             **kwargs,
@@ -1579,7 +1563,6 @@ class AggregateAction(DashboardComponent):
         self.root = figure(
             title="Aggregate Per Action",
             tools="",
-            # id="bk-aggregate-per-action-plot",
             name="aggregate_per_action",
             x_range=["a", "b"],
             **kwargs,
@@ -1671,7 +1654,6 @@ class MemoryByKey(DashboardComponent):
         self.root = figure(
             title="Memory Use",
             tools="",
-            # id="bk-memory-by-key-plot",
             name="memory_by_key",
             x_range=["a", "b"],
             **kwargs,
@@ -1748,7 +1730,6 @@ class CurrentLoad(DashboardComponent):
         processing = figure(
             title="Tasks Processing",
             tools="",
-            # id="bk-nprocessing-plot",
             name="processing",
             width=int(width / 2),
             min_border_bottom=50,
@@ -1768,7 +1749,6 @@ class CurrentLoad(DashboardComponent):
         cpu = figure(
             title="CPU Utilization",
             tools="",
-            # id="bk-cpu-worker-plot",
             width=int(width / 2),
             name="cpu_hist",
             x_range=(0, 100),
@@ -2187,7 +2167,6 @@ def task_stream_figure(clear_interval="20s", **kwargs):
     root = figure(
         name="task_stream",
         title="Task Stream",
-        # id="bk-task-stream-plot",
         x_range=x_range,
         y_range=y_range,
         toolbar_location="above",
@@ -2903,7 +2882,6 @@ class TaskGroupProgress(DashboardComponent):
         y_range = Range1d(0, max(self.plugin.nthreads))
 
         self.root = figure(
-            # id="bk-task-group-progress-plot",
             title="Task Group Progress",
             name="task_group_progress",
             toolbar_location="above",
@@ -3176,7 +3154,6 @@ class TaskProgress(DashboardComponent):
         y_range = Range1d(-8, 0)
 
         self.root = figure(
-            # id="bk-task-progress-plot",
             title="Progress",
             name="task_progress",
             x_range=x_range,
@@ -3711,7 +3688,6 @@ class WorkerTable(DashboardComponent):
             components.append(extra_table)
 
         self.root = column(*components, **sizing_mode)
-        # self.root = column(*components, id="bk-worker-table", **sizing_mode)
 
     @without_property_validation
     def update(self):
