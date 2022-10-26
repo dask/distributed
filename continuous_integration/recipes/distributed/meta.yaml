@@ -16,7 +16,7 @@ build:
   number: {{ GIT_DESCRIBE_NUMBER }}
   string: py_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}
   noarch: python
-  script: python -m pip install . -vv --no-deps
+  script: {{ PYTHON }} -m pip install . -vv --no-deps
   entry_points:
     # Old style CLI
     - dask-scheduler = distributed.cli.dask_scheduler:main
