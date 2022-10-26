@@ -42,6 +42,7 @@ def test_split_by_worker():
 
     assert sum(map(len, out.values())) == len(df)
 
+
 def test_split_by_worker_empty():
     df = pd.DataFrame(
         {
