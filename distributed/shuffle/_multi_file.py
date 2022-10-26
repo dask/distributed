@@ -262,6 +262,7 @@ class MultiFile:
             await asyncio.gather(*self._futures)
             raise self._exception
         while self.shards:
+            # If an exception arises while we're sleeping here we deadlock
             await asyncio.sleep(0.05)
 
         await asyncio.gather(*self._futures)
