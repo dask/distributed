@@ -13,7 +13,7 @@ import dask.dataframe as dd
 from dask.blockwise import Blockwise
 from dask.utils_test import hlg_layer_topological
 
-from distributed.shuffle.shuffle_extension import ShuffleWorkerExtension
+from distributed.shuffle._shuffle_extension import ShuffleWorkerExtension
 from distributed.utils_test import gen_cluster
 
 

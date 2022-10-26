@@ -17,7 +17,7 @@ import dask.dataframe as dd
 from dask.distributed import Worker
 from dask.utils import stringify
 
-from distributed.shuffle.shuffle_extension import (
+from distributed.shuffle._shuffle_extension import (
     dump_batch,
     list_of_buffers_to_table,
     load_arrow,
