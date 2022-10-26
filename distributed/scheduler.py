@@ -5701,21 +5701,11 @@ class Scheduler(SchedulerState, ServerNode):
         ----------
         Client.restart
         """
-        non_nanny_workers = {
-            addr: ws.server_id for addr, ws in self.workers.items() if not ws.nanny
-        }
-
-        if non_nanny_workers:
-            raise RuntimeError(
-                (
-                    "Expected all workers to have a nanny, encountered "
-                    f"{len(non_nanny_workers)} workers without nannies."
-                ),
-                non_nanny_workers,
-            )
+        workers = list(self.workers)
+        self._expect_nannies(workers)
         stimulus_id = f"restart-{time()}"
 
-        logger.info("Restarting workers and releasing all keys.")
+        logger.info("Resetting local state and restarting workers.")
         for cs in self.clients.values():
             self.client_releases_keys(
                 keys=[ts.key for ts in cs.wants_what],
@@ -5733,38 +5723,64 @@ class Scheduler(SchedulerState, ServerNode):
             except Exception as e:
                 logger.exception(e)
 
-        logger.debug("Asking nannies to restart workers.")
-        nanny_workers = {addr: ws.nanny for addr, ws in self.workers.items()}
+        logger.debug("Restarting all workers.")
+        await self._restart_workers(workers, graceful_timeout=timeout)
+
+        self.log_event([client, "all"], {"action": "restart", "client": client})
+        logger.info("Successfully restarted.")
+
+    def _expect_nannies(self, workers: Iterable[str]) -> None:
+        non_nannies = [worker for worker in workers if self.workers[worker].nanny]
+
+        if non_nannies:
+            raise RuntimeError(
+                (
+                    "Expected all workers to have a nanny, encountered "
+                    f"{len(non_nannies)} workers without nannies."
+                ),
+                non_nannies,
+            )
+
+    async def restart_workers(
+        self, workers: Iterable[str], graceful_timeout: float = 30
+    ):
+        self._expect_nannies(workers)
+        logger.debug("Asking nannies to restart workers: %s.", workers)
+        await self._restart_workers(workers, graceful_timeout)
+
+    async def _restart_workers(
+        self, workers: Iterable[str], graceful_timeout: float
+    ) -> None:
+        nanny_addresses = [self.workers[worker].nanny for worker in workers]
         async with contextlib.AsyncExitStack() as stack:
             nannies = await asyncio.gather(
                 *(
                     stack.enter_async_context(
-                        rpc(nanny_address, connection_args=self.connection_args)
+                        rpc(address, connection_args=self.connection_args)
                     )
-                    for nanny_address in nanny_workers.values()
+                    for address in nanny_addresses
                 )
             )
 
             responses = await asyncio.gather(
                 *(
-                    nanny.restart(graceful_timeout=timeout, reason="scheduler-restart")
+                    nanny.restart(
+                        graceful_timeout=graceful_timeout, reason="scheduler-restart"
+                    )
                     for nanny in nannies
                 ),
                 return_exceptions=True,
             )
-            bad_nannies = {
-                addr: response
-                for addr, response in zip(nanny_workers, responses)
+            bad_workers = {
+                worker: response
+                for worker, response in zip(workers, responses)
                 if isinstance(response, Exception)
             }
-            if bad_nannies:
+            if bad_workers:
                 raise RuntimeError(
-                    f"{len(bad_nannies)} nannies failed to restart.",
-                    bad_nannies,
+                    f"{len(bad_workers)} workers failed to restart.",
+                    bad_workers,
                 )
-
-        self.log_event([client, "all"], {"action": "restart", "client": client})
-        logger.info("Successfully restarted.")
 
     async def broadcast(
         self,
