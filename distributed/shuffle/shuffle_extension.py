@@ -6,18 +6,9 @@ import logging
 import os
 import time
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Sized
 from concurrent.futures import ThreadPoolExecutor
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    BinaryIO,
-    Callable,
-    NewType,
-    Sized,
-    TypeVar,
-    overload,
-)
+from typing import TYPE_CHECKING, Any, BinaryIO, NewType, TypeVar, overload
 
 import toolz
 

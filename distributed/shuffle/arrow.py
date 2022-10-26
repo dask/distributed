@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, BinaryIO
+from typing import TYPE_CHECKING, BinaryIO
 
 if TYPE_CHECKING:
     import pyarrow as pa
 
 
-def dump_batch(batch: Any, file: BinaryIO, schema: pa.Schema) -> None:
+def dump_batch(batch: bytes, file: BinaryIO, schema: pa.Schema) -> None:
     """
     Dump a batch to file, if we're the first, also write the schema
 

@@ -9,8 +9,8 @@ import shutil
 import time
 import weakref
 from collections import defaultdict
-from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Callable, Iterator
+from typing import TYPE_CHECKING, Any, BinaryIO
 
 from dask.sizeof import sizeof
 from dask.utils import parse_bytes
@@ -69,8 +69,8 @@ class MultiFile:
     def __init__(
         self,
         directory: str,
-        dump: Callable = pickle.dump,
-        load: Callable = pickle.load,
+        dump: Callable[[Any, BinaryIO], None] = pickle.dump,
+        load: Callable[[BinaryIO], Any] = pickle.load,
         sizeof: Callable[[list[pa.Table]], int] = sizeof,
         loop: object = None,
     ):
@@ -100,11 +100,11 @@ class MultiFile:
         self._exception = None
 
     @property
-    def queue(self) -> asyncio.Queue:
+    def queue(self) -> asyncio.Queue[None]:
         try:
             return MultiFile._queues[self._loop]
         except KeyError:
-            queue: asyncio.Queue = asyncio.Queue()
+            queue: asyncio.Queue[None] = asyncio.Queue()
             for _ in range(MultiFile.concurrent_files):
                 queue.put_nowait(None)
             MultiFile._queues[self._loop] = queue
@@ -170,7 +170,7 @@ class MultiFile:
 
                     await self.queue.get()
 
-                id = max(self.sizes, key=self.sizes.get)  # type: ignore
+                id = max(self.sizes, key=self.sizes.__getitem__)
                 shards = self.shards.pop(id)
                 size = self.sizes.pop(id)
 
