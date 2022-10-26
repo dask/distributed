@@ -60,7 +60,6 @@ class WorkerMemoryManager:
     memory_pause_fraction: float | Literal[False]
     max_spill: int | Literal[False]
     memory_monitor_interval: float
-    _memory_monitoring: bool
     _throttled_gc: ThrottledGC
 
     def __init__(
@@ -128,8 +127,6 @@ class WorkerMemoryManager:
             )
         else:
             self.data = {}
-
-        self._memory_monitoring = False
 
         self.memory_monitor_interval = parse_timedelta(
             dask.config.get("distributed.worker.memory.monitor-interval"),
