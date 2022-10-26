@@ -254,9 +254,9 @@ class Nanny(ServerNode):
         self.silence_logs = silence_logs
 
         handlers = {
-            "instantiate": self.instantiate,
+            "start_worker": self.start_worker,
             "stop_worker": self.stop_worker,
-            "restart": self.restart,
+            "restart_worker": self.restart_worker,
             "get_logs": self.get_logs,
             # cannot call it 'close' on the rpc side for naming conflict
             "terminate": self.close,
@@ -362,7 +362,7 @@ class Nanny(ServerNode):
             await self.plugin_add(plugin=plugin, name=name)
 
         logger.info("        Start Nanny at: %r", self.address)
-        response = await self.instantiate()
+        response = await self.start_worker()
 
         if response != Status.running:
             await self.close(reason="nanny-start-failed")
@@ -381,18 +381,26 @@ class Nanny(ServerNode):
 
         Waits at most ``graceful_timeout`` seconds for the worker process to shutdown
         gracefully before killing it abruptly.
-        When ``stop_worker`` returns, the process is down and the scheduler is properly
-        informed.
+        Returns when the process is down and the scheduler is properly informed.
+
+        See Also
+        --------
+        Nanny.restart
         """
         if self.process is None:
             return
 
         await self.process.stop(graceful_timeout=graceful_timeout, reason=reason)
 
-    async def instantiate(self) -> Status:
+    async def start_worker(self) -> Status:
         """Start a local worker process
 
-        Blocks until the process is up and the scheduler is properly informed
+        Returns when the until the process is up and the scheduler is properly
+        informed.
+
+        See Also
+        --------
+        Nanny.restart
         """
         if self.process is None:
             worker_kwargs = dict(
@@ -470,7 +478,7 @@ class Nanny(ServerNode):
                 msg = error_message(e)
                 return msg
         if getattr(plugin, "restart", False):
-            await self.restart(reason=f"nanny-plugin-{name}-restart")
+            await self.restart_worker(reason=f"nanny-plugin-{name}-restart")
 
         return {"status": "OK"}
 
@@ -489,15 +497,28 @@ class Nanny(ServerNode):
 
         return {"status": "OK"}
 
-    async def restart(
+    async def restart_worker(
         self, graceful_timeout: float = 30, reason: str = "nanny-restart"
     ) -> Literal["OK"]:
+        """Restart the local worker process
+
+        Waits at most ``graceful_timeout`` seconds for the worker process to shutdown
+        gracefully before killing it abruptly.
+        Returns when the worker process has been restarted and the scheduler is
+        properly informed.
+
+        See Also
+        --------
+        Nanny.stop_worker
+        Nanny.start_worker
+        """
         if self.process is not None:
             await self.stop_worker(graceful_timeout=graceful_timeout, reason=reason)
-            await self.instantiate()
+            await self.start_worker()
         return "OK"
 
-    def is_alive(self):
+    def is_alive(self) -> bool:
+        """Whether the local worker process is alive."""
         return self.process is not None and self.process.is_alive()
 
     def run(self, comm, *args, **kwargs):
@@ -534,7 +555,7 @@ class Nanny(ServerNode):
                 Status.failed,
             ):
                 logger.warning("Restarting worker")
-                await self.instantiate()
+                await self.start_worker()
             elif self.status == Status.closing_gracefully:
                 await self.close(reason="nanny-close-gracefully")
 
