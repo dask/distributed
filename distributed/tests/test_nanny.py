@@ -218,10 +218,9 @@ async def test_nanny_timeout(c, s, a):
     with captured_logger(
         logging.getLogger("distributed.nanny"), level=logging.ERROR
     ) as logger:
-        response = await a.restart(timeout=0.1)
+        response = await a.restart(graceful_timeout=0.1)
 
     out = logger.getvalue()
-    assert "timed out" in out.lower()
 
     start = time()
     while x.status != "cancelled":

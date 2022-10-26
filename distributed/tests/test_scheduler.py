@@ -904,6 +904,30 @@ async def test_restart_waits_for_new_workers(c, s, *workers):
     assert set(s.workers.values()).isdisjoint(original_workers.values())
 
 
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=Worker)
+async def test_restart_no_nannies(c, s, a, b):
+    with pytest.raises(
+        RuntimeError, match=r"Expected all workers to have a nanny"
+    ) as e:
+        await c.restart()
+    assert set(s.workers.keys()) == set(e.value.args[1].keys())
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=Nanny)
+async def test_restart_some_nannies_some_not(c, s, a, b):
+    async with Worker(s.address, nthreads=1) as w:
+        await c.wait_for_workers(3)
+
+        with pytest.raises(
+            RuntimeError, match=r"Expected all workers to have a nanny"
+        ) as e:
+            await c.restart()
+
+    assert w.address in e.value.args[1]
+
+
 class SlowStopNanny(Nanny):
     def __init__(self, *args, **kwargs):
         self.stop_worker_proceed = asyncio.Event()
@@ -913,115 +937,11 @@ class SlowStopNanny(Nanny):
     async def stop_worker(self, *, graceful_timeout, reason=None):
         self.stop_worker_called.set()
         print("stop_worker called")
-        await asyncio.wait_for(self.stop_worker_proceed.wait(), graceful_timeout)
+        await self.stop_worker_proceed.wait()
         print("stop_worker proceed")
         return await super().stop_worker(
             graceful_timeout=graceful_timeout, reason=reason
         )
-
-
-@gen_cluster(client=True, Worker=SlowStopNanny, nthreads=[("", 1)] * 2)
-async def test_restart_nanny_timeout_exceeded(c, s, a, b):
-    f = c.submit(div, 1, 0)
-    fr = c.submit(inc, 1, resources={"FOO": 1})
-    await wait(f)
-    assert s.erred_tasks
-    assert s.computations
-    assert s.unrunnable
-    assert s.tasks
-
-    with pytest.raises(
-        TimeoutError, match=r"2/2 nanny worker\(s\) did not shut down within 1s"
-    ):
-        await c.restart(timeout="1s")
-    assert a.stop_worker_called.is_set()
-    assert b.stop_worker_called.is_set()
-
-    assert not s.workers
-    assert not s.erred_tasks
-    assert not s.computations
-    assert not s.unrunnable
-    assert not s.tasks
-
-    assert not c.futures
-    assert f.status == "cancelled"
-    assert fr.status == "cancelled"
-
-
-@gen_cluster(client=True, nthreads=[("", 1)] * 2)
-async def test_restart_not_all_workers_return(c, s, a, b):
-    with pytest.raises(TimeoutError, match="Waited for 2 worker"):
-        await c.restart(timeout="1s")
-
-    assert not s.workers
-    assert a.status in (Status.closed, Status.closing)
-    assert b.status in (Status.closed, Status.closing)
-
-
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_restart_worker_rejoins_after_timeout_expired(c, s, a):
-    """
-    We don't want to see an error message like:
-
-    ``Waited for 1 worker(s) to reconnect after restarting, but after 0s, only 1 have returned.``
-
-    If a worker rejoins after our last poll for new workers, but before we raise the error,
-    we shouldn't raise the error.
-    """
-    # We'll use a 0s timeout on the restart, so it always expires.
-    # And we'll use a plugin to block the restart process, and spin up a new worker
-    # in the middle of it.
-
-    class Plugin(SchedulerPlugin):
-        removed = asyncio.Event()
-        proceed = asyncio.Event()
-
-        async def remove_worker(self, *args, **kwargs):
-            self.removed.set()
-            await self.proceed.wait()
-
-    s.add_plugin(Plugin())
-
-    task = asyncio.create_task(c.restart(timeout=0))
-    await Plugin.removed.wait()
-    assert not s.workers
-
-    async with Worker(s.address, nthreads=1) as w:
-        assert len(s.workers) == 1
-        Plugin.proceed.set()
-
-        # New worker has joined, but the timeout has expired (since it was 0).
-        # Still, we should not time out.
-        await task
-
-
-@gen_cluster(client=True, nthreads=[("", 1)] * 2)
-async def test_restart_no_wait_for_workers(c, s, a, b):
-    await c.restart(timeout="1s", wait_for_workers=False)
-
-    assert not s.workers
-    # Workers are not immediately closed because of https://github.com/dask/distributed/issues/6390
-    # (the message is still waiting in the BatchedSend)
-    await a.finished()
-    await b.finished()
-
-
-@pytest.mark.slow
-@gen_cluster(client=True, Worker=Nanny)
-async def test_restart_some_nannies_some_not(c, s, a, b):
-    original_addrs = set(s.workers)
-    async with Worker(s.address, nthreads=1) as w:
-        await c.wait_for_workers(3)
-
-        # FIXME how to make this not always take 20s if the nannies do restart quickly?
-        with pytest.raises(TimeoutError, match=r"The 1 worker\(s\) not using Nannies"):
-            await c.restart(timeout="20s")
-
-        assert w.status == Status.closed
-
-        assert len(s.workers) == 2
-        assert set(s.workers).isdisjoint(original_addrs)
-        assert w.address not in s.workers
 
 
 @gen_cluster(

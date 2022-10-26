@@ -387,7 +387,7 @@ class Nanny(ServerNode):
         if self.process is None:
             return
 
-        await self.process.stop(graceful_timeout, reason=reason)
+        await self.process.stop(graceful_timeout=graceful_timeout, reason=reason)
 
     async def instantiate(self) -> Status:
         """Start a local worker process
@@ -810,15 +810,12 @@ class WorkerProcess:
         try:
             try:
                 await process.join(graceful_timeout)
-                return
             except asyncio.TimeoutError:
-                pass
-
-            logger.warning(
-                f"Worker process still alive after {graceful_timeout} seconds, killing"
-            )
-            await process.kill()
-            await process.join()
+                logger.warning(
+                    f"Worker process still alive after {graceful_timeout} seconds, killing"
+                )
+                await process.kill()
+                await process.join()
         except ValueError as e:
             if "invalid operation on closed AsyncProcess" in str(e):
                 return
