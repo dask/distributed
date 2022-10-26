@@ -592,8 +592,6 @@ class ShuffleSchedulerExtension:
                 mapping[part] = worker
                 output_workers.add(worker)
                 self.scheduler.set_restrictions({ts.key: {worker}})
-                # ts.worker_restrictions = {worker}  # TODO: once cython is
-                # gone
 
             self.worker_for[id] = mapping
             self.schemas[id] = schema

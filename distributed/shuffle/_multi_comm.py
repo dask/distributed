@@ -169,6 +169,7 @@ class MultiComm:
                 task = asyncio.create_task(self._process(address, shards, size))
                 del shards
                 self._futures.add(task)
+                task.add_done_callback(self._futures.discard)
 
     async def _process(self, address: str, shards: list, size: int) -> None:
         """Send one message off to a neighboring worker"""
@@ -204,7 +205,10 @@ class MultiComm:
 
     async def flush(self) -> None:
         """
-        We don't expect any more data, wait until everything is flushed through
+        We don't expect any more data, wait until everything is flushed through.
+
+        Not thread safe. Caller must ensure this is not called concurrently with
+        put
         """
         if self._exception:
             await self._communicate_task
@@ -213,23 +217,18 @@ class MultiComm:
 
         while self.shards:
             await asyncio.sleep(0.05)
-        # FIXME: This needs lock protection to guarantee that shards are indeed
-        # empty and all associated futures are in self._futures but _process is
-        # locking as well. Either we'll need a RLock or a second lock
         await asyncio.gather(*self._futures)
         self._futures.clear()
 
-        assert not self.total_size
+        if self.total_size:
+            raise RuntimeError("Received additional input after flushing.")
         self._done = True
         await self._communicate_task
 
     async def close(self) -> None:
-        # TODO: Should we flush here?
-        # TODO: Should this raise an exception if there is one?
-        # TODO: Should finished tasks remove themselves from futures, s.t. we only raise once. We do not raise multiple times, do we?
-        await self.flush()
         self._done = True
         await self._communicate_task
+        await asyncio.gather(*self._futures)
 
     @contextlib.contextmanager
     def time(self, name: str) -> Iterator[None]:
