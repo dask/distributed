@@ -4,6 +4,7 @@ import toolz
 
 from distributed.http.prometheus import PrometheusCollector
 from distributed.http.scheduler.prometheus.semaphore import SemaphoreMetricCollector
+from distributed.http.scheduler.prometheus.stealing import WorkStealingMetricCollector
 from distributed.http.utils import RequestHandler
 from distributed.scheduler import ALL_TASK_STATES, Scheduler
 
@@ -85,7 +86,11 @@ class SchedulerMetricCollector(PrometheusCollector):
         yield prefix_state_counts
 
 
-COLLECTORS = [SchedulerMetricCollector, SemaphoreMetricCollector]
+COLLECTORS = [
+    SchedulerMetricCollector,
+    SemaphoreMetricCollector,
+    WorkStealingMetricCollector,
+]
 
 
 class PrometheusHandler(RequestHandler):
