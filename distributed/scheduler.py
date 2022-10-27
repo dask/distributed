@@ -2090,6 +2090,9 @@ class SchedulerState:
             returns None, in which case the task should be transitioned to
             ``no-worker``.
         """
+        print(
+            f"decide_worker_rootish_queuing_disabled({ts.key}) tg={ts.group} lws={ts.group.last_worker}"
+        )
         if self.validate:
             # See root-ish-ness note below in `decide_worker_rootish_queuing_enabled`
             assert math.isinf(self.WORKER_SATURATION)
