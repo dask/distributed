@@ -1543,7 +1543,12 @@ async def test_balance_many_workers_2(c, s, *workers):
     assert {len(w.has_what) for w in s.workers.values()} == {3}
 
 
-@gen_cluster(client=True)
+@gen_cluster(
+    client=True,
+    worker_kwargs={
+        "heartbeat_interval": "10s",  # prevent worker from updating executing task durations
+    },
+)
 async def test_include_communication_in_occupancy(c, s, a, b):
     x = c.submit(operator.mul, b"0", int(s.bandwidth) * 2, workers=a.address)
     y = c.submit(operator.mul, b"1", int(s.bandwidth * 3), workers=b.address)
