@@ -5730,7 +5730,7 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Successfully restarted.")
 
     def _expect_nannies(self, workers: Iterable[str]) -> None:
-        non_nannies = [worker for worker in workers if self.workers[worker].nanny]
+        non_nannies = [worker for worker in workers if not self.workers[worker].nanny]
 
         if non_nannies:
             raise RuntimeError(
