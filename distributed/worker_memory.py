@@ -31,14 +31,13 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, Container, Literal, cast
 
 import psutil
-from tornado.ioloop import PeriodicCallback
 
 import dask.config
 from dask.system import CPU_COUNT
 from dask.utils import format_bytes, parse_bytes, parse_timedelta
 
 from distributed import system
-from distributed.compatibility import WINDOWS
+from distributed.compatibility import WINDOWS, PeriodicCallback
 from distributed.core import Status
 from distributed.metrics import monotonic
 from distributed.spill import ManualEvictProto, SpillBuffer
@@ -79,7 +78,6 @@ class WorkerMemoryManager:
     memory_pause_fraction: float | Literal[False]
     max_spill: int | Literal[False]
     memory_monitor_interval: float
-    _memory_monitoring: bool
     _throttled_gc: ThrottledGC
 
     def __init__(
@@ -163,8 +161,6 @@ class WorkerMemoryManager:
         else:
             self.data = {}
 
-        self._memory_monitoring = False
-
         self.memory_monitor_interval = parse_timedelta(
             dask.config.get("distributed.worker.memory.monitor-interval"),
             default=False,
@@ -194,18 +190,12 @@ class WorkerMemoryManager:
         If process memory rises above the pause threshold (80%), stop execution of new
         tasks.
         """
-        if self._memory_monitoring:
-            return
-        self._memory_monitoring = True
-        try:
-            # Don't use psutil directly; instead read from the same API that is used
-            # to send info to the Scheduler (e.g. for the benefit of Active Memory
-            # Manager) and which can be easily mocked in unit tests.
-            memory = worker.monitor.get_process_memory()
-            self._maybe_pause_or_unpause(worker, memory)
-            await self._maybe_spill(worker, memory)
-        finally:
-            self._memory_monitoring = False
+        # Don't use psutil directly; instead read from the same API that is used
+        # to send info to the Scheduler (e.g. for the benefit of Active Memory
+        # Manager) and which can be easily mocked in unit tests.
+        memory = worker.monitor.get_process_memory()
+        self._maybe_pause_or_unpause(worker, memory)
+        await self._maybe_spill(worker, memory)
 
     def _maybe_pause_or_unpause(self, worker: Worker, memory: int) -> None:
         if self.memory_pause_fraction is False:

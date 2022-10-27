@@ -17,7 +17,7 @@ import dask.dataframe as dd
 from dask.distributed import Worker
 from dask.utils import stringify
 
-from distributed.shuffle.shuffle_extension import (
+from distributed.shuffle._shuffle_extension import (
     dump_batch,
     list_of_buffers_to_table,
     load_arrow,
@@ -288,10 +288,16 @@ async def test_tail(c, s, a, b):
         dtypes={"x": float, "y": float},
         freq="1 s",
     )
-    shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p").tail(compute=False)
-    persisted = await shuffled.persist()  # Only ask for one key
+    x = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    full = await x.persist()
+    ntasks_full = len(s.tasks)
+    del full
+    while s.tasks:
+        await asyncio.sleep(0)
+    partial = await x.tail(compute=False).persist()  # Only ask for one key
 
-    assert len(s.tasks) < df.npartitions * 2
+    assert len(s.tasks) < ntasks_full
+    del partial
 
     clean_worker(a)
     clean_worker(b)
@@ -402,6 +408,7 @@ async def test_restrictions(c, s, a, b):
 @pytest.mark.xfail(reason="Don't clean up forgotten shuffles")
 @gen_cluster(client=True)
 async def test_delete_some_results(c, s, a, b):
+    # FIXME: This works but not reliably. It fails every ~25% of runs
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -421,7 +428,6 @@ async def test_delete_some_results(c, s, a, b):
     clean_scheduler(s)
 
 
-@pytest.mark.xfail(reason="Don't update ongoing shuffles")
 @gen_cluster(client=True)
 async def test_add_some_results(c, s, a, b):
     df = dask.datasets.timeseries(
