@@ -8,10 +8,14 @@ class WorkStealingMetricCollector(PrometheusCollector):
     def __init__(self, server):
         super().__init__(server)
         self.subsystem = "stealing"
-        self.stealing: WorkStealing = self.server.extensions["stealing"]
 
     def collect(self):
         from prometheus_client.core import CounterMetricFamily
+
+        try:
+            stealing: WorkStealing = self.server.extensions["stealing"]
+        except KeyError:
+            return
 
         stealing_request_count_total = CounterMetricFamily(
             self.build_name("request_count_total"),
@@ -25,13 +29,13 @@ class WorkStealingMetricCollector(PrometheusCollector):
             labels=["cost_multiplier"],
         )
 
-        for level, multiplier in enumerate(self.stealing.cost_multipliers):
+        for level, multiplier in enumerate(stealing.cost_multipliers):
             stealing_request_count_total.add_metric(
-                [str(multiplier)], self.stealing.metrics["request_count_total"][level]
+                [str(multiplier)], stealing.metrics["request_count_total"][level]
             )
 
             stealing_request_cost_total.add_metric(
-                [str(multiplier)], self.stealing.metrics["request_cost_total"][level]
+                [str(multiplier)], stealing.metrics["request_cost_total"][level]
             )
 
         yield stealing_request_count_total

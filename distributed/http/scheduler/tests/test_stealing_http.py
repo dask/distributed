@@ -92,3 +92,13 @@ async def test_prometheus_collect_cost_total_by_cost_multipliers(c, s, a, b):
         if event[0] == "request"
     )
     assert count == expected_cost
+
+
+@gen_cluster(
+    client=True, clean_kwargs={"threads": False}, scheduler_kwargs={"extensions": {}}
+)
+async def test_prometheus_without_stealing_extension(c, s, a, b):
+    pytest.importorskip("prometheus_client")
+
+    active_metrics = await fetch_metrics(s.http_server.port, "dask_stealing_")
+    assert not active_metrics
