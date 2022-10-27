@@ -1870,3 +1870,65 @@ async def test_trivial_workload_should_not_cause_work_stealing(c, s, *workers):
     await c.gather(futs)
     events = s.events["stealing"]
     assert len(events) == 0
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 2,
+    config={
+        "distributed.scheduler.worker-saturation": 1.5,
+        "distributed.scheduler.work-stealing": False,
+    },
+    timeout=3,
+)
+async def test_transition_queued_memory(c, s, a, b):
+    """https://github.com/dask/distributed/issues/7200"""
+    ev0 = Event()
+    ev1 = Event()
+    run_once_lock = Lock()
+    sched_id = id(s)
+
+    async def f0(ev: Event, run_once_lock: Lock) -> None:
+        await ev.wait()
+        if await run_once_lock.acquire(blocking=False):
+            s = next(si for si in Scheduler._instances if id(si) == sched_id)
+            # The task is async, so it runs in the same thread as the scheduler
+            s.reschedule("x-0", stimulus_id="steal")
+
+    # You need at least 5 tasks for the group to be rootish
+    futures = [
+        c.submit(f0, ev0, run_once_lock, key="x-0"),
+        c.submit(lambda ev: ev.wait(), ev1, key="x-1"),
+        c.submit(lambda ev: ev.wait(), ev1, key="x-2"),
+        c.submit(lambda ev: ev.wait(), ev1, key="x-3"),
+        c.submit(lambda ev: ev.wait(), ev1, key="x-4"),
+    ]
+    while a.state.executing_count != 1 or b.state.executing_count != 1:
+        await asyncio.sleep(0.01)
+    assert s.tasks["x-0"].state == "processing"
+    assert s.tasks["x-4"].state == "queued"
+
+    retire_ws = s.tasks["x-0"].processing_on
+    await s.retire_workers([retire_ws.address], close=False, remove=False)
+    assert retire_ws.status == Status.closing_gracefully
+
+    # Reschedule x-0.
+    # Since the worker where it's processing is not running, it can only be rescheduled
+    # on the other worker, which however is full. So x-0 transitions to queued.
+    # The reschedule also sends a {op: free-tasks} message to the worker running x-0,
+    # which would normally transition the task to cancelled on the worker and prevent
+    # a message when the task finishes. However, the task finishes before such message
+    # can arrive, so the task transitions to memory on the worker and sends back a
+    # {op: task-finished} message to the scheduler.
+    # This triggers a queued->memory transition.
+    await ev0.set()
+
+    while not any(ev[:3] == ("x-0", "queued", "memory") for ev in s.story("x-0")):
+        await asyncio.sleep(0.01)
+
+    await ev1.set()
+    # Send tasks stuck on the worker stuck in closing_gracefully state back to the
+    # scheduler
+    await s.retire_workers([retire_ws.address])
+
+    await c.gather(futures)

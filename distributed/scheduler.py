@@ -2325,6 +2325,51 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    def transition_queued_memory(
+        self,
+        key: str,
+        stimulus_id: str,
+        *,
+        nbytes: int | None = None,
+        type: bytes | None = None,
+        typename: str | None = None,
+        worker: str,
+        **kwargs: Any,
+    ):
+        try:
+            ws: WorkerState = self.workers[worker]
+            ts: TaskState = self.tasks[key]
+            recommendations: dict = {}
+            client_msgs: dict = {}
+            worker_msgs: dict = {}
+
+            if self.validate:
+                assert not ts.processing_on
+                assert ts.state == "queued"
+
+            if nbytes is not None:
+                ts.set_nbytes(nbytes)
+
+            self.queued.remove(ts)
+            self.check_idle_saturated(ws)
+
+            _add_to_memory(
+                self, ts, ws, recommendations, client_msgs, type=type, typename=typename
+            )
+
+            if self.validate:
+                assert not ts.processing_on
+                assert ts.who_has
+
+            return recommendations, client_msgs, worker_msgs
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
+
     def transition_processing_memory(
         self,
         key: str,
@@ -2646,7 +2691,7 @@ class SchedulerState:
                     }
                 ]
 
-            _propagage_released(self, ts, recommendations)
+            _propagate_released(self, ts, recommendations)
             return recommendations, {}, worker_msgs
         except Exception as e:
             logger.exception(e)
@@ -2870,7 +2915,7 @@ class SchedulerState:
 
             self.queued.remove(ts)
 
-            _propagage_released(self, ts, recommendations)
+            _propagate_released(self, ts, recommendations)
             return recommendations, client_msgs, worker_msgs
         except Exception as e:
             logger.exception(e)
@@ -3016,6 +3061,7 @@ class SchedulerState:
         ("waiting", "no-worker"): transition_waiting_no_worker,
         ("waiting", "queued"): transition_waiting_queued,
         ("waiting", "memory"): transition_waiting_memory,
+        ("queued", "memory"): transition_queued_memory,
         ("queued", "released"): transition_queued_released,
         ("queued", "processing"): transition_queued_processing,
         ("processing", "released"): transition_processing_released,
@@ -7951,7 +7997,7 @@ def _add_to_memory(
         )
 
 
-def _propagage_released(
+def _propagate_released(
     state: SchedulerState,
     ts: TaskState,
     recommendations: Recs,
@@ -8305,10 +8351,9 @@ def heartbeat_interval(n: int) -> float:
 
 
 def _task_slots_available(ws: WorkerState, saturation_factor: float) -> int:
-    "Number of tasks that can be sent to this worker without oversaturating it"
+    """Number of tasks that can be sent to this worker without oversaturating it"""
     assert not math.isinf(saturation_factor)
-    nthreads = ws.nthreads
-    return max(math.ceil(saturation_factor * nthreads), 1) - (
+    return max(math.ceil(saturation_factor * ws.nthreads), 1) - (
         len(ws.processing) - len(ws.long_running)
     )
 
