@@ -311,7 +311,7 @@ async def test_decide_worker_rootish_while_last_worker_is_retiring(c, s, a):
         # not a running worker, so we must choose b
         await evx[1].set()
         await wait_for_state("y-2", "processing", s)
-        await wait_for_state("y-2", "ready", b)
+        await wait_for_state("y-2", "waiting", b)
 
         # Cleanup
         b.block_gather_dep.set()
