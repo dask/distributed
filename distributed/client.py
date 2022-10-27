@@ -3494,7 +3494,7 @@ class Client(SyncMethodMixin):
         will restart all workers and also reset local state on the cluster
         (e.g. all keys are released).
 
-        Additionally, this method makes no safety guarantees for tasks that are
+        Additionally, this method does not gracefully handle tasks that are
         being executed when a worker is restarted. These tasks may fail or have
         their suspicious count incremented.
 
