@@ -258,7 +258,6 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
     client=True,
     nthreads=[("", 1)],
     config={"distributed.scheduler.work-stealing": False},
-    timeout=3,
 )
 async def test_decide_worker_rootish_while_last_worker_is_retiring(c, s, a):
     """https://github.com/dask/distributed/issues/7063"""
@@ -311,7 +310,7 @@ async def test_decide_worker_rootish_while_last_worker_is_retiring(c, s, a):
         # not a running worker, so we must choose b
         await evx[1].set()
         await wait_for_state("y-2", "processing", s)
-        await wait_for_state("y-2", "waiting", b)
+        await wait_for_state("y-2", "waiting", b)  # x-1 is in memory on a
 
         # Cleanup
         b.block_gather_dep.set()
