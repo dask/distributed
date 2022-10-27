@@ -1505,7 +1505,9 @@ async def test_close_gracefully(c, s, a, b):
 
     assert any(ts for ts in b.state.tasks.values() if ts.state == "executing")
 
-    await b.close_gracefully()
+    with captured_logger("distributed.worker") as logger:
+        await b.close_gracefully(reason="foo")
+    assert "Reason: foo" in logger.getvalue()
 
     assert b.status == Status.closed
     assert b.address not in s.workers
@@ -1873,10 +1875,10 @@ async def test_heartbeat_comm_closed(s, monkeypatch):
             monkeypatch.setattr(w.scheduler, "heartbeat_worker", bad_heartbeat_worker)
 
             await w.heartbeat()
-            assert w.status == Status.closed
-            while s.workers:
-                await asyncio.sleep(0.01)
-    assert "Heartbeat to scheduler failed" in logger.getvalue()
+            assert w.status == Status.running
+    logs = logger.getvalue()
+    assert "Failed to communicate with scheduler during heartbeat" in logs
+    assert "Traceback" in logs
 
 
 @gen_cluster(nthreads=[("", 1)], worker_kwargs={"heartbeat_interval": "100s"})
@@ -3721,3 +3723,21 @@ async def test_deprecation_of_renamed_worker_attributes(s, a, b):
     )
     with pytest.warns(DeprecationWarning, match=msg):
         assert a.outgoing_current_count == a.transfer_outgoing_count
+
+
+@gen_cluster(nthreads=[])
+async def test_worker_log_memory_limit_too_high(s):
+    with captured_logger("distributed.worker_memory") as caplog:
+        # caplog.set_level(logging.WARN, logger="distributed.worker")
+        async with Worker(s.address, memory_limit="1PB"):
+            pass
+
+        expected_snippets = [
+            ("ignore", "ignoring"),
+            ("memory limit", "memory_limit"),
+            ("system"),
+            ("1PB"),
+        ]
+        for snippets in expected_snippets:
+            # assert any(snip in caplog.text for snip in snippets)
+            assert any(snip in caplog.getvalue().lower() for snip in snippets)

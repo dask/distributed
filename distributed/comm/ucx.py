@@ -11,10 +11,10 @@ import functools
 import logging
 import os
 import struct
-import warnings
 import weakref
 from collections.abc import Awaitable, Callable, Collection
 from typing import TYPE_CHECKING, Any
+from unittest.mock import patch
 
 import dask
 from dask.utils import parse_bytes
@@ -58,13 +58,13 @@ _warning_suffix = (
 
 
 def _warn_existing_cuda_context(ctx, pid):
-    warnings.warn(
+    logger.warning(
         f"A CUDA context for device {ctx} already exists on process ID {pid}. {_warning_suffix}"
     )
 
 
 def _warn_cuda_context_wrong_device(ctx_expected, ctx_actual, pid):
-    warnings.warn(
+    logger.warning(
         f"Worker with process ID {pid} should have a CUDA context assigned to device "
         f"{ctx_expected}, but instead the CUDA context is on device {ctx_actual}. "
         f"{_warning_suffix}"
@@ -89,13 +89,25 @@ def init_once():
         return
 
     # remove/process dask.ucx flags for valid ucx options
-    ucx_config = _scrub_ucx_config()
+    ucx_config, ucx_environment = _prepare_ucx_config()
 
     # We ensure the CUDA context is created before initializing UCX. This can't
     # be safely handled externally because communications in Dask start before
     # preload scripts run.
-    if dask.config.get("distributed.comm.ucx.create-cuda-context") is True or (
-        "TLS" in ucx_config and "cuda_copy" in ucx_config["TLS"]
+    # Precedence:
+    # 1. external environment
+    # 2. ucx_config (high level settings passed to ucp.init)
+    # 3. ucx_environment (low level settings equivalent to environment variables)
+    ucx_tls = os.environ.get(
+        "UCX_TLS",
+        ucx_config.get("TLS", ucx_environment.get("UCX_TLS", "")),
+    )
+    if (
+        dask.config.get("distributed.comm.ucx.create-cuda-context") is True
+        # This is not foolproof, if UCX_TLS=all we might require CUDA
+        # depending on configuration of UCX, but this is better than
+        # nothing
+        or ("cuda" in ucx_tls and "^cuda" not in ucx_tls)
     ):
         try:
             import numba.cuda
@@ -126,7 +138,12 @@ def init_once():
 
     ucp = _ucp
 
-    ucp.init(options=ucx_config, env_takes_precedence=True)
+    with patch.dict(os.environ, ucx_environment):
+        # We carefully ensure that ucx_environment only contains things
+        # that don't override ucx_config or existing slots in the
+        # environment, so the user's external environment can safely
+        # override things here.
+        ucp.init(options=ucx_config, env_takes_precedence=True)
 
     pool_size_str = dask.config.get("distributed.rmm.pool-size")
 
@@ -161,7 +178,7 @@ def init_once():
                 )
 
         if pool_size_str is not None:
-            warnings.warn(
+            logger.warning(
                 "Initial RMM pool size defined, but RMM is not available. "
                 "Please consider installing RMM or removing the pool size option."
             )
@@ -551,17 +568,24 @@ class UCXBackend(Backend):
 backends["ucx"] = UCXBackend()
 
 
-def _scrub_ucx_config():
-    """Function to scrub dask config options for valid UCX config options"""
+def _prepare_ucx_config():
+    """Translate dask config options to appropriate UCX config options
+
+    Returns
+    -------
+    tuple
+        Options suitable for passing to ``ucp.init`` and additional
+        UCX options that will be inserted directly into the environment
+        while calling ``ucp.init``.
+    """
 
     # configuration of UCX can happen in two ways:
     # 1) high level on/off flags which correspond to UCX configuration
-    # 2) explicitly defined UCX configuration flags
+    # 2) explicitly defined UCX configuration flags in distributed.comm.ucx.environment
+    # High-level settings in (1) are preferred to settings in (2)
+    # Settings in the external environment override both
 
-    # import does not initialize ucp -- this will occur outside this function
-    from ucp import get_config
-
-    options = {}
+    high_level_options = {}
 
     # if any of the high level flags are set, as long as they are not Null/None,
     # we assume we should configure basic TLS settings for UCX, otherwise we
@@ -596,14 +620,27 @@ def _scrub_ucx_config():
         if dask.config.get("distributed.comm.ucx.nvlink"):
             tls = tls + ",cuda_ipc"
 
-        options = {"TLS": tls, "SOCKADDR_TLS_PRIORITY": tls_priority}
+        high_level_options = {"TLS": tls, "SOCKADDR_TLS_PRIORITY": tls_priority}
 
-    # ANY UCX options defined in config will overwrite high level dask.ucx flags
-    valid_ucx_vars = list(get_config().keys())
-    for k, v in options.items():
-        if k not in valid_ucx_vars:
-            logger.debug(
-                f"Key: {k} with value: {v} not a valid UCX configuration option"
+    # Pick up any other ucx environment settings
+    environment_options = {}
+    for k, v in dask.config.get("distributed.comm.ucx.environment", {}).items():
+        # {"some-name": value} is translated to {"UCX_SOME_NAME": value}
+        key = "_".join(map(str.upper, ("UCX", *k.split("-"))))
+        if (hl_key := key[4:]) in high_level_options:
+            logger.warning(
+                f"Ignoring {k}={v} ({key=}) in ucx.environment, "
+                f"preferring {hl_key}={high_level_options[hl_key]} "
+                "from high level options"
             )
+        elif key in os.environ:
+            # This is only info because setting UCX configuration via
+            # environment variables is a reasonably common approach
+            logger.info(
+                f"Ignoring {k}={v} ({key=}) in ucx.environment, "
+                f"preferring {key}={os.environ[key]} from external environment"
+            )
+        else:
+            environment_options[key] = v
 
-    return options
+    return high_level_options, environment_options

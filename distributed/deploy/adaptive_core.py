@@ -8,10 +8,11 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, cast
 
 import tlz as toolz
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import IOLoop
 
 from dask.utils import parse_timedelta
 
+from distributed.compatibility import PeriodicCallback
 from distributed.metrics import time
 
 if TYPE_CHECKING:

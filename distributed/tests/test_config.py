@@ -338,13 +338,14 @@ def test_schema_is_complete():
         schema = yaml.safe_load(f)
 
     skip = {
-        "default-task-durations",
-        "bokeh-application",
-        "environ",
-        "pre-spawn-environ",
+        "distributed.scheduler.default-task-durations",
+        "distributed.scheduler.dashboard.bokeh-application",
+        "distributed.nanny.environ",
+        "distributed.nanny.pre-spawn-environ",
+        "distributed.comm.ucx.environment",
     }
 
-    def test_matches(c, s):
+    def test_matches(c, s, root):
         if set(c) != set(s["properties"]):
             raise ValueError(
                 "\nThe distributed.yaml and distributed-schema.yaml files are not in sync.\n"
@@ -359,10 +360,11 @@ def test_schema_is_complete():
                 )
             )
         for k, v in c.items():
-            if isinstance(v, dict) and k not in skip:
-                test_matches(c[k], s["properties"][k])
+            key = f"{root}.{k}" if root else k
+            if isinstance(v, dict) and key not in skip:
+                test_matches(c[k], s["properties"][k], key)
 
-    test_matches(config, schema)
+    test_matches(config, schema, "")
 
 
 def test_uvloop_event_loop():

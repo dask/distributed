@@ -87,5 +87,3 @@ repos:
           - tornado
           - zict
           - pyarrow
-
-# Increase this by 1 to force-wipe the pre-commit github action cache: 2

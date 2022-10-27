@@ -10,12 +10,13 @@ from inspect import isawaitable
 from typing import Any
 
 from packaging.version import parse as parse_version
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import IOLoop
 
 import dask.config
 from dask.utils import _deprecated, format_bytes, parse_timedelta, typename
 from dask.widgets import get_template
 
+from distributed.compatibility import PeriodicCallback
 from distributed.core import Status
 from distributed.deploy.adaptive import Adaptive
 from distributed.objects import SchedulerInfo

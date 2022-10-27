@@ -17,7 +17,7 @@ import cloudpickle
 import psutil
 import pytest
 from tlz import concat, first, merge, valmap
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import IOLoop
 
 import dask
 from dask import delayed
@@ -35,7 +35,7 @@ from distributed import (
     wait,
 )
 from distributed.comm.addressing import parse_host_port
-from distributed.compatibility import LINUX, MACOS, WINDOWS
+from distributed.compatibility import LINUX, MACOS, WINDOWS, PeriodicCallback
 from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps, loads
@@ -61,6 +61,7 @@ from distributed.utils_test import (
     slowinc,
     tls_only_security,
     varying,
+    wait_for_state,
 )
 from distributed.worker import dumps_function, dumps_task, get_worker
 
@@ -606,26 +607,17 @@ async def test_clear_events_client_removal(c, s, a, b):
         assert time() < start + 2
 
 
-@gen_cluster()
-async def test_add_worker(s, a, b):
-    w = Worker(s.address, nthreads=3)
-    w.data["x-5"] = 6
-    w.data["y"] = 1
-
-    dsk = {("x-%d" % i): (inc, i) for i in range(10)}
-    s.update_graph(
-        tasks=valmap(dumps_task, dsk),
-        keys=list(dsk),
-        client="client",
-        dependencies={k: set() for k in dsk},
-    )
-    s.validate_state()
-    await w
+@gen_cluster(client=True, nthreads=[])
+async def test_add_worker(c, s):
+    x = c.submit(inc, 1, key="x")
+    await wait_for_state("x", ("queued", "no-worker"), s)
     s.validate_state()
 
-    assert w.ip in s.host_info
-    assert s.host_info[w.ip]["addresses"] == {a.address, b.address, w.address}
-    await w.close()
+    async with Worker(s.address) as w:
+        s.validate_state()
+        assert w.ip in s.host_info
+        assert s.host_info[w.ip]["addresses"] == {w.address}
+        assert await x == 2
 
 
 @gen_cluster(scheduler_kwargs={"blocked_handlers": ["feed"]})
@@ -866,27 +858,29 @@ async def test_ready_remove_worker(s, a, b):
 
 @gen_cluster(client=True, Worker=Nanny, timeout=60)
 async def test_restart(c, s, a, b):
+    with captured_logger("distributed.scheduler") as caplog:
+        futures = c.map(inc, range(20))
+        await wait(futures)
+        with captured_logger("distributed.nanny") as nanny_logger:
+            await s.restart()
+        assert "Reason: scheduler-restart" in nanny_logger.getvalue()
 
-    futures = c.map(inc, range(20))
-    await wait(futures)
+        assert not s.computations
+        assert not s.task_prefixes
+        assert not s.task_groups
 
-    await s.restart()
+        assert len(s.workers) == 2
 
-    assert not s.computations
-    assert not s.task_prefixes
-    assert not s.task_groups
+        for ws in s.workers.values():
+            assert not ws.occupancy
+            assert not ws.processing
 
-    assert len(s.workers) == 2
+        assert not s.tasks
 
-    for ws in s.workers.values():
-        assert not ws.occupancy
-        assert not ws.processing
-
-    assert not s.tasks
-
-    assert all(f.status == "cancelled" for f in futures)
-    x = c.submit(inc, 1)
-    assert await x == 2
+        assert all(f.status == "cancelled" for f in futures)
+        x = c.submit(inc, 1)
+        assert await x == 2
+    assert "restart" in caplog.getvalue().lower()
 
 
 @pytest.mark.slow
@@ -916,12 +910,12 @@ class SlowKillNanny(Nanny):
         self.kill_called = asyncio.Event()
         super().__init__(*args, **kwargs)
 
-    async def kill(self, *, timeout):
+    async def kill(self, *, timeout, reason=None):
         self.kill_called.set()
         print("kill called")
         await asyncio.wait_for(self.kill_proceed.wait(), timeout)
         print("kill proceed")
-        return await super().kill(timeout=timeout)
+        return await super().kill(timeout=timeout, reason=reason)
 
 
 @gen_cluster(client=True, Worker=SlowKillNanny, nthreads=[("", 1)] * 2)
