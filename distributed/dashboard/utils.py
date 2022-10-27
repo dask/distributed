@@ -17,6 +17,19 @@ BOKEH_VERSION = Version(bokeh.__version__)
 
 PROFILING = False
 
+if BOKEH_VERSION.major < 3:
+    _DATATABLE_STYLESHEETS_KWARGS = {}
+else:
+    _DATATABLE_STYLESHEETS_KWARGS = {
+        "stylesheets": [
+            """
+    .bk-data-table {
+    z-index: 0;
+    }
+    """
+        ]
+    }
+
 
 def transpose(lod):
     return {k: [d[k] for d in lod] for k in lod[0]}

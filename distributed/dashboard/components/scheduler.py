@@ -72,7 +72,13 @@ from distributed.dashboard.components.shared import (
     SystemMonitor,
 )
 from distributed.dashboard.core import TabPanel
-from distributed.dashboard.utils import BOKEH_VERSION, PROFILING, transpose, update
+from distributed.dashboard.utils import (
+    _DATATABLE_STYLESHEETS_KWARGS,
+    BOKEH_VERSION,
+    PROFILING,
+    transpose,
+    update,
+)
 from distributed.diagnostics.graph_layout import GraphLayout
 from distributed.diagnostics.progress import GroupTiming
 from distributed.diagnostics.progress_stream import color_of, progress_quads
@@ -3457,6 +3463,7 @@ class ExceptionsTable(DashboardComponent):
             sortable=True,
             width=width,
             index_position=None,
+            **_DATATABLE_STYLESHEETS_KWARGS,
             **sizing_mode,
         )
 
@@ -3590,6 +3597,7 @@ class WorkerTable(DashboardComponent):
             sortable=True,
             width=width,
             index_position=None,
+            **_DATATABLE_STYLESHEETS_KWARGS,
         )
 
         for name in table_names:
@@ -3609,6 +3617,7 @@ class WorkerTable(DashboardComponent):
             sortable=True,
             width=width,
             index_position=None,
+            **_DATATABLE_STYLESHEETS_KWARGS,
         )
 
         for name in extra_names:
