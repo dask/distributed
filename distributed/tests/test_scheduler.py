@@ -254,6 +254,10 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
     test_decide_worker_coschedule_order_neighbors_()
 
 
+@pytest.mark.skipif(
+    math.isfinite(dask.config.get("distributed.scheduler.worker-saturation")),
+    reason="Not relevant with queuing on; see https://github.com/dask/distributed/issues/7204",
+)
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
