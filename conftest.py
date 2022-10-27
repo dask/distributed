@@ -35,5 +35,8 @@ def pytest_collection_modifyitems(config, items):
         if "slow" in item.keywords:
             item.add_marker(skip_slow)
 
+        if "ws" in item.fixturenames:
+            item.add_marker(pytest.mark.workerstate)
+
 
 pytest_plugins = ["distributed.pytest_resourceleaks"]

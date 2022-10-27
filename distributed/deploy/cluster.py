@@ -9,12 +9,14 @@ from contextlib import suppress
 from inspect import isawaitable
 from typing import Any
 
-from tornado.ioloop import PeriodicCallback
+from packaging.version import parse as parse_version
+from tornado.ioloop import IOLoop
 
 import dask.config
 from dask.utils import _deprecated, format_bytes, parse_timedelta, typename
 from dask.widgets import get_template
 
+from distributed.compatibility import PeriodicCallback
 from distributed.core import Status
 from distributed.deploy.adaptive import Adaptive
 from distributed.objects import SchedulerInfo
@@ -55,7 +57,7 @@ class Cluster(SyncMethodMixin):
     """
 
     _supports_scaling = True
-    _cluster_info: dict = {}
+    __loop: IOLoop | None = None
 
     def __init__(
         self,
@@ -66,7 +68,6 @@ class Cluster(SyncMethodMixin):
         scheduler_sync_interval=1,
     ):
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
-        self.loop = self._loop_runner.loop
 
         self.scheduler_info = {"workers": {}}
         self.periodic_callbacks = {}
@@ -84,13 +85,31 @@ class Cluster(SyncMethodMixin):
         if name is None:
             name = str(uuid.uuid4())[:8]
 
-        # Mask class attribute with instance attribute
         self._cluster_info = {
             "name": name,
             "type": typename(type(self)),
-            **type(self)._cluster_info,
         }
         self.status = Status.created
+
+    @property
+    def loop(self) -> IOLoop | None:
+        loop = self.__loop
+        if loop is None:
+            # If the loop is not running when this is called, the LoopRunner.loop
+            # property will raise a DeprecationWarning
+            # However subsequent calls might occur - eg atexit, where a stopped
+            # loop is still acceptable - so we cache access to the loop.
+            self.__loop = loop = self._loop_runner.loop
+        return loop
+
+    @loop.setter
+    def loop(self, value: IOLoop) -> None:
+        warnings.warn(
+            "setting the loop property is deprecated", DeprecationWarning, stacklevel=2
+        )
+        if value is None:
+            raise ValueError("expected an IOLoop, got None")
+        self.__loop = value
 
     @property
     def name(self):
@@ -324,6 +343,22 @@ class Cluster(SyncMethodMixin):
     def logs(self, *args, **kwargs):
         return self.get_logs(*args, **kwargs)
 
+    def get_client(self):
+        """Return client for the cluster
+
+        If a client has already been initialized for the cluster, return that
+        otherwise initialize a new client object.
+        """
+        from distributed.client import Client
+
+        try:
+            current_client = Client.current()
+            if current_client and current_client.cluster == self:
+                return current_client
+        except ValueError:
+            pass
+        return Client(self)
+
     @property
     def dashboard_link(self):
         try:
@@ -460,14 +495,28 @@ class Cluster(SyncMethodMixin):
         )
 
     def _ipython_display_(self, **kwargs):
-        widget = self._widget()
-        if widget is not None:
-            return widget._ipython_display_(**kwargs)
-        else:
-            from IPython.display import display
+        """Display the cluster rich IPython repr"""
+        # Note: it would be simpler to just implement _repr_mimebundle_,
+        # but we cannot do that until we drop ipywidgets 7 support, as
+        # it does not provide a public way to get the mimebundle for a
+        # widget. So instead we fall back on the more customizable _ipython_display_
+        # and display as a side-effect.
+        from IPython.display import display
 
-            data = {"text/plain": repr(self), "text/html": self._repr_html_()}
-            display(data, raw=True)
+        widget = self._widget()
+        if widget:
+            import ipywidgets
+
+            if parse_version(ipywidgets.__version__) >= parse_version("8.0.0"):
+                mimebundle = widget._repr_mimebundle_(**kwargs) or {}
+                mimebundle["text/plain"] = repr(self)
+                mimebundle["text/html"] = self._repr_html_()
+                display(mimebundle, raw=True)
+            else:
+                display(widget, **kwargs)
+        else:
+            mimebundle = {"text/plain": repr(self), "text/html": self._repr_html_()}
+            display(mimebundle, raw=True)
 
     def __enter__(self):
         return self.sync(self.__aenter__)

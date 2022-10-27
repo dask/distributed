@@ -775,7 +775,7 @@ class _ZeroCopyWriter:
     # (which would be very large), and set a limit on the number of buffers to
     # pass to sendmsg.
     if hasattr(socket.socket, "sendmsg"):
-        # Note: can't use WINDOWS constant as it upsets mypy
+        # Note: WINDOWS constant doesn't work with `mypy --platform win32`
         if sys.platform == "win32":
             SENDMSG_MAX_COUNT = 16  # No os.sysconf available
         else:

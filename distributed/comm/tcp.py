@@ -111,8 +111,8 @@ def set_tcp_timeout(comm):
             logger.debug("Setting TCP user timeout: %d ms", timeout * 1000)
             TCP_USER_TIMEOUT = 18  # since Linux 2.6.37
             sock.setsockopt(socket.SOL_TCP, TCP_USER_TIMEOUT, timeout * 1000)
-    except OSError as e:
-        logger.warning("Could not set timeout on TCP stream: %s", e)
+    except OSError:
+        logger.exception("Could not set timeout on TCP stream.")
 
 
 def get_stream_address(comm):
@@ -137,7 +137,7 @@ def convert_stream_closed_error(obj, exc):
         # The stream was closed because of an underlying OS error
         exc = exc.real_error
         if isinstance(exc, ssl.SSLError):
-            if "UNKNOWN_CA" in exc.reason:
+            if exc.reason and "UNKNOWN_CA" in exc.reason:
                 raise FatalCommClosedError(f"in {obj}: {exc.__class__.__name__}: {exc}")
         raise CommClosedError(f"in {obj}: {exc.__class__.__name__}: {exc}") from exc
     else:
@@ -194,7 +194,9 @@ class TCP(Comm):
         pass
 
     def _get_finalizer(self):
-        def finalize(stream=self.stream, r=repr(self)):
+        r = repr(self)
+
+        def finalize(stream=self.stream, r=r):
             # stream is None if a StreamClosedError is raised during interpreter
             # shutdown
             if stream is not None and not stream.closed():
@@ -414,11 +416,51 @@ class RequireEncryptionMixin:
             )
 
 
+_NUMERIC_ONLY = socket.AI_NUMERICHOST | socket.AI_NUMERICSERV
+
+
+async def _getaddrinfo(host, port, *, family, type=socket.SOCK_STREAM):
+    # On Python3.8 we are observing problems, particularly on slow systems
+    # For additional info, see
+    # https://github.com/dask/distributed/pull/6847#issuecomment-1208179864
+    # https://github.com/dask/distributed/pull/6847
+    # https://github.com/dask/distributed/issues/6896
+    # https://github.com/dask/distributed/issues/6846
+    if sys.version_info >= (3, 9):
+        # If host and port are numeric, then getaddrinfo doesn't block and we
+        # can skip get_running_loop().getaddrinfo which is implemented by
+        # running in a ThreadPoolExecutor. So we try first with the
+        # _NUMERIC_ONLY flags set, and then only use the threadpool if that
+        # fails with EAI_NONAME:
+        try:
+            return socket.getaddrinfo(
+                host,
+                port,
+                family=family,
+                type=type,
+                flags=_NUMERIC_ONLY,
+            )
+        except socket.gaierror as e:
+            if e.errno != socket.EAI_NONAME:
+                raise
+
+    # That failed; it's a real hostname. We better use a thread.
+    return await asyncio.get_running_loop().getaddrinfo(
+        host, port, family=family, type=socket.SOCK_STREAM
+    )
+
+
 class _DefaultLoopResolver(netutil.Resolver):
     """
     Resolver implementation using `asyncio.loop.getaddrinfo`.
     backport from Tornado 6.2+
     https://github.com/tornadoweb/tornado/blob/3de78b7a15ba7134917a18b0755ea24d7f8fde94/tornado/netutil.py#L416-L432
+
+    With an additional optimization based on
+    https://github.com/python-trio/trio/blob/4edfd41bd5519a2e626e87f6c6ca9fb32b90a6f4/trio/_socket.py#L125-L192
+    (Copyright Contributors to the Trio project.)
+
+    And proposed to cpython in https://github.com/python/cpython/pull/31497/
     """
 
     async def resolve(
@@ -431,7 +473,7 @@ class _DefaultLoopResolver(netutil.Resolver):
         # so the addresses we return should still be usable with SOCK_DGRAM.
         return [
             (fam, address)
-            for fam, _, _, _, address in await asyncio.get_running_loop().getaddrinfo(
+            for fam, _, _, _, address in await _getaddrinfo(
                 host, port, family=family, type=socket.SOCK_STREAM
             )
         ]
@@ -446,9 +488,17 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
         kwargs = self._get_connect_args(**connection_args)
 
         try:
-            stream = await self.client.connect(
-                ip, port, max_buffer_size=MAX_BUFFER_SIZE, **kwargs
-            )
+            # server_hostname option (for SNI) only works with tornado.iostream.IOStream
+            if "server_hostname" in kwargs:
+                stream = await self.client.connect(
+                    ip, port, max_buffer_size=MAX_BUFFER_SIZE
+                )
+                stream = await stream.start_tls(False, **kwargs)
+            else:
+                stream = await self.client.connect(
+                    ip, port, max_buffer_size=MAX_BUFFER_SIZE, **kwargs
+                )
+
             # Under certain circumstances tornado will have a closed connnection with an
             # error and not raise a StreamClosedError.
             #
@@ -490,8 +540,10 @@ class TLSConnector(BaseTCPConnector):
     encrypted = True
 
     def _get_connect_args(self, **connection_args):
-        ctx = _expect_tls_context(connection_args)
-        return {"ssl_options": ctx}
+        tls_args = {"ssl_options": _expect_tls_context(connection_args)}
+        if connection_args.get("server_hostname"):
+            tls_args["server_hostname"] = connection_args["server_hostname"]
+        return tls_args
 
 
 class BaseTCPListener(Listener, RequireEncryptionMixin):
@@ -519,7 +571,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         self.tcp_server = TCPServer(max_buffer_size=MAX_BUFFER_SIZE, **self.server_args)
         self.tcp_server.handle_stream = self._handle_stream
         backlog = int(dask.config.get("distributed.comm.socket-backlog"))
-        for i in range(5):
+        for _ in range(5):
             try:
                 # When shuffling data between workers, there can
                 # really be O(cluster size) connection requests

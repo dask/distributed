@@ -7,6 +7,8 @@ API
 
 **Client**
 
+The client connects to and submits computation to a Dask cluster (such as a :class:`distributed.LocalCluster`)
+
 .. autosummary::
    Client
 
@@ -21,6 +23,8 @@ API
    get_client
    secede
    rejoin
+   print
+   warn
    Reschedule
 
 .. currentmodule:: distributed.recreate_tasks
@@ -182,6 +186,8 @@ Other
 .. autofunction:: distributed.get_client
 .. autofunction:: distributed.secede
 .. autofunction:: distributed.rejoin
+.. autofunction:: distributed.print
+.. autofunction:: distributed.warn
 .. autoclass:: distributed.Reschedule
 .. autoclass:: get_task_stream
 .. autoclass:: get_task_metadata

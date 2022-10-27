@@ -53,8 +53,8 @@ One can also pass additional parameters:
 All those parameters can be passed in several ways:
 
 * through the Dask :doc:`configuration file <configuration>`;
-* if using the command line, through options to ``dask-scheduler`` and
-  ``dask-worker``;
+* if using the command line, through options to ``dask scheduler`` and
+  ``dask worker``;
 * if using the API, through a ``Security`` object.  For example, here is
   how you might configure a ``Security`` object for client use:
 

@@ -61,7 +61,7 @@ class Worker(Process):
     remote_python: str
         Path to Python on remote node to run this worker.
     kwargs: dict
-        These will be passed through the dask-worker CLI to the
+        These will be passed through the dask worker CLI to the
         dask.distributed.Worker class
     """
 
@@ -204,7 +204,7 @@ class Scheduler(Process):
     remote_python: str
         Path to Python on remote node to run this scheduler.
     kwargs: dict
-        These will be passed through the dask-scheduler CLI to the
+        These will be passed through the dask scheduler CLI to the
         dask.distributed.Scheduler class
     """
 
@@ -298,9 +298,9 @@ old_cluster_kwargs = {
 
 def SSHCluster(
     hosts: list[str] | None = None,
-    connect_options: dict | list[dict] = {},
-    worker_options: dict = {},
-    scheduler_options: dict = {},
+    connect_options: dict | list[dict] | None = None,
+    worker_options: dict | None = None,
+    scheduler_options: dict | None = None,
     worker_module: str = "deprecated",
     worker_class: str = "distributed.Nanny",
     remote_python: str | list[str] | None = None,
@@ -327,22 +327,22 @@ def SSHCluster(
 
     Parameters
     ----------
-    hosts : list[str]
+    hosts
         List of hostnames or addresses on which to launch our cluster.
         The first will be used for the scheduler and the rest for workers.
-    connect_options : dict or list of dict, optional
+    connect_options
         Keywords to pass through to :func:`asyncssh.connect`.
         This could include things such as ``port``, ``username``, ``password``
         or ``known_hosts``. See docs for :func:`asyncssh.connect` and
         :class:`asyncssh.SSHClientConnectionOptions` for full information.
         If a list it must have the same length as ``hosts``.
-    worker_options : dict, optional
+    worker_options
         Keywords to pass on to workers.
-    scheduler_options : dict, optional
+    scheduler_options
         Keywords to pass on to scheduler.
-    worker_class: str
+    worker_class
         The python class to use to create the worker(s).
-    remote_python : str or list of str, optional
+    remote_python
         Path to Python on remote nodes.
 
     Examples
@@ -393,6 +393,10 @@ def SSHCluster(
     dask.distributed.Worker
     asyncssh.connect
     """
+    connect_options = connect_options or {}
+    worker_options = worker_options or {}
+    scheduler_options = scheduler_options or {}
+
     if worker_module != "deprecated":
         raise ValueError(
             "worker_module has been deprecated in favor of worker_class. "

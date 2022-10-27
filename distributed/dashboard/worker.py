@@ -20,6 +20,7 @@ def connect(application, http_server, worker, prefix=""):
     )
     application.add_application(bokeh_app)
     bokeh_app.initialize(IOLoop.current())
+    bokeh_app.start()
 
 
 applications = {

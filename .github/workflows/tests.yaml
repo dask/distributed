@@ -24,19 +24,24 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.8", "3.9", "3.10"]
+        queuing: [no_queue]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
         exclude:
           - os: macos-latest
             python-version: 3.9
         include:
-          - partition: "ci1"
-            partition-label: "ci1"
-          - partition: "not ci1"
-            partition-label: "notci1"
+          - os: ubuntu-latest
+            python-version: 3.9
+            queuing: queue
+            partition: "ci1"
+          - os: ubuntu-latest
+            python-version: 3.9
+            queuing: queue
+            partition: "not ci1"
 
         # Uncomment to stress-test the test suite for random failures.
-        # Must also change env.TEST_ID below.
+        # Must also change `export TEST_ID` in first step below.
         # This will take a LONG time and delay all PRs across the whole github.com/dask!
         # To avoid hamstringing other people, change 'on: [push, pull_request]' above
         # to just 'on: [push]'; this way the stress test will run exclusively in your
@@ -44,12 +49,21 @@ jobs:
         # run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
     env:
-      TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}
-      # TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}-${{ matrix.run }}
+      CONDA_FILE: continuous_integration/environment-${{ matrix.python-version }}.yaml
 
     steps:
+      - name: Set $TEST_ID
+        run: |
+          export PARTITION_LABEL=$( echo "${{ matrix.partition }}" | sed "s/ //" )
+          export TEST_ID="${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.queuing }}-$PARTITION_LABEL"
+          # Switch to this version for stress-test:
+          # export TEST_ID="${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.queuing }}-$PARTITION_LABEL-${{ matrix.run }}"
+          echo "TEST_ID: $TEST_ID"
+          echo "TEST_ID=$TEST_ID" >> $GITHUB_ENV
+        shell: bash
+
       - name: Checkout source
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3.1.0
         with:
           fetch-depth: 0
 
@@ -60,13 +74,38 @@ jobs:
           miniforge-version: latest
           condarc-file: continuous_integration/condarc
           use-mamba: true
-          python-version: ${{ matrix.python-version }}
-          environment-file: continuous_integration/environment-${{ matrix.python-version }}.yaml
           activate-environment: dask-distributed
 
       - name: Show conda options
         shell: bash -l {0}
         run: conda config --show
+
+      - name: Check if caching is enabled
+        uses: xarray-contrib/ci-trigger@v1.1
+        id: skip-caching
+        with:
+          keyword: "[skip-caching]"
+
+      - name: Get Date
+        if: steps.skip-caching.outputs.trigger-found != 'true'
+        id: get-date
+        run: echo "::set-output name=today::$(/bin/date -u '+%Y%m%d')"
+        shell: bash
+
+      - name: Cache Conda env
+        if: steps.skip-caching.outputs.trigger-found != 'true'
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.CONDA }}/envs
+          key: conda-${{ matrix.os }}-${{ steps.get-date.outputs.today }}-${{ hashFiles(env.CONDA_FILE) }}-${{ env.CACHE_NUMBER }}
+        env:
+          # Increase this value to reset cache if continuous_integration/environment-${{ matrix.python-version }}.yaml has not changed
+          CACHE_NUMBER: 0
+        id: cache
+
+      - name: Update environment
+        run: mamba env update -n dask-distributed -f ${{ env.CONDA_FILE }}
+        if: steps.skip-caching.outputs.trigger-found == 'true' || steps.cache.outputs.cache-hit != 'true'
 
       - name: Install
         shell: bash -l {0}
@@ -96,15 +135,21 @@ jobs:
         if: ${{ matrix.os != 'windows-latest' }}
         run: sed -i.bak 's/timeout_method = thread/timeout_method = signal/' setup.cfg
 
+      - name: Disable IPv6
+        shell: bash -l {0}
+        # FIXME ipv6-related failures on Ubuntu github actions CI
+        # https://github.com/dask/distributed/issues/4514
+        if: ${{ matrix.os  == 'ubuntu-latest' }}
+        run: echo "DISABLE_IPV6=1" >> $GITHUB_ENV
+
+      - name: Set up dask env for job queuing
+        shell: bash -l {0}
+        if: ${{ matrix.queuing == 'queue' }}
+        run: echo "DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=1.0" >> $GITHUB_ENV
+
       - name: Print host info
         shell: bash -l {0}
         run: |
-          if [[ "${{ matrix.os }}" = "ubuntu-latest" ]]; then
-              # FIXME ipv6-related failures on Ubuntu github actions CI
-              # https://github.com/dask/distributed/issues/4514
-              export DISABLE_IPV6=1
-          fi
-
           python continuous_integration/scripts/host_info.py
 
       - name: Test
@@ -113,12 +158,6 @@ jobs:
         env:
           PYTHONFAULTHANDLER: 1
         run: |
-          if [[ "${{ matrix.os }}" = "ubuntu-latest" ]]; then
-              # FIXME ipv6-related failures on Ubuntu github actions CI
-              # https://github.com/dask/distributed/issues/4514
-              export DISABLE_IPV6=1
-          fi
-
           source continuous_integration/scripts/set_ulimit.sh
           set -o pipefail
           mkdir reports
@@ -147,23 +186,26 @@ jobs:
       #   uses: mxschmitt/action-tmate@v3
 
       - name: Coverage
-        uses: codecov/codecov-action@v1
+        uses: codecov/codecov-action@v3
+        with:
+          functionalities: network
 
       - name: Upload test results
         # ensure this runs even if pytest fails
         if: >
           always() &&
           (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure')
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ env.TEST_ID }}
           path: reports
+
       - name: Upload gen_cluster dumps for failed tests
         # ensure this runs even if pytest fails
         if: >
           always() &&
           (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure')
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ env.TEST_ID }}_cluster_dumps
           path: test_cluster_dump
@@ -177,7 +219,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Upload
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: Event File
           path: ${{ github.event_path }}

@@ -11,6 +11,7 @@ from time import sleep
 
 import psutil
 import pytest
+from tlz import merge
 
 import dask.config
 
@@ -20,8 +21,21 @@ from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import Status
 from distributed.metrics import monotonic
 from distributed.spill import has_zict_210
-from distributed.utils_test import captured_logger, gen_cluster, inc
+from distributed.utils_test import (
+    NO_AMM,
+    captured_logger,
+    gen_cluster,
+    inc,
+    wait_for_state,
+)
 from distributed.worker_memory import parse_memory_limit
+from distributed.worker_state_machine import (
+    ComputeTaskEvent,
+    ExecuteSuccessEvent,
+    GatherDep,
+    GatherDepSuccessEvent,
+    TaskErredMsg,
+)
 
 requires_zict_210 = pytest.mark.skipif(
     not has_zict_210,
@@ -52,6 +66,14 @@ async def test_parse_memory_limit_worker(s, w):
     assert w.memory_manager.memory_limit == 2e9
 
 
+@gen_cluster(nthreads=[("", 1)], worker_kwargs={"memory_limit": "0.5"})
+async def test_parse_memory_limit_worker_relative(s, w):
+    assert w.memory_manager.memory_limit > 0.5
+    assert w.memory_manager.memory_limit == pytest.approx(
+        distributed.system.MEMORY_LIMIT * 0.5
+    )
+
+
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
@@ -73,6 +95,46 @@ async def test_parse_memory_limit_nanny(c, s, n):
 )
 async def test_dict_data_if_no_spill_to_disk(s, w):
     assert type(w.data) is dict
+
+
+class WorkerData(dict):
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.kwargs = kwargs
+
+
+class WorkerDataLocalDirectory(dict):
+    def __init__(self, worker_local_directory, **kwargs):
+        super().__init__()
+        self.local_directory = worker_local_directory
+        self.kwargs = kwargs
+
+
+@gen_cluster(
+    nthreads=[("", 1)], Worker=Worker, worker_kwargs={"data": WorkerDataLocalDirectory}
+)
+async def test_worker_data_callable_local_directory(s, w):
+    assert type(w.memory_manager.data) is WorkerDataLocalDirectory
+    assert w.memory_manager.data.local_directory == w.local_directory
+
+
+@gen_cluster(
+    nthreads=[("", 1)],
+    Worker=Worker,
+    worker_kwargs={"data": (WorkerDataLocalDirectory, {"a": "b"})},
+)
+async def test_worker_data_callable_local_directory_kwargs(s, w):
+    assert type(w.memory_manager.data) is WorkerDataLocalDirectory
+    assert w.memory_manager.data.local_directory == w.local_directory
+    assert w.memory_manager.data.kwargs == {"a": "b"}
+
+
+@gen_cluster(
+    nthreads=[("", 1)], Worker=Worker, worker_kwargs={"data": (WorkerData, {"a": "b"})}
+)
+async def test_worker_data_callable_kwargs(s, w):
+    assert type(w.memory_manager.data) is WorkerData
+    assert w.memory_manager.data.kwargs == {"a": "b"}
 
 
 class CustomError(Exception):
@@ -97,10 +159,17 @@ async def assert_basic_futures(c: Client) -> None:
 
 
 @gen_cluster(client=True)
-async def test_fail_to_pickle_target_1(c, s, a, b):
-    """Test failure to serialize triggered by key which is individually larger
-    than target. The data is lost and the task is marked as failed;
-    the worker remains in usable condition.
+async def test_fail_to_pickle_execute_1(c, s, a, b):
+    """Test failure to serialize triggered by computing a key which is individually
+    larger than target. The data is lost and the task is marked as failed; the worker
+    remains in usable condition.
+
+    See also
+    --------
+    test_workerstate_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_flight
+    test_fail_to_pickle_execute_2
+    test_fail_to_pickle_spill
     """
     x = c.submit(FailToPickle, reported_size=100e9, key="x")
     await wait(x)
@@ -113,6 +182,70 @@ async def test_fail_to_pickle_target_1(c, s, a, b):
     await assert_basic_futures(c)
 
 
+class FailStoreDict(UserDict):
+    def __setitem__(self, key, value):
+        raise CustomError()
+
+
+def test_workerstate_fail_to_pickle_execute_1(ws_with_running_task):
+    """Same as test_fail_to_pickle_target_execute_1
+
+    See also
+    --------
+    test_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_flight
+    test_fail_to_pickle_execute_2
+    test_fail_to_pickle_spill
+    """
+    ws = ws_with_running_task
+    assert not ws.data
+    ws.data = FailStoreDict()
+
+    instructions = ws.handle_stimulus(
+        ExecuteSuccessEvent.dummy("x", None, stimulus_id="s1")
+    )
+    assert instructions == [TaskErredMsg.match(key="x", stimulus_id="s1")]
+    assert ws.tasks["x"].state == "error"
+
+
+@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/6705")
+def test_workerstate_fail_to_pickle_flight(ws):
+    """Same as test_workerstate_fail_to_pickle_execute_1, but the task was
+    computed on another host and for whatever reason it did not fail to pickle when it
+    was sent over the network.
+
+    See also
+    --------
+    test_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_execute_1
+    test_fail_to_pickle_execute_2
+    test_fail_to_pickle_spill
+
+    See also test_worker_state_machine.py::test_gather_dep_failure, where the task
+    instead fails to unpickle when leaving the network stack.
+    """
+    assert not ws.data
+    ws.data = FailStoreDict()
+    ws.total_resources = {"R": 1}
+    ws.available_resources = {"R": 1}
+    ws2 = "127.0.0.1:2"
+
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "y", who_has={"x": [ws2]}, resource_restrictions={"R": 1}, stimulus_id="s1"
+        ),
+        GatherDepSuccessEvent(
+            worker=ws2, total_nbytes=1, data={"x": 123}, stimulus_id="s2"
+        ),
+    )
+    assert instructions == [
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
+        TaskErredMsg.match(key="x", stimulus_id="s2"),
+    ]
+    assert ws.tasks["x"].state == "error"
+    assert ws.tasks["y"].state == "waiting"  # Not constrained
+
+
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
@@ -123,10 +256,17 @@ async def test_fail_to_pickle_target_1(c, s, a, b):
         "distributed.worker.memory.pause": False,
     },
 )
-async def test_fail_to_pickle_target_2(c, s, a):
-    """Test failure to spill triggered by key which is individually smaller
-    than target, so it is not spilled immediately. The data is retained and
-    the task is NOT marked as failed; the worker remains in usable condition.
+async def test_fail_to_pickle_execute_2(c, s, a):
+    """Test failure to spill triggered by computing a key which is individually smaller
+    than target, so it is not spilled immediately. The data is retained and the task is
+    NOT marked as failed; the worker remains in usable condition.
+
+    See also
+    --------
+    test_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_flight
+    test_fail_to_pickle_spill
     """
     x = c.submit(FailToPickle, reported_size=256, key="x")
     await wait(x)
@@ -157,7 +297,15 @@ async def test_fail_to_pickle_target_2(c, s, a):
     },
 )
 async def test_fail_to_pickle_spill(c, s, a):
-    """Test failure to evict a key, triggered by the spill threshold"""
+    """Test failure to evict a key, triggered by the spill threshold.
+
+    See also
+    --------
+    test_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_execute_1
+    test_workerstate_fail_to_pickle_flight
+    test_fail_to_pickle_execute_2
+    """
     a.monitor.get_process_memory = lambda: 701 if a.data.fast else 0
 
     with captured_logger(logging.getLogger("distributed.spill")) as logs:
@@ -488,11 +636,14 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
 @gen_cluster(
     client=True,
     nthreads=[("", 1), ("", 1)],
-    config={
-        "distributed.worker.memory.target": False,
-        "distributed.worker.memory.spill": False,
-        "distributed.worker.memory.pause": False,
-    },
+    config=merge(
+        NO_AMM,
+        {
+            "distributed.worker.memory.target": False,
+            "distributed.worker.memory.spill": False,
+            "distributed.worker.memory.pause": False,
+        },
+    ),
 )
 async def test_pause_prevents_deps_fetch(c, s, a, b):
     """A worker is paused while there are dependencies ready to fetch, but all other
@@ -538,8 +689,7 @@ async def test_pause_prevents_deps_fetch(c, s, a, b):
     # - ensure_communicating is triggered again
     # - ensure_communicating refuses to fetch y because the worker is paused
 
-    while "y" not in a.state.tasks or a.state.tasks["y"].state != "fetch":
-        await asyncio.sleep(0.01)
+    await wait_for_state("y", "fetch", a)
     await asyncio.sleep(0.1)
     assert a.state.tasks["y"].state == "fetch"
     assert "y" not in a.data
@@ -593,10 +743,9 @@ async def test_override_data_worker(s):
     async with Worker(s.address, data=UserDict) as w:
         assert type(w.data) is UserDict
 
-    data = UserDict({"x": 1})
+    data = UserDict()
     async with Worker(s.address, data=data) as w:
         assert w.data is data
-        assert w.data == {"x": 1}
 
 
 @gen_cluster(
@@ -821,16 +970,21 @@ async def test_pause_while_spilling(c, s, a):
             return bool, (paused,)
 
     futs = c.map(SlowSpill, range(N_TOTAL))
-    while len(a.data.slow) < N_PAUSE + 1:
+    while len(a.data.slow) < (N_PAUSE + 1 if a.state.ready else N_PAUSE):
         await asyncio.sleep(0.01)
 
     assert a.status == Status.paused
     # Worker should have become paused after the first `SlowSpill` was evicted, because
     # the spill to disk took longer than the memory monitor interval.
     assert len(a.data.fast) == 0
-    assert len(a.data.slow) == N_PAUSE + 1
-    n_spilled_while_paused = sum(paused is True for paused in a.data.slow.values())
-    assert N_PAUSE <= n_spilled_while_paused <= N_PAUSE + 1
+    # With queuing enabled, after the 3rd `SlowSpill` has been created, there's a race
+    # between the scheduler sending the worker a new task, and the memory monitor
+    # running and pausing the worker. If the worker gets paused before the 4th task
+    # lands, only 3 will be in memory. If after, the 4th will block on the semaphore
+    # until one of the others is spilled.
+    assert len(a.data.slow) in (N_PAUSE, N_PAUSE + 1)
+    n_spilled_while_not_paused = sum(paused is False for paused in a.data.slow.values())
+    assert 0 <= n_spilled_while_not_paused <= 1
 
 
 @pytest.mark.slow

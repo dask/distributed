@@ -1,6 +1,403 @@
 Changelog
 =========
 
+.. _v2022.10.0:
+
+2022.10.0
+---------
+
+Released on October 14, 2022
+
+.. note::
+
+    This release deprecates ``dask-scheduler``, ``dask-worker``, and ``dask-ssh``
+    CLIs in favor of ``dask scheduler``, ``dask worker``, and ``dask ssh``,
+    respectively. The old-style CLIs will continue to work for a time, but will be
+    removed in a future release.
+
+    As part of this migration the ``--reconnect``, ``--nprocs``, ``--bokeh``,
+    ``--bokeh-port`` CLI options have also been removed for both the old- and new-style
+    CLIs. These options had already previously been deprecated.
+    
+
+Enhancements
+^^^^^^^^^^^^
+- Use of new dask CLI (:pr:`6735`) `Doug Davis`_
+- Refactor occupancy (:pr:`7075`) `Hendrik Makait`_
+- Expose managed/unmanaged/spilled memory to Prometheus (:pr:`7112`) `crusaderky`_
+- Round up ``saturation-factor`` (:pr:`7116`) `Gabe Joseph`_
+- Return default on ``KeyError`` at any level in ``get_metadata`` (:pr:`7109`) `Hendrik Makait`_
+- Count task states per task prefix and expose to Prometheus (:pr:`7088`) `Nat Tabris`_
+- Add ``scheduler-sni`` option for dask workers (:pr:`6290`) `Burt Holzman`_
+
+Bug Fixes
+^^^^^^^^^
+- Improve exception catching in UCX communication (:pr:`7132`) `Peter Andreas Entschev`_
+- Improve robustness of ``PipInstall`` plugin (:pr:`7111`) `Hendrik Makait`_
+
+Maintenance
+^^^^^^^^^^^
+- Fix dependencies that should point to ``dask/dask`` (:pr:`7138`) `James Bourbeau`_
+- Hold on to ``z.sum()`` until test completes (:pr:`7136`) `Lawrence Mitchell`_
+- Bump ``peter-evans/create-pull-request`` from 3 to 4 (:pr:`7120`)
+- Update typing for ``system_monitor`` after ``python/typeshed#8829`` (:pr:`7131`) `Lawrence Mitchell`_
+- Fix two potentially flaky queuing tests (:pr:`7124`) `Gabe Joseph`_
+- Bump ``EnricoMi/publish-unit-test-result-action`` from 1 to 2 (:pr:`7121`)
+- Bump ``actions/checkout`` from 2 to 3.1.0 (:pr:`7119`)
+- Revamp ``SystemMonitor`` (:pr:`7097`) `crusaderky`_
+- Bump ``actions/cache`` from 2 to 3 (:pr:`7118`)
+- Bump ``actions/upload-artifact`` from 2 to 3 (:pr:`7117`)
+- Move dependabot configuration file (:pr:`7115`) `James Bourbeau`_
+- Enable dependabot for GitHub Actions (:pr:`7101`) `Florian Jetter`_
+- Update coverage upload action (:pr:`7100`) `Florian Jetter`_
+- Adjust hardware benchmarks bokeh test (:pr:`7096`) `Florian Jetter`_
+- Multi-platform mypy checks (:pr:`7094`) `crusaderky`_
+- Update gpuCI ``RAPIDS_VER`` to ``22.12`` (:pr:`7084`)
+
+
+.. _v2022.9.2:
+
+2022.9.2
+--------
+
+Released on September 30, 2022
+
+Enhancements
+^^^^^^^^^^^^
+- Smarter stealing with dependencies (:pr:`7024`) `Hendrik Makait`_
+- Enable Active Memory Manager by default (:pr:`7042`) `crusaderky`_
+- Allow timeout strings in ``distributed.wait`` (:pr:`7081`) `James Bourbeau`_
+- Make AMM memory measure configurable (:pr:`7062`) `crusaderky`_
+- AMM support for actors (:pr:`7072`) `crusaderky`_
+- Expose ``message-bytes-limit`` in config (:pr:`7074`) `Hendrik Makait`_
+- Detect mismatching Python version in scheduler (:pr:`7018`) `Hendrik Makait`_
+- Improve ``KilledWorker`` message users see (:pr:`7043`) `James Bourbeau`_
+- Support for cgroups v2 and respect soft limits (:pr:`7051`) `Samantha Hughes`_
+
+Bug Fixes
+^^^^^^^^^
+- Catch ``BaseException`` on UCX read error (:pr:`6996`) `Peter Andreas Entschev`_
+- Fix transfer limiting in ``_select_keys_for_gather`` (:pr:`7071`) `Hendrik Makait`_
+- Parse ``worker-saturation`` if a string (:pr:`7064`) `Gabe Joseph`_
+- ``Nanny(config=...)`` parameter overlays global dask config (:pr:`7069`) `crusaderky`_
+- Ensure default clients don't propagate to subprocesses (:pr:`7028`) `Florian Jetter`_
+
+Documentation
+^^^^^^^^^^^^^
+- Improve documentation of ``message-bytes-limit`` (:pr:`7077`) `Hendrik Makait`_
+- Minor tweaks to Sphinx documentation (:pr:`7041`) `crusaderky`_
+- Improve ``upload_file`` API documentation (:pr:`7040`) `Florian Jetter`_
+
+Maintenance
+^^^^^^^^^^^
+- ``test_serialize_numba``: Workaround issue with ``np.empty_like`` in NP 1.23 (:pr:`7089`) `Graham Markall`_
+- Type platform constants for ``mypy`` (:pr:`7091`) `jakirkham`_
+- ``dask-worker-space`` (:pr:`7054`) `crusaderky`_
+- Remove failing test case (:pr:`7087`) `Hendrik Makait`_
+- ``test_default_client`` (:pr:`7058`) `crusaderky`_
+- Fix ``pre-commit`` fails with recent versions of ``mypy`` and ``pandas`` (:pr:`7068`) `crusaderky`_
+- Add factorization utility (:pr:`7048`) `James Bourbeau`_
+
+
+.. _v2022.9.1:
+
+2022.9.1
+--------
+
+Released on September 16, 2022
+
+Enhancements
+^^^^^^^^^^^^
+- Add dashboard component for size of open data transfers (:pr:`6982`) `Hendrik Makait`_
+- Allow very fast keys and very expensive transfers as stealing candidates (:pr:`7022`) `Florian Jetter`_
+
+Bug Fixes
+^^^^^^^^^
+- No longer double count transfer cost in stealing (:pr:`7036`) `Hendrik Makait`_
+
+Maintenance
+^^^^^^^^^^^
+- Make ``test_wait_first_completed`` robust (:pr:`7039`) `Florian Jetter`_
+- Partial annotations for ``SchedulerState`` (:pr:`7023`) `crusaderky`_
+- Add more type annotations to ``stealing.py`` (:pr:`7009`) `Florian Jetter`_
+- Update codecov settings (:pr:`7015`) `Florian Jetter`_
+- Speed up ``test_balance`` (:pr:`7008`) `Florian Jetter`_
+- Fix test report after queuing job added (:pr:`7012`) `Gabe Joseph`_
+- Clean up env variables in Gihub Actions (:pr:`7001`) `crusaderky`_
+- Make ``test_steal_reschedule_reset_in_flight_occupancy`` non timing dependent (:pr:`7010`) `Florian Jetter`_
+- Replaced ``distributed.utils.key_split`` with ``dask.utils.key_split`` (:pr:`7005`) `Luke Conibear`_
+- Revert "Revert "Limit incoming data transfers by amount of data" (:pr:`6994)" (:pr:`7007`) `Florian Jetter`_
+- CI job running tests with queuing on (:pr:`6989`) `Gabe Joseph`_
+- Fix ``distributed/tests/test_client_executor.py::test_wait`` (:pr:`6990`) `Florian Jetter`_
+
+
+.. _v2022.9.0:
+
+2022.9.0
+--------
+
+Released on September 2, 2022
+
+Enhancements
+^^^^^^^^^^^^
+- Limit incoming data transfers by amount of data (:pr:`6975`) `Hendrik Makait`_
+- Expose transfer-related metrics in ``Worker.get_metrics`` and ``WorkerMetricCollector`` (:pr:`6936`) `Hendrik Makait`_
+- Withhold root tasks (no co assignment) (:pr:`6614`) `Gabe Joseph`_
+- Improve differentiation between incoming/outgoing connections and transfers (:pr:`6933`) `Hendrik Makait`_
+- Change memory bars color on spilling/paused status (:pr:`6959`) `crusaderky`_
+- Ensure restart clears taskgroups et al (:pr:`6944`) `Florian Jetter`_
+- Optimise ``scheduler.get_comm_cost`` set difference (:pr:`6931`) `Lawrence Mitchell`_
+- Expose setting multiple protocols and ports via the ``dask-scheduler`` CLI (:pr:`6898`) `Jacob Tomlinson`_
+- Make ``TextProgressBar`` clear the line when finished (:pr:`5968`) `Vincenzo Eduardo Padulano`_
+
+Bug Fixes
+^^^^^^^^^
+- Revert ``getaddrinfo`` fast path for Python 3.8 (:pr:`6978`) `Florian Jetter`_
+- cancelled/resumed->long-running transitions (:pr:`6916`) `crusaderky`_
+
+Deprecations
+^^^^^^^^^^^^
+- Deprecate default value for ``Client.wait_for_workers`` (:pr:`6942`) `Florian Jetter`_
+
+Documentation
+^^^^^^^^^^^^^
+- Document ``Scheduler`` and ``Worker`` state machine (:pr:`6948`) `crusaderky`_
+- Insert ``memory_limit`` parameter into ``LocalCluster`` docstring (:pr:`6839`) `Crislana Rafael`_
+
+Maintenance
+^^^^^^^^^^^
+- Revert "Limit incoming data transfers by amount of data" (:pr:`6994`) `Florian Jetter`_
+- Cache conda environment between CI test runs (:pr:`6855`) `Charles Blackmon-Luca`_
+- Revert "Fix co-assignment for binary operations" (:pr:`6985`) `Gabe Joseph`_
+- Cache ``test_report`` shelves in CI (:pr:`6937`) `Florian Jetter`_
+- Cleanup ``ipywidgets`` mocking (:pr:`6918`) `Thomas Grainger`_
+- Improve testing of ``{Scheduler|Worker}MetricCollector`` (:pr:`6945`) `Hendrik Makait`_
+- Clean up nanny ``WorkerProcess.kill`` (:pr:`6972`) `Gabe Joseph`_
+- Rewrite ``test_reconnect`` to use subprocess to kill scheduler reliably (:pr:`6967`) `Florian Jetter`_
+- Task state domain on the scheduler side (:pr:`6929`) `crusaderky`_
+- Remove ``@avoid_ci`` from ``test_steal`` (:pr:`6872`) `crusaderky`_
+- Use ``async with Worker`` in tests (:pr:`6958`) `crusaderky`_
+- Ignore spurious warnings in ``test_quiet_close_process`` (:pr:`6955`) `crusaderky`_
+- Fix tests on Windows (:pr:`6954`) `Hendrik Makait`_
+- Prevent duplicates in ``HeapSet.sorted()`` (:pr:`6952`) `crusaderky`_
+- Propagate worker address and improve ``_remove_from_processing`` behavior (:pr:`6946`) `Hendrik Makait`_
+- Add ``HeapSet._sorted`` internal flag (:pr:`6949`) `Gabe Joseph`_
+- Add ``HeapSet.peekn`` (:pr:`6947`) `Gabe Joseph`_
+- Fix ``pyright`` error when importing from ``distributed`` (:pr:`6904`) `Ian Liu Rodrigues`_
+- Always return ``ws.address`` from ``_remove_from_processing`` (:pr:`6884`) `Hendrik Makait`_
+- Use ``async with Client:`` in tests (:pr:`6921`) `Thomas Grainger`_
+- Ensure relative memory limits work as percentage of system memory (:pr:`6923`) `Florian Jetter`_
+
+
+.. _v2022.8.1:
+
+2022.8.1
+--------
+
+Released on August 19, 2022
+
+New Features
+^^^^^^^^^^^^
+
+Enhancements
+^^^^^^^^^^^^
+- Drop comparison of versions against all clients (:pr:`6861`) `Hendrik Makait`_
+- Log the worker name if set (:pr:`6866`) `Johannes Lange`_
+- Skip ``getaddrinfo`` thread if host is already resolved, using ``socket.AI_NUMERIC*`` (:pr:`6847`) `Thomas Grainger`_
+- Display unexpected state in ``Worker.execute`` validation (:pr:`6856`) `James Bourbeau`_
+- ``pre-spawn-environ`` (:pr:`6841`) `crusaderky`_
+- Dump ``has_what``, ``missing_dep_flight`` (:pr:`6830`) `Gabe Joseph`_
+
+Bug Fixes
+^^^^^^^^^
+- ``cancelled`` / ``resumed`` -> ``rescheduled`` transition (:pr:`6913`) `crusaderky`_
+- Fix resource deallocation for resumed tasks (:pr:`6914`) `crusaderky`_
+- Only close scheduler in ``SpecCluster`` if it exists (:pr:`6888`) `Matthew Rocklin`_
+- Fix issue if ``exc.reason`` is ``None`` (:pr:`6881`) `Hendrik Makait`_
+- Always close ``BatchedSend`` write coroutines (:pr:`6865`) `Gabe Joseph`_
+- Harden preamble of ``Worker.execute`` against race conditions (:pr:`6878`) `crusaderky`_
+
+Documentation
+^^^^^^^^^^^^^
+- Fix typo (:pr:`6870`) `Pieter Gijsbers`_
+
+Maintenance
+^^^^^^^^^^^
+- Use retries for the test report (:pr:`6926`) `Florian Jetter`_
+- Duplicated code: ``in_flight_tasks`` validation (:pr:`6917`) `crusaderky`_
+- ``ipywidgets`` 8 compatibility (:pr:`6912`) `James Bourbeau`_
+- Overhaul transitions for the ``resumed`` state (:pr:`6699`) `crusaderky`_
+- Don't upgrade to ``ipywidgets`` 8 (:pr:`6910`) `crusaderky`_
+- Clean up ``cluster`` process reaping (:pr:`6840`) `Gabe Joseph`_
+- Don't use ``bokeh`` ``Figure`` in tests (:pr:`6721`) `Bryan Van de Ven`_
+- Work around incompatibility of crick with setuptools 65 (:pr:`6887`) `crusaderky`_
+- Add max version constraint for ``dask-core`` in nightlies (:pr:`6862`) `Charles Blackmon-Luca`_
+- Replace ``port = random.randint(`` with ``port = d.utils.open_port`` (:pr:`6883`) `Thomas Grainger`_
+- Fix flaky ``test_wall_clock`` (:pr:`6879`) `crusaderky`_
+- Add descriptive error message to assert (:pr:`6871`) `Hendrik Makait`_
+- Increase timeout in ``test_quiet_process`` (:pr:`6857`) `Florian Jetter`_
+- Descriptive title for test report (:pr:`6849`) `Hendrik Makait`_
+- Add ``flake8-bugbear`` as plugin to ``pre-commit`` (:pr:`6809`) `Hendrik Makait`_
+- Remove redundant use of ``with clean():`` (:pr:`6852`) `Thomas Grainger`_
+- Show actual Job URL on test report (:pr:`6837`) `Florian Jetter`_
+- Update ``pre-commit`` dependencies (:pr:`6851`) `Hendrik Makait`_
+- Call exit callback even if ``AsyncProcess`` is reaped elsewhere (:pr:`6684`) `Thomas Grainger`_
+- Avoid function calls in argument defaults (:pr:`6812`) `Hendrik Makait`_
+- Ignore warning for unclose ``SSHCluster`` in tests (:pr:`6827`) `Florian Jetter`_
+
+.. _v2022.8.0:
+
+2022.8.0
+--------
+
+Released on August 5, 2022
+
+New Features
+^^^^^^^^^^^^
+- Add Jupyter Server to Dask Scheduler (:pr:`6737`) `Matthew Rocklin`_
+
+Enhancements
+^^^^^^^^^^^^
+- Human-readable formatting for disk I/O and renaming to diff net and disk (:pr:`6835`) `Hendrik Makait`_
+- Add ``Cluster.get_client()`` method (:pr:`6745`) `Julia Signell`_
+- Start bokeh app to activate bokeh's clean session callbacks (:pr:`6728`) `Martí Zamora`_
+
+Bug Fixes
+^^^^^^^^^
+- Ensure Nanny doesn't restart workers that fail to start, and joins subprocess (:pr:`6427`) `Gabe Joseph`_
+- Don't connect to cluster subprocesses at shutdown (:pr:`6829`) `Gabe Joseph`_
+- Fix ``restart`` wait for workers edge case (:pr:`6823`) `Gabe Joseph`_
+- Fix spilled size calculation in ``Slow`` (:pr:`6789`) `Hendrik Makait`_
+
+Deprecations
+^^^^^^^^^^^^
+- Deprecate passing stopped loops to ``LoopRunner`` (and therefore Client/Cluster) (:pr:`6680`) `Thomas Grainger`_
+
+Documentation
+^^^^^^^^^^^^^
+- Add text to top of API docs to make sure that users are exposed to ``LocalCluster`` early (:pr:`6793`) `Julia Signell`_
+- Change title for plugins documentation (:pr:`6733`) `Sarah Charlotte Johnson`_
+
+Maintenance
+^^^^^^^^^^^
+- Only set 5s connect timeout in ``gen_cluster`` tests (:pr:`6822`) `Gabe Joseph`_
+- Fix flaky ``test_worker_who_has_clears_after_failed_connection`` (:pr:`6832`) `Gabe Joseph`_
+- Add missing skips for pyarrow (:pr:`6787`) `Elliott Sales de Andrade`_
+- Miscellaneous ``flake8-bugbear`` issues (:pr:`6814`) `Hendrik Makait`_
+- Assert otherwise pointless comparisons (`B015`) (:pr:`6811`) `Hendrik Makait`_
+- Remove unused functions from ``utils_test.py`` (:pr:`6807`) `Hendrik Makait`_
+- Fix Jupyter security note (:pr:`6818`) `Jacob Tomlinson`_
+- Improve ``check_thread_leak`` output (:pr:`6797`) `Gabe Joseph`_
+- Use contextmanager to ensure clients are closed and do not leak (:pr:`6817`) `Hendrik Makait`_
+- Robust thread termination in ``test_watch`` and ``test_watch_requires_lock_to_run`` (:pr:`6788`) `Hendrik Makait`_
+- Avoid unused loop control variable or name them ``_`` (:pr:`6813`) `Hendrik Makait`_
+- Replace ``assert False`` where an exception should always be thrown (:pr:`6815`) `Hendrik Makait`_
+- Avoid mutable argument defaults in tests (:pr:`6810`) `Hendrik Makait`_
+- Avoid mutable argument defaults outside of tests (:pr:`6665`) `Hendrik Makait`_
+- Update gpuCI ``RAPIDS_VER`` to ``22.10`` (:pr:`6798`)
+- Use same Python for dask worker tests (:pr:`6786`) `Elliott Sales de Andrade`_
+
+
+.. _v2022.7.1:
+
+2022.7.1
+--------
+
+Released on July 22, 2022
+
+New Features
+^^^^^^^^^^^^
+- Dashboard for failed tasks (:pr:`6595`) `Ian Rose`_
+
+Enhancements
+^^^^^^^^^^^^
+- Wait for workers to return in ``Client.restart`` (:pr:`6714`) `Gabe Joseph`_
+- Remove global mutable ``Cluster._cluster_info`` (:pr:`6487`) `Thomas Grainger`_
+
+Bug Fixes
+^^^^^^^^^
+- Fix: nvml no early init (:pr:`6678`) `Lawrence Mitchell`_
+- Fix bug when restarting client  (:pr:`6654`) `Iain Dorrington`_
+- Failure to spill breaks available resources (:pr:`6703`) `crusaderky`_
+- Fix resource allocation for tasks with dependencies (:pr:`6676`) `Hendrik Makait`_
+
+Maintenance
+^^^^^^^^^^^
+- Revert "Set ``MALLOC_TRIM_THRESHOLD_`` before interpreter start" (:pr:`6777`) `Gabe Joseph`_
+- Fix mypy lint in CI (:pr:`6779`) `jakirkham`_
+- Remove ``test_restart_fast_sync``, ``test_fast_kill`` (:pr:`6750`) `Gabe Joseph`_
+- Fix flaky ``test_async_task_group_call_later_executes_delayed_task_in_background`` (:pr:`6744`) `Hendrik Makait`_
+- Drop redundant ``geninc`` (:pr:`6740`) `Hendrik Makait`_
+- Remove unused ``worker_coroutines`` (:pr:`6739`) `Gabe Joseph`_
+- Store ready and constrained tasks in heapsets (:pr:`6711`) `crusaderky`_
+- Improve tests for cancelled state (:pr:`6717`) `crusaderky`_
+- Future-proof Bokeh value import (:pr:`6707`) `Bryan Van de Ven`_
+- Revert temporary stress test (:pr:`6712`) `crusaderky`_
+- Validate constrained tasks (:pr:`6698`) `crusaderky`_
+- Minor quality-of-life tweaks to cancelled state (:pr:`6701`) `crusaderky`_
+- Pickle worker state machine exceptions (:pr:`6702`) `crusaderky`_
+- Partial matches for worker state machine instructions (:pr:`6704`) `crusaderky`_
+- Automatically mark all WorkerState tests (:pr:`6706`) `crusaderky`_
+
+
+.. _v2022.7.0:
+
+2022.7.0
+--------
+
+Released on July 8, 2022
+
+Enhancements
+^^^^^^^^^^^^
+- Use a tempdir path by default instead of cwd for the worker scratch dir (:pr:`6658`) `Florian Jetter`_
+- Add ``WorkerState.all_running_tasks`` (:pr:`6690`) `Hendrik Makait`_
+- ``Scheduler.reschedule()`` works only by accident (:pr:`6339`) `crusaderky`_
+- Remove spurious ``UnpauseEvent`` at worker start (:pr:`6652`) `crusaderky`_
+- Log if closing an executor is not possible in thread (:pr:`6644`) `Florian Jetter`_
+- Cloudpickle register by value (:pr:`6466`) `Ian Rose`_
+- Adding replicas to a task in fetch now sends it to flight immediately (:pr:`6594`) `crusaderky`_
+
+Bug Fixes
+^^^^^^^^^
+- Fix dump output of parameter-less events (:pr:`6695`) `crusaderky`_
+- Set ``MALLOC_TRIM_THRESHOLD_`` before interpreter start (:pr:`6681`) `crusaderky`_
+- Fix deadlocks around rescheduled and resumed states (:pr:`6673`) `crusaderky`_
+- ``has_arg`` returns ``True`` for keyword-only arguments (:pr:`6648`) `Lawrence Mitchell`_
+- Transitions caused by worker death use old 'worker-connect' ``stimulus_id`` (:pr:`6657`) `crusaderky`_
+- A key is forgotten while ``acquire-replicas`` is running (:pr:`6638`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Revisit ``WorkerState.long_running`` set (:pr:`6697`) `crusaderky`_
+- ``WorkerState`` unit tests for resumed state (:pr:`6688`) `crusaderky`_
+- Bump version of pandas-stubs (:pr:`6691`) `crusaderky`_
+- Add ``dummy`` factory methods for ``ExecuteSuccessEvent`` and ``ExecuteFailureEvent`` (:pr:`6687`) `Hendrik Makait`_
+- Pin ``tornado<6.2`` in nightly conda recipes (:pr:`6675`) `Peter Andreas Entschev`_
+- Refactor resource restriction handling in ``WorkerState`` (:pr:`6672`) `Hendrik Makait`_
+- ``test_signal`` and ``test_terminate`` occasionally return ``SIGKILL`` on MacOS (:pr:`6671`) `crusaderky`_
+- Use the ``loop`` fixture in even more tests (:pr:`6674`) `Thomas Grainger`_
+- Inconditionally ``import ssl`` (:pr:`6670`) `Thomas Grainger`_
+- Use the ``loop`` fixture in more tests (:pr:`6642`) `Thomas Grainger`_
+- Pin tornado to <6.2 (:pr:`6668`) `Florian Jetter`_
+- Handle ``AsyncTaskGroupClosedError`` (:pr:`6664`) `Hendrik Makait`_
+- Replace occurences of large delay ``slowinc`` with locks (:pr:`6656`) `Florian Jetter`_
+- Merge ``extend-ignore`` and ``ignore`` values for ``flake8`` (:pr:`6660`) `Hendrik Makait`_
+- Remove server close background task grace period (:pr:`6633`) `Thomas Grainger`_
+- Do not use tempfile in ``utils_test`` (:pr:`6651`) `Florian Jetter`_
+- ``close_worker`` cleanup (:pr:`6650`) `crusaderky`_
+- Rewrite ``test_cancelled_resumed_after_flight_with_dependencies`` using ``WorkerState`` (:pr:`6645`) `crusaderky`_
+- Log the actual duration to create a directory (:pr:`6647`) `Florian Jetter`_
+- ``pandas`` type stubs (:pr:`6635`) `crusaderky`_
+- Remove unused ``__started`` ``Event`` in ``Server`` (:pr:`6615`) `Florian Jetter`_
+- Use safe temp directory in ``gen_cluster`` (:pr:`6628`) `Florian Jetter`_
+- Print CI host info (:pr:`6629`) `crusaderky`_
+- Deduplicate ``data_needed`` (:pr:`6587`) `crusaderky`_
+- Remove ``EnsureCommunicatingAfterTransitions`` (:pr:`6462`) `crusaderky`_
+- Pickle ``WorkerState`` (:pr:`6623`) `crusaderky`_
+- Harden vs. ``TaskState`` collisions (:pr:`6593`) `crusaderky`_
+- Do not interact with the event loop when the cluster is garbage collected (:pr:`6627`) `Thomas Grainger`_
+
+
 .. _v2022.6.1:
 
 2022.6.1
@@ -3879,3 +4276,15 @@ significantly without many new features.
 .. _`Thomas A Caswell`: https://github.com/tacaswell
 .. _`hhuuggoo`: https://github.com/hhuuggoo
 .. _`Lawrence Mitchell`: https://github.com/wence-
+.. _`Iain Dorrington`: https://github.com/idorrington92
+.. _`Martí Zamora`: https://github.com/z4m0
+.. _`Johannes Lange`: https://github.com/jolange
+.. _`Pieter Gijsbers`: https://github.com/PGijsbers
+.. _`Crislana Rafael`: https://github.com/crislanarafael
+.. _`Ian Liu Rodrigues`: https://github.com/ianliu
+.. _`Vincenzo Eduardo Padulano`: https://github.com/vepadulano
+.. _`Luke Conibear`: https://github.com/lukeconibear
+.. _`Samantha Hughes`: https://github.com/shughes-uk
+.. _`Graham Markall`: https://github.com/gmarkall
+.. _`Nat Tabris`: https://github.com/ntabris
+.. _`Burt Holzman`: https://github.com/holzman

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import pickle
+import signal
 from datetime import timedelta
 from time import sleep
 
@@ -146,7 +147,7 @@ def test_worker_dies(loop):
                     if worker.address == kill_address:
                         import os
 
-                        os.kill(os.getpid(), 15)
+                        os.kill(os.getpid(), signal.SIGTERM)
                     return x
 
             futures = client.map(
@@ -404,15 +405,14 @@ async def test_oversubscribing_leases(c, s, a, b):
         client = get_client()
         client.set_metadata("release", True)
 
-    observer = await Worker(s.address)
+    async with Worker(s.address) as observer:
+        futures = c.map(
+            guaranteed_lease_timeout, range(2), sem=sem, workers=[a.address, b.address]
+        )
+        fut_observe = c.submit(observe_state, sem=sem, workers=[observer.address])
 
-    futures = c.map(
-        guaranteed_lease_timeout, range(2), sem=sem, workers=[a.address, b.address]
-    )
-    fut_observe = c.submit(observe_state, sem=sem, workers=[observer.address])
-
-    with captured_logger("distributed.semaphore", level=logging.DEBUG) as caplog:
-        payload, observer = await c.gather([futures, fut_observe])
+        with captured_logger("distributed.semaphore", level=logging.DEBUG) as caplog:
+            payload, _ = await c.gather([futures, fut_observe])
 
     logs = caplog.getvalue().split("\n")
     timeouts = [log for log in logs if "timed out" in log]
@@ -557,8 +557,9 @@ async def test_release_retry(c, s, a, b):
     },
 )
 async def test_release_failure(c, s, a, b):
-    """Don't raise even if release fails: lease will be cleaned up by the lease-validation after
-    a specified interval anyways (see config parameters used)."""
+    """Don't raise even if release fails: lease will be cleaned up by the
+    lease-validation after a specified interval anyway (see config parameters used).
+    """
 
     with dask.config.set({"distributed.comm.retry.count": 1}):
         pool = await FlakyConnectionPool(failing_connections=5)

@@ -19,6 +19,7 @@ from distributed.dashboard.components.scheduler import (
     ComputePerKey,
     CurrentLoad,
     EventLoop,
+    ExceptionsTable,
     MemoryByKey,
     Occupancy,
     SystemMonitor,
@@ -30,8 +31,10 @@ from distributed.dashboard.components.scheduler import (
     TaskStream,
     WorkerNetworkBandwidth,
     WorkersMemory,
+    WorkersTransferBytes,
     WorkerTable,
     events_doc,
+    exceptions_doc,
     graph_doc,
     hardware_doc,
     individual_doc,
@@ -55,6 +58,7 @@ applications = {
     "/shuffle": shuffling_doc,
     "/stealing": stealing_doc,
     "/workers": workers_doc,
+    "/exceptions": exceptions_doc,
     "/events": events_doc,
     "/counters": counters_doc,
     "/tasks": tasks_doc,
@@ -74,12 +78,14 @@ applications = {
     "/individual-group-progress": individual_doc(TaskGroupProgress, 200),
     "/individual-workers-memory": individual_doc(WorkersMemory, 100),
     "/individual-cluster-memory": individual_doc(ClusterMemory, 100),
+    "/individual-workers-transfer-bytes": individual_doc(WorkersTransferBytes, 100),
     "/individual-cpu": individual_doc(CurrentLoad, 100, fig_attr="cpu_figure"),
     "/individual-nprocessing": individual_doc(
         CurrentLoad, 100, fig_attr="processing_figure"
     ),
     "/individual-occupancy": individual_doc(Occupancy, 100),
     "/individual-workers": individual_doc(WorkerTable, 500),
+    "/individual-exceptions": individual_doc(ExceptionsTable, 1000),
     "/individual-bandwidth-types": individual_doc(BandwidthTypes, 500),
     "/individual-bandwidth-workers": individual_doc(BandwidthWorkers, 500),
     "/individual-workers-network": individual_doc(
@@ -122,6 +128,7 @@ def template_variables():
             "workers",
             "tasks",
             "system",
+            *(["gpu"] if device_get_count() > 0 else []),
             "profile",
             "graph",
             "groups",
@@ -143,8 +150,6 @@ def template_variables():
     template_variables["plots"] = sorted(
         template_variables["plots"], key=lambda d: d["name"]
     )
-    if device_get_count() > 0:
-        template_variables["pages"].insert(4, "gpu")
     return template_variables
 
 
@@ -165,3 +170,5 @@ def connect(application, http_server, scheduler, prefix=""):
             )
         ],
     )
+
+    bokeh_app.start()

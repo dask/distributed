@@ -29,7 +29,7 @@ optional_packages = [
 
 
 # only these scheduler packages will be checked for version mismatch
-scheduler_relevant_packages = {pkg for pkg, _ in required_packages} | {"lz4"}
+scheduler_relevant_packages = {pkg for pkg, _ in required_packages} | {"lz4", "python"}
 
 
 # notes to be displayed for mismatch packages
@@ -105,15 +105,15 @@ def get_package_info(
     return pversions
 
 
-def error_message(scheduler, workers, client, client_name="client"):
+def error_message(scheduler, workers, source, source_name="Client"):
     from distributed.utils import asciitable
 
-    client = client.get("packages") if client else "UNKNOWN"
+    source = source.get("packages") if source else "UNKNOWN"
     scheduler = scheduler.get("packages") if scheduler else "UNKNOWN"
     workers = {k: v.get("packages") if v else "UNKNOWN" for k, v in workers.items()}
 
     packages = set()
-    packages.update(client)
+    packages.update(source)
     packages.update(scheduler)
     for worker in workers:
         packages.update(workers.get(worker))
@@ -128,10 +128,10 @@ def error_message(scheduler, workers, client, client_name="client"):
         if pkg in scheduler_relevant_packages:
             versions.add(scheduler_version)
 
-        client_version = (
-            client.get(pkg, "MISSING") if isinstance(client, dict) else client
+        source_version = (
+            source.get(pkg, "MISSING") if isinstance(source, dict) else source
         )
-        versions.add(client_version)
+        versions.add(source_version)
 
         worker_versions = {
             workers[w].get(pkg, "MISSING")
@@ -148,14 +148,14 @@ def error_message(scheduler, workers, client, client_name="client"):
         elif len(worker_versions) == 0:
             worker_versions = None
 
-        errs.append((pkg, client_version, scheduler_version, worker_versions))
+        errs.append((pkg, source_version, scheduler_version, worker_versions))
         if pkg in notes_mismatch_package.keys():
             notes.append(f"-  {pkg}: {notes_mismatch_package[pkg]}")
 
     out = {"warning": "", "error": ""}
 
     if errs:
-        err_table = asciitable(["Package", client_name, "scheduler", "workers"], errs)
+        err_table = asciitable(["Package", source_name, "Scheduler", "Workers"], errs)
         err_msg = f"Mismatched versions found\n\n{err_table}"
         if notes:
             err_msg += "\nNotes: \n{}".format("\n".join(notes))

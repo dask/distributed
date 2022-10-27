@@ -4,9 +4,11 @@ import logging
 
 from tlz import merge, valmap
 
+from dask.utils import key_split
+
 from distributed.core import coerce_to_address, connect
 from distributed.diagnostics.progress import AllProgress
-from distributed.utils import color_of, key_split
+from distributed.utils import color_of
 from distributed.worker import dumps_function
 
 logger = logging.getLogger(__name__)
@@ -17,7 +19,7 @@ def counts(scheduler, allprogress):
         {"all": valmap(len, allprogress.all), "nbytes": allprogress.nbytes},
         {
             state: valmap(len, allprogress.state[state])
-            for state in ["memory", "erred", "released", "processing"]
+            for state in ["memory", "erred", "released", "processing", "queued"]
         },
     )
 
@@ -66,23 +68,29 @@ def progress_quads(msg, nrows=8, ncols=3):
     ...        'memory': {'inc': 2, 'dec': 0, 'add': 1},
     ...        'erred': {'inc': 0, 'dec': 1, 'add': 0},
     ...        'released': {'inc': 1, 'dec': 0, 'add': 1},
-    ...        'processing': {'inc': 1, 'dec': 0, 'add': 2}}
+    ...        'processing': {'inc': 1, 'dec': 0, 'add': 2},
+    ...        'queued': {'inc': 1, 'dec': 0, 'add': 2}}
 
     >>> progress_quads(msg, nrows=2)  # doctest: +SKIP
-    {'name': ['inc', 'add', 'dec'],
-     'left': [0, 0, 1],
-     'right': [0.9, 0.9, 1.9],
-     'top': [0, -1, 0],
-     'bottom': [-.8, -1.8, -.8],
-     'released': [1, 1, 0],
-     'memory': [2, 1, 0],
-     'erred': [0, 0, 1],
-     'processing': [1, 0, 2],
-     'done': ['3 / 5', '2 / 4', '1 / 1'],
-     'released-loc': [.2/.9, .25 / 0.9, 1],
-     'memory-loc': [3 / 5 / .9, .5 / 0.9, 1],
-     'erred-loc': [3 / 5 / .9, .5 / 0.9, 1.9],
-     'processing-loc': [4 / 5, 1 / 1, 1]}}
+    {'all': [5, 4, 1],
+    'memory': [2, 1, 0],
+    'erred': [0, 0, 1],
+    'released': [1, 1, 0],
+    'processing': [1, 2, 0],
+    'queued': [1, 2, 0],
+    'name': ['inc', 'add', 'dec'],
+    'show-name': ['inc', 'add', 'dec'],
+    'left': [0, 0, 1],
+    'right': [0.9, 0.9, 1.9],
+    'top': [0, -1, 0],
+    'bottom': [-0.8, -1.8, -0.8],
+    'color': ['#45BF6F', '#2E6C8E', '#440154'],
+    'released-loc': [0.18, 0.225, 1.0],
+    'memory-loc': [0.54, 0.45, 1.0],
+    'erred-loc': [0.54, 0.45, 1.9],
+    'processing-loc': [0.72, 0.9, 1.9],
+    'queued-loc': [0.9, 1.35, 1.9],
+    'done': ['3 / 5', '2 / 4', '1 / 1']}
     """
     width = 0.9
     names = sorted(msg["all"], key=msg["all"].get, reverse=True)
@@ -102,19 +110,32 @@ def progress_quads(msg, nrows=8, ncols=3):
     d["memory-loc"] = []
     d["erred-loc"] = []
     d["processing-loc"] = []
+    d["queued-loc"] = []
+    d["no-worker-loc"] = []
     d["done"] = []
-    for r, m, e, p, a, l in zip(
-        d["released"], d["memory"], d["erred"], d["processing"], d["all"], d["left"]
+    for r, m, e, p, q, nw, a, l in zip(
+        d["released"],
+        d["memory"],
+        d["erred"],
+        d["processing"],
+        d["queued"],
+        d.get("no_worker", [0] * n),
+        d["all"],
+        d["left"],
     ):
         rl = width * r / a + l
         ml = width * (r + m) / a + l
         el = width * (r + m + e) / a + l
         pl = width * (p + r + m + e) / a + l
+        ql = width * (p + r + m + e + q) / a + l
+        nwl = width * (p + r + m + e + q + nw) / a + l
         done = "%d / %d" % (r + m + e, a)
         d["released-loc"].append(rl)
         d["memory-loc"].append(ml)
         d["erred-loc"].append(el)
         d["processing-loc"].append(pl)
+        d["queued-loc"].append(ql)
+        d["no-worker-loc"].append(nwl)
         d["done"].append(done)
 
     return d
