@@ -4874,7 +4874,7 @@ async def test_restart_workers_no_nanny_raises(c, s, a, b):
 
 
 class SlowKillNanny(Nanny):
-    async def kill(self, timeout=2):
+    async def kill(self, timeout=2, **kwargs):
         await asyncio.sleep(2)
         return await super().kill(timeout=timeout)
 
