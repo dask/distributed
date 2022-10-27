@@ -5683,24 +5683,26 @@ class Scheduler(SchedulerState, ServerNode):
         does not automatically restart workers, ``restart`` will just shut down all
         workers, then time out!
 
-        After `restart`, all connected workers are new, regardless of whether `TimeoutError`
+        After ``restart``, all connected workers are new, regardless of whether ``TimeoutError``
         was raised. Any workers that failed to shut down in time are removed, and
         may or may not shut down on their own in the future.
 
         Parameters
         ----------
         timeout:
-            How long to wait for workers to shut down and come back, if `wait_for_workers`
+            How long to wait for workers to shut down and come back, if ``wait_for_workers``
             is True, otherwise just how long to wait for workers to shut down.
-            Raises `asyncio.TimeoutError` if this is exceeded.
+            Raises ``asyncio.TimeoutError`` if this is exceeded.
         wait_for_workers:
             Whether to wait for all workers to reconnect, or just for them to shut down
             (default True). Use ``restart(wait_for_workers=False)`` combined with
-            `Client.wait_for_workers` for granular control over how many workers to
+            :meth:`Client.wait_for_workers` for granular control over how many workers to
             wait for.
+
         See also
-        ----------
+        --------
         Client.restart
+        Client.restart_workers
         """
         stimulus_id = f"restart-{time()}"
 
