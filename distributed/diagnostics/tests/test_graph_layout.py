@@ -47,7 +47,7 @@ async def test_states(c, s, a, b):
 
     while True:
         updates = {state for _, state in gl.state_updates}
-        if updates == {"waiting", "processing", "memory", "released"}:
+        if updates == {"waiting", "queued", "processing", "memory", "released"}:
             break
         await asyncio.sleep(0.01)
 
