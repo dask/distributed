@@ -4865,10 +4865,11 @@ async def test_restart_workers(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_restart_workers_no_nanny_raises(c, s, a, b):
-    with pytest.raises(ValueError) as excinfo:
+    with pytest.raises(RuntimeError) as exc_info:
         await c.restart_workers(workers=[a.address])
-    msg = str(excinfo.value).lower()
-    assert "restarting workers requires a nanny" in msg
+    msg = str(exc_info.value)
+    assert "Expected all workers to have a nanny" in msg
+    assert "1 worker(s) without a nanny" in msg
     assert a.address in msg
 
 

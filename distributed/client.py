@@ -3421,11 +3421,12 @@ class Client(SyncMethodMixin):
         if timeout is not None:
             timeout = parse_timedelta(timeout, "s")
 
-        response = await self.scheduler.restart(timeout=timeout)
+        msg = await self.scheduler.restart(timeout=timeout)
 
-        if response["status"] == "error":
-            raise RuntimeError(response["message"])
-        assert response["status"] == "OK", response
+        if msg["status"] == "error":
+            typ, exc, tb = clean_exception(**msg)
+            raise exc.with_traceback(tb)
+        assert msg["status"] == "OK", msg
         return self
 
     def restart(self, timeout=no_default):
@@ -3460,12 +3461,12 @@ class Client(SyncMethodMixin):
         if timeout is not None:
             timeout = parse_timedelta(timeout, "s")
 
-        response = await self.scheduler.restart_workers(
-            workers=workers, timeout=timeout
-        )
-        if response["status"] == "error":
-            raise RuntimeError(response["message"])
-        assert response["status"] == "OK", response
+        msg = await self.scheduler.restart_workers(workers=workers, timeout=timeout)
+
+        if msg["status"] == "error":
+            typ, exc, tb = clean_exception(**msg)
+            raise exc.with_traceback(tb)
+        assert msg["status"] == "OK", msg
         return self
 
     def restart_workers(self, workers, timeout=no_default):

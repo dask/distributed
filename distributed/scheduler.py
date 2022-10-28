@@ -77,7 +77,7 @@ from distributed.comm import (
 )
 from distributed.comm.addressing import addresses_from_user_args
 from distributed.compatibility import PeriodicCallback
-from distributed.core import Status, clean_exception, rpc, send_recv
+from distributed.core import Status, clean_exception, error_message, rpc, send_recv
 from distributed.diagnostics.memory_sampler import MemorySamplerExtension
 from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
@@ -5674,6 +5674,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.log_event("all", {"action": "gather", "count": len(keys)})
         return result
 
+    # FIXME: Technically, we do not raise the error but return it, how to better word this?
     @log_errors
     async def restart(self, client=None, timeout=30):
         """
@@ -5699,6 +5700,14 @@ class Scheduler(SchedulerState, ServerNode):
         Client.restart
         Scheduler.restart_workers
         """
+        try:
+            await self._restart(client, timeout)
+            return {"status": "OK"}
+        except Exception as e:
+            logger.exception(e)
+            return error_message(e)
+
+    async def _restart(self, client=None, timeout=30):
         stimulus_id = f"restart-{time()}"
         timer = CountdownTimer(timeout)
         workers = list(self.workers)
@@ -5717,32 +5726,33 @@ class Scheduler(SchedulerState, ServerNode):
         self._clear_task_state()
         assert not self.tasks
         if timer.expired:
-            message = "Timed out while resetting task state."
-            logger.exception(message)
-            return {"status": "error", "message": message}
+            raise TimeoutError("Timed out while resetting task state.")
 
         self.report({"op": "restart"})
 
         logger.debug("Restarting plugins.")
-        for plugin in list(self.plugins.values()):
+
+        plugins = dict(self.plugins)
+        bad_plugins = []
+        for name, plugin in plugins.items():
             try:
                 plugin.restart(self)
             except Exception as e:
                 logger.exception(e)
+                bad_plugins.append(name)
+
+        if bad_plugins:
+            raise RuntimeError(
+                f"{len(bad_plugins)}/{len(plugins)} plugins failed to restart: {bad_plugins}",
+            )
+
         if timer.expired:
-            message = "Timed out while restarting plugins."
-            logger.exception(message)
-            return {"status": "error", "message": message}
+            raise TimeoutError("Timed out while restarting plugins.")
 
         logger.debug("Restarting workers.")
-        try:
-            await self._restart_workers(workers, timeout=timer.remaining)
-        except (RuntimeError, TimeoutError) as e:
-            logger.exception(e)
-            return {"status": "error", "message": str(e)}
+        await self._restart_workers(workers, timeout=timer.remaining)
         self.log_event([client, "all"], {"action": "restart", "client": client})
         logger.info("Successfully restarted.")
-        return {"status": "OK"}
 
     def _expect_nannies(self, workers: Iterable[str]) -> None:
         non_nannies = [worker for worker in workers if not self.workers[worker].nanny]
@@ -5787,8 +5797,8 @@ class Scheduler(SchedulerState, ServerNode):
             await self._restart_workers(workers, timeout)
             return {"status": "OK"}
         except RuntimeError as e:
-            logger.error(e)
-            return {"status": "error", "message": str(e)}
+            logger.exception(e)
+            return error_message(e)
 
     async def _restart_workers(self, workers: Iterable[str], timeout: float) -> None:
         nanny_addresses = [self.workers[worker].nanny for worker in workers]
@@ -5812,13 +5822,16 @@ class Scheduler(SchedulerState, ServerNode):
                 ),
                 return_exceptions=True,
             )
-            bad_workers = {
-                worker: response
-                for worker, response in zip(workers, responses)
-                if isinstance(response, Exception) or response == "timed out"
-            }
+
+            bad_workers = []
+            for worker, response in zip(workers, responses):
+                if isinstance(response, Exception):
+                    logger.exception(response)
+                    bad_workers.append(worker)
+                elif response == "timed out":
+                    logger.exception(f"{worker} timed out trying to restart.")
+                    bad_workers.append(worker)
             if bad_workers:
-                # TODO: Do we want to return the responses to the user or rather log them on the server?
                 raise RuntimeError(
                     f"{len(bad_workers)}/{len(nannies)} worker(s) failed to restart within {timeout} s.",
                     bad_workers,

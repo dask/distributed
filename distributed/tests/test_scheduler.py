@@ -909,9 +909,9 @@ async def test_restart_waits_for_new_workers(c, s, *workers):
 async def test_restart_no_nannies(c, s, a, b):
     with pytest.raises(
         RuntimeError, match=r"Expected all workers to have a nanny"
-    ) as e:
+    ) as exc_info:
         await c.restart()
-    assert set(s.workers.keys()) == set(e.value.args[1].keys())
+    assert set(s.workers.keys()) == set(exc_info.value.args[1])
 
 
 class SlowKillNanny(Nanny):
