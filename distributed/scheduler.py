@@ -3597,7 +3597,7 @@ class Scheduler(SchedulerState, ServerNode):
             "release-worker-data": self.release_worker_data,
             "add-keys": self.add_keys,
             "long-running": self.handle_long_running,
-            "reschedule": self.reschedule,
+            "reschedule": self._reschedule,
             "keep-alive": lambda *args, **kwargs: None,
             "log-event": self.log_worker_event,
             "worker-status-change": self.handle_worker_status_change,
@@ -7267,13 +7267,15 @@ class Scheduler(SchedulerState, ServerNode):
 
     transition_story = story
 
-    def reschedule(
+    def _reschedule(
         self, key: str, worker: str | None = None, *, stimulus_id: str
     ) -> None:
-        """Reschedule a task
+        """Reschedule a task.
 
-        Things may have shifted and this task may now be better suited to run
-        elsewhere
+        This function should only be used when the task has already been released in
+        some way on the worker it's assigned to — either via cancellation or a
+        Reschedule exception — and you are certain the worker will not send any further
+        updates about the task to the scheduler.
         """
         try:
             ts = self.tasks[key]
