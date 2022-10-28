@@ -525,18 +525,15 @@ async def test_pause_executor_manual(c, s, a):
 
     # Task that is running on the worker when the worker pauses
     x = c.submit(f, ev_x, key="x")
-    while a.state.executing_count != 1:
-        await asyncio.sleep(0.01)
+    await async_wait_for(lambda: a.state.executing_count == 1, 5)
 
     # Task that is queued (on worker or scheduler) when the worker pauses
     y = c.submit(inc, 1, key="y")
-    while "y" not in s.tasks:
-        await asyncio.sleep(0.01)
+    await async_wait_for(lambda: "y" in s.tasks, 5)
 
     a.status = Status.paused
     # Wait for sync to scheduler
-    while s.workers[a.address].status != Status.paused:
-        await asyncio.sleep(0.01)
+    await async_wait_for(lambda: s.workers[a.address].status == Status.paused, 5)
 
     # Task that is queued on the scheduler when the worker pauses.
     # It is not sent to the worker.
@@ -589,10 +586,9 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
         await asyncio.sleep(0.01)
 
     with captured_logger(logging.getLogger("distributed.worker_memory")) as logger:
-        # Task that is queued on the worker when the worker pauses
+        # Task that is queued (on worker or scheduler) when the worker pauses
         y = c.submit(inc, 1, key="y")
-        while "y" not in a.state.tasks:
-            await asyncio.sleep(0.01)
+        await async_wait_for(lambda: "y" in s.tasks, 5)
 
         # Hog the worker with 900GB unmanaged memory
         mocked_rss = 900 * 1000**3
