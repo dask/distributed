@@ -2129,7 +2129,9 @@ class SchedulerState:
         empties: list[WorkerState] = []
         min_ws: WorkerState | None = None
         min_v: float | None = None
-        for cws in self.idle.values():
+        for cws in dict.values(self.idle):
+            # ^ micro-optimization: `SortedDict` inherits from plain `dict`; iterating
+            # in non-sorted order is 10x faster and order doesn't matter here.
             v = len(cws.processing) / cws.nthreads
             if min_v is None or v < min_v:
                 min_v = v
