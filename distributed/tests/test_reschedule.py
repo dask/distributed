@@ -1,4 +1,4 @@
-"""Tests for tasks raising the Reschedule exception and Scheduler.reschedule().
+"""Tests for tasks raising the Reschedule exception and Scheduler._reschedule().
 
 Note that this functionality is also used by work stealing;
 see test_steal.py for additional tests.
@@ -21,42 +21,10 @@ from distributed.worker_state_machine import (
 )
 
 
-@gen_cluster(
-    client=True,
-    nthreads=[("", 1)] * 2,
-    config={
-        "distributed.scheduler.work-stealing": False,
-        # Difficult to get many tasks in processing with scheduler-side queuing
-        "distributed.scheduler.worker-saturation": float("inf"),
-    },
-)
-async def test_scheduler_reschedule(c, s, a, b):
-    xs = c.map(slowinc, range(100), key="x", delay=0.1)
-    while not a.state.tasks or not b.state.tasks:
-        await asyncio.sleep(0.01)
-    assert len(a.state.tasks) == len(b.state.tasks) == 50
-
-    ys = c.map(slowinc, range(100), key="y", delay=0.1, workers=[a.address])
-    while len(a.state.tasks) != 150:
-        await asyncio.sleep(0.01)
-
-    # Reschedule the 50 xs that are processing on a
-    for x in xs:
-        if s.tasks[x.key].processing_on is s.workers[a.address]:
-            s.reschedule(x.key, stimulus_id="test")
-
-    # Wait for at least some of the 50 xs that had been scheduled on a to move to b.
-    # This happens because you have 100 ys processing on a and 50 xs processing on b,
-    # so the scheduler will prefer b for the rescheduled tasks to obtain more equal
-    # balancing.
-    while len(a.state.tasks) == 150 or len(b.state.tasks) <= 50:
-        await asyncio.sleep(0.01)
-
-
 @gen_cluster()
 async def test_scheduler_reschedule_warns(s, a, b):
     with captured_logger("distributed.scheduler") as sched:
-        s.reschedule(key="__this-key-does-not-exist__", stimulus_id="test")
+        s._reschedule(key="__this-key-does-not-exist__", stimulus_id="test")
 
     assert "not found on the scheduler" in sched.getvalue()
     assert "Aborting reschedule" in sched.getvalue()

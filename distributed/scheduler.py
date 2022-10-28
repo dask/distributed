@@ -2100,16 +2100,20 @@ class SchedulerState:
 
         tg = ts.group
         lws = tg.last_worker
-        if not (
-            lws and tg.last_worker_tasks_left and self.workers.get(lws.address) is lws
+        if (
+            lws
+            and tg.last_worker_tasks_left
+            and lws.status == Status.running
+            and self.workers.get(lws.address) is lws
         ):
-            # Last-used worker is full or unknown; pick a new worker for the next few tasks
+            ws = lws
+        else:
+            # Last-used worker is full, unknown, retiring, or paused;
+            # pick a new worker for the next few tasks
             ws = min(pool, key=partial(self.worker_objective, ts))
             tg.last_worker_tasks_left = math.floor(
                 (len(tg) / self.total_nthreads) * ws.nthreads
             )
-        else:
-            ws = lws
 
         # Record `last_worker`, or clear it on the final task
         tg.last_worker = (
@@ -3593,7 +3597,7 @@ class Scheduler(SchedulerState, ServerNode):
             "release-worker-data": self.release_worker_data,
             "add-keys": self.add_keys,
             "long-running": self.handle_long_running,
-            "reschedule": self.reschedule,
+            "reschedule": self._reschedule,
             "keep-alive": lambda *args, **kwargs: None,
             "log-event": self.log_worker_event,
             "worker-status-change": self.handle_worker_status_change,
@@ -5683,24 +5687,26 @@ class Scheduler(SchedulerState, ServerNode):
         does not automatically restart workers, ``restart`` will just shut down all
         workers, then time out!
 
-        After `restart`, all connected workers are new, regardless of whether `TimeoutError`
+        After ``restart``, all connected workers are new, regardless of whether ``TimeoutError``
         was raised. Any workers that failed to shut down in time are removed, and
         may or may not shut down on their own in the future.
 
         Parameters
         ----------
         timeout:
-            How long to wait for workers to shut down and come back, if `wait_for_workers`
+            How long to wait for workers to shut down and come back, if ``wait_for_workers``
             is True, otherwise just how long to wait for workers to shut down.
-            Raises `asyncio.TimeoutError` if this is exceeded.
+            Raises ``asyncio.TimeoutError`` if this is exceeded.
         wait_for_workers:
             Whether to wait for all workers to reconnect, or just for them to shut down
             (default True). Use ``restart(wait_for_workers=False)`` combined with
-            `Client.wait_for_workers` for granular control over how many workers to
+            :meth:`Client.wait_for_workers` for granular control over how many workers to
             wait for.
+
         See also
-        ----------
+        --------
         Client.restart
+        Client.restart_workers
         """
         stimulus_id = f"restart-{time()}"
 
@@ -7261,13 +7267,15 @@ class Scheduler(SchedulerState, ServerNode):
 
     transition_story = story
 
-    def reschedule(
+    def _reschedule(
         self, key: str, worker: str | None = None, *, stimulus_id: str
     ) -> None:
-        """Reschedule a task
+        """Reschedule a task.
 
-        Things may have shifted and this task may now be better suited to run
-        elsewhere
+        This function should only be used when the task has already been released in
+        some way on the worker it's assigned to — either via cancellation or a
+        Reschedule exception — and you are certain the worker will not send any further
+        updates about the task to the scheduler.
         """
         try:
             ts = self.tasks[key]
