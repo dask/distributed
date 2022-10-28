@@ -5330,7 +5330,7 @@ class Scheduler(SchedulerState, ServerNode):
             for qts in _next_queued_when_slot_maybe_opened(self, ws)
         }
         if self.validate:
-            assert len(recommendations) == 1, (ws, recommendations)
+            assert len(recommendations) <= 1, (ws, recommendations)
 
         self.transitions(recommendations, stimulus_id)
 
