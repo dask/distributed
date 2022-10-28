@@ -3048,8 +3048,9 @@ class SchedulerState:
         """
         if ts.resource_restrictions or ts.worker_restrictions or ts.host_restrictions:
             return False
+        if not ts.dependencies:
+            return True
         tg = ts.group
-        # TODO short-circuit to True if `not ts.dependencies`?
         return (
             len(tg) > self.total_nthreads * 2
             and len(tg.dependencies) < 5
