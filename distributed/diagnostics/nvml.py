@@ -177,10 +177,7 @@ def _running_process_matches(handle):
         running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses_v2(handle)
     else:
         running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
-    for proc in running_processes:
-        if os.getpid() == proc.pid:
-            return True
-    return False
+    return any(os.getpid() == proc.pid for proc in running_processes)
 
 
 def has_cuda_context():
