@@ -110,6 +110,7 @@ Built-In Worker Plugins
 .. autoclass:: distributed.diagnostics.plugin.PipInstall
 .. autoclass:: distributed.diagnostics.plugin.CondaInstall
 .. autoclass:: distributed.diagnostics.plugin.UploadFile
+.. autoclass:: distributed.diagnostics.plugin.UploadDirectoryWorker
 
 
 Nanny Plugins

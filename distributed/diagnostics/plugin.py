@@ -534,36 +534,35 @@ class Environ(NannyPlugin):
         nanny.env.update(self.environ)
 
 
-class UploadDirectory(NannyPlugin):
-    """A NannyPlugin to upload a local file to workers.
+class UploadDirectoryWorker(WorkerPlugin):
+    """A WorkerPlugin to upload a local directory to workers.
 
     Parameters
     ----------
     path: str
         A path to the directory to upload
+    skip_words:
+        Sub folders to ignore
+    skip:
+        files to ignores
 
     Examples
     --------
-    >>> from distributed.diagnostics.plugin import UploadDirectory
-    >>> client.register_worker_plugin(UploadDirectory("/path/to/directory"), nanny=True)  # doctest: +SKIP
+    >>> from distributed.diagnostics.plugin import UploadDirectoryWorker
+    >>> client.register_worker_plugin(UploadDirectoryWorker("/path/to/directory"))  # doctest: +SKIP
     """
 
     def __init__(
-        self,
+        self, 
         path,
-        restart=False,
-        update_path=False,
         skip_words=(".git", ".github", ".pytest_cache", "tests", "docs"),
-        skip=(lambda fn: os.path.splitext(fn)[1] == ".pyc",),
+        skip=(lambda fn: os.path.splitext(fn)[1] == ".pyc",)
     ):
         """
-        Initialize the plugin by reading in the data from the given file.
+        Initialize the plugin mixin by reading in the data from the given file.
         """
         path = os.path.expanduser(path)
         self.path = os.path.split(path)[-1]
-        self.restart = restart
-        self.update_path = update_path
-
         self.name = "upload-directory-" + os.path.split(path)[-1]
 
         with tmpfile(extension="zip") as fn:
@@ -584,20 +583,61 @@ class UploadDirectory(NannyPlugin):
 
             with open(fn, "rb") as f:
                 self.data = f.read()
-
-    async def setup(self, nanny):
-        fn = os.path.join(nanny.local_directory, f"tmp-{uuid.uuid4()}.zip")
+    
+    async def extract(self, local_directory):
+        """
+        Extracts the bufferized and zipped folder into a local directory.
+        """
+        fn = os.path.join(local_directory, f"tmp-{uuid.uuid4()}.zip")
         with open(fn, "wb") as f:
             f.write(self.data)
 
         import zipfile
 
         with zipfile.ZipFile(fn) as z:
-            z.extractall(path=nanny.local_directory)
+            z.extractall(path=local_directory)
+
+        os.remove(fn)
+
+    async def setup(self, worker):
+        await self.extract(worker.local_directory)
+
+
+class UploadDirectory(UploadDirectoryWorker, NannyPlugin):
+    """A NannyPlugin to upload a local directory to nannies.
+
+    Parameters
+    ----------
+    path: str
+        A path to the directory to upload
+    update_path: bool
+        Wether or not to refresh Nanny sys.path (Needed if you upload a folder containing Python executable)
+    restart: bool
+        Wether or not to restart Workers
+
+    Examples
+    --------
+    >>> from distributed.diagnostics.plugin import UploadDirectory
+    >>> client.register_worker_plugin(UploadDirectory("/path/to/directory"), nanny=True)  # doctest: +SKIP
+    >>> client.register_worker_plugin(UploadDirectory("/path/to/pythonproject", restart=True, update_path=True), nanny=True)  # doctest: +SKIP
+    """
+
+    def __init__(
+        self,
+        path,
+        restart=False,
+        update_path=False,
+        **kwargs
+    ):
+        self.restart = restart
+        self.update_path = update_path
+
+        super().__init__(path, **kwargs)
+
+    async def setup(self, nanny):
+        await self.extract(nanny.local_directory)
 
         if self.update_path:
             path = os.path.join(nanny.local_directory, self.path)
             if path not in sys.path:
                 sys.path.insert(0, path)
-
-        os.remove(fn)
