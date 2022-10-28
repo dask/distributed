@@ -13,6 +13,7 @@ from distributed.utils_test import (
     BlockedGetData,
     _LockedCommPool,
     assert_story,
+    async_wait_for,
     gen_cluster,
     inc,
     lock_inc,
@@ -212,7 +213,7 @@ async def test_executing_cancelled_error(c, s, w):
     await wait_for_state(f1.key, "executing", w)
     # Queue up another task to ensure this is not affected by our error handling
     f2 = c.submit(inc, 1, key="f2")
-    await wait_for_state(f2.key, "ready", w)
+    await async_wait_for(lambda: len(s.tasks) == 2, 5)
 
     f1.release()
     await wait_for_state(f1.key, "cancelled", w)
