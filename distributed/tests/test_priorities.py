@@ -9,8 +9,14 @@ import pytest
 import dask
 from dask import delayed
 
-from distributed import Client, Event, Scheduler, Status, Worker, wait
-from distributed.utils_test import gen_cluster, inc, slowinc
+from distributed import Client, Event, Scheduler, Status, Worker
+from distributed.utils_test import (
+    async_wait_for,
+    freeze_batched_send,
+    gen_cluster,
+    inc,
+    slowinc,
+)
 
 dinc = delayed(inc)
 dslowinc = delayed(slowinc)
@@ -33,15 +39,9 @@ async def block_worker(
     Parameters
     ----------
     pause : bool
-        True
-            When entering the context manager, pause the worker. At exit, wait for all
-            tasks created inside the context manager to be added to Scheduler.unrunnable
-            and then unpause the worker.
-        False
-            When entering the context manager, send a dummy long task to the worker. At
-            exit, wait for all tasks created inside the context manager to reach the
-            scheduler and then terminate the dummy task.
-
+        If True, when entering the context manager, pause the worker. At exit, wait for all
+        tasks created inside the context manager to be added to ``Scheduler.unrunnable``
+        or ``Scheduler.queued`` and then unpause the worker.
     ntasks_on_scheduler : int, optional
         Number of tasks that must appear on the scheduler. Defaults to the number of
         futures held by the client.
@@ -53,46 +53,30 @@ async def block_worker(
         w.status = Status.paused
         while s.workers[w.address].status != Status.paused:
             await asyncio.sleep(0.01)
-    else:
-        ev = Event()
-        clog = c.submit(lambda ev: ev.wait(), ev, key="block_worker")
-        while "block_worker" not in w.state.tasks:
-            await asyncio.sleep(0.01)
 
-    yield
+    assert c.scheduler_comm
+    with freeze_batched_send(c.scheduler_comm):
+        yield
 
     if ntasks_on_scheduler is None:
         ntasks_on_scheduler = len(c.futures)
     if ntasks_on_worker is None:
         ntasks_on_worker = len(c.futures)
-    while len(s.tasks) < ntasks_on_scheduler:
-        await asyncio.sleep(0.01)
+    await async_wait_for(lambda: len(s.tasks) >= ntasks_on_scheduler, 5)
 
     if pause:
-        assert len(s.unrunnable) == ntasks_on_worker
+        assert (
+            len(s.unrunnable) == ntasks_on_worker or len(s.queued) == ntasks_on_worker
+        )
         assert not w.state.tasks
         w.status = Status.running
-    else:
-        while len(w.state.tasks) < ntasks_on_worker:
-            await asyncio.sleep(0.01)
-        await ev.set()
-        await clog
-        del clog
-        while "block_worker" in s.tasks:
-            await asyncio.sleep(0.01)
 
 
 def gen_blockable_cluster(test_func):
     """Generate a cluster with 1 worker and disabled memory monitor,
     to be used together with ``async with block_worker(...):``.
     """
-    return pytest.mark.parametrize(
-        "pause",
-        [
-            pytest.param(False, id="queue on worker"),
-            pytest.param(True, id="queue on scheduler"),
-        ],
-    )(
+    return pytest.mark.parametrize("pause", [pytest.param(False), pytest.param(True)])(
         gen_cluster(
             client=True,
             nthreads=[("", 1)],
@@ -109,11 +93,11 @@ async def test_submit(c, s, a, pause):
         clog = c.submit(lambda ev: ev.wait(), ev, key="clog")
         high = c.submit(inc, 2, key="high", priority=1)
 
-    await wait(high)
-    assert all(ws.processing for ws in s.workers.values())
-    assert s.tasks[low.key].state == "processing"
+    await high
+    assert s.tasks[clog.key].state == "processing"
+    assert s.tasks[low.key].state != "memory"
     await ev.set()
-    await wait(low)
+    await low
 
 
 @gen_blockable_cluster
@@ -124,12 +108,12 @@ async def test_map(c, s, a, pause):
         clog = c.submit(lambda ev: ev.wait(), ev, key="clog")
         high = c.map(inc, [4, 5, 6], key=["h1", "h2", "h3"], priority=1)
 
-    await wait(high)
-    assert all(ws.processing for ws in s.workers.values())
-    assert all(s.tasks[fut.key].state == "processing" for fut in low)
+    await c.gather(high)
+    assert s.tasks[clog.key].state == "processing"
+    assert all(s.tasks[fut.key].state != "memory" for fut in low)
     await ev.set()
     await clog
-    await wait(low)
+    await c.gather(low)
 
 
 @gen_blockable_cluster
@@ -140,12 +124,12 @@ async def test_compute(c, s, a, pause):
         clog = c.submit(lambda ev: ev.wait(), ev, key="clog")
         high = c.compute(dinc(2, dask_key_name="high"), priority=1)
 
-    await wait(high)
-    assert all(ws.processing for ws in s.workers.values())
-    assert s.tasks[low.key].state == "processing"
+    await high
+    assert s.tasks[clog.key].state == "processing"
+    assert s.tasks[low.key].state != "memory"
     await ev.set()
     await clog
-    await wait(low)
+    await low
 
 
 @gen_blockable_cluster
@@ -156,12 +140,12 @@ async def test_persist(c, s, a, pause):
         clog = c.submit(lambda ev: ev.wait(), ev, key="clog")
         high = dinc(2, dask_key_name="high").persist(priority=1)
 
-    await wait(high)
-    assert all(ws.processing for ws in s.workers.values())
-    assert s.tasks[low.key].state == "processing"
+    await high
+    assert s.tasks[clog.key].state == "processing"
+    assert s.tasks[low.key].state != "memory"
     await ev.set()
-    await wait(clog)
-    await wait(low)
+    await clog
+    await low
 
 
 @gen_blockable_cluster
@@ -176,11 +160,11 @@ async def test_annotate_compute(c, s, a, pause):
     async with block_worker(c, s, a, pause):
         low, clog, high = c.compute([low, clog, high], optimize_graph=False)
 
-    await wait(high)
-    assert s.tasks[low.key].state == "processing"
+    await high
+    assert s.tasks[low.key].state != "memory"
     await ev.set()
-    await wait(clog)
-    await wait(low)
+    await clog
+    await low
 
 
 @gen_blockable_cluster
@@ -195,11 +179,11 @@ async def test_annotate_persist(c, s, a, pause):
     async with block_worker(c, s, a, pause):
         low, clog, high = c.persist([low, clog, high], optimize_graph=False)
 
-    await wait(high)
-    assert s.tasks[low.key].state == "processing"
+    await high
+    assert s.tasks[low.key].state != "memory"
     await ev.set()
-    await wait(clog)
-    await wait(low)
+    await clog
+    await low
 
 
 @gen_blockable_cluster
