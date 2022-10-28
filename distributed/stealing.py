@@ -360,7 +360,7 @@ class WorkStealing(SchedulerPlugin):
                         *_log_msg,
                     )
                 )
-                self.scheduler.reschedule(key, stimulus_id=stimulus_id)
+                self.scheduler._reschedule(key, stimulus_id=stimulus_id)
             # Victim had already started execution
             elif state in _WORKER_STATE_REJECT:
                 self.log(("already-computing", *_log_msg))
