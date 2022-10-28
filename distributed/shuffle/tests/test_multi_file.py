@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 
 import pytest
@@ -82,15 +83,44 @@ async def test_exceptions(tmp_path):
 
 @gen_test()
 async def test_buffer_too_many_concurrent_files(tmp_path):
-    pass
+    # TODO: Concurreny limiting is configured at global levels. This only tests existence of a single instance of MultiFile
+    # In concurrent shuffles this is no longer true
+    payload = {
+        f"shard-{ix}": [f"shard-{ix}".encode()]
+        for ix in range(MultiFile.concurrent_files * 10)
+    }
+
+    async with MultiFile(
+        directory=tmp_path,
+        dump=dump,
+        load=load,
+        loop=IOLoop.current(),
+    ) as mf:
+
+        def concurrent_writes():
+            return MultiFile.concurrent_files - mf._queue.qsize()
+
+        assert concurrent_writes() == 0
+        tasks = []
+
+        for _ in range(MultiFile.concurrent_files * 10):
+            tasks.append(asyncio.create_task(mf.put(payload)))
+
+        def assert_below_limit():
+            assert 0 <= concurrent_writes() <= MultiFile.concurrent_files
+
+        while not concurrent_writes() == MultiFile.concurrent_files:
+            assert_below_limit()
+            await asyncio.sleep(0)
+
+        while mf.shards:
+            await asyncio.sleep(0)
+            assert_below_limit()
 
 
 @pytest.mark.parametrize(
     "explicit_flush",
-    [
-        True,
-        False,
-    ],
+    [True, False],
 )
 @gen_test()
 async def test_high_pressure_flush_with_exception(tmp_path, explicit_flush):
@@ -99,6 +129,7 @@ async def test_high_pressure_flush_with_exception(tmp_path, explicit_flush):
 
     def dump_broken(data, f):
         nonlocal counter
+        # We only want to raise if this was queued up before
         if counter > MultiFile.concurrent_files:
             raise Exception(123)
         counter += 1
@@ -107,7 +138,10 @@ async def test_high_pressure_flush_with_exception(tmp_path, explicit_flush):
     # Something here should raise...
     with pytest.raises(Exception, match="123"):
         async with MultiFile(
-            directory=tmp_path, dump=dump_broken, load=load, loop=IOLoop.current()
+            directory=tmp_path,
+            dump=dump_broken,
+            load=load,
+            loop=IOLoop.current(),
         ) as mf:
             tasks = []
             for _ in range(10):
@@ -116,8 +150,102 @@ async def test_high_pressure_flush_with_exception(tmp_path, explicit_flush):
             # Wait until things are actually queued up.
             # This is when there is no slot on the queue available anymore
             # but there are still shards around
-            while not (mf.shards and mf.queue.empty()):
+            while not (mf.shards and mf._queue.empty()):
+                # Disks are fast, don't give it time to unload the queue...
+                # There may only be a few ticks atm so keep this at zero
                 await asyncio.sleep(0)
+
+            # This toggle makes sense to ensure this code path is triggered even
+            # if close does not flush
             if explicit_flush:
                 # Flushing while this happens is a bad idea and deadlocks atm
                 await mf.flush()
+
+
+def gen_bytes(percentage: float) -> bytes:
+    num_bytes = int(math.floor(percentage * MultiFile.memory_limit))
+    return b"0" * num_bytes
+
+
+@pytest.mark.slow
+@gen_test()
+async def test_memory_limit(tmp_path):
+    # TODO: Memory limit concurrency is defined on interpreter level. Need to
+    # test multiple instances
+
+    big_payload = {
+        "shard-1": [gen_bytes(2)] * 2,
+        "shard-2": [gen_bytes(0.1)] * 10,
+        "shard-3": [gen_bytes(1)] * 2,
+    }
+    small_payload = {
+        "shard-4": [gen_bytes(0.1)],
+    }
+    async with MultiFile(
+        directory=tmp_path,
+        dump=dump,
+        load=load,
+        loop=IOLoop.current(),
+    ) as mf:
+        many_small = [asyncio.create_task(mf.put(small_payload)) for _ in range(9)]
+        many_small = asyncio.gather(*many_small)
+        # Puts that do not breach the limit do not block
+        await asyncio.wait_for(many_small, 0.05)
+
+        many_small = [asyncio.create_task(mf.put(small_payload)) for _ in range(12)]
+        many_small = asyncio.gather(*many_small)
+        # Puts that do not breach the limit do not block
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.shield(many_small), 0.1)
+
+        big = asyncio.create_task(mf.put(big_payload))
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.shield(big), 0.1)
+        small = asyncio.create_task(mf.put(small_payload))
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.shield(small), 0.1)
+        await big
+
+        # Once the big write is through, we can write without blocking again
+        await asyncio.wait_for(mf.put(small_payload), 0.05)
+
+
+@pytest.mark.slow
+@gen_test()
+async def test_memory_limit_blocked_exception(tmp_path):
+    # TODO: Memory limit concurrency is defined on interpreter level. Need to
+    # test multiple instances
+
+    def dump_only_bytes(data, f):
+        if not isinstance(data, bytes):
+            raise TypeError("Wrong type")
+        f.write(data)
+
+    big_payload = {
+        "shard-1": [gen_bytes(2)] * 5,
+    }
+    broken_payload = {
+        "shard-2": ["not-bytes"],
+    }
+    small_payload = {
+        "shard-2": [b"bytes"],
+    }
+    async with MultiFile(
+        directory=tmp_path,
+        dump=dump_only_bytes,
+        load=load,
+        loop=IOLoop.current(),
+    ) as mf:
+        big_write = asyncio.create_task(mf.put(big_payload))
+        broken_write = asyncio.create_task(mf.put(broken_payload))
+        small_write = asyncio.create_task(mf.put(small_payload))
+
+        # The broken write hits the limit and blocks
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.shield(broken_write), 0.1)
+
+        await asyncio.gather(big_write, broken_write, small_write)
+
+        # Make sure exception is not dropped
+        with pytest.raises(TypeError, match="Wrong type"):
+            await mf.flush()

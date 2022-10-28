@@ -64,7 +64,7 @@ class MultiFile:
 
     shards: defaultdict[str, list]
     sizes: defaultdict[str, int]
-    _futures: set[asyncio.Future]
+    _tasks: set[asyncio.Future]
     diagnostics: defaultdict[str, float]
     _exception: Exception | None
 
@@ -94,7 +94,7 @@ class MultiFile:
         self.bytes_read = 0
 
         self._done = False
-        self._futures = set()
+        self._tasks = set()
         self.diagnostics = defaultdict(float)
 
         self._communicate_future = asyncio.create_task(self.communicate())
@@ -102,7 +102,7 @@ class MultiFile:
         self._exception = None
 
     @property
-    def queue(self) -> asyncio.Queue[None]:
+    def _queue(self) -> asyncio.Queue[None]:
         try:
             return MultiFile._queues[self._loop]
         except KeyError:
@@ -123,7 +123,7 @@ class MultiFile:
             be written to that destination
         """
         if self._exception:
-            raise self._exception
+            await self._maybe_raise_exception()
 
         this_size = 0
         for id, shards in data.items():
@@ -139,6 +139,7 @@ class MultiFile:
 
         while MultiFile.total_size > MultiFile.memory_limit:
             with self.time("waiting-on-memory"):
+                await self._maybe_raise_exception()
                 async with self.condition:
 
                     try:
@@ -170,15 +171,21 @@ class MultiFile:
                         await asyncio.sleep(0.1)
                         continue
 
-                    await self.queue.get()
-
+                    await self._queue.get()
+                # Shards must only be mutated below
+                assert self.shards, "MultiFile.shards was mutated unexpectedly"
                 id = max(self.sizes, key=self.sizes.__getitem__)
                 shards = self.shards.pop(id)
                 size = self.sizes.pop(id)
-
-                future = asyncio.create_task(self.process(id, shards, size))
+                task = asyncio.create_task(self.process(id, shards, size))
                 del shards
-                self._futures.add(future)
+                self._tasks.add(task)
+
+                def _reset_count(task: asyncio.Task) -> None:
+                    self._tasks.discard(task)
+                    self._queue.put_nowait(None)
+
+                task.add_done_callback(_reset_count)
                 async with self.condition:
                     self.condition.notify()
 
@@ -225,7 +232,6 @@ class MultiFile:
             MultiFile.total_size -= size
             async with self.condition:
                 self.condition.notify()
-            await self.queue.put(None)
 
     def read(self, id: int) -> pa.Table:
         """Read a complete file back into memory"""
@@ -255,24 +261,27 @@ class MultiFile:
         else:
             raise KeyError(id)
 
+    async def _maybe_raise_exception(self) -> None:
+        if self._exception:
+            assert self._done
+            await self._communicate_future
+            await asyncio.gather(*self._tasks)
+            raise self._exception
+
     async def flush(self) -> None:
         """Wait until all writes are finished"""
-        if self._exception:
-            await self._communicate_future
-            await asyncio.gather(*self._futures)
-            raise self._exception
+
         while self.shards:
+            await self._maybe_raise_exception()
             # If an exception arises while we're sleeping here we deadlock
             await asyncio.sleep(0.05)
 
-        await asyncio.gather(*self._futures)
-        if all(future.done() for future in self._futures):
-            self._futures.clear()
+        await asyncio.gather(*self._tasks)
+        await self._maybe_raise_exception()
 
         assert not self.total_size
 
         self._done = True
-
         await self._communicate_future
 
     async def close(self) -> None:
