@@ -3450,35 +3450,33 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self._restart, timeout=timeout)
 
-    async def _restart_workers(
-        self, workers: list[str], timeout: int | float | None = None
-    ):
-        results = await self.scheduler.broadcast(
-            msg={"op": "restart", "timeout": timeout}, workers=workers, nanny=True
-        )
-        timeout_workers = {
-            key: value for key, value in results.items() if value == "timed out"
-        }
-        if timeout_workers:
-            raise TimeoutError(
-                f"The following workers failed to restart with {timeout} seconds: {list(timeout_workers.keys())}"
-            )
+    async def _restart_workers(self, workers, timeout=no_default):
+        if timeout == no_default:
+            timeout = self._timeout * 4
+        if timeout is not None:
+            timeout = parse_timedelta(timeout, "s")
 
-    def restart_workers(self, workers: list[str], timeout: int | float | None = None):
-        """Restart a specified set of workers
+        await self.scheduler.restart_workers(workers=workers, timeout=timeout)
+        return self
 
-        .. note::
+    def restart_workers(self, workers, timeout=no_default):
+        """
+        Restart a specified set of workers
 
-            Only workers being monitored by a :class:`distributed.Nanny` can be restarted.
+        If this method takes longer than ``timeout`` seconds or fails,
+        it will raise an ``RuntimeError``. This leaves the workers in an undefined
+        state.
 
-        See ``Nanny.restart`` for more details.
+        This methods expects all workers to have nannies to be able to restart them.
+        If workers without nannies exist, ``Client.restart_workers`` will raise a
+        ``RuntimeError`` that lists the workers without nannies. Consider removing
+        those workers and calling ``Client.restart_workers`` again afterward.
 
         Parameters
         ----------
-        workers : list[str]
-            Workers to restart.
-        timeout : int | float | None
-            Number of seconds to wait
+        timeout:
+            Raise `RuntimeError` if ``restart_workers`` takes more than ``timeout``
+            seconds.
 
         Notes
         -----
@@ -3504,13 +3502,8 @@ class Client(SyncMethodMixin):
         See Also
         --------
         Client.restart
+        Scheduler.restart_workers
         """
-        info = self.scheduler_info()
-        for worker in workers:
-            if info["workers"][worker]["nanny"] is None:
-                raise ValueError(
-                    f"Restarting workers requires a nanny to be used. Worker {worker} has type {info['workers'][worker]['type']}."
-                )
         return self.sync(
             self._restart_workers,
             workers=workers,

@@ -5696,7 +5696,7 @@ class Scheduler(SchedulerState, ServerNode):
         See Also
         --------
         Client.restart
-        Client.restart_workers
+        Scheduler.restart_workers
         """
         stimulus_id = f"restart-{time()}"
         timer = CountdownTimer(timeout)
@@ -5748,6 +5748,29 @@ class Scheduler(SchedulerState, ServerNode):
             )
 
     async def restart_workers(self, workers: Iterable[str], timeout: float = 30):
+        """
+        Restart a specified set of workers
+
+        If this method takes longer than ``timeout`` seconds or fails,
+        it will raise an ``RuntimeError``. This leaves the workers in an undefined
+        state.
+
+        This methods expects all workers to have nannies to be able to restart them.
+        If workers without nannies exist, ``Scheduler.restart_workers`` will raise a
+        ``RuntimeError`` that lists the workers without nannies. Consider removing
+        those workers and calling ``Scheduler.restart_workers`` again afterward.
+
+        Parameters
+        ----------
+        timeout:
+            Raise `RuntimeError` if ``restart_workers`` takes more than ``timeout``
+            seconds.
+
+        See Also
+        --------
+        Scheduler.restart
+        Client.restart_workers
+        """
         self._expect_nannies(workers)
         logger.debug("Asking nannies to restart workers: %s.", workers)
         await self._restart_workers(workers, timeout)

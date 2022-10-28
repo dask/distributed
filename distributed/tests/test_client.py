@@ -3513,14 +3513,13 @@ def test_get_returns_early(c):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True)
-async def test_Client_clears_references_after_restart(c, s, a, b):
+@gen_cluster(client=True, Worker=Nanny)
+async def test_client_clears_references_after_restart(c, s, a, b):
     x = c.submit(inc, 1)
     assert x.key in c.refcount
     assert x.key in c.futures
 
-    with pytest.raises(TimeoutError):
-        await c.restart(timeout=5)
+    await c.restart()
 
     assert x.key not in c.refcount
     assert not c.futures

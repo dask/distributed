@@ -946,16 +946,6 @@ async def test_restart_nanny_timeout_exceeded(c, s, a, b):
     assert fr.status == "cancelled"
 
 
-@gen_cluster(client=True, nthreads=[("", 1)] * 2)
-async def test_restart_not_all_workers_return(c, s, a, b):
-    with pytest.raises(TimeoutError, match="Waited for 2 worker"):
-        await c.restart(timeout="1s")
-
-    assert not s.workers
-    assert a.status in (Status.closed, Status.closing)
-    assert b.status in (Status.closed, Status.closing)
-
-
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_restart_worker_rejoins_after_timeout_expired(c, s, a):
     """
