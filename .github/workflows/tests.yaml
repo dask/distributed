@@ -162,8 +162,7 @@ jobs:
           set -o pipefail
           mkdir reports
 
-          pytest distributed \
-            -m "not avoid_ci and ${{ matrix.partition }}" --runslow \
+          pytest distributed/tests/test_stress.py::test_stress_creation_and_deletion --runslow --count=20 \
             --leaks=fds,processes,threads \
             --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID \
             --cov=distributed --cov-report=xml \
