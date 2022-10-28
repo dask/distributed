@@ -88,7 +88,7 @@ class MultiFile:
         self.total_size = 0
         self.total_received = 0
 
-        self.condition = asyncio.Condition()
+        self._wait_on_memory = asyncio.Condition()
 
         self.bytes_written = 0
         self.bytes_read = 0
@@ -140,11 +140,11 @@ class MultiFile:
         while MultiFile.total_size > MultiFile.memory_limit:
             with self.time("waiting-on-memory"):
                 await self._maybe_raise_exception()
-                async with self.condition:
+                async with self._wait_on_memory:
 
                     try:
                         await asyncio.wait_for(
-                            self.condition.wait(), 1
+                            self._wait_on_memory.wait(), 1
                         )  # Block until memory calms down
                     except asyncio.TimeoutError:
                         continue
@@ -186,8 +186,8 @@ class MultiFile:
                     self._queue.put_nowait(None)
 
                 task.add_done_callback(_reset_count)
-                async with self.condition:
-                    self.condition.notify()
+                async with self._wait_on_memory:
+                    self._wait_on_memory.notify()
 
     async def process(self, id: str, shards: list[pa.Table], size: int) -> None:
         """Write one buffer to file
@@ -230,8 +230,8 @@ class MultiFile:
             self.bytes_written += size
             self.total_size -= size
             MultiFile.total_size -= size
-            async with self.condition:
-                self.condition.notify()
+            async with self._wait_on_memory:
+                self._wait_on_memory.notify()
 
     def read(self, id: int | str) -> pa.Table:
         """Read a complete file back into memory"""
