@@ -213,18 +213,13 @@ def test_unsupported_arguments(client, s, a, b):
 def test_retries(client):
     args = [ZeroDivisionError("one"), ZeroDivisionError("two"), 42]
 
-    with client.get_executor(retries=5, pure=False) as e:
+    with client.get_executor(retries=6, pure=False) as e:
         future = e.submit(varying(args))
         assert future.result() == 42
 
-    with client.get_executor(retries=4) as e:
-        future = e.submit(varying(args))
-        result = future.result()
-        assert result == 42
-
     with client.get_executor(retries=2) as e:
         future = e.submit(varying(args))
-        with pytest.raises(ZeroDivisionError, match="two"):
+        with pytest.raises(ZeroDivisionError):
             res = future.result()
 
     with client.get_executor(retries=0) as e:
