@@ -120,7 +120,7 @@ async def test_bad_disk(c, s, a, b):
     # clean_scheduler(s)
 
 
-@pytest.mark.xfail
+@pytest.mark.skip
 @pytest.mark.slow
 @gen_cluster(client=True)
 async def test_crashed_worker(c, s, a, b):

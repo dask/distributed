@@ -167,6 +167,7 @@ class MultiFile:
 
             while not self._done:
                 with self.time("idle"):
+                    await self._maybe_raise_exception()
                     if not self.shards:
                         await asyncio.sleep(0.1)
                         continue

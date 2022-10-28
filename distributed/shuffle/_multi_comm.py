@@ -7,7 +7,7 @@ import time
 import weakref
 from collections import defaultdict
 from collections.abc import Iterator
-from typing import Awaitable, Callable, Sequence
+from typing import Any, Awaitable, Callable, Sequence
 
 from tornado.ioloop import IOLoop
 
@@ -74,7 +74,7 @@ class MultiComm:
         self.total_size = 0
         self.total_moved = 0
         self._wait_on_memory = threading.Condition()
-        self._futures: set[asyncio.Task] = set()
+        self._tasks: set[asyncio.Task] = set()
         self._done = False
         self.diagnostics: dict[str, float] = defaultdict(float)
         self._loop = loop
@@ -119,6 +119,8 @@ class MultiComm:
         while MultiComm.total_size > MultiComm.memory_limit:
             with self.time("waiting-on-memory"):
                 with self._wait_on_memory:
+                    if self._exception:
+                        raise self._exception
                     self._wait_on_memory.wait(1)  # Block until memory calms down
 
     async def communicate(self) -> None:
@@ -138,6 +140,7 @@ class MultiComm:
 
         while not self._done:
             with self.time("idle"):
+                await self._maybe_raise_exception()
                 if not self.shards:
                     await asyncio.sleep(0.1)
                     continue
@@ -168,8 +171,8 @@ class MultiComm:
                 assert shards
                 task = asyncio.create_task(self._process(address, shards, size))
                 del shards
-                self._futures.add(task)
-                task.add_done_callback(self._futures.discard)
+                self._tasks.add(task)
+                task.add_done_callback(self._tasks.discard)
 
     async def _process(self, address: str, shards: list, size: int) -> None:
         """Send one message off to a neighboring worker"""
@@ -178,8 +181,6 @@ class MultiComm:
             # Consider boosting total_size a bit here to account for duplication
 
             try:
-                # while (time.time() // 5 % 4) == 0:
-                #     await asyncio.sleep(0.1)
                 start = time.time()
                 try:
                     with self.time("send"):
@@ -201,7 +202,14 @@ class MultiComm:
                     MultiComm.total_size -= size
                 with self._wait_on_memory:
                     self._wait_on_memory.notify()
-                await self.queue.put(None)
+                self.queue.put_nowait(None)
+
+    async def _maybe_raise_exception(self) -> None:
+        if self._exception:
+            assert self._done
+            await self._communicate_task
+            await asyncio.gather(*self._tasks)
+            raise self._exception
 
     async def flush(self) -> None:
         """
@@ -211,24 +219,34 @@ class MultiComm:
         put
         """
         if self._exception:
-            await self._communicate_task
-            await asyncio.gather(*self._futures)
-            raise self._exception
+            await self._maybe_raise_exception()
 
         while self.shards:
+            await self._maybe_raise_exception()
             await asyncio.sleep(0.05)
-        await asyncio.gather(*self._futures)
-        self._futures.clear()
+
+        await asyncio.gather(*self._tasks)
+        await self._maybe_raise_exception()
 
         if self.total_size:
             raise RuntimeError("Received additional input after flushing.")
         self._done = True
         await self._communicate_task
 
+    async def __aenter__(self) -> MultiComm:
+        return self
+
+    async def __aexit__(self, exc: Any, typ: Any, traceback: Any) -> None:
+        await self.close()
+
     async def close(self) -> None:
+        if not self._done:
+            await self.flush()
         self._done = True
         await self._communicate_task
-        await asyncio.gather(*self._futures)
+        await asyncio.gather(*self._tasks)
+        self.shards.clear()
+        self.sizes.clear()
 
     @contextlib.contextmanager
     def time(self, name: str) -> Iterator[None]:
