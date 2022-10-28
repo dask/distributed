@@ -164,14 +164,13 @@ def _running_process_matches(handle):
 
     Parameters
     ----------
-    handle: ``pyvnml.nvml.LP_struct_c_nvmlDevice_t``
+    handle : pyvnml.nvml.LP_struct_c_nvmlDevice_t
         NVML handle to CUDA device
 
     Returns
     -------
-    out: bool
-        ``True`` if device handle's has a CUDA context on the running process,
-        or ``False`` otherwise.
+    out : bool
+        Whether the device handle has a CUDA context on the running process.
     """
     init_once()
     if hasattr(pynvml, "nvmlDeviceGetComputeRunningProcesses_v2"):
@@ -189,8 +188,10 @@ def has_cuda_context():
 
     Returns
     -------
-    ``False`` if current process has no CUDA context created, otherwise returns the
-    index of the device for which there's a CUDA context.
+    out : CudaContext
+        Object containing information as to whether the current process has a CUDA
+        context created, and in the positive case containing also information about
+        the device the context belongs to.
     """
     init_once()
     if is_initialized():
@@ -232,14 +233,14 @@ def get_device_index_and_uuid(device):
 
     Parameters
     ----------
-    device: ``int``, ``bytes`` or``str``
+    device : int, bytes or str
         An ``int`` with the index of a GPU, or ``bytes`` or ``str`` with the UUID
         of a CUDA (either GPU or MIG) device.
 
     Returns
     -------
-    out: ``dict``
-        Dictionary containing ``"device-index"`` and ``"uuid"`` keys.
+    out : CudaDeviceInfo
+        Object containing information about the device.
 
     Examples
     --------
@@ -273,13 +274,13 @@ def get_device_mig_mode(device):
 
     Parameters
     ----------
-    device: ``int``, ``bytes`` or``str``
+    device: int, bytes or str
         An ``int`` with the index of a GPU, or ``bytes`` or ``str`` with the UUID
         of a CUDA (either GPU or MIG) device.
 
     Returns
     -------
-    out: ``list``
+    out : list
         A ``list`` with two integers ``[current_mode, pending_mode]``.
     """
     init_once()
