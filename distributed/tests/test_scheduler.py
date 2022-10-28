@@ -408,6 +408,42 @@ async def test_queued_remove_add_worker(c, s, a, b):
         await wait(fs)
 
 
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    config={
+        "distributed.scheduler.worker-saturation": 1.0,
+        "distributed.worker.memory.pause": False,
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": False,
+    },
+)
+async def test_queued_dont_try_non_running_worker(c, s, a):
+    "When a slot opens on a non-running worker, don't consider scheduling a queued task"
+    events = [Event() for _ in range(5)]
+    fs = c.map(lambda ev: ev.wait(), events, key=[f"w-{i}" for i in range(len(events))])
+
+    await async_wait_for(lambda: s.queued, timeout=5)
+
+    a.status = Status.paused
+
+    await async_wait_for(lambda: not s.running, timeout=5)
+
+    assert len(a.state.executing) == 1
+    a_key: str = next(iter(a.state.executing)).key
+    a_task = s.tasks[a_key]
+    a_event = events[int(a_key[2])]
+
+    front_of_queue = s.queued.peek()
+
+    assert a_task.state == "processing"
+    await a_event.set()
+    await wait_for_state(a_key, "memory", s)
+
+    story = s.story(front_of_queue)
+    assert story[-1][1:2] != ["queued", "queued"], story
+
+
 @pytest.mark.parametrize(
     "saturation_config, expected_task_counts",
     [
