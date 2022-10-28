@@ -301,14 +301,16 @@ https://img.shields.io/travis/com/python-versioneer/python-versioneer.svg
 [travis-url]: https://travis-ci.com/github/python-versioneer/python-versioneer
 
 """
+from __future__ import annotations
+
 # pylint:disable=invalid-name,import-outside-toplevel,missing-function-docstring
 # pylint:disable=missing-class-docstring,too-many-branches,too-many-statements
 # pylint:disable=raise-missing-from,too-many-lines,too-many-locals,import-error
 # pylint:disable=too-few-public-methods,redefined-outer-name,consider-using-with
 # pylint:disable=attribute-defined-outside-init,too-many-arguments
-
 import configparser
 import errno
+import functools
 import json
 import os
 import re
@@ -316,7 +318,6 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Callable, Dict
-import functools
 
 have_tomllib = True
 if sys.version_info >= (3, 11):
