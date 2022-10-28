@@ -23,6 +23,7 @@ from distributed.metrics import monotonic
 from distributed.spill import has_zict_210
 from distributed.utils_test import (
     NO_AMM,
+    async_wait_for,
     captured_logger,
     gen_cluster,
     inc,
@@ -527,9 +528,9 @@ async def test_pause_executor_manual(c, s, a):
     while a.state.executing_count != 1:
         await asyncio.sleep(0.01)
 
-    # Task that is queued on the worker when the worker pauses
+    # Task that is queued (on worker or scheduler) when the worker pauses
     y = c.submit(inc, 1, key="y")
-    while "y" not in a.state.tasks:
+    while "y" not in s.tasks:
         await asyncio.sleep(0.01)
 
     a.status = Status.paused
@@ -540,9 +541,7 @@ async def test_pause_executor_manual(c, s, a):
     # Task that is queued on the scheduler when the worker pauses.
     # It is not sent to the worker.
     z = c.submit(inc, 2, key="z")
-    while "z" not in s.tasks or s.tasks["z"].state != "no-worker":
-        await asyncio.sleep(0.01)
-    assert s.unrunnable == {s.tasks["z"]}
+    await async_wait_for(lambda: len(s.queued) == 1 or len(s.unrunnable) == 1, 5)
 
     # Test that a task that already started when the worker paused can complete
     # and its output can be retrieved. Also test that the now free slot won't be
@@ -552,8 +551,6 @@ async def test_pause_executor_manual(c, s, a):
     await asyncio.sleep(0.05)
 
     assert a.state.executing_count == 0
-    assert len(a.state.ready) == 1
-    assert a.state.tasks["y"].state == "ready"
     assert "z" not in a.state.tasks
 
     # Unpause. Tasks that were queued on the worker are executed.
