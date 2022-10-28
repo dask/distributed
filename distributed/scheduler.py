@@ -5338,6 +5338,9 @@ class Scheduler(SchedulerState, ServerNode):
         ws.add_to_long_running(ts)
         self.check_idle_saturated(ws)
 
+        if qts := _next_queued_when_slot_maybe_opened(self, ws):
+            self.transitions({qts.key: "processing"}, stimulus_id)
+
     def handle_worker_status_change(
         self, status: str | Status, worker: str | WorkerState, stimulus_id: str
     ) -> None:
@@ -7886,19 +7889,34 @@ def _exit_processing_common(
     state.check_idle_saturated(ws)
     state.release_resources(ts, ws)
 
-    # If a slot has opened up for a queued task, schedule it.
-    if state.queued and not _worker_full(ws, state.WORKER_SATURATION):
+    if qts := _next_queued_when_slot_maybe_opened(state, ws):
+        if state.validate:
+            assert qts.key not in recommendations, recommendations[qts.key]
+        recommendations[qts.key] = "processing"
+
+    return ws
+
+
+def _next_queued_when_slot_maybe_opened(
+    state: SchedulerState, ws: WorkerState
+) -> TaskState | None:
+    "If a slot has opened up on this worker, return the task at the front of the queue."
+    if (
+        state.queued
+        and ws.status == Status.running
+        and not _worker_full(ws, state.WORKER_SATURATION)
+    ):
         qts = state.queued.peek()
         if state.validate:
             assert qts.state == "queued", qts.state
-            assert qts.key not in recommendations, recommendations[qts.key]
+            assert not qts.processing_on
+            assert not qts.waiting_on
 
         # NOTE: we don't need to schedule more than one task at once here. Since this is
         # called each time 1 task completes, multiple tasks must complete for multiple
         # slots to open up.
-        recommendations[qts.key] = "processing"
-
-    return ws
+        return qts
+    return None
 
 
 def _add_to_memory(
