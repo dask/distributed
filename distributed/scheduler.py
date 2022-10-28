@@ -2100,16 +2100,20 @@ class SchedulerState:
 
         tg = ts.group
         lws = tg.last_worker
-        if not (
-            lws and tg.last_worker_tasks_left and self.workers.get(lws.address) is lws
+        if (
+            lws
+            and tg.last_worker_tasks_left
+            and lws.status == Status.running
+            and self.workers.get(lws.address) is lws
         ):
-            # Last-used worker is full or unknown; pick a new worker for the next few tasks
+            ws = lws
+        else:
+            # Last-used worker is full, unknown, retiring, or paused;
+            # pick a new worker for the next few tasks
             ws = min(pool, key=partial(self.worker_objective, ts))
             tg.last_worker_tasks_left = math.floor(
                 (len(tg) / self.total_nthreads) * ws.nthreads
             )
-        else:
-            ws = lws
 
         # Record `last_worker`, or clear it on the final task
         tg.last_worker = (
