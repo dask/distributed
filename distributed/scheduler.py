@@ -2167,10 +2167,7 @@ class SchedulerState:
                 _task_slots_available(ws, self.WORKER_SATURATION),
             )
             assert ws in self.running, (ws, self.running)
-
-        if self.validate and ws is not None:
             assert self.workers.get(ws.address) is ws
-            assert ws in self.running, (ws, self.running)
 
         return ws
 
