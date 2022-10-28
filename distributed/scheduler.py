@@ -2124,9 +2124,22 @@ class SchedulerState:
             # All workers busy? Task gets/stays queued.
             return None
 
-        # Just pick the least busy worker.
-        # NOTE: this will lead to worst-case scheduling with regards to co-assignment.
-        ws = min(self.idle.values(), key=lambda ws: len(ws.processing) / ws.nthreads)
+        # Pick the least-busy worker. If multiple workers have no tasks, round-robin
+        # them to ensure different workers get tasks on a quiet cluster.
+        empties: list[WorkerState] = []
+        min_ws: WorkerState | None = None
+        min_v: float | None = None
+        for cws in self.idle.values():
+            v = len(cws.processing) / cws.nthreads
+            if min_v is None or v < min_v:
+                min_v = v
+                min_ws = cws
+            if v == 0:
+                empties.append(cws)
+
+        ws = empties[self.n_tasks % len(empties)] if empties else min_ws
+        assert ws
+
         if self.validate:
             assert not _worker_full(ws, self.WORKER_SATURATION), (
                 ws,
