@@ -343,17 +343,17 @@ async def test_cuda_context(
                 assert cluster.scheduler_address.startswith("ucx://")
                 ctx = has_cuda_context()
                 assert (
-                    ctx["has-context"]
-                    and ctx["device-index"] == device_index
-                    and isinstance(ctx["uuid"], bytes)
+                    ctx.has_context
+                    and ctx.device_info.device_index == device_index
+                    and isinstance(ctx.device_info.uuid, bytes)
                 )
                 worker_cuda_context = await client.run(has_cuda_context)
                 assert len(worker_cuda_context) == 1
                 worker_cuda_context = list(worker_cuda_context.values())
                 assert (
-                    worker_cuda_context[0]["has-context"]
-                    and worker_cuda_context[0]["device-index"] == device_index
-                    and isinstance(worker_cuda_context[0]["uuid"], bytes)
+                    worker_cuda_context[0].has_context
+                    and worker_cuda_context[0].device_info.device_index == device_index
+                    and isinstance(worker_cuda_context[0].device_info.uuid, bytes)
                 )
 
 
