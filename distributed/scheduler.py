@@ -3288,20 +3288,7 @@ class SchedulerState:
 
         Returns priority-ordered recommendations.
         """
-        maybe_runnable: list[TaskState] = []
-        # Schedule any queued tasks onto the new worker
-        if not math.isinf(self.WORKER_SATURATION) and self.queued:
-            for qts in reversed(
-                list(
-                    self.queued.peekn(_task_slots_available(ws, self.WORKER_SATURATION))
-                )
-            ):
-                if self.validate:
-                    assert qts.state == "queued"
-                    assert not qts.processing_on
-                    assert not qts.waiting_on
-
-                maybe_runnable.append(qts)
+        maybe_runnable = list(_next_queued_when_slot_maybe_opened(self, ws))[::-1]
 
         # Schedule any restricted tasks onto the new worker, if the worker can run them
         for ts in self.unrunnable:
@@ -5338,8 +5325,14 @@ class Scheduler(SchedulerState, ServerNode):
         ws.add_to_long_running(ts)
         self.check_idle_saturated(ws)
 
-        if qts := _next_queued_when_slot_maybe_opened(self, ws):
-            self.transitions({qts.key: "processing"}, stimulus_id)
+        recommendations = {
+            qts.key: "processing"
+            for qts in _next_queued_when_slot_maybe_opened(self, ws)
+        }
+        if self.validate:
+            assert len(recommendations) == 1, (ws, recommendations)
+
+        self.transitions(recommendations, stimulus_id)
 
     def handle_worker_status_change(
         self, status: str | Status, worker: str | WorkerState, stimulus_id: str
@@ -7889,7 +7882,7 @@ def _exit_processing_common(
     state.check_idle_saturated(ws)
     state.release_resources(ts, ws)
 
-    if qts := _next_queued_when_slot_maybe_opened(state, ws):
+    for qts in _next_queued_when_slot_maybe_opened(state, ws):
         if state.validate:
             assert qts.key not in recommendations, recommendations[qts.key]
         recommendations[qts.key] = "processing"
@@ -7899,24 +7892,20 @@ def _exit_processing_common(
 
 def _next_queued_when_slot_maybe_opened(
     state: SchedulerState, ws: WorkerState
-) -> TaskState | None:
-    "If a slot has opened up on this worker, return the task at the front of the queue."
-    if (
-        state.queued
-        and ws.status == Status.running
-        and not _worker_full(ws, state.WORKER_SATURATION)
-    ):
-        qts = state.queued.peek()
-        if state.validate:
-            assert qts.state == "queued", qts.state
-            assert not qts.processing_on
-            assert not qts.waiting_on
-
-        # NOTE: we don't need to schedule more than one task at once here. Since this is
-        # called each time 1 task completes, multiple tasks must complete for multiple
-        # slots to open up.
-        return qts
-    return None
+) -> Iterator[TaskState]:
+    "Queued tasks to run, in priority order, if a slot may have opened up on this worker."
+    if state.queued and ws.status == Status.running:
+        # NOTE: this is called most frequently because a single task has completed, so
+        # there are <= 1 task slots available on the worker. `peekn` has fastpahs for
+        # these cases N<=0 and N==1.
+        for qts in state.queued.peekn(
+            _task_slots_available(ws, state.WORKER_SATURATION)
+        ):
+            if state.validate:
+                assert qts.state == "queued", qts.state
+                assert not qts.processing_on
+                assert not qts.waiting_on
+            yield qts
 
 
 def _add_to_memory(
