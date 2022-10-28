@@ -904,13 +904,23 @@ async def test_restart_waits_for_new_workers(c, s, *workers):
     assert set(s.workers.values()).isdisjoint(original_workers.values())
 
 
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=Worker)
+async def test_restart_no_nannies(c, s, a, b):
+    with pytest.raises(
+        RuntimeError, match=r"Expected all workers to have a nanny"
+    ) as e:
+        await c.restart()
+    assert set(s.workers.keys()) == set(e.value.args[1].keys())
+
+
 class SlowKillNanny(Nanny):
     def __init__(self, *args, **kwargs):
         self.kill_proceed = asyncio.Event()
         self.kill_called = asyncio.Event()
         super().__init__(*args, **kwargs)
 
-    async def kill(self, *, timeout, reason=None):
+    async def kill(self, *, timeout=30, reason=None):
         self.kill_called.set()
         print("kill called")
         await asyncio.wait_for(self.kill_proceed.wait(), timeout)
@@ -928,9 +938,7 @@ async def test_restart_nanny_timeout_exceeded(c, s, a, b):
     assert s.unrunnable
     assert s.tasks
 
-    with pytest.raises(
-        TimeoutError, match=r"2/2 nanny worker\(s\) did not shut down within 1s"
-    ):
+    with pytest.raises(RuntimeError, match=r"2/2 worker(s) failed to restart"):
         await c.restart(timeout="1s")
     assert a.kill_called.is_set()
     assert b.kill_called.is_set()
@@ -1010,7 +1018,7 @@ async def test_restart_heartbeat_before_closing(c, s, n):
     https://github.com/dask/distributed/issues/6494
     """
     prev_workers = dict(s.workers)
-    restart_task = asyncio.create_task(s.restart())
+    restart_task = asyncio.create_task(s.restart(timeout=5))
 
     await n.kill_called.wait()
     await asyncio.sleep(0.5)  # significantly longer than the heartbeat interval

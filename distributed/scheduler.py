@@ -3646,6 +3646,7 @@ class Scheduler(SchedulerState, ServerNode):
             "replicate": self.replicate,
             "run_function": self.run_function,
             "restart": self.restart,
+            "restart_workers": self.restart_workers,
             "update_data": self.update_data,
             "set_resources": self.add_resources,
             "retire_workers": self.retire_workers,
@@ -5716,7 +5717,9 @@ class Scheduler(SchedulerState, ServerNode):
         self._clear_task_state()
         assert not self.tasks
         if timer.expired:
-            raise RuntimeError("Timed out resetting task state.")
+            message = "Timed out while resetting task state."
+            logger.exception(message)
+            return {"status": "error", "message": message}
 
         self.report({"op": "restart"})
 
@@ -5727,13 +5730,19 @@ class Scheduler(SchedulerState, ServerNode):
             except Exception as e:
                 logger.exception(e)
         if timer.expired:
-            raise RuntimeError("Timed out while restarting plugin.")
+            message = "Timed out while restarting plugins."
+            logger.exception(message)
+            return {"status": "error", "message": message}
 
         logger.debug("Restarting workers.")
-        await self._restart_workers(workers, timeout=timer.remaining)
-
+        try:
+            await self._restart_workers(workers, timeout=timer.remaining)
+        except (RuntimeError, TimeoutError) as e:
+            logger.exception(e)
+            return {"status": "error", "message": str(e)}
         self.log_event([client, "all"], {"action": "restart", "client": client})
         logger.info("Successfully restarted.")
+        return {"status": "OK"}
 
     def _expect_nannies(self, workers: Iterable[str]) -> None:
         non_nannies = [worker for worker in workers if not self.workers[worker].nanny]
@@ -5747,6 +5756,7 @@ class Scheduler(SchedulerState, ServerNode):
                 non_nannies,
             )
 
+    @log_errors
     async def restart_workers(self, workers: Iterable[str], timeout: float = 30):
         """
         Restart a specified set of workers
@@ -5771,9 +5781,14 @@ class Scheduler(SchedulerState, ServerNode):
         Scheduler.restart
         Client.restart_workers
         """
-        self._expect_nannies(workers)
-        logger.debug("Asking nannies to restart workers: %s.", workers)
-        await self._restart_workers(workers, timeout)
+        try:
+            self._expect_nannies(workers)
+            logger.debug("Asking nannies to restart workers: %s.", workers)
+            await self._restart_workers(workers, timeout)
+            return {"status": "OK"}
+        except RuntimeError as e:
+            logger.error(e)
+            return {"status": "error", "message": str(e)}
 
     async def _restart_workers(self, workers: Iterable[str], timeout: float) -> None:
         nanny_addresses = [self.workers[worker].nanny for worker in workers]
@@ -5800,11 +5815,12 @@ class Scheduler(SchedulerState, ServerNode):
             bad_workers = {
                 worker: response
                 for worker, response in zip(workers, responses)
-                if isinstance(response, Exception)
+                if isinstance(response, Exception) or response == "timed out"
             }
             if bad_workers:
+                # TODO: Do we want to return the responses to the user or rather log them on the server?
                 raise RuntimeError(
-                    f"{len(bad_workers)} workers failed to restart within {timeout} s.",
+                    f"{len(bad_workers)}/{len(nannies)} worker(s) failed to restart within {timeout} s.",
                     bad_workers,
                 )
 
