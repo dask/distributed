@@ -166,6 +166,6 @@ __all__ = [
     "worker_client",
 ]
 
-from . import _version
+from distributed import _version
 
 __version__ = _version.get_versions()["version"]
