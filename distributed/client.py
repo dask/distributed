@@ -1145,6 +1145,14 @@ class Client(SyncMethodMixin):
             return f"<{self.__class__.__name__}: No scheduler connected>"
 
     def _repr_html_(self):
+        try:
+            import dask_labextension  # noqa: F401
+
+            # TODO: also guard with version check
+            JUPYTERLAB = True
+        except ImportError:
+            JUPYTERLAB = False
+
         scheduler, info = self._get_scheduler_info()
 
         return get_template("client.html.j2").render(
@@ -1154,6 +1162,7 @@ class Client(SyncMethodMixin):
             cluster=self.cluster,
             scheduler_file=self.scheduler_file,
             dashboard_link=self.dashboard_link,
+            jupyterlab=JUPYTERLAB,
         )
 
     def start(self, **kwargs):
