@@ -993,17 +993,6 @@ async def test_restart_worker_rejoins_after_timeout_expired(c, s, a):
         await task
 
 
-@gen_cluster(client=True, nthreads=[("", 1)] * 2)
-async def test_restart_no_wait_for_workers(c, s, a, b):
-    await c.restart(timeout="1s", wait_for_workers=False)
-
-    assert not s.workers
-    # Workers are not immediately closed because of https://github.com/dask/distributed/issues/6390
-    # (the message is still waiting in the BatchedSend)
-    await a.finished()
-    await b.finished()
-
-
 @pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny)
 async def test_restart_some_nannies_some_not(c, s, a, b):
@@ -1011,15 +1000,12 @@ async def test_restart_some_nannies_some_not(c, s, a, b):
     async with Worker(s.address, nthreads=1) as w:
         await c.wait_for_workers(3)
 
-        # FIXME how to make this not always take 20s if the nannies do restart quickly?
-        with pytest.raises(TimeoutError, match=r"The 1 worker\(s\) not using Nannies"):
-            await c.restart(timeout="20s")
+        with pytest.raises(
+            RuntimeError, match=r"Expected all workers to have a nanny"
+        ) as e:
+            await c.restart()
 
-        assert w.status == Status.closed
-
-        assert len(s.workers) == 2
-        assert set(s.workers).isdisjoint(original_addrs)
-        assert w.address not in s.workers
+    assert w.address in e.value.args[1]
 
 
 @gen_cluster(

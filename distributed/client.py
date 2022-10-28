@@ -3415,48 +3415,40 @@ class Client(SyncMethodMixin):
         else:
             return result
 
-    async def _restart(self, timeout=no_default, wait_for_workers=True):
+    async def _restart(self, timeout=no_default):
         if timeout == no_default:
             timeout = self._timeout * 4
         if timeout is not None:
             timeout = parse_timedelta(timeout, "s")
 
-        await self.scheduler.restart(timeout=timeout, wait_for_workers=wait_for_workers)
+        await self.scheduler.restart(timeout=timeout)
         return self
 
-    def restart(self, timeout=no_default, wait_for_workers=True):
+    def restart(self, timeout=no_default):
         """
-        Restart all workers. Reset local state. Optionally wait for workers to return.
+        Reset local state and restart all workers
 
-        Workers without nannies are shut down, hoping an external deployment system
-        will restart them. Therefore, if not using nannies and your deployment system
-        does not automatically restart workers, ``restart`` will just shut down all
-        workers, then time out!
+        If ``restart`` takes longer than ``timeout`` seconds or fails at any stage,
+        it will raise an ``RuntimeError``. This leaves the cluster in an undefined
+        state.
 
-        After ``restart``, all connected workers are new, regardless of whether ``TimeoutError``
-        was raised. Any workers that failed to shut down in time are removed, and
-        may or may not shut down on their own in the future.
+        This methods expects all workers to have nannies to be able to restart them.
+        If workers without nannies exist, ``restart`` will raise a ``RuntimeError``
+        that lists the workers without nannies. Consider removing those workers
+        and calling ``restart`` again afterward.
 
         Parameters
         ----------
         timeout:
-            How long to wait for workers to shut down and come back, if ``wait_for_workers``
-            is True, otherwise just how long to wait for workers to shut down.
-            Raises ``asyncio.TimeoutError`` if this is exceeded.
-        wait_for_workers:
-            Whether to wait for all workers to reconnect, or just for them to shut down
-            (default True). Use ``restart(wait_for_workers=False)`` combined with
-            :meth:`Client.wait_for_workers` for granular control over how many workers to
-            wait for.
+            Raise `RuntimeError` if ``restart`` takes more than ``timeout``
+            seconds.
 
-        See also
+        See Also
         --------
         Scheduler.restart
         Client.restart_workers
         """
-        return self.sync(
-            self._restart, timeout=timeout, wait_for_workers=wait_for_workers
-        )
+        return self.sync(self._restart, timeout=timeout)
 
     async def _restart_workers(
         self, workers: list[str], timeout: int | float | None = None

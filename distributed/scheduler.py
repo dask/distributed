@@ -83,7 +83,7 @@ from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
 from distributed.http import get_handlers
 from distributed.lock import LockExtension
-from distributed.metrics import time
+from distributed.metrics import CountdownTimer, time
 from distributed.multi_lock import MultiLockExtension
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
@@ -5673,43 +5673,38 @@ class Scheduler(SchedulerState, ServerNode):
         self.log_event("all", {"action": "gather", "count": len(keys)})
         return result
 
-    # FIXME: Docstring
     @log_errors
     async def restart(self, client=None, timeout=30):
         """
-        Restart all workers. Reset local state. Optionally wait for workers to return.
+        Reset local state and restart all workers
 
-        Workers without nannies are shut down, hoping an external deployment system
-        will restart them. Therefore, if not using nannies and your deployment system
-        does not automatically restart workers, ``restart`` will just shut down all
-        workers, then time out!
+        If ``restart`` takes longer than ``timeout`` seconds or fails at any stage,
+        it will raise an ``RuntimeError``. This leaves the cluster in an undefined
+        state.
 
-        After ``restart``, all connected workers are new, regardless of whether ``TimeoutError``
-        was raised. Any workers that failed to shut down in time are removed, and
-        may or may not shut down on their own in the future.
+        This methods expects all workers to have nannies to be able to restart them.
+        If workers without nannies exist, ``restart`` will raise a ``RuntimeError``
+        that lists the workers without nannies. Consider removing those workers
+        and calling ``restart`` again afterward.
 
         Parameters
         ----------
         timeout:
-            How long to wait for workers to shut down and come back, if ``wait_for_workers``
-            is True, otherwise just how long to wait for workers to shut down.
-            Raises ``asyncio.TimeoutError`` if this is exceeded.
-        wait_for_workers:
-            Whether to wait for all workers to reconnect, or just for them to shut down
-            (default True). Use ``restart(wait_for_workers=False)`` combined with
-            :meth:`Client.wait_for_workers` for granular control over how many workers to
-            wait for.
+            Raise `RuntimeError` if ``restart`` takes more than ``timeout``
+            seconds.
 
-        See also
+        See Also
         --------
         Client.restart
         Client.restart_workers
         """
         stimulus_id = f"restart-{time()}"
+        timer = CountdownTimer(timeout)
         workers = list(self.workers)
         self._expect_nannies(workers)
 
         logger.info("Resetting local state and restarting workers.")
+        logger.debug("Releasing all keys.")
         for cs in self.clients.values():
             self.client_releases_keys(
                 keys=[ts.key for ts in cs.wants_what],
@@ -5717,18 +5712,25 @@ class Scheduler(SchedulerState, ServerNode):
                 stimulus_id=stimulus_id,
             )
 
+        logger.debug("Clearing task state.")
         self._clear_task_state()
         assert not self.tasks
+        if timer.expired:
+            raise RuntimeError("Timed out resetting task state.")
+
         self.report({"op": "restart"})
 
+        logger.debug("Restarting plugins.")
         for plugin in list(self.plugins.values()):
             try:
                 plugin.restart(self)
             except Exception as e:
                 logger.exception(e)
+        if timer.expired:
+            raise RuntimeError("Timed out while restarting plugin.")
 
-        logger.debug("Restarting all workers.")
-        await self._restart_workers(workers, graceful_timeout=timeout)
+        logger.debug("Restarting workers.")
+        await self._restart_workers(workers, timeout=timer.remaining)
 
         self.log_event([client, "all"], {"action": "restart", "client": client})
         logger.info("Successfully restarted.")

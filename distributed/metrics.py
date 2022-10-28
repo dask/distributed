@@ -98,3 +98,27 @@ try:
     thread_time = timemod.thread_time
 except (AttributeError, OSError):  # pragma: no cover
     thread_time = process_time
+
+
+class CountdownTimer:
+    duration: float | None
+    started_at: float
+
+    def __init__(self, duration: float | None = None):
+        self.duration = duration
+        self.started_at = time()
+
+    @property
+    def elapsed(self) -> float:
+        return time() - self.started_at
+
+    @property
+    def remaining(self) -> float | None:
+        if self.duration is None:
+            return None
+        else:
+            return max(0, self.duration - self.elapsed)
+
+    @property
+    def expired(self) -> bool:
+        return self.remaining == 0
