@@ -1505,7 +1505,9 @@ async def test_close_gracefully(c, s, a, b):
 
     assert any(ts for ts in b.state.tasks.values() if ts.state == "executing")
 
-    await b.close_gracefully()
+    with captured_logger("distributed.worker") as logger:
+        await b.close_gracefully(reason="foo")
+    assert "Reason: foo" in logger.getvalue()
 
     assert b.status == Status.closed
     assert b.address not in s.workers

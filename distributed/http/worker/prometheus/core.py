@@ -9,6 +9,8 @@ from distributed.worker import Worker
 
 
 class WorkerMetricCollector(PrometheusCollector):
+    server: Worker
+
     def __init__(self, server: Worker):
         super().__init__(server)
         self.logger = logging.getLogger("distributed.dask_worker")
@@ -26,15 +28,15 @@ class WorkerMetricCollector(PrometheusCollector):
     def collect(self):
         from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
 
+        ws = self.server.state
+
         tasks = GaugeMetricFamily(
             self.build_name("tasks"),
             "Number of tasks at worker.",
             labels=["state"],
         )
-        tasks.add_metric(["stored"], len(self.server.data))
-        tasks.add_metric(["executing"], self.server.state.executing_count)
-        tasks.add_metric(["ready"], len(self.server.state.ready))
-        tasks.add_metric(["waiting"], self.server.state.waiting_for_data_count)
+        for k, n in ws.task_counts.items():
+            tasks.add_metric([k], n)
         yield tasks
 
         yield GaugeMetricFamily(
@@ -43,13 +45,13 @@ class WorkerMetricCollector(PrometheusCollector):
                 "[Deprecated: This metric has been renamed to transfer_incoming_count.] "
                 "Number of open fetch requests to other workers."
             ),
-            value=self.server.state.transfer_incoming_count,
+            value=ws.transfer_incoming_count,
         )
 
         yield GaugeMetricFamily(
             self.build_name("threads"),
             "Number of worker threads.",
-            value=self.server.state.nthreads,
+            value=ws.nthreads,
         )
 
         yield GaugeMetricFamily(
@@ -63,7 +65,7 @@ class WorkerMetricCollector(PrometheusCollector):
         except AttributeError:
             spilled_memory, spilled_disk = 0, 0  # spilling is disabled
         process_memory = self.server.monitor.get_process_memory()
-        managed_memory = min(process_memory, self.server.state.nbytes - spilled_memory)
+        managed_memory = min(process_memory, ws.nbytes - spilled_memory)
 
         memory = GaugeMetricFamily(
             self.build_name("memory_bytes"),
@@ -78,12 +80,12 @@ class WorkerMetricCollector(PrometheusCollector):
         yield GaugeMetricFamily(
             self.build_name("transfer_incoming_bytes"),
             "Total size of open data transfers from other workers.",
-            value=self.server.state.transfer_incoming_bytes,
+            value=ws.transfer_incoming_bytes,
         )
         yield GaugeMetricFamily(
             self.build_name("transfer_incoming_count"),
             "Number of open data transfers from other workers.",
-            value=self.server.state.transfer_incoming_count,
+            value=ws.transfer_incoming_count,
         )
 
         yield CounterMetricFamily(
@@ -92,7 +94,7 @@ class WorkerMetricCollector(PrometheusCollector):
                 "Total number of data transfers from other workers "
                 "since the worker was started."
             ),
-            value=self.server.state.transfer_incoming_count_total,
+            value=ws.transfer_incoming_count_total,
         )
 
         yield GaugeMetricFamily(

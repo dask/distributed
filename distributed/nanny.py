@@ -15,7 +15,7 @@ from contextlib import suppress
 from inspect import isawaitable
 from queue import Empty
 from time import sleep as sync_sleep
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 from toolz import merge
 from tornado import gen
@@ -110,7 +110,7 @@ class Nanny(ServerNode):
     """
 
     _instances: ClassVar[weakref.WeakSet[Nanny]] = weakref.WeakSet()
-    process = None
+    process: WorkerProcess | None
     memory_manager: NannyMemoryManager
 
     env: dict[str, str]
@@ -162,6 +162,7 @@ class Nanny(ServerNode):
                 stacklevel=2,
             )
 
+        self.process = None
         self._setup_logging(logger)
         self.loop = self.io_loop = IOLoop.current()
 
@@ -256,8 +257,8 @@ class Nanny(ServerNode):
             "instantiate": self.instantiate,
             "kill": self.kill,
             "restart": self.restart,
-            # cannot call it 'close' on the rpc side for naming conflict
             "get_logs": self.get_logs,
+            # cannot call it 'close' on the rpc side for naming conflict
             "terminate": self.close,
             "close_gracefully": self.close_gracefully,
             "run": self.run,
@@ -364,7 +365,7 @@ class Nanny(ServerNode):
         response = await self.instantiate()
 
         if response != Status.running:
-            await self.close()
+            await self.close(reason="nanny-start-failed")
             return
 
         assert self.worker_address
@@ -373,7 +374,7 @@ class Nanny(ServerNode):
 
         return self
 
-    async def kill(self, timeout=2):
+    async def kill(self, timeout: float = 2, reason: str = "nanny-kill") -> None:
         """Kill the local worker process
 
         Blocks until both the process is down and the scheduler is properly
@@ -383,7 +384,7 @@ class Nanny(ServerNode):
             return
 
         deadline = time() + timeout
-        await self.process.kill(timeout=0.8 * (deadline - time()))
+        await self.process.kill(reason=reason, timeout=0.8 * (deadline - time()))
 
     async def instantiate(self) -> Status:
         """Start a local worker process
@@ -430,7 +431,9 @@ class Nanny(ServerNode):
                     self,
                     self.scheduler_addr,
                 )
-                await self.close(timeout=self.death_timeout)
+                await self.close(
+                    timeout=self.death_timeout, reason="nanny-instantiate-timeout"
+                )
                 raise
 
         else:
@@ -438,7 +441,7 @@ class Nanny(ServerNode):
                 result = await self.process.start()
             except Exception:
                 logger.error("Failed to start process", exc_info=True)
-                await self.close()
+                await self.close(reason="nanny-instantiate-failed")
                 raise
         return result
 
@@ -464,7 +467,7 @@ class Nanny(ServerNode):
                 msg = error_message(e)
                 return msg
         if getattr(plugin, "restart", False):
-            await self.restart()
+            await self.restart(reason=f"nanny-plugin-{name}-restart")
 
         return {"status": "OK"}
 
@@ -483,10 +486,12 @@ class Nanny(ServerNode):
 
         return {"status": "OK"}
 
-    async def restart(self, timeout=30):
+    async def restart(
+        self, timeout: float = 30, reason: str = "nanny-restart"
+    ) -> Literal["OK", "timed out"]:
         async def _():
             if self.process is not None:
-                await self.kill()
+                await self.kill(reason=reason)
                 await self.instantiate()
 
         try:
@@ -525,7 +530,7 @@ class Nanny(ServerNode):
             except OSError:
                 logger.exception("Failed to unregister")
                 if not self.reconnect:
-                    await self.close()
+                    await self.close(reason="nanny-unregister-failed")
                     return
 
         try:
@@ -538,7 +543,7 @@ class Nanny(ServerNode):
                 logger.warning("Restarting worker")
                 await self.instantiate()
             elif self.status == Status.closing_gracefully:
-                await self.close()
+                await self.close(reason="nanny-close-gracefully")
 
         except Exception:
             logger.error(
@@ -553,15 +558,20 @@ class Nanny(ServerNode):
         warnings.warn("Worker._close has moved to Worker.close", stacklevel=2)
         return self.close(*args, **kwargs)
 
-    def close_gracefully(self):
+    def close_gracefully(self, reason: str = "nanny-close-gracefully") -> None:
         """
         A signal that we shouldn't try to restart workers if they go away
 
         This is used as part of the cluster shutdown process.
         """
         self.status = Status.closing_gracefully
+        logger.info(
+            "Closing Nanny gracefully at %r. Reason: %s", self.address_safe, reason
+        )
 
-    async def close(self, timeout=5):
+    async def close(
+        self, timeout: float = 5, reason: str = "nanny-close"
+    ) -> Literal["OK"]:
         """
         Close the worker process, stop all comms.
         """
@@ -573,10 +583,7 @@ class Nanny(ServerNode):
             return "OK"
 
         self.status = Status.closing
-        logger.info(
-            "Closing Nanny at %r.",
-            self.address_safe,
-        )
+        logger.info("Closing Nanny at %r. Reason: %s", self.address_safe, reason)
 
         for preload in self.preloads:
             await preload.teardown()
@@ -592,7 +599,7 @@ class Nanny(ServerNode):
         self.stop()
         try:
             if self.process is not None:
-                await self.kill(timeout=timeout)
+                await self.kill(timeout=timeout, reason=reason)
         except Exception:
             logger.exception("Error in Nanny killing Worker subprocess")
         self.process = None
@@ -615,6 +622,7 @@ class WorkerProcess:
     running: asyncio.Event
     stopped: asyncio.Event
 
+    process: AsyncProcess | None
     env: dict[str, str]
     pre_spawn_env: dict[str, str]
 
@@ -744,6 +752,7 @@ class WorkerProcess:
 
     def mark_stopped(self):
         if self.status != Status.stopped:
+            assert self.process is not None
             r = self.process.exitcode
             assert r is not None
             if r != 0:
@@ -764,7 +773,12 @@ class WorkerProcess:
             if self.on_exit is not None:
                 self.on_exit(r)
 
-    async def kill(self, timeout: float = 2, executor_wait: bool = True) -> None:
+    async def kill(
+        self,
+        timeout: float = 2,
+        executor_wait: bool = True,
+        reason: str = "workerprocess-kill",
+    ) -> None:
         """
         Ensure the worker process is stopped, waiting at most
         ``timeout * 0.8`` seconds before killing it abruptly.
@@ -787,7 +801,7 @@ class WorkerProcess:
             Status.failed,  # process failed to start, but hasn't been joined yet
         ), self.status
         self.status = Status.stopping
-        logger.info("Nanny asking worker to close")
+        logger.info("Nanny asking worker to close. Reason: %s", reason)
 
         process = self.process
         assert process
@@ -799,6 +813,7 @@ class WorkerProcess:
                 "op": "stop",
                 "timeout": wait_timeout,
                 "executor_wait": executor_wait,
+                "reason": reason,
             }
         )
         await asyncio.sleep(0)  # otherwise we get broken pipe errors
@@ -871,12 +886,15 @@ class WorkerProcess:
             loop.make_current()
             worker = Worker(**worker_kwargs)
 
-            async def do_stop(timeout=5, executor_wait=True):
+            async def do_stop(
+                timeout=5, executor_wait=True, reason="workerprocess-stop"
+            ):
                 try:
                     await worker.close(
                         nanny=False,
                         executor_wait=executor_wait,
                         timeout=timeout,
+                        reason=reason,
                     )
                 finally:
                     loop.stop()

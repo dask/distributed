@@ -1014,6 +1014,8 @@ async def test_deprecated_worker_attributes(s, a, b):
 
     with pytest.warns(FutureWarning, match="attribute has been removed"):
         assert a.data_needed == set()
+    with pytest.warns(FutureWarning, match="attribute has been removed"):
+        assert a.waiting_for_data_count == 0
 
 
 @pytest.mark.parametrize("n_remote_workers", [1, 2])
@@ -1620,3 +1622,101 @@ def test_worker_nbytes(ws_with_running_task):
     # memory -> released by RemoveReplicasEvent
     ws.handle_stimulus(RemoveReplicasEvent(keys=["x", "y", "w"], stimulus_id="s7"))
     assert ws.nbytes == 0
+
+
+def test_fetch_count(ws):
+    ws.transfer_incoming_count_limit = 0
+    ws2 = "127.0.0.1:2"
+    ws3 = "127.0.0.1:3"
+    assert ws.fetch_count == 0
+    # Saturate comms
+    # released->fetch->flight
+    ws.handle_stimulus(
+        AcquireReplicasEvent(who_has={"a": [ws2]}, nbytes={"a": 1}, stimulus_id="s1"),
+        AcquireReplicasEvent(
+            who_has={"b": [ws2, ws3]}, nbytes={"b": 1}, stimulus_id="s2"
+        ),
+    )
+    assert ws.tasks["b"].coming_from == ws3
+    assert ws.fetch_count == 0
+
+    # released->fetch
+    # d is in two data_needed heaps
+    ws.handle_stimulus(
+        AcquireReplicasEvent(
+            who_has={"c": [ws2], "d": [ws2, ws3]},
+            nbytes={"c": 1, "d": 1},
+            stimulus_id="s3",
+        )
+    )
+    assert ws.fetch_count == 2
+
+    # fetch->released
+    ws.handle_stimulus(FreeKeysEvent(keys={"c", "d"}, stimulus_id="s4"))
+    assert ws.fetch_count == 0
+
+    # flight->missing
+    ws.handle_stimulus(
+        GatherDepSuccessEvent(worker=ws2, data={}, total_nbytes=0, stimulus_id="s5")
+    )
+    assert ws.tasks["a"].state == "missing"
+    print(ws.tasks)
+    assert ws.fetch_count == 0
+    assert len(ws.missing_dep_flight) == 1
+
+    # flight->fetch
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "clog", who_has={"clog_dep": [ws2]}, priority=(-1,), stimulus_id="s6"
+        ),
+        GatherDepSuccessEvent(worker=ws3, data={}, total_nbytes=0, stimulus_id="s7"),
+    )
+    assert ws.tasks["b"].state == "fetch"
+    assert ws.fetch_count == 1
+    assert len(ws.missing_dep_flight) == 1
+
+
+def test_task_counts(ws):
+    assert ws.task_counts == {
+        "constrained": 0,
+        "executing": 0,
+        "fetch": 0,
+        "flight": 0,
+        "long-running": 0,
+        "memory": 0,
+        "missing": 0,
+        "other": 0,
+        "ready": 0,
+        "waiting": 0,
+    }
+
+
+def test_task_counts_with_actors(ws):
+    ws.handle_stimulus(ComputeTaskEvent.dummy("x", actor=True, stimulus_id="s1"))
+    assert ws.actors == {"x": None}
+    assert ws.task_counts == {
+        "constrained": 0,
+        "executing": 1,
+        "fetch": 0,
+        "flight": 0,
+        "long-running": 0,
+        "memory": 0,
+        "missing": 0,
+        "other": 0,
+        "ready": 0,
+        "waiting": 0,
+    }
+    ws.handle_stimulus(ExecuteSuccessEvent.dummy("x", value=123, stimulus_id="s2"))
+    assert ws.actors == {"x": 123}
+    assert ws.task_counts == {
+        "constrained": 0,
+        "executing": 0,
+        "fetch": 0,
+        "flight": 0,
+        "long-running": 0,
+        "memory": 1,
+        "missing": 0,
+        "other": 0,
+        "ready": 0,
+        "waiting": 0,
+    }

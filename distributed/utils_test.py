@@ -24,7 +24,7 @@ import threading
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from contextlib import contextmanager, nullcontext, suppress
 from itertools import count
 from time import sleep
@@ -2353,10 +2353,14 @@ def freeze_batched_send(bcomm: BatchedSend) -> Iterator[LockedComm]:
 
 
 async def wait_for_state(
-    key: str, state: str, dask_worker: Worker | Scheduler, *, interval: float = 0.01
+    key: str,
+    state: str | Collection[str],
+    dask_worker: Worker | Scheduler,
+    *,
+    interval: float = 0.01,
 ) -> None:
     """Wait for a task to appear on a Worker or on the Scheduler and to be in a specific
-    state.
+    state or one of a set of possible states.
     """
     tasks: Mapping[str, SchedulerTaskState | WorkerTaskState]
 
@@ -2367,14 +2371,18 @@ async def wait_for_state(
     else:
         raise TypeError(dask_worker)  # pragma: nocover
 
+    if isinstance(state, str):
+        state = (state,)
+    state_str = repr(next(iter(state))) if len(state) == 1 else str(state)
+
     try:
-        while key not in tasks or tasks[key].state != state:
+        while key not in tasks or tasks[key].state not in state:
             await asyncio.sleep(interval)
     except (asyncio.CancelledError, asyncio.TimeoutError):
         if key in tasks:
             msg = (
                 f"tasks[{key}].state={tasks[key].state!r} on {dask_worker.address}; "
-                f"expected {state=}"
+                f"expected state={state_str}"
             )
         else:
             msg = f"tasks[{key}] not found on {dask_worker.address}"

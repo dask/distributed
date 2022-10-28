@@ -69,3 +69,13 @@ async def test_prometheus(c, s, a, b):
     assert active_metrics.keys() == expected_metrics
     for v in active_metrics.values():
         assert v.samples == []
+
+
+@gen_cluster(
+    client=True, clean_kwargs={"threads": False}, scheduler_kwargs={"extensions": {}}
+)
+async def test_prometheus_without_semaphore_extension(c, s, a, b):
+    pytest.importorskip("prometheus_client")
+
+    active_metrics = await fetch_metrics(s.http_server.port, "dask_semaphore_")
+    assert not active_metrics

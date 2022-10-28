@@ -17,7 +17,7 @@ import cloudpickle
 import psutil
 import pytest
 from tlz import concat, first, merge, valmap
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import IOLoop
 
 import dask
 from dask import delayed
@@ -35,7 +35,7 @@ from distributed import (
     wait,
 )
 from distributed.comm.addressing import parse_host_port
-from distributed.compatibility import LINUX, MACOS, WINDOWS
+from distributed.compatibility import LINUX, MACOS, WINDOWS, PeriodicCallback
 from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps, loads
@@ -43,6 +43,7 @@ from distributed.scheduler import KilledWorker, MemoryState, Scheduler, WorkerSt
 from distributed.utils import TimeoutError
 from distributed.utils_test import (
     NO_AMM,
+    BlockedGatherDep,
     BrokenComm,
     async_wait_for,
     captured_logger,
@@ -61,6 +62,7 @@ from distributed.utils_test import (
     slowinc,
     tls_only_security,
     varying,
+    wait_for_state,
 )
 from distributed.worker import dumps_function, dumps_task, get_worker
 
@@ -250,6 +252,76 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         assert len(unexpected_transfers) <= 3, unexpected_transfers
 
     test_decide_worker_coschedule_order_neighbors_()
+
+
+@pytest.mark.skipif(
+    math.isfinite(dask.config.get("distributed.scheduler.worker-saturation")),
+    reason="Not relevant with queuing on; see https://github.com/dask/distributed/issues/7204",
+)
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    config={"distributed.scheduler.work-stealing": False},
+)
+async def test_decide_worker_rootish_while_last_worker_is_retiring(c, s, a):
+    """https://github.com/dask/distributed/issues/7063"""
+    # Put a task in memory on the worker to be retired and prevent the other from
+    # acquiring a replica. This will cause a to be stuck in closing_gracefully later on,
+    # until we set b.block_gather_dep.
+    m = (await c.scatter({"m": 1}, workers=[a.address]))["m"]
+
+    evx = [Event() for _ in range(3)]
+    evy = Event()
+
+    async with BlockedGatherDep(s.address, nthreads=1) as b:
+        xs = [
+            c.submit(lambda ev: ev.wait(), evx[0], key="x-0", workers=[a.address]),
+            c.submit(lambda ev: ev.wait(), evx[1], key="x-1", workers=[a.address]),
+            c.submit(lambda ev: ev.wait(), evx[2], key="x-2", workers=[b.address]),
+        ]
+        ys = [
+            c.submit(lambda x, ev: ev.wait(), xs[0], evy, key="y-0"),
+            c.submit(lambda x, ev: ev.wait(), xs[0], evy, key="y-1"),
+            c.submit(lambda x, ev: ev.wait(), xs[1], evy, key="y-2"),
+            c.submit(lambda x, ev: ev.wait(), xs[2], evy, key="y-3"),
+            c.submit(lambda x, ev: ev.wait(), xs[2], evy, key="y-4"),
+            c.submit(lambda x, ev: ev.wait(), xs[2], evy, key="y-5"),
+        ]
+
+        while a.state.executing_count != 1 or b.state.executing_count != 1:
+            await asyncio.sleep(0.01)
+
+        # - y-2 has no restrictions
+        # - TaskGroup(y) has more than 4 tasks (total_nthreads * 2)
+        # - TaskGroup(y) has less than 5 dependency groups
+        # - TaskGroup(y) has less than 5 dependency tasks
+        assert s.is_rootish(s.tasks["y-2"])
+
+        await evx[0].set()
+        await wait_for_state("y-0", "processing", s)
+        await wait_for_state("y-1", "processing", s)
+        assert s.tasks["y-2"].group.last_worker == s.workers[a.address]
+        assert s.tasks["y-2"].group.last_worker_tasks_left == 1
+
+        # Take a out of the running pool, but without removing it from the cluster
+        # completely
+        retire_task = asyncio.create_task(c.retire_workers([a.address]))
+        # Wait until AMM sends AcquireReplicasEvent to b to move away m
+        await b.in_gather_dep.wait()
+        assert s.workers[a.address].status == Status.closing_gracefully
+
+        # Transition y-2 to processing. Normally, it would be scheduled on a, but it's
+        # not a running worker, so we must choose b
+        await evx[1].set()
+        await wait_for_state("y-2", "processing", s)
+        await wait_for_state("y-2", "waiting", b)  # x-1 is in memory on a
+
+        # Cleanup
+        b.block_gather_dep.set()
+        await evx[2].set()
+        await evy.set()
+        await retire_task
+        await wait(xs + ys)
 
 
 @pytest.mark.slow
@@ -606,26 +678,17 @@ async def test_clear_events_client_removal(c, s, a, b):
         assert time() < start + 2
 
 
-@gen_cluster()
-async def test_add_worker(s, a, b):
-    w = Worker(s.address, nthreads=3)
-    w.data["x-5"] = 6
-    w.data["y"] = 1
-
-    dsk = {("x-%d" % i): (inc, i) for i in range(10)}
-    s.update_graph(
-        tasks=valmap(dumps_task, dsk),
-        keys=list(dsk),
-        client="client",
-        dependencies={k: set() for k in dsk},
-    )
-    s.validate_state()
-    await w
+@gen_cluster(client=True, nthreads=[])
+async def test_add_worker(c, s):
+    x = c.submit(inc, 1, key="x")
+    await wait_for_state("x", ("queued", "no-worker"), s)
     s.validate_state()
 
-    assert w.ip in s.host_info
-    assert s.host_info[w.ip]["addresses"] == {a.address, b.address, w.address}
-    await w.close()
+    async with Worker(s.address) as w:
+        s.validate_state()
+        assert w.ip in s.host_info
+        assert s.host_info[w.ip]["addresses"] == {w.address}
+        assert await x == 2
 
 
 @gen_cluster(scheduler_kwargs={"blocked_handlers": ["feed"]})
@@ -869,8 +932,9 @@ async def test_restart(c, s, a, b):
     with captured_logger("distributed.scheduler") as caplog:
         futures = c.map(inc, range(20))
         await wait(futures)
-
-        await s.restart()
+        with captured_logger("distributed.nanny") as nanny_logger:
+            await s.restart()
+        assert "Reason: scheduler-restart" in nanny_logger.getvalue()
 
         assert not s.computations
         assert not s.task_prefixes
@@ -917,12 +981,12 @@ class SlowKillNanny(Nanny):
         self.kill_called = asyncio.Event()
         super().__init__(*args, **kwargs)
 
-    async def kill(self, *, timeout):
+    async def kill(self, *, timeout, reason=None):
         self.kill_called.set()
         print("kill called")
         await asyncio.wait_for(self.kill_proceed.wait(), timeout)
         print("kill proceed")
-        return await super().kill(timeout=timeout)
+        return await super().kill(timeout=timeout, reason=reason)
 
 
 @gen_cluster(client=True, Worker=SlowKillNanny, nthreads=[("", 1)] * 2)
@@ -1479,7 +1543,12 @@ async def test_balance_many_workers_2(c, s, *workers):
     assert {len(w.has_what) for w in s.workers.values()} == {3}
 
 
-@gen_cluster(client=True)
+@gen_cluster(
+    client=True,
+    worker_kwargs={
+        "heartbeat_interval": "10s",  # prevent worker from updating executing task durations
+    },
+)
 async def test_include_communication_in_occupancy(c, s, a, b):
     x = c.submit(operator.mul, b"0", int(s.bandwidth) * 2, workers=a.address)
     y = c.submit(operator.mul, b"1", int(s.bandwidth * 3), workers=b.address)

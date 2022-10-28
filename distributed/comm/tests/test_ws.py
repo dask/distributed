@@ -165,7 +165,7 @@ async def test_http_and_comm_server(dashboard, protocol, security, port):
     "protocol,sni",
     [("ws://", True), ("ws://", False), ("wss://", True), ("wss://", False)],
 )
-@gen_test()
+@gen_test(clean_kwargs={"instances": False})
 async def test_connection_made_with_extra_conn_args(protocol, sni):
     if protocol == "ws://":
         security = Security(
@@ -189,7 +189,7 @@ async def test_connection_made_with_extra_conn_args(protocol, sni):
         await comm.close()
 
 
-@gen_test()
+@gen_test(clean_kwargs={"instances": False})
 async def test_connection_made_with_sni():
     xfail_ssl_issue5601()
     pytest.importorskip("cryptography")

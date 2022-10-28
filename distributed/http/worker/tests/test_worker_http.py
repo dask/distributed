@@ -71,8 +71,14 @@ async def test_prometheus_collect_task_states(c, s, a):
     assert not a.state.tasks
     active_metrics = await fetch_state_metrics()
     assert active_metrics == {
-        "stored": 0.0,
+        "constrained": 0.0,
         "executing": 0.0,
+        "fetch": 0.0,
+        "flight": 0.0,
+        "long-running": 0.0,
+        "memory": 0.0,
+        "missing": 0.0,
+        "other": 0.0,
         "ready": 0.0,
         "waiting": 0.0,
     }
@@ -86,8 +92,14 @@ async def test_prometheus_collect_task_states(c, s, a):
 
     active_metrics = await fetch_state_metrics()
     assert active_metrics == {
-        "stored": 0.0,
+        "constrained": 0.0,
         "executing": 1.0,
+        "fetch": 0.0,
+        "flight": 0.0,
+        "long-running": 0.0,
+        "memory": 0.0,
+        "missing": 0.0,
+        "other": 0.0,
         "ready": 0.0,
         "waiting": 0.0,
     }
@@ -102,8 +114,14 @@ async def test_prometheus_collect_task_states(c, s, a):
 
     active_metrics = await fetch_state_metrics()
     assert active_metrics == {
-        "stored": 0.0,
+        "constrained": 0.0,
         "executing": 0.0,
+        "fetch": 0.0,
+        "flight": 0.0,
+        "long-running": 0.0,
+        "memory": 0.0,
+        "missing": 0.0,
+        "other": 0.0,
         "ready": 0.0,
         "waiting": 0.0,
     }

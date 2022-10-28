@@ -307,7 +307,9 @@ class PackageInstall(WorkerPlugin, abc.ABC):
             if self.restart and worker.nanny and not await self._is_restarted(worker):
                 logger.info("Restarting worker to refresh interpreter.")
                 await self._set_restarted(worker)
-                worker.loop.add_callback(worker.close_gracefully, restart=True)
+                worker.loop.add_callback(
+                    worker.close_gracefully, restart=True, reason=f"{self.name}-setup"
+                )
 
     @abc.abstractmethod
     def install(self) -> None:

@@ -839,6 +839,8 @@ def test_fail_hard(sync):
 
                 while a.status != Status.closed:
                     await asyncio.sleep(0.01)
+            method_name = "fail_sync" if sync else "fail_async"
+            assert f"worker-{method_name}-fail-hard" in logger.getvalue()
 
         test_done = True
 
@@ -987,16 +989,19 @@ async def test_wait_for_state(c, s, a, capsys):
 
     await asyncio.gather(
         wait_for_state("x", "memory", s),
-        wait_for_state("x", "memory", a),
+        wait_for_state("x", {"memory", "other"}, a),
         c.run(wait_for_state, "x", "memory"),
     )
 
     with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(wait_for_state("x", "bad_state", s), timeout=0.1)
     with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(wait_for_state("x", ("this", "that"), s), timeout=0.1)
+    with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(wait_for_state("y", "memory", s), timeout=0.1)
     assert capsys.readouterr().out == (
         f"tasks[x].state='memory' on {s.address}; expected state='bad_state'\n"
+        f"tasks[x].state='memory' on {s.address}; expected state=('this', 'that')\n"
         f"tasks[y] not found on {s.address}\n"
     )
 

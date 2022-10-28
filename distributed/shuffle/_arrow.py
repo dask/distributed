@@ -6,7 +6,7 @@ if TYPE_CHECKING:
     import pyarrow as pa
 
 
-def dump_batch(batch, file: BinaryIO, schema=None) -> None:  # type: ignore[no-untyped-def]
+def dump_batch(batch: bytes, file: BinaryIO, schema: pa.Schema) -> None:
     """
     Dump a batch to file, if we're the first, also write the schema
 
