@@ -233,10 +233,12 @@ class MultiFile:
             async with self.condition:
                 self.condition.notify()
 
-    def read(self, id: int) -> pa.Table:
+    def read(self, id: int | str) -> pa.Table:
         """Read a complete file back into memory"""
         if self._exception:
             raise self._exception
+        if not self._done:
+            raise RuntimeError("Tried to read from file before done.")
         parts = []
 
         try:

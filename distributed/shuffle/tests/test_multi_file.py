@@ -41,6 +41,26 @@ async def test_basic(tmp_path):
     assert not os.path.exists(tmp_path)
 
 
+@gen_test()
+async def test_read_before_flush(tmp_path):
+    payload = {"1": [b"foo"]}
+    async with MultiFile(
+        directory=tmp_path, dump=dump, load=load, loop=IOLoop.current()
+    ) as mf:
+        with pytest.raises(RuntimeError):
+            mf.read(1)
+
+        await mf.put(payload)
+
+        with pytest.raises(RuntimeError):
+            mf.read(1)
+
+        await mf.flush()
+        assert mf.read("1") == b"foo"
+        with pytest.raises(KeyError):
+            mf.read(2)
+
+
 @pytest.mark.parametrize("count", [2, 100, 1000])
 @gen_test()
 async def test_many(tmp_path, count):
