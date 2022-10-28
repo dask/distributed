@@ -1361,7 +1361,7 @@ class Client(SyncMethodMixin):
         logger.debug("Started scheduling coroutines. Synchronized")
 
     async def _update_scheduler_info(self):
-        if self.status not in ("running", "connecting"):
+        if self.status not in ("running", "connecting") or self.scheduler is None:
             return
         try:
             self._scheduler_identity = SchedulerInfo(await self.scheduler.identity())
