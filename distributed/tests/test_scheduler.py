@@ -64,7 +64,7 @@ from distributed.utils_test import (
     varying,
     wait_for_state,
 )
-from distributed.worker import dumps_function, dumps_task, get_worker
+from distributed.worker import dumps_function, dumps_task, get_worker, secede
 
 pytestmark = pytest.mark.ci1
 
@@ -477,6 +477,29 @@ async def test_queued_remove_add_worker(c, s, a, b):
 
         await event.set()
         await wait(fs)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+)
+async def test_secede_opens_slot(c, s, a):
+    first = Event()
+    second = Event()
+
+    def func(first, second):
+        first.wait()
+        secede()
+        second.wait()
+
+    fs = c.map(func, [first] * 5, [second] * 5)
+    await async_wait_for(lambda: a.state.executing, 5)
+
+    await first.set()
+    await async_wait_for(lambda: len(a.state.tasks) == len(fs), 5)
+
+    await second.set()
+    await c.gather(fs)
 
 
 @pytest.mark.parametrize(
