@@ -22,6 +22,7 @@ dependencies:
   - msgpack-python
   - netcdf4
   - paramiko
+  - polars
   - pre-commit
   - prometheus_client
   - psutil

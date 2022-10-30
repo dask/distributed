@@ -66,6 +66,12 @@ def _register_arrow():
     from distributed.protocol import arrow
 
 
+@dask_serialize.register_lazy("polars")
+@dask_deserialize.register_lazy("polars")
+def _register_polars():
+    from distributed.protocol import polars
+
+
 @dask_serialize.register_lazy("torch")
 @dask_deserialize.register_lazy("torch")
 @dask_serialize.register_lazy("torchvision")
