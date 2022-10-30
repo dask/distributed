@@ -3,14 +3,10 @@ from __future__ import annotations
 import pytest
 
 pl = pytest.importorskip("polars")
-pd = pytest.importorskip("pandas")
 
 import distributed
 from distributed.protocol import deserialize, serialize, to_serialize
 from distributed.utils_test import gen_cluster
-
-# df = pl.DataFrame({"A": list("abc"), "B": [1, 2, 3]})
-# ldf = df.lazy()
 
 
 def test_roundtrip():
