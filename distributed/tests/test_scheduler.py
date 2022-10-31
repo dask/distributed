@@ -2852,6 +2852,10 @@ async def test_get_worker_monitor_info(s, a, b):
         assert res[w.address]["last_time"] is not None
 
 
+@pytest.mark.skipif(
+    math.isfinite(dask.config.get("distributed.scheduler.worker-saturation")),
+    reason="Round-robin not enabled with queuing; see https://github.com/dask/distributed/issues/7197",
+)
 @gen_cluster(client=True)
 async def test_quiet_cluster_round_robin(c, s, a, b):
     await c.submit(inc, 1)
