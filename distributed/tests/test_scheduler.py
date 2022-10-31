@@ -45,6 +45,7 @@ from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
     BrokenComm,
+    assert_story,
     async_wait_for,
     captured_logger,
     cluster,
@@ -4079,3 +4080,112 @@ async def test_count_task_prefix(c, s, a, b):
 
     assert s.task_prefixes["inc"].state_counts["memory"] == 20
     assert s.task_prefixes["inc"].state_counts["erred"] == 0
+
+
+@gen_cluster(client=True)
+async def test_transition_waiting_memory(c, s, a, b):
+    """Test race condition where a task transitions to memory while its state on the
+    scheduler is waiting:
+
+    1. worker a finishes x
+    2. y transitions to processing and is assigned to worker b
+    3. b fetches x and sends an add_keys message to the scheduler
+    4. In the meantime, a dies and causes x to be scheduled back to released/waiting.
+    5. Scheduler queues up a free-keys intended for b to cancel both x and y
+    6. Before free-keys arrives to b, the worker runs and completes y, sending a
+       finished-task message to the scheduler
+    7. {op: add-keys, keys=[x]} from b finally arrives to the scheduler. This triggers
+       a {op: remove-replicas, keys=[x]} message from the scheduler to worker b, because
+       add-keys when the task state is not memory triggers a cleanup of redundant
+       replicas (see Scheduler.add_keys) - in this, add-keys differs from finished-task!
+    8. {op: task-finished, key=y} from b arrives to the scheduler
+
+    See also:
+    - test_transition_no_worker_memory
+    - test_transition_queued_memory
+    - test_transition_processing_memory_from_unexpected_worker
+    """
+    # This test is very timing-sensitive. Instead of using inc, which would need to
+    # spin up a thread, wait for locks, etc., use an async function, which will
+    # go from the transition of x to memory to the transition of y to the same state
+    # in exactly 2 cycles of the event loop:
+    # 1. x transitions to memory; y transitions to processing. This creates an asyncio
+    #    task for Worker.execute and adds it at the end of the event loop.
+    # 2. The Worker.execute asyncio task runs. This completes the user task and the
+    #    asyncio task without ever releasing control (note: await coroutine does not
+    #    release control!). This in turn schedules the done_callbacks at the end of
+    #    event loop with call_soon
+    # 3. run the done_callback, which is BaseWorker._handle_stimulus_from_task, which
+    #    transitions y to memory.
+    async def ainc(x):
+        return x + 1
+
+    x = c.submit(inc, 1, key="x", workers=[a.address])
+    y = c.submit(ainc, x, key="y", workers=[b.address])
+    await wait_for_state("x", "memory", b, interval=0)
+    # Note interval=0 above. It means that x has just landed on b this instant and the
+    # scheduler doesn't know yet.
+    assert b.state.tasks["y"].state == "executing"
+    assert s.tasks["x"].who_has == {s.workers[a.address]}
+
+    # Note: remove_worker is async but will only release the event loop if the
+    # remove_worker method of a SchedulerPlugin returns a Future.
+    await s.remove_worker(a.address, stimulus_id="remove_a")
+    assert s.tasks["x"].state == "no-worker"
+    assert s.tasks["y"].state == "waiting"
+
+    # This is where using an async function for y matters!
+    await wait_for_state("y", "memory", b, interval=0)
+
+    while b.state.tasks:
+        await asyncio.sleep(0.1)
+    await wait_for_state("y", "waiting", s)
+    assert s.tasks["x"].state == "no-worker"
+
+    assert_story(
+        s.story("y"),
+        [
+            ("y", "waiting", "memory", {}),
+            ("y", "memory", "released", {"y": "waiting"}),
+            ("y", "released", "waiting", {}),
+        ],
+    )
+
+
+@gen_cluster(client=True)
+async def test_transition_no_worker_memory(c, s, a, b):
+    """Test race condition where a task transitions to memory while its state on the
+    scheduler is queued.
+
+    See also:
+    - test_transition_waiting_memory
+    - test_transition_queued_memory
+    - test_transition_processing_memory_from_unexpected_worker
+    """
+    raise NotImplementedError("TODO")
+
+
+@gen_cluster(client=True, config={"distributed.scheduler.worker-saturation": 1.0})
+async def test_transition_queued_memory(c, s, a, b):
+    """Test race condition where a task transitions to memory while its state on the
+    scheduler is queued.
+
+    See also:
+    - test_transition_waiting_memory
+    - test_transition_no_worker_memory
+    - test_transition_processing_memory_from_unexpected_worker
+    """
+    raise NotImplementedError("TODO")
+
+
+@gen_cluster(client=True)
+async def test_transition_processing_memory_from_unexpected_worker(c, s, a, b):
+    """Test race condition where a task transitions from processing to memory, but
+    the task-finished message arrives from an unexpected worker.
+
+    See also:
+    - test_transition_waiting_memory
+    - test_transition_no_worker_memory
+    - test_transition_queued_memory
+    """
+    raise NotImplementedError("TODO")
