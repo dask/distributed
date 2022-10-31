@@ -12,10 +12,10 @@ from dask import delayed
 from distributed import Client, Event, Scheduler, Status, Worker
 from distributed.utils_test import (
     async_wait_for,
-    freeze_batched_send,
     gen_cluster,
     inc,
     slowinc,
+    wait_for_state,
 )
 
 dinc = delayed(inc)
@@ -39,9 +39,15 @@ async def block_worker(
     Parameters
     ----------
     pause : bool
-        If True, when entering the context manager, pause the worker. At exit, wait for all
-        tasks created inside the context manager to be added to ``Scheduler.unrunnable``
-        or ``Scheduler.queued`` and then unpause the worker.
+        True
+            When entering the context manager, pause the worker. At exit, wait for all
+            tasks created inside the context manager to be added to ``Scheduler.unrunnable``
+            or ``Scheduler.queued`` and then unpause the worker.
+        False
+            When entering the context manager, send a dummy long task to the worker. At
+            exit, wait for all tasks created inside the context manager to reach the
+            scheduler and then terminate the dummy task.
+
     ntasks_on_scheduler : int, optional
         Number of tasks that must appear on the scheduler. Defaults to the number of
         futures held by the client.
@@ -51,18 +57,21 @@ async def block_worker(
     """
     if pause:
         w.status = Status.paused
-        while s.workers[w.address].status != Status.paused:
-            await asyncio.sleep(0.01)
+        await async_wait_for(
+            lambda: s.workers[w.address].status == Status.paused, timeout=5
+        )
+    else:
+        ev = Event()
+        clog = c.submit(ev.wait, key="block_worker")
+        await wait_for_state(clog.key, "executing", w)
 
-    assert c.scheduler_comm
-    with freeze_batched_send(c.scheduler_comm):
-        yield
+    yield
 
     if ntasks_on_scheduler is None:
         ntasks_on_scheduler = len(c.futures)
     if ntasks_on_worker is None:
         ntasks_on_worker = len(c.futures)
-    await async_wait_for(lambda: len(s.tasks) >= ntasks_on_scheduler, 5)
+    await async_wait_for(lambda: len(s.tasks) >= ntasks_on_scheduler, timeout=5)
 
     if pause:
         assert (
@@ -70,6 +79,11 @@ async def block_worker(
         )
         assert not w.state.tasks
         w.status = Status.running
+    else:
+        await ev.set()
+        await clog
+        del clog
+        await async_wait_for(lambda: "block_worker" not in s.tasks, timeout=5)
 
 
 def gen_blockable_cluster(test_func):
