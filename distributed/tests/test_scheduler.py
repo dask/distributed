@@ -479,10 +479,7 @@ async def test_queued_remove_add_worker(c, s, a, b):
         await wait(fs)
 
 
-@gen_cluster(
-    client=True,
-    nthreads=[("", 1)],
-)
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_secede_opens_slot(c, s, a):
     first = Event()
     second = Event()
@@ -493,10 +490,10 @@ async def test_secede_opens_slot(c, s, a):
         second.wait()
 
     fs = c.map(func, [first] * 5, [second] * 5)
-    await async_wait_for(lambda: a.state.executing, 5)
+    await async_wait_for(lambda: a.state.executing, timeout=5)
 
     await first.set()
-    await async_wait_for(lambda: len(a.state.tasks) == len(fs), 5)
+    await async_wait_for(lambda: len(a.state.long_running) == len(fs), timeout=5)
 
     await second.set()
     await c.gather(fs)

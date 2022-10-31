@@ -3288,7 +3288,7 @@ class SchedulerState:
 
         Returns priority-ordered recommendations.
         """
-        maybe_runnable = list(_next_queued_when_slot_maybe_opened(self, ws))[::-1]
+        maybe_runnable = list(_next_queued_tasks_for_worker(self, ws))[::-1]
 
         # Schedule any restricted tasks onto the new worker, if the worker can run them
         for ts in self.unrunnable:
@@ -5326,8 +5326,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.check_idle_saturated(ws)
 
         recommendations = {
-            qts.key: "processing"
-            for qts in _next_queued_when_slot_maybe_opened(self, ws)
+            qts.key: "processing" for qts in _next_queued_tasks_for_worker(self, ws)
         }
         if self.validate:
             assert len(recommendations) <= 1, (ws, recommendations)
@@ -7882,7 +7881,7 @@ def _exit_processing_common(
     state.check_idle_saturated(ws)
     state.release_resources(ts, ws)
 
-    for qts in _next_queued_when_slot_maybe_opened(state, ws):
+    for qts in _next_queued_tasks_for_worker(state, ws):
         if state.validate:
             assert qts.key not in recommendations, recommendations[qts.key]
         recommendations[qts.key] = "processing"
@@ -7890,22 +7889,22 @@ def _exit_processing_common(
     return ws
 
 
-def _next_queued_when_slot_maybe_opened(
+def _next_queued_tasks_for_worker(
     state: SchedulerState, ws: WorkerState
 ) -> Iterator[TaskState]:
-    "Queued tasks to run, in priority order, if a slot may have opened up on this worker."
-    if state.queued and ws.status == Status.running:
-        # NOTE: this is called most frequently because a single task has completed, so
-        # there are <= 1 task slots available on the worker. `peekn` has fastpahs for
-        # these cases N<=0 and N==1.
-        for qts in state.queued.peekn(
-            _task_slots_available(ws, state.WORKER_SATURATION)
-        ):
-            if state.validate:
-                assert qts.state == "queued", qts.state
-                assert not qts.processing_on
-                assert not qts.waiting_on
-            yield qts
+    """Queued tasks to run, in priority order, on all open slots on a worker"""
+    if not state.queued or ws.status != Status.running:
+        return
+
+    # NOTE: this is called most frequently because a single task has completed, so there
+    # are <= 1 task slots available on the worker.
+    # `peekn` has fast paths for the cases N<=0 and N==1.
+    for qts in state.queued.peekn(_task_slots_available(ws, state.WORKER_SATURATION)):
+        if state.validate:
+            assert qts.state == "queued", qts.state
+            assert not qts.processing_on
+            assert not qts.waiting_on
+        yield qts
 
 
 def _add_to_memory(
