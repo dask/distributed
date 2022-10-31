@@ -7,7 +7,11 @@ import tornado.routing
 from tornado import web
 
 
-def _descend_routes(router, routers=set(), out=set()):
+def _descend_routes(router, routers=None, out=None):
+    if routers is None:
+        routers = set()
+    if out is None:
+        out = set()
     if router in routers:
         return
     routers.add(router)
@@ -16,7 +20,7 @@ def _descend_routes(router, routers=set(), out=set()):
             if issubclass(rule.target, tornado.web.StaticFileHandler):
                 prefix = rule.matcher.regex.pattern.rstrip("(.*)$").rstrip("/")
                 path = rule.target_kwargs["path"]
-                for d, dirs, files in os.walk(path):
+                for d, _, files in os.walk(path):
                     for fn in files:
                         fullpath = d + "/" + fn
                         ourpath = fullpath.replace(path, prefix).replace("\\", "/")

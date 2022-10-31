@@ -14,8 +14,12 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GITHUB_TOKEN: ${{ github.token }}
+      PYTHON_VERSION: 3.9
+    defaults:
+      run:
+        shell: bash -l {0}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3.1.0
 
       - name: Setup Conda Environment
         uses: conda-incubator/setup-miniconda@v2
@@ -24,28 +28,35 @@ jobs:
           miniforge-version: latest
           condarc-file: continuous_integration/condarc
           use-mamba: true
-          python-version: 3.9
+          python-version: ${{ env.PYTHON_VERSION }}
           environment-file: continuous_integration/scripts/test-report-environment.yml
           activate-environment: dask-distributed
 
       - name: Show conda options
-        shell: bash -l {0}
         run: conda config --show
 
       - name: mamba list
-        shell: bash -l {0}
         run: mamba list
 
+      - uses: actions/cache@v3
+        id: cache
+        with:
+          # Suffix is depending on the backend / OS. Let's be agnostic here
+          # See https://docs.python.org/3/library/shelve.html#shelve.open
+          path: |
+            test_report*
+            !test_report.html
+          key: ${{ env.PYTHON_VERSION }}-${{ hashFiles('continuous_integration/scripts/test_report*') }}
+
       - name: Generate report
-        shell: bash -l {0}
         run: |
-          python continuous_integration/scripts/test_report.py --days 90 --nfails 1 -o test_report.html
-          python continuous_integration/scripts/test_report.py --days 7 --nfails 2 -o test_short_report.html
+          python continuous_integration/scripts/test_report.py --max-days 90 --max-runs 50 --nfails 1 -o test_report.html
+          python continuous_integration/scripts/test_report.py --max-days 7 --max-runs 50 --nfails 2 -o test_short_report.html --title "Test Short Report"
           mkdir deploy
           mv test_report.html test_short_report.html deploy/
 
       - name: Deploy 🚀
-        uses: JamesIves/github-pages-deploy-action@4.1.7
+        uses: JamesIves/github-pages-deploy-action@v4.4.1
         with:
           branch: gh-pages
           folder: deploy

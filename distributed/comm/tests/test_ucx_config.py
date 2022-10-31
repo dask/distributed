@@ -10,7 +10,7 @@ pytestmark = pytest.mark.gpu
 import dask
 
 from distributed import Client
-from distributed.comm.ucx import _scrub_ucx_config
+from distributed.comm.ucx import _prepare_ucx_config
 from distributed.utils import get_ip
 from distributed.utils_test import gen_test, popen
 
@@ -34,9 +34,12 @@ async def test_ucx_config(ucx_loop, cleanup):
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
-        ucx_config = _scrub_ucx_config()
-        assert ucx_config.get("TLS") == "rc,tcp,cuda_copy,cuda_ipc"
-        assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "tcp"
+        ucx_config, ucx_environment = _prepare_ucx_config()
+        assert ucx_config == {
+            "TLS": "rc,tcp,cuda_copy,cuda_ipc",
+            "SOCKADDR_TLS_PRIORITY": "tcp",
+        }
+        assert ucx_environment == {}
 
     ucx = {
         "nvlink": False,
@@ -47,9 +50,9 @@ async def test_ucx_config(ucx_loop, cleanup):
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
-        ucx_config = _scrub_ucx_config()
-        assert ucx_config.get("TLS") == "rc,tcp"
-        assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "tcp"
+        ucx_config, ucx_environment = _prepare_ucx_config()
+        assert ucx_config == {"TLS": "rc,tcp", "SOCKADDR_TLS_PRIORITY": "tcp"}
+        assert ucx_environment == {}
 
     ucx = {
         "nvlink": False,
@@ -60,9 +63,12 @@ async def test_ucx_config(ucx_loop, cleanup):
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
-        ucx_config = _scrub_ucx_config()
-        assert ucx_config.get("TLS") == "rc,tcp,cuda_copy"
-        assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "rdmacm"
+        ucx_config, ucx_environment = _prepare_ucx_config()
+        assert ucx_config == {
+            "TLS": "rc,tcp,cuda_copy",
+            "SOCKADDR_TLS_PRIORITY": "rdmacm",
+        }
+        assert ucx_environment == {}
 
     ucx = {
         "nvlink": None,
@@ -73,8 +79,33 @@ async def test_ucx_config(ucx_loop, cleanup):
     }
 
     with dask.config.set({"distributed.comm.ucx": ucx}):
-        ucx_config = _scrub_ucx_config()
+        ucx_config, ucx_environment = _prepare_ucx_config()
         assert ucx_config == {}
+        assert ucx_environment == {}
+
+    ucx = {
+        "nvlink": False,
+        "infiniband": True,
+        "rdmacm": True,
+        "tcp": True,
+        "cuda-copy": True,
+    }
+
+    with dask.config.set(
+        {
+            "distributed.comm.ucx": ucx,
+            "distributed.comm.ucx.environment": {
+                "tls": "all",
+                "memtrack-dest": "stdout",
+            },
+        }
+    ):
+        ucx_config, ucx_environment = _prepare_ucx_config()
+        assert ucx_config == {
+            "TLS": "rc,tcp,cuda_copy",
+            "SOCKADDR_TLS_PRIORITY": "rdmacm",
+        }
+        assert ucx_environment == {"UCX_MEMTRACK_DEST": "stdout"}
 
 
 @pytest.mark.flaky(
@@ -87,16 +118,17 @@ def test_ucx_config_w_env_var(ucx_loop, cleanup, loop):
 
     port = "13339"
     # Using localhost appears to be less flaky than {HOST}. Additionally, this is
-    # closer to how other dask-worker tests are written.
+    # closer to how other dask worker tests are written.
     sched_addr = f"ucx://127.0.0.1:{port}"
 
     with popen(
-        ["dask-scheduler", "--no-dashboard", "--protocol", "ucx", "--port", port],
+        ["dask", "scheduler", "--no-dashboard", "--protocol", "ucx", "--port", port],
         env=env,
     ):
         with popen(
             [
-                "dask-worker",
+                "dask",
+                "worker",
                 sched_addr,
                 "--host",
                 "127.0.0.1",

@@ -7,7 +7,8 @@ dependencies:
   - packaging
   - pip
   - asyncssh
-  - bokeh
+  # Temporary restriction until https://github.com/dask/distributed/issues/7173 is resolved
+  - bokeh<3
   - click
   - cloudpickle
   - coverage
@@ -34,6 +35,7 @@ dependencies:
   - pytest-rerunfailures
   - pytest-timeout
   - requests
+  - setuptools<65  # FIXME https://github.com/jcrist/crick/issues/24
   - s3fs
   - scikit-learn
   - scipy

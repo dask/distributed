@@ -56,7 +56,7 @@ class MultiComm:
     memory_limit = parse_bytes("100 MiB")
     max_connections = 10
     _queues: weakref.WeakKeyDictionary[
-        asyncio.AbstractEventLoop, asyncio.Queue
+        asyncio.AbstractEventLoop, asyncio.Queue[None]
     ] = weakref.WeakKeyDictionary()
     total_size = 0
     lock = threading.Lock()
@@ -81,11 +81,11 @@ class MultiComm:
         self._exception: Exception | None = None
 
     @property
-    def queue(self):
+    def queue(self) -> asyncio.Queue[None]:
         try:
             return MultiComm._queues[self._loop]
         except KeyError:
-            queue = asyncio.Queue()
+            queue: asyncio.Queue[None] = asyncio.Queue()
             for _ in range(MultiComm.max_connections):
                 queue.put_nowait(None)
             MultiComm._queues[self._loop] = queue
@@ -118,7 +118,7 @@ class MultiComm:
                 with self.thread_condition:
                     self.thread_condition.wait(1)  # Block until memory calms down
 
-    async def communicate(self):
+    async def communicate(self) -> None:
         """
         Continuously find the largest batch and send from there
 
@@ -142,7 +142,7 @@ class MultiComm:
                 await self.queue.get()
 
             with self.lock:
-                address = max(self.sizes, key=self.sizes.get)
+                address = max(self.sizes, key=self.sizes.__getitem__)
 
                 size = 0
                 shards = []
@@ -198,7 +198,7 @@ class MultiComm:
                     self.thread_condition.notify()
                 await self.queue.put(None)
 
-    async def flush(self):
+    async def flush(self) -> None:
         """
         We don't expect any more data, wait until everything is flushed through
         """

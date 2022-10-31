@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from distributed.shuffle.multi_file import MultiFile
+from distributed.shuffle._multi_file import MultiFile
 from distributed.utils_test import gen_test
 
 
@@ -43,7 +43,7 @@ async def test_many(tmp_path, count):
     with MultiFile(directory=tmp_path, dump=dump, load=load) as mf:
         d = {i: [str(i).encode() * 100] for i in range(count)}
 
-        for i in range(10):
+        for _ in range(10):
             await mf.put(d)
 
         await mf.flush()

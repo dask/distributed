@@ -16,8 +16,16 @@ import dask.config
 from dask.sizeof import sizeof
 
 from distributed import Lock
+from distributed.client import wait
 from distributed.utils import is_valid_xml
-from distributed.utils_test import gen_cluster, inc, lock_inc, slowinc
+from distributed.utils_test import (
+    div,
+    fetch_metrics,
+    gen_cluster,
+    inc,
+    lock_inc,
+    slowinc,
+)
 
 DEFAULT_ROUTES = dask.config.get("distributed.scheduler.http.routes")
 
@@ -89,31 +97,88 @@ async def test_prefix(c, s, a, b):
 @gen_cluster(client=True, clean_kwargs={"threads": False})
 async def test_prometheus(c, s, a, b):
     pytest.importorskip("prometheus_client")
-    from prometheus_client.parser import text_string_to_metric_families
 
-    http_client = AsyncHTTPClient()
+    active_metrics = await fetch_metrics(s.http_server.port, "dask_scheduler_")
+
+    expected_metrics = {
+        "dask_scheduler_clients",
+        "dask_scheduler_desired_workers",
+        "dask_scheduler_workers",
+        "dask_scheduler_tasks",
+        "dask_scheduler_tasks_suspicious",
+        "dask_scheduler_tasks_forgotten",
+        "dask_scheduler_prefix_state_totals",
+    }
+
+    assert active_metrics.keys() == expected_metrics
+    assert active_metrics["dask_scheduler_clients"].samples[0].value == 1.0
 
     # request data twice since there once was a case where metrics got registered multiple times resulting in
     # prometheus_client errors
-    for _ in range(2):
-        response = await http_client.fetch(
-            "http://localhost:%d/metrics" % s.http_server.port
-        )
-        assert response.code == 200
-        assert response.headers["Content-Type"] == "text/plain; version=0.0.4"
-
-        txt = response.body.decode("utf8")
-        families = {
-            family.name: family for family in text_string_to_metric_families(txt)
-        }
-        assert "dask_scheduler_workers" in families
-
-        client = families["dask_scheduler_clients"]
-        assert client.samples[0].value == 1.0
+    await fetch_metrics(s.http_server.port, "dask_scheduler_")
 
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})
 async def test_prometheus_collect_task_states(c, s, a, b):
+    pytest.importorskip("prometheus_client")
+
+    async def fetch_state_metrics():
+        families = await fetch_metrics(s.http_server.port, prefix="dask_scheduler_")
+
+        active_metrics = {
+            sample.labels["state"]: sample.value
+            for sample in families["dask_scheduler_tasks"].samples
+        }
+        forgotten_tasks = [
+            sample.value
+            for sample in families["dask_scheduler_tasks_forgotten"].samples
+        ]
+        return active_metrics, forgotten_tasks
+
+    expected = {
+        "memory",
+        "released",
+        "queued",
+        "processing",
+        "waiting",
+        "no-worker",
+        "erred",
+    }
+
+    # Ensure that we get full zero metrics for all states even though the
+    # scheduler did nothing, yet
+    assert not s.tasks
+    active_metrics, forgotten_tasks = await fetch_state_metrics()
+    assert active_metrics.keys() == expected
+    assert sum(active_metrics.values()) == 0.0
+    assert sum(forgotten_tasks) == 0.0
+
+    # submit a task which should show up in the prometheus scraping
+    future = c.submit(slowinc, 1, delay=0.5)
+    while not any(future.key in w.state.tasks for w in [a, b]):
+        await asyncio.sleep(0.001)
+
+    active_metrics, forgotten_tasks = await fetch_state_metrics()
+    assert active_metrics.keys() == expected
+    assert sum(active_metrics.values()) == 1.0
+    assert sum(forgotten_tasks) == 0.0
+
+    res = await c.gather(future)
+    assert res == 2
+
+    future.release()
+
+    while any(future.key in w.state.tasks for w in [a, b]):
+        await asyncio.sleep(0.001)
+
+    active_metrics, forgotten_tasks = await fetch_state_metrics()
+    assert active_metrics.keys() == expected
+    assert sum(active_metrics.values()) == 0.0
+    assert sum(forgotten_tasks) == 0.0
+
+
+@gen_cluster(client=True, clean_kwargs={"threads": False})
+async def test_prometheus_collect_task_prefix_counts(c, s, a, b):
     pytest.importorskip("prometheus_client")
     from prometheus_client.parser import text_string_to_metric_families
 
@@ -127,48 +192,26 @@ async def test_prometheus_collect_task_states(c, s, a, b):
             family.name: family for family in text_string_to_metric_families(txt)
         }
 
-        active_metrics = {
-            sample.labels["state"]: sample.value
-            for sample in families["dask_scheduler_tasks"].samples
+        prefix_state_counts = {
+            (sample.labels["task_prefix_name"], sample.labels["state"]): sample.value
+            for sample in families["dask_scheduler_prefix_state_totals"].samples
         }
-        forgotten_tasks = [
-            sample.value
-            for sample in families["dask_scheduler_tasks_forgotten"].samples
-        ]
-        return active_metrics, forgotten_tasks
 
-    expected = {"memory", "released", "processing", "waiting", "no-worker", "erred"}
+        return prefix_state_counts
 
-    # Ensure that we get full zero metrics for all states even though the
-    # scheduler did nothing, yet
-    assert not s.tasks
-    active_metrics, forgotten_tasks = await fetch_metrics()
-    assert active_metrics.keys() == expected
-    assert sum(active_metrics.values()) == 0.0
-    assert sum(forgotten_tasks) == 0.0
+    # do some compute and check the counts for each prefix and state
+    futures = c.map(inc, range(10))
+    await c.gather(futures)
 
-    # submit a task which should show up in the prometheus scraping
-    future = c.submit(slowinc, 1, delay=0.5)
-    while not any(future.key in w.state.tasks for w in [a, b]):
-        await asyncio.sleep(0.001)
+    prefix_state_counts = await fetch_metrics()
+    assert prefix_state_counts.get(("inc", "memory")) == 10
+    assert prefix_state_counts.get(("inc", "erred"), 0) == 0
 
-    active_metrics, forgotten_tasks = await fetch_metrics()
-    assert active_metrics.keys() == expected
-    assert sum(active_metrics.values()) == 1.0
-    assert sum(forgotten_tasks) == 0.0
+    f = c.submit(div, 1, 0)
+    await wait(f)
 
-    res = await c.gather(future)
-    assert res == 2
-
-    future.release()
-
-    while any(future.key in w.state.tasks for w in [a, b]):
-        await asyncio.sleep(0.001)
-
-    active_metrics, forgotten_tasks = await fetch_metrics()
-    assert active_metrics.keys() == expected
-    assert sum(active_metrics.values()) == 0.0
-    assert sum(forgotten_tasks) == 0.0
+    prefix_state_counts = await fetch_metrics()
+    assert prefix_state_counts.get(("div", "erred")) == 1
 
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})

@@ -50,6 +50,7 @@ from tornado.ioloop import IOLoop
 import dask
 from dask import istask
 from dask.utils import ensure_bytes as _ensure_bytes
+from dask.utils import key_split
 from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
@@ -433,12 +434,26 @@ class LoopRunner:
     def __init__(self, loop=None, asynchronous=False):
         if loop is None:
             if asynchronous:
+                try:
+                    asyncio.get_running_loop()
+                except RuntimeError:
+                    warnings.warn(
+                        "Constructing a LoopRunner(asynchronous=True) without a running loop is deprecated",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
                 self._loop = IOLoop.current()
             else:
                 # We're expecting the loop to run in another thread,
                 # avoid re-using this thread's assigned loop
                 self._loop = IOLoop()
         else:
+            if not loop.asyncio_loop.is_running():
+                warnings.warn(
+                    "Constructing LoopRunner(loop=loop) without a running loop is deprecated",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
             self._loop = loop
         self._asynchronous = asynchronous
         self._loop_thread = None
@@ -569,6 +584,13 @@ class LoopRunner:
 
     @property
     def loop(self):
+        loop = self._loop
+        if not loop.asyncio_loop.is_running():
+            warnings.warn(
+                "Accessing the loop property while the loop is not running is deprecated",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         return self._loop
 
 
@@ -622,66 +644,8 @@ def is_kernel():
     return getattr(get_ipython(), "kernel", None) is not None
 
 
-hex_pattern = re.compile("[a-f]+")
-
-
-@functools.lru_cache(100000)
-def key_split(s):
-    """
-    >>> key_split('x')
-    'x'
-    >>> key_split('x-1')
-    'x'
-    >>> key_split('x-1-2-3')
-    'x'
-    >>> key_split(('x-2', 1))
-    'x'
-    >>> key_split("('x-2', 1)")
-    'x'
-    >>> key_split("('x', 1)")
-    'x'
-    >>> key_split('hello-world-1')
-    'hello-world'
-    >>> key_split(b'hello-world-1')
-    'hello-world'
-    >>> key_split('ae05086432ca935f6eba409a8ecd4896')
-    'data'
-    >>> key_split('<module.submodule.myclass object at 0xdaf372')
-    'myclass'
-    >>> key_split(None)
-    'Other'
-    >>> key_split('x-abcdefab')  # ignores hex
-    'x'
-    """
-    if type(s) is bytes:
-        s = s.decode()
-    if type(s) is tuple:
-        s = s[0]
-    try:
-        words = s.split("-")
-        if not words[0][0].isalpha():
-            result = words[0].split(",")[0].strip("'(\"")
-        else:
-            result = words[0]
-        for word in words[1:]:
-            if word.isalpha() and not (
-                len(word) == 8 and hex_pattern.match(word) is not None
-            ):
-                result += "-" + word
-            else:
-                break
-        if len(result) == 32 and re.match(r"[a-f0-9]{32}", result):
-            return "data"
-        else:
-            if result[0] == "<":
-                result = result.strip("<>").split()[0].split(".")[-1]
-            return result
-    except Exception:
-        return "Other"
-
-
 def key_split_group(x: object) -> str:
-    """A more fine-grained version of key_split
+    """A more fine-grained version of key_split.
 
     >>> key_split_group(('x-2', 1))
     'x-2'
@@ -1141,7 +1105,7 @@ def json_load_robust(fn, load=json.load):
     """Reads a JSON file from disk that may be being written as we read"""
     while not os.path.exists(fn):
         sleep(0.01)
-    for i in range(10):
+    for _ in range(10):
         try:
             with open(fn) as f:
                 cfg = load(f)
@@ -1206,7 +1170,7 @@ def command_has_keyword(cmd, k):
             except ImportError:
                 raise ImportError("Module for command %s is not available" % cmd)
 
-        if isinstance(getattr(cmd, "main"), click.core.Command):
+        if isinstance(cmd.main, click.core.Command):
             cmd = cmd.main
         if isinstance(cmd, click.core.Command):
             cmd_params = {
@@ -1379,7 +1343,7 @@ def cli_keywords(
         A string with the name of a module, or the module containing a
         click-generated command with a "main" function, or the function itself.
         It may be used to parse a module's custom arguments (that is, arguments that
-        are not part of Worker class), such as nworkers from dask-worker CLI or
+        are not part of Worker class), such as nworkers from dask worker CLI or
         enable_nvlink from dask-cuda-worker CLI.
 
     Examples

@@ -205,7 +205,9 @@ class WS(Comm):
         self._read_extra()
 
     def _get_finalizer(self):
-        def finalize(sock=self.sock, r=repr(self)):
+        r = repr(self)
+
+        def finalize(sock=self.sock, r=r):
             if not sock.close_code:
                 logger.info("Closing dangling websocket in %s", r)
                 sock.close()
@@ -439,8 +441,18 @@ class WSSConnector(WSConnector):
     comm_class = WSS
 
     def _get_connect_args(self, **connection_args):
-        ctx = connection_args.get("ssl_context")
-        return {"ssl_options": ctx, **connection_args.get("extra_conn_args", {})}
+        wss_args = {
+            "ssl_options": connection_args.get("ssl_context"),
+            **connection_args.get("extra_conn_args", {}),
+        }
+
+        if connection_args.get("server_hostname"):
+            wss_args["headers"] = {
+                **wss_args.get("headers", {}),
+                **{"Host": connection_args["server_hostname"]},
+            }
+
+        return wss_args
 
 
 class WSBackend(BaseTCPBackend):

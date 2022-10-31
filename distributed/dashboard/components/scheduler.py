@@ -64,6 +64,7 @@ from dask.utils import (
     parse_timedelta,
 )
 
+from distributed.core import Status
 from distributed.dashboard.components import add_periodic_callback
 from distributed.dashboard.components.shared import (
     DashboardComponent,
@@ -239,20 +240,63 @@ class ProcessingHistogram(DashboardComponent):
         self.source.data.update({"left": x[:-1], "right": x[1:], "top": counts})
 
 
-def _memory_color(current: int, limit: int) -> str:
-    """Dynamic color used by WorkersMemory and ClusterMemory"""
-    if limit and current > limit:
-        return "red"
-    if limit and current > limit / 2:
-        return "orange"
-    return "blue"
+class MemoryColor:
+    """Change the color of the memory bars from blue to orange when process memory goes
+    above the ``target`` threshold and to red when the worker pauses.
+    Workers in ``closing_gracefully`` state will also be orange.
+
+    If ``target`` is disabled, change to orange on ``spill`` instead.
+    If spilling is completely disabled, never turn orange.
+
+    If pausing is disabled, change to red when passing the ``terminate`` threshold
+    instead. If both pause and terminate are disabled, turn red when passing
+    ``memory_limit``.
+
+    Note
+    ----
+    A worker will start spilling when managed memory alone passes the target threshold.
+    However, here we're switching to orange when the process memory goes beyond target,
+    which is usually earlier.
+    This is deliberate for the sake of simplicity and also because, when the process
+    memory passes the spill threshold, it will keep spilling until it falls below the
+    target threshold - so it's not completely wrong. Again, we don't want to track
+    the hysteresis cycle of the spill system here for the sake of simplicity.
+
+    In short, orange should be treated as "the worker *may* be spilling".
+    """
+
+    orange: float
+    red: float
+
+    def __init__(self):
+        target = dask.config.get("distributed.worker.memory.target")
+        spill = dask.config.get("distributed.worker.memory.spill")
+        terminate = dask.config.get("distributed.worker.memory.terminate")
+        # These values can be False. It's also common to configure them to impossibly
+        # high values to achieve the same effect.
+        self.orange = min(target or math.inf, spill or math.inf)
+        self.red = min(terminate or math.inf, 1.0)
+
+    def _memory_color(self, current: int, limit: int, status: Status) -> str:
+        if status != Status.running:
+            return "red"
+        if not limit:
+            return "blue"
+        if current >= limit * self.red:
+            return "red"
+        if current >= limit * self.orange:
+            return "orange"
+        return "blue"
 
 
-class ClusterMemory(DashboardComponent):
+class ClusterMemory(DashboardComponent, MemoryColor):
     """Total memory usage on the cluster"""
 
     @log_errors
     def __init__(self, scheduler, width=600, **kwargs):
+        DashboardComponent.__init__(self)
+        MemoryColor.__init__(self)
+
         self.scheduler = scheduler
         self.source = ColumnDataSource(
             {
@@ -327,12 +371,30 @@ class ClusterMemory(DashboardComponent):
         )
         self.root.add_tools(hover)
 
+    def _cluster_memory_color(self) -> str:
+        colors = {
+            self._memory_color(
+                current=ws.memory.process,
+                limit=getattr(ws, "memory_limit", 0),
+                status=ws.status,
+            )
+            for ws in self.scheduler.workers.values()
+        }
+
+        assert colors.issubset({"red", "orange", "blue"})
+        if "red" in colors:
+            return "red"
+        elif "orange" in colors:
+            return "orange"
+        else:
+            return "blue"
+
     @without_property_validation
     @log_errors
     def update(self):
         limit = sum(ws.memory_limit for ws in self.scheduler.workers.values())
         meminfo = self.scheduler.memory
-        color = _memory_color(meminfo.process, limit)
+        color = self._cluster_memory_color()
 
         width = [
             meminfo.managed_in_memory,
@@ -363,11 +425,14 @@ class ClusterMemory(DashboardComponent):
         update(self.source, result)
 
 
-class WorkersMemory(DashboardComponent):
+class WorkersMemory(DashboardComponent, MemoryColor):
     """Memory usage for single workers"""
 
     @log_errors
     def __init__(self, scheduler, width=600, **kwargs):
+        DashboardComponent.__init__(self)
+        MemoryColor.__init__(self)
+
         self.scheduler = scheduler
         self.source = ColumnDataSource(
             {
@@ -414,12 +479,10 @@ class WorkersMemory(DashboardComponent):
         self.root.x_range = Range1d(start=0)
         self.root.yaxis.visible = False
         self.root.ygrid.visible = False
+        self.root.toolbar_location = None
 
         tap = TapTool(callback=OpenURL(url="./info/worker/@escaped_worker.html"))
         self.root.add_tools(tap)
-
-        self.root.toolbar_location = None
-        self.root.yaxis.visible = False
 
         hover = HoverTool(
             point_policy="follow_mouse",
@@ -477,7 +540,7 @@ class WorkersMemory(DashboardComponent):
             meminfo = ws.memory
             limit = getattr(ws, "memory_limit", 0)
             max_limit = max(max_limit, limit, meminfo.process + meminfo.managed_spilled)
-            color_i = _memory_color(meminfo.process, limit)
+            color_i = self._memory_color(meminfo.process, limit, ws.status)
 
             width += [
                 meminfo.managed_in_memory,
@@ -565,6 +628,119 @@ class WorkersMemoryHistogram(DashboardComponent):
         counts, x = np.histogram(nbytes, bins=40)
         d = {"left": x[:-1], "right": x[1:], "top": counts}
         update(self.source, d)
+
+
+class WorkersTransferBytes(DashboardComponent):
+    """Size of open data transfers from/to other workers per worker"""
+
+    @log_errors
+    def __init__(self, scheduler, width=600, **kwargs):
+        self.scheduler = scheduler
+        self.source = ColumnDataSource(
+            {
+                "escaped_worker": [],
+                "transfer_incoming_bytes": [],
+                "transfer_outgoing_bytes": [],
+                "worker": [],
+                "y_incoming": [],
+                "y_outgoing": [],
+            }
+        )
+
+        self.root = figure(
+            title=f"Bytes transferring: {format_bytes(0)}",
+            tools="",
+            id="bk-workers-transfer-bytes-plot",
+            width=int(width / 2),
+            name="workers_transfer_bytes",
+            min_border_bottom=50,
+            **kwargs,
+        )
+
+        # transfer_incoming_bytes
+        self.root.hbar(
+            name="transfer_incoming_bytes",
+            y="y_incoming",
+            right="transfer_incoming_bytes",
+            line_color=None,
+            left=0,
+            height=0.5,
+            fill_color="red",
+            source=self.source,
+        )
+
+        # transfer_outgoing_bytes
+        self.root.hbar(
+            name="transfer_outgoing_bytes",
+            y="y_outgoing",
+            right="transfer_outgoing_bytes",
+            line_color=None,
+            left=0,
+            height=0.5,
+            fill_color="blue",
+            source=self.source,
+        )
+
+        self.root.axis[0].ticker = BasicTicker(**TICKS_1024)
+        self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+        self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
+        self.root.xaxis.minor_tick_line_alpha = 0
+        self.root.x_range = Range1d(start=0)
+        self.root.yaxis.visible = False
+        self.root.ygrid.visible = False
+        self.root.toolbar_location = None
+
+        tap = TapTool(callback=OpenURL(url="./info/worker/@escaped_worker.html"))
+        hover = HoverTool(
+            tooltips=[
+                ("Worker", "@worker"),
+                ("Incoming", "@transfer_incoming_bytes{0.00 b}"),
+                ("Outgoing", "@transfer_outgoing_bytes{0.00 b}"),
+            ],
+            point_policy="follow_mouse",
+        )
+        self.root.add_tools(hover, tap)
+
+    @without_property_validation
+    @log_errors
+    def update(self):
+        wss = self.scheduler.workers.values()
+
+        h = 0.1
+        y_incoming = [i + 0.75 + i * h for i in range(len(wss))]
+        y_outgoing = [i + 0.25 + i * h for i in range(len(wss))]
+
+        transfer_incoming_bytes = [
+            ws.metrics["transfer"]["incoming_bytes"] for ws in wss
+        ]
+        transfer_outgoing_bytes = [
+            ws.metrics["transfer"]["outgoing_bytes"] for ws in wss
+        ]
+        workers = [ws.address for ws in wss]
+        escaped_workers = [escape.url_escape(worker) for worker in workers]
+
+        if wss:
+            x_limit = max(
+                max(transfer_incoming_bytes),
+                max(transfer_outgoing_bytes),
+                max(ws.memory_limit for ws in wss),
+            )
+        else:
+            x_limit = 0
+        self.root.x_range.end = x_limit
+
+        result = {
+            "escaped_worker": escaped_workers,
+            "transfer_incoming_bytes": transfer_incoming_bytes,
+            "transfer_outgoing_bytes": transfer_outgoing_bytes,
+            "worker": workers,
+            "y_incoming": y_incoming,
+            "y_outgoing": y_outgoing,
+        }
+        self.root.title.text = (
+            f"Bytes transferring: {format_bytes(sum(transfer_incoming_bytes))}"
+        )
+        update(self.source, result)
 
 
 class Hardware(DashboardComponent):
@@ -874,7 +1050,8 @@ class BandwidthWorkers(DashboardComponent):
 class WorkerNetworkBandwidth(DashboardComponent):
     """Worker network bandwidth chart
 
-    Plots horizontal bars with the read_bytes and write_bytes worker state
+    Plots horizontal bars with the host_net_io.read_bps and host_net_io.write_bps worker
+    state
     """
 
     @log_errors
@@ -899,7 +1076,7 @@ class WorkerNetworkBandwidth(DashboardComponent):
             **kwargs,
         )
 
-        # read_bytes
+        # host_net_io.read_bps
         self.bandwidth.hbar(
             y="y_read",
             right="x_read",
@@ -911,7 +1088,7 @@ class WorkerNetworkBandwidth(DashboardComponent):
             source=self.source,
         )
 
-        # write_bytes
+        # host_net_io.write_bps
         self.bandwidth.hbar(
             y="y_write",
             right="x_write",
@@ -940,7 +1117,7 @@ class WorkerNetworkBandwidth(DashboardComponent):
             **kwargs,
         )
 
-        # read_bytes_disk
+        # host_disk_io.read_bps
         self.disk.hbar(
             y="y_read",
             right="x_read_disk",
@@ -952,7 +1129,7 @@ class WorkerNetworkBandwidth(DashboardComponent):
             source=self.source,
         )
 
-        # write_bytes_disk
+        # host_disk_io.write_bps
         self.disk.hbar(
             y="y_write",
             right="x_write_disk",
@@ -988,10 +1165,10 @@ class WorkerNetworkBandwidth(DashboardComponent):
         x_write_disk = []
 
         for ws in workers:
-            x_read.append(ws.metrics["read_bytes"])
-            x_write.append(ws.metrics["write_bytes"])
-            x_read_disk.append(ws.metrics.get("read_bytes_disk", 0))
-            x_write_disk.append(ws.metrics.get("write_bytes_disk", 0))
+            x_read.append(ws.metrics["host_net_io"]["read_bps"])
+            x_write.append(ws.metrics["host_net_io"]["write_bps"])
+            x_read_disk.append(ws.metrics.get("host_disk_io", {}).get("read_bps", 0))
+            x_write_disk.append(ws.metrics.get("host_disk_io", {}).get("write_bps", 0))
 
         if self.scheduler.workers:
             self.bandwidth.x_range.end = max(
@@ -1026,15 +1203,19 @@ class WorkerNetworkBandwidth(DashboardComponent):
 class SystemTimeseries(DashboardComponent):
     """Timeseries for worker network bandwidth, cpu, memory and disk.
 
-    bandwidth: plots the average of read_bytes and write_bytes for the workers
-    as a function of time.
-    cpu: plots the average of cpu for the workers as a function of time.
-    memory: plots the average of memory for the workers as a function of time.
-    disk: plots the average of read_bytes_disk and write_bytes_disk for the workers
-    as a function of time.
+    bandwidth
+        Plots the average of host_net_io.read_bps and host_net_io.write_bps for the
+        workers as a function of time
+    cpu
+        Plots the average of cpu for the workers as a function of time
+    memory
+        Plots the average of memory for the workers as a function of time
+    disk
+        Plots the average of host_disk_io.read_bps and host_disk_io.write_bps for the
+        workers as a function of time
 
-    The metrics plotted come from the aggregation of
-    from ws.metrics["val"] for ws in scheduler.workers.values() divided by nuber of workers.
+    The metrics plotted come from the aggregation of from ws.metrics[key] for ws in
+    scheduler.workers.values() divided by nuber of workers.
     """
 
     @log_errors
@@ -1043,12 +1224,12 @@ class SystemTimeseries(DashboardComponent):
         self.source = ColumnDataSource(
             {
                 "time": [],
-                "read_bytes": [],
-                "write_bytes": [],
+                "host_net_io.read_bps": [],
+                "host_net_io.write_bps": [],
                 "cpu": [],
                 "memory": [],
-                "read_bytes_disk": [],
-                "write_bytes_disk": [],
+                "host_disk_io.read_bps": [],
+                "host_disk_io.write_bps": [],
             }
         )
 
@@ -1072,14 +1253,14 @@ class SystemTimeseries(DashboardComponent):
         self.bandwidth.line(
             source=self.source,
             x="time",
-            y="read_bytes",
+            y="host_net_io.read_bps",
             color="red",
             legend_label="read (mean)",
         )
         self.bandwidth.line(
             source=self.source,
             x="time",
-            y="write_bytes",
+            y="host_net_io.write_bps",
             color="blue",
             legend_label="write (mean)",
         )
@@ -1145,14 +1326,14 @@ class SystemTimeseries(DashboardComponent):
         self.disk.line(
             source=self.source,
             x="time",
-            y="read_bytes_disk",
+            y="host_disk_io.read_bps",
             color="red",
             legend_label="read (mean)",
         )
         self.disk.line(
             source=self.source,
             x="time",
-            y="write_bytes_disk",
+            y="host_disk_io.write_bps",
             color="blue",
             legend_label="write (mean)",
         )
@@ -1167,31 +1348,31 @@ class SystemTimeseries(DashboardComponent):
     def get_data(self):
         workers = self.scheduler.workers.values()
 
-        read_bytes = 0
-        write_bytes = 0
+        net_read_bps = 0
+        net_write_bps = 0
         cpu = 0
         memory = 0
-        read_bytes_disk = 0
-        write_bytes_disk = 0
+        disk_read_bps = 0
+        disk_write_bps = 0
         time = 0
         for ws in workers:
-            read_bytes += ws.metrics["read_bytes"]
-            write_bytes += ws.metrics["write_bytes"]
+            net_read_bps += ws.metrics["host_net_io"]["read_bps"]
+            net_write_bps += ws.metrics["host_net_io"]["write_bps"]
             cpu += ws.metrics["cpu"]
             memory += ws.metrics["memory"]
-            read_bytes_disk += ws.metrics.get("read_bytes_disk", 0)
-            write_bytes_disk += ws.metrics.get("write_bytes_disk", 0)
+            disk_read_bps += ws.metrics.get("host_disk_io", {}).get("read_bps", 0)
+            disk_write_bps += ws.metrics.get("host_disk_io", {}).get("write_bps", 0)
             time += ws.metrics["time"]
 
         result = {
             # use `or` to avoid ZeroDivision when no workers
             "time": [time / (len(workers) or 1) * 1000],
-            "read_bytes": [read_bytes / (len(workers) or 1)],
-            "write_bytes": [write_bytes / (len(workers) or 1)],
+            "host_net_io.read_bps": [net_read_bps / (len(workers) or 1)],
+            "host_net_io.write_bps": [net_write_bps / (len(workers) or 1)],
             "cpu": [cpu / (len(workers) or 1)],
             "memory": [memory / (len(workers) or 1)],
-            "read_bytes_disk": [read_bytes_disk / (len(workers) or 1)],
-            "write_bytes_disk": [write_bytes_disk / (len(workers) or 1)],
+            "host_disk_io.read_bps": [disk_read_bps / (len(workers) or 1)],
+            "host_disk_io.write_bps": [disk_write_bps / (len(workers) or 1)],
         }
         return result
 
@@ -1440,7 +1621,7 @@ class AggregateAction(DashboardComponent):
     def update(self):
         agg_times = defaultdict(float)
 
-        for key, ts in self.scheduler.task_prefixes.items():
+        for ts in self.scheduler.task_prefixes.values():
             for action, t in ts.all_durations.items():
                 agg_times[action] += t
 
@@ -1718,7 +1899,7 @@ class StealingEvents(DashboardComponent):
         self.last = 0
         self.source = ColumnDataSource(
             {
-                "time": [time() - 20, time()],
+                "time": [time() - 60, time()],
                 "level": [0, 15],
                 "color": ["white", "white"],
                 "duration": [0, 0],
@@ -1763,7 +1944,7 @@ class StealingEvents(DashboardComponent):
         """Convert a log message to a glyph"""
         total_duration = 0
         for msg in msgs:
-            time, level, key, duration, sat, occ_sat, idl, occ_idl = msg
+            time, level, key, duration, sat, occ_sat, idl, occ_idl = msg[:8]
             total_duration += duration
 
         try:
@@ -1792,7 +1973,7 @@ class StealingEvents(DashboardComponent):
         current = len(self.scheduler.events["stealing"])
         n = current - self.last
 
-        log = [log[-i][1] for i in range(1, n + 1) if isinstance(log[-i][1], list)]
+        log = [log[-i][1][1] for i in range(1, n + 1) if log[-i][1][0] == "request"]
         self.last = current
 
         if log:
@@ -2097,8 +2278,8 @@ class TaskGraph(DashboardComponent):
 
         node_colors = factor_cmap(
             "state",
-            factors=["waiting", "processing", "memory", "released", "erred"],
-            palette=["gray", "green", "red", "blue", "black"],
+            factors=["waiting", "queued", "processing", "memory", "released", "erred"],
+            palette=["gray", "yellow", "green", "red", "blue", "black"],
         )
 
         self.root = figure(title="Task Graph", **kwargs)
@@ -2539,7 +2720,7 @@ class TaskGroupGraph(DashboardComponent):
 
         durations = set()
         nbytes = set()
-        for key, tg in self.scheduler.task_groups.items():
+        for tg in self.scheduler.task_groups.values():
 
             if tg.duration and tg.nbytes_total:
                 durations.add(tg.duration)
@@ -2986,7 +3167,7 @@ class TaskProgress(DashboardComponent):
         self.scheduler = scheduler
 
         data = progress_quads(
-            dict(all={}, memory={}, erred={}, released={}, processing={})
+            dict(all={}, memory={}, erred={}, released={}, processing={}, queued={})
         )
         self.source = ColumnDataSource(data=data)
 
@@ -3058,6 +3239,30 @@ class TaskProgress(DashboardComponent):
             fill_alpha=0.35,
             line_alpha=0,
         )
+        self.root.quad(
+            source=self.source,
+            top="top",
+            bottom="bottom",
+            left="processing-loc",
+            right="queued-loc",
+            fill_color="gray",
+            hatch_pattern="/",
+            hatch_color="white",
+            fill_alpha=0.35,
+            line_alpha=0,
+        )
+        self.root.quad(
+            source=self.source,
+            top="top",
+            bottom="bottom",
+            left="queued-loc",
+            right="no-worker-loc",
+            fill_color="red",
+            hatch_pattern="/",
+            hatch_color="black",
+            fill_alpha=0.35,
+            line_alpha=0,
+        )
         self.root.text(
             source=self.source,
             text="show-name",
@@ -3094,16 +3299,24 @@ class TaskProgress(DashboardComponent):
                     <span style="font-size: 10px; font-family: Monaco, monospace;">@all</span>
                 </div>
                 <div>
+                    <span style="font-size: 14px; font-weight: bold;">Queued:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@queued</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">No-worker:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@no_worker</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Processing:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@processing</span>
+                </div>
+                <div>
                     <span style="font-size: 14px; font-weight: bold;">Memory:</span>&nbsp;
                     <span style="font-size: 10px; font-family: Monaco, monospace;">@memory</span>
                 </div>
                 <div>
                     <span style="font-size: 14px; font-weight: bold;">Erred:</span>&nbsp;
                     <span style="font-size: 10px; font-family: Monaco, monospace;">@erred</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Ready:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@processing</span>
                 </div>
                 """,
         )
@@ -3118,6 +3331,8 @@ class TaskProgress(DashboardComponent):
             "released": {},
             "processing": {},
             "waiting": {},
+            "queued": {},
+            "no_worker": {},
         }
 
         for tp in self.scheduler.task_prefixes.values():
@@ -3128,6 +3343,8 @@ class TaskProgress(DashboardComponent):
                 state["released"][tp.name] = active_states["released"]
                 state["processing"][tp.name] = active_states["processing"]
                 state["waiting"][tp.name] = active_states["waiting"]
+                state["queued"][tp.name] = active_states["queued"]
+                state["no_worker"][tp.name] = active_states["no-worker"]
 
         state["all"] = {k: sum(v[k] for v in state.values()) for k in state["memory"]}
 
@@ -3140,7 +3357,15 @@ class TaskProgress(DashboardComponent):
 
         totals = {
             k: sum(state[k].values())
-            for k in ["all", "memory", "erred", "released", "waiting"]
+            for k in [
+                "all",
+                "memory",
+                "erred",
+                "released",
+                "waiting",
+                "queued",
+                "no_worker",
+            ]
         }
         totals["processing"] = totals["all"] - sum(
             v for k, v in totals.items() if k != "all"
@@ -3148,8 +3373,11 @@ class TaskProgress(DashboardComponent):
 
         self.root.title.text = (
             "Progress -- total: %(all)s, "
-            "in-memory: %(memory)s, processing: %(processing)s, "
             "waiting: %(waiting)s, "
+            "queued: %(queued)s, "
+            "processing: %(processing)s, "
+            "in-memory: %(memory)s, "
+            "no-worker: %(no_worker)s, "
             "erred: %(erred)s" % totals
         )
 
@@ -3309,7 +3537,11 @@ class WorkerTable(DashboardComponent):
         "in_memory",
         "ready",
         "time",
-        "spilled_nbytes",
+        # Use scheduler.WorkerState.memory.managed instead of
+        # scheduler.WorkerState.metrics["managed_bytes"]; the two measures are slightly
+        # different. See explanation in scheduler.WorkerState.memory().
+        "managed_bytes",
+        "spilled_bytes",
     }
 
     def __init__(self, scheduler, width=800, **kwargs):
@@ -3327,8 +3559,10 @@ class WorkerTable(DashboardComponent):
             "memory_unmanaged_recent",
             "memory_spilled",
             "num_fds",
-            "read_bytes",
-            "write_bytes",
+            "host_net_io.read_bps",
+            "host_net_io.write_bps",
+            "host_disk_io.read_bps",
+            "host_disk_io.write_bps",
             "cpu_fraction",
         ]
         workers = self.scheduler.workers.values()
@@ -3355,8 +3589,10 @@ class WorkerTable(DashboardComponent):
             "memory_unmanaged_recent",
             "memory_spilled",
             "num_fds",
-            "read_bytes",
-            "write_bytes",
+            "host_net_io.read_bps",
+            "host_net_io.write_bps",
+            "host_disk_io.read_bps",
+            "host_disk_io.write_bps",
         ]
         column_title_renames = {
             "memory_limit": "limit",
@@ -3366,8 +3602,10 @@ class WorkerTable(DashboardComponent):
             "memory_unmanaged_recent": "unmanaged recent",
             "memory_spilled": "spilled",
             "num_fds": "# fds",
-            "read_bytes": "read",
-            "write_bytes": "write",
+            "host_net_io.read_bps": "net read",
+            "host_net_io.write_bps": "net write",
+            "host_disk_io.read_bps": "disk read",
+            "host_disk_io.write_bps": "disk write",
         }
 
         self.source = ColumnDataSource({k: [] for k in self.names})
@@ -3386,10 +3624,12 @@ class WorkerTable(DashboardComponent):
             "memory_unmanaged_old": NumberFormatter(format="0.0 b"),
             "memory_unmanaged_recent": NumberFormatter(format="0.0 b"),
             "memory_spilled": NumberFormatter(format="0.0 b"),
-            "read_bytes": NumberFormatter(format="0 b"),
-            "write_bytes": NumberFormatter(format="0 b"),
+            "host_net_io.read_bps": NumberFormatter(format="0 b"),
+            "host_net_io.write_bps": NumberFormatter(format="0 b"),
             "num_fds": NumberFormatter(format="0"),
             "nthreads": NumberFormatter(format="0"),
+            "host_disk_io.read_bps": NumberFormatter(format="0 b"),
+            "host_disk_io.write_bps": NumberFormatter(format="0 b"),
         }
 
         table = DataTable(
@@ -3419,6 +3659,12 @@ class WorkerTable(DashboardComponent):
             width=width,
             index_position=None,
         )
+
+        for name in extra_names:
+            if name in formatters:
+                extra_table.columns[extra_names.index(name)].formatter = formatters[
+                    name
+                ]
 
         hover = HoverTool(
             point_policy="follow_mouse",
@@ -3495,13 +3741,19 @@ class WorkerTable(DashboardComponent):
     @without_property_validation
     def update(self):
         data = {name: [] for name in self.names + self.extra_names}
-        for i, (addr, ws) in enumerate(
-            sorted(self.scheduler.workers.items(), key=lambda kv: str(kv[1].name))
+        for i, ws in enumerate(
+            sorted(self.scheduler.workers.values(), key=lambda ws: str(ws.name))
         ):
             minfo = ws.memory
 
             for name in self.names + self.extra_names:
-                data[name].append(ws.metrics.get(name, None))
+                if "." in name:
+                    n0, _, n1 = name.partition(".")
+                    v = ws.metrics.get(n0, {}).get(n1, None)
+                else:
+                    v = ws.metrics.get(name, None)
+                data[name].append(v)
+
             data["name"][-1] = ws.name if ws.name is not None else i
             data["address"][-1] = ws.address
             if ws.memory_limit:
@@ -4025,6 +4277,7 @@ def status_doc(scheduler, extra, doc):
 
     if len(scheduler.workers) <= 100:
         workers_memory = WorkersMemory(scheduler, sizing_mode="stretch_both")
+
         processing = CurrentLoad(scheduler, sizing_mode="stretch_both")
 
         processing_root = processing.processing_figure
@@ -4036,16 +4289,19 @@ def status_doc(scheduler, extra, doc):
 
     current_load = CurrentLoad(scheduler, sizing_mode="stretch_both")
     occupancy = Occupancy(scheduler, sizing_mode="stretch_both")
+    workers_transfer_bytes = WorkersTransferBytes(scheduler, sizing_mode="stretch_both")
 
     cpu_root = current_load.cpu_figure
     occupancy_root = occupancy.root
 
     workers_memory.update()
+    workers_transfer_bytes.update()
     processing.update()
     current_load.update()
     occupancy.update()
 
     add_periodic_callback(doc, workers_memory, 100)
+    add_periodic_callback(doc, workers_transfer_bytes, 100)
     add_periodic_callback(doc, processing, 100)
     add_periodic_callback(doc, current_load, 100)
     add_periodic_callback(doc, occupancy, 100)
@@ -4055,8 +4311,9 @@ def status_doc(scheduler, extra, doc):
     tab1 = Panel(child=processing_root, title="Processing")
     tab2 = Panel(child=cpu_root, title="CPU")
     tab3 = Panel(child=occupancy_root, title="Occupancy")
+    tab4 = Panel(child=workers_transfer_bytes.root, title="Data Transfer")
 
-    proc_tabs = Tabs(tabs=[tab1, tab2, tab3], name="processing_tabs")
+    proc_tabs = Tabs(tabs=[tab1, tab2, tab3, tab4], name="processing_tabs")
     doc.add_root(proc_tabs)
 
     task_stream = TaskStream(

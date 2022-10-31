@@ -6,7 +6,13 @@ import dask
 
 from distributed import Worker
 from distributed.comm import CommClosedError
-from distributed.utils_test import assert_story, assert_valid_story, gen_cluster, inc
+from distributed.utils_test import (
+    NO_AMM,
+    assert_story,
+    assert_valid_story,
+    gen_cluster,
+    inc,
+)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -124,7 +130,7 @@ async def test_client_story_failed_worker(c, s, a, b, on_error):
         raise ValueError(on_error)
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_worker_story_with_deps(c, s, a, b):
     """
     Assert that the structure of the story does not change unintentionally and

@@ -7,11 +7,10 @@ import warnings
 from asyncio import TimeoutError
 from collections import defaultdict, deque
 
-from tornado.ioloop import PeriodicCallback
-
 import dask
 from dask.utils import parse_timedelta
 
+from distributed.compatibility import PeriodicCallback
 from distributed.metrics import time
 from distributed.utils import SyncMethodMixin, log_errors
 from distributed.utils_comm import retry_operation
@@ -377,7 +376,7 @@ class Semaphore(SyncMethodMixin):
         except ValueError:
             client = get_client()
             self.scheduler = scheduler_rpc or client.scheduler
-            self.loop = loop or client.io_loop
+            self.loop = loop or client.loop
 
         self.name = name or "semaphore-" + uuid.uuid4().hex
         self.max_leases = max_leases

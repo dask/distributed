@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import contextlib
 
+import pytest
+
 from distributed import Client, LocalCluster
 from distributed.utils import LoopRunner
 
@@ -27,12 +29,14 @@ def _check_cluster_and_client_loop(loop):
 
 
 # Test if Client stops LoopRunner on close.
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
 def test_close_loop_sync_start_new_loop(cleanup):
     with _check_loop_runner():
         _check_cluster_and_client_loop(loop=None)
 
 
 # Test if Client stops LoopRunner on close.
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
 def test_close_loop_sync_use_running_loop(cleanup):
     with _check_loop_runner():
         # Start own loop or use current thread's one.

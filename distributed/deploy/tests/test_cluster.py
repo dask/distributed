@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from tornado.ioloop import IOLoop
 
 from distributed.deploy.cluster import Cluster
 from distributed.utils_test import gen_test
@@ -35,3 +36,19 @@ async def test_logs_deprecated():
     async with Cluster(asynchronous=True) as cluster:
         with pytest.warns(FutureWarning, match="get_logs"):
             cluster.logs()
+
+
+@gen_test()
+async def test_deprecated_loop_properties():
+    class ExampleCluster(Cluster):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.loop = self.io_loop = IOLoop.current()
+
+    with pytest.warns(DeprecationWarning) as warninfo:
+        async with ExampleCluster(asynchronous=True, loop=IOLoop.current()):
+            pass
+
+    assert [(w.category, *w.message.args) for w in warninfo] == [
+        (DeprecationWarning, "setting the loop property is deprecated")
+    ]
