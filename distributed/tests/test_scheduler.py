@@ -1517,6 +1517,17 @@ async def test_learn_occupancy_2(c, s, a, b):
     assert nproc * 0.1 < s.total_occupancy < nproc * 0.4
 
 
+@gen_cluster(
+    nthreads=[("", 2)] * 5,
+    client=True,
+    config={"distributed.scheduler.work-stealing": False},
+)
+async def test_balance_fewer_tasks_than_cluster(c, s, *workers):
+    fs = c.map(inc, range(4))
+    await wait(fs)
+    assert sorted(len(w.has_what) for w in s.workers.values()) == [0, 1, 1, 1, 1]
+
+
 @nodebug
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 30)
 async def test_balance_many_workers(c, s, *workers):

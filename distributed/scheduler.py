@@ -2119,11 +2119,13 @@ class SchedulerState:
         tg.last_worker = (
             ws if tg.states["released"] + tg.states["waiting"] > 1 else None
         )
-        tg.last_worker_tasks_left -= 1
+        if tg.last_worker_tasks_left > 0:
+            tg.last_worker_tasks_left -= 1
 
-        if self.validate and ws is not None:
+        if self.validate:
             assert self.workers.get(ws.address) is ws
             assert ws in self.running, (ws, self.running)
+            assert tg.last_worker_tasks_left >= 0, tg.last_worker_tasks_left
 
         return ws
 
