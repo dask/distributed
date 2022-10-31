@@ -124,16 +124,13 @@ async def test_cluster_dump_story(c, s, a, b, tmp_path):
 
     dump = DumpArtefact.from_url(f"{filename}.msgpack.gz")
 
-    story = dump.scheduler_story("f1", "f2")
-    assert story.keys() == {"f1", "f2"}
+    scheduler_story = dump.scheduler_story("f1", "f2", datetimes=False)
+    assert_story(scheduler_story, s.story("f1", "f2"))
 
-    for k, task_story in story.items():
-        assert_story(task_story, s.story(k))
-
-    story = dump.worker_story("f1", "f2")
-    assert story.keys() == {"f1", "f2"}
-    for k, task_story in story.items():
-        assert_story(task_story, a.state.story(k) + b.state.story(k))
+    worker_stories = dump.worker_stories("f1", "f2", datetimes=False)
+    assert worker_stories.keys() == {a.address, b.address}
+    assert_story(worker_stories[a.address], a.state.story("f1", "f2"))
+    assert_story(worker_stories[b.address], b.state.story("f1", "f2"))
 
 
 @gen_cluster(client=True)
@@ -154,6 +151,7 @@ async def test_cluster_dump_to_yamls(c, s, a, b, tmp_path):
     dump.to_yamls(yaml_path)
 
     scheduler_files = {
+        "clients.yaml",
         "events.yaml",
         "extensions.yaml",
         "general.yaml",
@@ -166,20 +164,24 @@ async def test_cluster_dump_to_yamls(c, s, a, b, tmp_path):
 
     scheduler_yaml_path = yaml_path / "scheduler"
     expected = {scheduler_yaml_path / f for f in scheduler_files}
-    assert expected == set(scheduler_yaml_path.iterdir())
+    assert set(scheduler_yaml_path.iterdir()) == expected
 
     worker_files = {
         "config.yaml",
+        "data.yaml",
         "general.yaml",
+        "incoming_transfer_log.yaml",
         "log.yaml",
         "logs.yaml",
+        "stimulus_log.yaml",
+        "outgoing_transfer_log.yaml",
         "tasks.yaml",
     }
 
     for worker in (a, b):
-        worker_yaml_path = yaml_path / worker.id
+        worker_yaml_path = yaml_path / dump._slugify_addr(worker.address)
         expected = {worker_yaml_path / f for f in worker_files}
-        assert expected == set(worker_yaml_path.iterdir())
+        assert set(worker_yaml_path.iterdir()) == expected
 
     # Internal dictionary state compaction
     # has not been destructive of the original dictionary

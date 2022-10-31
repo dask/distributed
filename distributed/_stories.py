@@ -1,55 +1,73 @@
 from __future__ import annotations
 
-from typing import Iterable
+from datetime import datetime
+from typing import Iterable, TypeVar
 
 
 def scheduler_story(
-    keys_or_stimuli: set[str], transition_log: Iterable[tuple]
-) -> list[tuple]:
+    keys: set, transition_log: Iterable, datetimes: bool = False
+) -> list:
     """Creates a story from the scheduler transition log given a set of keys
     describing tasks or stimuli.
 
     Parameters
     ----------
-    keys_or_stimuli : set[str]
-        Task keys or stimulus_id's
+    keys : set
+        A set of task `keys` or `stimulus_id`'s
     log : iterable
         The scheduler transition log
+    datetimes : bool
+        Whether to convert timestamps into `datetime.datetime` objects
+        (default False)
 
     Returns
     -------
-    story : list[tuple]
+    story : list
     """
     return [
-        t
+        msg_with_datetime(t) if datetimes else t
         for t in transition_log
-        if t[0] in keys_or_stimuli or keys_or_stimuli.intersection(t[3])
+        if t[0] in keys or keys.intersection(t[3])
     ]
 
 
-def worker_story(keys_or_stimuli: set[str], log: Iterable[tuple]) -> list:
+def worker_story(keys: set, log: Iterable, datetimes: bool = False) -> list:
     """Creates a story from the worker log given a set of keys
     describing tasks or stimuli.
 
     Parameters
     ----------
-    keys_or_stimuli : set[str]
-        Task keys or stimulus_id's
+    keys : set
+        A set of task `keys` or `stimulus_id`'s
     log : iterable
         The worker log
+    datetimes : bool
+        Whether to convert timestamps into `datetime.datetime` objects
+        (default False)
 
     Returns
     -------
-    story : list[str]
+    story : list
     """
     return [
-        msg
+        msg_with_datetime(msg) if datetimes else msg
         for msg in log
-        if any(key in msg for key in keys_or_stimuli)
+        if any(key in msg for key in keys)
         or any(
-            key in c
-            for key in keys_or_stimuli
-            for c in msg
-            if isinstance(c, (tuple, list, set))
+            key in c for key in keys for c in msg if isinstance(c, (tuple, list, set))
         )
     ]
+
+
+T = TypeVar("T", list, tuple)
+
+
+def msg_with_datetime(msg: T, idx: int = -1) -> T:
+    if idx < 0:
+        idx = len(msg) + idx
+    dt = msg[idx]
+    try:
+        dt = datetime.fromtimestamp(dt)
+    except (TypeError, ValueError):
+        pass
+    return msg[:idx] + type(msg)((dt,)) + msg[idx + 1 :]

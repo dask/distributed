@@ -4071,21 +4071,17 @@ class Client(SyncMethodMixin):
             Either ``"msgpack"`` or ``"yaml"``. If msgpack is used (default),
             the output will be stored in a gzipped file as msgpack.
 
+            ``"msgpack"`` is generally preferred, since it's far faster to write
+            and far smaller on disk. If you want to examine the dump in human-readable
+            format, consider creating the dump in msgpack format, then (in an IPython session
+            or separate script), using `DumpArtefact.to_yamls` to create a directory
+            tree of separate YAML files, which are easier to work with.
+
             To read::
 
-                import gzip, msgpack
-                with gzip.open("filename") as fd:
-                    state = msgpack.unpack(fd)
+                from distributed.cluster_dump import DumpArtefact
+                dump = DumpArtefact.from_url("filename")
 
-            or::
-
-                import yaml
-                try:
-                    from yaml import CLoader as Loader
-                except ImportError:
-                    from yaml import Loader
-                with open("filename") as fd:
-                    state = yaml.load(fd, Loader=Loader)
         **storage_options:
             Any additional arguments to :func:`fsspec.open` when writing to a URL.
         """

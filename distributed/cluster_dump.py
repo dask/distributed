@@ -2,19 +2,34 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
+import threading
 from collections.abc import Mapping
+from contextlib import contextmanager, nullcontext
+from functools import partial
 from pathlib import Path
-from typing import IO, Any, Awaitable, Callable, Collection, Literal
+from typing import (
+    IO,
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Collection,
+    Iterator,
+    Literal,
+)
 
 import fsspec
 import msgpack
 
+from distributed._stories import msg_with_datetime
 from distributed._stories import scheduler_story as _scheduler_story
 from distributed._stories import worker_story as _worker_story
 from distributed.compatibility import to_thread
 
-DEFAULT_CLUSTER_DUMP_FORMAT: Literal["msgpack" | "yaml"] = "msgpack"
+if TYPE_CHECKING:
+    import yaml
+
+DEFAULT_CLUSTER_DUMP_FORMAT: Literal["msgpack", "yaml"] = "msgpack"
 DEFAULT_CLUSTER_DUMP_EXCLUDE: Collection[str] = ("run_spec",)
 
 
@@ -85,7 +100,7 @@ def load_cluster_dump(url: str, **kwargs: Any) -> dict:
     """
     if url.endswith(".msgpack.gz"):
         mode = "rb"
-        reader = msgpack.unpack
+        reader = partial(msgpack.unpack, strict_map_key=False)
     elif url.endswith(".yaml"):
         import yaml
 
@@ -148,6 +163,17 @@ class DumpArtefact(Mapping):
         else:
             return list(context.values())
 
+    @staticmethod
+    def _slugify_addr(addr: str) -> str:
+        return addr.replace("://", "-").replace("/", "_")
+
+    def processing_on(self) -> dict[str, str]:
+        "Tasks currently in ``processing`` on the scheduler, and which worker they're processing on"
+        return {
+            t["key"]: t["processing_on"]
+            for t in self.scheduler_tasks_in_state("processing")
+        }
+
     def scheduler_tasks_in_state(self, state: str | None = None) -> list:
         """
         Parameters
@@ -184,39 +210,100 @@ class DumpArtefact(Mapping):
 
         return tasks
 
-    def scheduler_story(self, *key_or_stimulus_id: str) -> dict:
+    def scheduler_story(self, *key_or_stimulus_id: str, datetimes: bool = True) -> list:
+        """
+        Returns
+        -------
+        story : list
+            A list of events for the keys/stimulus ID's in ``*key_or_stimulus_id``.
+        """
+        keys = set(key_or_stimulus_id)
+        return [
+            tuple(s)
+            for s in _scheduler_story(
+                keys, self.dump["scheduler"]["transition_log"], datetimes=datetimes
+            )
+        ]
+
+    def scheduler_short_story(self, *key_or_stimulus_id: str) -> list[str]:
+        """
+        Returns
+        -------
+        story : list
+            A list of just the final states for the keys/stimulus ID's in ``*key_or_stimulus_id``.
+        """
+        return [x[2] for x in self.scheduler_story(*key_or_stimulus_id)]
+
+    def scheduler_short_stories(self, *key_or_stimulus_id: str) -> dict[str, list[str]]:
         """
         Returns
         -------
         stories : dict
-            A list of stories for the keys/stimulus ID's in ``*key_or_stimulus_id``.
+            A dict of the short story for each key or stimulus ID. Keys missing from the logs are dropped.
         """
-        stories = defaultdict(list)
+        return {
+            k: s
+            for k, s in ((k, self.scheduler_short_story(k)) for k in key_or_stimulus_id)
+            if s
+        }
 
-        log = self.dump["scheduler"]["transition_log"]
-        keys = set(key_or_stimulus_id)
-
-        for story in _scheduler_story(keys, log):
-            stories[story[0]].append(tuple(story))
-
-        return dict(stories)
-
-    def worker_story(self, *key_or_stimulus_id: str) -> dict:
+    def worker_stories(self, *key_or_stimulus_id: str, datetimes: bool = True) -> dict:
         """
         Returns
         -------
         stories : dict
-            A dict of stories for the keys/stimulus ID's in ``*key_or_stimulus_id`.`
+            A dict for each worker of the story for all the keys/stimulus IDs
+            in ``*key_or_stimulus_id`.`
         """
         keys = set(key_or_stimulus_id)
-        stories = defaultdict(list)
+        return {
+            addr: [tuple(s) for s in _worker_story(keys, wlog, datetimes=datetimes)]
+            for addr, worker_dump in self.dump["workers"].items()
+            if isinstance(worker_dump, dict) and (wlog := worker_dump.get("log"))
+        }
 
-        for worker_dump in self.dump["workers"].values():
-            if isinstance(worker_dump, dict) and "log" in worker_dump:
-                for story in _worker_story(keys, worker_dump["log"]):
-                    stories[story[0]].append(tuple(story))
+    def worker_short_stories(self, key_or_stimulus_id: str) -> dict[str, list[str]]:
+        """
+        Returns
+        -------
+        stories : dict
+            A dict of the short story for the key or stimulus ID, for each worker.
+            Workers missing from the logs are dropped.
+        """
+        return {
+            addr: [
+                x[2]
+                for x in story
+                if x[0] == key_or_stimulus_id or x[-1] == key_or_stimulus_id
+            ]
+            for addr, story in self.worker_stories(
+                key_or_stimulus_id, datetimes=False
+            ).items()
+            if story
+        }
 
-        return dict(stories)
+    def worker_stories_to_yamls(
+        self, root_dir: str | Path | None = None, *key_or_stimulus_id: str
+    ) -> None:
+        """
+        Write the results of `worker_stories` to separate YAML files per worker.
+        """
+        import yaml
+
+        root_dir = Path(root_dir) if root_dir else Path.cwd()
+
+        stories = self.worker_stories(*key_or_stimulus_id)
+        for i, (addr, story) in enumerate(stories.items(), 1):
+            worker_dir = root_dir / self._slugify_addr(addr)
+            worker_dir.mkdir(parents=True, exist_ok=True)
+            path = (
+                worker_dir
+                / f"story-{key_or_stimulus_id[0] if len(key_or_stimulus_id) == 1 else key_or_stimulus_id}.yaml"
+            )
+
+            print(f"Dumping story {i:>3}/{len(stories)} to {path}")
+            with open(path, "w") as f:
+                yaml.dump([list(s) for s in story], f, Dumper=yaml.CSafeDumper)
 
     def missing_workers(self) -> list:
         """
@@ -235,7 +322,7 @@ class DumpArtefact(Mapping):
             or not isinstance(responsive_workers[w], dict)
         ]
 
-    def _compact_state(self, state: dict, expand_keys: set[str]) -> dict[str, dict]:
+    def _compact_state(self, state: dict, expand_keys: set[str]) -> dict[str, Any]:
         """Compacts ``state`` keys into a general key,
         unless the key is in ``expand_keys``"""
         assert "general" not in state
@@ -254,8 +341,19 @@ class DumpArtefact(Mapping):
     def to_yamls(
         self,
         root_dir: str | Path | None = None,
-        worker_expand_keys: Collection[str] = ("config", "log", "logs", "tasks"),
+        worker_expand_keys: Collection[str] = (
+            "config",
+            "data",
+            "incoming_transfer_log",
+            "outgoing_transfer_log",
+            "pending_data_per_worker",
+            "log",
+            "logs",
+            "stimulus_log",
+            "tasks",
+        ),
         scheduler_expand_keys: Collection[str] = (
+            "clients",
             "events",
             "extensions",
             "log",
@@ -264,7 +362,9 @@ class DumpArtefact(Mapping):
             "transition_log",
             "workers",
         ),
-    ) -> None:
+        background: bool = False,
+        log: bool | None = None,
+    ) -> None | threading.Thread:
         """
         Splits the Dump Artefact into a tree of yaml files with
         ``root_dir`` as it's base.
@@ -292,7 +392,32 @@ class DumpArtefact(Mapping):
             into separate yaml files.
             Keys that are not in this iterable are compacted into a
             ``general.yaml`` file.
+        background:
+            If True, run in a separate daemon thread in the background.
+            Returns the `threading.Thread` object immediately.
+        log:
+            Print progress updates if True. Defaults to None, which means
+            False if ``background`` is True, and True otherwise.
         """
+        if background:
+            t = threading.Thread(
+                target=self.to_yamls,
+                name="to-yamls",
+                kwargs=dict(
+                    root_dir=root_dir,
+                    worker_expand_keys=worker_expand_keys,
+                    scheduler_expand_keys=scheduler_expand_keys,
+                    background=False,
+                    log=log if log is not None else False,
+                ),
+                daemon=True,
+            )
+            t.start()
+            return t
+
+        if log is None:
+            log = True
+
         import yaml
 
         root_dir = Path(root_dir) if root_dir else Path.cwd()
@@ -301,31 +426,72 @@ class DumpArtefact(Mapping):
         worker_expand_keys = set(worker_expand_keys)
 
         workers = self.dump["workers"]
-        for info in workers.values():
-            try:
-                worker_id = info["id"]
-            except KeyError:
+        for i, (addr, info) in enumerate(workers.items(), 1):
+            if not isinstance(info, dict):
+                if log:
+                    print(f"Skipping worker {i:>3}/{len(workers)} - {info}")
                 continue
+
+            log_dir = root_dir / self._slugify_addr(addr)
+            log_dir.mkdir(parents=True, exist_ok=True)
+
+            if log:
+                print(f"Dumping worker {i:>4}/{len(workers)} to {log_dir}")
 
             worker_state = self._compact_state(info, worker_expand_keys)
 
-            log_dir = root_dir / worker_id
-            log_dir.mkdir(parents=True, exist_ok=True)
-
             for name, _logs in worker_state.items():
                 filename = str(log_dir / f"{name}.yaml")
+                if name == "log":
+                    _logs = list(map(msg_with_datetime, _logs))
                 with open(filename, "w") as fd:
-                    yaml.dump(_logs, fd, Dumper=dumper)
+
+                    with _block_literals(dumper) if name == "logs" else nullcontext():
+                        yaml.dump(_logs, fd, Dumper=dumper)
 
         context = "scheduler"
-        scheduler_state = self._compact_state(self.dump[context], scheduler_expand_keys)
-
         log_dir = root_dir / context
         log_dir.mkdir(parents=True, exist_ok=True)
-        # Compact smaller keys into a general dict
 
-        for name, _logs in scheduler_state.items():
+        if log:
+            print(f"Dumping scheduler to {log_dir}")
+
+        # Compact smaller keys into a general dict
+        scheduler_state = self._compact_state(self.dump[context], scheduler_expand_keys)
+        for i, (name, _logs) in enumerate(scheduler_state.items(), 1):
             filename = str(log_dir / f"{name}.yaml")
+            if log:
+                print(f"    Dumping {i:>2}/{len(scheduler_state)} {filename}")
+
+            if name == "transition_log":
+                _logs = [msg_with_datetime(e) for e in _logs]
+
+            if name == "events":
+                _logs = {
+                    k: [msg_with_datetime(e, idx=0) for e in events]
+                    for k, events in _logs.items()
+                }
 
             with open(filename, "w") as fd:
-                yaml.dump(_logs, fd, Dumper=dumper)
+                with _block_literals(dumper) if name == "logs" else nullcontext():
+                    yaml.dump(_logs, fd, Dumper=dumper)
+        return None
+
+
+@contextmanager
+def _block_literals(dumper: type[yaml.Dumper | yaml.CDumper]) -> Iterator[None]:
+    "Contextmanager to use literal-block YAML syntax for multiline strings. Not thread-safe."
+    # based on https://stackoverflow.com/a/33300001/17100540
+    original_respresenter = dumper.yaml_representers[str]
+
+    def represent_str(self, data):
+        if "\n" in data:
+            return self.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+        return self.represent_scalar("tag:yaml.org,2002:str", data)
+
+    dumper.add_representer(str, represent_str)
+
+    try:
+        yield
+    finally:
+        dumper.add_representer(str, original_respresenter)
