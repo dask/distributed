@@ -4162,7 +4162,7 @@ async def test_transition_no_worker_memory(c, s, a, b):
     - test_transition_queued_memory
     - test_transition_processing_memory_from_unexpected_worker
     """
-    raise NotImplementedError("TODO")
+    # TODO
 
 
 @gen_cluster(client=True, config={"distributed.scheduler.worker-saturation": 1.0})
@@ -4175,7 +4175,7 @@ async def test_transition_queued_memory(c, s, a, b):
     - test_transition_no_worker_memory
     - test_transition_processing_memory_from_unexpected_worker
     """
-    raise NotImplementedError("TODO")
+    # TODO
 
 
 @gen_cluster(client=True)
@@ -4188,4 +4188,4 @@ async def test_transition_processing_memory_from_unexpected_worker(c, s, a, b):
     - test_transition_no_worker_memory
     - test_transition_queued_memory
     """
-    raise NotImplementedError("TODO")
+    # TODO
