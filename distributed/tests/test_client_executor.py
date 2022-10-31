@@ -217,7 +217,7 @@ def test_retries(client):
         future = e.submit(varying(args))
         assert future.result() == 42
 
-    with client.get_executor(retries=2) as e:
+    with client.get_executor(retries=1) as e:
         future = e.submit(varying(args))
         with pytest.raises(ZeroDivisionError):
             res = future.result()
