@@ -3,7 +3,6 @@ from __future__ import annotations
 import functools
 import warnings
 
-import bokeh
 from bokeh.application import Application
 from bokeh.application.handlers.function import FunctionHandler
 from bokeh.server.server import BokehTornado
@@ -12,12 +11,16 @@ from packaging.version import parse as parse_version
 
 import dask
 
-if parse_version(bokeh.__version__) < parse_version("2.1.1"):
+from distributed.dashboard.utils import BOKEH_VERSION
+
+_min_bokeh_version = "2.1.1"
+
+if BOKEH_VERSION < parse_version(_min_bokeh_version):
     warnings.warn(
-        "\nDask needs bokeh >= 2.1.1 for the dashboard."
+        f"\nDask needs bokeh >= {_min_bokeh_version}, < 3 for the dashboard."
         "\nContinuing without the dashboard."
     )
-    raise ImportError("Dask needs bokeh >= 2.1.1")
+    raise ImportError(f"Dask needs bokeh >= {_min_bokeh_version}, < 3")
 
 
 def BokehApplication(applications, server, prefix="/", template_variables=None):

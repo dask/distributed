@@ -78,6 +78,7 @@ class WorkStealing(SchedulerPlugin):
     # { worker state: occupancy }
     in_flight_occupancy: defaultdict[WorkerState, float]
     in_flight_tasks: defaultdict[WorkerState, int]
+    metrics: dict[str, dict[int, float]]
     _in_flight_event: asyncio.Event
     _request_counter: int
 
@@ -104,15 +105,19 @@ class WorkStealing(SchedulerPlugin):
         self.in_flight_occupancy = defaultdict(lambda: 0)
         self.in_flight_tasks = defaultdict(lambda: 0)
         self._in_flight_event = asyncio.Event()
+        self.metrics = {
+            "request_count_total": defaultdict(lambda: 0),
+            "request_cost_total": defaultdict(lambda: 0),
+        }
         self._request_counter = 0
         self.scheduler.stream_handlers["steal-response"] = self.move_task_confirm
 
     async def start(self, scheduler: Any = None) -> None:
         """Start the background coroutine to balance the tasks on the cluster.
         Idempotent.
-        The scheduler argument is ignored. It is merely required to satisify the
-        plugin interface. Since this class is simultaneouly an extension, the
-        scheudler instance is already registered during initialization
+        The scheduler argument is ignored. It is merely required to satisfy the
+        plugin interface. Since this class is simultaneously an extension, the
+        scheduler instance is already registered during initialization
         """
         if "stealing" in self.scheduler.periodic_callbacks:
             return
@@ -360,7 +365,7 @@ class WorkStealing(SchedulerPlugin):
                         *_log_msg,
                     )
                 )
-                self.scheduler.reschedule(key, stimulus_id=stimulus_id)
+                self.scheduler._reschedule(key, stimulus_id=stimulus_id)
             # Victim had already started execution
             elif state in _WORKER_STATE_REJECT:
                 self.log(("already-computing", *_log_msg))
@@ -455,18 +460,21 @@ class WorkStealing(SchedulerPlugin):
                             <= occ_victim - (comm_cost_victim + compute) / 2
                         ):
                             self.move_task_request(ts, victim, thief)
+                            cost = compute + comm_cost_victim
                             log.append(
                                 (
                                     start,
                                     level,
                                     ts.key,
-                                    comm_cost_victim + compute,
+                                    cost,
                                     victim.address,
                                     occ_victim,
                                     thief.address,
                                     occ_thief,
                                 )
                             )
+                            self.metrics["request_count_total"][level] += 1
+                            self.metrics["request_cost_total"][level] += cost
 
                             occ_thief = self._combined_occupancy(thief)
                             nproc_thief = self._combined_nprocessing(thief)
