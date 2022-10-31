@@ -26,7 +26,6 @@ from collections.abc import (
     Iterable,
     Iterator,
     Mapping,
-    Sequence,
     Set,
 )
 from contextlib import suppress
@@ -1493,8 +1492,7 @@ class SchedulerState:
     #: Workers that are currently in running state
     running: set[WorkerState]
     #: Workers that are currently in running state and not fully utilized
-    #: (actually a SortedDict, but the sortedcontainers package isn't annotated)
-    idle: dict[str, WorkerState]
+    idle: set[WorkerState]
     #: Workers that are fully utilized. May include non-running workers.
     saturated: set[WorkerState]
     total_nthreads: int
@@ -1595,7 +1593,7 @@ class SchedulerState:
         self.clients["fire-and-forget"] = ClientState("fire-and-forget")
         self.extensions = {}
         self.host_info = host_info
-        self.idle = SortedDict()
+        self.idle = set()
         self.n_tasks = 0
         self.resources = resources
         self.saturated = set()
@@ -2055,7 +2053,7 @@ class SchedulerState:
             # See root-ish-ness note below in `decide_worker_rootish_queuing_enabled`
             assert math.isinf(self.WORKER_SATURATION)
 
-        pool = self.idle.values() if self.idle else self.running
+        pool = self.idle or self.running
         if not pool:
             return None
 
@@ -2126,7 +2124,7 @@ class SchedulerState:
 
         # Just pick the least busy worker.
         # NOTE: this will lead to worst-case scheduling with regards to co-assignment.
-        ws = min(self.idle.values(), key=lambda ws: len(ws.processing) / ws.nthreads)
+        ws = min(self.idle, key=lambda ws: len(ws.processing) / ws.nthreads)
         if self.validate:
             assert not _worker_full(ws, self.WORKER_SATURATION), (
                 ws,
@@ -2165,43 +2163,12 @@ class SchedulerState:
             # If there were no restrictions, `valid_workers()` didn't subset by `running`.
             valid_workers = self.running
 
-        if ts.dependencies or valid_workers is not None:
-            ws = decide_worker(
-                ts,
-                self.running,
-                valid_workers,
-                partial(self.worker_objective, ts),
-            )
-        else:
-            # TODO if `is_rootish` would always return True for tasks without dependencies,
-            # we could remove all this logic. The rootish assignment logic would behave
-            # more or less the same as this, maybe without gauranteed round-robin though?
-            # This path is only reachable when `ts` doesn't have dependencies, but its
-            # group is also smaller than the cluster.
-
-            # Fastpath when there are no related tasks or restrictions
-            worker_pool = self.idle or self.workers
-            # FIXME idle and workers are SortedDict's declared as dicts
-            #       because sortedcontainers is not annotated
-            wp_vals = cast("Sequence[WorkerState]", worker_pool.values())
-            n_workers: int = len(wp_vals)
-            if n_workers < 20:  # smart but linear in small case
-                ws = min(wp_vals, key=operator.attrgetter("occupancy"))
-                assert ws
-                if ws.occupancy == 0:
-                    # special case to use round-robin; linear search
-                    # for next worker with zero occupancy (or just
-                    # land back where we started).
-                    wp_i: WorkerState
-                    start: int = self.n_tasks % n_workers
-                    i: int
-                    for i in range(n_workers):
-                        wp_i = wp_vals[(i + start) % n_workers]
-                        if wp_i.occupancy == 0:
-                            ws = wp_i
-                            break
-            else:  # dumb but fast in large case
-                ws = wp_vals[self.n_tasks % n_workers]
+        ws = decide_worker(
+            ts,
+            self.running,
+            valid_workers,
+            partial(self.worker_objective, ts),
+        )
 
         if self.validate and ws is not None:
             assert self.workers.get(ws.address) is ws
@@ -3038,10 +3005,10 @@ class SchedulerState:
             else not _worker_full(ws, self.WORKER_SATURATION)
         ):
             if ws.status == Status.running:
-                idle[ws.address] = ws
+                idle.add(ws)
             saturated.discard(ws)
         else:
-            idle.pop(ws.address, None)
+            idle.discard(ws)
 
             if p > nc:
                 pending: float = occ * (p - nc) / (p * nc)
@@ -4719,7 +4686,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.rpc.remove(address)
         del self.stream_comms[address]
         del self.aliases[ws.name]
-        self.idle.pop(ws.address, None)
+        self.idle.discard(ws)
         self.saturated.discard(ws)
         del self.workers[address]
         ws.status = Status.closed
@@ -4994,22 +4961,19 @@ class Scheduler(SchedulerState, ServerNode):
         if not (set(self.workers) == set(self.stream_comms)):
             raise ValueError("Workers not the same in all collections")
 
-        assert self.running.issuperset(self.idle.values()), (
-            self.running,
-            list(self.idle.values()),
-        )
+        assert self.running.issuperset(self.idle), (self.running, self.idle)
         task_group_counts: defaultdict[str, int] = defaultdict(int)
         for w, ws in self.workers.items():
             assert isinstance(w, str), (type(w), w)
             assert isinstance(ws, WorkerState), (type(ws), ws)
             assert ws.address == w
             if ws.status != Status.running:
-                assert ws.address not in self.idle
+                assert ws not in self.idle
             assert ws.long_running.issubset(ws.processing)
             if not ws.processing:
                 assert not ws.occupancy
                 if ws.status == Status.running:
-                    assert ws.address in self.idle
+                    assert ws in self.idle
             assert not ws.needs_what.keys() & ws.has_what
             actual_needs_what: defaultdict[TaskState, int] = defaultdict(int)
             for ts in ws.processing:
@@ -5307,7 +5271,7 @@ class Scheduler(SchedulerState, ServerNode):
                 self.send_all(client_msgs, worker_msgs)
         else:
             self.running.discard(ws)
-            self.idle.pop(ws.address, None)
+            self.idle.discard(ws)
 
     async def handle_request_refresh_who_has(
         self, keys: Iterable[str], worker: str, stimulus_id: str
