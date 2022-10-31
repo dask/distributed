@@ -18,7 +18,6 @@ from distributed.comm.core import CommClosedError
 from distributed.comm.registry import backends, get_backend
 from distributed.deploy.local import LocalCluster
 from distributed.diagnostics.nvml import (
-    CudaDeviceInfo,
     device_get_count,
     get_device_index_and_uuid,
     get_device_mig_mode,
@@ -332,13 +331,16 @@ async def test_simple(
 async def test_cuda_context(
     ucx_loop,
 ):
-    device_info = CudaDeviceInfo()
-    for i in range(device_get_count()):
-        if get_device_mig_mode(i)[0] == 0:
-            device_info = get_device_index_and_uuid(i)
-            break
-    else:
-        pytest.skip("No CUDA devices in non-MIG mode available.")
+    try:
+        device_info = get_device_index_and_uuid(
+            next(
+                filter(
+                    lambda i: get_device_mig_mode(i)[0] == 0, range(device_get_count())
+                )
+            )
+        )
+    except StopIteration:
+        pytest.skip("No CUDA device in non-MIG mode available")
 
     with patch.dict(
         os.environ, {"CUDA_VISIBLE_DEVICES": device_info.uuid.decode("utf-8")}
