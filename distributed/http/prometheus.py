@@ -40,4 +40,5 @@ def import_metrics_handler(module_name: str, handler_name: str) -> type[RequestH
         return PrometheusNotAvailableHandler
     module = import_module(module_name)
     handler = getattr(module, handler_name)
+    assert issubclass(handler, RequestHandler)
     return handler
