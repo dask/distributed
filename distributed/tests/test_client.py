@@ -4884,8 +4884,8 @@ async def test_restart_workers_timeout(c, s, a, b):
     with pytest.raises(RuntimeError) as excinfo:
         await c.restart_workers(workers=[a.worker_address], timeout=0.001)
     msg = str(excinfo.value).lower()
-    assert "1/1 worker(s) failed to restart" in msg
-    assert a.worker_address in msg
+    assert "1/1 nannies failed to restart" in msg
+    assert a.address in msg
 
 
 class MyException(Exception):
