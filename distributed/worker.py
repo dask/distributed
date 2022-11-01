@@ -1261,9 +1261,10 @@ class Worker(BaseWorker, ServerNode):
         try:
             await self.handle_stream(comm)
         except CommClosedError:
-            logger.info(
+            logger.error(
                 "Connection to scheduler %s has been closed.", comm.peer_address
             )
+            raise
         finally:
             await self.close(reason="worker-handle-scheduler-connection-broken")
 
