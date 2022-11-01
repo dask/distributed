@@ -5822,18 +5822,27 @@ class Scheduler(SchedulerState, ServerNode):
                 return_exceptions=True,
             )
 
-            bad_workers = []
-            for worker, response in zip(workers, responses):
-                if isinstance(response, Exception):
-                    logger.exception(response)
-                    bad_workers.append(worker)
+            bad_nannies = []
+            for nanny, response in zip(nanny_addresses, responses):
+                if isinstance(response, asyncio.TimeoutError):
+                    logger.error(
+                        "Scheduler timed out trying to restart worker on %s.", nanny
+                    )
+                    bad_nannies.append(nanny)
+                elif isinstance(response, Exception):
+                    logger.exception(
+                        "Encountered exception trying to to restart worker on %s.",
+                        nanny,
+                        exc_info=response,
+                    )
+                    bad_nannies.append(nanny)
                 elif response == "timed out":
-                    logger.exception(f"{worker} timed out trying to restart.")
-                    bad_workers.append(worker)
-            if bad_workers:
+                    logger.error("%s timed out trying to restart its worker.", nanny)
+                    bad_nannies.append(nanny)
+            if bad_nannies:
                 raise RuntimeError(
-                    f"{len(bad_workers)}/{len(nannies)} worker(s) failed to restart within {timeout} s.",
-                    bad_workers,
+                    f"{len(bad_nannies)}/{len(nannies)} nannies failed to restart the worker within {timeout} s.",
+                    bad_nannies,
                 )
 
     async def broadcast(
