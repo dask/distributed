@@ -121,12 +121,20 @@ async def test_prometheus(c, s, a, b):
     await fetch_metrics(s.http_server.port, "dask_scheduler_")
 
 
-@gen_test()
-async def test_metrics_when_prometheus_client_not_installed():
+@pytest.fixture
+def prometheus_not_available():
+    import sys
+
     with mock.patch.dict("sys.modules", {"prometheus_client": None}):
-        async with Scheduler(dashboard_address=":0") as s:
-            body = await fetch_metrics_body(s.http_server.port)
-            assert "Prometheus metrics are not available" in body
+        del sys.modules["distributed.http.scheduler.prometheus"]
+        yield
+
+
+@gen_test()
+async def test_metrics_when_prometheus_client_not_installed(prometheus_not_available):
+    async with Scheduler(dashboard_address=":0") as s:
+        body = await fetch_metrics_body(s.http_server.port)
+        assert "Prometheus metrics are not available" in body
 
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})

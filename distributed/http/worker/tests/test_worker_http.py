@@ -58,10 +58,23 @@ async def test_prometheus(c, s, a):
     await fetch_metrics(a.http_server.port, prefix="dask_worker_")
 
 
-@gen_cluster(client=True, nthreads=[])
-async def test_metrics_when_prometheus_client_not_installed(c, s):
+@pytest.fixture
+def prometheus_not_available():
+    import sys
+
     with mock.patch.dict("sys.modules", {"prometheus_client": None}):
-        async with Worker(s.address) as w:
+        del sys.modules["distributed.http.worker.prometheus"]
+        yield
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_metrics_when_prometheus_client_not_installed(
+    c, s, prometheus_not_available
+):
+    with mock.patch.dict("sys.modules", {"prometheus_client": None}):
+        import distributed
+
+        async with distributed.Worker(s.address) as w:
             body = await fetch_metrics_body(w.http_server.port)
             assert "Prometheus metrics are not available" in body
 
