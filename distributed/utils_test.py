@@ -2148,6 +2148,12 @@ def ucx_loop():
     ucp.reset()
     loop.close()
 
+    # Reset also Distributed's UCX initialization, i.e., revert the effects of
+    # `distributed.comm.ucx.init_once()`.
+    import distributed.comm.ucx
+
+    distributed.comm.ucx.ucp = None
+
 
 def wait_for_log_line(
     match: bytes, stream: IO[bytes] | None, max_lines: int | None = 10
