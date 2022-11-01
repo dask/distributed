@@ -4103,7 +4103,6 @@ async def test_count_task_prefix(c, s, a, b):
     assert s.task_prefixes["inc"].state_counts["erred"] == 0
 
 
-@pytest.mark.repeat(100)
 @gen_cluster(client=True)
 async def test_transition_waiting_memory(c, s, a, b):
     """Test race condition where a task transitions to memory while its state on the
@@ -4119,13 +4118,8 @@ async def test_transition_waiting_memory(c, s, a, b):
     7. {op: add-keys, keys=[x]} from b finally arrives to the scheduler. This triggers
        a {op: remove-replicas, keys=[x]} message from the scheduler to worker b, because
        add-keys when the task state is not memory triggers a cleanup of redundant
-       replicas (see Scheduler.add_keys) - in this, add-keys differs from finished-task!
-    8. {op: task-finished, key=y} from b arrives to the scheduler
-
-    See also:
-    - test_transition_no_worker_memory
-    - test_transition_queued_memory
-    - test_transition_processing_memory_from_unexpected_worker
+       replicas (see Scheduler.add_keys) - in this, add-keys differs from task-finished!
+    8. {op: task-finished, key=y} from b arrives to the scheduler and it is ignored.
     """
     x = c.submit(inc, 1, key="x", workers=[a.address])
     y = c.submit(inc, x, key="y", workers=[b.address])
@@ -4143,53 +4137,7 @@ async def test_transition_waiting_memory(c, s, a, b):
             await wait_for_state("y", "memory", b)
 
     await async_wait_for(lambda: not b.state.tasks, timeout=5)
-    await wait_for_state("y", "waiting", s)
+
     assert s.tasks["x"].state == "no-worker"
-
-    assert_story(
-        s.story("y"),
-        [
-            ("y", "waiting", "memory", {}),
-            ("y", "memory", "released", {"y": "waiting"}),
-            ("y", "released", "waiting", {}),
-        ],
-    )
-
-
-@gen_cluster(client=True)
-async def test_transition_no_worker_memory(c, s, a, b):
-    """Test race condition where a task transitions to memory while its state on the
-    scheduler is queued.
-
-    See also:
-    - test_transition_waiting_memory
-    - test_transition_queued_memory
-    - test_transition_processing_memory_from_unexpected_worker
-    """
-    # TODO
-
-
-@gen_cluster(client=True, config={"distributed.scheduler.worker-saturation": 1.0})
-async def test_transition_queued_memory(c, s, a, b):
-    """Test race condition where a task transitions to memory while its state on the
-    scheduler is queued.
-
-    See also:
-    - test_transition_waiting_memory
-    - test_transition_no_worker_memory
-    - test_transition_processing_memory_from_unexpected_worker
-    """
-    # TODO
-
-
-@gen_cluster(client=True)
-async def test_transition_processing_memory_from_unexpected_worker(c, s, a, b):
-    """Test race condition where a task transitions from processing to memory, but
-    the task-finished message arrives from an unexpected worker.
-
-    See also:
-    - test_transition_waiting_memory
-    - test_transition_no_worker_memory
-    - test_transition_queued_memory
-    """
-    # TODO
+    assert s.tasks["y"].state == "waiting"
+    assert_story(s.story("y"), [("y", "waiting", "waiting", {})])

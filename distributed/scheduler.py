@@ -2023,42 +2023,23 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_no_worker_memory(
+    def impossible_transition(
         self,
+        finish: TaskStateState,
         key: str,
         stimulus_id: str,
-        *,
-        nbytes: int | None = None,
-        type: bytes | None = None,
-        typename: str | None = None,
-        worker: str,
+        *args: Any,
         **kwargs: Any,
-    ):
+    ) -> tuple[Recs, dict, dict]:  # pragma: nocover
         try:
-            ws = self.workers[worker]
             ts = self.tasks[key]
-            recommendations: dict = {}
-            client_msgs: dict = {}
-            worker_msgs: dict = {}
-
-            if self.validate:
-                assert not ts.processing_on
-                assert not ts.waiting_on
-                assert ts.state == "no-worker"
-
-            self.unrunnable.remove(ts)
-
-            if nbytes is not None:
-                ts.set_nbytes(nbytes)
-
-            self.check_idle_saturated(ws)
-
-            _add_to_memory(
-                self, ts, ws, recommendations, client_msgs, type=type, typename=typename
+            # FIXME downcast antipattern
+            scheduler = cast(Scheduler, self)
+            story = scheduler.story(ts)
+            raise RuntimeError(
+                f"Impossible transition {ts.state}->{finish} for {ts.key!r}: "
+                f"{stimulus_id=}, {args=}, {kwargs=}, {story=}"
             )
-            ts.state = "memory"
-
-            return recommendations, client_msgs, worker_msgs
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2292,80 +2273,23 @@ class SchedulerState:
         worker: str,
         **kwargs: Any,
     ):
+        """This transition exclusively happens in a race condition where the scheduler
+        believes that the only copy of a dependency task has just been lost, so it
+        transitions all dependents back to waiting, but actually a replica has already
+        been acquired by a worker computing the dependency - the scheduler just doesn't
+        know yet - and the execution finishes before the cancellation message from the
+        scheduler has a chance to reach the worker. Shortly, the cancellation request
+        will reach the worker, thus deleting the data from memory.
+        """
         try:
-            ws: WorkerState = self.workers[worker]
-            ts: TaskState = self.tasks[key]
-            recommendations: dict = {}
-            client_msgs: dict = {}
-            worker_msgs: dict = {}
+            ts = self.tasks[key]
 
             if self.validate:
                 assert not ts.processing_on
                 assert ts.waiting_on
                 assert ts.state == "waiting"
 
-            ts.waiting_on.clear()
-
-            if nbytes is not None:
-                ts.set_nbytes(nbytes)
-
-            self.check_idle_saturated(ws)
-
-            _add_to_memory(
-                self, ts, ws, recommendations, client_msgs, type=type, typename=typename
-            )
-
-            if self.validate:
-                assert not ts.processing_on
-                assert not ts.waiting_on
-                assert ts.who_has
-
-            return recommendations, client_msgs, worker_msgs
-        except Exception as e:
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
-
-                pdb.set_trace()
-            raise
-
-    def transition_queued_memory(
-        self,
-        key: str,
-        stimulus_id: str,
-        *,
-        nbytes: int | None = None,
-        type: bytes | None = None,
-        typename: str | None = None,
-        worker: str,
-        **kwargs: Any,
-    ):
-        try:
-            ws: WorkerState = self.workers[worker]
-            ts: TaskState = self.tasks[key]
-            recommendations: dict = {}
-            client_msgs: dict = {}
-            worker_msgs: dict = {}
-
-            if self.validate:
-                assert not ts.processing_on
-                assert ts.state == "queued"
-
-            if nbytes is not None:
-                ts.set_nbytes(nbytes)
-
-            self.queued.remove(ts)
-            self.check_idle_saturated(ws)
-
-            _add_to_memory(
-                self, ts, ws, recommendations, client_msgs, type=type, typename=typename
-            )
-
-            if self.validate:
-                assert not ts.processing_on
-                assert ts.who_has
-
-            return recommendations, client_msgs, worker_msgs
+            return {}, {}, {}
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2410,21 +2334,16 @@ class SchedulerState:
             if ws is None:
                 return {key: "released"}, {}, {}
 
-            if ws != ts.processing_on:  # someone else has this task
-                logger.info(
-                    "Unexpected worker completed task. Expected: %s, Got: %s, Key: %s",
-                    ts.processing_on,
-                    ws,
-                    key,
-                )
+            if ws != ts.processing_on:  # pragma: nocover
                 assert ts.processing_on
-                worker_msgs[ts.processing_on.address] = [
-                    {
-                        "op": "cancel-compute",
-                        "key": key,
-                        "stimulus_id": stimulus_id,
-                    }
-                ]
+                # FIXME downcast antipattern
+                scheduler = cast(Scheduler, self)
+                story = scheduler.story(ts)
+                raise RuntimeError(
+                    f"Task {ts.key!r} transitioned from processing to memory on worker "
+                    f"{ws}, while it was expected from {ts.processing_on}. "
+                    f"This should be impossible. {stimulus_id=}, {story=}"
+                )
 
             #############################
             # Update Timing Information #
@@ -3065,7 +2984,7 @@ class SchedulerState:
         ("waiting", "no-worker"): transition_waiting_no_worker,
         ("waiting", "queued"): transition_waiting_queued,
         ("waiting", "memory"): transition_waiting_memory,
-        ("queued", "memory"): transition_queued_memory,
+        ("queued", "memory"): partial(impossible_transition, "memory"),
         ("queued", "released"): transition_queued_released,
         ("queued", "processing"): transition_queued_processing,
         ("processing", "released"): transition_processing_released,
@@ -3073,7 +2992,7 @@ class SchedulerState:
         ("processing", "erred"): transition_processing_erred,
         ("no-worker", "released"): transition_no_worker_released,
         ("no-worker", "processing"): transition_no_worker_processing,
-        ("no-worker", "memory"): transition_no_worker_memory,
+        ("no-worker", "memory"): partial(impossible_transition, "memory"),
         ("released", "forgotten"): transition_released_forgotten,
         ("memory", "forgotten"): transition_memory_forgotten,
         ("erred", "released"): transition_erred_released,
