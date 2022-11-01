@@ -5824,7 +5824,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             bad_nannies = []
             for nanny, response in zip(nanny_addresses, responses):
-                if isinstance(response, asyncio.TimeoutError):
+                if isinstance(response, TimeoutError):
                     logger.error(
                         "Scheduler timed out trying to restart worker on %s.", nanny
                     )

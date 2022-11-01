@@ -1026,31 +1026,34 @@ class SlowKillNanny(Nanny):
     config={"distributed.scheduler.allowed-failures": 0},
 )
 async def test_restart_nanny_timeout_exceeded(c, s, a, b):
-    with captured_logger("distributed.scheduler") as logger:
-        f = c.submit(div, 1, 0)
-        fr = c.submit(inc, 1, resources={"FOO": 1})
-        await wait(f)
-        assert s.erred_tasks
-        assert s.computations
-        assert s.unrunnable
-        assert s.tasks
+    f = c.submit(div, 1, 0)
+    fr = c.submit(inc, 1, resources={"FOO": 1})
+    await wait(f)
+    assert s.erred_tasks
+    assert s.computations
+    assert s.unrunnable
+    assert s.tasks
 
+    with captured_logger("distributed") as logger:
         with pytest.raises(RuntimeError, match=r"2/2 nannies failed to restart"):
             await c.restart(timeout="1s")
-        assert a.kill_called.is_set()
-        assert b.kill_called.is_set()
-
-        assert not s.erred_tasks
-        assert not s.computations
-        assert not s.unrunnable
-        assert not s.tasks
-
-        assert not c.futures
-        assert f.status == "cancelled"
-        assert fr.status == "cancelled"
-        await asyncio.sleep(5)
-
     logs = logger.getvalue()
+
+    assert a.kill_called.is_set()
+    assert b.kill_called.is_set()
+
+    assert f"Scheduler timed out trying to restart worker on {a.address}." in logs
+    assert f"Scheduler timed out trying to restart worker on {b.address}." in logs
+
+    assert not s.erred_tasks
+    assert not s.computations
+    assert not s.unrunnable
+    assert not s.tasks
+
+    assert not c.futures
+    assert f.status == "cancelled"
+    assert fr.status == "cancelled"
+
     print(logs)
 
 
