@@ -1,6 +1,18 @@
 Changelog
 =========
 
+.. _v2022.10.2:
+
+2022.10.2
+---------
+
+Released on October 31, 2022
+
+- Reverted a bug where Bokeh was accidentally made non-optional (:pr:`7230`) `Oliver Holworthy`_
+- Schedule a queued task when a task secedes (:pr:`7224`) `Gabe Joseph`_
+
+This was a hotfix release
+
 .. _v2022.10.1:
 
 2022.10.1
@@ -76,7 +88,7 @@ Released on October 14, 2022
     As part of this migration the ``--reconnect``, ``--nprocs``, ``--bokeh``,
     ``--bokeh-port`` CLI options have also been removed for both the old- and new-style
     CLIs. These options had already previously been deprecated.
-    
+
 
 Enhancements
 ^^^^^^^^^^^^
@@ -466,7 +478,7 @@ Released on June 24, 2022
 Highlights
 ^^^^^^^^^^
 This release includes the Worker State Machine refactor. The expectation should be that the worker
-state is its own synchronous subclass. Pulling all the state out into its own class allows us 
+state is its own synchronous subclass. Pulling all the state out into its own class allows us
 to write targeted unit tests without invoking any concurrent or asynchronous code.
 
 See :pr:`5736` for more information.
@@ -4347,3 +4359,4 @@ significantly without many new features.
 .. _`Nat Tabris`: https://github.com/ntabris
 .. _`Burt Holzman`: https://github.com/holzman
 .. _`Max Bane`: https://github.com/maxbane
+.. _`Oliver Holworthy`: https://github.com/oliverholworthy
