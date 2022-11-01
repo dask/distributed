@@ -31,7 +31,9 @@ class PrometheusNotAvailableHandler(RequestHandler):
         self.set_header("Content-Type", "text/plain; version=0.0.4")
 
 
-def get_metrics_handler(module_name: str, handler_name: str) -> type[RequestHandler]:
+def import_metrics_handler(module_name: str, handler_name: str) -> type[RequestHandler]:
+    """Import ``handler_name`` from ``module_name`` if ``prometheus_client``
+    is installed, import the ``PrometheusNotAvailableHandler`` otherwise."""
     try:
         import prometheus_client  # noqa: F401
     except ModuleNotFoundError:
