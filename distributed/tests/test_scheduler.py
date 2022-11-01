@@ -4157,8 +4157,7 @@ async def test_transition_waiting_memory(c, s, a, b):
     # This is where using an async function for y matters!
     await wait_for_state("y", "memory", b, interval=0)
 
-    while b.state.tasks:
-        await asyncio.sleep(0.1)
+    await async_wait_for(lambda: not b.state.tasks, timeout=5)
     await wait_for_state("y", "waiting", s)
     assert s.tasks["x"].state == "no-worker"
 
