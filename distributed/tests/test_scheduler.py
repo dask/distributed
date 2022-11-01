@@ -51,6 +51,7 @@ from distributed.utils_test import (
     cluster,
     dec,
     div,
+    freeze_batched_send,
     freeze_data_fetching,
     gen_cluster,
     gen_test,
@@ -4102,6 +4103,7 @@ async def test_count_task_prefix(c, s, a, b):
     assert s.task_prefixes["inc"].state_counts["erred"] == 0
 
 
+@pytest.mark.repeat(100)
 @gen_cluster(client=True)
 async def test_transition_waiting_memory(c, s, a, b):
     """Test race condition where a task transitions to memory while its state on the
@@ -4125,37 +4127,20 @@ async def test_transition_waiting_memory(c, s, a, b):
     - test_transition_queued_memory
     - test_transition_processing_memory_from_unexpected_worker
     """
-    # This test is very timing-sensitive. Instead of using inc, which would need to
-    # spin up a thread, wait for locks, etc., use an async function, which will
-    # go from the transition of x to memory to the transition of y to the same state
-    # in exactly 2 cycles of the event loop:
-    # 1. x transitions to memory; y transitions to processing. This creates an asyncio
-    #    task for Worker.execute and adds it at the end of the event loop.
-    # 2. The Worker.execute asyncio task runs. This completes the user task and the
-    #    asyncio task without ever releasing control (note: await coroutine does not
-    #    release control!). This in turn schedules the done_callbacks at the end of
-    #    event loop with call_soon
-    # 3. run the done_callback, which is BaseWorker._handle_stimulus_from_task, which
-    #    transitions y to memory.
-    async def ainc(x):
-        return x + 1
-
     x = c.submit(inc, 1, key="x", workers=[a.address])
-    y = c.submit(ainc, x, key="y", workers=[b.address])
+    y = c.submit(inc, x, key="y", workers=[b.address])
     await wait_for_state("x", "memory", b, interval=0)
     # Note interval=0 above. It means that x has just landed on b this instant and the
     # scheduler doesn't know yet.
     assert b.state.tasks["y"].state == "executing"
     assert s.tasks["x"].who_has == {s.workers[a.address]}
 
-    # Note: remove_worker is async but will only release the event loop if the
-    # remove_worker method of a SchedulerPlugin returns a Future.
-    await s.remove_worker(a.address, stimulus_id="remove_a")
-    assert s.tasks["x"].state == "no-worker"
-    assert s.tasks["y"].state == "waiting"
-
-    # This is where using an async function for y matters!
-    await wait_for_state("y", "memory", b, interval=0)
+    with freeze_batched_send(b.batched_stream):
+        with freeze_batched_send(s.stream_comms[b.address]):
+            await s.remove_worker(a.address, stimulus_id="remove_a")
+            assert s.tasks["x"].state == "no-worker"
+            assert s.tasks["y"].state == "waiting"
+            await wait_for_state("y", "memory", b)
 
     await async_wait_for(lambda: not b.state.tasks, timeout=5)
     await wait_for_state("y", "waiting", s)
