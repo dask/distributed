@@ -26,7 +26,8 @@ class PrometheusCollector:
 class PrometheusNotAvailableHandler(RequestHandler):
     def get(self):
         self.write(
-            "# Prometheus is not available, see: https://docs.dask.org/en/stable/how-to/setup-prometheus.html#setup-prometheus-monitoring"
+            "# Prometheus metrics are not available, see: "
+            "https://docs.dask.org/en/stable/how-to/setup-prometheus.html#setup-prometheus-monitoring"
         )
         self.set_header("Content-Type", "text/plain; version=0.0.4")
 
