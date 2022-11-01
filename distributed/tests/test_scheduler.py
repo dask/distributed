@@ -1019,7 +1019,12 @@ class SlowKillNanny(Nanny):
         return await super().kill(timeout=timeout, reason=reason)
 
 
-@gen_cluster(client=True, Worker=SlowKillNanny, nthreads=[("", 1)] * 2)
+@gen_cluster(
+    client=True,
+    Worker=SlowKillNanny,
+    nthreads=[("", 1)] * 2,
+    config={"distributed.scheduler.allowed-failures": 0},
+)
 async def test_restart_nanny_timeout_exceeded(c, s, a, b):
     f = c.submit(div, 1, 0)
     fr = c.submit(inc, 1, resources={"FOO": 1})
@@ -1029,12 +1034,11 @@ async def test_restart_nanny_timeout_exceeded(c, s, a, b):
     assert s.unrunnable
     assert s.tasks
 
-    with pytest.raises(RuntimeError, match=r"2/2 worker(s) failed to restart"):
+    with pytest.raises(RuntimeError, match=r"2/2 worker\(s\) failed to restart"):
         await c.restart(timeout="1s")
     assert a.kill_called.is_set()
     assert b.kill_called.is_set()
 
-    assert not s.workers
     assert not s.erred_tasks
     assert not s.computations
     assert not s.unrunnable
