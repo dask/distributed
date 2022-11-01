@@ -1049,43 +1049,6 @@ async def test_restart_nanny_timeout_exceeded(c, s, a, b):
     assert fr.status == "cancelled"
 
 
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_restart_worker_rejoins_after_timeout_expired(c, s, a):
-    """
-    We don't want to see an error message like:
-
-    ``Waited for 1 worker(s) to reconnect after restarting, but after 0s, only 1 have returned.``
-
-    If a worker rejoins after our last poll for new workers, but before we raise the error,
-    we shouldn't raise the error.
-    """
-    # We'll use a 0s timeout on the restart, so it always expires.
-    # And we'll use a plugin to block the restart process, and spin up a new worker
-    # in the middle of it.
-
-    class Plugin(SchedulerPlugin):
-        removed = asyncio.Event()
-        proceed = asyncio.Event()
-
-        async def remove_worker(self, *args, **kwargs):
-            self.removed.set()
-            await self.proceed.wait()
-
-    s.add_plugin(Plugin())
-
-    task = asyncio.create_task(c.restart(timeout=0))
-    await Plugin.removed.wait()
-    assert not s.workers
-
-    async with Worker(s.address, nthreads=1) as w:
-        assert len(s.workers) == 1
-        Plugin.proceed.set()
-
-        # New worker has joined, but the timeout has expired (since it was 0).
-        # Still, we should not time out.
-        await task
-
-
 @pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny)
 async def test_restart_some_nannies_some_not(c, s, a, b):
