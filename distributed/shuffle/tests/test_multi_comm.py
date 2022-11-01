@@ -5,7 +5,7 @@ from collections import defaultdict
 
 import pytest
 
-from distributed.shuffle.multi_comm import MultiComm
+from distributed.shuffle._multi_comm import MultiComm
 from distributed.utils_test import gen_test
 
 

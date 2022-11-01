@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import IOLoop
+
+from distributed.compatibility import PeriodicCallback
 
 try:
     from crick import TDigest

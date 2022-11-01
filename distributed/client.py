@@ -49,13 +49,14 @@ try:
 except ImportError:
     single_key = first
 from tornado import gen
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import IOLoop
 
 import distributed.utils
 from distributed import cluster_dump, preloading
 from distributed import versions as version_module
 from distributed.batched import BatchedSend
 from distributed.cfexecutor import ClientExecutor
+from distributed.compatibility import PeriodicCallback
 from distributed.core import (
     CommClosedError,
     ConnectionPool,
@@ -3432,27 +3433,96 @@ class Client(SyncMethodMixin):
         does not automatically restart workers, ``restart`` will just shut down all
         workers, then time out!
 
-        After `restart`, all connected workers are new, regardless of whether `TimeoutError`
+        After ``restart``, all connected workers are new, regardless of whether ``TimeoutError``
         was raised. Any workers that failed to shut down in time are removed, and
         may or may not shut down on their own in the future.
 
         Parameters
         ----------
         timeout:
-            How long to wait for workers to shut down and come back, if `wait_for_workers`
+            How long to wait for workers to shut down and come back, if ``wait_for_workers``
             is True, otherwise just how long to wait for workers to shut down.
-            Raises `asyncio.TimeoutError` if this is exceeded.
+            Raises ``asyncio.TimeoutError`` if this is exceeded.
         wait_for_workers:
             Whether to wait for all workers to reconnect, or just for them to shut down
             (default True). Use ``restart(wait_for_workers=False)`` combined with
-            `Client.wait_for_workers` for granular control over how many workers to
+            :meth:`Client.wait_for_workers` for granular control over how many workers to
             wait for.
+
         See also
-        ----------
+        --------
         Scheduler.restart
+        Client.restart_workers
         """
         return self.sync(
             self._restart, timeout=timeout, wait_for_workers=wait_for_workers
+        )
+
+    async def _restart_workers(
+        self, workers: list[str], timeout: int | float | None = None
+    ):
+        results = await self.scheduler.broadcast(
+            msg={"op": "restart", "timeout": timeout}, workers=workers, nanny=True
+        )
+        timeout_workers = {
+            key: value for key, value in results.items() if value == "timed out"
+        }
+        if timeout_workers:
+            raise TimeoutError(
+                f"The following workers failed to restart with {timeout} seconds: {list(timeout_workers.keys())}"
+            )
+
+    def restart_workers(self, workers: list[str], timeout: int | float | None = None):
+        """Restart a specified set of workers
+
+        .. note::
+
+            Only workers being monitored by a :class:`distributed.Nanny` can be restarted.
+
+        See ``Nanny.restart`` for more details.
+
+        Parameters
+        ----------
+        workers : list[str]
+            Workers to restart.
+        timeout : int | float | None
+            Number of seconds to wait
+
+        Notes
+        -----
+        This method differs from :meth:`Client.restart` in that this method
+        simply restarts the specified set of workers, while ``Client.restart``
+        will restart all workers and also reset local state on the cluster
+        (e.g. all keys are released).
+
+        Additionally, this method does not gracefully handle tasks that are
+        being executed when a worker is restarted. These tasks may fail or have
+        their suspicious count incremented.
+
+        Examples
+        --------
+        You can get information about active workers using the following:
+
+        >>> workers = client.scheduler_info()['workers']
+
+        From that list you may want to select some workers to restart
+
+        >>> client.restart_workers(workers=['tcp://address:port', ...])
+
+        See Also
+        --------
+        Client.restart
+        """
+        info = self.scheduler_info()
+        for worker in workers:
+            if info["workers"][worker]["nanny"] is None:
+                raise ValueError(
+                    f"Restarting workers requires a nanny to be used. Worker {worker} has type {info['workers'][worker]['type']}."
+                )
+        return self.sync(
+            self._restart_workers,
+            workers=workers,
+            timeout=timeout,
         )
 
     async def _upload_large_file(self, local_filename, remote_filename=None):

@@ -81,7 +81,7 @@ jobs:
         run: conda config --show
 
       - name: Check if caching is enabled
-        uses: xarray-contrib/ci-trigger@v1.1
+        uses: xarray-contrib/ci-trigger@v1.2
         id: skip-caching
         with:
           keyword: "[skip-caching]"
