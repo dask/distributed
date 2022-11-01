@@ -2100,16 +2100,20 @@ class SchedulerState:
 
         tg = ts.group
         lws = tg.last_worker
-        if not (
-            lws and tg.last_worker_tasks_left and self.workers.get(lws.address) is lws
+        if (
+            lws
+            and tg.last_worker_tasks_left
+            and lws.status == Status.running
+            and self.workers.get(lws.address) is lws
         ):
-            # Last-used worker is full or unknown; pick a new worker for the next few tasks
+            ws = lws
+        else:
+            # Last-used worker is full, unknown, retiring, or paused;
+            # pick a new worker for the next few tasks
             ws = min(pool, key=partial(self.worker_objective, ts))
             tg.last_worker_tasks_left = math.floor(
                 (len(tg) / self.total_nthreads) * ws.nthreads
             )
-        else:
-            ws = lws
 
         # Record `last_worker`, or clear it on the final task
         tg.last_worker = (
@@ -3284,20 +3288,7 @@ class SchedulerState:
 
         Returns priority-ordered recommendations.
         """
-        maybe_runnable: list[TaskState] = []
-        # Schedule any queued tasks onto the new worker
-        if not math.isinf(self.WORKER_SATURATION) and self.queued:
-            for qts in reversed(
-                list(
-                    self.queued.peekn(_task_slots_available(ws, self.WORKER_SATURATION))
-                )
-            ):
-                if self.validate:
-                    assert qts.state == "queued"
-                    assert not qts.processing_on
-                    assert not qts.waiting_on
-
-                maybe_runnable.append(qts)
+        maybe_runnable = list(_next_queued_tasks_for_worker(self, ws))[::-1]
 
         # Schedule any restricted tasks onto the new worker, if the worker can run them
         for ts in self.unrunnable:
@@ -3593,7 +3584,7 @@ class Scheduler(SchedulerState, ServerNode):
             "release-worker-data": self.release_worker_data,
             "add-keys": self.add_keys,
             "long-running": self.handle_long_running,
-            "reschedule": self.reschedule,
+            "reschedule": self._reschedule,
             "keep-alive": lambda *args, **kwargs: None,
             "log-event": self.log_worker_event,
             "worker-status-change": self.handle_worker_status_change,
@@ -5334,6 +5325,14 @@ class Scheduler(SchedulerState, ServerNode):
 
         ws.add_to_long_running(ts)
         self.check_idle_saturated(ws)
+
+        recommendations = {
+            qts.key: "processing" for qts in _next_queued_tasks_for_worker(self, ws)
+        }
+        if self.validate:
+            assert len(recommendations) <= 1, (ws, recommendations)
+
+        self.transitions(recommendations, stimulus_id)
 
     def handle_worker_status_change(
         self, status: str | Status, worker: str | WorkerState, stimulus_id: str
@@ -7288,13 +7287,15 @@ class Scheduler(SchedulerState, ServerNode):
 
     transition_story = story
 
-    def reschedule(
+    def _reschedule(
         self, key: str, worker: str | None = None, *, stimulus_id: str
     ) -> None:
-        """Reschedule a task
+        """Reschedule a task.
 
-        Things may have shifted and this task may now be better suited to run
-        elsewhere
+        This function should only be used when the task has already been released in
+        some way on the worker it's assigned to — either via cancellation or a
+        Reschedule exception — and you are certain the worker will not send any further
+        updates about the task to the scheduler.
         """
         try:
             ts = self.tasks[key]
@@ -7905,19 +7906,30 @@ def _exit_processing_common(
     state.check_idle_saturated(ws)
     state.release_resources(ts, ws)
 
-    # If a slot has opened up for a queued task, schedule it.
-    if state.queued and not _worker_full(ws, state.WORKER_SATURATION):
-        qts = state.queued.peek()
+    for qts in _next_queued_tasks_for_worker(state, ws):
         if state.validate:
-            assert qts.state == "queued", qts.state
             assert qts.key not in recommendations, recommendations[qts.key]
-
-        # NOTE: we don't need to schedule more than one task at once here. Since this is
-        # called each time 1 task completes, multiple tasks must complete for multiple
-        # slots to open up.
         recommendations[qts.key] = "processing"
 
     return ws
+
+
+def _next_queued_tasks_for_worker(
+    state: SchedulerState, ws: WorkerState
+) -> Iterator[TaskState]:
+    """Queued tasks to run, in priority order, on all open slots on a worker"""
+    if not state.queued or ws.status != Status.running:
+        return
+
+    # NOTE: this is called most frequently because a single task has completed, so there
+    # are <= 1 task slots available on the worker.
+    # `peekn` has fast paths for the cases N<=0 and N==1.
+    for qts in state.queued.peekn(_task_slots_available(ws, state.WORKER_SATURATION)):
+        if state.validate:
+            assert qts.state == "queued", qts.state
+            assert not qts.processing_on
+            assert not qts.waiting_on
+        yield qts
 
 
 def _add_to_memory(
