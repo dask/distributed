@@ -106,7 +106,6 @@ from distributed.utils_test import (
     map_varying,
     nodebug,
     popen,
-    pristine_loop,
     randominc,
     save_sys_modules,
     slowadd,
@@ -2207,8 +2206,26 @@ async def test_multi_client(s, a, b):
         await asyncio.sleep(0.01)
 
 
+@contextmanager
+def _pristine_loop():
+    IOLoop.clear_instance()
+    IOLoop.clear_current()
+    loop = IOLoop()
+    loop.make_current()
+    assert IOLoop.current() is loop
+    try:
+        yield loop
+    finally:
+        try:
+            loop.close(all_fds=True)
+        except (KeyError, ValueError):
+            pass
+        IOLoop.clear_instance()
+        IOLoop.clear_current()
+
+
 def long_running_client_connection(address):
-    with pristine_loop():
+    with _pristine_loop():
         c = Client(address)
         x = c.submit(lambda x: x + 1, 10)
         x.result()
@@ -5602,7 +5619,7 @@ def test_client_async_before_loop_starts(cleanup):
         async with client:
             pass
 
-    with pristine_loop() as loop:
+    with _pristine_loop() as loop:
         with pytest.warns(
             DeprecationWarning,
             match=r"Constructing LoopRunner\(loop=loop\) without a running loop is deprecated",
