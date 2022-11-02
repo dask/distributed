@@ -1101,6 +1101,31 @@ async def test_restart_heartbeat_before_closing(c, s, n):
     await c.wait_for_workers(1)
 
 
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_restart_raises_with_failing_scheduler_plugin(c, s, n):
+    class BadPlugin(SchedulerPlugin):
+        def restart(self, scheduler: Scheduler) -> None:
+            raise NotImplementedError()
+
+    plugin = BadPlugin()
+    await c.register_scheduler_plugin(plugin=plugin, name="bad-plugin")
+    with pytest.raises(RuntimeError, match="plugins failed to restart") as exc_info:
+        await c.restart()
+    assert "bad-plugin" in exc_info.value.args[1]
+
+
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_restart_slow_scheduler_plugin_times_out(c, s, n):
+    class SlowPlugin(SchedulerPlugin):
+        def restart(self, scheduler: Scheduler) -> None:
+            sleep(0.11)
+
+    plugin = SlowPlugin()
+    await c.register_scheduler_plugin(plugin=plugin)
+    with pytest.raises(TimeoutError, match="Timed out while restarting plugins"):
+        await c.restart(timeout=0.1)
+
+
 @gen_cluster()
 async def test_broadcast(s, a, b):
     result = await s.broadcast(msg={"op": "ping"})

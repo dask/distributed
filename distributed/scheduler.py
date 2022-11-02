@@ -5740,11 +5740,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         if bad_plugins:
             raise RuntimeError(
-                f"{len(bad_plugins)}/{len(plugins)} plugins failed to restart: {bad_plugins}",
+                f"{len(bad_plugins)}/{len(plugins)} plugins failed to restart",
+                bad_plugins,
             )
-
-        if timer.expired:
-            raise TimeoutError("Timed out while restarting plugins.")
 
         logger.debug("Restarting workers.")
         await self._restart_workers(workers, timeout=timer.remaining)
