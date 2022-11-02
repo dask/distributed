@@ -820,34 +820,42 @@ class Server:
         closed = False
         try:
             while not closed:
-                msgs = await comm.read()
+                try:
+                    msgs = await comm.read()
+                # If another coroutine has closed the comm, stop handling the stream.
+                except CommClosedError:
+                    closed = True
+                    logger.info(
+                        "Connection to %s has been closed.",
+                        comm.peer_address,
+                    )
+                    break
                 if not isinstance(msgs, (tuple, list)):
                     msgs = (msgs,)
 
-                if not comm.closed():
-                    for msg in msgs:
-                        if msg == "OK":
+                for msg in msgs:
+                    if msg == "OK":
+                        break
+                    op = msg.pop("op")
+                    if op:
+                        if op == "close-stream":
+                            closed = True
+                            logger.info(
+                                "Received 'close-stream' from %s; closing.",
+                                comm.peer_address,
+                            )
                             break
-                        op = msg.pop("op")
-                        if op:
-                            if op == "close-stream":
-                                closed = True
-                                logger.info(
-                                    "Received 'close-stream' from %s; closing.",
-                                    comm.peer_address,
-                                )
-                                break
-                            handler = self.stream_handlers[op]
-                            if iscoroutinefunction(handler):
-                                self._ongoing_background_tasks.call_soon(
-                                    handler, **merge(extra, msg)
-                                )
-                                await asyncio.sleep(0)
-                            else:
-                                handler(**merge(extra, msg))
+                        handler = self.stream_handlers[op]
+                        if iscoroutinefunction(handler):
+                            self._ongoing_background_tasks.call_soon(
+                                handler, **merge(extra, msg)
+                            )
+                            await asyncio.sleep(0)
                         else:
-                            logger.error("odd message %s", msg)
-                    await asyncio.sleep(0)
+                            handler(**merge(extra, msg))
+                    else:
+                        logger.error("odd message %s", msg)
+                await asyncio.sleep(0)
         except Exception:
             if LOG_PDB:
                 import pdb
