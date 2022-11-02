@@ -3438,7 +3438,7 @@ class Client(SyncMethodMixin):
         state.
 
         This methods expects all workers to have nannies to be able to restart them.
-        If workers without nannies exist, ``restart`` will raise a ``RuntimeError``
+        If workers without nannies exist, ``restart`` will raise a ``ValueError``
         that lists the workers without nannies. Consider removing those workers
         and calling ``restart`` again afterward.
 
@@ -3446,7 +3446,7 @@ class Client(SyncMethodMixin):
         ----------
         timeout:
             Raise `RuntimeError` if ``restart`` takes more than ``timeout``
-            seconds.
+            seconds
 
         See Also
         --------
@@ -3479,14 +3479,16 @@ class Client(SyncMethodMixin):
 
         This methods expects all workers to have nannies to be able to restart them.
         If workers without nannies exist, ``Client.restart_workers`` will raise a
-        ``RuntimeError`` that lists the workers without nannies. Consider removing
+        ``ValueError`` that lists the workers without nannies. Consider removing
         those workers and calling ``Client.restart_workers`` again afterward.
 
         Parameters
         ----------
+        workers:
+            Workers to restart
         timeout:
             Raise `RuntimeError` if ``restart_workers`` takes more than ``timeout``
-            seconds.
+            seconds
 
         Notes
         -----

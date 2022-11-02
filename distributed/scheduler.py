@@ -5684,7 +5684,7 @@ class Scheduler(SchedulerState, ServerNode):
         state.
 
         This methods expects all workers to have nannies to be able to restart them.
-        If workers without nannies exist, ``restart`` will raise a ``RuntimeError``
+        If workers without nannies exist, ``restart`` will raise a ``ValueError``
         that lists the workers without nannies. Consider removing those workers
         and calling ``restart`` again afterward.
 
@@ -5692,7 +5692,7 @@ class Scheduler(SchedulerState, ServerNode):
         ----------
         timeout:
             Raise `RuntimeError` if ``restart`` takes more than ``timeout``
-            seconds.
+            seconds
 
         See Also
         --------
@@ -5757,7 +5757,7 @@ class Scheduler(SchedulerState, ServerNode):
         non_nannies = [worker for worker in workers if not self.workers[worker].nanny]
 
         if non_nannies:
-            raise RuntimeError(
+            raise ValueError(
                 (
                     "Expected all workers to have a nanny, encountered "
                     f"{len(non_nannies)} worker(s) without a nanny."
@@ -5776,14 +5776,16 @@ class Scheduler(SchedulerState, ServerNode):
 
         This methods expects all workers to have nannies to be able to restart them.
         If workers without nannies exist, ``Scheduler.restart_workers`` will raise a
-        ``RuntimeError`` that lists the workers without nannies. Consider removing
+        ``ValueError`` that lists the workers without nannies. Consider removing
         those workers and calling ``Scheduler.restart_workers`` again afterward.
 
         Parameters
         ----------
+        workers:
+            Workers to restart
         timeout:
             Raise `RuntimeError` if ``restart_workers`` takes more than ``timeout``
-            seconds.
+            seconds
 
         See Also
         --------
