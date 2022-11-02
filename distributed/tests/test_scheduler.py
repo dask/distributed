@@ -999,7 +999,7 @@ async def test_restart_waits_for_new_workers(c, s, *workers):
 @gen_cluster(client=True, Worker=Worker)
 async def test_restart_no_nannies(c, s, a, b):
     with pytest.raises(
-        RuntimeError, match=r"Expected all workers to have a nanny"
+        ValueError, match=r"Expected all workers to have a nanny"
     ) as exc_info:
         await c.restart()
     assert set(s.workers.keys()) == set(exc_info.value.args[1])
@@ -1065,7 +1065,7 @@ async def test_restart_some_nannies_some_not(c, s, a, b):
         await c.wait_for_workers(3)
 
         with pytest.raises(
-            RuntimeError, match=r"Expected all workers to have a nanny"
+            ValueError, match=r"Expected all workers to have a nanny"
         ) as e:
             await c.restart()
 

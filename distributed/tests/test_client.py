@@ -4865,7 +4865,7 @@ async def test_restart_workers(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_restart_workers_no_nanny_raises(c, s, a, b):
-    with pytest.raises(RuntimeError) as exc_info:
+    with pytest.raises(ValueError) as exc_info:
         await c.restart_workers(workers=[a.address])
     msg = str(exc_info.value)
     assert "Expected all workers to have a nanny" in msg
