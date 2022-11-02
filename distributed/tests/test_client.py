@@ -2207,12 +2207,10 @@ async def test_multi_client(s, a, b):
 
 
 def long_running_client_connection(address):
-    async def run():
-        c = Client(address)
+    with Client(address) as c:
         x = c.submit(lambda x: x + 1, 10)
+        x.result()
         sleep(100)
-
-    asyncio.new_event_loop().run_until_complete(run())
 
 
 @gen_cluster()
@@ -5597,7 +5595,7 @@ async def test_future_auto_inform(c, s, a, b):
             await asyncio.sleep(0.01)
 
 
-def test_client_async_before_loop_starts(cleanup):
+def test_client_async_in_fresh_loop(cleanup):
     async def run():
         loop = IOLoop.current()
         client = Client(asynchronous=True, loop=loop)
