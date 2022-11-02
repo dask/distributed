@@ -5673,25 +5673,23 @@ class Scheduler(SchedulerState, ServerNode):
         self.log_event("all", {"action": "gather", "count": len(keys)})
         return result
 
-    # FIXME: Technically, we do not raise the error but return it, how to better word this?
     @log_errors
     async def restart(self, client=None, timeout=30):
         """
         Reset local state and restart all workers
 
-        If ``restart`` takes longer than ``timeout`` seconds or fails at any stage,
-        it will raise an ``RuntimeError``. This leaves the cluster in an undefined
-        state.
-
         This methods expects all workers to have nannies to be able to restart them.
-        If workers without nannies exist, ``restart`` will raise a ``ValueError``
-        that lists the workers without nannies. Consider removing those workers
-        and calling ``restart`` again afterward.
+        If workers without nannies exist, ``restart`` will return a serialized
+        ``ValueError`` that lists the workers without nannies. Consider removing
+        those workers and calling ``restart`` again afterward.
+
+        If ``restart`` fails or times out, it will return a serialized error and
+        leave the cluster in an undefined state.
 
         Parameters
         ----------
         timeout:
-            Raise `RuntimeError` if ``restart`` takes more than ``timeout``
+            ``restart`` fails and returns an error if it takes more than ``timeout``
             seconds
 
         See Also
@@ -5770,21 +5768,17 @@ class Scheduler(SchedulerState, ServerNode):
         """
         Restart a specified set of workers
 
-        If this method takes longer than ``timeout`` seconds or fails,
-        it will raise an ``RuntimeError``. This leaves the workers in an undefined
-        state.
-
         This methods expects all workers to have nannies to be able to restart them.
-        If workers without nannies exist, ``Scheduler.restart_workers`` will raise a
-        ``ValueError`` that lists the workers without nannies. Consider removing
-        those workers and calling ``Scheduler.restart_workers`` again afterward.
+        If workers without nannies exist, ``Client.restart_workers`` will return a
+        serialized ``ValueError`` that lists the workers without nannies. Consider
+        removing those workers and calling ``Client.restart_workers`` again afterward.
 
         Parameters
         ----------
         workers:
             Workers to restart
         timeout:
-            Raise `RuntimeError` if ``restart_workers`` takes more than ``timeout``
+            Return a `RuntimeError` if ``restart_workers`` takes more than ``timeout``
             seconds
 
         See Also

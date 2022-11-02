@@ -3433,20 +3433,28 @@ class Client(SyncMethodMixin):
         """
         Reset local state and restart all workers
 
-        If ``restart`` takes longer than ``timeout`` seconds or fails at any stage,
-        it will raise an ``RuntimeError``. This leaves the cluster in an undefined
-        state.
-
         This methods expects all workers to have nannies to be able to restart them.
         If workers without nannies exist, ``restart`` will raise a ``ValueError``
         that lists the workers without nannies. Consider removing those workers
         and calling ``restart`` again afterward.
 
+        If ``restart`` fails or times out, it will raise an error and
+        leave the cluster in an undefined state
+
         Parameters
         ----------
         timeout:
-            Raise `RuntimeError` if ``restart`` takes more than ``timeout``
-            seconds
+            Time in seconds before ``restart`` fails and raises an error
+
+        Raises
+        ------
+        ValueError
+            If any of the ``workers`` do not have a nanny
+        dask.distributed.TimeoutError
+            If ``timeout`` seconds are elapsed before returning
+        RuntimeError
+            If ``restart`` fails at any stage or fails to restart workers
+            before timing out
 
         See Also
         --------
@@ -3473,10 +3481,6 @@ class Client(SyncMethodMixin):
         """
         Restart a specified set of workers
 
-        If this method takes longer than ``timeout`` seconds or fails,
-        it will raise an ``RuntimeError``. This leaves the workers in an undefined
-        state.
-
         This methods expects all workers to have nannies to be able to restart them.
         If workers without nannies exist, ``Client.restart_workers`` will raise a
         ``ValueError`` that lists the workers without nannies. Consider removing
@@ -3489,6 +3493,14 @@ class Client(SyncMethodMixin):
         timeout:
             Raise `RuntimeError` if ``restart_workers`` takes more than ``timeout``
             seconds
+
+
+        Raises
+        ------
+        ValueError
+            If any of the ``workers`` do not have a nanny
+        RuntimeError
+            If ``restart`` to restart workers or times out while trying
 
         Notes
         -----
