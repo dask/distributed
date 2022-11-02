@@ -1850,7 +1850,12 @@ class SchedulerState:
 
                 start = "released"
             else:
-                raise RuntimeError(f"Impossible transition from {start} to {finish}")
+                # FIXME downcast antipattern
+                scheduler = cast(Scheduler, self)
+                raise RuntimeError(
+                    f"Impossible transition from {start} to {finish} for {ts.key!r}: "
+                    f"{stimulus_id=}, {args=}, {kwargs=}, story={scheduler.story(ts)}"
+                )
 
             if not stimulus_id:
                 stimulus_id = STIMULUS_ID_UNSET
@@ -2015,31 +2020,6 @@ class SchedulerState:
             # If no worker, task just stays in `no-worker`
 
             return recommendations, client_msgs, worker_msgs
-        except Exception as e:
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
-
-                pdb.set_trace()
-            raise
-
-    def impossible_transition(
-        self,
-        finish: TaskStateState,
-        key: str,
-        stimulus_id: str,
-        *args: Any,
-        **kwargs: Any,
-    ) -> tuple[Recs, dict, dict]:  # pragma: nocover
-        try:
-            ts = self.tasks[key]
-            # FIXME downcast antipattern
-            scheduler = cast(Scheduler, self)
-            story = scheduler.story(ts)
-            raise RuntimeError(
-                f"Impossible transition {ts.state}->{finish} for {ts.key!r}: "
-                f"{stimulus_id=}, {args=}, {kwargs=}, {story=}"
-            )
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2338,11 +2318,10 @@ class SchedulerState:
                 assert ts.processing_on
                 # FIXME downcast antipattern
                 scheduler = cast(Scheduler, self)
-                story = scheduler.story(ts)
                 raise RuntimeError(
                     f"Task {ts.key!r} transitioned from processing to memory on worker "
-                    f"{ws}, while it was expected from {ts.processing_on}. "
-                    f"This should be impossible. {stimulus_id=}, {story=}"
+                    f"{ws}, while it was expected from {ts.processing_on}. This should "
+                    f"be impossible. {stimulus_id=}, story={scheduler.story(ts)}"
                 )
 
             #############################
@@ -2984,7 +2963,6 @@ class SchedulerState:
         ("waiting", "no-worker"): transition_waiting_no_worker,
         ("waiting", "queued"): transition_waiting_queued,
         ("waiting", "memory"): transition_waiting_memory,
-        ("queued", "memory"): partial(impossible_transition, "memory"),
         ("queued", "released"): transition_queued_released,
         ("queued", "processing"): transition_queued_processing,
         ("processing", "released"): transition_processing_released,
@@ -2992,7 +2970,6 @@ class SchedulerState:
         ("processing", "erred"): transition_processing_erred,
         ("no-worker", "released"): transition_no_worker_released,
         ("no-worker", "processing"): transition_no_worker_processing,
-        ("no-worker", "memory"): partial(impossible_transition, "memory"),
         ("released", "forgotten"): transition_released_forgotten,
         ("memory", "forgotten"): transition_memory_forgotten,
         ("erred", "released"): transition_erred_released,
