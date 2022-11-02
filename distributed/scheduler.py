@@ -1853,7 +1853,7 @@ class SchedulerState:
                 # FIXME downcast antipattern
                 scheduler = cast(Scheduler, self)
                 raise RuntimeError(
-                    f"Impossible transition from {start} to {finish} for {ts.key!r}: "
+                    f"Impossible transition from {start} to {finish} for {key!r}: "
                     f"{stimulus_id=}, {args=}, {kwargs=}, story={scheduler.story(ts)}"
                 )
 
