@@ -436,12 +436,10 @@ class LoopRunner:
             if asynchronous:
                 try:
                     asyncio.get_running_loop()
-                except RuntimeError:
-                    warnings.warn(
-                        "Constructing a LoopRunner(asynchronous=True) without a running loop is deprecated",
-                        DeprecationWarning,
-                        stacklevel=2,
-                    )
+                except RuntimeError as e:
+                    raise RuntimeError(
+                        "Constructing a LoopRunner(asynchronous=True) without a running loop is not allowed"
+                    ) from e
                 self._loop = IOLoop.current()
             else:
                 # We're expecting the loop to run in another thread,
@@ -449,10 +447,8 @@ class LoopRunner:
                 self._loop = IOLoop()
         else:
             if not loop.asyncio_loop.is_running():
-                warnings.warn(
-                    "Constructing LoopRunner(loop=loop) without a running loop is deprecated",
-                    DeprecationWarning,
-                    stacklevel=2,
+                raise RuntimeError(
+                    "Constructing LoopRunner(loop=loop) without a running loop is not allowed"
                 )
             self._loop = loop
         self._asynchronous = asynchronous
