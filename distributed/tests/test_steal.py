@@ -825,44 +825,6 @@ async def test_do_not_steal_communication_heavy_tasks(c, s, a, b):
     assert not b.data
 
 
-@gen_cluster(
-    client=True,
-    config={"distributed.scheduler.default-task-durations": {"blocked_add": 0.001}},
-)
-async def test_steal_communication_heavy_tasks(c, s, a, b):
-    steal = s.extensions["stealing"]
-    await steal.stop()
-    x = c.submit(mul, b"0", int(s.bandwidth), workers=a.address)
-    y = c.submit(mul, b"1", int(s.bandwidth), workers=b.address)
-    event = Event()
-
-    def blocked_add(x, y, event):
-        event.wait()
-        return x + y
-
-    futures = [
-        c.submit(
-            blocked_add,
-            x,
-            y,
-            event=event,
-            pure=False,
-            workers=a.address,
-            allow_other_workers=True,
-        )
-        for i in range(10)
-    ]
-
-    while not any(f.key in s.tasks and s.tasks[f.key].processing_on for f in futures):
-        await asyncio.sleep(0.01)
-
-    await steal.start()
-    steal.balance()
-    await steal.stop()
-    await event.set()
-    await c.gather(futures)
-
-
 @gen_cluster(client=True)
 async def test_steal_twice(c, s, a, b):
     x = c.submit(inc, 1, workers=a.address)
