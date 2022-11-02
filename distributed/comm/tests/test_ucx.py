@@ -327,6 +327,7 @@ async def test_simple(
             assert await client.submit(lambda x: x + 1, 10) == 11
 
 
+@pytest.mark.xfail(reason="If running on Docker, requires --pid=host")
 @gen_test()
 async def test_cuda_context(
     ucx_loop,
