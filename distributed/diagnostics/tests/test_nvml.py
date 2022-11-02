@@ -74,6 +74,7 @@ def run_has_cuda_context(queue):
         queue.put(e)
 
 
+@pytest.mark.xfail(reason="If running on Docker, requires --pid=host")
 def test_has_cuda_context():
     if nvml.device_get_count() < 1:
         pytest.skip("No GPUs available")
