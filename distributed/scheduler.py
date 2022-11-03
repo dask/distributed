@@ -3026,9 +3026,7 @@ class SchedulerState:
         if occ < 0:
             occ = ws.occupancy
 
-        nc: int = ws.nthreads
-        p: int = len(ws.processing)
-        avg: float = self.total_occupancy / self.total_nthreads
+        p = len(ws.processing)
 
         idle = self.idle
         saturated = self.saturated
@@ -3043,9 +3041,10 @@ class SchedulerState:
         else:
             idle.pop(ws.address, None)
 
+            nc = ws.nthreads
             if p > nc:
-                pending: float = occ * (p - nc) / (p * nc)
-                if 0.4 < pending > 1.9 * avg:
+                pending = occ * (p - nc) / (p * nc)
+                if 0.4 < pending > 1.9 * (self.total_occupancy / self.total_nthreads):
                     saturated.add(ws)
                     return
 
@@ -3055,8 +3054,10 @@ class SchedulerState:
         self, ws: WorkerState, occupancy: float, nprocessing: int
     ) -> bool:
         nthreads = ws.nthreads
-        avg_occ_per_thread = self.total_occupancy / self.total_nthreads
-        return nprocessing < nthreads or occupancy < nthreads * avg_occ_per_thread / 2
+        return (
+            nprocessing < nthreads
+            or occupancy < nthreads * (self.total_occupancy / self.total_nthreads) / 2
+        )
 
     def get_comm_cost(self, ts: TaskState, ws: WorkerState) -> float:
         """
