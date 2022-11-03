@@ -672,9 +672,9 @@ async def assert_balanced(inp, expected, c, s, *workers):
 
     counter = itertools.count()
 
-    futures = []
-    for w, ts in zip(workers, inp):
-        for t in sorted(ts, reverse=True):
+    futures_per_worker = defaultdict(list)
+    for w, tasks in zip(workers, inp):
+        for t in sorted(tasks, reverse=True):
             if t:
                 [dat] = await c.scatter(
                     [gen_nbytes(int(t * s.bandwidth))], workers=w.address
@@ -692,33 +692,45 @@ async def assert_balanced(inp, expected, c, s, *workers):
                 pure=False,
                 priority=-i,
             )
-            futures.append(f)
+            futures_per_worker[w].append(f)
 
-    while len([ts for ts in s.tasks.values() if ts.processing_on]) < len(futures):
-        await asyncio.sleep(0.001)
+    # Make sure all tasks are scheduled on the workers
+    # We are relying on the futures not to be rootish (and thus not to remain in the
+    # scheduler-side queue) because they have worker restrictions
+    wait_for_states = []
+    for w, fs in futures_per_worker.items():
+        for i, f in enumerate(fs):
+            # Make sure the first task is executing, all others are ready
+            state = "executing" if i == 0 else "ready"
+            wait_for_states.append(wait_for_state(f.key, state, w))
+    await asyncio.gather(*wait_for_states)
 
-    try:
-        for _ in range(10):
-            steal.balance()
-            await steal.stop()
+    for w, ts in zip(workers, inp):
+        assert len(w.state.executing) == min(1, len(ts))
+        assert len(w.state.ready) == max(0, len(ts) - 1)
 
-            result = [
-                sorted(
-                    (int(key_split(ts.key)) for ts in s.workers[w.address].processing),
-                    reverse=True,
-                )
-                for w in workers
-            ]
+    # Balance twice since stealing might attempt to steal the already executing task
+    # on first try and will need a second try to correct its mistake
+    for _ in range(2):
+        steal.balance()
+        await steal.stop()
 
-            result2 = sorted(result, reverse=True)
-            expected2 = sorted(expected, reverse=True)
+    await ev.set()
+    await c.gather([f for fs in futures_per_worker.values() for f in fs])
 
-            if result2 == expected2:
-                # Release the threadpools
-                return
-    finally:
-        await ev.set()
-    raise Exception(f"Expected: {expected2}; got: {result2}")
+    result = [
+        sorted(
+            # Exclude input data encoded with ``SizeOf``
+            (int(key_split(t)) for t in w.data.keys() if not t.startswith("SizeOf")),
+            reverse=True,
+        )
+        for w in workers
+    ]
+
+    result2 = sorted(result, reverse=True)
+    expected2 = sorted(expected, reverse=True)
+
+    assert result2 == expected2
 
 
 @pytest.mark.parametrize(
