@@ -1630,6 +1630,12 @@ def _run_dependency_balance_test(
                 **kwargs,
             )
 
+        default_task_durations = {
+            compose_task_prefix(deps): "1s"
+            for tasks in task_placement
+            for deps in tasks
+        }
+
         gen_cluster(
             client=True,
             nthreads=[("", 1)] * len(task_placement),
@@ -1637,11 +1643,15 @@ def _run_dependency_balance_test(
                 NO_AMM,
                 config or {},
                 {
-                    # FIXME
-                    "distributed.scheduler.unknown-task-duration": "1s",
+                    "distributed.scheduler.default-task-durations": default_task_durations,
                 },
             ),
         )(_run)()
+
+
+def compose_task_prefix(dependencies: list[str]) -> str:
+    dep_key = "".join(sorted(dependencies))
+    return f"task-{dep_key}"
 
 
 async def _dependency_balance_test_permutation(
@@ -1804,8 +1814,7 @@ async def _place_tasks(
     for worker, tasks in zip(workers, placement):
         for dependencies in tasks:
             i = next(counter)
-            dep_key = "".join(sorted(dependencies))
-            key = f"task-{dep_key}-{i}"
+            key = f"{compose_task_prefix(dependencies)}-{i}"
             f = c.submit(
                 block,
                 [dependency_futures[dependency] for dependency in dependencies],
