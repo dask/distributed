@@ -1850,7 +1850,12 @@ class SchedulerState:
 
                 start = "released"
             else:
-                raise RuntimeError(f"Impossible transition from {start} to {finish}")
+                # FIXME downcast antipattern
+                scheduler = cast(Scheduler, self)
+                raise RuntimeError(
+                    f"Impossible transition from {start} to {finish} for {key!r}: "
+                    f"{stimulus_id=}, {args=}, {kwargs=}, story={scheduler.story(ts)}"
+                )
 
             if not stimulus_id:
                 stimulus_id = STIMULUS_ID_UNSET
@@ -2013,50 +2018,6 @@ class SchedulerState:
                 self.unrunnable.discard(ts)
                 worker_msgs = _add_to_processing(self, ts, ws)
             # If no worker, task just stays in `no-worker`
-
-            return recommendations, client_msgs, worker_msgs
-        except Exception as e:
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
-
-                pdb.set_trace()
-            raise
-
-    def transition_no_worker_memory(
-        self,
-        key: str,
-        stimulus_id: str,
-        *,
-        nbytes: int | None = None,
-        type: bytes | None = None,
-        typename: str | None = None,
-        worker: str,
-        **kwargs: Any,
-    ):
-        try:
-            ws = self.workers[worker]
-            ts = self.tasks[key]
-            recommendations: dict = {}
-            client_msgs: dict = {}
-            worker_msgs: dict = {}
-
-            if self.validate:
-                assert not ts.processing_on
-                assert not ts.waiting_on
-                assert ts.state == "no-worker"
-
-            self.unrunnable.remove(ts)
-
-            if nbytes is not None:
-                ts.set_nbytes(nbytes)
-
-            self.check_idle_saturated(ws)
-
-            _add_to_memory(
-                self, ts, ws, recommendations, client_msgs, type=type, typename=typename
-            )
-            ts.state = "memory"
 
             return recommendations, client_msgs, worker_msgs
         except Exception as e:
@@ -2292,35 +2253,23 @@ class SchedulerState:
         worker: str,
         **kwargs: Any,
     ):
+        """This transition exclusively happens in a race condition where the scheduler
+        believes that the only copy of a dependency task has just been lost, so it
+        transitions all dependents back to waiting, but actually a replica has already
+        been acquired by a worker computing the dependency - the scheduler just doesn't
+        know yet - and the execution finishes before the cancellation message from the
+        scheduler has a chance to reach the worker. Shortly, the cancellation request
+        will reach the worker, thus deleting the data from memory.
+        """
         try:
-            ws: WorkerState = self.workers[worker]
-            ts: TaskState = self.tasks[key]
-            recommendations: dict = {}
-            client_msgs: dict = {}
-            worker_msgs: dict = {}
+            ts = self.tasks[key]
 
             if self.validate:
                 assert not ts.processing_on
                 assert ts.waiting_on
                 assert ts.state == "waiting"
 
-            ts.waiting_on.clear()
-
-            if nbytes is not None:
-                ts.set_nbytes(nbytes)
-
-            self.check_idle_saturated(ws)
-
-            _add_to_memory(
-                self, ts, ws, recommendations, client_msgs, type=type, typename=typename
-            )
-
-            if self.validate:
-                assert not ts.processing_on
-                assert not ts.waiting_on
-                assert ts.who_has
-
-            return recommendations, client_msgs, worker_msgs
+            return {}, {}, {}
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2365,21 +2314,15 @@ class SchedulerState:
             if ws is None:
                 return {key: "released"}, {}, {}
 
-            if ws != ts.processing_on:  # someone else has this task
-                logger.info(
-                    "Unexpected worker completed task. Expected: %s, Got: %s, Key: %s",
-                    ts.processing_on,
-                    ws,
-                    key,
-                )
+            if ws != ts.processing_on:  # pragma: nocover
                 assert ts.processing_on
-                worker_msgs[ts.processing_on.address] = [
-                    {
-                        "op": "cancel-compute",
-                        "key": key,
-                        "stimulus_id": stimulus_id,
-                    }
-                ]
+                # FIXME downcast antipattern
+                scheduler = cast(Scheduler, self)
+                raise RuntimeError(
+                    f"Task {ts.key!r} transitioned from processing to memory on worker "
+                    f"{ws}, while it was expected from {ts.processing_on}. This should "
+                    f"be impossible. {stimulus_id=}, story={scheduler.story(ts)}"
+                )
 
             #############################
             # Update Timing Information #
@@ -2650,7 +2593,7 @@ class SchedulerState:
                     }
                 ]
 
-            _propagage_released(self, ts, recommendations)
+            _propagate_released(self, ts, recommendations)
             return recommendations, {}, worker_msgs
         except Exception as e:
             logger.exception(e)
@@ -2874,7 +2817,7 @@ class SchedulerState:
 
             self.queued.remove(ts)
 
-            _propagage_released(self, ts, recommendations)
+            _propagate_released(self, ts, recommendations)
             return recommendations, client_msgs, worker_msgs
         except Exception as e:
             logger.exception(e)
@@ -3027,7 +2970,6 @@ class SchedulerState:
         ("processing", "erred"): transition_processing_erred,
         ("no-worker", "released"): transition_no_worker_released,
         ("no-worker", "processing"): transition_no_worker_processing,
-        ("no-worker", "memory"): transition_no_worker_memory,
         ("released", "forgotten"): transition_released_forgotten,
         ("memory", "forgotten"): transition_memory_forgotten,
         ("erred", "released"): transition_erred_released,
@@ -7965,7 +7907,7 @@ def _add_to_memory(
         )
 
 
-def _propagage_released(
+def _propagate_released(
     state: SchedulerState,
     ts: TaskState,
     recommendations: Recs,
@@ -8319,10 +8261,9 @@ def heartbeat_interval(n: int) -> float:
 
 
 def _task_slots_available(ws: WorkerState, saturation_factor: float) -> int:
-    "Number of tasks that can be sent to this worker without oversaturating it"
+    """Number of tasks that can be sent to this worker without oversaturating it"""
     assert not math.isinf(saturation_factor)
-    nthreads = ws.nthreads
-    return max(math.ceil(saturation_factor * nthreads), 1) - (
+    return max(math.ceil(saturation_factor * ws.nthreads), 1) - (
         len(ws.processing) - len(ws.long_running)
     )
 

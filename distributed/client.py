@@ -1361,7 +1361,7 @@ class Client(SyncMethodMixin):
         logger.debug("Started scheduling coroutines. Synchronized")
 
     async def _update_scheduler_info(self):
-        if self.status not in ("running", "connecting"):
+        if self.status not in ("running", "connecting") or self.scheduler is None:
             return
         try:
             self._scheduler_identity = SchedulerInfo(await self.scheduler.identity())
@@ -1438,7 +1438,12 @@ class Client(SyncMethodMixin):
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        await self._close()
+        await self._close(
+            # if we're handling an exception, we assume that it's more
+            # important to deliver that exception than shutdown gracefully.
+            fast=exc_type
+            is not None
+        )
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
@@ -1568,7 +1573,15 @@ class Client(SyncMethodMixin):
         logger.exception(exception)
 
     async def _close(self, fast=False):
-        """Send close signal and wait until scheduler completes"""
+        """
+        Send close signal and wait until scheduler completes
+
+        If fast is True, the client will close forcefully, by cancelling tasks
+        the background _handle_report_task.
+        """
+        # TODO: aclose more forcefully by aborting the RPC and cancelling all
+        # background tasks.
+        # see https://trio.readthedocs.io/en/stable/reference-io.html#trio.aclose_forcefully
         if self.status == "closed":
             return
 
