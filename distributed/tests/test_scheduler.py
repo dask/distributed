@@ -505,7 +505,6 @@ async def test_secede_opens_slot(c, s, a):
     "saturation_config, expected_task_counts",
     [
         (2.5, (5, 3)),
-        ("2.5", (5, 3)),
         (2.0, (4, 2)),
         (1.1, (3, 2)),
         (1.0, (2, 1)),
