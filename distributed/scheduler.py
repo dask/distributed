@@ -26,7 +26,6 @@ from collections.abc import (
     Iterable,
     Iterator,
     Mapping,
-    Sequence,
     Set,
 )
 from contextlib import suppress
@@ -2169,43 +2168,17 @@ class SchedulerState:
             # If there were no restrictions, `valid_workers()` didn't subset by `running`.
             valid_workers = self.running
 
-        if ts.dependencies or valid_workers is not None:
-            ws = decide_worker(
-                ts,
-                self.running,
-                valid_workers,
-                partial(self.worker_objective, ts),
-            )
-        else:
-            # TODO if `is_rootish` would always return True for tasks without dependencies,
-            # we could remove all this logic. The rootish assignment logic would behave
-            # more or less the same as this, maybe without gauranteed round-robin though?
-            # This path is only reachable when `ts` doesn't have dependencies, but its
-            # group is also smaller than the cluster.
+        if self.validate:
+            assert (
+                ts.dependencies or valid_workers is not None
+            ), f"{ts} should be covered by root-ish case"
 
-            # Fastpath when there are no related tasks or restrictions
-            worker_pool = self.idle or self.workers
-            # FIXME idle and workers are SortedDict's declared as dicts
-            #       because sortedcontainers is not annotated
-            wp_vals = cast("Sequence[WorkerState]", worker_pool.values())
-            n_workers: int = len(wp_vals)
-            if n_workers < 20:  # smart but linear in small case
-                ws = min(wp_vals, key=operator.attrgetter("occupancy"))
-                assert ws
-                if ws.occupancy == 0:
-                    # special case to use round-robin; linear search
-                    # for next worker with zero occupancy (or just
-                    # land back where we started).
-                    wp_i: WorkerState
-                    start: int = self.n_tasks % n_workers
-                    i: int
-                    for i in range(n_workers):
-                        wp_i = wp_vals[(i + start) % n_workers]
-                        if wp_i.occupancy == 0:
-                            ws = wp_i
-                            break
-            else:  # dumb but fast in large case
-                ws = wp_vals[self.n_tasks % n_workers]
+        ws = decide_worker(
+            ts,
+            self.running,
+            valid_workers,
+            partial(self.worker_objective, ts),
+        )
 
         if self.validate and ws is not None:
             assert self.workers.get(ws.address) is ws
