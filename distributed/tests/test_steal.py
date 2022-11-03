@@ -721,7 +721,7 @@ async def assert_balanced(inp, expected, c, s, *workers):
 
     result = [
         sorted(
-            # Exclude input data encoded with ``SizeOf``
+            # The name of input data starts with ``SizeOf``
             (int(key_split(t)) for t in w.data.keys() if not t.startswith("SizeOf")),
             reverse=True,
         )
