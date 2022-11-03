@@ -2157,9 +2157,11 @@ def ucx_loop():
     # TODO: should we check if there's already a context _before_ the test runs?
     # I think that would be useful.
     from distributed.diagnostics.nvml import has_cuda_context
+
     ctx = has_cuda_context()
     if ctx.has_context:
         import numba.cuda
+
         ctx = numba.cuda.current_context()
         ctx.device.reset()
 

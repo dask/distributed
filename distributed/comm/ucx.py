@@ -135,7 +135,9 @@ def init_once():
         )
         pre_existing_cuda_context = has_cuda_context()
         if pre_existing_cuda_context.has_context:
-            _warn_existing_cuda_context(pre_existing_cuda_context.device_info, os.getpid())
+            _warn_existing_cuda_context(
+                pre_existing_cuda_context.device_info, os.getpid()
+            )
 
         numba.cuda.current_context()
 
