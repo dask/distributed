@@ -940,18 +940,20 @@ class WorkerProcess:
             except (tornado.util.TimeoutError, asyncio.TimeoutError):
                 pass
             except Exception as e:
-                if failure_type is not None:
-                    logger.exception(f"Failed to {failure_type} worker")
-                    init_result_q.put({"uid": uid, "exception": e})
-                    init_result_q.close()
-                    # If we hit an exception here we need to wait for a least
-                    # one interval for the outside to pick up this message.
-                    # Otherwise we arrive in a race condition where the process
-                    # cleanup wipes the queue before the exception can be
-                    # properly handled. See also
-                    # WorkerProcess._wait_until_connected (the 2 is for good
-                    # measure)
-                    sync_sleep(cls._init_msg_interval * 3)
+                if failure_type is None:
+                    raise
+
+                logger.exception(f"Failed to {failure_type} worker")
+                init_result_q.put({"uid": uid, "exception": e})
+                init_result_q.close()
+                # If we hit an exception here we need to wait for a least
+                # one interval for the outside to pick up this message.
+                # Otherwise we arrive in a race condition where the process
+                # cleanup wipes the queue before the exception can be
+                # properly handled. See also
+                # WorkerProcess._wait_until_connected (the 2 is for good
+                # measure)
+                sync_sleep(cls._init_msg_interval * 3)
 
         with contextlib.ExitStack() as stack:
 
