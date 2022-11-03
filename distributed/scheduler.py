@@ -32,7 +32,7 @@ from collections.abc import (
 from contextlib import suppress
 from functools import partial
 from numbers import Number
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, overload
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, cast, overload
 
 import psutil
 from sortedcontainers import SortedDict, SortedSet
@@ -1448,6 +1448,17 @@ class TaskState:
         return recursive_to_dict(self, exclude=exclude, members=True)
 
 
+class Transition(NamedTuple):
+    """An entry in :attr:`SchedulerState.transition_log`"""
+
+    key: str
+    start: TaskStateState
+    finish: TaskStateState
+    recommendations: dict[str, TaskStateState]
+    stimulus_id: str
+    timestamp: float
+
+
 class SchedulerState:
     """Underlying task state of dynamic scheduler
 
@@ -1536,8 +1547,13 @@ class SchedulerState:
 
     #: History of erred tasks.
     #: The length can be tweaked through
-    #: distributed.diagnostics.erred-tasks.ax-history
+    #: distributed.diagnostics.erred-tasks.max-history
     erred_tasks: deque[ErredTask]
+
+    #: History of task state transitions.
+    #: The length can be tweaked through
+    #: distributed.scheduler.transition-log-length
+    transition_log: deque[Transition]
 
     #: Total number of transitions since the cluster was started
     transition_counter: int
@@ -1625,6 +1641,13 @@ class SchedulerState:
         }
         self.plugins = {} if not plugins else {_get_plugin_name(p): p for p in plugins}
 
+        self.transition_log = deque(
+            maxlen=dask.config.get("distributed.scheduler.transition-log-length")
+        )
+        self.transition_counter = 0
+        self._idle_transition_counter = 0
+        self.transition_counter_max = transition_counter_max
+
         # Variables from dask.config, cached by __init__ for performance
         self.UNKNOWN_TASK_DURATION = parse_timedelta(
             dask.config.get("distributed.scheduler.unknown-task-duration")
@@ -1653,9 +1676,6 @@ class SchedulerState:
             raise ValueError(
                 f"Unsupported `distributed.scheduler.worker-saturation` value {sat!r}. Must be a float."
             )
-        self.transition_counter = 0
-        self._idle_transition_counter = 0
-        self.transition_counter_max = transition_counter_max
 
     @property
     def memory(self) -> MemoryState:
@@ -1850,21 +1870,19 @@ class SchedulerState:
 
                 start = "released"
             else:
-                # FIXME downcast antipattern
-                scheduler = cast(Scheduler, self)
                 raise RuntimeError(
                     f"Impossible transition from {start} to {finish} for {key!r}: "
-                    f"{stimulus_id=}, {args=}, {kwargs=}, story={scheduler.story(ts)}"
+                    f"{stimulus_id=}, {args=}, {kwargs=}, story={self.story(ts)}"
                 )
 
             if not stimulus_id:
                 stimulus_id = STIMULUS_ID_UNSET
 
             actual_finish = ts._state
-            # FIXME downcast antipattern
-            scheduler = cast(Scheduler, self)
-            scheduler.transition_log.append(
-                (key, start, actual_finish, recommendations, stimulus_id, time())
+            self.transition_log.append(
+                Transition(
+                    key, start, actual_finish, recommendations, stimulus_id, time()
+                )
             )
             if self.validate:
                 if stimulus_id == STIMULUS_ID_UNSET:
@@ -2316,12 +2334,10 @@ class SchedulerState:
 
             if ws != ts.processing_on:  # pragma: nocover
                 assert ts.processing_on
-                # FIXME downcast antipattern
-                scheduler = cast(Scheduler, self)
                 raise RuntimeError(
                     f"Task {ts.key!r} transitioned from processing to memory on worker "
                     f"{ws}, while it was expected from {ts.processing_on}. This should "
-                    f"be impossible. {stimulus_id=}, story={scheduler.story(ts)}"
+                    f"be impossible. {stimulus_id=}, story={self.story(ts)}"
                 )
 
             #############################
@@ -2977,6 +2993,14 @@ class SchedulerState:
         ("released", "erred"): transition_released_erred,
     }
 
+    def story(self, *keys_or_tasks_or_stimuli: str | TaskState) -> list[Transition]:
+        """Get all transitions that touch one of the input keys or stimulus_id's"""
+        keys_or_stimuli = {
+            key.key if isinstance(key, TaskState) else key
+            for key in keys_or_tasks_or_stimuli
+        }
+        return scheduler_story(keys_or_stimuli, self.transition_log)
+
     ##############################
     # Assigning Tasks to Workers #
     ##############################
@@ -3504,9 +3528,6 @@ class Scheduler(SchedulerState, ServerNode):
             aliases,
         ]
 
-        self.transition_log = deque(
-            maxlen=dask.config.get("distributed.scheduler.transition-log-length")
-        )
         self.log = deque(
             maxlen=dask.config.get("distributed.scheduler.transition-log-length")
         )
@@ -7191,18 +7212,13 @@ class Scheduler(SchedulerState, ServerNode):
         self._transitions(recommendations, client_msgs, worker_msgs, stimulus_id)
         self.send_all(client_msgs, worker_msgs)
 
-    def story(self, *keys_or_tasks_or_stimuli: str | TaskState) -> list[tuple]:
-        """Get all transitions that touch one of the input keys or stimulus_id's"""
-        keys_or_stimuli = {
-            key.key if isinstance(key, TaskState) else key
-            for key in keys_or_tasks_or_stimuli
-        }
-        return scheduler_story(keys_or_stimuli, self.transition_log)
+    async def get_story(self, keys_or_stimuli: Iterable[str]) -> list[Transition]:
+        """RPC hook for :meth:`SchedulerState.story`.
 
-    async def get_story(self, keys_or_stimuli: Iterable[str]) -> list[tuple]:
+        Note that the msgpack serialization/deserialization round-trip will transform
+        the :class:`Transition` namedtuples into regular tuples.
+        """
         return self.story(*keys_or_stimuli)
-
-    transition_story = story
 
     def _reschedule(
         self, key: str, worker: str | None = None, *, stimulus_id: str
