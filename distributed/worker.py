@@ -1257,14 +1257,10 @@ class Worker(BaseWorker, ServerNode):
 
     @fail_hard
     async def handle_scheduler(self, comm: Comm) -> None:
-        await self.handle_stream(comm)
-        logger.info(
-            "Connection to scheduler broken. Closing without reporting. ID: %s Address %s Status: %s",
-            self.id,
-            self.address,
-            self.status,
-        )
-        await self.close(reason="worker-handle-scheduler-connection-broken")
+        try:
+            await self.handle_stream(comm)
+        finally:
+            await self.close(reason="worker-handle-scheduler-connection-broken")
 
     async def upload_file(
         self, filename: str, data: str | bytes, load: bool = True
