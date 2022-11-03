@@ -31,6 +31,7 @@ from distributed import (
     Nanny,
     SchedulerPlugin,
     Worker,
+    as_completed,
     fire_and_forget,
     wait,
 )
@@ -499,6 +500,24 @@ async def test_secede_opens_slot(c, s, a):
 
     await second.set()
     await c.gather(fs)
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_submit_waits_on_full_cluster(c, s, a):
+    "Make sure later `client.submit` doesn't cut in line (particularly with queuing on)"
+    event = Event()
+
+    fs = c.map(lambda i: event.wait(), range(10))
+    await async_wait_for(lambda: s.tasks, timeout=5)
+
+    extra = c.submit(inc, 1, fifo_timeout=0)
+    ac = as_completed(fs + [extra])
+    await async_wait_for(lambda: extra.key in s.tasks, timeout=5)
+
+    await event.set()
+
+    order = [f.key async for f in ac]
+    assert order[-1] == extra.key
 
 
 @pytest.mark.parametrize(
