@@ -2072,16 +2072,18 @@ class SchedulerState:
             # Last-used worker is full, unknown, retiring, or paused;
             # pick a new worker for the next few tasks
             ws = min(pool, key=partial(self.worker_objective, ts))
-            tg.last_worker_tasks_left = math.floor(
-                (len(tg) / self.total_nthreads) * ws.nthreads
+            tg.last_worker_tasks_left = max(
+                1,
+                # This can evaluate to 0 for tasks with no dependencies
+                # (see definition of is_rootish)
+                int(len(tg) / self.total_nthreads * ws.nthreads),
             )
 
         # Record `last_worker`, or clear it on the final task
         tg.last_worker = (
             ws if tg.states["released"] + tg.states["waiting"] > 1 else None
         )
-        if tg.last_worker_tasks_left > 0:
-            tg.last_worker_tasks_left -= 1
+        tg.last_worker_tasks_left -= 1
 
         if self.validate:
             assert self.workers.get(ws.address) is ws
