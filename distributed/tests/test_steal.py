@@ -705,10 +705,6 @@ async def assert_balanced(inp, expected, c, s, *workers):
             wait_for_states.append(wait_for_state(f.key, state, w))
     await asyncio.gather(*wait_for_states)
 
-    for w, ts in zip(workers, inp):
-        assert len(w.state.executing) == min(1, len(ts))
-        assert len(w.state.ready) == max(0, len(ts) - 1)
-
     # Balance twice since stealing might attempt to steal the already executing task
     # on first try and will need a second try to correct its mistake
     for _ in range(2):
@@ -1641,6 +1637,7 @@ def _run_dependency_balance_test(
                 NO_AMM,
                 config or {},
                 {
+                    # FIXME
                     "distributed.scheduler.unknown-task-duration": "1s",
                 },
             ),
@@ -1690,7 +1687,7 @@ async def _dependency_balance_test_permutation(
         dependencies, permutated_dependency_placement, c, s, workers
     )
 
-    ev, futures = await _place_tasks(
+    ev, futures_per_worker = await _place_tasks(
         permutated_task_placement,
         permutated_dependency_placement,
         dependency_futures,
@@ -1705,22 +1702,20 @@ async def _dependency_balance_test_permutation(
     for ws in s.workers.values():
         s.check_idle_saturated(ws)
 
-    try:
-        for _ in range(20):
-            steal.balance()
-            await steal.stop()
+    # Balance twice since stealing might attempt to steal the already executing task
+    # on first try and will need a second try to correct its mistake
+    for _ in range(2):
+        steal.balance()
+        # steal.stop() ensures that all in-flight stealing requests have been resolved
+        await steal.stop()
 
-            permutated_actual_placement = _get_task_placement(s, workers)
-            actual_placement = [permutated_actual_placement[i] for i in inverse]
+    await ev.set()
+    await c.gather([f for fs in futures_per_worker.values() for f in fs])
 
-            if correct_placement_fn(actual_placement):
-                return
-    finally:
-        # Release the threadpools
-        await ev.set()
-        await c.gather(futures)
+    permutated_actual_placement = _get_task_placement(s, workers)
+    actual_placement = [permutated_actual_placement[i] for i in inverse]
 
-    raise AssertionError(actual_placement, permutation)
+    assert correct_placement_fn(actual_placement), (actual_placement, permutation)
 
 
 async def _place_dependencies(
@@ -1755,28 +1750,18 @@ async def _place_dependencies(
 
     futures = {}
     for name, multiplier in dependencies.items():
+        key = f"dep-{name}"
         worker_addresses = dependencies_to_workers[name]
         futs = await c.scatter(
-            {name: gen_nbytes(int(multiplier * s.bandwidth))},
+            {key: gen_nbytes(int(multiplier * s.bandwidth))},
             workers=worker_addresses,
             broadcast=True,
         )
-        futures[name] = futs[name]
+        futures[name] = futs[key]
 
     await c.gather(futures.values())
 
-    _assert_dependency_placement(placement, workers)
-
     return futures
-
-
-def _assert_dependency_placement(expected, workers):
-    """Assert that dependencies are placed on the workers as expected."""
-    actual = []
-    for worker in workers:
-        actual.append(list(worker.state.tasks.keys()))
-
-    assert actual == expected
 
 
 async def _place_tasks(
@@ -1786,7 +1771,7 @@ async def _place_tasks(
     c: Client,
     s: Scheduler,
     workers: Sequence[Worker],
-) -> tuple[Event, list[Future]]:
+) -> tuple[Event, dict[Worker, list[Future]]]:
     """Places the tasks on the workers as specified.
 
     Parameters
@@ -1815,36 +1800,36 @@ async def _place_tasks(
         event.wait()
 
     counter = itertools.count()
-    futures = []
-    for worker_idx, tasks in enumerate(placement):
+    futures_per_worker = defaultdict(list)
+    for worker, tasks in zip(workers, placement):
         for dependencies in tasks:
             i = next(counter)
             dep_key = "".join(sorted(dependencies))
-            key = f"{dep_key}-{i}"
+            key = f"task-{dep_key}-{i}"
             f = c.submit(
                 block,
                 [dependency_futures[dependency] for dependency in dependencies],
                 event=ev,
                 key=key,
-                workers=workers[worker_idx].address,
+                workers=worker.address,
                 allow_other_workers=True,
                 pure=False,
                 priority=-i,
             )
-            futures.append(f)
+            futures_per_worker[worker].append(f)
 
-    while len([ts for ts in s.tasks.values() if ts.processing_on]) < len(futures):
-        await asyncio.sleep(0.001)
+    # Make sure all tasks are scheduled on the workers
+    # We are relying on the futures not to be rootish (and thus not to remain in the
+    # scheduler-side queue) because they have worker restrictions
+    wait_for_states = []
+    for w, fs in futures_per_worker.items():
+        for i, f in enumerate(fs):
+            # Make sure the first task is executing, all others are ready
+            state = "executing" if i == 0 else "ready"
+            wait_for_states.append(wait_for_state(f.key, state, w))
+    await asyncio.gather(*wait_for_states)
 
-    while any(
-        len(w.state.tasks) < (len(tasks) + len(dependencies))
-        for w, dependencies, tasks in zip(workers, dependency_placement, placement)
-    ):
-        await asyncio.sleep(0.001)
-
-    assert_task_placement(placement, s, workers)
-
-    return ev, futures
+    return ev, futures_per_worker
 
 
 def _get_task_placement(
@@ -1854,25 +1839,18 @@ def _get_task_placement(
     actual = []
     for w in workers:
         actual.append(
-            [list(key_split(ts.key)) for ts in s.workers[w.address].processing]
+            [
+                list(key_split(key[5:]))  # Remove "task-" prefix
+                for key in w.data.keys()
+                if key.startswith("task-")
+            ]
         )
     return _deterministic_placement(actual)
-
-
-def _equal_placement(left, right):
-    """Return True IFF the two input placements are equal."""
-    return _deterministic_placement(left) == _deterministic_placement(right)
 
 
 def _deterministic_placement(placement):
     """Return a deterministic ordering of the tasks or dependencies on each worker."""
     return [sorted(placed) for placed in placement]
-
-
-def assert_task_placement(expected, s, workers):
-    """Assert that tasks are placed on the workers as expected."""
-    actual = _get_task_placement(s, workers)
-    assert _equal_placement(actual, expected)
 
 
 # Reproducer from https://github.com/dask/distributed/issues/6573
