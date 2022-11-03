@@ -713,6 +713,7 @@ async def assert_balanced(inp, expected, c, s, *workers):
     # on first try and will need a second try to correct its mistake
     for _ in range(2):
         steal.balance()
+        # steal.stop() ensures that all in-flight stealing requests have been resolved
         await steal.stop()
 
     await ev.set()
