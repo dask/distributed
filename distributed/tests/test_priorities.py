@@ -90,7 +90,7 @@ def gen_blockable_cluster(test_func):
     """Generate a cluster with 1 worker and disabled memory monitor,
     to be used together with ``async with block_worker(...):``.
     """
-    return pytest.mark.parametrize("pause", [pytest.param(False), pytest.param(True)])(
+    return pytest.mark.parametrize("pause", [False, True])(
         gen_cluster(
             client=True,
             nthreads=[("", 1)],
