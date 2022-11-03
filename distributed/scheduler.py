@@ -34,7 +34,7 @@ from numbers import Number
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, overload
 
 import psutil
-from sortedcontainers import SortedDict, SortedSet
+from sortedcontainers import SortedSet
 from tlz import (
     first,
     groupby,
@@ -1485,7 +1485,6 @@ class SchedulerState:
     #######################
 
     #: Workers currently connected to the scheduler
-    #: (actually a SortedDict, but the sortedcontainers package isn't annotated)
     workers: dict[str, WorkerState]
     #: Worker {name: address}
     aliases: dict[Hashable, str]
@@ -1575,7 +1574,7 @@ class SchedulerState:
         self,
         aliases: dict[Hashable, str],
         clients: dict[str, ClientState],
-        workers: SortedDict[str, WorkerState],
+        workers: dict[str, WorkerState],
         host_info: dict[str, dict[str, Any]],
         resources: dict[str, dict[str, float]],
         tasks: dict[str, TaskState],
@@ -3458,7 +3457,7 @@ class Scheduler(SchedulerState, ServerNode):
         clients = {}
 
         # Worker state
-        workers = SortedDict()
+        workers = {}
 
         host_info = {}
         resources = {}
