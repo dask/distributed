@@ -508,8 +508,11 @@ async def test_secede_opens_slot(c, s, a):
         (2.0, (4, 2)),
         (1.1, (3, 2)),
         (1.0, (2, 1)),
-        (-1.0, (1, 1)),
-        (float("inf"), (6, 4))
+        (0.1, (1, 1)),
+        # This is necessary because there's no way to parse a float infinite from
+        # a DASK_* environment variable
+        ("inf", (6, 4)),
+        (float("inf"), (6, 4)),
         # ^ depends on root task assignment logic; ok if changes, just needs to add up to 10
     ],
 )

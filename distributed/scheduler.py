@@ -1649,6 +1649,10 @@ class SchedulerState:
         self.WORKER_SATURATION = dask.config.get(
             "distributed.scheduler.worker-saturation"
         )
+        if self.WORKER_SATURATION == "inf":
+            # Special case necessary because there's no way to parse a float infinity
+            # from a DASK_* environment variable
+            self.WORKER_SATURATION = math.inf
         if (
             not isinstance(self.WORKER_SATURATION, (int, float))
             or self.WORKER_SATURATION <= 0
