@@ -34,7 +34,6 @@ from numbers import Number
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, overload
 
 import psutil
-from sortedcontainers import SortedSet
 from tlz import (
     first,
     groupby,
@@ -854,7 +853,7 @@ class Computation:
 
     start: float
     groups: set[TaskGroup]
-    code: SortedSet
+    code: dict[str, None]  # a sorted set
     id: uuid.UUID
 
     __slots__ = tuple(__annotations__)
@@ -862,7 +861,7 @@ class Computation:
     def __init__(self):
         self.start = time()
         self.groups = set()
-        self.code = SortedSet()
+        self.code = {}
         self.id = uuid.uuid4()
 
     @property
@@ -4268,8 +4267,8 @@ class Scheduler(SchedulerState, ServerNode):
             computation = Computation()
             self.computations.append(computation)
 
-        if code and code not in computation.code:  # add new code blocks
-            computation.code.add(code)
+        if code:  # add new code blocks
+            computation.code.setdefault(code, None)
 
         n = 0
         while len(tasks) != n:  # walk through new tasks, cancel any bad deps

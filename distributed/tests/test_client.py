@@ -6985,7 +6985,7 @@ def test_computation_object_code_dask_compute(client):
         assert len(computations) == 1
         comp = computations[0]
         assert len(comp.code) == 1
-        return comp.code[0]
+        return first(comp.code)
 
     code = client.run_on_scheduler(fetch_comp_code)
 
@@ -7005,7 +7005,7 @@ def test_computation_object_code_not_available(client):
         assert len(computations) == 1
         comp = computations[0]
         assert len(comp.code) == 1
-        return comp.code[0]
+        return first(comp.code)
 
     code = client.run_on_scheduler(fetch_comp_code)
     assert code == "<Code not available>"
@@ -7026,7 +7026,7 @@ async def test_computation_object_code_dask_persist(c, s, a, b):
     comp = computations[0]
     assert len(comp.code) == 1
 
-    assert comp.code[0] == test_function_code
+    assert first(comp.code) == test_function_code
 
 
 @gen_cluster(client=True)
@@ -7047,7 +7047,7 @@ async def test_computation_object_code_client_submit_simple(c, s, a, b):
 
     assert len(comp.code) == 1
 
-    assert comp.code[0] == test_function_code
+    assert first(comp.code) == test_function_code
 
 
 @gen_cluster(client=True)
@@ -7069,7 +7069,7 @@ async def test_computation_object_code_client_submit_list_comp(c, s, a, b):
     # Code is deduplicated
     assert len(comp.code) == 1
 
-    assert comp.code[0] == test_function_code
+    assert first(comp.code) == test_function_code
 
 
 @gen_cluster(client=True)
@@ -7091,7 +7091,7 @@ async def test_computation_object_code_client_submit_dict_comp(c, s, a, b):
     # Code is deduplicated
     assert len(comp.code) == 1
 
-    assert comp.code[0] == test_function_code
+    assert first(comp.code) == test_function_code
 
 
 @gen_cluster(client=True)
@@ -7109,7 +7109,7 @@ async def test_computation_object_code_client_map(c, s, a, b):
     comp = computations[0]
     assert len(comp.code) == 1
 
-    assert comp.code[0] == test_function_code
+    assert first(comp.code) == test_function_code
 
 
 @gen_cluster(client=True)
@@ -7127,7 +7127,7 @@ async def test_computation_object_code_client_compute(c, s, a, b):
     comp = computations[0]
     assert len(comp.code) == 1
 
-    assert comp.code[0] == test_function_code
+    assert first(comp.code) == test_function_code
 
 
 @gen_cluster(client=True, Worker=Nanny)
