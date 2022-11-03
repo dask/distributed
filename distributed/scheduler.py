@@ -2124,9 +2124,12 @@ class SchedulerState:
             # All workers busy? Task gets/stays queued.
             return None
 
-        # Just pick the least busy worker.
+        # Just pick the least busy worker. Use the lowest-RSS worker in a tie.
         # NOTE: this will lead to worst-case scheduling with regards to co-assignment.
-        ws = min(self.idle.values(), key=lambda ws: len(ws.processing) / ws.nthreads)
+        ws = min(
+            self.idle.values(),
+            key=lambda ws: (len(ws.processing) / ws.nthreads, ws.memory.process),
+        )
         if self.validate:
             assert not _worker_full(ws, self.WORKER_SATURATION), (
                 ws,
