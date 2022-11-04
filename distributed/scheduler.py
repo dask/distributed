@@ -1646,13 +1646,22 @@ class SchedulerState:
             / 2.0
         )
 
-        sat = dask.config.get("distributed.scheduler.worker-saturation")
-        try:
-            self.WORKER_SATURATION = float(sat)
-        except ValueError:
-            raise ValueError(
-                f"Unsupported `distributed.scheduler.worker-saturation` value {sat!r}. Must be a float."
+        self.WORKER_SATURATION = dask.config.get(
+            "distributed.scheduler.worker-saturation"
+        )
+        if self.WORKER_SATURATION == "inf":
+            # Special case necessary because there's no way to parse a float infinity
+            # from a DASK_* environment variable
+            self.WORKER_SATURATION = math.inf
+        if (
+            not isinstance(self.WORKER_SATURATION, (int, float))
+            or self.WORKER_SATURATION <= 0
+        ):
+            raise ValueError(  # pragma: nocover
+                "`distributed.scheduler.worker-saturation` must be a float > 0; got "
+                + repr(self.WORKER_SATURATION)
             )
+
         self.transition_counter = 0
         self._idle_transition_counter = 0
         self.transition_counter_max = transition_counter_max
