@@ -3270,7 +3270,7 @@ class SchedulerState:
         if ts.actor:
             ws.actors.add(ts)
 
-        return {ws.address: [_task_to_msg(self, ts)]}
+        return {ws.address: [self._task_to_msg(ts)]}
 
     def _exit_processing_common(
         self, ts: TaskState, recommendations: Recs
@@ -3458,6 +3458,41 @@ class SchedulerState:
                         recommendations[ts.key] = "forgotten"
                     elif ts.state != "erred" and not ts.waiters:
                         recommendations[ts.key] = "released"
+
+    def _task_to_msg(self, ts: TaskState, duration: float = -1) -> dict[str, Any]:
+        """Convert a single computational task to a message"""
+        # FIXME: The duration attribute is not used on worker. We could save ourselves the
+        #        time to compute and submit this
+        if duration < 0:
+            duration = self.get_task_duration(ts)
+
+        msg: dict[str, Any] = {
+            "op": "compute-task",
+            "key": ts.key,
+            "priority": ts.priority,
+            "duration": duration,
+            "stimulus_id": f"compute-task-{time()}",
+            "who_has": {
+                dts.key: [ws.address for ws in dts.who_has] for dts in ts.dependencies
+            },
+            "nbytes": {dts.key: dts.nbytes for dts in ts.dependencies},
+            "run_spec": None,
+            "function": None,
+            "args": None,
+            "kwargs": None,
+            "resource_restrictions": ts.resource_restrictions,
+            "actor": ts.actor,
+            "annotations": ts.annotations,
+        }
+        if self.validate:
+            assert all(msg["who_has"].values())
+
+        if isinstance(ts.run_spec, dict):
+            msg.update(ts.run_spec)
+        else:
+            msg["run_spec"] = ts.run_spec
+
+        return msg
 
 
 class Scheduler(SchedulerState, ServerNode):
@@ -5408,7 +5443,7 @@ class Scheduler(SchedulerState, ServerNode):
     def send_task_to_worker(self, worker, ts: TaskState, duration: float = -1):
         """Send a single computational task to a worker"""
         try:
-            msg: dict = _task_to_msg(self, ts, duration)
+            msg: dict = self._task_to_msg(ts, duration)
             self.worker_send(worker, msg)
         except Exception as e:
             logger.exception(e)
@@ -7978,44 +8013,6 @@ class Scheduler(SchedulerState, ServerNode):
                 "stimulus_id": stimulus_id,
             }
         )
-
-
-def _task_to_msg(
-    state: SchedulerState, ts: TaskState, duration: float = -1
-) -> dict[str, Any]:
-    """Convert a single computational task to a message"""
-    # FIXME: The duration attribute is not used on worker. We could save ourselves the
-    #        time to compute and submit this
-    if duration < 0:
-        duration = state.get_task_duration(ts)
-
-    msg: dict[str, Any] = {
-        "op": "compute-task",
-        "key": ts.key,
-        "priority": ts.priority,
-        "duration": duration,
-        "stimulus_id": f"compute-task-{time()}",
-        "who_has": {
-            dts.key: [ws.address for ws in dts.who_has] for dts in ts.dependencies
-        },
-        "nbytes": {dts.key: dts.nbytes for dts in ts.dependencies},
-        "run_spec": None,
-        "function": None,
-        "args": None,
-        "kwargs": None,
-        "resource_restrictions": ts.resource_restrictions,
-        "actor": ts.actor,
-        "annotations": ts.annotations,
-    }
-    if state.validate:
-        assert all(msg["who_has"].values())
-
-    if isinstance(ts.run_spec, dict):
-        msg.update(ts.run_spec)
-    else:
-        msg["run_spec"] = ts.run_spec
-
-    return msg
 
 
 def _task_to_report_msg(ts: TaskState) -> dict[str, Any] | None:
