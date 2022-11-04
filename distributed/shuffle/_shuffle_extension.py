@@ -11,7 +11,8 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, BinaryIO, NewType, TypeVar, overload
 
 import toolz
-from tornado.ioloop import IOLoop
+
+from dask.utils import parse_bytes
 
 from distributed.core import PooledRPCCall
 from distributed.protocol import to_serialize
@@ -21,6 +22,7 @@ from distributed.shuffle._arrow import (
     list_of_buffers_to_table,
     load_arrow,
 )
+from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._multi_comm import MultiComm
 from distributed.shuffle._multi_file import MultiFile
 from distributed.utils import log_errors, sync
@@ -88,9 +90,9 @@ class Shuffle:
         local_address: str,
         directory: str,
         nthreads: int,
-        loop: IOLoop,
         rpc: Callable[[str], PooledRPCCall],
         broadcast: Callable,
+        memory_limiter: ResourceLimiter,
     ):
 
         import pandas as pd
@@ -98,13 +100,10 @@ class Shuffle:
         self.broadcast = broadcast
         self.rpc = rpc
         self.column = column
-        assert loop
-        self.loop = loop
         self.id = id
         self.schema = schema
         self.output_workers = output_workers
         self.executor = ThreadPoolExecutor(nthreads)
-        self._tasks: set[asyncio.Task] = set()
         partitions_of = defaultdict(list)
         self.local_address = local_address
         for part, addr in worker_for.items():
@@ -123,10 +122,10 @@ class Shuffle:
             load=load_arrow,
             directory=directory,
             sizeof=_sizeof,
-            loop=self.loop,
+            memory_limiter=memory_limiter,
         )
 
-        self.multi_comm = MultiComm(send=self.send, loop=self.loop)
+        self.multi_comm = MultiComm(send=self.send, memory_limiter=memory_limiter)
         # TODO: reduce number of connections to number of workers
         # MultiComm.max_connections = min(10, n_workers)
 
@@ -136,6 +135,9 @@ class Shuffle:
         self.total_recvd = 0
         self.start_time = time.time()
         self._exception: Exception | None = None
+
+    def __repr__(self) -> str:
+        return f"<Shuffle: id: {self.id} on {self.local_address}>"
 
     @contextlib.contextmanager
     def time(self, name: str) -> Iterator[None]:
@@ -149,6 +151,8 @@ class Shuffle:
         # participating in this specific shuffle. This will not only reduce the
         # number of workers we need to contact but will also simplify error
         # handling, e.g. if a non-participating worker is not reachable in time
+        # TODO: Consider broadcast pinging once when the shuffle starts to warm
+        # up the comm pool on scheduler side
         out = await self.broadcast(
             msg={"op": "shuffle_inputs_done", "shuffle_id": self.id}
         )
@@ -166,11 +170,12 @@ class Shuffle:
         )
 
     async def offload(self, func: Callable[..., T], *args: Any) -> T:
-        return await asyncio.get_running_loop().run_in_executor(
-            self.executor,
-            func,
-            *args,
-        )
+        with self.time("cpu"):
+            return await asyncio.get_running_loop().run_in_executor(
+                self.executor,
+                func,
+                *args,
+            )
 
     def heartbeat(self) -> dict[str, Any]:
         return {
@@ -179,16 +184,16 @@ class Shuffle:
                 "buckets": len(self.multi_file.shards),
                 "written": self.multi_file.bytes_written,
                 "read": self.multi_file.bytes_read,
-                "active": 0,
                 "diagnostics": self.multi_file.diagnostics,
-                "memory_limit": self.multi_file.memory_limit,
+                "active": 0,
+                "memory_limit": 0,  # FIXME
             },
             "comms": {
                 "memory": self.multi_comm.total_size,
                 "buckets": len(self.multi_comm.shards),
                 "written": self.multi_comm.total_moved,
                 "read": self.total_recvd,
-                "active": self.multi_comm.queue.qsize(),
+                "active": 0,
                 "diagnostics": self.multi_comm.diagnostics,
                 "memory_limit": self.multi_comm.memory_limit,
             },
@@ -197,14 +202,7 @@ class Shuffle:
         }
 
     async def receive(self, data: list[pa.Buffer]) -> None:
-        task = asyncio.create_task(self._receive(data))
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
-        if (
-            self.multi_file.total_size + sum(map(len, data))
-            > self.multi_file.memory_limit
-        ):
-            await task  # backpressure
+        await self._receive(data)
 
     async def _receive(self, data: list[pa.Buffer]) -> None:
         # This is actually ok.  Our local barrier might have finished,
@@ -219,33 +217,32 @@ class Shuffle:
             # TODO: Is it actually a good idea to dispatch multiple times instead of
             # onyl once?
             # An ugly way of turning these batches back into an arrow table
-            with self.time("cpu"):
-                data = await self.offload(
-                    list_of_buffers_to_table,
-                    data,
-                    self.schema,
-                )
+            data = await self.offload(
+                list_of_buffers_to_table,
+                data,
+                self.schema,
+            )
 
-                groups = await self.offload(split_by_partition, data, self.column)
+            groups = await self.offload(split_by_partition, data, self.column)
 
             assert len(data) == sum(map(len, groups.values()))
             del data
 
-            with self.time("cpu"):
-                groups = await self.offload(
-                    lambda: {
-                        k: [batch.serialize() for batch in v.to_batches()]
-                        for k, v in groups.items()
-                    }
-                )
-                await self.multi_file.put(groups)
+            groups = await self.offload(
+                lambda: {
+                    k: [batch.serialize() for batch in v.to_batches()]
+                    for k, v in groups.items()
+                }
+            )
+            await self.multi_file.put(groups)
         except Exception as e:
             self._exception = e
 
-    def add_partition(self, data: pd.DataFrame) -> None:
+    async def add_partition(self, data: pd.DataFrame) -> None:
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to shuffle {self}")
-        with self.time("cpu"):
+
+        def _() -> dict[str, list[bytes]]:
             out = split_by_worker(
                 data,
                 self.column,
@@ -255,7 +252,10 @@ class Shuffle:
                 k: [b.serialize().to_pybytes() for b in t.to_batches()]
                 for k, t in out.items()
             }
-        self.multi_comm.put(out)
+            return out
+
+        out = await self.offload(_)
+        await self.multi_comm.put(out)
 
     async def get_output_partition(self, i: int) -> pd.DataFrame:
         assert self.transferred, "`get_output_partition` called before barrier task"
@@ -289,15 +289,11 @@ class Shuffle:
         return self.transferred and self.output_partitions_left == 0
 
     async def flush_receive(self) -> None:
-        await asyncio.gather(*self._tasks)
         if self._exception:
             raise self._exception
         await self.multi_file.flush()
 
     async def close(self) -> None:
-        for t in self._tasks:
-            t.cancel()
-        asyncio.gather(*self._tasks)
         await self.multi_comm.close()
         await self.multi_file.close()
         try:
@@ -327,6 +323,8 @@ class ShuffleWorkerExtension:
         # Initialize
         self.worker: Worker = worker
         self.shuffles: dict[ShuffleId, Shuffle] = {}
+        limit = worker.memory_manager.memory_limit or parse_bytes("1GB")
+        self.memory_limiter = ResourceLimiter(int(limit * 0.5))
 
     # Handlers
     ##########
@@ -360,8 +358,9 @@ class ShuffleWorkerExtension:
                 # If the shuffle has no output partitions, remove it now;
                 # `get_output_partition` will never be called.
                 # This happens when there are fewer output partitions than workers.
-                assert not shuffle.multi_file.shards
+                assert shuffle.multi_file.empty
                 del self.shuffles[shuffle_id]
+                logger.critical(f"Shuffle inputs done {shuffle}")
                 await self._register_complete(shuffle)
 
     def add_partition(
@@ -374,7 +373,7 @@ class ShuffleWorkerExtension:
         shuffle = self.get_shuffle(
             shuffle_id, empty=data, npartitions=npartitions, column=column
         )
-        shuffle.add_partition(data=data)
+        sync(self.worker.loop, shuffle.add_partition, data=data)
 
     async def _barrier(self, shuffle_id: ShuffleId) -> None:
         """
@@ -389,11 +388,14 @@ class ShuffleWorkerExtension:
         await shuffle.barrier()
 
     async def _register_complete(self, shuffle: Shuffle) -> None:
+        logger.critical(f"Register complete {shuffle}")
         await shuffle.close()
+        logger.critical(f"Register complete {shuffle} - Close success")
         await self.worker.scheduler.shuffle_register_complete(
             id=shuffle.id,
             worker=self.worker.address,
         )
+        logger.critical(f"Register complete {shuffle} - SUCCESS")
 
     @overload
     async def _get_shuffle(
@@ -458,8 +460,8 @@ class ShuffleWorkerExtension:
                         nthreads=self.worker.state.nthreads,
                         local_address=self.worker.address,
                         rpc=self.worker.rpc,
-                        loop=self.worker.loop,
                         broadcast=self.worker.scheduler.broadcast,
+                        memory_limiter=self.memory_limiter,
                     )
                     self.shuffles[shuffle_id] = shuffle
                 return self.shuffles[shuffle_id]

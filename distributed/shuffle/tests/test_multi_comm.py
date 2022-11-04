@@ -11,6 +11,8 @@ from tornado.ioloop import IOLoop
 from distributed.shuffle._multi_comm import MultiComm
 from distributed.utils_test import gen_test
 
+# pytest.skip(allow_module_level=True)
+
 
 @gen_test()
 async def test_basic(tmp_path):

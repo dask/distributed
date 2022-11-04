@@ -17,6 +17,7 @@ from dask.distributed import Worker
 from dask.utils import stringify
 
 from distributed.core import PooledRPCCall
+from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._shuffle_extension import (
     Shuffle,
     ShuffleId,
@@ -90,7 +91,7 @@ async def test_concurrent(c, s, a, b):
     clean_scheduler(s)
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_bad_disk(c, s, a, b):
 
     df = dask.datasets.timeseries(
@@ -388,6 +389,7 @@ async def test_multi(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_restrictions(c, s, a, b):
+    # FIXME: This is flaky
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -408,6 +410,7 @@ async def test_restrictions(c, s, a, b):
 
     await y
     assert all(stringify(key) in a.data for key in y.__dask_keys__())
+    print("Test DONE!")
 
 
 @pytest.mark.xfail(reason="Don't clean up forgotten shuffles")
@@ -527,15 +530,15 @@ class ShuffleTestPool:
             local_address=name,
             nthreads=2,
             rpc=self,
-            loop=loop,
             broadcast=self.fake_broadcast,
+            memory_limiter=ResourceLimiter(10000000),
         )
         self.shuffles[name] = s
         return s
 
 
 # 36 parametrizations
-# Runtime each ~1s
+# Runtime each ~0.1s
 @pytest.mark.parametrize("n_workers", [1, 10])
 @pytest.mark.parametrize("n_input_partitions", [1, 2, 10])
 @pytest.mark.parametrize("npartitions", [1, 20])
@@ -586,8 +589,7 @@ async def test_basic_lowlevel_shuffle(
     try:
         for ix, df in enumerate(dfs):
             s = shuffles[ix % len(shuffles)]
-            s.add_partition(df)
-            await asyncio.sleep(0.05)
+            await s.add_partition(df)
 
         await barrier_worker.barrier()
 
@@ -608,83 +610,6 @@ async def test_basic_lowlevel_shuffle(
     finally:
         await asyncio.gather(*[s.close() for s in shuffles])
     assert len(df_after) == len(pd.concat(dfs))
-
-
-@gen_test()
-async def test_slow_offload(tmpdir, loop_in_thread):
-    # Ensure that all data is
-    dfs = []
-    rows_per_df = 10
-    n_input_partitions = 2
-    npartitions = 2
-    for ix in range(n_input_partitions):
-        df = pd.DataFrame({"x": range(rows_per_df * ix, rows_per_df * (ix + 1))})
-        df["_partition"] = df.x % npartitions
-        dfs.append(df)
-
-    workers = ["A", "B"]
-
-    worker_for_mapping = {}
-    partitions_for_worker = defaultdict(list)
-
-    for part in range(npartitions):
-        worker_for_mapping[part] = w = get_worker_for(part, workers, npartitions)
-        partitions_for_worker[w].append(part)
-    schema = pa.Schema.from_pandas(dfs[0])
-
-    local_shuffle_pool = ShuffleTestPool()
-
-    block_offload = asyncio.Event()
-
-    class SlowOffload(Shuffle):
-        async def offload(self, func, *args):
-            await block_offload.wait()
-            return await super().offload(func, *args)
-
-    sA = local_shuffle_pool.new_shuffle(
-        name="A",
-        worker_for_mapping=worker_for_mapping,
-        schema=schema,
-        directory=tmpdir,
-        loop=loop_in_thread,
-        Shuffle=SlowOffload,
-    )
-    sB = local_shuffle_pool.new_shuffle(
-        name="B",
-        worker_for_mapping=worker_for_mapping,
-        schema=schema,
-        directory=tmpdir,
-        loop=loop_in_thread,
-    )
-    try:
-        sA.add_partition(dfs[0])
-        sB.add_partition(dfs[1])
-
-        await sB.barrier()
-
-        assert len(partitions_for_worker["A"]) == 1
-
-        get_partition_A = asyncio.create_task(
-            sA.get_output_partition(partitions_for_worker["A"][0])
-        )
-        partition_available = asyncio.Event()
-        get_partition_A.add_done_callback(lambda _: partition_available.set())
-
-        with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(partition_available.wait(), 0.2)
-
-        # Fetching from B is not a problem
-        assert len(partitions_for_worker["B"]) == 1
-        df1 = await sB.get_output_partition(partitions_for_worker["B"][0])
-
-        # After unblocking we should receive the data as usual w/out data loss
-        block_offload.set()
-        df2 = await get_partition_A
-
-        df_after = pd.concat([df1, df2])
-        assert len(df_after) == len(pd.concat(dfs))
-    finally:
-        await asyncio.gather(*[s.close() for s in [sA, sB]])
 
 
 @gen_test()
@@ -711,8 +636,6 @@ async def test_error_offload(tmpdir, loop_in_thread):
 
     local_shuffle_pool = ShuffleTestPool()
 
-    block_offload = asyncio.Event()
-
     class ErrorOffload(Shuffle):
         async def offload(self, func, *args):
             raise RuntimeError("Error during deserialization")
@@ -733,21 +656,17 @@ async def test_error_offload(tmpdir, loop_in_thread):
         loop=loop_in_thread,
     )
     try:
+        await sB.add_partition(dfs[0])
+        await sB.add_partition(dfs[1])
+        await sB.barrier()
+        # Fetching from B is not a problem
+        assert len(partitions_for_worker["B"]) == 1
+        await sB.get_output_partition(partitions_for_worker["B"][0])
+
         with pytest.raises(RuntimeError, match="Error during deserialization"):
-            sA.add_partition(dfs[0])
-            sB.add_partition(dfs[1])
-
-            await sB.barrier()
-
             assert len(partitions_for_worker["A"]) == 1
-
             # The error should be raised here. Functionally speaking, we're fine
             # as long as it is raised before we collect the last shard.
             await sA.get_output_partition(partitions_for_worker["A"][0])
-
-            # Fetching from B is not a problem
-            assert len(partitions_for_worker["B"]) == 1
-            await sB.get_output_partition(partitions_for_worker["B"][0])
-
     finally:
         await asyncio.gather(*[s.close() for s in [sA, sB]])
