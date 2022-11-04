@@ -705,9 +705,9 @@ async def assert_balanced(inp, expected, c, s, *workers):
             wait_for_states.append(wait_for_state(f.key, state, w))
     await asyncio.gather(*wait_for_states)
 
-    # Balance twice since stealing might attempt to steal the already executing task
-    # on first try and will need a second try to correct its mistake
-    for _ in range(2):
+    # Balance several since stealing might attempt to steal the already executing task
+    # for each saturated worker and will need a chance to correct its mistake
+    for _ in workers:
         steal.balance()
         # steal.stop() ensures that all in-flight stealing requests have been resolved
         await steal.stop()
@@ -1712,9 +1712,9 @@ async def _dependency_balance_test_permutation(
     for ws in s.workers.values():
         s.check_idle_saturated(ws)
 
-    # Balance twice since stealing might attempt to steal the already executing task
-    # on first try and will need a second try to correct its mistake
-    for _ in range(2):
+    # Balance several since stealing might attempt to steal the already executing task
+    # for each saturated worker and will need a chance to correct its mistake
+    for _ in workers:
         steal.balance()
         # steal.stop() ensures that all in-flight stealing requests have been resolved
         await steal.stop()
