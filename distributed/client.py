@@ -22,10 +22,12 @@ from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from functools import partial
+from importlib.metadata import PackageNotFoundError, version
 from numbers import Number
 from queue import Queue as pyQueue
 from typing import Any, ClassVar, Coroutine, Literal, Sequence, TypedDict
 
+from packaging.version import parse as parse_version
 from tlz import first, groupby, keymap, merge, partition_all, valmap
 
 import dask
@@ -1146,11 +1148,9 @@ class Client(SyncMethodMixin):
 
     def _repr_html_(self):
         try:
-            import dask_labextension  # noqa: F401
-
-            # TODO: also guard with version check
-            JUPYTERLAB = True
-        except ImportError:
+            dle_version = parse_version(version("dask-labextension"))
+            JUPYTERLAB = False if dle_version < parse_version("6.0.0") else True
+        except PackageNotFoundError:
             JUPYTERLAB = False
 
         scheduler, info = self._get_scheduler_info()
