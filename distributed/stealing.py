@@ -64,7 +64,7 @@ class InFlightInfo(TypedDict):
 class WorkStealing(SchedulerPlugin):
     scheduler: Scheduler
     # {worker: ({ task states for level 0}, ..., {task states for level 14})}
-    stealable: dict[str, tuple[dict[TaskState, None], ...]]
+    stealable: dict[str, tuple[set[TaskState], ...]]
     # { task state: (worker, level) }
     key_stealable: dict[TaskState, tuple[str, int]]
     # (multiplier for level 0, ... multiplier for level 14)
@@ -153,7 +153,7 @@ class WorkStealing(SchedulerPlugin):
         return self.scheduler.log_event("stealing", msg)
 
     def add_worker(self, scheduler: Any = None, worker: Any = None) -> None:
-        self.stealable[worker] = tuple({} for _ in range(15))
+        self.stealable[worker] = tuple(set() for _ in range(15))
 
     def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
         del self.stealable[worker]
@@ -218,7 +218,7 @@ class WorkStealing(SchedulerPlugin):
             assert ts.processing_on
             ws = ts.processing_on
             worker = ws.address
-            self.stealable[worker][level][ts] = None
+            self.stealable[worker][level].add(ts)
             self.key_stealable[ts] = (worker, level)
 
     def remove_key_from_stealable(self, ts: TaskState) -> None:
@@ -228,7 +228,7 @@ class WorkStealing(SchedulerPlugin):
 
         worker, level = result
         try:
-            del self.stealable[worker][level][ts]
+            self.stealable[worker][level].remove(ts)
         except KeyError:
             pass
 
@@ -440,13 +440,13 @@ class WorkStealing(SchedulerPlugin):
                             ts not in self.key_stealable
                             or ts.processing_on is not victim
                         ):
-                            del stealable[ts]
+                            stealable.discard(ts)
                             continue
                         i += 1
                         if not (thief := _get_thief(s, ts, potential_thieves)):
                             continue
                         if ts not in victim.processing:
-                            del stealable[ts]
+                            stealable.discard(ts)
                             continue
 
                         occ_thief = self._combined_occupancy(thief)
@@ -483,7 +483,7 @@ class WorkStealing(SchedulerPlugin):
                                 thief, occ_thief, nproc_thief
                             ):
                                 potential_thieves.discard(thief)
-                            del stealable[ts]
+                            stealable.discard(ts)
                     self.scheduler.check_idle_saturated(
                         victim, occ=self._combined_occupancy(victim)
                     )
