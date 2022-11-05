@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import os
 import socket
@@ -11,7 +13,7 @@ from time import sleep
 from tlz import merge
 from tornado import gen
 
-from ..metrics import time
+from distributed.metrics import time
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +60,7 @@ def async_ssh(cmd_dict):
         except (SSHException, PasswordRequiredException) as e:
 
             print(
-                "[ dask-ssh ] : "
+                "[ dask ssh ] : "
                 + bcolors.FAIL
                 + "SSH connection error when connecting to {addr}:{port} "
                 "to run '{cmd}'".format(
@@ -85,7 +87,7 @@ def async_ssh(cmd_dict):
             retries += 1
             if retries >= 3:
                 print(
-                    "[ dask-ssh ] : "
+                    "[ dask ssh ] : "
                     + bcolors.FAIL
                     + "SSH connection failed after 3 retries. Exiting."
                     + bcolors.ENDC
@@ -426,7 +428,7 @@ class SSHCluster:
 
         # Start worker nodes
         self.workers = []
-        for i, addr in enumerate(worker_addrs):
+        for addr in worker_addrs:
             self.add_worker(addr)
 
     @gen.coroutine
@@ -507,5 +509,5 @@ class SSHCluster:
     def __enter__(self):
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type, exc_value, traceback):
         self.shutdown()

@@ -7,11 +7,9 @@ omit =
     distributed/cli/utils.py
     distributed/cli/dask_spec.py
     distributed/deploy/ssh.py
-    distributed/_ipython_utils.py
     distributed/_version.py
     distributed/pytest_resourceleaks.py
     distributed/comm/ucx.py
-    distributed/asyncio.py
 
 [report]
 show_missing = True
@@ -27,6 +25,7 @@ exclude_lines =
     # always ignore type checking blocks
     TYPE_CHECKING
     except ImportError
+    @overload
 
 [html]
 directory = coverage_html_report

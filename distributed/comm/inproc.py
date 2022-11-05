@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import itertools
 import logging
@@ -9,10 +11,10 @@ from collections import deque, namedtuple
 from tornado.concurrent import Future
 from tornado.ioloop import IOLoop
 
-from ..protocol import nested_deserialize
-from ..utils import get_ip
-from .core import Comm, CommClosedError, Connector, Listener
-from .registry import Backend, backends
+from distributed.comm.core import Comm, CommClosedError, Connector, Listener
+from distributed.comm.registry import Backend, backends
+from distributed.protocol import nested_deserialize
+from distributed.utils import get_ip
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +90,13 @@ class QueueEmpty(Exception):
     pass
 
 
+def _set_result_unless_cancelled(fut, result):
+    """Helper setting the result only if the future was not cancelled."""
+    if fut.cancelled():
+        return
+    fut.set_result(result)
+
+
 class Queue:
     """
     A single-reader, single-writer, non-threadsafe, peekable queue.
@@ -119,7 +128,7 @@ class Queue:
         if fut is not None:
             assert len(q) == 0
             self._read_future = None
-            fut.set_result(value)
+            _set_result_unless_cancelled(fut, value)
         else:
             q.append(value)
 
@@ -153,7 +162,7 @@ class InProc(Comm):
 
     _initialized = False
 
-    def __init__(
+    def __init__(  # type: ignore[no-untyped-def]
         self,
         local_addr: str,
         peer_addr: str,
@@ -175,7 +184,9 @@ class InProc(Comm):
         self._initialized = True
 
     def _get_finalizer(self):
-        def finalize(write_q=self._write_q, write_loop=self._write_loop, r=repr(self)):
+        r = repr(self)
+
+        def finalize(write_q=self._write_q, write_loop=self._write_loop, r=r):
             logger.warning(f"Closing dangling queue in {r}")
             write_loop.add_callback(write_q.put_nowait, _EOF)
 
@@ -252,6 +263,14 @@ class InProcListener(Listener):
         self.deserialize = deserialize
         self.listen_q = Queue()
 
+    async def _handle_stream(self, comm):
+        try:
+            await self.on_connection(comm)
+        except CommClosedError:
+            logger.debug("Connection closed before handshake completed")
+            return
+        await self.comm_handler(comm)
+
     async def _listen(self):
         while True:
             conn_req = await self.listen_q.get()
@@ -267,12 +286,7 @@ class InProcListener(Listener):
             )
             # Notify connector
             conn_req.c_loop.add_callback(conn_req.conn_event.set)
-            try:
-                await self.on_connection(comm)
-            except CommClosedError:
-                logger.debug("Connection closed before handshake completed")
-                return
-            IOLoop.current().add_callback(self.comm_handler, comm)
+            IOLoop.current().add_callback(self._handle_stream, comm)
 
     def connect_threadsafe(self, conn_req):
         self.loop.add_callback(self.listen_q.put_nowait, conn_req)

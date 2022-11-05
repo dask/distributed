@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import operator
 from time import sleep
@@ -73,13 +75,12 @@ async def test_client_actions(s, a, b, direct_to_workers):
         assert counter._address
         assert hasattr(counter, "increment")
         assert hasattr(counter, "add")
-        assert hasattr(counter, "n")
 
         assert await counter.n == 0
 
         assert counter._address == a.address
 
-        assert isinstance(a.actors[counter.key], Counter)
+        assert isinstance(a.state.actors[counter.key], Counter)
         assert s.tasks[counter.key].actor
 
         await asyncio.gather(counter.increment(), counter.increment())
@@ -122,7 +123,7 @@ async def test_Actor(c, s, a, b):
 
     assert counter._cls == Counter
 
-    assert hasattr(counter, "n")
+    assert await counter.n == 0
     assert hasattr(counter, "increment")
     assert hasattr(counter, "add")
 
@@ -187,7 +188,7 @@ async def test_gc(c, s, a, b):
     await wait(actor)
     del actor
 
-    while a.actors or b.actors:
+    while a.state.actors or b.state.actors:
         await asyncio.sleep(0.01)
 
 
@@ -201,7 +202,7 @@ async def test_track_dependencies(c, s, a, b):
 
     await asyncio.sleep(0.3)
 
-    assert a.actors or b.actors
+    assert a.state.actors or b.state.actors
 
 
 @gen_cluster(client=True)
@@ -209,7 +210,7 @@ async def test_future(c, s, a, b):
     counter = c.submit(Counter, actor=True, workers=[a.address])
     assert isinstance(counter, Future)
     await wait(counter)
-    assert isinstance(a.actors[counter.key], Counter)
+    assert isinstance(a.state.actors[counter.key], Counter)
 
     counter = await counter
     assert isinstance(counter, Actor)
@@ -291,14 +292,13 @@ async def test_failed_worker(c, s, a, b):
 
     assert "actor" in str(info.value).lower()
     assert "worker" in str(info.value).lower()
-    assert "lost" in str(info.value).lower()
 
 
 @gen_cluster(client=True)
 async def bench(c, s, a, b):
     counter = await c.submit(Counter, actor=True)
 
-    for i in range(1000):
+    for _ in range(1000):
         await counter.increment()
 
 
@@ -357,14 +357,17 @@ async def test_many_computations(c, s, a, b):
     counter = await c.submit(Counter, actor=True)
 
     def add(n, counter):
-        for i in range(n):
+        for _ in range(n):
             counter.increment().result()
 
     futures = c.map(add, range(10), counter=counter)
     done = c.submit(lambda x: None, futures)
 
     while not done.done():
-        assert len(s.processing) <= a.nthreads + b.nthreads
+        assert (
+            len([ws for ws in s.workers.values() if ws.processing])
+            <= a.state.nthreads + b.state.nthreads
+        )
         await asyncio.sleep(0.01)
 
     await done
@@ -380,7 +383,7 @@ async def test_thread_safety(c, s, a, b):
             assert self.n == 0
             self.n += 1
 
-            for i in range(20):
+            for _ in range(20):
                 sleep(0.002)
                 assert self.n == 1
             self.n = 0
@@ -429,7 +432,7 @@ async def test_load_balance_map(c, s, *workers):
     actors = c.map(Foo, range(10), y=b, actor=True)
     await wait(actors)
 
-    assert all(len(w.actors) == 2 for w in workers)
+    assert all(len(w.state.actors) == 2 for w in workers)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4, Worker=Nanny)
@@ -474,14 +477,12 @@ async def bench_param_server(c, s, *workers):
     print(format_time(end - start))
 
 
-@pytest.mark.slow
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
-@gen_cluster(client=True, timeout=120)
+@gen_cluster(client=True)
 async def test_compute(c, s, a, b):
     @dask.delayed
     def f(n, counter):
         assert isinstance(counter, Actor)
-        for i in range(n):
+        for _ in range(n):
             counter.increment().result()
 
     @dask.delayed
@@ -503,7 +504,7 @@ def test_compute_sync(client):
     @dask.delayed
     def f(n, counter):
         assert isinstance(counter, Actor), type(counter)
-        for i in range(n):
+        for _ in range(n):
             counter.increment().result()
 
     @dask.delayed
@@ -529,7 +530,10 @@ def test_compute_sync(client):
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1)],
-    config={"distributed.worker.profile.interval": "1ms"},
+    config={
+        "distributed.worker.profile.enabled": True,
+        "distributed.worker.profile.interval": "1ms",
+    },
 )
 async def test_actors_in_profile(c, s, a):
     class Sleeper:
@@ -538,7 +542,7 @@ async def test_actors_in_profile(c, s, a):
 
     sleeper = await c.submit(Sleeper, actor=True)
 
-    for i in range(5):
+    for _ in range(5):
         await sleeper.sleep(0.200)
         if (
             list(a.profile_recent["children"])[0].startswith("sleep")
@@ -584,7 +588,7 @@ async def test_worker_actor_handle_is_weakref(c, s, a, b):
     del counter
 
     start = time()
-    while a.actors or b.data:
+    while a.state.actors or b.data:
         await asyncio.sleep(0.1)
         assert time() < start + 30
 
@@ -627,22 +631,21 @@ def test_worker_actor_handle_is_weakref_from_compute_sync(client):
         assert time() < start + 30
 
 
-def test_one_thread_deadlock():
+def test_one_thread_deadlock(loop):
     class UsesCounter:
         # An actor whose method argument is another actor
 
         def do_inc(self, ac):
             return ac.increment().result()
 
-    with cluster(nworkers=1) as (cl, _):
-        client = Client(cl["address"])
+    with cluster(nworkers=1) as (cl, _), Client(cl["address"], loop=loop) as client:
         ac = client.submit(Counter, actor=True).result()
         ac2 = client.submit(UsesCounter, actor=True).result()
 
         assert ac2.do_inc(ac).result() == 1
 
 
-def test_one_thread_deadlock_timeout():
+def test_one_thread_deadlock_timeout(loop):
     class UsesCounter:
         # An actor whose method argument is another actor
 
@@ -651,23 +654,21 @@ def test_one_thread_deadlock_timeout():
             # cannot expire
             return ac.increment().result(timeout=0.001)
 
-    with cluster(nworkers=1) as (cl, _):
-        client = Client(cl["address"])
+    with cluster(nworkers=1) as (cl, _), Client(cl["address"], loop=loop) as client:
         ac = client.submit(Counter, actor=True).result()
         ac2 = client.submit(UsesCounter, actor=True).result()
 
         assert ac2.do_inc(ac).result() == 1
 
 
-def test_one_thread_deadlock_sync_client():
+def test_one_thread_deadlock_sync_client(loop):
     class UsesCounter:
         # An actor whose method argument is another actor
 
         def do_inc(self, ac):
             return get_client().sync(ac.increment)
 
-    with cluster(nworkers=1) as (cl, _):
-        client = Client(cl["address"])
+    with cluster(nworkers=1) as (cl, _), Client(cl["address"], loop=loop) as client:
         ac = client.submit(Counter, actor=True).result()
         ac2 = client.submit(UsesCounter, actor=True).result()
 
@@ -688,7 +689,7 @@ async def test_async_deadlock(client, s, a):
     assert (await ac2.ado_inc(ac)) == 1
 
 
-def test_exception():
+def test_exception(loop):
     class MyException(Exception):
         pass
 
@@ -700,8 +701,7 @@ def test_exception():
         def prop(self):
             raise MyException
 
-    with cluster(nworkers=2) as (cl, w):
-        client = Client(cl["address"])
+    with cluster(nworkers=2) as (cl, w), Client(cl["address"], loop=loop) as client:
         ac = client.submit(Broken, actor=True).result()
         acfut = ac.method()
         with pytest.raises(MyException):

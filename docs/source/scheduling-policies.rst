@@ -50,7 +50,7 @@ would all belong to the TaskGroup ``random-a1b2c3``.)
 To identify the root(ish) tasks, we use this heuristic:
 
 1.  The TaskGroup has 2x more tasks than there are threads in the cluster
-2.  The TaskGroup has fewer than 5 dependencies across *all* tasks in the group.
+2.  The TaskGroup has fewer than 5 unique dependencies across *all* tasks in the group.
 
     We don't just say "The task has no dependencies", because real-world cases like
     :obj:`dask.array.from_zarr` and :obj:`dask.array.from_array` produce graphs like the one
@@ -82,24 +82,48 @@ where can the task run the soonest, considering both data transfer and worker bu
 
 Tasks that don't meet the root-ish criteria described above are selected as follows:
 
+First, we identify the pool of viable workers:
+
 1.  If the task has no dependencies and no restrictions, then we find the
     least-occupied worker.
 2.  Otherwise, if a task has user-provided restrictions (for example it must
     run on a machine with a GPU) then we restrict the available pool of workers
-    to just that set, otherwise we consider all workers.
-3.  From among this pool of workers, we determine the workers to whom the least
-    amount of data would need to be transferred.
-4.  We break ties by choosing the worker that currently has the fewest tasks,
-    counting both those tasks in memory and those tasks processing currently.
+    to just that set. Otherwise, we consider all workers.
+3.  We restrict the above set to just workers that hold at least one dependency
+    of the task.
+
+From among this pool of workers, we then determine the worker where we think the task will
+start running the soonest, using :meth:`Scheduler.worker_objective`. For each worker:
+
+1.  We consider the estimated runtime of other tasks already queued on that worker.
+    Then, we add how long it will take to transfer any dependencies to that worker that
+    it doesn't already have, based on their size, in bytes, and the measured network
+    bandwith between workers. Note that this does *not* consider (de)serialization
+    time, time to retrieve the data from disk if it was spilled, or potential differences
+    between size in memory and serialized size. In practice, the
+    queue-wait-time (known as *occupancy*) usually dominates, so data will usually be
+    transferred to a different worker if it means the task can start any sooner.
+2.  It's possible for ties to occur with the "start soonest" metric, though uncommon
+    when all workers are busy. We break ties by choosing the worker that has the
+    fewest number of bytes of Dask data stored (including spilled data). Note that
+    this is the same as :ref:`managed <memtypes>` plus :ref:`spilled <memtypes>`
+    memory, not the :ref:`process <memtypes>` memory.
 
 This process is easy to change (and indeed this document may be outdated).  We
-encourage readers to inspect the ``decide_worker`` functions in ``scheduler.py``.
+encourage readers to inspect the ``decide_worker`` and ``worker_objective``
+functions in ``scheduler.py``.
 
 .. currentmodule:: distributed.scheduler
 
 .. autosummary:: decide_worker
 
-.. autosummary:: Scheduler.decide_worker
+.. autosummary:: Scheduler.decide_worker_non_rootish
+
+.. autosummary:: Scheduler.decide_worker_rootish_queuing_disabled
+
+.. autosummary:: Scheduler.decide_worker_rootish_queuing_enabled
+
+.. autosummary:: Scheduler.worker_objective
 
 
 Choosing Tasks
@@ -125,11 +149,11 @@ all of these (they all come up in important workloads) quickly.
 Last in, first out
 ~~~~~~~~~~~~~~~~~~
 
-When a worker finishes a task the immediate dependencies of that task get top
+When a worker finishes a task, the immediate dependencies of that task get top
 priority.  This encourages a behavior of finishing ongoing work immediately
-before starting new work.  This often conflicts with the
-first-come-first-served objective but often results in shorter total runtimes
-and significantly reduced memory footprints.
+before starting new work (depth-first graph traversal). This often conflicts with
+the first-come-first-served objective, but often results in significantly reduced
+memory footprints and, due to avoiding data spillage to disk, better overall runtimes.
 
 .. _priority-break-ties:
 
@@ -162,10 +186,11 @@ However, workers inevitably run out of tasks that were related to tasks they
 were just working on and the last-in-first-out policy eventually exhausts
 itself.  In these cases workers often pull tasks from the common task pool.
 The tasks in this pool *are* ordered in a first-come-first-served basis and so
-workers do behave in a fair scheduling manner at a *coarse* level if not a fine
-grained one.
+workers do behave in a scheduling manner that's fair to multiple submissions
+at a *coarse* level, if not a fine-grained one.
 
-Dask's scheduling policies are short-term-efficient and long-term-fair.
+Dask's scheduling policies are short-term-efficient and long-term-fair
+to multiple clients.
 
 
 Where these decisions are made
@@ -187,9 +212,10 @@ scheduler, and workers at various points in the computation.
     policy between computations.  All tasks from a previous call to compute
     have a higher priority than all tasks from a subsequent call to compute (or
     submit, persist, map, or any operation that generates futures).
-3.  Whenever a task is ready to run the scheduler assigns it to a worker.  The
-    scheduler does not wait based on priority.
-4.  However when the worker receives these tasks it considers their priorities
-    when determining which tasks to prioritize for communication or for
+3.  Whenever a task is ready to run (its dependencies, if any, are complete),
+    the scheduler assigns it to a worker. When multiple tasks are ready at once,
+    they are all submitted to workers, in priority order.
+4.  However, when the worker receives these tasks, it considers their priorities
+    when determining which tasks to prioritize for fetching data or for
     computation.  The worker maintains a heap of all ready-to-run tasks ordered
     by this priority.

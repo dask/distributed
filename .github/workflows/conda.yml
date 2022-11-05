@@ -6,6 +6,7 @@ on:
   pull_request:
     paths:
       - setup.py
+      - requirements.txt
       - continuous_integration/recipes/**
       - .github/workflows/conda.yml
 
@@ -25,7 +26,7 @@ jobs:
     name: Build (and upload)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3.1.0
         with:
           fetch-depth: 0
       - name: Set up Python
@@ -73,6 +74,4 @@ jobs:
         run: |
           # install anaconda for upload
           mamba install anaconda-client
-
           anaconda upload --label dev noarch/*.tar.bz2
-          anaconda upload --label dev linux-64/*.tar.bz2

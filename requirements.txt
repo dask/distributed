@@ -1,14 +1,15 @@
 click >= 6.6
 cloudpickle >= 1.5.0
-dask == 2022.02.0
+dask == 2022.10.2
 jinja2
+locket >= 1.0.0
 msgpack >= 0.6.0
 packaging >= 20.0
 psutil >= 5.0
 sortedcontainers !=2.0.0, !=2.0.1
 tblib >= 1.6.0
 toolz >= 0.8.2
-tornado >= 6.0.3
+tornado >= 6.0.3, <6.2
+urllib3
 zict >= 0.1.3
 pyyaml
-setuptools

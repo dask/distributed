@@ -1,22 +1,28 @@
+"""Implementation of the Active Memory Manager. This is a scheduler extension which
+sends drop/replicate suggestions to the worker.
+
+See also :mod:`distributed.worker_memory` and :mod:`distributed.spill`, which implement
+spill/pause/terminate mechanics on the Worker side.
+"""
 from __future__ import annotations
 
+import abc
 import logging
 from collections import defaultdict
 from collections.abc import Generator
-from typing import TYPE_CHECKING
-
-from tornado.ioloop import PeriodicCallback
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 import dask
 from dask.utils import parse_timedelta
 
-from .core import Status
-from .metrics import time
-from .utils import import_term, log_errors
+from distributed.compatibility import PeriodicCallback
+from distributed.core import Status
+from distributed.metrics import time
+from distributed.utils import import_term, log_errors
 
-if TYPE_CHECKING:  # pragma: nocover
-    from .client import Client
-    from .scheduler import Scheduler, TaskState, WorkerState
+if TYPE_CHECKING:
+    from distributed.client import Client
+    from distributed.scheduler import Scheduler, TaskState, WorkerState
 
 # Main logger. This is reasonably terse also at DEBUG level.
 logger = logging.getLogger(__name__)
@@ -39,14 +45,20 @@ class ActiveMemoryManagerExtension:
     ``distributed.scheduler.active-memory-manager``.
     """
 
+    #: Back-reference to the scheduler holding this extension
     scheduler: Scheduler
+    #: All active policies
     policies: set[ActiveMemoryManagerPolicy]
+    #: Memory measure to use. Must be one of the attributes or properties of
+    #: :class:`distributed.scheduler.MemoryState`.
+    measure: str
+    #: Run automatically every this many seconds
     interval: float
-
-    # These attributes only exist within the scope of self.run()
-    # Current memory (in bytes) allocated on each worker, plus/minus pending actions
+    #: Current memory (in bytes) allocated on each worker, plus/minus pending actions
+    #: This attribute only exist within the scope of self.run().
     workers_memory: dict[WorkerState, int]
-    # Pending replications and deletions for each task
+    #: Pending replications and deletions for each task
+    #: This attribute only exist within the scope of self.run().
     pending: dict[TaskState, tuple[set[WorkerState], set[WorkerState]]]
 
     def __init__(
@@ -56,6 +68,7 @@ class ActiveMemoryManagerExtension:
         # away on the fly a specialized manager, separate from the main one.
         policies: set[ActiveMemoryManagerPolicy] | None = None,
         *,
+        measure: str | None = None,
         register: bool = True,
         start: bool | None = None,
         interval: float | None = None,
@@ -76,6 +89,23 @@ class ActiveMemoryManagerExtension:
         for policy in policies:
             self.add_policy(policy)
 
+        if not measure:
+            measure = dask.config.get(
+                "distributed.scheduler.active-memory-manager.measure"
+            )
+        mem = scheduler.memory
+        measure_domain = {
+            name
+            for name in dir(mem)
+            if not name.startswith("_") and isinstance(getattr(mem, name), int)
+        }
+        if not isinstance(measure, str) or measure not in measure_domain:
+            raise ValueError(
+                "distributed.scheduler.active-memory-manager.measure "
+                "must be one of " + ", ".join(sorted(measure_domain))
+            )
+        self.measure = measure
+
         if register:
             scheduler.extensions["amm"] = self
             scheduler.handlers["amm_handler"] = self.amm_handler
@@ -85,12 +115,13 @@ class ActiveMemoryManagerExtension:
                 dask.config.get("distributed.scheduler.active-memory-manager.interval")
             )
         self.interval = interval
+
         if start is None:
             start = dask.config.get("distributed.scheduler.active-memory-manager.start")
         if start:
             self.start()
 
-    def amm_handler(self, comm, method: str):
+    def amm_handler(self, method: str) -> Any:
         """Scheduler handler, invoked from the Client by
         :class:`~distributed.active_memory_manager.AMMClientProxy`
         """
@@ -123,42 +154,37 @@ class ActiveMemoryManagerExtension:
         self.policies.add(policy)
         policy.manager = self
 
+    @log_errors
     def run_once(self) -> None:
         """Run all policies once and asynchronously (fire and forget) enact their
         recommendations to replicate/drop tasks
         """
-        with log_errors():
-            ts_start = time()
-            # This should never fail since this is a synchronous method
-            assert not hasattr(self, "pending")
+        ts_start = time()
+        # This should never fail since this is a synchronous method
+        assert not hasattr(self, "pending")
 
-            self.pending = {}
-            self.workers_memory = {
-                w: w.memory.optimistic for w in self.scheduler.workers.values()
-            }
-            try:
-                # populate self.pending
-                self._run_policies()
+        self.pending = {}
+        measure = self.measure
+        self.workers_memory = {
+            ws: getattr(ws.memory, measure) for ws in self.scheduler.workers.values()
+        }
+        try:
+            # populate self.pending
+            self._run_policies()
 
-                if self.pending:
-                    self._enact_suggestions()
-            finally:
-                del self.workers_memory
-                del self.pending
-            ts_stop = time()
-            logger.debug(
-                "Active Memory Manager run in %.0fms", (ts_stop - ts_start) * 1000
-            )
+            if self.pending:
+                self._enact_suggestions()
+        finally:
+            del self.workers_memory
+            del self.pending
+        ts_stop = time()
+        logger.debug("Active Memory Manager run in %.0fms", (ts_stop - ts_start) * 1000)
 
     def _run_policies(self) -> None:
         """Sequentially run ActiveMemoryManagerPolicy.run() for all registered policies,
         obtain replicate/drop suggestions, and use them to populate self.pending.
         """
-        candidates: set[WorkerState] | None
-        cmd: str
         ws: WorkerState | None
-        ts: TaskState
-        nreplicas: int
 
         for policy in list(self.policies):  # a policy may remove itself
             logger.debug("Running policy: %s", policy)
@@ -166,33 +192,41 @@ class ActiveMemoryManagerExtension:
             ws = None
             while True:
                 try:
-                    cmd, ts, candidates = policy_gen.send(ws)
+                    suggestion = policy_gen.send(ws)
                 except StopIteration:
                     break  # next policy
 
+                if not isinstance(suggestion, Suggestion):
+                    # legacy: accept plain tuples
+                    suggestion = Suggestion(*suggestion)  # type: ignore[unreachable]
+
                 try:
-                    pending_repl, pending_drop = self.pending[ts]
+                    pending_repl, pending_drop = self.pending[suggestion.ts]
                 except KeyError:
                     pending_repl = set()
                     pending_drop = set()
-                    self.pending[ts] = pending_repl, pending_drop
+                    self.pending[suggestion.ts] = pending_repl, pending_drop
 
-                if cmd == "replicate":
-                    ws = self._find_recipient(ts, candidates, pending_repl)
+                if suggestion.op == "replicate":
+                    ws = self._find_recipient(
+                        suggestion.ts, suggestion.candidates, pending_repl
+                    )
                     if ws:
                         pending_repl.add(ws)
-                        self.workers_memory[ws] += ts.nbytes
+                        self.workers_memory[ws] += suggestion.ts.nbytes
 
-                elif cmd == "drop":
-                    ws = self._find_dropper(ts, candidates, pending_drop)
+                elif suggestion.op == "drop":
+                    ws = self._find_dropper(
+                        suggestion.ts, suggestion.candidates, pending_drop
+                    )
                     if ws:
                         pending_drop.add(ws)
                         self.workers_memory[ws] = max(
-                            0, self.workers_memory[ws] - ts.nbytes
+                            0, self.workers_memory[ws] - suggestion.ts.nbytes
                         )
 
                 else:
-                    raise ValueError(f"Unknown command: {cmd}")  # pragma: nocover
+                    raise ValueError(f"Unknown op: {suggestion.op}")  # pragma: nocover
 
     def _find_recipient(
         self,
@@ -219,6 +253,10 @@ class ActiveMemoryManagerExtension:
 
         if ts.state != "memory":
             log_reject(f"ts.state = {ts.state}")
+            return None
+
+        if ts.actor:
+            log_reject("task is an actor")
             return None
 
         if candidates is None:
@@ -271,6 +309,10 @@ class ActiveMemoryManagerExtension:
 
         if len(ts.who_has) - len(pending_drop) < 2:
             log_reject("less than 2 replicas exist")
+            return None
+
+        if ts.actor:
+            log_reject("task is an actor")
             return None
 
         if candidates is None:
@@ -377,29 +419,44 @@ class ActiveMemoryManagerExtension:
             )
 
 
-class ActiveMemoryManagerPolicy:
+class Suggestion(NamedTuple):
+    op: Literal["replicate", "drop"]
+    ts: TaskState
+    candidates: set[WorkerState] | None = None
+
+
+if TYPE_CHECKING:
+    # TODO import from typing (requires Python >=3.10)
+    from typing_extensions import TypeAlias
+
+    # TODO remove quotes (requires Python >=3.9)
+    SuggestionGenerator: TypeAlias = Generator[Suggestion, "WorkerState | None", None]
+
+
+class ActiveMemoryManagerPolicy(abc.ABC):
     """Abstract parent class"""
+
+    __slots__ = ("manager",)
 
     manager: ActiveMemoryManagerExtension
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
 
+    @abc.abstractmethod
     def run(
         self,
-    ) -> Generator[
-        tuple[str, TaskState, set[WorkerState] | None],
-        WorkerState | None,
-        None,
-    ]:
+    ) -> SuggestionGenerator:
         """This method is invoked by the ActiveMemoryManager every few seconds, or
         whenever the user invokes ``client.amm.run_once``.
-        It is an iterator that must emit any of the following:
 
-        - "replicate", <TaskState>, None
-        - "replicate", <TaskState>, {subset of potential workers to replicate to}
-        - "drop", <TaskState>, None
-        - "drop", <TaskState>, {subset of potential workers to drop from}
+        It is an iterator that must emit
+        :class:`~distributed.active_memory_manager.Suggestion` objects:
+
+        - ``Suggestion("replicate", <TaskState>)``
+        - ``Suggestion("replicate", <TaskState>, {subset of potential workers to replicate to})``
+        - ``Suggeston("drop", <TaskState>)``
+        - ``Suggestion("drop", <TaskState>, {subset of potential workers to drop from})``
 
         Each element yielded indicates the desire to create or destroy a single replica
         of a key. If a subset of workers is not provided, it defaults to all workers on
@@ -412,19 +469,18 @@ class ActiveMemoryManagerPolicy:
 
         .. code-block:: python
 
-           choice = (yield "replicate", ts, None)
+           choice = (yield Suggestion("replicate", ts))
 
         ``choice`` is either a WorkerState or None; the latter is returned if the
         ActiveMemoryManager chose to disregard the request.
 
-        The current pending (accepted) commands can be inspected on
-        ``self.manager.pending``; this includes the commands previously yielded by this
-        same method.
+        The current pending (accepted) suggestions can be inspected on
+        ``self.manager.pending``; this includes the suggestions previously yielded by
+        this same method.
 
-        The current memory usage on each worker, *downstream of all pending commands*,
-        can be inspected on ``self.manager.workers_memory``.
+        The current memory usage on each worker, *downstream of all pending
+        suggestions*, can be inspected on ``self.manager.workers_memory``.
         """
-        raise NotImplementedError("Virtual method")  # pragma: nocover
 
 
 class AMMClientProxy:
@@ -441,20 +497,20 @@ class AMMClientProxy:
     def __init__(self, client: Client):
         self._client = client
 
-    def _run(self, method: str):
+    def _run(self, method: str) -> Any:
         """Remotely invoke ActiveMemoryManagerExtension.amm_handler"""
         return self._client.sync(self._client.scheduler.amm_handler, method=method)
 
-    def start(self):
+    def start(self) -> Any:
         return self._run("start")
 
-    def stop(self):
+    def stop(self) -> Any:
         return self._run("stop")
 
-    def run_once(self):
+    def run_once(self) -> Any:
         return self._run("run_once")
 
-    def running(self):
+    def running(self) -> Any:
         return self._run("running")
 
 
@@ -463,7 +519,7 @@ class ReduceReplicas(ActiveMemoryManagerPolicy):
     drop the excess replicas.
     """
 
-    def run(self):
+    def run(self) -> SuggestionGenerator:
         nkeys = 0
         ndrop = 0
 
@@ -485,7 +541,7 @@ class ReduceReplicas(ActiveMemoryManagerPolicy):
                 nkeys += 1
                 ndrop += ndrop_key
                 for _ in range(ndrop_key):
-                    yield "drop", ts, None
+                    yield Suggestion("drop", ts)
 
         if ndrop:
             logger.debug(
@@ -548,6 +604,8 @@ class RetireWorker(ActiveMemoryManagerPolicy):
         URI of the worker to be retired
     """
 
+    __slots__ = ("address", "no_recipients")
+
     address: str
     no_recipients: bool
 
@@ -558,11 +616,21 @@ class RetireWorker(ActiveMemoryManagerPolicy):
     def __repr__(self) -> str:
         return f"RetireWorker({self.address!r})"
 
-    def run(self):
+    def run(self) -> SuggestionGenerator:
         """"""
         ws = self.manager.scheduler.workers.get(self.address)
         if ws is None:
             logger.debug("Removing policy %s: Worker no longer in cluster", self)
+            self.manager.policies.remove(self)
+            return
+
+        if ws.actors:
+            logger.warning(
+                f"Tried retiring worker {self.address}, but it holds actor(s) "
+                f"{set(ws.actors)}, which can't be moved."
+                "The worker will not be retired."
+            )
+            self.no_recipients = True
             self.manager.policies.remove(self)
             return
 
@@ -571,6 +639,11 @@ class RetireWorker(ActiveMemoryManagerPolicy):
 
         logger.debug("Retiring %s", ws)
         for ts in ws.has_what:
+            if ts.actor:
+                # This is just a proxy Actor object; if there were any originals we
+                # would have stopped earlier
+                continue
+
             if len(ts.who_has) > 1:
                 # There are already replicas of this key on other workers.
                 # Suggest dropping the replica from this worker.
@@ -588,7 +661,7 @@ class RetireWorker(ActiveMemoryManagerPolicy):
                 #    key are on workers being retired and the other RetireWorker
                 #    instances already made the same suggestion. We need to deal with
                 #    this case and create a replica elsewhere.
-                drop_ws = (yield "drop", ts, {ws})
+                drop_ws = yield Suggestion("drop", ts, {ws})
                 if drop_ws:
                     continue  # Use case 1 or 2
                 if ts.who_has & self.manager.scheduler.running:
@@ -606,7 +679,7 @@ class RetireWorker(ActiveMemoryManagerPolicy):
                 has_pending_repl = False
 
             if not has_pending_repl:
-                rec_ws = (yield "replicate", ts, None)
+                rec_ws = yield Suggestion("replicate", ts)
                 if not rec_ws:
                     # replication was rejected by the AMM (see _find_recipient)
                     nno_rec += 1
@@ -637,6 +710,12 @@ class RetireWorker(ActiveMemoryManagerPolicy):
 
     def done(self) -> bool:
         """Return True if it is safe to close the worker down; False otherwise"""
+        if self not in self.manager.policies:
+            # Either the no_recipients flag has been raised, or there were no unique
+            # replicas as of the latest AMM run. Note that due to tasks transitioning
+            # from running to memory there may be some now; it's OK to lose them and
+            # just recompute them somewhere else.
+            return True
         ws = self.manager.scheduler.workers.get(self.address)
         if ws is None:
             return True

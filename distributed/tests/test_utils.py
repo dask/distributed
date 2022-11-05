@@ -1,12 +1,16 @@
-import array
+from __future__ import annotations
+
 import asyncio
 import contextvars
 import functools
 import io
+import multiprocessing
 import os
 import queue
 import socket
 import traceback
+import warnings
+from array import array
 from collections import deque
 from time import sleep
 
@@ -18,21 +22,22 @@ import dask
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.metrics import time
 from distributed.utils import (
-    LRU,
     All,
     Log,
     Logs,
     LoopRunner,
     TimeoutError,
     _maybe_complex,
-    ensure_bytes,
     ensure_ip,
+    ensure_memoryview,
     format_dashboard_link,
     get_ip_interface,
+    get_mp_context,
     get_traceback,
     is_kernel,
     is_valid_xml,
     iscoroutinefunction,
+    log_errors,
     nbytes,
     offload,
     open_port,
@@ -57,7 +62,8 @@ from distributed.utils_test import (
 )
 
 
-def test_All(loop):
+@gen_test()
+async def test_All():
     async def throws():
         1 / 0
 
@@ -67,21 +73,18 @@ def test_All(loop):
     async def inc(x):
         return x + 1
 
-    async def f():
-        results = await All([inc(i) for i in range(10)])
-        assert results == list(range(1, 11))
+    results = await All([inc(i) for i in range(10)])
+    assert results == list(range(1, 11))
 
-        start = time()
-        for tasks in [[throws(), slow()], [slow(), throws()]]:
-            try:
-                await All(tasks)
-                assert False
-            except ZeroDivisionError:
-                pass
-            end = time()
-            assert end - start < 10
-
-    loop.run_sync(f)
+    start = time()
+    for tasks in [[throws(), slow()], [slow(), throws()]]:
+        try:
+            await All(tasks)
+            assert False
+        except ZeroDivisionError:
+            pass
+        end = time()
+        assert end - start < 10
 
 
 def test_sync_error(loop_in_thread):
@@ -121,10 +124,11 @@ def test_sync_timeout(loop_in_thread):
 
 
 def test_sync_closed_loop():
-    loop = IOLoop.current()
+    async def get_loop():
+        return IOLoop.current()
+
+    loop = asyncio.run(get_loop())
     loop.close()
-    IOLoop.clear_current()
-    IOLoop.clear_instance()
 
     with pytest.raises(RuntimeError) as exc_info:
         sync(loop, inc, 1)
@@ -159,6 +163,18 @@ def test_get_ip_interface():
     assert get_ip_interface(iface) == "127.0.0.1"
     with pytest.raises(ValueError, match=f"'__notexist'.+network interface.+'{iface}'"):
         get_ip_interface("__notexist")
+
+
+@pytest.mark.skipif(
+    WINDOWS, reason="Windows doesn't support different multiprocessing contexts"
+)
+def test_get_mp_context():
+    # this will need updated if the default multiprocessing context changes from spawn.
+    assert get_mp_context() is multiprocessing.get_context("spawn")
+    with dask.config.set({"distributed.worker.multiprocessing-method": "forkserver"}):
+        assert get_mp_context() is multiprocessing.get_context("forkserver")
+    with dask.config.set({"distributed.worker.multiprocessing-method": "fork"}):
+        assert get_mp_context() is multiprocessing.get_context("fork")
 
 
 def test_truncate_exception():
@@ -247,25 +263,73 @@ def test_seek_delimiter_endline():
     assert f.tell() == 7
 
 
-def test_ensure_bytes():
-    data = [b"1", "1", memoryview(b"1"), bytearray(b"1"), array.array("b", [49])]
-    for d in data:
-        result = ensure_bytes(d)
-        assert isinstance(result, bytes)
-        assert result == b"1"
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"",
+        bytearray(),
+        b"1",
+        bytearray(b"1"),
+        memoryview(b"1"),
+        memoryview(bytearray(b"1")),
+        array("B", b"1"),
+        array("I", range(5)),
+        memoryview(b"123456")[1:-1],
+        memoryview(b"123456")[::2],
+        memoryview(array("I", range(5)))[1:-1],
+        memoryview(array("I", range(5)))[::2],
+        memoryview(b"123456").cast("B", (2, 3)),
+        memoryview(b"0123456789").cast("B", (5, 2))[1:-1],
+        memoryview(b"0123456789").cast("B", (5, 2))[::2],
+    ],
+)
+def test_ensure_memoryview(data):
+    data_mv = memoryview(data)
+    result = ensure_memoryview(data)
+    assert isinstance(result, memoryview)
+    assert result.contiguous
+    assert result.ndim == 1
+    assert result.format == "B"
+    assert result == bytes(data_mv)
+    if data_mv.nbytes and data_mv.contiguous:
+        assert result.readonly == data_mv.readonly
+        if isinstance(data, memoryview):
+            if data.ndim == 1 and data.format == "B":
+                assert id(result) == id(data)
+            else:
+                assert id(data) != id(result)
+    else:
+        assert id(result.obj) != id(data_mv.obj)
+        assert not result.readonly
 
 
-def test_ensure_bytes_ndarray():
+@pytest.mark.parametrize(
+    "dt, nitems, shape, strides",
+    [
+        ("i8", 12, (12,), (8,)),
+        ("i8", 12, (3, 4), (32, 8)),
+        ("i8", 12, (4, 3), (8, 32)),
+        ("i8", 12, (3, 2), (32, 16)),
+        ("i8", 12, (2, 3), (16, 32)),
+    ],
+)
+def test_ensure_memoryview_ndarray(dt, nitems, shape, strides):
     np = pytest.importorskip("numpy")
-    result = ensure_bytes(np.arange(12))
-    assert isinstance(result, bytes)
+    data = np.ndarray(
+        shape, dtype=dt, buffer=np.arange(nitems, dtype=dt), strides=strides
+    )
+    result = ensure_memoryview(data)
+    assert isinstance(result, memoryview)
+    assert result.ndim == 1
+    assert result.format == "B"
+    assert result.contiguous
 
 
-def test_ensure_bytes_pyarrow_buffer():
+def test_ensure_memoryview_pyarrow_buffer():
     pa = pytest.importorskip("pyarrow")
     buf = pa.py_buffer(b"123")
-    result = ensure_bytes(buf)
-    assert isinstance(result, bytes)
+    result = ensure_memoryview(buf)
+    assert isinstance(result, memoryview)
 
 
 def test_nbytes():
@@ -323,25 +387,48 @@ def assert_not_running(loop):
             q.get(timeout=0.02)
 
 
+_loop_not_running_property_warning = functools.partial(
+    pytest.warns,
+    DeprecationWarning,
+    match=r"Accessing the loop property while the loop is not running is deprecated",
+)
+_explicit_loop_is_not_running_warning = functools.partial(
+    pytest.warns,
+    DeprecationWarning,
+    match=r"Constructing LoopRunner\(loop=loop\) without a running loop is deprecated",
+)
+_implicit_loop_is_not_running_warning = functools.partial(
+    pytest.warns,
+    DeprecationWarning,
+    match=r"Constructing a LoopRunner\(asynchronous=True\) without a running loop is deprecated",
+)
+
+
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
 def test_loop_runner(loop_in_thread):
     # Implicit loop
     loop = IOLoop()
     loop.make_current()
     runner = LoopRunner()
-    assert runner.loop not in (loop, loop_in_thread)
+    with _loop_not_running_property_warning():
+        assert runner.loop not in (loop, loop_in_thread)
     assert not runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
     runner.start()
     assert runner.is_started()
     assert_running(runner.loop)
     runner.stop()
     assert not runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
 
     # Explicit loop
     loop = IOLoop()
-    runner = LoopRunner(loop=loop)
-    assert runner.loop is loop
+    with _explicit_loop_is_not_running_warning():
+        runner = LoopRunner(loop=loop)
+    with _loop_not_running_property_warning():
+        assert runner.loop is loop
     assert not runner.is_started()
     assert_not_running(loop)
     runner.start()
@@ -365,38 +452,51 @@ def test_loop_runner(loop_in_thread):
     # Implicit loop, asynchronous=True
     loop = IOLoop()
     loop.make_current()
-    runner = LoopRunner(asynchronous=True)
-    assert runner.loop is loop
+    with _implicit_loop_is_not_running_warning():
+        runner = LoopRunner(asynchronous=True)
+    with _loop_not_running_property_warning():
+        assert runner.loop is loop
     assert not runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
     runner.start()
     assert runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
     runner.stop()
     assert not runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
 
     # Explicit loop, asynchronous=True
     loop = IOLoop()
-    runner = LoopRunner(loop=loop, asynchronous=True)
-    assert runner.loop is loop
+    with _explicit_loop_is_not_running_warning():
+        runner = LoopRunner(loop=loop, asynchronous=True)
+    with _loop_not_running_property_warning():
+        assert runner.loop is loop
     assert not runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
     runner.start()
     assert runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
     runner.stop()
     assert not runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
 
 
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
 def test_two_loop_runners(loop_in_thread):
     # Loop runners tied to the same loop should cooperate
 
     # ABCCBA
     loop = IOLoop()
-    a = LoopRunner(loop=loop)
-    b = LoopRunner(loop=loop)
+    with _explicit_loop_is_not_running_warning():
+        a = LoopRunner(loop=loop)
+    with _explicit_loop_is_not_running_warning():
+        b = LoopRunner(loop=loop)
     assert_not_running(loop)
     a.start()
     assert_running(loop)
@@ -414,8 +514,10 @@ def test_two_loop_runners(loop_in_thread):
 
     # ABCABC
     loop = IOLoop()
-    a = LoopRunner(loop=loop)
-    b = LoopRunner(loop=loop)
+    with _explicit_loop_is_not_running_warning():
+        a = LoopRunner(loop=loop)
+    with _explicit_loop_is_not_running_warning():
+        b = LoopRunner(loop=loop)
     assert_not_running(loop)
     a.start()
     assert_running(loop)
@@ -460,36 +562,44 @@ async def test_loop_runner_gen():
 
 
 @gen_test()
-async def test_all_exceptions_logging():
-    async def throws():
-        raise Exception("foo1234")
+async def test_all_quiet_exceptions():
+    class CustomError(Exception):
+        pass
+
+    async def throws(msg):
+        raise CustomError(msg)
 
     with captured_logger("") as sio:
-        try:
-            await All([throws() for _ in range(5)], quiet_exceptions=Exception)
-        except Exception:
-            pass
+        with pytest.raises(CustomError):
+            await All([throws("foo") for _ in range(5)])
+        with pytest.raises(CustomError):
+            await All([throws("bar") for _ in range(5)], quiet_exceptions=CustomError)
 
-        import gc
-
-        gc.collect()
-        await asyncio.sleep(0.1)
-
-    assert "foo1234" not in sio.getvalue()
+    assert "bar" not in sio.getvalue()
+    assert "foo" in sio.getvalue()
 
 
 def test_warn_on_duration():
-    with pytest.warns(None) as record:
+    with warnings.catch_warnings(record=True) as record:
         with warn_on_duration("10s", "foo"):
             pass
     assert not record
 
-    with pytest.warns(None) as record:
+    with pytest.warns(UserWarning, match=r"foo") as record:
         with warn_on_duration("1ms", "foo"):
             sleep(0.100)
 
     assert record
-    assert any("foo" in str(rec.message) for rec in record)
+
+    with pytest.warns(UserWarning) as record:
+        with warn_on_duration("1ms", "{duration:.4f}"):
+            start = time()
+            sleep(0.100)
+            measured = time() - start
+
+    assert record
+    assert len(record) == 1
+    assert float(str(record[0].message)) >= float(str(f"{measured:.4f}"))
 
 
 def test_logs():
@@ -528,40 +638,35 @@ def test_parse_ports():
     assert parse_ports(23) == [23]
     assert parse_ports("45") == [45]
     assert parse_ports("100:103") == [100, 101, 102, 103]
+    assert parse_ports([100, 101, 102, 103]) == [100, 101, 102, 103]
+
+    out = parse_ports((100, 101, 102, 103))
+    assert out == [100, 101, 102, 103]
+    assert isinstance(out, list)
 
     with pytest.raises(ValueError, match="port_stop must be greater than port_start"):
         parse_ports("103:100")
+    with pytest.raises(TypeError):
+        parse_ports(100.5)
+    with pytest.raises(TypeError):
+        parse_ports([100, 100.5])
+    with pytest.raises(ValueError):
+        parse_ports("foo")
+    with pytest.raises(ValueError):
+        parse_ports("100.5")
 
 
-def test_lru():
-
-    l = LRU(maxsize=3)
-    l["a"] = 1
-    l["b"] = 2
-    l["c"] = 3
-    assert list(l.keys()) == ["a", "b", "c"]
-
-    # Use "a" and ensure it becomes the most recently used item
-    l["a"]
-    assert list(l.keys()) == ["b", "c", "a"]
-
-    # Ensure maxsize is respected
-    l["d"] = 4
-    assert len(l) == 3
-    assert list(l.keys()) == ["c", "a", "d"]
-
-
-@pytest.mark.asyncio
+@gen_test()
 async def test_offload():
     assert (await offload(inc, 1)) == 2
     assert (await offload(lambda x, y: x + y, 1, y=2)) == 3
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_offload_preserves_contextvars():
     var = contextvars.ContextVar("var")
 
-    async def set_var(v: str):
+    async def set_var(v: str) -> None:
         var.set(v)
         r = await offload(var.get)
         assert r == v
@@ -769,3 +874,112 @@ def test_recursive_to_dict_no_nest():
         ],
     }
     assert recursive_to_dict(info) == expect
+
+
+@gen_test()
+async def test_log_errors():
+    class CustomError(Exception):
+        pass
+
+    # Use the logger of the caller module
+    with captured_logger("test_utils") as caplog:
+
+        # Context manager
+        with log_errors():
+            pass
+
+        with log_errors():
+            with log_errors():
+                pass
+
+        with log_errors(pdb=True):
+            pass
+
+        with pytest.raises(CustomError):
+            with log_errors():
+                raise CustomError("err1")
+
+        with pytest.raises(CustomError):
+            with log_errors():
+                with log_errors():
+                    raise CustomError("err2")
+
+        # Bare decorator
+        @log_errors
+        def _():
+            return 123
+
+        assert _() == 123
+
+        @log_errors
+        def _():
+            raise CustomError("err3")
+
+        with pytest.raises(CustomError):
+            _()
+
+        @log_errors
+        def inner():
+            raise CustomError("err4")
+
+        @log_errors
+        def outer():
+            inner()
+
+        with pytest.raises(CustomError):
+            outer()
+
+        # Decorator with parameters
+        @log_errors()
+        def _():
+            return 456
+
+        assert _() == 456
+
+        @log_errors()
+        def _():
+            with log_errors():
+                raise CustomError("err5")
+
+        with pytest.raises(CustomError):
+            _()
+
+        @log_errors(pdb=True)
+        def _():
+            return 789
+
+        assert _() == 789
+
+        # Decorate async function
+        @log_errors
+        async def _():
+            return 123
+
+        assert await _() == 123
+
+        @log_errors
+        async def _():
+            raise CustomError("err6")
+
+        with pytest.raises(CustomError):
+            await _()
+
+    assert [row for row in caplog.getvalue().splitlines() if row.startswith("err")] == [
+        "err1",
+        "err2",
+        "err2",
+        "err3",
+        "err4",
+        "err4",
+        "err5",
+        "err5",
+        "err6",
+    ]
+
+    # Test unroll_stack
+    with captured_logger("distributed.utils") as caplog:
+        with pytest.raises(CustomError):
+            with log_errors(unroll_stack=0):
+                raise CustomError("err7")
+
+    assert caplog.getvalue().startswith("err7\n")

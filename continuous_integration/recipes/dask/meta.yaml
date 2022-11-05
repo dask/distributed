@@ -19,14 +19,17 @@ build:
 requirements:
   host:
     - python >=3.8
+    - dask-core {{ dask_version }}
+    - distributed {{ version }}
   run:
     - python >=3.8
-    - dask-core >={{ dask_version }}
-    - distributed {{ version }}=*{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}*
+    - {{ pin_compatible('dask-core', max_pin='x.x.x.x') }}
+    - {{ pin_compatible('distributed', exact=True) }}
     - cytoolz >=0.8.2
+    - lz4
     - numpy >=1.18
     - pandas >=1.0
-    - bokeh >=2.1.1
+    - bokeh >=2.4.2,<3
     - jinja2
 
   run_constrained:
@@ -44,6 +47,10 @@ test:
     - dask.diagnostics
     - dask.distributed
     - distributed
+    
+  commands:
+    - dask --version
+    - dask info versions
 
 about:
   home: https://dask.org/

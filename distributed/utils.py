@@ -19,17 +19,21 @@ import warnings
 import weakref
 import xml.etree.ElementTree
 from asyncio import TimeoutError
-from collections import OrderedDict, UserDict, deque
-from collections.abc import Container, KeysView, ValuesView
+from collections import deque
+from collections.abc import Callable, Collection, Container, KeysView, ValuesView
 from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
+from datetime import timedelta
+from functools import wraps
 from hashlib import md5
 from importlib.util import cache_from_source
+from pickle import PickleBuffer
 from time import sleep
 from types import ModuleType
+from typing import TYPE_CHECKING
 from typing import Any as AnyType
-from typing import ClassVar
+from typing import ClassVar, Iterator, TypeVar, overload
 
 import click
 import tblib.pickling_support
@@ -45,11 +49,13 @@ from tornado.ioloop import IOLoop
 
 import dask
 from dask import istask
+from dask.utils import ensure_bytes as _ensure_bytes
+from dask.utils import key_split
 from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
-from .compatibility import WINDOWS
-from .metrics import time
+from distributed.compatibility import WINDOWS
+from distributed.metrics import time
 
 try:
     from dask.context import thread_state
@@ -65,19 +71,42 @@ else:
 logger = _logger = logging.getLogger(__name__)
 
 
+if TYPE_CHECKING:
+    # TODO: import from typing (requires Python >=3.10)
+    from typing_extensions import ParamSpec
+
+    P = ParamSpec("P")
+    T = TypeVar("T")
+
 no_default = "__no_default__"
 
+_forkserver_preload_set = False
 
-def _initialize_mp_context():
+
+def get_mp_context():
+    """Create a multiprocessing context
+
+    The context type is controlled by the
+    ``distributed.worker.multiprocessing-method`` configuration key.
+
+    Returns
+    -------
+    multiprocessing.BaseContext
+        The multiprocessing context
+
+    Notes
+    -----
+    Repeated calls with the same method will return the same object
+    (since multiprocessing.get_context returns singleton instances).
+    """
+    global _forkserver_preload_set
     method = dask.config.get("distributed.worker.multiprocessing-method")
     ctx = multiprocessing.get_context(method)
-    if method == "forkserver":
+    if method == "forkserver" and not _forkserver_preload_set:
         # Makes the test suite much faster
         preload = ["distributed"]
-        if "pkg_resources" in sys.modules:
-            preload.append("pkg_resources")
 
-        from .versions import optional_packages, required_packages
+        from distributed.versions import optional_packages, required_packages
 
         for pkg, _ in required_packages + optional_packages:
             try:
@@ -87,11 +116,9 @@ def _initialize_mp_context():
             else:
                 preload.append(pkg)
         ctx.set_forkserver_preload(preload)
+        _forkserver_preload_set = True
 
     return ctx
-
-
-mp_context = _initialize_mp_context()
 
 
 def has_arg(func, argname):
@@ -100,7 +127,8 @@ def has_arg(func, argname):
     """
     while True:
         try:
-            if argname in inspect.getfullargspec(func).args:
+            argspec = inspect.getfullargspec(func)
+            if argname in set(argspec.args) | set(argspec.kwonlyargs):
                 return True
         except TypeError:
             break
@@ -406,12 +434,26 @@ class LoopRunner:
     def __init__(self, loop=None, asynchronous=False):
         if loop is None:
             if asynchronous:
+                try:
+                    asyncio.get_running_loop()
+                except RuntimeError:
+                    warnings.warn(
+                        "Constructing a LoopRunner(asynchronous=True) without a running loop is deprecated",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
                 self._loop = IOLoop.current()
             else:
                 # We're expecting the loop to run in another thread,
                 # avoid re-using this thread's assigned loop
                 self._loop = IOLoop()
         else:
+            if not loop.asyncio_loop.is_running():
+                warnings.warn(
+                    "Constructing LoopRunner(loop=loop) without a running loop is deprecated",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
             self._loop = loop
         self._asynchronous = asynchronous
         self._loop_thread = None
@@ -542,6 +584,13 @@ class LoopRunner:
 
     @property
     def loop(self):
+        loop = self._loop
+        if not loop.asyncio_loop.is_running():
+            warnings.warn(
+                "Accessing the loop property while the loop is not running is deprecated",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         return self._loop
 
 
@@ -595,66 +644,8 @@ def is_kernel():
     return getattr(get_ipython(), "kernel", None) is not None
 
 
-hex_pattern = re.compile("[a-f]+")
-
-
-@functools.lru_cache(100000)
-def key_split(s):
-    """
-    >>> key_split('x')
-    'x'
-    >>> key_split('x-1')
-    'x'
-    >>> key_split('x-1-2-3')
-    'x'
-    >>> key_split(('x-2', 1))
-    'x'
-    >>> key_split("('x-2', 1)")
-    'x'
-    >>> key_split("('x', 1)")
-    'x'
-    >>> key_split('hello-world-1')
-    'hello-world'
-    >>> key_split(b'hello-world-1')
-    'hello-world'
-    >>> key_split('ae05086432ca935f6eba409a8ecd4896')
-    'data'
-    >>> key_split('<module.submodule.myclass object at 0xdaf372')
-    'myclass'
-    >>> key_split(None)
-    'Other'
-    >>> key_split('x-abcdefab')  # ignores hex
-    'x'
-    """
-    if type(s) is bytes:
-        s = s.decode()
-    if type(s) is tuple:
-        s = s[0]
-    try:
-        words = s.split("-")
-        if not words[0][0].isalpha():
-            result = words[0].split(",")[0].strip("'(\"")
-        else:
-            result = words[0]
-        for word in words[1:]:
-            if word.isalpha() and not (
-                len(word) == 8 and hex_pattern.match(word) is not None
-            ):
-                result += "-" + word
-            else:
-                break
-        if len(result) == 32 and re.match(r"[a-f0-9]{32}", result):
-            return "data"
-        else:
-            if result[0] == "<":
-                result = result.strip("<>").split()[0].split(".")[-1]
-            return result
-    except Exception:
-        return "Other"
-
-
-def key_split_group(x) -> str:
-    """A more fine-grained version of key_split
+def key_split_group(x: object) -> str:
+    """A more fine-grained version of key_split.
 
     >>> key_split_group(('x-2', 1))
     'x-2'
@@ -669,10 +660,9 @@ def key_split_group(x) -> str:
     >>> key_split_group('x-1')
     'x'
     """
-    typ = type(x)
-    if typ is tuple:
+    if isinstance(x, tuple):
         return x[0]
-    elif typ is str:
+    elif isinstance(x, str):
         if x[0] == "(":
             return x.split(",", 1)[0].strip("()\"'")
         elif len(x) == 32 and re.match(r"[a-f0-9]{32}", x):
@@ -681,30 +671,108 @@ def key_split_group(x) -> str:
             return x.strip("<>").split()[0].split(".")[-1]
         else:
             return key_split(x)
-    elif typ is bytes:
+    elif isinstance(x, bytes):
         return key_split_group(x.decode())
     else:
         return "Other"
 
 
-@contextmanager
-def log_errors(pdb=False):
-    from .comm import CommClosedError
+@overload
+def log_errors(func: Callable[P, T], /) -> Callable[P, T]:
+    ...
 
-    try:
-        yield
-    except (CommClosedError, gen.Return):
-        raise
-    except Exception as e:
+
+@overload
+def log_errors(*, pdb: bool = False, unroll_stack: int = 1) -> _LogErrors:
+    ...
+
+
+def log_errors(func=None, /, *, pdb=False, unroll_stack=1):
+    """Log any errors and then reraise them.
+
+    This can be used:
+
+    - As a context manager::
+
+        with log_errors(...):
+            ...
+
+    - As a bare function decorator::
+
+        @log_errors
+        def func(...):
+            ...
+
+    - As a function decorator with parameters::
+
+        @log_errors(...)
+        def func(...):
+            ...
+
+    Parameters
+    ----------
+    pdb: bool, optional
+        Set to True to break into the debugger in case of exception
+    unroll_stack: int, optional
+        Number of levels of stack to unroll when determining the module's name for the
+        purpose of logging. Normally you should omit this. Set to 2 if you are writing a
+        helper function, context manager, or decorator.
+    """
+    le = _LogErrors(pdb=pdb, unroll_stack=unroll_stack)
+    return le(func) if func else le
+
+
+class _LogErrors:
+    __slots__ = ("pdb", "unroll_stack")
+
+    pdb: bool
+    unroll_stack: int
+
+    def __init__(self, pdb: bool, unroll_stack: int):
+        self.pdb = pdb
+        self.unroll_stack = unroll_stack
+
+    def __call__(self, func: Callable[P, T], /) -> Callable[P, T]:
+        self.unroll_stack += 1
+
+        if inspect.iscoroutinefunction(func):
+
+            async def wrapper(*args, **kwargs):
+                with self:
+                    return await func(*args, **kwargs)
+
+        else:
+
+            def wrapper(*args, **kwargs):
+                with self:
+                    return func(*args, **kwargs)
+
+        return wraps(func)(wrapper)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        from distributed.comm import CommClosedError
+
+        if not exc_type or issubclass(exc_type, (CommClosedError, gen.Return)):
+            return
+
+        stack = inspect.stack()
+        frame = stack[self.unroll_stack]
+        mod = inspect.getmodule(frame[0])
+        modname = mod.__name__
+
         try:
-            logger.exception(e)
-        except TypeError:  # logger becomes None during process cleanup
-            pass
-        if pdb:
-            import pdb
+            logger = logging.getLogger(modname)
+            logger.exception(exc_value)
+        except Exception:  # Interpreter teardown
+            pass  # pragma: nocover
 
-            pdb.set_trace()
-        raise
+        if self.pdb:
+            import pdb  # pragma: nocover
+
+            pdb.set_trace()  # pragma: nocover
 
 
 def silence_logging(level, root="distributed"):
@@ -915,35 +983,55 @@ def ensure_bytes(s):
     >>> ensure_bytes(b'123')
     b'123'
     """
-    if isinstance(s, bytes):
-        return s
-    elif hasattr(s, "encode"):
-        return s.encode()
+    warnings.warn(
+        "`distributed.utils.ensure_bytes` is deprecated. "
+        "Please switch to `dask.utils.ensure_bytes`. "
+        "This will be removed in `2022.6.0`.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return _ensure_bytes(s)
+
+
+def ensure_memoryview(obj):
+    """Ensure `obj` is a 1-D contiguous `uint8` `memoryview`"""
+    mv: memoryview
+    if type(obj) is memoryview:
+        mv = obj
     else:
-        try:
-            return bytes(s)
-        except Exception as e:
-            raise TypeError(
-                "Object %s is neither a bytes object nor has an encode method" % s
-            ) from e
+        mv = memoryview(obj)
+
+    if not mv.nbytes:
+        # Drop `obj` reference to permit freeing underlying data
+        return memoryview(bytearray())
+    elif not mv.contiguous:
+        # Copy to contiguous form of expected shape & type
+        return memoryview(bytearray(mv))
+    elif mv.ndim != 1 or mv.format != "B":
+        # Perform zero-copy reshape & cast
+        # Use `PickleBuffer.raw()` as `memoryview.cast()` fails with F-order
+        # xref: https://github.com/python/cpython/issues/91484
+        return PickleBuffer(mv).raw()
+    else:
+        # Return `memoryview` as it already meets requirements
+        return mv
 
 
-def open_port(host=""):
+def open_port(host: str = "") -> int:
     """Return a probably-open port
 
     There is a chance that this port will be taken by the operating system soon
     after returning from this function.
     """
     # http://stackoverflow.com/questions/2838244/get-open-tcp-port-in-python
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind((host, 0))
-    s.listen(1)
-    port = s.getsockname()[1]
-    s.close()
-    return port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((host, 0))
+        s.listen(1)
+        port = s.getsockname()[1]
+        return port
 
 
-def import_file(path: str):
+def import_file(path: str) -> list[ModuleType]:
     """Loads modules for a file (.py, .zip, .egg)"""
     directory, filename = os.path.split(path)
     name, ext = os.path.splitext(filename)
@@ -1017,7 +1105,7 @@ def json_load_robust(fn, load=json.load):
     """Reads a JSON file from disk that may be being written as we read"""
     while not os.path.exists(fn):
         sleep(0.01)
-    for i in range(10):
+    for _ in range(10):
         try:
             with open(fn) as f:
                 cfg = load(f)
@@ -1082,7 +1170,7 @@ def command_has_keyword(cmd, k):
             except ImportError:
                 raise ImportError("Module for command %s is not available" % cmd)
 
-        if isinstance(getattr(cmd, "main"), click.core.Command):
+        if isinstance(cmd.main, click.core.Command):
             cmd = cmd.main
         if isinstance(cmd, click.core.Command):
             cmd_params = {
@@ -1126,30 +1214,24 @@ def color_of(x, palette=palette):
     return palette[n % len(palette)]
 
 
-def _iscoroutinefunction(f):
+def iscoroutinefunction(f):
     return inspect.iscoroutinefunction(f) or gen.is_coroutine_function(f)
 
 
-@functools.lru_cache(None)
-def _iscoroutinefunction_cached(f):
-    return _iscoroutinefunction(f)
-
-
-def iscoroutinefunction(f):
-    # Attempt to use lru_cache version and fall back to non-cached version if needed
-    try:
-        return _iscoroutinefunction_cached(f)
-    except TypeError:  # unhashable type
-        return _iscoroutinefunction(f)
-
-
 @contextmanager
-def warn_on_duration(duration, msg):
+def warn_on_duration(duration: str | float | timedelta, msg: str) -> Iterator[None]:
+    """Generate a UserWarning if the operation in this context takes longer than
+    *duration* and print *msg*
+
+    The message may include a format string `{duration}` which will be formatted
+    to include the actual duration it took
+    """
     start = time()
     yield
     stop = time()
-    if stop - start > _parse_timedelta(duration):
-        warnings.warn(msg, stacklevel=2)
+    diff = stop - start
+    if diff > _parse_timedelta(duration):
+        warnings.warn(msg.format(duration=diff), stacklevel=2)
 
 
 def format_dashboard_link(host, port):
@@ -1163,15 +1245,15 @@ def format_dashboard_link(host, port):
     )
 
 
-def parse_ports(port):
+def parse_ports(port: int | str | Collection[int] | None) -> list[int] | list[None]:
     """Parse input port information into list of ports
 
     Parameters
     ----------
-    port : int, str, None
+    port : int, str, list[int], None
         Input port or ports. Can be an integer like 8787, a string for a
-        single port like "8787", a string for a sequential range of ports like
-        "8000:8200", or None.
+        single port like "8787", string for a sequential range of ports like
+        "8000:8200", a collection of ints, or None.
 
     Returns
     -------
@@ -1203,12 +1285,7 @@ def parse_ports(port):
     [None]
 
     """
-    if isinstance(port, str) and ":" not in port:
-        port = int(port)
-
-    if isinstance(port, (int, type(None))):
-        ports = [port]
-    else:
+    if isinstance(port, str) and ":" in port:
         port_start, port_stop = map(int, port.split(":"))
         if port_stop <= port_start:
             raise ValueError(
@@ -1216,9 +1293,20 @@ def parse_ports(port):
                 "port_stop must be greater than port_start, but got "
                 f"{port_start=} and {port_stop=}"
             )
-        ports = list(range(port_start, port_stop + 1))
+        return list(range(port_start, port_stop + 1))
 
-    return ports
+    if isinstance(port, str):
+        return [int(port)]
+
+    if isinstance(port, int) or port is None:
+        return [port]  # type: ignore
+
+    if isinstance(port, Collection):
+        if not all(isinstance(p, int) for p in port):
+            raise TypeError(port)
+        return list(port)  # type: ignore
+
+    raise TypeError(port)
 
 
 is_coroutine_function = iscoroutinefunction
@@ -1238,7 +1326,11 @@ class Logs(dict):
         return get_template("logs.html.j2").render(logs=self)
 
 
-def cli_keywords(d: dict, cls=None, cmd=None):
+def cli_keywords(
+    d: dict[str, AnyType],
+    cls: Callable | None = None,
+    cmd: str | ModuleType | None = None,
+) -> list[str]:
     """Convert a kwargs dictionary into a list of CLI keywords
 
     Parameters
@@ -1251,7 +1343,7 @@ def cli_keywords(d: dict, cls=None, cmd=None):
         A string with the name of a module, or the module containing a
         click-generated command with a "main" function, or the function itself.
         It may be used to parse a module's custom arguments (that is, arguments that
-        are not part of Worker class), such as nworkers from dask-worker CLI or
+        are not part of Worker class), such as nworkers from dask worker CLI or
         enable_nvlink from dask-cuda-worker CLI.
 
     Examples
@@ -1303,7 +1395,7 @@ _offload_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="Dask-O
 weakref.finalize(_offload_executor, _offload_executor.shutdown)
 
 
-def import_term(name: str):
+def import_term(name: str) -> AnyType:
     """Return the fully qualified term
 
     Examples
@@ -1321,7 +1413,7 @@ def import_term(name: str):
 
 
 async def offload(fn, *args, **kwargs):
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     # Retain context vars while deserializing; see https://bugs.python.org/issue34014
     context = contextvars.copy_context()
     return await loop.run_in_executor(
@@ -1333,36 +1425,17 @@ class EmptyContext:
     def __enter__(self):
         pass
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type, exc_value, traceback):
         pass
 
     async def __aenter__(self):
         pass
 
-    async def __aexit__(self, *args):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         pass
 
 
 empty_context = EmptyContext()
-
-
-class LRU(UserDict):
-    """Limited size mapping, evicting the least recently looked-up key when full"""
-
-    def __init__(self, maxsize):
-        super().__init__()
-        self.data = OrderedDict()
-        self.maxsize = maxsize
-
-    def __getitem__(self, key):
-        value = super().__getitem__(key)
-        self.data.move_to_end(key)
-        return value
-
-    def __setitem__(self, key, value):
-        if len(self) >= self.maxsize:
-            self.data.popitem(last=False)
-        super().__setitem__(key, value)
 
 
 def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> list[dict]:
@@ -1617,3 +1690,16 @@ def recursive_to_dict(
         return repr(obj)
     finally:
         tok.var.reset(tok)
+
+
+def is_python_shutting_down() -> bool:
+    """Is the interpreter shutting down now?
+
+    This is a variant of ``sys.is_finalizing`` which can return True inside the ``__del__``
+    method of classes defined inside the distributed package.
+    """
+    # This import must remain local for the global variable to be
+    # properly evaluated
+    from distributed import _python_shutting_down
+
+    return _python_shutting_down

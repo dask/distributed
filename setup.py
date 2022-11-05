@@ -1,15 +1,14 @@
 #!/usr/bin/env python
 
+from __future__ import annotations
+
 import os
-import sys
 
 from setuptools import find_packages, setup
-from setuptools.extension import Extension
 
 import versioneer
 
 requires = open("requirements.txt").read().strip().split("\n")
-setup_requires = []
 install_requires = []
 extras_require: dict = {}
 for r in requires:
@@ -23,47 +22,6 @@ for r in requires:
     else:
         install_requires.append(r)
 
-# To enable Cython, add to pip install one of the following:
-# --install-option="--with-cython"
-# --install-option="--with-cython=annotate"
-# --install-option="--with-cython=profile"
-# --install-option="--with-cython=annotate,profile"
-
-cython_arg = None
-for i in range(len(sys.argv)):
-    if sys.argv[i].startswith("--with-cython"):
-        cython_arg = sys.argv[i]
-        del sys.argv[i]
-        break
-
-ext_modules = []
-if cython_arg:
-    try:
-        import cython  # noqa: F401
-    except ImportError:
-        setup_requires.append("cython")
-
-    _, _, params_str = cython_arg.partition("=")
-    params = params_str.split(",")
-    profile = "profile" in params
-    if "annotate" in params:
-        import Cython.Compiler.Options
-
-        Cython.Compiler.Options.annotate = True
-
-    cyext_modules = [
-        Extension("distributed.scheduler", sources=["distributed/scheduler.py"]),
-    ]
-    for e in cyext_modules:
-        e.cython_directives = {  # type: ignore
-            "annotation_typing": True,
-            "binding": False,
-            "embedsignature": True,
-            "language_level": 3,
-            "profile": profile,
-        }
-    ext_modules.extend(cyext_modules)
-
 
 setup(
     name="distributed",
@@ -71,20 +29,21 @@ setup(
     cmdclass=versioneer.get_cmdclass(),
     description="Distributed scheduler for Dask",
     url="https://distributed.dask.org",
+    project_urls={
+        "Source": "https://github.com/dask/distributed",
+    },
     maintainer="Matthew Rocklin",
     maintainer_email="mrocklin@gmail.com",
     python_requires=">=3.8",
     license="BSD",
     package_data={
         "": ["templates/index.html", "template.html"],
-        "distributed": ["http/templates/*.html"],
+        "distributed": ["http/templates/*.html", "py.typed"],
     },
     include_package_data=True,
-    setup_requires=setup_requires,
     install_requires=install_requires,
     extras_require=extras_require,
     packages=find_packages(exclude=["*tests*"]),
-    ext_modules=ext_modules,
     long_description=(
         open("README.rst").read() if os.path.exists("README.rst") else ""
     ),
@@ -95,16 +54,23 @@ setup(
         "License :: OSI Approved :: BSD License",
         "Operating System :: OS Independent",
         "Programming Language :: Python",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3 :: Only",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
         "Topic :: Scientific/Engineering",
         "Topic :: System :: Distributed Computing",
     ],
     entry_points="""
         [console_scripts]
-        dask-ssh=distributed.cli.dask_ssh:go
-        dask-scheduler=distributed.cli.dask_scheduler:go
-        dask-worker=distributed.cli.dask_worker:go
+        dask-ssh=distributed.cli.dask_ssh:main
+        dask-scheduler=distributed.cli.dask_scheduler:main
+        dask-worker=distributed.cli.dask_worker:main
+        [dask_cli]
+        scheduler=distributed.cli.dask_scheduler:main
+        worker=distributed.cli.dask_worker:main
+        ssh=distributed.cli.dask_ssh:main
       """,
     # https://mypy.readthedocs.io/en/latest/installed_packages.html
     zip_safe=False,

@@ -11,11 +11,11 @@ from typing import Generic, Literal, NoReturn, TypeVar
 
 from tornado.ioloop import IOLoop
 
-from .client import Future
-from .protocol import to_serialize
-from .utils import iscoroutinefunction, sync, thread_state
-from .utils_comm import WrappedKey
-from .worker import get_client, get_worker
+from distributed.client import Future
+from distributed.protocol import to_serialize
+from distributed.utils import iscoroutinefunction, sync, thread_state
+from distributed.utils_comm import WrappedKey
+from distributed.worker import get_client, get_worker
 
 _T = TypeVar("_T")
 
@@ -122,9 +122,9 @@ class Actor(WrappedKey):
     @property
     def _io_loop(self):
         if self._worker:
-            return self._worker.io_loop
+            return self._worker.loop
         else:
-            return self._client.io_loop
+            return self._client.loop
 
     @property
     def _scheduler_rpc(self):
@@ -205,8 +205,9 @@ class Actor(WrappedKey):
                         if self._future and not self._future.done():
                             await self._future
                             return await run_actor_function_on_worker()
-                        else:  # pragma: no cover
-                            raise OSError("Unable to contact Actor's worker")
+                        else:
+                            exc = OSError("Unable to contact Actor's worker")
+                            return _Error(exc)
                     if result["status"] == "OK":
                         return _OK(result["result"])
                     return _Error(result["exception"])
@@ -289,7 +290,7 @@ class EagerActorFuture(BaseActorFuture[_T]):
 
     def __await__(self) -> Generator[object, None, _T]:
         return self._result
-        yield
+        yield  # type: ignore[unreachable]
 
     def result(self, timeout: object = None) -> _T:
         return self._result
