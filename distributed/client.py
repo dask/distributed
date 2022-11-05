@@ -2702,9 +2702,9 @@ class Client(SyncMethodMixin):
 
     async def _run_on_scheduler(self, function, *args, wait=True, **kwargs):
         response = await self.scheduler.run_function(
-            function=dumps(function, protocol=4),
-            args=dumps(args, protocol=4),
-            kwargs=dumps(kwargs, protocol=4),
+            function=dumps(function),
+            args=dumps(args),
+            kwargs=dumps(kwargs),
             wait=wait,
         )
         if response["status"] == "error":
@@ -2765,10 +2765,10 @@ class Client(SyncMethodMixin):
         responses = await self.scheduler.broadcast(
             msg=dict(
                 op="run",
-                function=dumps(function, protocol=4),
-                args=dumps(args, protocol=4),
+                function=dumps(function),
+                args=dumps(args),
                 wait=wait,
-                kwargs=dumps(kwargs, protocol=4),
+                kwargs=dumps(kwargs),
             ),
             workers=workers,
             nanny=nanny,
@@ -4614,7 +4614,7 @@ class Client(SyncMethodMixin):
 
     async def _register_scheduler_plugin(self, plugin, name, idempotent=False):
         return await self.scheduler.register_scheduler_plugin(
-            plugin=dumps(plugin, protocol=4),
+            plugin=dumps(plugin),
             name=name,
             idempotent=idempotent,
         )
@@ -4670,7 +4670,7 @@ class Client(SyncMethodMixin):
         else:
             method = self.scheduler.register_worker_plugin
 
-        responses = await method(plugin=dumps(plugin, protocol=4), name=name)
+        responses = await method(plugin=dumps(plugin), name=name)
         for response in responses.values():
             if response["status"] == "error":
                 _, exc, tb = clean_exception(

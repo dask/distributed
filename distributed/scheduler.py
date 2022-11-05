@@ -4752,7 +4752,6 @@ class Scheduler(SchedulerState, ServerNode):
                             last_worker=ws.clean(),
                             allowed_failures=self.allowed_failures,
                         ),
-                        protocol=4,
                     )
                     r = self.transition(
                         k,
@@ -5812,7 +5811,7 @@ class Scheduler(SchedulerState, ServerNode):
                 elif on_error == "return":
                     return e
                 elif on_error == "return_pickle":
-                    return dumps(e, protocol=4)
+                    return dumps(e)
                 elif on_error == "ignore":
                     return ERROR
                 else:
