@@ -1519,14 +1519,13 @@ class SchedulerState:
     tasks: dict[str, TaskState]
 
     #: Tasks in the "queued" state, ordered by priority.
-    #: They should generally be root-ish, but in certain cases may not be.
-    #: They must not have restrictions.
+    #: They are all root-ish.
     #: Always empty if `worker-saturation` is set to `inf`.
     queued: HeapSet[TaskState]
 
     #: Tasks in the "no-worker" state.
     #: They may or may not have restrictions.
-    #: Could contain root-ish tasks even when `worker-saturation` is a finite value.
+    #: Only contains root-ish tasks if `worker-saturation` is set to `inf`.
     unrunnable: set[TaskState]
 
     #: Subset of tasks that exist in memory on more than one worker
