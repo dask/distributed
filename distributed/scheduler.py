@@ -746,6 +746,9 @@ class WorkerState:
         """Remove a task from a workers processing"""
         if self.scheduler.validate:
             assert ts in self.processing
+            assert ts._rootish is not None
+
+        ts._rootish = None
 
         if ts in self.long_running:
             self.long_running.discard(ts)
@@ -1311,6 +1314,9 @@ class TaskState:
     #: Cached hash of :attr:`~TaskState.client_key`
     _hash: int
 
+    #: Cached; set by `SchedulerState.is_rootish`
+    _rootish: bool | None
+
     # Support for weakrefs to a class with __slots__
     __weakref__: Any = None
     __slots__ = tuple(__annotations__)
@@ -1352,6 +1358,7 @@ class TaskState:
         self.metadata = {}
         self.annotations = {}
         self.erred_on = set()
+        self._rootish = None
         TaskState._instances.add(self)
 
     def __hash__(self) -> int:
@@ -1511,10 +1518,15 @@ class SchedulerState:
     #: All tasks currently known to the scheduler
     tasks: dict[str, TaskState]
 
-    #: Tasks in the "queued" state, ordered by priority
+    #: Tasks in the "queued" state, ordered by priority.
+    #: They should generally be root-ish, but in certain cases may not be.
+    #: They must not have restrictions.
+    #: Always empty if `worker-saturation` is set to `inf`.
     queued: HeapSet[TaskState]
 
-    #: Tasks in the "no-worker" state
+    #: Tasks in the "no-worker" state.
+    #: They may or may not have restrictions.
+    #: Could contain root-ish tasks even when `worker-saturation` is a finite value.
     unrunnable: set[TaskState]
 
     #: Subset of tasks that exist in memory on more than one worker
@@ -2014,10 +2026,18 @@ class SchedulerState:
                 assert not ts.actor, f"Actors can't be in `no-worker`: {ts}"
                 assert ts in self.unrunnable
 
-            if ws := self.decide_worker_non_rootish(ts):
+            decide_worker = (
+                self.decide_worker_rootish_queuing_disabled
+                if self.is_rootish(ts)
+                else self.decide_worker_non_rootish
+            )
+            if ws := decide_worker(ts):
                 self.unrunnable.discard(ts)
                 worker_msgs = _add_to_processing(self, ts, ws)
             # If no worker, task just stays in `no-worker`
+
+            if self.validate and self.is_rootish(ts):
+                assert ws is not None
 
             return recommendations, client_msgs, worker_msgs
         except Exception as e:
@@ -2052,8 +2072,8 @@ class SchedulerState:
             ``no-worker``.
         """
         if self.validate:
-            # See root-ish-ness note below in `decide_worker_rootish_queuing_enabled`
             assert math.isinf(self.WORKER_SATURATION)
+            assert self.is_rootish(ts)
 
         pool = self.idle.values() if self.idle else self.running
         if not pool:
@@ -2113,11 +2133,6 @@ class SchedulerState:
 
         """
         if self.validate:
-            # We don't `assert self.is_rootish(ts)` here, because that check is dependent on
-            # cluster size. It's possible a task looked root-ish when it was queued, but the
-            # cluster has since scaled up and it no longer does when coming out of the queue.
-            # If `is_rootish` changes to a static definition, then add that assertion here
-            # (and actually pass in the task).
             assert not math.isinf(self.WORKER_SATURATION)
 
         if not self.idle:
@@ -2154,6 +2169,9 @@ class SchedulerState:
             ``ts`` or there are no running workers, returns None, in which case the task
             should be transitioned to ``no-worker``.
         """
+        if self.validate:
+            assert not self.is_rootish(ts)
+
         if not self.running:
             return None
 
@@ -2988,15 +3006,28 @@ class SchedulerState:
         Root-ish tasks are part of a group that's much larger than the cluster,
         and have few or no dependencies.
         """
-        if ts.resource_restrictions or ts.worker_restrictions or ts.host_restrictions:
-            return False
-        tg = ts.group
-        # TODO short-circuit to True if `not ts.dependencies`?
-        return (
-            len(tg) > self.total_nthreads * 2
-            and len(tg.dependencies) < 5
-            and sum(map(len, tg.dependencies)) < 5
-        )
+        # NOTE: we cache `is_rootish` not for performance, but so it can't change if
+        # `TaskGroup` and cluster size does. That avoids annoying edge cases where a
+        # task does/doesn't look root-ish when it goes into `queued` or `unrunnable`,
+        # but that's flipped when it comes out.
+        if (result := ts._rootish) is None:
+            if (
+                ts.resource_restrictions
+                or ts.worker_restrictions
+                or ts.host_restrictions
+            ):
+                result = False
+            else:
+                tg = ts.group
+                result = (
+                    len(tg) > self.total_nthreads * 2
+                    and len(tg.dependencies) < 5
+                    and sum(map(len, tg.dependencies)) < 5
+                )
+            ts._rootish = result
+        else:
+            pass
+        return result
 
     def check_idle_saturated(self, ws: WorkerState, occ: float = -1.0):
         """Update the status of the idle and saturated state
@@ -7052,6 +7083,8 @@ class Scheduler(SchedulerState, ServerNode):
     def set_restrictions(self, worker: dict[str, Collection[str] | str]):
         for key, restrictions in worker.items():
             ts = self.tasks[key]
+            if ts._rootish is not None:
+                raise ValueError(f"cannot set restrictions on ready {ts}")
             if isinstance(restrictions, str):
                 restrictions = {restrictions}
             ts.worker_restrictions = set(restrictions)

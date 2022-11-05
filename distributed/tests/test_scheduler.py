@@ -525,7 +525,7 @@ async def test_queued_rootish_changes_while_paused(c, s, a, b):
     config={"distributed.scheduler.work-stealing": False},
 )
 async def test_queued_rootish_changes_scale_up(c, s, a):
-    "Tasks are initially root-ish. After cluster scales, they aren't."
+    "Tasks are initially root-ish. After cluster scales, they don't meet the definition, but still are."
 
     root = c.submit(inc, 1, key="root")
 
@@ -548,9 +548,9 @@ async def test_queued_rootish_changes_scale_up(c, s, a):
         for _ in range(3):
             await stack.enter_async_context(Worker(s.address, nthreads=2))
 
-        if s.is_rootish(s.tasks[fs[0].key]):
+        if not s.is_rootish(s.tasks[fs[0].key]):
             pytest.fail(
-                "Test assumptions have changed; task is still root-ish. Test may no longer be relevant."
+                "Test assumptions have changed; root-ish-ness has flipped. Test may no longer be relevant."
             )
 
         await event.set()
