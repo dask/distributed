@@ -212,9 +212,9 @@ def test_pickle_by_value_when_registered():
                     f.write("def myfunc(x):\n    return x + 1")
                 import mymodule  # noqa
 
-                assert dumps(
+                assert dumps(mymodule.myfunc) == pickle.dumps(
                     mymodule.myfunc, protocol=HIGHEST_PROTOCOL
-                ) == pickle.dumps(mymodule.myfunc, protocol=HIGHEST_PROTOCOL)
+                )
                 cloudpickle.register_pickle_by_value(mymodule)
                 assert len(dumps(mymodule.myfunc)) > len(pickle.dumps(mymodule.myfunc))
 

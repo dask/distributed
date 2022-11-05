@@ -4742,7 +4742,6 @@ class Scheduler(SchedulerState, ServerNode):
                             last_worker=ws.clean(),
                             allowed_failures=self.allowed_failures,
                         ),
-                        protocol=4,
                     )
                     r = self.transition(
                         k,
