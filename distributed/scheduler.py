@@ -2014,6 +2014,8 @@ class SchedulerState:
                 assert ts in self.unrunnable
 
             if ws := self.decide_worker_non_rootish(ts):
+                # ^ NOTE: `ts` may actually be root-ish now, but it wasn't when it went
+                # into `no-worker`. `TaskGroup` or cluster size could have changed.
                 self.unrunnable.discard(ts)
                 worker_msgs = _add_to_processing(self, ts, ws)
             # If no worker, task just stays in `no-worker`
@@ -2157,6 +2159,11 @@ class SchedulerState:
             ``ts`` or there are no running workers, returns None, in which case the task
             should be transitioned to ``no-worker``.
         """
+        if self.validate and ts.state != "no-worker":
+            # Task may not have looked root-ish when it went into no-worker, but does
+            # when it comes out. We let that slide. See `transition_no_worker_processing`.
+            assert not self.is_rootish(ts), f"{ts} should be covered by root-ish case"
+
         if not self.running:
             return None
 
@@ -2167,11 +2174,6 @@ class SchedulerState:
 
             # If there were no restrictions, `valid_workers()` didn't subset by `running`.
             valid_workers = self.running
-
-        if self.validate:
-            assert (
-                ts.dependencies or valid_workers is not None
-            ), f"{ts} should be covered by root-ish case"
 
         ws = decide_worker(
             ts,
