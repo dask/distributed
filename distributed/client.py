@@ -22,10 +22,12 @@ from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from functools import partial
+from importlib.metadata import PackageNotFoundError, version
 from numbers import Number
 from queue import Queue as pyQueue
 from typing import Any, ClassVar, Coroutine, Literal, Sequence, TypedDict
 
+from packaging.version import parse as parse_version
 from tlz import first, groupby, keymap, merge, partition_all, valmap
 
 import dask
@@ -1146,6 +1148,12 @@ class Client(SyncMethodMixin):
             return f"<{self.__class__.__name__}: No scheduler connected>"
 
     def _repr_html_(self):
+        try:
+            dle_version = parse_version(version("dask-labextension"))
+            JUPYTERLAB = False if dle_version < parse_version("6.0.0") else True
+        except PackageNotFoundError:
+            JUPYTERLAB = False
+
         scheduler, info = self._get_scheduler_info()
 
         return get_template("client.html.j2").render(
@@ -1155,6 +1163,7 @@ class Client(SyncMethodMixin):
             cluster=self.cluster,
             scheduler_file=self.scheduler_file,
             dashboard_link=self.dashboard_link,
+            jupyterlab=JUPYTERLAB,
         )
 
     def start(self, **kwargs):
