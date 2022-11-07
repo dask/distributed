@@ -2037,15 +2037,12 @@ class SchedulerState:
                 assert not ts.actor, f"Actors can't be in `no-worker`: {ts}"
                 assert ts in self.unrunnable
 
-            ws, state = self.decide_worker_and_next_state(ts)
-            if not ws:
-                return {key: state}, {}, {}
-
-            if self.validate:
-                assert state == "processing", state
+            ws_or_state = self.decide_worker_or_next_state(ts)
+            if isinstance(ws_or_state, str):
+                return {key: ws_or_state}, {}, {}
 
             self.unrunnable.discard(ts)
-            return {}, {}, _add_to_processing(self, ts, ws)
+            return {}, {}, _add_to_processing(self, ts, ws_or_state)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2235,15 +2232,15 @@ class SchedulerState:
 
         return ws
 
-    def decide_worker_and_next_state(
+    def decide_worker_or_next_state(
         self, ts: TaskState
-    ) -> tuple[WorkerState | None, Literal["queued", "no-worker", "processing"]]:
-        """Pick a worker for a runnable task.
+    ) -> WorkerState | Literal["queued", "no-worker"]:
+        """
+        Pick a worker for a runnable task, or if there is none, which state to hold the task in.
 
-        Selects an appropriate worker to run the task (or None), based on whether the
-        task is root-ish or not and whether queuing is enabled. Also returns the next
-        state the task should go do. If the worker is not None, the state will be
-        ``processing``.
+        Selects an appropriate worker to run the task, based on whether the task is
+        root-ish or not and whether queuing is enabled. If there is none, instead
+        returns the next state the task should go do.
         """
         if self.is_rootish(ts):
             # NOTE: having two root-ish methods is temporary. When the feature flag is removed,
@@ -2251,15 +2248,15 @@ class SchedulerState:
             # Eventually, special-casing root tasks might be removed entirely, with better heuristics.
             if math.isinf(self.WORKER_SATURATION):
                 if not (ws := self._decide_worker_rootish_queuing_disabled(ts)):
-                    return None, "no-worker"
+                    return "no-worker"
             else:
                 if not (ws := self._decide_worker_rootish_queuing_enabled()):
-                    return None, "queued"
+                    return "queued"
         else:
             if not (ws := self._decide_worker_non_rootish(ts)):
-                return None, "no-worker"
+                return "no-worker"
 
-        return ws, "processing"
+        return ws
 
     def transition_waiting_processing(self, key, stimulus_id):
         """Possibly schedule a ready task. This is the primary dispatch for ready tasks.
@@ -2270,14 +2267,11 @@ class SchedulerState:
         try:
             ts: TaskState = self.tasks[key]
 
-            ws, state = self.decide_worker_and_next_state(ts)
-            if not ws:
-                return {key: state}, {}, {}
+            ws_or_state = self.decide_worker_or_next_state(ts)
+            if isinstance(ws_or_state, str):
+                return {key: ws_or_state}, {}, {}
 
-            if self.validate:
-                assert state == "processing", state
-
-            return {}, {}, _add_to_processing(self, ts, ws)
+            return {}, {}, _add_to_processing(self, ts, ws_or_state)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2877,15 +2871,12 @@ class SchedulerState:
                 assert not ts.actor, f"Actors can't be queued: {ts}"
                 assert ts in self.queued
 
-            ws, state = self.decide_worker_and_next_state(ts)
-            if not ws:
-                return {key: state}, {}, {}
-
-            if self.validate:
-                assert state == "processing", state
+            ws_or_state = self.decide_worker_or_next_state(ts)
+            if isinstance(ws_or_state, str):
+                return {key: ws_or_state}, {}, {}
 
             self.queued.discard(ts)
-            return {}, {}, _add_to_processing(self, ts, ws)
+            return {}, {}, _add_to_processing(self, ts, ws_or_state)
 
         except Exception as e:
             logger.exception(e)
