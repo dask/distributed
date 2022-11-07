@@ -19,7 +19,6 @@ from queue import Empty
 from time import sleep as sync_sleep
 from typing import TYPE_CHECKING, Callable, ClassVar, Literal
 
-import tornado.util
 from toolz import merge
 from tornado.ioloop import IOLoop
 
