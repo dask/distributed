@@ -951,7 +951,7 @@ class WorkerProcess:
                 # Otherwise we arrive in a race condition where the process
                 # cleanup wipes the queue before the exception can be
                 # properly handled. See also
-                # WorkerProcess._wait_until_connected (the 2 is for good
+                # WorkerProcess._wait_until_connected (the 3 is for good
                 # measure)
                 sync_sleep(cls._init_msg_interval * 3)
 
