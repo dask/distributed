@@ -7,11 +7,10 @@ import warnings
 from asyncio import TimeoutError
 from collections import defaultdict, deque
 
-from tornado.ioloop import PeriodicCallback
-
 import dask
 from dask.utils import parse_timedelta
 
+from distributed.compatibility import PeriodicCallback
 from distributed.metrics import time
 from distributed.utils import SyncMethodMixin, log_errors
 from distributed.utils_comm import retry_operation

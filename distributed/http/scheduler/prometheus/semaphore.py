@@ -11,8 +11,10 @@ class SemaphoreMetricCollector(PrometheusCollector):
     def collect(self):
         from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
 
-        sem_ext = self.server.extensions["semaphores"]
-
+        try:
+            sem_ext = self.server.extensions["semaphores"]
+        except KeyError:
+            return
         semaphore_max_leases_family = GaugeMetricFamily(
             self.build_name("max_leases"),
             "Maximum leases allowed per semaphore, this will be constant for each semaphore during its lifetime.",

@@ -536,12 +536,10 @@ async def test_WorkerTable_custom_metric_overlap_with_core_metric(c, s, a, b):
     def metric(worker):
         return -999
 
-    a.metrics["executing"] = metric
     a.metrics["cpu"] = metric
     a.metrics["metric"] = metric
     await asyncio.gather(a.heartbeat(), b.heartbeat())
 
-    assert s.workers[a.address].metrics["executing"] != -999
     assert s.workers[a.address].metrics["cpu"] != -999
     assert s.workers[a.address].metrics["metric"] == -999
 
@@ -1128,6 +1126,9 @@ async def test_shuffling(c, s, a, b):
         ss.update()
         await asyncio.sleep(0.1)
         assert time() < start + 5
+    # FIXME: If this is still running while the test is running, this raises
+    # awkward CancelledErrors
+    await df2
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True}, timeout=60)

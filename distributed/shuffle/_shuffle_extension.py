@@ -2,36 +2,36 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import functools
 import logging
 import os
 import time
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Sized
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, NewType
+from typing import TYPE_CHECKING, Any, BinaryIO, NewType, TypeVar, overload
 
 import toolz
 
 from distributed.protocol import to_serialize
-from distributed.shuffle.arrow import (
+from distributed.shuffle._arrow import (
     deserialize_schema,
     dump_batch,
     list_of_buffers_to_table,
     load_arrow,
 )
-from distributed.shuffle.multi_comm import MultiComm
-from distributed.shuffle.multi_file import MultiFile
+from distributed.shuffle._multi_comm import MultiComm
+from distributed.shuffle._multi_file import MultiFile
 from distributed.utils import log_errors, sync
 
 if TYPE_CHECKING:
     import pandas as pd
     import pyarrow as pa
 
+    from distributed.scheduler import Scheduler, WorkerState
     from distributed.worker import Worker
 
 ShuffleId = NewType("ShuffleId", str)
-
+T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,6 @@ class Shuffle:
         schema: pa.Schema,
         id: ShuffleId,
         worker: Worker,
-        executor: ThreadPoolExecutor,
     ):
 
         import pandas as pd
@@ -57,7 +56,7 @@ class Shuffle:
         self.schema = schema
         self.worker = worker
         self.output_workers = output_workers
-        self.executor = executor
+        self.executor = ThreadPoolExecutor(worker.state.nthreads)
 
         partitions_of = defaultdict(list)
         for part, address in worker_for.items():
@@ -65,14 +64,17 @@ class Shuffle:
         self.partitions_of = dict(partitions_of)
         self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
 
+        def _dump_batch(batch: Any, file: BinaryIO) -> None:
+            return dump_batch(batch, file, self.schema)
+
+        def _sizeof(shards: list[Sized]) -> int:
+            return sum(map(len, shards))
+
         self.multi_file = MultiFile(
-            dump=functools.partial(
-                dump_batch,
-                schema=self.schema,
-            ),
+            dump=_dump_batch,
             load=load_arrow,
             directory=os.path.join(self.worker.local_directory, "shuffle-%s" % self.id),
-            sizeof=lambda L: sum(map(len, L)),
+            sizeof=_sizeof,
             loop=self.worker.io_loop,
         )
 
@@ -105,7 +107,7 @@ class Shuffle:
         stop = time.time()
         self.diagnostics[name] += stop - start
 
-    async def offload(self, func, *args):
+    async def offload(self, func: Callable[..., T], *args: Any) -> T:
         # return func(*args)
         return await asyncio.get_event_loop().run_in_executor(
             self.executor,
@@ -113,7 +115,7 @@ class Shuffle:
             *args,
         )
 
-    def heartbeat(self):
+    def heartbeat(self) -> dict[str, Any]:
         return {
             "disk": {
                 "memory": self.multi_file.total_size,
@@ -215,7 +217,7 @@ class Shuffle:
     def done(self) -> bool:
         return self.transferred and self.output_partitions_left == 0
 
-    def close(self):
+    def close(self) -> None:
         self.multi_file.close()
 
 
@@ -231,13 +233,12 @@ class ShuffleWorkerExtension:
         # Initialize
         self.worker: Worker = worker
         self.shuffles: dict[ShuffleId, Shuffle] = {}
-        self.executor = ThreadPoolExecutor(worker.state.nthreads)
 
     # Handlers
     ##########
     # NOTE: handlers are not threadsafe, but they're called from async comms, so that's okay
 
-    def heartbeat(self):
+    def heartbeat(self) -> dict:
         return {id: shuffle.heartbeat() for id, shuffle in self.shuffles.items()}
 
     async def shuffle_receive(
@@ -280,8 +281,8 @@ class ShuffleWorkerExtension:
         self,
         data: pd.DataFrame,
         shuffle_id: ShuffleId,
-        npartitions: int | None = None,
-        column: str | None = None,
+        npartitions: int,
+        column: str,
     ) -> None:
         shuffle = self.get_shuffle(
             shuffle_id, empty=data, npartitions=npartitions, column=column
@@ -301,6 +302,10 @@ class ShuffleWorkerExtension:
         # Tell all peers that we've reached the barrier
         # Note that this will call `shuffle_inputs_done` on our own worker as well
         shuffle = await self._get_shuffle(shuffle_id)
+        # FIXME: This should restrict communication to only workers
+        # participating in this specific shuffle. This will not only reduce the
+        # number of workers we need to contact but will also simplify error
+        # handling, e.g. if a non-participating worker is not reachable in time
         out = await self.worker.scheduler.broadcast(
             msg={"op": "shuffle_inputs_done", "shuffle_id": shuffle_id}
         )
@@ -332,6 +337,23 @@ class ShuffleWorkerExtension:
                 worker=self.worker.address,
             )
         return output
+
+    @overload
+    async def _get_shuffle(
+        self,
+        shuffle_id: ShuffleId,
+    ) -> Shuffle:
+        ...
+
+    @overload
+    async def _get_shuffle(
+        self,
+        shuffle_id: ShuffleId,
+        empty: pd.DataFrame,
+        column: str,
+        npartitions: int,
+    ) -> Shuffle:
+        ...
 
     async def _get_shuffle(
         self,
@@ -374,10 +396,26 @@ class ShuffleWorkerExtension:
                         worker=self.worker,
                         schema=deserialize_schema(result["schema"]),
                         id=shuffle_id,
-                        executor=self.executor,
                     )
                     self.shuffles[shuffle_id] = shuffle
                 return self.shuffles[shuffle_id]
+
+    @overload
+    def get_shuffle(
+        self,
+        shuffle_id: ShuffleId,
+        empty: pd.DataFrame,
+        column: str,
+        npartitions: int,
+    ) -> Shuffle:
+        ...
+
+    @overload
+    def get_shuffle(
+        self,
+        shuffle_id: ShuffleId,
+    ) -> Shuffle:
+        ...
 
     def get_shuffle(
         self,
@@ -390,8 +428,7 @@ class ShuffleWorkerExtension:
             self.worker.loop, self._get_shuffle, shuffle_id, empty, column, npartitions
         )
 
-    def close(self):
-        self.executor.shutdown()
+    def close(self) -> None:
         while self.shuffles:
             _, shuffle = self.shuffles.popitem()
             shuffle.close()
@@ -409,7 +446,15 @@ class ShuffleSchedulerExtension:
     ShuffleWorkerExtension
     """
 
-    def __init__(self, scheduler):
+    scheduler: Scheduler
+    worker_for: dict[ShuffleId, dict[int, str]]
+    heartbeats: defaultdict[ShuffleId, dict]
+    schemas: dict[ShuffleId, bytes]
+    columns: dict[ShuffleId, str]
+    output_workers: dict[ShuffleId, set[str]]
+    completed_workers: dict[ShuffleId, set[str]]
+
+    def __init__(self, scheduler: Scheduler):
         self.scheduler = scheduler
         self.scheduler.handlers.update(
             {
@@ -424,7 +469,7 @@ class ShuffleSchedulerExtension:
         self.output_workers = {}
         self.completed_workers = {}
 
-    def heartbeat(self, ws, data):
+    def heartbeat(self, ws: WorkerState, data: dict) -> None:
         for shuffle_id, d in data.items():
             self.heartbeats[shuffle_id][ws.address].update(d)
 
@@ -450,7 +495,7 @@ class ShuffleSchedulerExtension:
                 if ts.worker_restrictions:
                     worker = list(ts.worker_restrictions)[0]
                 else:
-                    worker = worker_for(part, workers, npartitions)
+                    worker = get_worker_for(part, workers, npartitions)
                 mapping[part] = worker
                 output_workers.add(worker)
                 self.scheduler.set_restrictions({ts.key: {worker}})
@@ -487,7 +532,7 @@ class ShuffleSchedulerExtension:
                 del self.heartbeats[id]
 
 
-def worker_for(output_partition: int, workers: list[str], npartitions: int) -> str:
+def get_worker_for(output_partition: int, workers: list[str], npartitions: int) -> str:
     "Get the address of the worker which should hold this output partition number"
     i = len(workers) * output_partition // npartitions
     return workers[i]
@@ -514,7 +559,9 @@ def split_by_worker(
     if not nrows:
         return {}
     # assert len(df) == nrows  # Not true if some outputs aren't wanted
-    t = pa.Table.from_pandas(df)
+    # FIXME: If we do not preserve the index something is corrupting the
+    # bytestream such that it cannot be deserialized anymore
+    t = pa.Table.from_pandas(df, preserve_index=True)
     t = t.sort_by("_worker")
     codes = np.asarray(t.select(["_worker"]))[0]
     t = t.drop(["_worker"])
@@ -538,10 +585,7 @@ def split_by_worker(
     return out
 
 
-def split_by_partition(
-    t: pa.Table,
-    column: str,
-) -> dict:
+def split_by_partition(t: pa.Table, column: str) -> dict:
     """
     Split data into many arrow batches, partitioned by final partition
     """

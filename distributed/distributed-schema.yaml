@@ -118,8 +118,13 @@ properties:
               How frequently to balance worker loads
 
           worker-saturation:
-            type: number
-            exclusiveMinimum: 0
+            oneOf:
+              - type: number
+                exclusiveMinimum: 0
+              # String "inf", not to be confused with .inf which in YAML means float
+              # infinity. This is necessary because there's no way to parse a float
+              # infinity from a DASK_* environment variable.
+              - enum: [inf]
             description: |
               Controls how many root tasks are sent to workers (like a `readahead`).
 
@@ -961,7 +966,21 @@ properties:
                   additional variables for each transport, while ensuring optimal connectivity. When
                   ``True``, a CUDA context will be created on the first device listed in
                   ``CUDA_VISIBLE_DEVICES``.
+              environment:
+                type: object
+                description: |
+                  Mapping for setting arbitrary UCX environment variables.
+                  Names here are translated via the following rules to
+                  map to the relevant UCX environment variable:
+                    - hyphens are replaced with underscores
+                    - words are uppercased
+                    - UCX_ is prepended
+                  So, for example, setting ``some-option=value`` is
+                  equivalent to setting ``UCX_SOME_OPTION=value`` in
+                  the calling environment.
 
+                  For a full list of supported UCX environment
+                  variables, run ``ucx_info -f``.
           tcp:
             type: object
             properties:

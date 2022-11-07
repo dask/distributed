@@ -48,6 +48,7 @@ from distributed.utils_test import (
     slowadd,
     slowidentity,
     slowinc,
+    wait_for_state,
 )
 from distributed.worker_state_machine import (
     ExecuteSuccessEvent,
@@ -792,37 +793,40 @@ async def test_restart(c, s, a, b):
     assert not any(x for L in steal.stealable.values() for x in L)
 
 
-@gen_cluster(client=True)
-async def test_do_not_steal_communication_heavy_tasks(c, s, a, b):
-    # Never steal unreasonably large tasks
+@pytest.mark.parametrize("nbytes,expect_steal", [(1000, True), (2**30, False)])
+@gen_cluster(
+    client=True,
+    # Without this, the test would rely on tasks of unknown duration to be stealable
+    config={"distributed.scheduler.default-task-durations": {"block_reduce": "1s"}},
+)
+async def test_do_not_steal_communication_heavy_tasks(c, s, a, b, nbytes, expect_steal):
+    """Never steal tasks when it would cause unreasonably large network transfers"""
     steal = s.extensions["stealing"]
-    x = c.submit(gen_nbytes, int(s.bandwidth) * 1000, workers=a.address, pure=False)
-    y = c.submit(gen_nbytes, int(s.bandwidth) * 1000, workers=a.address, pure=False)
+    x = c.submit(gen_nbytes, nbytes, workers=[a.address], key="x")
+    y = c.submit(gen_nbytes, nbytes, workers=[a.address], key="y")
 
-    def block_reduce(x, y, event):
+    def block_reduce(i, x, y, event):
         event.wait()
-        return None
 
     event = Event()
-    futures = [
-        c.submit(
-            block_reduce,
-            x,
-            y,
-            event=event,
-            pure=False,
-            workers=a.address,
-            allow_other_workers=True,
-        )
-        for i in range(10)
-    ]
-    while not a.state.tasks:
-        await asyncio.sleep(0.1)
+    futures = c.map(
+        block_reduce,
+        range(10),
+        x=x,
+        y=y,
+        event=event,
+        workers=[a.address],
+        allow_other_workers=True,
+    )
+    await wait_for_state(futures[0].key, "executing", a)
+    # We are relying on the futures not to be rootish (and thus not to remain in the
+    # scheduler-side queue) because they have worker restrictions
+    assert len(a.state.ready) == 9
+
     steal.balance()
-    await steal.stop()
     await event.set()
     await c.gather(futures)
-    assert not b.data
+    assert bool(b.data) == expect_steal
 
 
 @gen_cluster(
@@ -1186,7 +1190,7 @@ async def test_steal_reschedule_reset_in_flight_occupancy(c, s, *workers):
 
     steal.move_task_request(victim_ts, wsA, wsB)
 
-    s.reschedule(victim_key, stimulus_id="test")
+    s._reschedule(victim_key, stimulus_id="test")
     await event.set()
     await c.gather(futs1)
 
@@ -1321,7 +1325,7 @@ async def test_reschedule_concurrent_requests_deadlock(c, s, *workers):
     steal.move_task_request(victim_ts, wsA, wsB)
 
     s.set_restrictions(worker={victim_key: [wsB.address]})
-    s.reschedule(victim_key, stimulus_id="test")
+    s._reschedule(victim_key, stimulus_id="test")
     assert wsB == victim_ts.processing_on
     # move_task_request is not responsible for respecting worker restrictions
     steal.move_task_request(victim_ts, wsB, wsC)

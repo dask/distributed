@@ -6,7 +6,6 @@ import functools
 import gc
 import inspect
 import logging
-import math
 import operator
 import os
 import pathlib
@@ -28,6 +27,7 @@ from operator import add
 from threading import Semaphore
 from time import sleep
 from typing import Any
+from unittest import mock
 
 import psutil
 import pytest
@@ -73,6 +73,7 @@ from distributed.cluster_dump import load_cluster_dump
 from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import Status
+from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.metrics import time
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
 from distributed.sizeof import sizeof
@@ -4830,6 +4831,63 @@ async def test_retire_workers(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
+class WorkerStartTime(WorkerPlugin):
+    def setup(self, worker):
+        worker.start_time = time()
+
+
+@gen_cluster(client=True, Worker=Nanny, worker_kwargs={"plugins": [WorkerStartTime()]})
+async def test_restart_workers(c, s, a, b):
+    # Get initial worker start times
+    results = await c.run(lambda dask_worker: dask_worker.start_time)
+    a_start_time = results[a.worker_address]
+    b_start_time = results[b.worker_address]
+    assert set(s.workers) == {a.worker_address, b.worker_address}
+
+    # Persist futures and perform a computation
+    da = pytest.importorskip("dask.array")
+    size = 100
+    x = da.ones(size, chunks=10)
+    x = x.persist()
+    assert await c.compute(x.sum()) == size
+
+    # Restart a single worker
+    await c.restart_workers(workers=[a.worker_address])
+    assert set(s.workers) == {a.worker_address, b.worker_address}
+
+    # Make sure worker start times are as expected
+    results = await c.run(lambda dask_worker: dask_worker.start_time)
+    assert results[b.worker_address] == b_start_time
+    assert results[a.worker_address] > a_start_time
+
+    # Ensure computation still completes after worker restart
+    assert await c.compute(x.sum()) == size
+
+
+@gen_cluster(client=True)
+async def test_restart_workers_no_nanny_raises(c, s, a, b):
+    with pytest.raises(ValueError) as excinfo:
+        await c.restart_workers(workers=[a.address])
+    msg = str(excinfo.value).lower()
+    assert "restarting workers requires a nanny" in msg
+    assert a.address in msg
+
+
+class SlowKillNanny(Nanny):
+    async def kill(self, timeout=2, **kwargs):
+        await asyncio.sleep(2)
+        return await super().kill(timeout=timeout)
+
+
+@gen_cluster(client=True, Worker=SlowKillNanny)
+async def test_restart_workers_timeout(c, s, a, b):
+    with pytest.raises(TimeoutError) as excinfo:
+        await c.restart_workers(workers=[a.worker_address], timeout=0.001)
+    msg = str(excinfo.value).lower()
+    assert "workers failed to restart" in msg
+    assert a.worker_address in msg
+
+
 class MyException(Exception):
     pass
 
@@ -5554,12 +5612,6 @@ def test_client_async_before_loop_starts(cleanup):
         loop.run_sync(close)  # TODO: client.close() does not unset global client
 
 
-# FIXME shouldn't consistently fail on windows, may be an actual bug
-@pytest.mark.skipif(
-    WINDOWS
-    and math.isfinite(dask.config.get("distributed.scheduler.worker-saturation")),
-    reason="flaky on Windows with queuing active",
-)
 @pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny, timeout=60, nthreads=[("127.0.0.1", 3)] * 2)
 async def test_nested_compute(c, s, a, b):
@@ -7722,6 +7774,24 @@ async def test_deprecated_loop_properties(s):
         (DeprecationWarning, "The io_loop property is deprecated"),
         (DeprecationWarning, "setting the loop property is deprecated"),
     ]
+
+
+@gen_cluster(client=False, nthreads=[])
+async def test_fast_close_on_aexit_failure(s):
+    class MyException(Exception):
+        pass
+
+    c = Client(s.address, asynchronous=True)
+    with mock.patch.object(c, "_close", wraps=c._close) as _close_proxy:
+        with pytest.raises(MyException):
+            async with c:
+                start = time()
+                raise MyException
+        stop = time()
+
+    assert _close_proxy.mock_calls == [mock.call(fast=True)]
+    assert c.status == "closed"
+    assert (stop - start) < 2
 
 
 @gen_cluster(client=True, nthreads=[])

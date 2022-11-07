@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from distributed.shuffle.multi_file import MultiFile
+from distributed.shuffle._multi_file import MultiFile
 from distributed.utils_test import gen_test
 
 

@@ -1,12 +1,94 @@
 Changelog
 =========
 
+.. _v2022.10.2:
+
+2022.10.2
+---------
+
+Released on October 31, 2022
+
+- Reverted a bug where Bokeh was accidentally made non-optional (:pr:`7230`) `Oliver Holworthy`_
+- Schedule a queued task when a task secedes (:pr:`7224`) `Gabe Joseph`_
+
+This was a hotfix release
+
+.. _v2022.10.1:
+
+2022.10.1
+---------
+
+Released on October 28, 2022
+
+New Features
+^^^^^^^^^^^^
+- Add ``Client.restart_workers`` method (:pr:`7154`) `James Bourbeau`_
+- Implement ``PackageInstall`` plugin for ``pip`` and ``conda`` (:pr:`7126`) `Hendrik Makait`_
+
+Enhancements
+^^^^^^^^^^^^
+- Add prometheus collector for work-stealing (:pr:`7206`) `Hendrik Makait`_
+- Track reason of workers closing and restarting (:pr:`7166`) `Hendrik Makait`_
+- Show no-worker on task progress bar (:pr:`7171`) `Florian Jetter`_
+- Set ``OPENBLAS_NUM_THREADS`` by default (:pr:`7177`) `James Bourbeau`_
+- Optionally provide local directory to data constructor (:pr:`7153`) `Lawrence Mitchell`_
+- Introduce ``distributed.comm.ucx.environment`` config slot (:pr:`7164`) `Lawrence Mitchell`_
+- Log information about memory limit (:pr:`7160`) `Florian Jetter`_
+- Improve log messages on scheduler for restart (:pr:`7150`) `Florian Jetter`_
+- More comprehensive ``WorkerState`` task counters (:pr:`7167`) `crusaderky`_
+
+Documentation
+^^^^^^^^^^^^^
+- Add note to changelog about new CLI (:pr:`7178`) `James Bourbeau`_
+- Update AMM docs (:pr:`7158`) `Benjamin Zaitlen`_
+- Add ``CondaInstall`` to plugins doc (:pr:`7149`) `James Bourbeau`_
+
+Bug Fixes
+^^^^^^^^^
+- Update minimum ``bokeh`` version message (:pr:`7172`) `James Bourbeau`_
+- Revamped implementations of remote ``print()`` and ``warn()``, fixing #7095 (:pr:`7129`) `Max Bane`_
+
+Maintenance
+^^^^^^^^^^^
+- Temporarily restrict ``bokeh<3`` (:pr:`7219`) `James Bourbeau`_
+- Make ``Scheduler.reschedule`` private (:pr:`7216`) `crusaderky`_
+- Fix ``decide_worker_rootish_queuing_disabled`` assert (:pr:`7065`) `Gabe Joseph`_
+- Fix flaky ``test_include_communication_in_occupancy`` (:pr:`7212`) `Gabe Joseph`_
+- Do not raise on leaked websockets (:pr:`7199`) `Florian Jetter`_
+- Update nightly recipes with CLI tests, dependency changes (:pr:`7201`) `Charles Blackmon-Luca`_
+- Make ``p2p`` shuffle submodules private (:pr:`7186`) `Florian Jetter`_
+- Backport tornado ``PeriodicCallback`` (:pr:`7165`) `Florian Jetter`_
+- Fix ``mypy`` failure on CI (:pr:`7198`) `Florian Jetter`_
+- User a layer for ``p2p`` shuffle (:pr:`7180`) `Florian Jetter`_
+- Type annotations for shuffle (:pr:`7185`) `Florian Jetter`_
+- Do not close worker on comm error in heartbeat (:pr:`7163`) `Hendrik Makait`_
+- Errors when setting TCP timeouts log as error (:pr:`7161`) `Florian Jetter`_
+- Remove incorrect advice from ``pre-commit`` config (:pr:`7159`) `crusaderky`_
+- Bump ``the-coding-turtle/ga-yaml-parser`` from 0.1.1 to 0.1.2 (:pr:`7146`)
+- Bump ``JamesIves/github-pages-deploy-action`` from 4.1.7 to 4.4.1 (:pr:`7145`)
+- Use functionalities network for codecov uploader (:pr:`7148`) `Florian Jetter`_
+- Use counter metric type where appropriate, ``incoming_count`` was reporting bytes (:pr:`7125`) `Nat Tabris`_
+
+
+
 .. _v2022.10.0:
 
 2022.10.0
 ---------
 
 Released on October 14, 2022
+
+.. note::
+
+    This release deprecates ``dask-scheduler``, ``dask-worker``, and ``dask-ssh``
+    CLIs in favor of ``dask scheduler``, ``dask worker``, and ``dask ssh``,
+    respectively. The old-style CLIs will continue to work for a time, but will be
+    removed in a future release.
+
+    As part of this migration the ``--reconnect``, ``--nprocs``, ``--bokeh``,
+    ``--bokeh-port`` CLI options have also been removed for both the old- and new-style
+    CLIs. These options had already previously been deprecated.
+
 
 Enhancements
 ^^^^^^^^^^^^
@@ -396,7 +478,7 @@ Released on June 24, 2022
 Highlights
 ^^^^^^^^^^
 This release includes the Worker State Machine refactor. The expectation should be that the worker
-state is its own synchronous subclass. Pulling all the state out into its own class allows us 
+state is its own synchronous subclass. Pulling all the state out into its own class allows us
 to write targeted unit tests without invoking any concurrent or asynchronous code.
 
 See :pr:`5736` for more information.
@@ -4276,3 +4358,5 @@ significantly without many new features.
 .. _`Graham Markall`: https://github.com/gmarkall
 .. _`Nat Tabris`: https://github.com/ntabris
 .. _`Burt Holzman`: https://github.com/holzman
+.. _`Max Bane`: https://github.com/maxbane
+.. _`Oliver Holworthy`: https://github.com/oliverholworthy
