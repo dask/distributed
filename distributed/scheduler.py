@@ -2032,20 +2032,20 @@ class SchedulerState:
     def transition_no_worker_processing(self, key, stimulus_id):
         try:
             ts: TaskState = self.tasks[key]
-            recommendations: Recs = {}
-            client_msgs: dict = {}
-            worker_msgs: dict = {}
 
             if self.validate:
                 assert not ts.actor, f"Actors can't be in `no-worker`: {ts}"
                 assert ts in self.unrunnable
 
-            if ws := self.decide_worker_non_rootish(ts):
-                self.unrunnable.discard(ts)
-                worker_msgs = _add_to_processing(self, ts, ws)
-            # If no worker, task just stays in `no-worker`
+            ws, state = self.decide_worker_and_next_state(ts)
+            if not ws:
+                return {key: state}, {}, {}
 
-            return recommendations, client_msgs, worker_msgs
+            if self.validate:
+                assert state == "processing", state
+
+            self.unrunnable.discard(ts)
+            return {}, {}, _add_to_processing(self, ts, ws)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2054,7 +2054,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def decide_worker_rootish_queuing_disabled(
+    def _decide_worker_rootish_queuing_disabled(
         self, ts: TaskState
     ) -> WorkerState | None:
         """Pick a worker for a runnable root-ish task, without queuing.
@@ -2114,7 +2114,7 @@ class SchedulerState:
 
         return ws
 
-    def decide_worker_rootish_queuing_enabled(self) -> WorkerState | None:
+    def _decide_worker_rootish_queuing_enabled(self) -> WorkerState | None:
         """Pick a worker for a runnable root-ish task, if not all are busy.
 
         Picks the least-busy worker out of the ``idle`` workers (idle workers have fewer
@@ -2166,7 +2166,7 @@ class SchedulerState:
 
         return ws
 
-    def decide_worker_non_rootish(self, ts: TaskState) -> WorkerState | None:
+    def _decide_worker_non_rootish(self, ts: TaskState) -> WorkerState | None:
         """Pick a worker for a runnable non-root task, considering dependencies and restrictions.
 
         Out of eligible workers holding dependencies of ``ts``, selects the worker
@@ -2235,6 +2235,32 @@ class SchedulerState:
 
         return ws
 
+    def decide_worker_and_next_state(
+        self, ts: TaskState
+    ) -> tuple[WorkerState | None, Literal["queued", "no-worker", "processing"]]:
+        """Pick a worker for a runnable task.
+
+        Selects an appropriate worker to run the task (or None), based on whether the
+        task is root-ish or not and whether queuing is enabled. Also returns the next
+        state the task should go do. If the worker is not None, the state will be
+        ``processing``.
+        """
+        if self.is_rootish(ts):
+            # NOTE: having two root-ish methods is temporary. When the feature flag is removed,
+            # there should only be one, which combines co-assignment and queuing.
+            # Eventually, special-casing root tasks might be removed entirely, with better heuristics.
+            if math.isinf(self.WORKER_SATURATION):
+                if not (ws := self._decide_worker_rootish_queuing_disabled(ts)):
+                    return None, "no-worker"
+            else:
+                if not (ws := self._decide_worker_rootish_queuing_enabled()):
+                    return None, "queued"
+        else:
+            if not (ws := self._decide_worker_non_rootish(ts)):
+                return None, "no-worker"
+
+        return ws, "processing"
+
     def transition_waiting_processing(self, key, stimulus_id):
         """Possibly schedule a ready task. This is the primary dispatch for ready tasks.
 
@@ -2244,22 +2270,14 @@ class SchedulerState:
         try:
             ts: TaskState = self.tasks[key]
 
-            if self.is_rootish(ts):
-                # NOTE: having two root-ish methods is temporary. When the feature flag is removed,
-                # there should only be one, which combines co-assignment and queuing.
-                # Eventually, special-casing root tasks might be removed entirely, with better heuristics.
-                if math.isinf(self.WORKER_SATURATION):
-                    if not (ws := self.decide_worker_rootish_queuing_disabled(ts)):
-                        return {ts.key: "no-worker"}, {}, {}
-                else:
-                    if not (ws := self.decide_worker_rootish_queuing_enabled()):
-                        return {ts.key: "queued"}, {}, {}
-            else:
-                if not (ws := self.decide_worker_non_rootish(ts)):
-                    return {ts.key: "no-worker"}, {}, {}
+            ws, state = self.decide_worker_and_next_state(ts)
+            if not ws:
+                return {key: state}, {}, {}
 
-            worker_msgs = _add_to_processing(self, ts, ws)
-            return {}, {}, worker_msgs
+            if self.validate:
+                assert state == "processing", state
+
+            return {}, {}, _add_to_processing(self, ts, ws)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2854,20 +2872,21 @@ class SchedulerState:
     def transition_queued_processing(self, key, stimulus_id):
         try:
             ts: TaskState = self.tasks[key]
-            recommendations: Recs = {}
-            client_msgs: dict = {}
-            worker_msgs: dict = {}
 
             if self.validate:
                 assert not ts.actor, f"Actors can't be queued: {ts}"
                 assert ts in self.queued
 
-            if ws := self.decide_worker_rootish_queuing_enabled():
-                self.queued.discard(ts)
-                worker_msgs = _add_to_processing(self, ts, ws)
-            # If no worker, task just stays `queued`
+            ws, state = self.decide_worker_and_next_state(ts)
+            if not ws:
+                return {key: state}, {}, {}
 
-            return recommendations, client_msgs, worker_msgs
+            if self.validate:
+                assert state == "processing", state
+
+            self.queued.discard(ts)
+            return {}, {}, _add_to_processing(self, ts, ws)
+
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
