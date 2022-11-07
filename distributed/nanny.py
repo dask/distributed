@@ -937,8 +937,6 @@ class WorkerProcess:
                         init_result_q.close()
                         await worker.finished()
                         logger.info("Worker closed")
-            except (tornado.util.TimeoutError, asyncio.TimeoutError):
-                pass
             except Exception as e:
                 if failure_type is None:
                     raise
