@@ -479,7 +479,7 @@ async def test_plugin_internal_exception():
             async with Worker(
                 s.address,
                 plugins={
-                    b"corrupting pickle" + pickle.dumps(lambda: None, protocol=4),
+                    b"corrupting pickle" + pickle.dumps(lambda: None),
                 },
             ) as w:
                 pass

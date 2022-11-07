@@ -47,7 +47,7 @@ def dask_dumps(x, context=None):
     header = {
         "sub-header": sub_header,
         "type": type_name,
-        "type-serialized": pickle.dumps(type(x), protocol=4),
+        "type-serialized": pickle.dumps(type(x)),
         "serializer": "dask",
     }
     return header, frames
@@ -834,7 +834,7 @@ class ObjectDictSerializer:
     def serialize(self, est):
         header = {
             "serializer": self.serializer,
-            "type-serialized": pickle.dumps(type(est), protocol=4),
+            "type-serialized": pickle.dumps(type(est)),
             "simple": {},
             "complex": {},
         }

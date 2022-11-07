@@ -1762,11 +1762,11 @@ class WorkerState:
             typ = ts.type = type(value)
             del value
         try:
-            typ_serialized = pickle.dumps(typ, protocol=4)
+            typ_serialized = pickle.dumps(typ)
         except Exception:
             # Some types fail pickling (example: _thread.lock objects),
             # send their name as a best effort.
-            typ_serialized = pickle.dumps(typ.__name__, protocol=4)
+            typ_serialized = pickle.dumps(typ.__name__)
         return TaskFinishedMsg(
             key=ts.key,
             nbytes=ts.nbytes,

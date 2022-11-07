@@ -1669,12 +1669,20 @@ class SchedulerState:
             / 2.0
         )
 
-        sat = dask.config.get("distributed.scheduler.worker-saturation")
-        try:
-            self.WORKER_SATURATION = float(sat)
-        except ValueError:
-            raise ValueError(
-                f"Unsupported `distributed.scheduler.worker-saturation` value {sat!r}. Must be a float."
+        self.WORKER_SATURATION = dask.config.get(
+            "distributed.scheduler.worker-saturation"
+        )
+        if self.WORKER_SATURATION == "inf":
+            # Special case necessary because there's no way to parse a float infinity
+            # from a DASK_* environment variable
+            self.WORKER_SATURATION = math.inf
+        if (
+            not isinstance(self.WORKER_SATURATION, (int, float))
+            or self.WORKER_SATURATION <= 0
+        ):
+            raise ValueError(  # pragma: nocover
+                "`distributed.scheduler.worker-saturation` must be a float > 0; got "
+                + repr(self.WORKER_SATURATION)
             )
 
     @property
@@ -3050,9 +3058,7 @@ class SchedulerState:
         if occ < 0:
             occ = ws.occupancy
 
-        nc: int = ws.nthreads
-        p: int = len(ws.processing)
-        avg: float = self.total_occupancy / self.total_nthreads
+        p = len(ws.processing)
 
         idle = self.idle
         saturated = self.saturated
@@ -3067,9 +3073,10 @@ class SchedulerState:
         else:
             idle.pop(ws.address, None)
 
+            nc = ws.nthreads
             if p > nc:
-                pending: float = occ * (p - nc) / (p * nc)
-                if 0.4 < pending > 1.9 * avg:
+                pending = occ * (p - nc) / (p * nc)
+                if 0.4 < pending > 1.9 * (self.total_occupancy / self.total_nthreads):
                     saturated.add(ws)
                     return
 
@@ -3079,8 +3086,10 @@ class SchedulerState:
         self, ws: WorkerState, occupancy: float, nprocessing: int
     ) -> bool:
         nthreads = ws.nthreads
-        avg_occ_per_thread = self.total_occupancy / self.total_nthreads
-        return nprocessing < nthreads or occupancy < nthreads * avg_occ_per_thread / 2
+        return (
+            nprocessing < nthreads
+            or occupancy < nthreads * (self.total_occupancy / self.total_nthreads) / 2
+        )
 
     def get_comm_cost(self, ts: TaskState, ws: WorkerState) -> float:
         """
@@ -3528,9 +3537,6 @@ class Scheduler(SchedulerState, ServerNode):
             aliases,
         ]
 
-        self.log = deque(
-            maxlen=dask.config.get("distributed.scheduler.transition-log-length")
-        )
         self.events = defaultdict(
             partial(
                 deque, maxlen=dask.config.get("distributed.scheduler.events-log-length")
@@ -3721,7 +3727,6 @@ class Scheduler(SchedulerState, ServerNode):
         extra = {
             "transition_log": self.transition_log,
             "transition_counter": self.transition_counter,
-            "log": self.log,
             "tasks": self.tasks,
             "task_groups": self.task_groups,
             # Overwrite dict of WorkerState.identity from info
@@ -4763,7 +4768,6 @@ class Scheduler(SchedulerState, ServerNode):
                             last_worker=ws.clean(),
                             allowed_failures=self.allowed_failures,
                         ),
-                        protocol=4,
                     )
                     r = self.transition(
                         k,
@@ -5823,7 +5827,7 @@ class Scheduler(SchedulerState, ServerNode):
                 elif on_error == "return":
                     return e
                 elif on_error == "return_pickle":
-                    return dumps(e, protocol=4)
+                    return dumps(e)
                 elif on_error == "ignore":
                     return ERROR
                 else:
