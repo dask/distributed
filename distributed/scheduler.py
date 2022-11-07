@@ -3517,9 +3517,6 @@ class Scheduler(SchedulerState, ServerNode):
         self.transition_log = deque(
             maxlen=dask.config.get("distributed.scheduler.transition-log-length")
         )
-        self.log = deque(
-            maxlen=dask.config.get("distributed.scheduler.transition-log-length")
-        )
         self.events = defaultdict(
             partial(
                 deque, maxlen=dask.config.get("distributed.scheduler.events-log-length")
@@ -3710,7 +3707,6 @@ class Scheduler(SchedulerState, ServerNode):
         extra = {
             "transition_log": self.transition_log,
             "transition_counter": self.transition_counter,
-            "log": self.log,
             "tasks": self.tasks,
             "task_groups": self.task_groups,
             # Overwrite dict of WorkerState.identity from info
