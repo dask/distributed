@@ -678,9 +678,13 @@ def _handle_warn(event):
                 "_handle_warn: client received a warn event missing the required "
                 '"message" argument.'
             )
+        if "category" in msg:
+            category = pickle.loads(msg["category"])
+        else:
+            category = None
         warnings.warn(
             pickle.loads(msg["message"]),
-            category=pickle.loads(msg.get("category", None)),
+            category=category,
         )
 
 
