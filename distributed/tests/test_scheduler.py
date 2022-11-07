@@ -21,15 +21,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 from dask import delayed
-from dask.utils import (
-    apply,
-    format_bytes,
-    parse_bytes,
-    parse_timedelta,
-    stringify,
-    tmpfile,
-    typename,
-)
+from dask.utils import apply, parse_timedelta, stringify, tmpfile, typename
 
 from distributed import (
     CancelledError,
@@ -487,70 +479,6 @@ async def test_queued_remove_add_worker(c, s, a, b):
 
         await event.set()
         await wait(fs)
-
-
-@gen_cluster(
-    client=True,
-    nthreads=[("", 1)] * 2,
-    Worker=Nanny,
-    config={
-        "distributed.scheduler.worker-saturation": 1.0,
-        # "distributed.worker.memory.recent-to-old-time": "5s",
-    },
-    worker_kwargs={
-        "heartbeat_interval": "20ms",
-        "memory_limit": "700 MiB",
-    },
-)
-async def test_queued_low_memory_tiebreaker(c, s, *workers):
-    managed = c.submit(lambda: "x" * parse_bytes("100mib"))
-    await wait(managed)
-
-    # Problem: at this point, both workers have ~70mb 'optimistic' memory.
-    # Because `managed_in_memory` can't be larger than `process`, we don't count
-    # the 100mb until we actually get a heartbeat about it from the worker, even
-    # though we know it will be there.
-    # This leads to re-using the same worker (we picked it in the first place since
-    # it had slightly lower process memory).
-
-    print([format_bytes(ws.nbytes) for ws in s.workers.values()])
-    # ['100.00 MiB', '0 B']
-
-    print([ws.memory for ws in s.workers.values()])
-    # [Process memory (RSS)  : 70.11 MiB
-    #   - managed by Dask   : 70.11 MiB
-    #   - unmanaged (old)   : 0 B
-    #   - unmanaged (recent): 0 B
-    # Spilled to disk       : 0 B
-    # , Process memory (RSS)  : 71.47 MiB
-    #   - managed by Dask   : 0 B
-    #   - unmanaged (old)   : 71.47 MiB
-    #   - unmanaged (recent): 0 B
-    # Spilled to disk       : 0 B
-    # ]
-
-    leak = c.submit(leaking, out_mib=1, leak_mib=400, sleep_time=0)
-    await wait(leak)
-
-    ws_managed = first(s.tasks[managed.key].who_has)
-    ws_leak = first(s.tasks[leak.key].who_has)
-
-    # fails
-    assert ws_managed is not ws_leak
-
-    await assert_memory(ws_leak, "process", 400, 700)
-    assert ws_leak.memory.process > ws_managed.memory.process
-
-    f = c.submit(inc, 1)
-    await f
-    assert len(ws_managed.has_what) == 2
-
-    del f, managed, leak
-    await async_wait_for(lambda: not s.tasks, timeout=5)
-
-    f2 = c.submit(inc, 1)
-    await f2
-    assert len(ws_managed.has_what) == 1
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])

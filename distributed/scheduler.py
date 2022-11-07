@@ -2124,19 +2124,11 @@ class SchedulerState:
             # All workers busy? Task gets/stays queued.
             return None
 
-        # Just pick the least busy worker. Use the lowest-memory worker in a tie.
+        # Just pick the least busy worker. Use the lowest-RSS worker in a tie.
         # NOTE: this will lead to worst-case scheduling with regards to co-assignment.
         ws = min(
             self.idle.values(),
-            key=lambda ws: (
-                len(ws.processing) / ws.nthreads,
-                ws.memory.optimistic / ws.memory_limit,
-                # Alternative: nbytes, then break another tie with process memory.
-                # But this means an empty worker with high unmanaged memory will be
-                # selected over a worker with 1 small key in memory and low total memory.
-                # ws.nbytes / ws.memory_limit,
-                # ws.memory.process / ws.memory_limit,
-            ),
+            key=lambda ws: (len(ws.processing) / ws.nthreads, ws.memory.process),
         )
         if self.validate:
             assert not _worker_full(ws, self.WORKER_SATURATION), (
@@ -3001,8 +2993,6 @@ class SchedulerState:
         """
         if ts.resource_restrictions or ts.worker_restrictions or ts.host_restrictions:
             return False
-        if not ts.dependencies:
-            return True
         tg = ts.group
         # TODO short-circuit to True if `not ts.dependencies`?
         return (
