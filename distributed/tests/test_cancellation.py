@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
-from distributed._cancellation import Deadline
 from distributed.metrics import time
+from distributed.utils import Deadline
 from distributed.utils_test import gen_test
 
 

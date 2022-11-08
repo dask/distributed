@@ -10,10 +10,9 @@ from collections import defaultdict, deque
 import dask
 from dask.utils import parse_timedelta
 
-from distributed._cancellation import Deadline
 from distributed.compatibility import PeriodicCallback
 from distributed.metrics import time
-from distributed.utils import SyncMethodMixin, log_errors
+from distributed.utils import Deadline, SyncMethodMixin, log_errors
 from distributed.utils_comm import retry_operation
 from distributed.worker import get_client, get_worker
 
