@@ -192,7 +192,7 @@ jobs:
       - name: Prepare coverage report
         if: ${{ matrix.os != 'windows-latest' }}
         shell: bash -l {0}
-        run: sed -i 's/filename="/filename="distributed\//g' coverage.xml
+        run: sed -i'' -e 's/filename="/filename="distributed\//g' coverage.xml
 
       # Do not upload coverage reports for cron jobs
       - name: Coverage
