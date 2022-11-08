@@ -2029,6 +2029,30 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    def transition_no_worker_queued(self, key, stimulus_id):
+        try:
+            ts: TaskState = self.tasks[key]
+
+            if self.validate:
+                assert self.is_rootish(
+                    ts
+                ), "Non root-ish task should remain in no-worker"
+                assert not ts.actor, f"Actors can't be queued: {ts}"
+                assert ts not in self.queued
+
+            self.unrunnable.remove(ts)
+            self.queued.add(ts)
+            ts.state = "queued"
+
+            return {}, {}, {}
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
+
     def transition_no_worker_processing(self, key, stimulus_id):
         try:
             ts: TaskState = self.tasks[key]
@@ -2863,6 +2887,28 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    def transition_queued_no_worker(self, key, stimulus_id):
+        try:
+            ts: TaskState = self.tasks[key]
+
+            if self.validate:
+                assert not self.is_rootish(ts), "Root-ish task should remain in queued"
+                assert not ts.actor, f"Actors can't be queued: {ts}"
+                assert ts not in self.unrunnable
+
+            self.queued.remove(ts)
+            self.unrunnable.add(ts)
+            ts.state = "no-worker"
+
+            return {}, {}, {}
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
+
     def transition_queued_processing(self, key, stimulus_id):
         try:
             ts: TaskState = self.tasks[key]
@@ -2998,11 +3044,13 @@ class SchedulerState:
         ("waiting", "queued"): transition_waiting_queued,
         ("waiting", "memory"): transition_waiting_memory,
         ("queued", "released"): transition_queued_released,
+        ("queued", "no-worker"): transition_queued_no_worker,
         ("queued", "processing"): transition_queued_processing,
         ("processing", "released"): transition_processing_released,
         ("processing", "memory"): transition_processing_memory,
         ("processing", "erred"): transition_processing_erred,
         ("no-worker", "released"): transition_no_worker_released,
+        ("no-worker", "queued"): transition_no_worker_queued,
         ("no-worker", "processing"): transition_no_worker_processing,
         ("released", "forgotten"): transition_released_forgotten,
         ("memory", "forgotten"): transition_memory_forgotten,
