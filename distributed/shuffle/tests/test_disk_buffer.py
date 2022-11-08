@@ -1,15 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import math
 import os
 
 import pytest
 
-from dask.utils import parse_bytes
-
 from distributed.shuffle._disk import DiskShardsBuffer
-from distributed.shuffle._limiter import ResourceLimiter
 from distributed.utils_test import gen_test
 
 
@@ -125,94 +121,5 @@ async def test_high_pressure_flush_with_exception(tmp_path):
             await asyncio.sleep(0)
 
         with pytest.raises(Exception, match="123"):
-            await mf.flush()
-            mf.raise_on_exception()
-
-
-def gen_bytes(percentage: float, limit: int) -> bytes:
-    num_bytes = int(math.floor(percentage * limit))
-    return b"0" * num_bytes
-
-
-@pytest.mark.slow
-@gen_test(timeout=60)
-async def test_memory_limit(tmp_path):
-    limit = parse_bytes("10.0 MiB")
-    import time
-
-    def dump_slow(*args):
-        time.sleep(len(args[0]) / limit)
-        dump(*args)
-
-    big_payload = {"shard-1": [gen_bytes(2, limit)]}
-    small_payload = {
-        "shard-4": [gen_bytes(0.1, limit)],
-    }
-
-    limiter = ResourceLimiter(limit)
-
-    async with DiskShardsBuffer(
-        directory=tmp_path,
-        dump=dump_slow,
-        load=load,
-        memory_limiter=limiter,
-    ) as mf:
-        many_small = [asyncio.create_task(mf.put(small_payload)) for _ in range(9)]
-        many_small = asyncio.gather(*many_small)
-        # Puts that do not breach the limit do not block
-        await asyncio.wait_for(many_small, 0.1)
-
-        many_small = [asyncio.create_task(mf.put(small_payload)) for _ in range(11)]
-        many_small = asyncio.gather(*many_small)
-        # Puts that do not breach the limit do not block
-        with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(asyncio.shield(many_small), 0.1)
-
-        while not mf.memory_limiter.free():
-            await asyncio.sleep(0.1)
-        big = asyncio.create_task(mf.put(big_payload))
-        small = asyncio.create_task(mf.put(small_payload))
-
-        await big
-        assert not small.done()
-        # Once the big write is through, we can write without blocking again
-        await mf.put(small_payload)
-
-
-@gen_test()
-async def test_memory_limit_blocked_exception(tmp_path):
-    # TODO: Memory limit concurrency is defined on interpreter level. Need to
-    # test multiple instances
-    limit = parse_bytes("10.0 MiB")
-    import time
-
-    def dump_only_bytes(data, f):
-        if not isinstance(data, bytes):
-            raise TypeError("Wrong type")
-        time.sleep(0.5)
-        f.write(data)
-
-    big_payload = {
-        "shard-1": [gen_bytes(2, limit)],
-    }
-    broken_payload = {
-        "shard-2": ["not-bytes"],
-    }
-    limiter = ResourceLimiter(limit)
-    async with DiskShardsBuffer(
-        directory=tmp_path,
-        dump=dump_only_bytes,
-        load=load,
-        memory_limiter=limiter,
-    ) as mf:
-        big_write = asyncio.create_task(mf.put(big_payload))
-        small_write = asyncio.create_task(mf.put(broken_payload))
-        # The broken write hits the limit and blocks
-
-        await big_write
-        # assert not small_write.done()
-
-        # Make sure exception is not dropped
-        with pytest.raises(TypeError, match="Wrong type"):
             await mf.flush()
             mf.raise_on_exception()

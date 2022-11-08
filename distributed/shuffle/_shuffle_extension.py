@@ -115,14 +115,14 @@ class Shuffle:
         def _dump_batch(batch: Any, file: BinaryIO) -> None:
             return dump_batch(batch, file, self.schema)
 
-        self.multi_file = DiskShardsBuffer(
+        self._disk_buffer = DiskShardsBuffer(
             dump=_dump_batch,
             load=load_arrow,
             directory=directory,
             memory_limiter=memory_limiter_disk,
         )
 
-        self.multi_comm = CommShardsBuffer(
+        self._comm_buffer = CommShardsBuffer(
             send=self.send, memory_limiter=memory_limiter_comms
         )
         # TODO: reduce number of connections to number of workers
@@ -179,22 +179,22 @@ class Shuffle:
     def heartbeat(self) -> dict[str, Any]:
         return {
             "disk": {
-                "memory": self.multi_file.total_size,
-                "buckets": len(self.multi_file.shards),
-                "written": self.multi_file.bytes_written,
-                "read": self.multi_file.bytes_read,
-                "diagnostics": self.multi_file.diagnostics,
+                "memory": self._disk_buffer.total_size,
+                "buckets": len(self._disk_buffer.shards),
+                "written": self._disk_buffer.bytes_written,
+                "read": self._disk_buffer.bytes_read,
+                "diagnostics": self._disk_buffer.diagnostics,
                 "active": 0,
                 "memory_limit": 0,  # FIXME
             },
             "comms": {
-                "memory": self.multi_comm.total_size,
-                "buckets": len(self.multi_comm.shards),
-                "written": self.multi_comm.bytes_written,
+                "memory": self._comm_buffer.total_size,
+                "buckets": len(self._comm_buffer.shards),
+                "written": self._comm_buffer.bytes_written,
                 "read": self.total_recvd,
                 "active": 0,
-                "diagnostics": self.multi_comm.diagnostics,
-                "memory_limit": self.multi_comm.memory_limit,
+                "diagnostics": self._comm_buffer.diagnostics,
+                "memory_limit": self._comm_buffer.memory_limit,
             },
             "diagnostics": self.diagnostics,
             "start": self.start_time,
@@ -233,7 +233,7 @@ class Shuffle:
                     for k, v in groups.items()
                 }
             )
-            await self.multi_file.put(groups)
+            await self._disk_buffer.put(groups)
         except Exception as e:
             self._exception = e
 
@@ -254,7 +254,7 @@ class Shuffle:
             return out
 
         out = await self.offload(_)
-        await self.multi_comm.put(out)
+        await self._comm_buffer.put(out)
 
     async def get_output_partition(self, i: int) -> pd.DataFrame:
         assert self.transferred, "`get_output_partition` called before barrier task"
@@ -271,7 +271,7 @@ class Shuffle:
         ), f"No outputs remaining, but requested output partition {i} on {self.local_address}."
         await self.flush_receive()
         try:
-            df = self.multi_file.read(i)
+            df = self._disk_buffer.read(i)
             with self.time("cpu"):
                 out = df.to_pandas()
         except KeyError:
@@ -282,7 +282,7 @@ class Shuffle:
     async def inputs_done(self) -> None:
         assert not self.transferred, "`inputs_done` called multiple times"
         self.transferred = True
-        await self.multi_comm.flush()
+        await self._comm_buffer.flush()
 
     def done(self) -> bool:
         return self.transferred and self.output_partitions_left == 0
@@ -290,11 +290,11 @@ class Shuffle:
     async def flush_receive(self) -> None:
         if self._exception:
             raise self._exception
-        await self.multi_file.flush()
+        await self._disk_buffer.flush()
 
     async def close(self) -> None:
-        await self.multi_comm.close()
-        await self.multi_file.close()
+        await self._comm_buffer.close()
+        await self._disk_buffer.close()
         try:
             self.executor.shutdown(cancel_futures=True)
         except Exception:
@@ -356,7 +356,7 @@ class ShuffleWorkerExtension:
                 # If the shuffle has no output partitions, remove it now;
                 # `get_output_partition` will never be called.
                 # This happens when there are fewer output partitions than workers.
-                assert shuffle.multi_file.empty
+                assert shuffle._disk_buffer.empty
                 del self.shuffles[shuffle_id]
                 logger.critical(f"Shuffle inputs done {shuffle}")
                 await self._register_complete(shuffle)

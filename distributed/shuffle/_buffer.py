@@ -6,7 +6,7 @@ import logging
 import weakref
 from collections import defaultdict
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any, Generic, Sized, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from tornado.ioloop import IOLoop
 
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("distributed.shuffle")
 
-ShardType = TypeVar("ShardType", bound=Sized)
+ShardType = TypeVar("ShardType")
 
 
 class ShardsBuffer(Generic[ShardType]):
@@ -86,7 +86,7 @@ class ShardsBuffer(Generic[ShardType]):
     async def _process(self, id: str, shards: list[ShardType]) -> None:
         raise NotImplementedError()
 
-    def read(self, id: int | str) -> ShardType:
+    def read(self, id: str) -> ShardType:
         raise NotImplementedError()
 
     @property
