@@ -484,6 +484,61 @@ async def test_queued_remove_add_worker(c, s, a, b):
 
 @gen_cluster(
     client=True,
+    nthreads=[("", 2)],
+    config={
+        "distributed.scheduler.worker-saturation": 1.0,
+    },
+)
+async def test_queued_oversaturates_after_group_shrinks(c, s, a):
+    """
+    When tasks switch from root-ish to non-root-ish, even though they're in `queued`,
+    they're scheduled without regard to worker-saturation.
+
+    This isn't really desireable behavior, it's just what happens to occur right now. If
+    this changes, that's okay (maybe even good).
+    """
+    root = c.submit(inc, 1, key="root")
+
+    # Put some tasks in the queue
+    es = [Event() for _ in range(5)]
+    fs = c.map(lambda _, e: e.wait(), [root] * len(es), es)
+    await wait_for_state(fs[0].key, "processing", s)
+    assert s.queued
+
+    # Add a downstream task that depends on fs[0]
+    de = Event()
+    downstream = c.submit(lambda _: de.wait(), fs[0])
+    await wait_for_state(downstream.key, "waiting", s)
+
+    # Cancel one task. Group is now too small to be root-ish.
+    del fs[-1], es[-1]
+    await async_wait_for(lambda: len(s.tasks) == len(fs) + 2, 5)
+    if s.is_rootish(s.tasks[fs[0].key]):
+        pytest.fail(
+            "Test assumptions have changed; task is still root-ish. Test may no longer be relevant."
+        )
+
+    # Let the downstream task schedule.
+    # When a slot opens and we try to schedule the next task on the queue,
+    # it gets scheduled as non-root-ish. So both the downstream task and the next
+    # queued task get assigned to the worker, exceeding worker-saturation.
+    await es[0].set()
+    await wait_for_state(downstream.key, "processing", s)
+    # KEY ASSERTION:
+    # the next task on the queue got scheduled, exceeding worker-saturation, because
+    # even though it was in `queued`, it was no longer root-ish.
+    assert len(s.workers[a.address].processing) == a.state.nthreads + 1
+
+    # Everything runs
+    await de.set()
+    await downstream
+    await asyncio.gather(*(e.set() for e in es))
+
+    await c.gather(fs)
+
+
+@gen_cluster(
+    client=True,
     nthreads=[("", 2)] * 2,
     config={
         "distributed.worker.memory.pause": False,
@@ -494,6 +549,7 @@ async def test_queued_remove_add_worker(c, s, a, b):
 )
 async def test_queued_rootish_changes_while_paused(c, s, a, b):
     "Some tasks are root-ish, some aren't. So both `unrunnable` and `queued` contain non-restricted tasks."
+    # NOTE: this tests the `no-worker->queued` transition when queueing is active.
 
     root = c.submit(inc, 1, key="root")
     await root
