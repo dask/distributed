@@ -185,10 +185,21 @@ jobs:
       #   if: ${{ failure() }}
       #   uses: mxschmitt/action-tmate@v3
 
+      - name: where am i
+        command: pwd
+
+      - name: files
+        command: ls
+
+      # https://community.codecov.com/t/files-missing-from-report/3902/7
+      # The coverage file being created records filenames at the distributed/ directory
+      # as opposed to root. This is causing filename mismatches in Codecov.
+      # This command edits `coverage.xml` in-file by adding `distributed` to all filenames.
+      - name: Prepare coverage report
+        command: sed -i 's/filename="/filename="distributed\//g' coverage.xml
+
       - name: Coverage
         uses: codecov/codecov-action@v3
-        with:
-          functionalities: network
 
       - name: Upload test results
         # ensure this runs even if pytest fails
