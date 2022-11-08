@@ -26,10 +26,10 @@ class ResourceLimiter:
             await self._condition.wait_for(self.available)
             self._waiters -= 1
 
-    def acquire(self, value: int) -> None:
+    def increase(self, value: int) -> None:
         self._acquired += value
 
-    async def release(self, value: int) -> None:
+    async def decrease(self, value: int) -> None:
         if value > self._acquired:
             raise RuntimeError(
                 f"Cannot release more than what was acquired! release: {value} acquired: {self._acquired}"

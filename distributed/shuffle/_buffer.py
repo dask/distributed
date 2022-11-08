@@ -3,12 +3,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import weakref
 from collections import defaultdict
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Generic, Sized, TypeVar
-
-from tornado.ioloop import IOLoop
 
 from distributed.metrics import time
 from distributed.shuffle._limiter import ResourceLimiter
@@ -27,15 +24,10 @@ class ShardsBuffer(Generic[ShardType]):
     sizes: defaultdict[str, int]
     _exception: None | Exception
 
-    _queues: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
-
-    @property
-    def _instances(self) -> set:
-        raise NotImplementedError()
-
     def __init__(
         self,
         memory_limiter: ResourceLimiter | None,
+        # TODO: Set concurrency to 1 for disk since it cannot work with asyncio (yet)
         concurrency_limit: int = 2,
         max_message_size: int = -1,
     ) -> None:
@@ -48,7 +40,8 @@ class ShardsBuffer(Generic[ShardType]):
         self.memory_limiter = memory_limiter
         self.diagnostics: dict[str, float] = defaultdict(float)
         self._tasks = [
-            asyncio.create_task(self.worker()) for _ in range(concurrency_limit)
+            asyncio.create_task(self._background_task())
+            for _ in range(concurrency_limit)
         ]
         self._shards_available = asyncio.Condition()
         self._flush_lock = asyncio.Lock()
@@ -90,7 +83,7 @@ class ShardsBuffer(Generic[ShardType]):
             ] + 0.02 * (stop - start)
         finally:
             if self.memory_limiter:
-                await self.memory_limiter.release(size)
+                await self.memory_limiter.decrease(size)
             self.bytes_memory -= size
 
     async def _process(self, id: str, shards: list[ShardType]) -> None:
@@ -103,7 +96,7 @@ class ShardsBuffer(Generic[ShardType]):
     def empty(self) -> bool:
         return not self.shards
 
-    async def worker(self) -> None:
+    async def _background_task(self) -> None:
         def _continue() -> bool:
             return bool(self.shards or self._done)
 
@@ -167,7 +160,7 @@ class ShardsBuffer(Generic[ShardType]):
         self.bytes_total += total_batch_size
 
         if self.memory_limiter:
-            self.memory_limiter.acquire(total_batch_size)
+            self.memory_limiter.increase(total_batch_size)
         async with self._shards_available:
             for id_, shards in data.items():
                 self.shards[id_].extend(shards)
@@ -210,12 +203,6 @@ class ShardsBuffer(Generic[ShardType]):
         async with self._shards_available:
             self._shards_available.notify_all()
         await asyncio.gather(*self._tasks)
-
-        # Exceptions may hold a ref to this s.t. it is never clenaned up
-        try:
-            del type(self)._queues[IOLoop.current()]
-        except KeyError:
-            pass
 
     async def __aenter__(self) -> "ShardsBuffer":
         return self

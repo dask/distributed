@@ -542,7 +542,7 @@ class ShuffleTestPool:
 @pytest.mark.parametrize("n_input_partitions", [1, 2, 10])
 @pytest.mark.parametrize("npartitions", [1, 20])
 @pytest.mark.parametrize("barrier_first_worker", [True, False])
-@gen_test(timeout=5)
+@gen_test()
 async def test_basic_lowlevel_shuffle(
     tmpdir,
     loop_in_thread,
