@@ -18,7 +18,7 @@ def gen_bytes(percentage: float, limit: int) -> bytes:
     return b"0" * num_bytes
 
 
-class TestBuffer(ShardsBuffer):
+class BufferTest(ShardsBuffer):
     def __init__(self, memory_limiter: ResourceLimiter, concurrency_limit: int) -> None:
         self.allow_process = asyncio.Event()
         self.storage: dict[str, bytes] = defaultdict(bytes)
@@ -53,7 +53,7 @@ async def test_memory_limit(big_payload):
 
     limiter = ResourceLimiter(limit)
 
-    async with TestBuffer(
+    async with BufferTest(
         memory_limiter=limiter,
         concurrency_limit=2,
     ) as buf:
@@ -92,7 +92,7 @@ async def test_memory_limit(big_payload):
         await asyncio.wait_for(buf.put(small_payload), 0.1)
 
 
-class TestBufferBroken(ShardsBuffer):
+class BufferShardsBroken(ShardsBuffer):
     def __init__(self, memory_limiter: ResourceLimiter, concurrency_limit: int) -> None:
         self.storage: dict[str, bytes] = defaultdict(bytes)
         super().__init__(
@@ -119,7 +119,7 @@ async def test_memory_limit_blocked_exception():
         "error": ["not-bytes"],
     }
     limiter = ResourceLimiter(limit)
-    async with TestBufferBroken(
+    async with BufferShardsBroken(
         memory_limiter=limiter,
         concurrency_limit=2,
     ) as mf:
