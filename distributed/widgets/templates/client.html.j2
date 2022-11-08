@@ -29,6 +29,12 @@
 
         </table>
 
+        {% if jupyterlab %}
+            <button style="margin-bottom: 12px;" data-commandlinker-command="dask:populate-and-launch-layout" data-commandlinker-args='{"url": "{{ dashboard_link }}" }'>
+                Launch dashboard in JupyterLab
+            </button>
+        {% endif %}
+
         {% if scheduler is none %}
             <p>No scheduler connected.</p>
         {% elif cluster %}

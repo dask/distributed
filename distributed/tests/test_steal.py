@@ -793,77 +793,6 @@ async def test_restart(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_do_not_steal_communication_heavy_tasks(c, s, a, b):
-    # Never steal unreasonably large tasks
-    steal = s.extensions["stealing"]
-    x = c.submit(gen_nbytes, int(s.bandwidth) * 1000, workers=a.address, pure=False)
-    y = c.submit(gen_nbytes, int(s.bandwidth) * 1000, workers=a.address, pure=False)
-
-    def block_reduce(x, y, event):
-        event.wait()
-        return None
-
-    event = Event()
-    futures = [
-        c.submit(
-            block_reduce,
-            x,
-            y,
-            event=event,
-            pure=False,
-            workers=a.address,
-            allow_other_workers=True,
-        )
-        for i in range(10)
-    ]
-    while not a.state.tasks:
-        await asyncio.sleep(0.1)
-    steal.balance()
-    await steal.stop()
-    await event.set()
-    await c.gather(futures)
-    assert not b.data
-
-
-@gen_cluster(
-    client=True,
-    config={"distributed.scheduler.default-task-durations": {"blocked_add": 0.001}},
-)
-async def test_steal_communication_heavy_tasks(c, s, a, b):
-    steal = s.extensions["stealing"]
-    await steal.stop()
-    x = c.submit(mul, b"0", int(s.bandwidth), workers=a.address)
-    y = c.submit(mul, b"1", int(s.bandwidth), workers=b.address)
-    event = Event()
-
-    def blocked_add(x, y, event):
-        event.wait()
-        return x + y
-
-    futures = [
-        c.submit(
-            blocked_add,
-            x,
-            y,
-            event=event,
-            pure=False,
-            workers=a.address,
-            allow_other_workers=True,
-        )
-        for i in range(10)
-    ]
-
-    while not any(f.key in s.tasks and s.tasks[f.key].processing_on for f in futures):
-        await asyncio.sleep(0.01)
-
-    await steal.start()
-    steal.balance()
-    await steal.stop()
-    await event.set()
-    await c.gather(futures)
-
-
-@gen_cluster(client=True)
 async def test_steal_twice(c, s, a, b):
     x = c.submit(inc, 1, workers=a.address)
     await wait(x)
@@ -1440,6 +1369,57 @@ async def test_steal_very_fast_tasks(c, s, *workers):
     ideal = ntasks / len(workers)
     assert (ntasks_per_worker > ideal * 0.5).all(), (ideal, ntasks_per_worker)
     assert (ntasks_per_worker < ideal * 1.5).all(), (ideal, ntasks_per_worker)
+
+
+def test_balance_steal_communication_heavy_tasks():
+    dependencies = {"a": 10, "b": 10}
+    dependency_placement = [["a"], ["b"]]
+    task_placement = [[["a", "b"]] * 10, []]
+
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        return sum(actual_task_counts) == 10 and actual_task_counts[1] > 0
+
+    _run_dependency_balance_test(
+        dependencies,
+        dependency_placement,
+        task_placement,
+        _correct_placement,
+    )
+
+
+def test_balance_uneven_without_replica():
+    dependencies = {"a": 1}
+    dependency_placement = [["a"], []]
+    task_placement = [[["a"], ["a"]], []]
+
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        return actual_task_counts == [2, 0]
+
+    _run_dependency_balance_test(
+        dependencies,
+        dependency_placement,
+        task_placement,
+        _correct_placement,
+    )
+
+
+def test_balance_eventually_steals_large_dependency_without_replica():
+    dependencies = {"a": 10}
+    dependency_placement = [["a"], []]
+    task_placement = [[["a"]] * 20, []]
+
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        return sum(actual_task_counts) == 20 and actual_task_counts[1] > 0
+
+    _run_dependency_balance_test(
+        dependencies,
+        dependency_placement,
+        task_placement,
+        _correct_placement,
+    )
 
 
 def test_balance_even_with_replica():

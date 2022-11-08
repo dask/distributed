@@ -118,8 +118,13 @@ properties:
               How frequently to balance worker loads
 
           worker-saturation:
-            type: number
-            exclusiveMinimum: 0
+            oneOf:
+              - type: number
+                exclusiveMinimum: 0
+              # String "inf", not to be confused with .inf which in YAML means float
+              # infinity. This is necessary because there's no way to parse a float
+              # infinity from a DASK_* environment variable.
+              - enum: [inf]
             description: |
               Controls how many root tasks are sent to workers (like a `readahead`).
 

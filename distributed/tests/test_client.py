@@ -6,7 +6,6 @@ import functools
 import gc
 import inspect
 import logging
-import math
 import operator
 import os
 import pathlib
@@ -28,6 +27,7 @@ from operator import add
 from threading import Semaphore
 from time import sleep
 from typing import Any
+from unittest import mock
 
 import psutil
 import pytest
@@ -5612,12 +5612,6 @@ def test_client_async_before_loop_starts(cleanup):
         loop.run_sync(close)  # TODO: client.close() does not unset global client
 
 
-# FIXME shouldn't consistently fail on windows, may be an actual bug
-@pytest.mark.skipif(
-    WINDOWS
-    and math.isfinite(dask.config.get("distributed.scheduler.worker-saturation")),
-    reason="flaky on Windows with queuing active",
-)
 @pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny, timeout=60, nthreads=[("127.0.0.1", 3)] * 2)
 async def test_nested_compute(c, s, a, b):
@@ -7320,13 +7314,20 @@ async def test_log_event_warn(c, s, a, b):
     with pytest.warns(UserWarning, match="Hello!"):
         await c.submit(foo)
 
-    def bar():
+    def no_message():
         # missing "message" key should log TypeError
         get_worker().log_event("warn", {})
 
     with captured_logger(logging.getLogger("distributed.client")) as log:
-        await c.submit(bar)
+        await c.submit(no_message)
         assert "TypeError" in log.getvalue()
+
+    def no_category():
+        # missing "category" defaults to `UserWarning`
+        get_worker().log_event("warn", {"message": pickle.dumps("asdf")})
+
+    with pytest.warns(UserWarning, match="asdf"):
+        await c.submit(no_category)
 
 
 @gen_cluster(client=True)
@@ -7773,6 +7774,24 @@ async def test_deprecated_loop_properties(s):
         (DeprecationWarning, "The io_loop property is deprecated"),
         (DeprecationWarning, "setting the loop property is deprecated"),
     ]
+
+
+@gen_cluster(client=False, nthreads=[])
+async def test_fast_close_on_aexit_failure(s):
+    class MyException(Exception):
+        pass
+
+    c = Client(s.address, asynchronous=True)
+    with mock.patch.object(c, "_close", wraps=c._close) as _close_proxy:
+        with pytest.raises(MyException):
+            async with c:
+                start = time()
+                raise MyException
+        stop = time()
+
+    assert _close_proxy.mock_calls == [mock.call(fast=True)]
+    assert c.status == "closed"
+    assert (stop - start) < 2
 
 
 @gen_cluster(client=True, nthreads=[])

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
+
+if TYPE_CHECKING:
+    # Circular import
+    from distributed.scheduler import Transition
 
 
 def scheduler_story(
-    keys_or_stimuli: set[str], transition_log: Iterable[tuple]
-) -> list[tuple]:
+    keys_or_stimuli: set[str], transition_log: Iterable[Transition]
+) -> list[Transition]:
     """Creates a story from the scheduler transition log given a set of keys
     describing tasks or stimuli.
 

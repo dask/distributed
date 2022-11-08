@@ -59,8 +59,7 @@ class HeapSet(MutableSet[T]):
     _sorted: bool
 
     def __init__(self, *, key: Callable[[T], Any]):
-        # FIXME https://github.com/python/mypy/issues/708
-        self.key = key  # type: ignore
+        self.key = key
         self._data = set()
         self._inc = 0
         self._heap = []
@@ -78,7 +77,7 @@ class HeapSet(MutableSet[T]):
         key: Callable[[T], Any], inc: int, heap: list[tuple[Any, int, T]]
     ) -> HeapSet[T]:
         self = object.__new__(HeapSet)
-        self.key = key  # type: ignore
+        self.key = key
         self._data = {v for _, _, v in heap}
         self._inc = inc
         self._heap = [(k, i, weakref.ref(v)) for k, i, v in heap]
@@ -95,7 +94,7 @@ class HeapSet(MutableSet[T]):
     def add(self, value: T) -> None:
         if value in self._data:
             return
-        k = self.key(value)  # type: ignore
+        k = self.key(value)
         vref = weakref.ref(value)
         heapq.heappush(self._heap, (k, self._inc, vref))
         self._sorted = False
