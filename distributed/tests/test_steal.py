@@ -705,7 +705,7 @@ async def assert_balanced(inp, expected, c, s, *workers):
             wait_for_states.append(wait_for_state(f.key, state, w))
     await asyncio.gather(*wait_for_states)
 
-    # Balance several since stealing might attempt to steal the already executing task
+    # Balance several times since stealing might attempt to steal the already executing task
     # for each saturated worker and will need a chance to correct its mistake
     for _ in workers:
         steal.balance()
