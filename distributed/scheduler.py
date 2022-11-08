@@ -7806,6 +7806,7 @@ def _validate_ready(state: SchedulerState, ts: TaskState) -> None:
     assert ts not in state.unrunnable
     assert ts not in state.queued
     assert all(dts.who_has for dts in ts.dependencies)
+    assert ts._rootish is not None
 
 
 def _add_to_processing(
@@ -7817,6 +7818,7 @@ def _add_to_processing(
         assert ws in state.running, state.running
         assert (o := state.workers.get(ws.address)) is ws, (ws, o)
 
+    ts._rootish = None
     ws.add_to_processing(ts)
     ts.processing_on = ws
     ts.state = "processing"
