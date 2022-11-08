@@ -7945,6 +7945,7 @@ def _propagate_released(
     recommendations: Recs,
 ) -> None:
     ts.state = "released"
+    ts._rootish = None
     key = ts.key
 
     if ts.has_lost_dependencies:
