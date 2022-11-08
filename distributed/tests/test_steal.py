@@ -1376,7 +1376,7 @@ async def test_steal_very_fast_tasks(c, s, *workers):
     [
         pytest.param(10, 5, False, id="not enough work to steal"),
         pytest.param(10, 10, True, id="enough work to steal"),
-        pytest.param(20, 10, False, id="not enough work for increased price"),
+        pytest.param(20, 10, False, id="not enough work for increased cost"),
     ],
 )
 def test_balance_expensive_tasks(cost, ntasks, expect_steal):
