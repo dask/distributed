@@ -3009,6 +3009,8 @@ class SchedulerState:
         # `TaskGroup` and cluster size does. That avoids annoying edge cases where a
         # task does/doesn't look root-ish when it goes into `queued` or `unrunnable`,
         # but that's flipped when it comes out.
+        # Specifically, `_rootish` is set only when a task in in the `queued` or
+        # `no-worker` states.
         if (result := ts._rootish) is None:
             if (
                 ts.resource_restrictions
