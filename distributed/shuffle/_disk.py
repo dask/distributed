@@ -4,9 +4,10 @@ import contextlib
 import os
 import pathlib
 import shutil
-from typing import Any, BinaryIO, Callable
+from typing import TYPE_CHECKING, Any, BinaryIO, Callable
 
-import pyarrow as pa
+if TYPE_CHECKING:
+    import pyarrow as pa
 
 from distributed.shuffle._buffer import ShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
