@@ -1446,6 +1446,57 @@ async def test_steal_very_fast_tasks(c, s, *workers):
     assert (ntasks_per_worker < ideal * 1.5).all(), (ideal, ntasks_per_worker)
 
 
+def test_balance_steal_communication_heavy_tasks():
+    dependencies = {"a": 10, "b": 10}
+    dependency_placement = [["a"], ["b"]]
+    task_placement = [[["a", "b"]] * 10, []]
+
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        return sum(actual_task_counts) == 10 and actual_task_counts[1] > 0
+
+    _run_dependency_balance_test(
+        dependencies,
+        dependency_placement,
+        task_placement,
+        _correct_placement,
+    )
+
+
+def test_balance_uneven_without_replica():
+    dependencies = {"a": 1}
+    dependency_placement = [["a"], []]
+    task_placement = [[["a"], ["a"]], []]
+
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        return actual_task_counts == [2, 0]
+
+    _run_dependency_balance_test(
+        dependencies,
+        dependency_placement,
+        task_placement,
+        _correct_placement,
+    )
+
+
+def test_balance_eventually_steals_large_dependency_without_replica():
+    dependencies = {"a": 10}
+    dependency_placement = [["a"], []]
+    task_placement = [[["a"]] * 20, []]
+
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        return sum(actual_task_counts) == 20 and actual_task_counts[1] > 0
+
+    _run_dependency_balance_test(
+        dependencies,
+        dependency_placement,
+        task_placement,
+        _correct_placement,
+    )
+
+
 def test_balance_even_with_replica():
     dependencies = {"a": 1}
     dependency_placement = [["a"], ["a"]]
