@@ -2888,6 +2888,7 @@ class SchedulerState:
             raise
 
     def transition_queued_no_worker(self, key, stimulus_id):
+        # FIXME this transition may be unreachable?
         try:
             ts: TaskState = self.tasks[key]
 
