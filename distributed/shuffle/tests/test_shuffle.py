@@ -389,7 +389,6 @@ async def test_multi(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_restrictions(c, s, a, b):
-    # FIXME: This is flaky
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -410,7 +409,6 @@ async def test_restrictions(c, s, a, b):
 
     await y
     assert all(stringify(key) in a.data for key in y.__dask_keys__())
-    print("Test DONE!")
 
 
 @pytest.mark.xfail(reason="Don't clean up forgotten shuffles")
