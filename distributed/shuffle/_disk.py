@@ -64,7 +64,7 @@ class DiskShardsBuffer(ShardsBuffer):
         self.dump = dump
         self.load = load
 
-    async def _process(self, id: str, shards: list[pa.Table]) -> None:
+    async def _process(self, id: str, shards: list[pa.Buffer]) -> None:
         """Write one buffer to file
 
         This function was built to offload the disk IO, but since then we've

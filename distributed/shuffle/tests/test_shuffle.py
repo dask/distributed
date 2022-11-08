@@ -542,7 +542,7 @@ class ShuffleTestPool:
 @pytest.mark.parametrize("n_input_partitions", [1, 2, 10])
 @pytest.mark.parametrize("npartitions", [1, 20])
 @pytest.mark.parametrize("barrier_first_worker", [True, False])
-@gen_test()
+@gen_test(timeout=5)
 async def test_basic_lowlevel_shuffle(
     tmpdir,
     loop_in_thread,
@@ -591,6 +591,18 @@ async def test_basic_lowlevel_shuffle(
             await s.add_partition(df)
 
         await barrier_worker.barrier()
+
+        total_bytes_sent = 0
+        total_bytes_recvd = 0
+        total_bytes_recvd_shuffle = 0
+        for s in shuffles:
+            metrics = s.heartbeat()
+            assert metrics["comm"]["total"] == metrics["comm"]["written"]
+            total_bytes_sent += metrics["comm"]["written"]
+            total_bytes_recvd += metrics["disk"]["total"]
+            total_bytes_recvd_shuffle += s.total_recvd
+
+        assert total_bytes_recvd_shuffle == total_bytes_sent
 
         def _done():
             return [s.done() for s in shuffles]

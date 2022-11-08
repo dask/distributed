@@ -1112,7 +1112,7 @@ async def test_prefix_bokeh(s, a, b):
     assert bokeh_app.prefix == f"/{prefix}"
 
 
-@gen_cluster(client=True, worker_kwargs={"dashboard": True})
+@gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
 async def test_shuffling(c, s, a, b):
     pytest.importorskip("pyarrow")
     dd = pytest.importorskip("dask.dataframe")
@@ -1120,7 +1120,6 @@ async def test_shuffling(c, s, a, b):
 
     df = dask.datasets.timeseries()
     df2 = dd.shuffle.shuffle(df, "x", shuffle="p2p").persist()
-
     start = time()
     while not ss.source.data["disk_read"]:
         ss.update()

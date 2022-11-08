@@ -59,6 +59,7 @@ class CommShardsBuffer(ShardsBuffer):
         super().__init__(
             memory_limiter=memory_limiter,
             concurrency_limit=concurrency_limit,
+            max_message_size=CommShardsBuffer.max_message_size,
         )
         self.send = send
 
@@ -68,4 +69,9 @@ class CommShardsBuffer(ShardsBuffer):
 
             # Consider boosting total_size a bit here to account for duplication
             with self.time("send"):
-                await self.send(address, [b"".join(shards)])
+                await self.send(address, [_join_shards(shards)])
+
+
+def _join_shards(shards: list[bytes]) -> bytes:
+    # This is just there for easier profiling
+    return b"".join(shards)

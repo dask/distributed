@@ -6,11 +6,9 @@ import logging
 import weakref
 from collections import defaultdict
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, Sized, TypeVar
 
 from tornado.ioloop import IOLoop
-
-from dask.sizeof import sizeof
 
 from distributed.metrics import time
 from distributed.shuffle._limiter import ResourceLimiter
@@ -20,7 +18,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("distributed.shuffle")
 
-ShardType = TypeVar("ShardType")
+ShardType = TypeVar("ShardType", bound=Sized)
 
 
 class ShardsBuffer(Generic[ShardType]):
@@ -56,9 +54,21 @@ class ShardsBuffer(Generic[ShardType]):
         self._flush_lock = asyncio.Lock()
         self.max_message_size = max_message_size
 
-        self.total_size = 0
+        self.bytes_total = 0
+        self.bytes_memory = 0
         self.bytes_written = 0
         self.bytes_read = 0
+
+    def heartbeat(self) -> dict[str, Any]:
+        return {
+            "memory": self.bytes_memory,
+            "total": self.bytes_total,
+            "buckets": len(self.shards),
+            "written": self.bytes_written,
+            "read": self.bytes_read,
+            "diagnostics": self.diagnostics,
+            "memory_limit": self.memory_limiter._maxvalue if self.memory_limiter else 0,
+        }
 
     async def process(self, id: str, shards: list[pa.Table], size: int) -> None:
         try:
@@ -81,7 +91,7 @@ class ShardsBuffer(Generic[ShardType]):
         finally:
             if self.memory_limiter:
                 await self.memory_limiter.release(size)
-            self.total_size -= size
+            self.bytes_memory -= size
 
     async def _process(self, id: str, shards: list[ShardType]) -> None:
         raise NotImplementedError()
@@ -110,7 +120,7 @@ class ShardsBuffer(Generic[ShardType]):
                         try:
                             shard = self.shards[part_id].pop()
                             shards.append(shard)
-                            s = sizeof(shard)
+                            s = len(shard)
                             size += s
                             self.sizes[part_id] -= s
                         except IndexError:
@@ -150,10 +160,11 @@ class ShardsBuffer(Generic[ShardType]):
 
         sizes = {}
         for id_, shards in data.items():
-            size = sum(map(sizeof, shards))
+            size = sum(map(len, shards))
             sizes[id_] = size
         total_batch_size = sum(sizes.values())
-        self.total_size += total_batch_size
+        self.bytes_memory += total_batch_size
+        self.bytes_total += total_batch_size
 
         if self.memory_limiter:
             self.memory_limiter.acquire(total_batch_size)
@@ -184,18 +195,18 @@ class ShardsBuffer(Generic[ShardType]):
 
             await asyncio.gather(*self._tasks)
             if not self._exception:
-                assert not self.total_size, (type(self), self.total_size)
+                assert not self.bytes_memory, (type(self), self.bytes_memory)
 
     async def close(self) -> None:
         await self.flush()
         if not self._exception:
-            assert not self.total_size, (type(self), self.total_size)
+            assert not self.bytes_memory, (type(self), self.bytes_memory)
         for t in self._tasks:
             t.cancel()
         self._closed = True
         self._done = True
         self.shards.clear()
-        self.total_size = 0
+        self.bytes_memory = 0
         async with self._shards_available:
             self._shards_available.notify_all()
         await asyncio.gather(*self._tasks)

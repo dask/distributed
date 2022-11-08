@@ -112,7 +112,7 @@ class Shuffle:
         self.partitions_of = dict(partitions_of)
         self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
 
-        def _dump_batch(batch: Any, file: BinaryIO) -> None:
+        def _dump_batch(batch: pa.Buffer, file: BinaryIO) -> None:
             return dump_batch(batch, file, self.schema)
 
         self._disk_buffer = DiskShardsBuffer(
@@ -177,33 +177,19 @@ class Shuffle:
             )
 
     def heartbeat(self) -> dict[str, Any]:
+        comm_heartbat = self._comm_buffer.heartbeat()
+        comm_heartbat["read"] = self.total_recvd
         return {
-            "disk": {
-                "memory": self._disk_buffer.total_size,
-                "buckets": len(self._disk_buffer.shards),
-                "written": self._disk_buffer.bytes_written,
-                "read": self._disk_buffer.bytes_read,
-                "diagnostics": self._disk_buffer.diagnostics,
-                "active": 0,
-                "memory_limit": 0,  # FIXME
-            },
-            "comms": {
-                "memory": self._comm_buffer.total_size,
-                "buckets": len(self._comm_buffer.shards),
-                "written": self._comm_buffer.bytes_written,
-                "read": self.total_recvd,
-                "active": 0,
-                "diagnostics": self._comm_buffer.diagnostics,
-                "memory_limit": self._comm_buffer.memory_limit,
-            },
+            "disk": self._disk_buffer.heartbeat(),
+            "comm": comm_heartbat,
             "diagnostics": self.diagnostics,
             "start": self.start_time,
         }
 
-    async def receive(self, data: list[pa.Buffer]) -> None:
+    async def receive(self, data: list[bytes]) -> None:
         await self._receive(data)
 
-    async def _receive(self, data: list[pa.Buffer]) -> None:
+    async def _receive(self, data: list[bytes]) -> None:
         # This is actually ok.  Our local barrier might have finished,
         # but barriers on other workers might still be running and sending us
         # data
@@ -322,8 +308,8 @@ class ShuffleWorkerExtension:
         # Initialize
         self.worker: Worker = worker
         self.shuffles: dict[ShuffleId, Shuffle] = {}
-        self.memory_limiter_disk = ResourceLimiter(parse_bytes("2 GiB"))
-        self.memory_limiter_comms = ResourceLimiter(parse_bytes("200 MiB"))
+        self.memory_limiter_disk = ResourceLimiter(parse_bytes("1 GiB"))
+        self.memory_limiter_comms = ResourceLimiter(parse_bytes("100 MiB"))
 
     # Handlers
     ##########
@@ -386,14 +372,11 @@ class ShuffleWorkerExtension:
         await shuffle.barrier()
 
     async def _register_complete(self, shuffle: Shuffle) -> None:
-        logger.critical(f"Register complete {shuffle}")
         await shuffle.close()
-        logger.critical(f"Register complete {shuffle} - Close success")
         await self.worker.scheduler.shuffle_register_complete(
             id=shuffle.id,
             worker=self.worker.address,
         )
-        logger.critical(f"Register complete {shuffle} - SUCCESS")
 
     @overload
     async def _get_shuffle(
