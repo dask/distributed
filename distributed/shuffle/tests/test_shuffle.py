@@ -91,7 +91,7 @@ async def test_concurrent(c, s, a, b):
     clean_scheduler(s)
 
 
-@gen_cluster(client=True, nthreads=[("", 1)])
+@gen_cluster(client=True)
 async def test_bad_disk(c, s, a, b):
 
     df = dask.datasets.timeseries(
@@ -531,7 +531,8 @@ class ShuffleTestPool:
             nthreads=2,
             rpc=self,
             broadcast=self.fake_broadcast,
-            memory_limiter=ResourceLimiter(10000000),
+            memory_limiter_disk=ResourceLimiter(10000000),
+            memory_limiter_comms=ResourceLimiter(10000000),
         )
         self.shuffles[name] = s
         return s

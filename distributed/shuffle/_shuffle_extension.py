@@ -6,7 +6,7 @@ import logging
 import os
 import time
 from collections import defaultdict
-from collections.abc import Callable, Iterator, Sized
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, BinaryIO, NewType, TypeVar, overload
 
@@ -22,9 +22,9 @@ from distributed.shuffle._arrow import (
     list_of_buffers_to_table,
     load_arrow,
 )
+from distributed.shuffle._comms import CommShardsBuffer
+from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._multi_comm import MultiComm
-from distributed.shuffle._multi_file import MultiFile
 from distributed.utils import log_errors, sync
 
 if TYPE_CHECKING:
@@ -92,7 +92,8 @@ class Shuffle:
         nthreads: int,
         rpc: Callable[[str], PooledRPCCall],
         broadcast: Callable,
-        memory_limiter: ResourceLimiter,
+        memory_limiter_disk: ResourceLimiter,
+        memory_limiter_comms: ResourceLimiter,
     ):
 
         import pandas as pd
@@ -114,18 +115,16 @@ class Shuffle:
         def _dump_batch(batch: Any, file: BinaryIO) -> None:
             return dump_batch(batch, file, self.schema)
 
-        def _sizeof(shards: list[Sized]) -> int:
-            return sum(map(len, shards))
-
-        self.multi_file = MultiFile(
+        self.multi_file = DiskShardsBuffer(
             dump=_dump_batch,
             load=load_arrow,
             directory=directory,
-            sizeof=_sizeof,
-            memory_limiter=memory_limiter,
+            memory_limiter=memory_limiter_disk,
         )
 
-        self.multi_comm = MultiComm(send=self.send, memory_limiter=memory_limiter)
+        self.multi_comm = CommShardsBuffer(
+            send=self.send, memory_limiter=memory_limiter_comms
+        )
         # TODO: reduce number of connections to number of workers
         # MultiComm.max_connections = min(10, n_workers)
 
@@ -191,7 +190,7 @@ class Shuffle:
             "comms": {
                 "memory": self.multi_comm.total_size,
                 "buckets": len(self.multi_comm.shards),
-                "written": self.multi_comm.total_moved,
+                "written": self.multi_comm.bytes_written,
                 "read": self.total_recvd,
                 "active": 0,
                 "diagnostics": self.multi_comm.diagnostics,
@@ -323,8 +322,8 @@ class ShuffleWorkerExtension:
         # Initialize
         self.worker: Worker = worker
         self.shuffles: dict[ShuffleId, Shuffle] = {}
-        limit = worker.memory_manager.memory_limit or parse_bytes("1GB")
-        self.memory_limiter = ResourceLimiter(int(limit * 0.5))
+        self.memory_limiter_disk = ResourceLimiter(parse_bytes("2 GiB"))
+        self.memory_limiter_comms = ResourceLimiter(parse_bytes("200 MiB"))
 
     # Handlers
     ##########
@@ -335,7 +334,6 @@ class ShuffleWorkerExtension:
 
     async def shuffle_receive(
         self,
-        comm: object,
         shuffle_id: ShuffleId,
         data: list[bytes],
     ) -> None:
@@ -346,7 +344,7 @@ class ShuffleWorkerExtension:
         shuffle = await self._get_shuffle(shuffle_id)
         await shuffle.receive(data)
 
-    async def shuffle_inputs_done(self, comm: object, shuffle_id: ShuffleId) -> None:
+    async def shuffle_inputs_done(self, shuffle_id: ShuffleId) -> None:
         """
         Hander: Inform the extension that all input partitions have been handed off to extensions.
         Using an unknown ``shuffle_id`` is an error.
@@ -461,7 +459,8 @@ class ShuffleWorkerExtension:
                         local_address=self.worker.address,
                         rpc=self.worker.rpc,
                         broadcast=self.worker.scheduler.broadcast,
-                        memory_limiter=self.memory_limiter,
+                        memory_limiter_disk=self.memory_limiter_disk,
+                        memory_limiter_comms=self.memory_limiter_comms,
                     )
                     self.shuffles[shuffle_id] = shuffle
                 return self.shuffles[shuffle_id]
@@ -635,7 +634,7 @@ def split_by_worker(
     df: pd.DataFrame,
     column: str,
     worker_for: pd.Series,
-) -> dict:
+) -> dict[Any, pa.Table]:
     """
     Split data into many arrow batches, partitioned by destination worker
     """
@@ -678,7 +677,7 @@ def split_by_worker(
     return out
 
 
-def split_by_partition(t: pa.Table, column: str) -> dict:
+def split_by_partition(t: pa.Table, column: str) -> dict[Any, pa.Table]:
     """
     Split data into many arrow batches, partitioned by final partition
     """

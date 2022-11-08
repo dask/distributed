@@ -8,8 +8,8 @@ import pytest
 
 from dask.utils import parse_bytes
 
+from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._multi_file import MultiFile
 from distributed.utils_test import gen_test
 
 
@@ -26,7 +26,7 @@ def load(f):
 
 @gen_test()
 async def test_basic(tmp_path):
-    async with MultiFile(directory=tmp_path, dump=dump, load=load) as mf:
+    async with DiskShardsBuffer(directory=tmp_path, dump=dump, load=load) as mf:
         await mf.put({"x": [b"0" * 1000], "y": [b"1" * 500]})
         await mf.put({"x": [b"0" * 1000], "y": [b"1" * 500]})
 
@@ -44,7 +44,7 @@ async def test_basic(tmp_path):
 @gen_test()
 async def test_read_before_flush(tmp_path):
     payload = {"1": [b"foo"]}
-    async with MultiFile(directory=tmp_path, dump=dump, load=load) as mf:
+    async with DiskShardsBuffer(directory=tmp_path, dump=dump, load=load) as mf:
         with pytest.raises(RuntimeError):
             mf.read(1)
 
@@ -62,7 +62,7 @@ async def test_read_before_flush(tmp_path):
 @pytest.mark.parametrize("count", [2, 100, 1000])
 @gen_test()
 async def test_many(tmp_path, count):
-    async with MultiFile(directory=tmp_path, dump=dump, load=load) as mf:
+    async with DiskShardsBuffer(directory=tmp_path, dump=dump, load=load) as mf:
         d = {i: [str(i).encode() * 100] for i in range(count)}
 
         for _ in range(10):
@@ -82,7 +82,7 @@ async def test_exceptions(tmp_path):
     def dump(data, f):
         raise Exception(123)
 
-    async with MultiFile(directory=tmp_path, dump=dump, load=load) as mf:
+    async with DiskShardsBuffer(directory=tmp_path, dump=dump, load=load) as mf:
         await mf.put({"x": [b"0" * 1000], "y": [b"1" * 500]})
 
         while not mf._exception:
@@ -91,44 +91,7 @@ async def test_exceptions(tmp_path):
         with pytest.raises(Exception, match="123"):
             await mf.put({"x": [b"0" * 1000], "y": [b"1" * 500]})
 
-        # with pytest.raises(Exception, match="123"):
         await mf.flush()
-
-
-# @gen_test()
-# async def test_buffer_too_many_concurrent_files(tmp_path):
-#     # TODO: Concurreny limiting is configured at global levels. This only tests existence of a single instance of MultiFile
-#     # In concurrent shuffles this is no longer true
-#     payload = {
-#         f"shard-{ix}": [f"shard-{ix}".encode()]
-#         for ix in range(MultiFile.concurrent_files * 10)
-#     }
-
-#     async with MultiFile(
-#         directory=tmp_path,
-#         dump=dump,
-#         load=load,
-#     ) as mf:
-
-#         def concurrent_writes():
-#             return MultiFile.concurrent_files - mf._queue.qsize()
-
-#         assert concurrent_writes() == 0
-#         tasks = []
-
-#         for _ in range(MultiFile.concurrent_files * 10):
-#             tasks.append(asyncio.create_task(mf.put(payload)))
-
-#         def assert_below_limit():
-#             assert 0 <= concurrent_writes() <= MultiFile.concurrent_files
-
-#         while not concurrent_writes() == MultiFile.concurrent_files:
-#             assert_below_limit()
-#             await asyncio.sleep(0)
-
-#         while mf.shards:
-#             await asyncio.sleep(0)
-#             assert_below_limit()
 
 
 @gen_test()
@@ -139,12 +102,12 @@ async def test_high_pressure_flush_with_exception(tmp_path):
     def dump_broken(data, f):
         nonlocal counter
         # We only want to raise if this was queued up before
-        if counter > MultiFile.concurrent_files:
+        if counter > DiskShardsBuffer.concurrency_limit:
             raise Exception(123)
         counter += 1
         dump(data, f)
 
-    async with MultiFile(
+    async with DiskShardsBuffer(
         directory=tmp_path,
         dump=dump_broken,
         load=load,
@@ -171,11 +134,9 @@ def gen_bytes(percentage: float, limit: int) -> bytes:
     return b"0" * num_bytes
 
 
-# @pytest.mark.slow
-@gen_test(timeout=600)
-async def test_memory_limit(tmp_path, monkeypatch):
-    # TODO: Memory limit concurrency is defined on interpreter level. Need to
-    # test multiple instances
+@pytest.mark.slow
+@gen_test(timeout=60)
+async def test_memory_limit(tmp_path):
     limit = parse_bytes("10.0 MiB")
     import time
 
@@ -190,7 +151,7 @@ async def test_memory_limit(tmp_path, monkeypatch):
 
     limiter = ResourceLimiter(limit)
 
-    async with MultiFile(
+    async with DiskShardsBuffer(
         directory=tmp_path,
         dump=dump_slow,
         load=load,
@@ -219,7 +180,7 @@ async def test_memory_limit(tmp_path, monkeypatch):
 
 
 @gen_test()
-async def test_memory_limit_blocked_exception(tmp_path, monkeypatch):
+async def test_memory_limit_blocked_exception(tmp_path):
     # TODO: Memory limit concurrency is defined on interpreter level. Need to
     # test multiple instances
     limit = parse_bytes("10.0 MiB")
@@ -238,7 +199,7 @@ async def test_memory_limit_blocked_exception(tmp_path, monkeypatch):
         "shard-2": ["not-bytes"],
     }
     limiter = ResourceLimiter(limit)
-    async with MultiFile(
+    async with DiskShardsBuffer(
         directory=tmp_path,
         dump=dump_only_bytes,
         load=load,
