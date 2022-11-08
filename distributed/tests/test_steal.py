@@ -48,7 +48,6 @@ from distributed.utils_test import (
     slowadd,
     slowidentity,
     slowinc,
-    wait_for_state,
 )
 from distributed.worker_state_machine import (
     ExecuteSuccessEvent,
@@ -791,80 +790,6 @@ async def test_restart(c, s, a, b):
     await c.restart()
 
     assert not any(x for L in steal.stealable.values() for x in L)
-
-
-@pytest.mark.parametrize("nbytes,expect_steal", [(1000, True), (2**30, False)])
-@gen_cluster(
-    client=True,
-    # Without this, the test would rely on tasks of unknown duration to be stealable
-    config={"distributed.scheduler.default-task-durations": {"block_reduce": "1s"}},
-)
-async def test_do_not_steal_communication_heavy_tasks(c, s, a, b, nbytes, expect_steal):
-    """Never steal tasks when it would cause unreasonably large network transfers"""
-    steal = s.extensions["stealing"]
-    x = c.submit(gen_nbytes, nbytes, workers=[a.address], key="x")
-    y = c.submit(gen_nbytes, nbytes, workers=[a.address], key="y")
-
-    def block_reduce(i, x, y, event):
-        event.wait()
-
-    event = Event()
-    futures = c.map(
-        block_reduce,
-        range(10),
-        x=x,
-        y=y,
-        event=event,
-        workers=[a.address],
-        allow_other_workers=True,
-    )
-    await wait_for_state(futures[0].key, "executing", a)
-    # We are relying on the futures not to be rootish (and thus not to remain in the
-    # scheduler-side queue) because they have worker restrictions
-    assert len(a.state.ready) == 9
-
-    steal.balance()
-    await event.set()
-    await c.gather(futures)
-    assert bool(b.data) == expect_steal
-
-
-@gen_cluster(
-    client=True,
-    config={"distributed.scheduler.default-task-durations": {"blocked_add": 0.001}},
-)
-async def test_steal_communication_heavy_tasks(c, s, a, b):
-    steal = s.extensions["stealing"]
-    await steal.stop()
-    x = c.submit(mul, b"0", int(s.bandwidth), workers=a.address)
-    y = c.submit(mul, b"1", int(s.bandwidth), workers=b.address)
-    event = Event()
-
-    def blocked_add(x, y, event):
-        event.wait()
-        return x + y
-
-    futures = [
-        c.submit(
-            blocked_add,
-            x,
-            y,
-            event=event,
-            pure=False,
-            workers=a.address,
-            allow_other_workers=True,
-        )
-        for i in range(10)
-    ]
-
-    while not any(f.key in s.tasks and s.tasks[f.key].processing_on for f in futures):
-        await asyncio.sleep(0.01)
-
-    await steal.start()
-    steal.balance()
-    await steal.stop()
-    await event.set()
-    await c.gather(futures)
 
 
 @gen_cluster(client=True)
