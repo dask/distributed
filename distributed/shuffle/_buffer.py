@@ -180,6 +180,7 @@ class ShardsBuffer(Generic[ShardType]):
         async with self._flush_lock:
             self._closed = True
             async with self._shards_available:
+                self._shards_available.notify_all()
                 await self._shards_available.wait_for(
                     lambda: not self.shards or self._exception or self._done
                 )
