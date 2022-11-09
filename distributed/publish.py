@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 from collections.abc import MutableMapping
 
 from dask.utils import stringify
 
-from .utils import log_errors
+from distributed.utils import log_errors
 
 
 class PublishExtension:
@@ -26,32 +28,27 @@ class PublishExtension:
         }
 
         self.scheduler.handlers.update(handlers)
-        self.scheduler.extensions["publish"] = self
 
-    def put(
-        self, comm=None, keys=None, data=None, name=None, override=False, client=None
-    ):
-        with log_errors():
-            if not override and name in self.datasets:
-                raise KeyError("Dataset %s already exists" % name)
-            self.scheduler.client_desires_keys(keys, "published-%s" % stringify(name))
-            self.datasets[name] = {"data": data, "keys": keys}
-            return {"status": "OK", "name": name}
+    @log_errors
+    def put(self, keys=None, data=None, name=None, override=False, client=None):
+        if not override and name in self.datasets:
+            raise KeyError("Dataset %s already exists" % name)
+        self.scheduler.client_desires_keys(keys, f"published-{stringify(name)}")
+        self.datasets[name] = {"data": data, "keys": keys}
+        return {"status": "OK", "name": name}
 
-    def delete(self, comm=None, name=None):
-        with log_errors():
-            out = self.datasets.pop(name, {"keys": []})
-            self.scheduler.client_releases_keys(
-                out["keys"], "published-%s" % stringify(name)
-            )
+    @log_errors
+    def delete(self, name=None):
+        out = self.datasets.pop(name, {"keys": []})
+        self.scheduler.client_releases_keys(out["keys"], f"published-{stringify(name)}")
 
+    @log_errors
     def list(self, *args):
-        with log_errors():
-            return list(sorted(self.datasets.keys(), key=str))
+        return list(sorted(self.datasets.keys(), key=str))
 
-    def get(self, stream, name=None, client=None):
-        with log_errors():
-            return self.datasets.get(name, None)
+    @log_errors
+    def get(self, name=None, client=None):
+        return self.datasets.get(name, None)
 
 
 class Datasets(MutableMapping):

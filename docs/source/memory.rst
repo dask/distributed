@@ -210,4 +210,4 @@ usually necessary.
 
 Worker memory management
 ------------------------
-Memory usage can be optimized by configuring worker-side :ref:`memman`.
+Memory usage can be optimized by configuring worker-side :doc:`worker-memory`.

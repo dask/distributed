@@ -1,7 +1,15 @@
+from __future__ import annotations
+
 import pytest
 
+import dask
+
 from distributed.protocol import dumps, loads, maybe_compress, msgpack, to_serialize
-from distributed.protocol.compression import compressions
+from distributed.protocol.compression import (
+    compressions,
+    default_compression,
+    get_default_compression,
+)
 from distributed.protocol.cuda import cuda_deserialize, cuda_serialize
 from distributed.protocol.serialize import (
     Serialize,
@@ -20,23 +28,52 @@ def test_protocol():
         assert loads(dumps(msg)) == msg
 
 
+@pytest.mark.parametrize(
+    "config,default",
+    [
+        ("auto", default_compression),
+        (None, None),
+        ("zlib", "zlib"),
+        ("foo", ValueError),
+    ],
+)
+def test_compression_config(config, default):
+    with dask.config.set({"distributed.comm.compression": config}):
+        if type(default) is type and issubclass(default, Exception):
+            with pytest.raises(default):
+                assert get_default_compression()
+        else:
+            assert get_default_compression() == default
+
+
 def test_compression_1():
     pytest.importorskip("lz4")
     np = pytest.importorskip("numpy")
     x = np.ones(1000000)
-    frames = dumps({"x": Serialize(x.tobytes())})
-    assert sum(map(nbytes, frames)) < x.nbytes
+    b = x.tobytes()
+    frames = dumps({"x": Serialize(b)})
+    assert sum(map(nbytes, frames)) < nbytes(b)
     y = loads(frames)
-    assert {"x": x.tobytes()} == y
+    assert {"x": b} == y
 
 
 def test_compression_2():
     pytest.importorskip("lz4")
     np = pytest.importorskip("numpy")
     x = np.random.random(10000)
-    msg = dumps(to_serialize(x.tobytes()))
+    msg = dumps(to_serialize(x.data))
     compression = msgpack.loads(msg[1]).get("compression")
     assert all(c is None for c in compression)
+
+
+def test_compression_3():
+    pytest.importorskip("lz4")
+    np = pytest.importorskip("numpy")
+    x = np.ones(1000000)
+    frames = dumps({"x": Serialize(x.data)})
+    assert sum(map(nbytes, frames)) < x.nbytes
+    y = loads(frames)
+    assert {"x": x.data} == y
 
 
 def test_compression_without_deserialization():
@@ -80,9 +117,29 @@ def test_maybe_compress(lib, compression):
 
         payload = b"0" * 10000
         rc, rd = maybe_compress(f(payload), compression=compression)
-        # For some reason compressing memoryviews can force blosc...
-        assert rc in (compression, "blosc")
+        assert rc == compression
         assert compressions[rc]["decompress"](rd) == payload
+
+
+@pytest.mark.parametrize(
+    "lib,compression",
+    [(None, None), ("zlib", "zlib"), ("lz4", "lz4"), ("zstandard", "zstd")],
+)
+def test_maybe_compress_config_default(lib, compression):
+    if lib:
+        pytest.importorskip(lib)
+
+    try_converters = [bytes, memoryview]
+
+    with dask.config.set({"distributed.comm.compression": compression}):
+        for f in try_converters:
+            payload = b"123"
+            assert maybe_compress(f(payload)) == (None, payload)
+
+            payload = b"0" * 10000
+            rc, rd = maybe_compress(f(payload))
+            assert rc == compression
+            assert compressions[rc]["decompress"](rd) == payload
 
 
 def test_maybe_compress_sample():
@@ -218,14 +275,8 @@ def test_maybe_compress_memoryviews():
     pytest.importorskip("lz4")
     x = np.arange(1000000, dtype="int64")
     compression, payload = maybe_compress(x.data)
-    try:
-        import blosc  # noqa: F401
-    except ImportError:
-        assert compression == "lz4"
-        assert len(payload) < x.nbytes * 0.75
-    else:
-        assert compression == "blosc"
-        assert len(payload) < x.nbytes / 10
+    assert compression == "lz4"
+    assert len(payload) < x.nbytes * 0.75
 
 
 @pytest.mark.parametrize("serializers", [("dask",), ("cuda",)])

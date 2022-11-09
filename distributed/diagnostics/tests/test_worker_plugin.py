@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import asyncio
+import warnings
 
 import pytest
 
@@ -41,11 +44,10 @@ class MyPlugin(WorkerPlugin):
 async def test_create_with_client(c, s):
     await c.register_worker_plugin(MyPlugin(123))
 
-    worker = await Worker(s.address, loop=s.loop)
-    assert worker._my_plugin_status == "setup"
-    assert worker._my_plugin_data == 123
+    async with Worker(s.address) as worker:
+        assert worker._my_plugin_status == "setup"
+        assert worker._my_plugin_data == 123
 
-    await worker.close()
     assert worker._my_plugin_status == "teardown"
 
 
@@ -54,46 +56,33 @@ async def test_remove_with_client(c, s):
     await c.register_worker_plugin(MyPlugin(123), name="foo")
     await c.register_worker_plugin(MyPlugin(546), name="bar")
 
-    worker = await Worker(s.address, loop=s.loop)
-    # remove the 'foo' plugin
-    await c.unregister_worker_plugin("foo")
-    assert worker._my_plugin_status == "teardown"
+    async with Worker(s.address) as worker:
+        # remove the 'foo' plugin
+        await c.unregister_worker_plugin("foo")
+        assert worker._my_plugin_status == "teardown"
 
-    # check that on the scheduler registered worker plugins we only have 'bar'
-    assert len(s.worker_plugins) == 1
-    assert "bar" in s.worker_plugins
+        # check that on the scheduler registered worker plugins we only have 'bar'
+        assert len(s.worker_plugins) == 1
+        assert "bar" in s.worker_plugins
 
-    # check on the worker plugins that we only have 'bar'
-    assert len(worker.plugins) == 1
-    assert "bar" in worker.plugins
+        # check on the worker plugins that we only have 'bar'
+        assert len(worker.plugins) == 1
+        assert "bar" in worker.plugins
 
-    # let's remove 'bar' and we should have none worker plugins
-    await c.unregister_worker_plugin("bar")
-    assert worker._my_plugin_status == "teardown"
-    assert not s.worker_plugins
-    assert not worker.plugins
+        # let's remove 'bar' and we should have none worker plugins
+        await c.unregister_worker_plugin("bar")
+        assert worker._my_plugin_status == "teardown"
+        assert not s.worker_plugins
+        assert not worker.plugins
 
 
 @gen_cluster(client=True, nthreads=[])
 async def test_remove_with_client_raises(c, s):
     await c.register_worker_plugin(MyPlugin(123), name="foo")
 
-    worker = await Worker(s.address, loop=s.loop)
-    with pytest.raises(ValueError, match="bar"):
-        await c.unregister_worker_plugin("bar")
-
-
-@gen_cluster(client=True, nthreads=[])
-async def test_create_with_client_and_plugin_from_class(c, s):
-    await c.register_worker_plugin(MyPlugin, data=456)
-
-    worker = await Worker(s.address, loop=s.loop)
-    assert worker._my_plugin_status == "setup"
-    assert worker._my_plugin_data == 456
-
-    # Give the plugin a new name so that it registers
-    await c.register_worker_plugin(MyPlugin, name="new", data=789)
-    assert worker._my_plugin_data == 789
+    async with Worker(s.address):
+        with pytest.raises(ValueError, match="bar"):
+            await c.unregister_worker_plugin("bar")
 
 
 @gen_cluster(client=True, worker_kwargs={"plugins": [MyPlugin(5)]})
@@ -118,7 +107,7 @@ async def test_normal_task_transitions_called(c, s, w):
 
     await c.register_worker_plugin(plugin)
     await c.submit(lambda x: x, 1, key="task")
-    await async_wait_for(lambda: not w.tasks, timeout=10)
+    await async_wait_for(lambda: not w.state.tasks, timeout=10)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
@@ -149,6 +138,7 @@ async def test_failing_task_transitions_called(c, s, w):
 async def test_superseding_task_transitions_called(c, s, w):
     expected_notifications = [
         {"key": "task", "start": "released", "finish": "waiting"},
+        {"key": "task", "start": "waiting", "finish": "ready"},
         {"key": "task", "start": "waiting", "finish": "constrained"},
         {"key": "task", "start": "constrained", "finish": "executing"},
         {"key": "task", "start": "executing", "finish": "memory"},
@@ -160,7 +150,7 @@ async def test_superseding_task_transitions_called(c, s, w):
 
     await c.register_worker_plugin(plugin)
     await c.submit(lambda x: x, 1, key="task", resources={"X": 1})
-    await async_wait_for(lambda: not w.tasks, timeout=10)
+    await async_wait_for(lambda: not w.state.tasks, timeout=10)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
@@ -186,7 +176,7 @@ async def test_dependent_tasks(c, s, w):
 
     await c.register_worker_plugin(plugin)
     await c.get(dsk, "task", sync=False)
-    await async_wait_for(lambda: not w.tasks, timeout=10)
+    await async_wait_for(lambda: not w.state.tasks, timeout=10)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
@@ -207,35 +197,8 @@ async def test_default_name(c, s, w):
     assert next(iter(w.plugins)).startswith("MyCustomPlugin-")
 
 
-def test_release_key_deprecated():
-    class ReleaseKeyDeprecated(WorkerPlugin):
-        def __init__(self):
-            self._called = False
-
-        def release_key(self, key, state, cause, reason, report):
-            # Ensure that the handler still works
-            self._called = True
-            assert state == "memory"
-            assert key == "task"
-
-        def teardown(self, worker):
-            assert self._called
-            return super().teardown(worker)
-
-    @gen_cluster(client=True, nthreads=[("", 1)])
-    async def test(c, s, a):
-
-        await c.register_worker_plugin(ReleaseKeyDeprecated())
-        fut = await c.submit(inc, 1, key="task")
-        assert fut == 2
-
-    with pytest.deprecated_call(
-        match="The `WorkerPlugin.release_key` hook is depreacted"
-    ):
-        test()
-
-
-def test_assert_no_warning_no_overload():
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_assert_no_warning_no_overload(c, s, a):
     """Assert we do not receive a deprecation warning if we do not overload any
     methods
     """
@@ -243,15 +206,13 @@ def test_assert_no_warning_no_overload():
     class Dummy(WorkerPlugin):
         pass
 
-    @gen_cluster(client=True, nthreads=[("", 1)])
-    async def test(c, s, a):
-
+    with warnings.catch_warnings(record=True) as record:
         await c.register_worker_plugin(Dummy())
-        fut = await c.submit(inc, 1, key="task")
-        assert fut == 2
+        assert await c.submit(inc, 1, key="x") == 2
+        while "x" in a.state.tasks:
+            await asyncio.sleep(0.01)
 
-    with pytest.warns(None):
-        test()
+    assert not record
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
@@ -269,14 +230,14 @@ async def test_WorkerPlugin_overwrite(c, s, w):
         def teardown(self, worker):
             del self.worker.foo
 
-    await c.register_worker_plugin(MyCustomPlugin)
+    await c.register_worker_plugin(MyCustomPlugin())
 
     assert w.foo == 0
 
     await c.submit(inc, 0)
     assert w.foo == 123
 
-    while s.tasks or w.tasks:
+    while s.tasks or w.state.tasks:
         await asyncio.sleep(0.01)
 
     class MyCustomPlugin(WorkerPlugin):
@@ -292,7 +253,7 @@ async def test_WorkerPlugin_overwrite(c, s, w):
         def teardown(self, worker):
             del self.worker.bar
 
-    await c.register_worker_plugin(MyCustomPlugin)
+    await c.register_worker_plugin(MyCustomPlugin())
 
     assert not hasattr(w, "foo")
     assert w.bar == 0

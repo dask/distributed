@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+from docutils.parsers.rst import directives
+
+# -- Configuration to keep autosummary in sync with autoclass::members ----------------------------------------------
+# Fixes issues/3693
+# See https://stackoverflow.com/questions/20569011/python-sphinx-autosummary-automated-listing-of-member-functions
+from sphinx.ext.autosummary import Autosummary, get_documenter
+from sphinx.util.inspect import safe_getattr
+
+import distributed
+
 #
 # Dask.distributed documentation build configuration file, created by
 # sphinx-quickstart on Tue Oct  6 14:42:44 2015.
@@ -65,7 +75,6 @@ author = "Anaconda, Inc."
 # built documents.
 #
 # The short X.Y version.
-import distributed
 
 version = distributed.__version__
 # The full version, including alpha/beta/rc tags.
@@ -104,7 +113,9 @@ exclude_patterns: list[str] = []
 # show_authors = False
 
 # The name of the Pygments (syntax highlighting) style to use.
-pygments_style = "default"
+# Commenting this out for now, if we register dask pygments,
+# then eventually this line can be:
+# pygments_style = "dask"
 
 # A list of ignored prefixes for module index sorting.
 # modindex_common_prefix = []
@@ -385,13 +396,13 @@ intersphinx_mapping = {
     "pandas": ("https://pandas.pydata.org/docs", None),
     "dask": ("https://docs.dask.org/en/latest", None),
     "bokeh": ("https://docs.bokeh.org/en/latest", None),
+    "fsspec": ("https://filesystem-spec.readthedocs.io/en/latest", None),
 }
 
 # Redirects
 # https://tech.signavio.com/2017/managing-sphinx-redirects
 redirect_files = [
     # old html, new html
-    ("joblib.html", "https://ml.dask.org/joblib.html"),
     ("setup.html", "https://docs.dask.org/en/latest/setup.html"),
     ("ec2.html", "https://docs.dask.org/en/latest/setup/cloud.html"),
     ("configuration.html", "https://docs.dask.org/en/latest/configuration.html"),
@@ -424,15 +435,6 @@ def copy_legacy_redirects(app, docname):
             target_path = app.outdir + "/" + html_src_path
             with open(target_path, "w") as f:
                 f.write(page)
-
-
-from docutils.parsers.rst import directives  # type: ignore
-
-# -- Configuration to keep autosummary in sync with autoclass::members ----------------------------------------------
-# Fixes issues/3693
-# See https://stackoverflow.com/questions/20569011/python-sphinx-autosummary-automated-listing-of-member-functions
-from sphinx.ext.autosummary import Autosummary, get_documenter
-from sphinx.util.inspect import safe_getattr
 
 
 class AutoAutoSummary(Autosummary):

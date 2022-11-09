@@ -1,0 +1,82 @@
+{% set major_minor_patch = environ.get('GIT_DESCRIBE_TAG', '0.0.0.dev').split('.') %}
+{% set new_patch = major_minor_patch[2] | int + 1 %}
+{% set version = (major_minor_patch[:2] + [new_patch]) | join('.') + environ.get('VERSION_SUFFIX', '') %}
+{% set dask_version = environ.get('DASK_CORE_VERSION', '0.0.0.dev') %}
+
+
+package:
+  name: distributed
+  version: {{ version }}
+
+source:
+  git_url: ../../..
+
+build:
+  number: {{ GIT_DESCRIBE_NUMBER }}
+  string: py_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}
+  noarch: python
+  script: {{ PYTHON }} -m pip install . -vv --no-deps
+  entry_points:
+    # Old style CLI
+    - dask-scheduler = distributed.cli.dask_scheduler:main
+    - dask-ssh = distributed.cli.dask_ssh:main
+    - dask-worker = distributed.cli.dask_worker:main
+
+requirements:
+  host:
+    - python >=3.8
+    - pip
+    - dask-core {{ dask_version }}
+  run:
+    - python >=3.8
+    - click >=7.0
+    - cloudpickle >=1.5.0
+    - cytoolz >=0.8.2
+    - {{ pin_compatible('dask-core', max_pin='x.x.x.x') }}
+    - jinja2
+    - locket >=1.0.0
+    - msgpack-python >=0.6.0
+    - packaging >=20.0
+    - psutil >=5.0
+    - pyyaml
+    - sortedcontainers !=2.0.0,!=2.0.1
+    - tblib >=1.6.0
+    - toolz >=0.8.2
+    - tornado >=6.0.3,<6.2
+    - urllib3
+    - zict >=0.1.3
+  run_constrained:
+    - openssl !=1.1.1e
+
+test:
+  imports:
+    - distributed
+    - distributed.cli
+    - distributed.comm
+    - distributed.deploy
+    - distributed.diagnostics
+    - distributed.protocol
+  commands:
+    - pip check
+    - dask-scheduler --help
+    - dask-ssh --help
+    - dask-worker --help
+    - dask scheduler --help
+    - dask ssh --help
+    - dask worker --help
+  requires:
+    - pip
+
+about:
+  home: https://distributed.dask.org
+  summary: Distributed scheduler for Dask
+  license: BSD-3-Clause
+  license_family: BSD
+  license_file: LICENSE.txt
+  description: |
+    Distributed is a lightweight library for distributed computing in Python.
+    It extends both the concurrent.futures and dask APIs to moderate sized
+    clusters.
+  doc_url: https://distributed.dask.org
+  doc_source_url: https://github.com/dask/distributed/blob/main/docs/source/index.rst
+  dev_url: https://github.com/dask/distributed

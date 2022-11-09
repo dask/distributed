@@ -1,6 +1,29 @@
 from __future__ import annotations
 
+import importlib.metadata
+import sys
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
+from typing import Protocol
+
+
+class _EntryPoints(Protocol):
+    def __call__(self, **kwargs: str) -> Iterable[importlib.metadata.EntryPoint]:
+        ...
+
+
+if sys.version_info >= (3, 10):
+    # py3.10 importlib.metadata type annotations are not in mypy yet
+    # https://github.com/python/typeshed/pull/7331
+    _entry_points: _EntryPoints = importlib.metadata.entry_points
+else:
+
+    def _entry_points(
+        *, group: str, name: str
+    ) -> Iterable[importlib.metadata.EntryPoint]:
+        for ep in importlib.metadata.entry_points().get(group, []):
+            if ep.name == name:
+                yield ep
 
 
 class Backend(ABC):
@@ -59,40 +82,24 @@ class Backend(ABC):
 backends: dict[str, Backend] = {}
 
 
-def get_backend(scheme: str, require: bool = True) -> Backend:
+def get_backend(scheme: str) -> Backend:
     """
     Get the Backend instance for the given *scheme*.
     It looks for matching scheme in dask's internal cache, and falls-back to
     package metadata for the group name ``distributed.comm.backends``
-
-    Parameters
-    ----------
-
-    require : bool
-        Verify that the backends requirements are properly installed. See
-        https://setuptools.readthedocs.io/en/latest/pkg_resources.html for more
-        information.
     """
 
     backend = backends.get(scheme)
-    if backend is None:
-        import pkg_resources
+    if backend is not None:
+        return backend
 
-        backend = None
-        for backend_class_ep in pkg_resources.iter_entry_points(
-            "distributed.comm.backends", scheme
-        ):
-            # resolve and require are equivalent to load
-            backend_factory = backend_class_ep.resolve()
-            if require:
-                backend_class_ep.require()
-            backend = backend_factory()
+    for backend_class_ep in _entry_points(
+        name=scheme, group="distributed.comm.backends"
+    ):
+        backend = backend_class_ep.load()()
+        backends[scheme] = backend
+        return backend
 
-        if backend is None:
-            raise ValueError(
-                "unknown address scheme %r (known schemes: %s)"
-                % (scheme, sorted(backends))
-            )
-        else:
-            backends[scheme] = backend
-    return backend
+    raise ValueError(
+        f"unknown address scheme {scheme!r} (known schemes: {sorted(backends)})"
+    )

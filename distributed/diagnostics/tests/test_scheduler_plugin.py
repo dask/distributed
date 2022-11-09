@@ -1,7 +1,11 @@
+from __future__ import annotations
+
+import logging
+
 import pytest
 
-from distributed import Scheduler, SchedulerPlugin, Worker
-from distributed.utils_test import gen_cluster, gen_test, inc
+from distributed import Scheduler, SchedulerPlugin, Worker, get_worker
+from distributed.utils_test import captured_logger, gen_cluster, gen_test, inc
 
 
 @gen_cluster(client=True)
@@ -71,8 +75,8 @@ async def test_add_remove_worker(s):
 
     events[:] = []
     s.remove_plugin(plugin.name)
-    a = await Worker(s.address)
-    await a.close()
+    async with Worker(s.address):
+        pass
     assert events == []
 
 
@@ -112,33 +116,6 @@ async def test_async_add_remove_worker(s):
         pass
     assert events == []
 
-    class UnnamedPlugin(SchedulerPlugin):
-        async def start(self, scheduler):
-            self.scheduler = scheduler
-
-    plugin = UnnamedPlugin()
-    s.add_plugin(plugin)
-    s.add_plugin(plugin, name="another")
-    with pytest.warns(FutureWarning, match="Removing scheduler plugins by value"):
-        with pytest.raises(ValueError) as excinfo:
-            s.remove_plugin(plugin)
-
-    msg = str(excinfo.value)
-    assert "Multiple instances of" in msg
-
-
-@gen_cluster(client=True)
-async def test_add_by_type(c, s, a, b):
-    class MyPlugin(SchedulerPlugin):
-        def __init__(self, scheduler):
-            self.scheduler = scheduler
-
-    with pytest.warns(FutureWarning, match="Adding plugins by class is deprecated"):
-        s.add_plugin(MyPlugin)
-
-    inst = next(iter(p for p in s.plugins.values() if isinstance(p, MyPlugin)))
-    assert inst.scheduler is s
-
 
 @gen_test()
 async def test_lifecycle():
@@ -170,11 +147,11 @@ async def test_register_scheduler_plugin(c, s, a, b):
             scheduler.foo = "bar"
 
     assert not hasattr(s, "foo")
-    await c.register_scheduler_plugin(Dummy1)
+    await c.register_scheduler_plugin(Dummy1())
     assert s.foo == "bar"
 
     with pytest.warns(UserWarning) as w:
-        await c.register_scheduler_plugin(Dummy1)
+        await c.register_scheduler_plugin(Dummy1())
     assert "Scheduler already contains" in w[0].message.args[0]
 
     class Dummy2(SchedulerPlugin):
@@ -185,7 +162,7 @@ async def test_register_scheduler_plugin(c, s, a, b):
 
     n_plugins = len(s.plugins)
     with pytest.raises(RuntimeError, match="raising in start method"):
-        await c.register_scheduler_plugin(Dummy2)
+        await c.register_scheduler_plugin(Dummy2())
     # total number of plugins should be unchanged
     assert n_plugins == len(s.plugins)
 
@@ -198,10 +175,73 @@ async def test_register_scheduler_plugin_pickle_disabled(c, s, a, b):
 
     n_plugins = len(s.plugins)
     with pytest.raises(ValueError) as excinfo:
-        await c.register_scheduler_plugin(Dummy1)
+        await c.register_scheduler_plugin(Dummy1())
 
     msg = str(excinfo.value)
     assert "disallowed from deserializing" in msg
     assert "distributed.scheduler.pickle" in msg
 
     assert n_plugins == len(s.plugins)
+
+
+@gen_cluster(client=True)
+async def test_log_event_plugin(c, s, a, b):
+    class EventPlugin(SchedulerPlugin):
+        async def start(self, scheduler: Scheduler) -> None:
+            self.scheduler = scheduler
+            self.scheduler._recorded_events = list()  # type: ignore
+
+        def log_event(self, name, msg):
+            self.scheduler._recorded_events.append((name, msg))
+
+    await c.register_scheduler_plugin(EventPlugin())
+
+    def f():
+        get_worker().log_event("foo", 123)
+
+    await c.submit(f)
+
+    assert ("foo", 123) in s._recorded_events
+
+
+@gen_cluster(client=True)
+async def test_register_plugin_on_scheduler(c, s, a, b):
+    class MyPlugin(SchedulerPlugin):
+        async def start(self, scheduler: Scheduler) -> None:
+            scheduler._foo = "bar"  # type: ignore
+
+    await s.register_scheduler_plugin(MyPlugin())
+
+    assert s._foo == "bar"
+
+
+@gen_cluster(client=True)
+async def test_closing_errors_ok(c, s, a, b, capsys):
+    class OK(SchedulerPlugin):
+        async def before_close(self):
+            print(123)
+
+        async def close(self):
+            print(456)
+
+    class Bad(SchedulerPlugin):
+        async def before_close(self):
+            raise Exception("BEFORE_CLOSE")
+
+        async def close(self):
+            raise Exception("AFTER_CLOSE")
+
+    await s.register_scheduler_plugin(OK())
+    await s.register_scheduler_plugin(Bad())
+
+    with captured_logger(logging.getLogger("distributed.scheduler")) as logger:
+        await s.close()
+
+    out, err = capsys.readouterr()
+    assert "123" in out
+    assert "456" in out
+
+    text = logger.getvalue()
+    assert "BEFORE_CLOSE" in text
+    text = logger.getvalue()
+    assert "AFTER_CLOSE" in text

@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import asyncio
 import atexit
 import gc
 import logging
@@ -7,10 +10,9 @@ import sys
 import warnings
 
 import click
-from tornado.ioloop import IOLoop
 
 from distributed import Scheduler
-from distributed.cli.utils import check_python_3, install_signal_handlers
+from distributed._signals import wait_for_signals
 from distributed.preloading import validate_preload_argv
 from distributed.proctitle import (
     enable_proctitle_on_children,
@@ -23,9 +25,9 @@ logger = logging.getLogger("distributed.scheduler")
 pem_file_option_type = click.Path(exists=True, resolve_path=True)
 
 
-@click.command(context_settings=dict(ignore_unknown_options=True))
+@click.command(name="scheduler", context_settings=dict(ignore_unknown_options=True))
 @click.option("--host", type=str, default="", help="URI, IP or hostname of this server")
-@click.option("--port", type=int, default=None, help="Serving port")
+@click.option("--port", type=str, default=None, help="Serving port")
 @click.option(
     "--interface",
     type=str,
@@ -55,9 +57,6 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 )
 # XXX default port (or URI) values should be centralized somewhere
 @click.option(
-    "--bokeh-port", type=int, default=None, help="Deprecated.  See --dashboard-address"
-)
-@click.option(
     "--dashboard-address",
     type=str,
     default=":8787",
@@ -72,11 +71,13 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     help="Launch the Dashboard [default: --dashboard]",
 )
 @click.option(
-    "--bokeh/--no-bokeh",
-    "bokeh",
-    default=None,
+    "--jupyter/--no-jupyter",
+    "jupyter",
+    default=False,
     required=False,
-    help="Deprecated.  See --dashboard/--no-dashboard.",
+    help="Start a Jupyter Server in the same process.  Warning: This will make"
+    "it possible for anyone with access to your dashboard address to run"
+    "Python code",
 )
 @click.option("--show/--no-show", default=False, help="Show web UI [default: --show]")
 @click.option(
@@ -119,10 +120,10 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 def main(
     host,
     port,
-    bokeh_port,
+    protocol,
+    interface,
     show,
     dashboard,
-    bokeh,
     dashboard_prefix,
     use_xheaders,
     pid_file,
@@ -130,28 +131,46 @@ def main(
     tls_cert,
     tls_key,
     dashboard_address,
+    jupyter,
     **kwargs,
 ):
+    """Launch a distributed scheduler."""
+
+    if "dask-scheduler" in sys.argv[0]:
+        warnings.warn(
+            "dask-scheduler is deprecated and will be removed in a future release; use `dask scheduler` instead",
+            FutureWarning,
+        )
+
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
     gc.set_threshold(g0 * 3, g1 * 3, g2 * 3)
 
     enable_proctitle_on_current()
     enable_proctitle_on_children()
 
-    if bokeh_port is not None:
-        warnings.warn(
-            "The --bokeh-port flag has been renamed to --dashboard-address. "
-            "Consider adding ``--dashboard-address :%d`` " % bokeh_port
-        )
-        dashboard_address = bokeh_port
-    if bokeh is not None:
-        warnings.warn(
-            "The --bokeh/--no-bokeh flag has been renamed to --dashboard/--no-dashboard. "
-        )
-        dashboard = bokeh
+    if interface and "," in interface:
+        interface = interface.split(",")
+
+    if protocol and "," in protocol:
+        protocol = protocol.split(",")
+
+    if port:
+        if "," in port:
+            port = [int(p) for p in port.split(",")]
+        else:
+            port = int(port)
 
     if port is None and (not host or not re.search(r":\d", host)):
-        port = 8786
+        if isinstance(protocol, list):
+            port = [8786] + [0] * (len(protocol) - 1)
+        else:
+            port = 8786
+
+    if isinstance(protocol, list) or isinstance(port, list):
+        if (not isinstance(protocol, list) or not isinstance(port, list)) or len(
+            port
+        ) != len(protocol):
+            raise ValueError("--protocol and --port must both be lists of equal length")
 
     sec = {
         k: v
@@ -183,39 +202,53 @@ def main(
         limit = max(soft, hard // 2)
         resource.setrlimit(resource.RLIMIT_NOFILE, (limit, hard))
 
-    loop = IOLoop.current()
-    logger.info("-" * 47)
-
-    scheduler = Scheduler(
-        loop=loop,
-        security=sec,
-        host=host,
-        port=port,
-        dashboard=dashboard,
-        dashboard_address=dashboard_address,
-        http_prefix=dashboard_prefix,
-        **kwargs,
-    )
-    logger.info("-" * 47)
-
-    install_signal_handlers(loop)
-
     async def run():
-        await scheduler
-        await scheduler.finished()
+        logger.info("-" * 47)
+
+        scheduler = Scheduler(
+            security=sec,
+            host=host,
+            port=port,
+            protocol=protocol,
+            interface=interface,
+            dashboard=dashboard,
+            dashboard_address=dashboard_address,
+            http_prefix=dashboard_prefix,
+            jupyter=jupyter,
+            **kwargs,
+        )
+        logger.info("-" * 47)
+
+        async def wait_for_scheduler_to_finish():
+            """Wait for the scheduler to initialize and finish"""
+            await scheduler
+            await scheduler.finished()
+
+        async def wait_for_signals_and_close():
+            """Wait for SIGINT or SIGTERM and close the scheduler upon receiving one of those signals"""
+            await wait_for_signals()
+            await scheduler.close()
+
+        wait_for_signals_and_close_task = asyncio.create_task(
+            wait_for_signals_and_close()
+        )
+        wait_for_scheduler_to_finish_task = asyncio.create_task(
+            wait_for_scheduler_to_finish()
+        )
+
+        done, _ = await asyncio.wait(
+            [wait_for_signals_and_close_task, wait_for_scheduler_to_finish_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        # Re-raise exceptions from done tasks
+        [task.result() for task in done]
+        logger.info("Stopped scheduler at %r", scheduler.address)
 
     try:
-        loop.run_sync(run)
+        asyncio.run(run())
     finally:
-        scheduler.stop()
-
-        logger.info("End scheduler at %r", scheduler.address)
-
-
-def go():
-    check_python_3()
-    main()
+        logger.info("End scheduler")
 
 
 if __name__ == "__main__":
-    go()
+    main()  # pragma: no cover

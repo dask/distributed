@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import torch
 
-from .serialize import (
+from distributed.protocol.serialize import (
     dask_deserialize,
     dask_serialize,
     deserialize,

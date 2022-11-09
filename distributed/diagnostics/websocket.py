@@ -1,6 +1,9 @@
-from ..utils import key_split
-from .plugin import SchedulerPlugin
-from .task_stream import colors
+from __future__ import annotations
+
+from dask.utils import key_split
+
+from distributed.diagnostics.plugin import SchedulerPlugin
+from distributed.diagnostics.task_stream import colors
 
 
 class WebsocketPlugin(SchedulerPlugin):

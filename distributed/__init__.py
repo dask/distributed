@@ -1,14 +1,21 @@
-from . import config  # isort:skip; load distributed configuration first
-from . import widgets  # isort:skip; load distributed widgets second
+from __future__ import annotations
+
+# isort: off
+from distributed import config  # load distributed configuration first
+from distributed import widgets  # load distributed widgets second
+
+# isort: on
+
+import atexit
+
 import dask
 from dask.config import config  # type: ignore
 
-from ._version import get_versions
-from .actor import Actor, ActorFuture
-from .client import (
+from distributed._version import get_versions
+from distributed.actor import Actor, ActorFuture, BaseActorFuture
+from distributed.client import (
     Client,
     CompatibleExecutor,
-    Executor,
     Future,
     as_completed,
     default_client,
@@ -19,34 +26,142 @@ from .client import (
     performance_report,
     wait,
 )
-from .core import Status, connect, rpc
-from .deploy import Adaptive, LocalCluster, SpecCluster, SSHCluster
-from .diagnostics.plugin import (
+from distributed.core import Status, connect, rpc
+from distributed.deploy import Adaptive, LocalCluster, SpecCluster, SSHCluster
+from distributed.diagnostics.plugin import (
+    CondaInstall,
     Environ,
     NannyPlugin,
+    PackageInstall,
     PipInstall,
     SchedulerPlugin,
     UploadDirectory,
     UploadFile,
     WorkerPlugin,
 )
-from .diagnostics.progressbar import progress
-from .event import Event
-from .lock import Lock
-from .multi_lock import MultiLock
-from .nanny import Nanny
-from .pubsub import Pub, Sub
-from .queues import Queue
-from .scheduler import Scheduler
-from .security import Security
-from .semaphore import Semaphore
-from .threadpoolexecutor import rejoin
-from .utils import CancelledError, TimeoutError, sync
-from .variable import Variable
-from .worker import Reschedule, Worker, get_client, get_worker, print, secede, warn
-from .worker_client import local_client, worker_client
+from distributed.diagnostics.progressbar import progress
+from distributed.event import Event
+from distributed.lock import Lock
+from distributed.multi_lock import MultiLock
+from distributed.nanny import Nanny
+from distributed.pubsub import Pub, Sub
+from distributed.queues import Queue
+from distributed.scheduler import KilledWorker, Scheduler
+from distributed.security import Security
+from distributed.semaphore import Semaphore
+from distributed.threadpoolexecutor import rejoin
+from distributed.utils import CancelledError, TimeoutError, sync
+from distributed.variable import Variable
+from distributed.worker import (
+    Reschedule,
+    Worker,
+    get_client,
+    get_worker,
+    print,
+    secede,
+    warn,
+)
+from distributed.worker_client import local_client, worker_client
 
-versions = get_versions()
-__version__ = versions["version"]
-__git_revision__ = versions["full-revisionid"]
-del get_versions, versions
+
+def __getattr__(name):
+    global __version__, __git_revision__
+
+    if name == "__version__":
+        from importlib.metadata import version
+
+        __version__ = version("distributed")
+        return __version__
+
+    if name == "__git_revision__":
+        from distributed._version import get_versions
+
+        __git_revision__ = get_versions()["full-revisionid"]
+        return __git_revision__
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+_python_shutting_down = False
+
+
+@atexit.register
+def _():
+    """Set a global when Python shuts down.
+
+    Note
+    ----
+    This function must be registered with atexit *after* any class that invokes
+    ``dstributed.utils.is_python_shutting_down`` has been defined. This way it
+    will be called before the ``__del__`` method of those classes.
+
+    See Also
+    --------
+    distributed.utils.is_python_shutting_down
+    """
+    global _python_shutting_down
+    _python_shutting_down = True
+
+
+__all__ = [
+    "Actor",
+    "ActorFuture",
+    "Adaptive",
+    "BaseActorFuture",
+    "CancelledError",
+    "Client",
+    "CompatibleExecutor",
+    "CondaInstall",
+    "Environ",
+    "Event",
+    "Future",
+    "KilledWorker",
+    "LocalCluster",
+    "Lock",
+    "MultiLock",
+    "Nanny",
+    "NannyPlugin",
+    "PackageInstall",
+    "PipInstall",
+    "Pub",
+    "Queue",
+    "Reschedule",
+    "SSHCluster",
+    "Scheduler",
+    "SchedulerPlugin",
+    "Security",
+    "Semaphore",
+    "SpecCluster",
+    "Status",
+    "Sub",
+    "TimeoutError",
+    "UploadDirectory",
+    "UploadFile",
+    "Variable",
+    "Worker",
+    "WorkerPlugin",
+    "as_completed",
+    "config",
+    "connect",
+    "dask",
+    "default_client",
+    "fire_and_forget",
+    "futures_of",
+    "get_client",
+    "get_task_metadata",
+    "get_task_stream",
+    "get_versions",
+    "get_worker",
+    "local_client",
+    "performance_report",
+    "print",
+    "progress",
+    "rejoin",
+    "rpc",
+    "secede",
+    "sync",
+    "wait",
+    "warn",
+    "widgets",
+    "worker_client",
+]

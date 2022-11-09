@@ -8,14 +8,15 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, cast
 
 import tlz as toolz
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import IOLoop
 
 from dask.utils import parse_timedelta
 
-from ..metrics import time
+from distributed.compatibility import PeriodicCallback
+from distributed.metrics import time
 
 if TYPE_CHECKING:
-    from ..scheduler import WorkerState
+    from distributed.scheduler import WorkerState
 
 
 logger = logging.getLogger(__name__)
@@ -94,7 +95,7 @@ class AdaptiveCore:
         minimum: int = 0,
         maximum: int | float = math.inf,
         wait_count: int = 3,
-        interval: str | int | float | timedelta | None = "1s",
+        interval: str | int | float | timedelta = "1s",
     ):
         if not isinstance(maximum, int) and not math.isinf(maximum):
             raise TypeError(f"maximum must be int or inf; got {maximum}")
