@@ -1311,7 +1311,8 @@ class TaskState:
     #: Cached hash of :attr:`~TaskState.client_key`
     _hash: int
 
-    #: Cached; set by `SchedulerState.is_rootish`
+    #: Cached while tasks are in `queued` or `no-worker`; set in
+    #: `transition_waiting_processing` and `_add_to_processing`
     _rootish: bool | None
 
     # Support for weakrefs to a class with __slots__
@@ -2236,6 +2237,7 @@ class SchedulerState:
                 # NOTE: having two root-ish methods is temporary. When the feature flag is removed,
                 # there should only be one, which combines co-assignment and queuing.
                 # Eventually, special-casing root tasks might be removed entirely, with better heuristics.
+                ts._rootish = True  # cached until `processing`
                 if math.isinf(self.WORKER_SATURATION):
                     if not (ws := self.decide_worker_rootish_queuing_disabled(ts)):
                         return {ts.key: "no-worker"}, {}, {}
@@ -2243,6 +2245,7 @@ class SchedulerState:
                     if not (ws := self.decide_worker_rootish_queuing_enabled()):
                         return {ts.key: "queued"}, {}, {}
             else:
+                ts._rootish = False  # cached until `processing`
                 if not (ws := self.decide_worker_non_rootish(ts)):
                     return {ts.key: "no-worker"}, {}, {}
 
@@ -3002,30 +3005,24 @@ class SchedulerState:
         Root-ish tasks are part of a group that's much larger than the cluster,
         and have few or no dependencies.
         """
-        # NOTE: we cache `is_rootish` not for performance, but so it can't change if
-        # `TaskGroup` and cluster size does. That avoids annoying edge cases where a
-        # task does/doesn't look root-ish when it goes into `queued` or `unrunnable`,
-        # but that's flipped when it comes out.
-        # Specifically, `_rootish` is set only when a task in in the `queued` or
-        # `no-worker` states.
-        if (result := ts._rootish) is None:
-            if (
-                ts.resource_restrictions
-                or ts.worker_restrictions
-                or ts.host_restrictions
-            ):
-                result = False
-            else:
-                tg = ts.group
-                result = (
-                    len(tg) > self.total_nthreads * 2
-                    and len(tg.dependencies) < 5
-                    and sum(map(len, tg.dependencies)) < 5
-                )
-            ts._rootish = result
+        # NOTE: the result of `is_rootish` is cached when putting a task into `queued`
+        # or `no-worker`, and invalidated when leaving those states. we cache
+        # `is_rootish` not for performance, but so it can't change if `TaskGroup` and
+        # cluster size does. That avoids annoying edge cases where a task does/doesn't
+        # look root-ish when it goes into `queued` or `unrunnable`, but that's flipped
+        # when it comes out.
+        if (cached := ts._rootish) is not None:
+            return cached
+
+        if ts.resource_restrictions or ts.worker_restrictions or ts.host_restrictions:
+            return False
         else:
-            pass
-        return result
+            tg = ts.group
+            return (
+                len(tg) > self.total_nthreads * 2
+                and len(tg.dependencies) < 5
+                and sum(map(len, tg.dependencies)) < 5
+            )
 
     def check_idle_saturated(self, ws: WorkerState, occ: float = -1.0):
         """Update the status of the idle and saturated state
