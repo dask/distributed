@@ -5339,6 +5339,7 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             self.running.discard(ws)
             self.idle.pop(ws.address, None)
+            self.idle_task_count.pop(ws.address, None)
 
     async def handle_request_refresh_who_has(
         self, keys: Iterable[str], worker: str, stimulus_id: str
