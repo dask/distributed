@@ -3005,12 +3005,12 @@ class SchedulerState:
         Root-ish tasks are part of a group that's much larger than the cluster,
         and have few or no dependencies.
         """
-        # NOTE: the result of `is_rootish` is cached when putting a task into `queued`
-        # or `no-worker`, and invalidated when leaving those states. we cache
-        # `is_rootish` not for performance, but so it can't change if `TaskGroup` and
-        # cluster size does. That avoids annoying edge cases where a task does/doesn't
-        # look root-ish when it goes into `queued` or `unrunnable`, but that's flipped
-        # when it comes out.
+        # NOTE: the result of `is_rootish` is cached in `waiting->processing`, and
+        # invalidated when entering `processing`. This is for the benefit of the
+        # `queued` and and `no-worker` states. We cache `is_rootish` not for
+        # performance, but so it can't change if `TaskGroup` and cluster size does. That
+        # avoids annoying edge cases where a task does/doesn't look root-ish when it
+        # goes into `queued` or `unrunnable`, but that's flipped when it comes out.
         if (cached := ts._rootish) is not None:
             return cached
 
