@@ -7150,7 +7150,7 @@ class Scheduler(SchedulerState, ServerNode):
         try:
             self.worker_plugins.pop(name)
         except KeyError:
-            raise ValueError(f"The worker plugin {name} does not exists")
+            raise ValueError(f"The worker plugin {name} does not exist")
 
         responses = await self.broadcast(msg=dict(op="plugin-remove", name=name))
         return responses
@@ -7170,7 +7170,7 @@ class Scheduler(SchedulerState, ServerNode):
         try:
             self.nanny_plugins.pop(name)
         except KeyError:
-            raise ValueError(f"The nanny plugin {name} does not exists")
+            raise ValueError(f"The nanny plugin {name} does not exist")
 
         responses = await self.broadcast(
             msg=dict(op="plugin_remove", name=name), nanny=True
