@@ -53,3 +53,58 @@ async def test_limiter_basic():
 
     await res.decrease(5)
     assert res.available() == 3
+
+
+@gen_test()
+async def test_limiter_concurrent_decrease_releases_waiter():
+    res = ResourceLimiter(5)
+    res.increase(5)
+
+    wait_for_available = asyncio.create_task(res.wait_for_available())
+    event = asyncio.Event()
+
+    async def decrease():
+        await event.wait()
+        await res.decrease(5)
+
+    decrease_buffer = asyncio.create_task(decrease())
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(asyncio.shield(wait_for_available), 0.1)
+
+    event.set()
+    await wait_for_available
+
+
+@gen_test()
+async def test_limiter_statistics():
+    res = ResourceLimiter(1)
+
+    assert res.time_blocked_avg == 0.0
+    assert res.time_blocked_total == 0.0
+
+    await res.wait_for_available()
+
+    assert res.time_blocked_avg == 0.0
+    assert res.time_blocked_total == 0.0
+
+    res.increase(1)
+
+    blocked_wait = asyncio.create_task(res.wait_for_available())
+
+    await asyncio.sleep(0.1)
+
+    assert not blocked_wait.done()
+
+    await res.decrease(1)
+
+    await blocked_wait
+
+    assert 0.2 > res.time_blocked_total > 0.0
+    assert res.time_blocked_total > res.time_blocked_avg
+
+    before_total = res.time_blocked_total
+    before_avg = res.time_blocked_avg
+
+    await res.wait_for_available()
+    assert before_total == res.time_blocked_total
+    assert before_avg > res.time_blocked_avg

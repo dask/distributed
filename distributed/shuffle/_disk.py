@@ -57,7 +57,11 @@ class DiskShardsBuffer(ShardsBuffer):
         load: Callable[[BinaryIO], Any],
         memory_limiter: ResourceLimiter | None = None,
     ):
-        super().__init__(memory_limiter=memory_limiter)
+        super().__init__(
+            memory_limiter=memory_limiter,
+            # Disk is not able to run concurrently atm
+            concurrency_limit=1,
+        )
         self.directory = pathlib.Path(directory)
         if not os.path.exists(self.directory):
             os.mkdir(self.directory)

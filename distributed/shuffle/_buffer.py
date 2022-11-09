@@ -19,6 +19,25 @@ ShardType = TypeVar("ShardType", bound=Sized)
 
 
 class ShardsBuffer(Generic[ShardType]):
+    """A buffer for P2P shuffle
+
+    The objects to buffer are typically bytes belonging to certain shards.
+    Typically the buffer is implemented on sending and receiving end.
+
+    The buffer allows for concurrent writing and buffers shards to reduce overhead of writing.
+
+    The shards are typically provided in a format like::
+
+        {
+            "bucket-0": [b"shard1", b"shard2"],
+            "bucket-1": [b"shard1", b"shard2"],
+        }
+
+    Buckets typically correspond to output partitions.
+
+    If exceptions occur during writing, the buffer is automatically closed. Subsequent attempts to write will raise the same exception.
+    Flushing will not raise an exception. To ensure that the buffer finished successfully, please call `ShardsBuffer.raise_on_exception`
+    """
 
     shards: defaultdict[str, list[ShardType]]
     sizes: defaultdict[str, int]
@@ -27,7 +46,6 @@ class ShardsBuffer(Generic[ShardType]):
     def __init__(
         self,
         memory_limiter: ResourceLimiter | None,
-        # TODO: Set concurrency to 1 for disk since it cannot work with asyncio (yet)
         concurrency_limit: int = 2,
         max_message_size: int = -1,
     ) -> None:
@@ -129,7 +147,7 @@ class ShardsBuffer(Generic[ShardType]):
                 self._shards_available.notify_all()
             await self.process(part_id, shards, size)
 
-    async def put(self, data: dict[str, list[ShardType]]) -> None:
+    async def write(self, data: dict[str, list[ShardType]]) -> None:
         """
         Writes many objects into the local buffers, blocks until ready for more
 
@@ -172,11 +190,15 @@ class ShardsBuffer(Generic[ShardType]):
         assert size
 
     def raise_on_exception(self) -> None:
+        """Raises an exception if something went wrong during writing"""
         if self._exception:
             raise self._exception
 
     async def flush(self) -> None:
-        """Wait until all writes are finished"""
+        """Wait until all writes are finished.
+
+        This closes the buffer such that no new writes are allowed
+        """
         async with self._flush_lock:
             self._closed = True
             async with self._shards_available:
@@ -192,6 +214,10 @@ class ShardsBuffer(Generic[ShardType]):
                 assert not self.bytes_memory, (type(self), self.bytes_memory)
 
     async def close(self) -> None:
+        """Flush and close the buffer.
+
+        This cleans up all allocated resources.
+        """
         await self.flush()
         if not self._exception:
             assert not self.bytes_memory, (type(self), self.bytes_memory)

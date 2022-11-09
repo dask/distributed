@@ -625,7 +625,6 @@ async def test_basic_lowlevel_shuffle(
 
 @gen_test()
 async def test_error_offload(tmpdir, loop_in_thread):
-    # Ensure that all data is
     dfs = []
     rows_per_df = 10
     n_input_partitions = 2

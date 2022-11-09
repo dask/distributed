@@ -23,8 +23,8 @@ def load(f):
 @gen_test()
 async def test_basic(tmp_path):
     async with DiskShardsBuffer(directory=tmp_path, dump=dump, load=load) as mf:
-        await mf.put({"x": [b"0" * 1000], "y": [b"1" * 500]})
-        await mf.put({"x": [b"0" * 1000], "y": [b"1" * 500]})
+        await mf.write({"x": [b"0" * 1000], "y": [b"1" * 500]})
+        await mf.write({"x": [b"0" * 1000], "y": [b"1" * 500]})
 
         await mf.flush()
 
@@ -44,7 +44,7 @@ async def test_read_before_flush(tmp_path):
         with pytest.raises(RuntimeError):
             mf.read(1)
 
-        await mf.put(payload)
+        await mf.write(payload)
 
         with pytest.raises(RuntimeError):
             mf.read(1)
@@ -62,7 +62,7 @@ async def test_many(tmp_path, count):
         d = {i: [str(i).encode() * 100] for i in range(count)}
 
         for _ in range(10):
-            await mf.put(d)
+            await mf.write(d)
 
         await mf.flush()
 
@@ -79,13 +79,13 @@ async def test_exceptions(tmp_path):
         raise Exception(123)
 
     async with DiskShardsBuffer(directory=tmp_path, dump=dump, load=load) as mf:
-        await mf.put({"x": [b"0" * 1000], "y": [b"1" * 500]})
+        await mf.write({"x": [b"0" * 1000], "y": [b"1" * 500]})
 
         while not mf._exception:
             await asyncio.sleep(0.1)
 
         with pytest.raises(Exception, match="123"):
-            await mf.put({"x": [b"0" * 1000], "y": [b"1" * 500]})
+            await mf.write({"x": [b"0" * 1000], "y": [b"1" * 500]})
 
         await mf.flush()
 
@@ -110,7 +110,7 @@ async def test_high_pressure_flush_with_exception(tmp_path):
     ) as mf:
         tasks = []
         for _ in range(10):
-            tasks.append(asyncio.create_task(mf.put(payload)))
+            tasks.append(asyncio.create_task(mf.write(payload)))
 
         # Wait until things are actually queued up.
         # This is when there is no slot on the queue available anymore

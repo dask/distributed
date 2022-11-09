@@ -52,8 +52,8 @@ class Shuffle:
     The user of this needs to guarantee that only `Shuffle`s of the same unique
     `ShuffleID` interact.
 
-    Paramters
-    ---------
+    Parameters
+    ----------
     worker_for:
         A mapping partition_id -> worker_address.
     output_workers:
@@ -78,6 +78,10 @@ class Shuffle:
     broadcast:
         A function that ensures a RPC is evaluated on all `Shuffle` instances of
         a given `ShuffleID`.
+    memory_limiter_disk:
+    memory_limiter_comm:
+        A ``ResourceLimiter`` limiting the total amount of memory used in either
+        buffer.
     """
 
     def __init__(
@@ -136,7 +140,7 @@ class Shuffle:
         self._exception: Exception | None = None
 
     def __repr__(self) -> str:
-        return f"<Shuffle: id: {self.id} on {self.local_address}>"
+        return f"<Shuffle id: {self.id} on {self.local_address}>"
 
     @contextlib.contextmanager
     def time(self, name: str) -> Iterator[None]:
@@ -177,11 +181,11 @@ class Shuffle:
             )
 
     def heartbeat(self) -> dict[str, Any]:
-        comm_heartbat = self._comm_buffer.heartbeat()
-        comm_heartbat["read"] = self.total_recvd
+        comm_heartbeat = self._comm_buffer.heartbeat()
+        comm_heartbeat["read"] = self.total_recvd
         return {
             "disk": self._disk_buffer.heartbeat(),
-            "comm": comm_heartbat,
+            "comm": comm_heartbeat,
             "diagnostics": self.diagnostics,
             "start": self.start_time,
         }
@@ -190,17 +194,13 @@ class Shuffle:
         await self._receive(data)
 
     async def _receive(self, data: list[bytes]) -> None:
-        # This is actually ok.  Our local barrier might have finished,
-        # but barriers on other workers might still be running and sending us
-        # data
-        # assert not self.transferred, "`receive` called after barrier task"
         if self._exception:
             raise self._exception
 
         try:
             self.total_recvd += sum(map(len, data))
             # TODO: Is it actually a good idea to dispatch multiple times instead of
-            # onyl once?
+            # only once?
             # An ugly way of turning these batches back into an arrow table
             data = await self.offload(
                 list_of_buffers_to_table,
@@ -219,7 +219,7 @@ class Shuffle:
                     for k, v in groups.items()
                 }
             )
-            await self._disk_buffer.put(groups)
+            await self._disk_buffer.write(groups)
         except Exception as e:
             self._exception = e
 
@@ -240,7 +240,7 @@ class Shuffle:
             return out
 
         out = await self.offload(_)
-        await self._comm_buffer.put(out)
+        await self._comm_buffer.write(out)
 
     async def get_output_partition(self, i: int) -> pd.DataFrame:
         assert self.transferred, "`get_output_partition` called before barrier task"
@@ -332,7 +332,7 @@ class ShuffleWorkerExtension:
 
     async def shuffle_inputs_done(self, shuffle_id: ShuffleId) -> None:
         """
-        Hander: Inform the extension that all input partitions have been handed off to extensions.
+        Handler: Inform the extension that all input partitions have been handed off to extensions.
         Using an unknown ``shuffle_id`` is an error.
         """
         with log_errors():

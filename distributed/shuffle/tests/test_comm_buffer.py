@@ -18,8 +18,8 @@ async def test_basic(tmp_path):
         d[address].extend(shards)
 
     mc = CommShardsBuffer(send=send)
-    await mc.put({"x": [b"0" * 1000], "y": [b"1" * 500]})
-    await mc.put({"x": [b"0" * 1000], "y": [b"1" * 500]})
+    await mc.write({"x": [b"0" * 1000], "y": [b"1" * 500]})
+    await mc.write({"x": [b"0" * 1000], "y": [b"1" * 500]})
 
     await mc.flush()
 
@@ -35,13 +35,13 @@ async def test_exceptions(tmp_path):
         raise Exception(123)
 
     mc = CommShardsBuffer(send=send)
-    await mc.put({"x": [b"0" * 1000], "y": [b"1" * 500]})
+    await mc.write({"x": [b"0" * 1000], "y": [b"1" * 500]})
 
     while not mc._exception:
         await asyncio.sleep(0.1)
 
     with pytest.raises(Exception, match="123"):
-        await mc.put({"x": [b"0" * 1000], "y": [b"1" * 500]})
+        await mc.write({"x": [b"0" * 1000], "y": [b"1" * 500]})
 
     await mc.flush()
 
@@ -61,14 +61,14 @@ async def test_slow_send(tmpdir):
         sending_first.set()
 
     mc = CommShardsBuffer(send=send, concurrency_limit=1)
-    await mc.put({"x": [b"0"], "y": [b"1"]})
-    await mc.put({"x": [b"0"], "y": [b"1"]})
+    await mc.write({"x": [b"0"], "y": [b"1"]})
+    await mc.write({"x": [b"0"], "y": [b"1"]})
     flush_task = asyncio.create_task(mc.flush())
     await sending_first.wait()
     block_send.clear()
 
     with pytest.raises(RuntimeError):
-        await mc.put({"x": [b"2"], "y": [b"2"]})
+        await mc.write({"x": [b"2"], "y": [b"2"]})
         await flush_task
 
     assert [b"2" not in shard for shard in d["x"]]
@@ -92,7 +92,7 @@ async def test_concurrent_puts():
     payload = {x: [gen_bytes(frac)] for x in range(nshards)}
 
     async with CommShardsBuffer(send=send) as mc:
-        futs = [asyncio.create_task(mc.put(payload)) for _ in range(nputs)]
+        futs = [asyncio.create_task(mc.write(payload)) for _ in range(nputs)]
 
         await asyncio.gather(*futs)
         await mc.flush()
@@ -125,7 +125,7 @@ async def test_concurrent_puts_error():
     payload = {x: [gen_bytes(frac)] for x in range(nshards)}
 
     async with CommShardsBuffer(send=send) as mc:
-        futs = [asyncio.create_task(mc.put(payload)) for _ in range(nputs)]
+        futs = [asyncio.create_task(mc.write(payload)) for _ in range(nputs)]
 
         await asyncio.gather(*futs)
         await mc.flush()

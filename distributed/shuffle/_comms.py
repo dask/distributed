@@ -36,8 +36,6 @@ class CommShardsBuffer(ShardsBuffer):
         The maximum number of connections to have out at once
     max_message_size: str
         The maximum size of a single message that we want to send
-    queue: asyncio.Queue
-        A queue holding tokens used to limit concurrency
 
     Parameters
     ----------

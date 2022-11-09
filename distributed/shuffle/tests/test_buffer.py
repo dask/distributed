@@ -57,29 +57,31 @@ async def test_memory_limit(big_payload):
         memory_limiter=limiter,
         concurrency_limit=2,
     ) as buf:
-        many_small = [asyncio.create_task(buf.put(small_payload)) for _ in range(9)]
+        many_small = [asyncio.create_task(buf.write(small_payload)) for _ in range(9)]
         buf.allow_process.set()
         many_small = asyncio.gather(*many_small)
         # Puts that do not breach the limit do not block
-        await asyncio.wait_for(many_small, 0.1)
+        await many_small
+        assert buf.memory_limiter.time_blocked_total == 0
         buf.allow_process.clear()
 
-        many_small = [asyncio.create_task(buf.put(small_payload)) for _ in range(11)]
+        many_small = [asyncio.create_task(buf.write(small_payload)) for _ in range(11)]
         assert buf.memory_limiter
         while buf.memory_limiter.available():
             await asyncio.sleep(0.1)
 
-        new_put = asyncio.create_task(buf.put(small_payload))
+        new_put = asyncio.create_task(buf.write(small_payload))
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(asyncio.shield(new_put), 0.1)
         buf.allow_process.set()
         many_small = asyncio.gather(*many_small)
+        await new_put
 
         while not buf.memory_limiter.free():
             await asyncio.sleep(0.1)
         buf.allow_process.clear()
-        big = asyncio.create_task(buf.put(big_payload))
-        small = asyncio.create_task(buf.put(small_payload))
+        big = asyncio.create_task(buf.write(big_payload))
+        small = asyncio.create_task(buf.write(small_payload))
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(asyncio.shield(big), 0.1)
         with pytest.raises(asyncio.TimeoutError):
@@ -89,7 +91,9 @@ async def test_memory_limit(big_payload):
         await big
         await small
         # Once the big write is through, we can write without blocking again
-        await asyncio.wait_for(buf.put(small_payload), 0.1)
+        before = buf.memory_limiter.time_blocked_total
+        await buf.write(small_payload)
+        assert before == buf.memory_limiter.time_blocked_total
 
 
 class BufferShardsBroken(ShardsBuffer):
@@ -123,8 +127,8 @@ async def test_memory_limit_blocked_exception():
         memory_limiter=limiter,
         concurrency_limit=2,
     ) as mf:
-        big_write = asyncio.create_task(mf.put(big_payload))
-        small_write = asyncio.create_task(mf.put(broken_payload))
+        big_write = asyncio.create_task(mf.write(big_payload))
+        small_write = asyncio.create_task(mf.write(broken_payload))
         # The broken write hits the limit and blocks
         await big_write
         await small_write
