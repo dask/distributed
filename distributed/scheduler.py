@@ -4921,7 +4921,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert not any([ts in dts.waiters for dts in ts.dependencies])
         assert ts not in self.unrunnable
         assert ts not in self.queued
-        assert ts._rootish is None
+        assert ts._rootish is None, ts._rootish
 
     def validate_waiting(self, key):
         ts: TaskState = self.tasks[key]
@@ -4930,7 +4930,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert not ts.processing_on
         assert ts not in self.unrunnable
         assert ts not in self.queued
-        assert ts._rootish is None
+        assert ts._rootish is None, ts._rootish
         for dts in ts.dependencies:
             # We are waiting on a dependency iff it's not stored
             assert bool(dts.who_has) != (dts in ts.waiting_on)
@@ -4943,7 +4943,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert not ts.waiting_on
         assert not ts.who_has
         assert not ts.processing_on
-        assert ts._rootish is True
+        assert ts._rootish is True, ts._rootish
         assert not (
             ts.worker_restrictions or ts.host_restrictions or ts.resource_restrictions
         )
@@ -4960,7 +4960,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert ts in ws.processing
         assert not ts.who_has
         assert ts not in self.queued
-        assert ts._rootish is None
+        assert ts._rootish is None, ts._rootish
         for dts in ts.dependencies:
             assert dts.who_has
             assert ts in dts.waiters
@@ -4974,7 +4974,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert not ts.waiting_on
         assert ts not in self.unrunnable
         assert ts not in self.queued
-        assert ts._rootish is None
+        assert ts._rootish is None, ts._rootish
         for dts in ts.dependents:
             assert (dts in ts.waiters) == (
                 dts.state in ("waiting", "queued", "processing", "no-worker")
@@ -4989,7 +4989,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert not ts.processing_on
         assert not ts.who_has
         assert ts not in self.queued
-        assert ts._rootish is not None
+        assert ts._rootish is not None, ts._rootish
         for dts in ts.dependencies:
             assert dts.who_has
 
@@ -4998,7 +4998,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert ts.exception_blame
         assert not ts.who_has
         assert ts not in self.queued
-        assert ts._rootish is None
+        assert ts._rootish is None, ts._rootish
 
     def validate_key(self, key, ts: TaskState | None = None):
         try:
@@ -7812,7 +7812,7 @@ def _validate_ready(state: SchedulerState, ts: TaskState) -> None:
     assert ts not in state.unrunnable
     assert ts not in state.queued
     assert all(dts.who_has for dts in ts.dependencies)
-    assert ts._rootish is not None
+    assert ts._rootish is not None, ts._rootish
 
 
 def _add_to_processing(
