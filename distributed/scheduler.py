@@ -746,9 +746,6 @@ class WorkerState:
         """Remove a task from a workers processing"""
         if self.scheduler.validate:
             assert ts in self.processing
-            assert ts._rootish is not None
-
-        ts._rootish = None
 
         if ts in self.long_running:
             self.long_running.discard(ts)
@@ -7855,6 +7852,9 @@ def _exit_processing_common(
     --------
     Scheduler._set_duration_estimate
     """
+    if state.validate:
+        assert ts._rootish is None, ts._rootish
+
     ws = ts.processing_on
     assert ws
     ts.processing_on = None
