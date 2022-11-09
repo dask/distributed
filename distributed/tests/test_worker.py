@@ -479,7 +479,7 @@ async def test_plugin_internal_exception():
             async with Worker(
                 s.address,
                 plugins={
-                    b"corrupting pickle" + pickle.dumps(lambda: None, protocol=4),
+                    b"corrupting pickle" + pickle.dumps(lambda: None),
                 },
             ) as w:
                 pass
@@ -1852,7 +1852,7 @@ async def test_workerstate_executing(c, s, a):
 
 @gen_cluster(nthreads=[("", 1)])
 async def test_shutdown_on_scheduler_comm_closed(s, a):
-    with captured_logger("distributed.worker", level=logging.INFO) as logger:
+    with captured_logger("distributed.core", level=logging.INFO) as logger:
         # Temporary network disconnect
         s.stream_comms[a.address].abort()
 
@@ -1860,7 +1860,7 @@ async def test_shutdown_on_scheduler_comm_closed(s, a):
         assert a.status == Status.closed
         assert not s.workers
         assert not s.stream_comms
-        assert "Connection to scheduler broken" in logger.getvalue()
+        assert f"Connection to {s.address} has been closed" in logger.getvalue()
 
 
 @gen_cluster(nthreads=[])

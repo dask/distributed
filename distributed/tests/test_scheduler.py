@@ -45,11 +45,13 @@ from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
     BrokenComm,
+    assert_story,
     async_wait_for,
     captured_logger,
     cluster,
     dec,
     div,
+    freeze_batched_send,
     freeze_data_fetching,
     gen_cluster,
     gen_test,
@@ -503,12 +505,14 @@ async def test_secede_opens_slot(c, s, a):
     "saturation_config, expected_task_counts",
     [
         (2.5, (5, 3)),
-        ("2.5", (5, 3)),
         (2.0, (4, 2)),
         (1.1, (3, 2)),
         (1.0, (2, 1)),
-        (-1.0, (1, 1)),
-        (float("inf"), (6, 4))
+        (0.1, (1, 1)),
+        # This is necessary because there's no way to parse a float infinite from
+        # a DASK_* environment variable
+        ("inf", (6, 4)),
+        (float("inf"), (6, 4)),
         # ^ depends on root task assignment logic; ok if changes, just needs to add up to 10
     ],
 )
@@ -3694,7 +3698,7 @@ async def test_transition_counter_max_worker(c, s, a):
     # This is set by @gen_cluster; it's False in production
     assert s.transition_counter_max > 0
     a.state.transition_counter_max = 1
-    with captured_logger("distributed.core") as logger:
+    with captured_logger("distributed.worker") as logger:
         fut = c.submit(inc, 2)
         while True:
             try:
@@ -3800,7 +3804,6 @@ async def test_Scheduler__to_dict(c, s, a):
         "thread_id",
         "transition_log",
         "transition_counter",
-        "log",
         "memory",
         "tasks",
         "task_groups",
@@ -4099,3 +4102,43 @@ async def test_count_task_prefix(c, s, a, b):
 
     assert s.task_prefixes["inc"].state_counts["memory"] == 20
     assert s.task_prefixes["inc"].state_counts["erred"] == 0
+
+
+@gen_cluster(client=True)
+async def test_transition_waiting_memory(c, s, a, b):
+    """Test race condition where a task transitions to memory while its state on the
+    scheduler is waiting:
+
+    1. worker a finishes x
+    2. y transitions to processing and is assigned to worker b
+    3. b fetches x and sends an add_keys message to the scheduler
+    4. In the meantime, a dies and causes x to be scheduled back to released/waiting.
+    5. Scheduler queues up a free-keys intended for b to cancel both x and y
+    6. Before free-keys arrives to b, the worker runs and completes y, sending a
+       finished-task message to the scheduler
+    7. {op: add-keys, keys=[x]} from b finally arrives to the scheduler. This triggers
+       a {op: remove-replicas, keys=[x]} message from the scheduler to worker b, because
+       add-keys when the task state is not memory triggers a cleanup of redundant
+       replicas (see Scheduler.add_keys) - in this, add-keys differs from task-finished!
+    8. {op: task-finished, key=y} from b arrives to the scheduler and it is ignored.
+    """
+    x = c.submit(inc, 1, key="x", workers=[a.address])
+    y = c.submit(inc, x, key="y", workers=[b.address])
+    await wait_for_state("x", "memory", b, interval=0)
+    # Note interval=0 above. It means that x has just landed on b this instant and the
+    # scheduler doesn't know yet.
+    assert b.state.tasks["y"].state == "executing"
+    assert s.tasks["x"].who_has == {s.workers[a.address]}
+
+    with freeze_batched_send(b.batched_stream):
+        with freeze_batched_send(s.stream_comms[b.address]):
+            await s.remove_worker(a.address, stimulus_id="remove_a")
+            assert s.tasks["x"].state == "no-worker"
+            assert s.tasks["y"].state == "waiting"
+            await wait_for_state("y", "memory", b)
+
+    await async_wait_for(lambda: not b.state.tasks, timeout=5)
+
+    assert s.tasks["x"].state == "no-worker"
+    assert s.tasks["y"].state == "waiting"
+    assert_story(s.story("y"), [("y", "waiting", "waiting", {})])

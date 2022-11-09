@@ -6,7 +6,6 @@ import functools
 import gc
 import inspect
 import logging
-import math
 import operator
 import os
 import pathlib
@@ -5595,26 +5594,6 @@ async def test_future_auto_inform(c, s, a, b):
             await asyncio.sleep(0.01)
 
 
-def test_client_async_in_fresh_loop(cleanup):
-    async def run():
-        loop = IOLoop.current()
-        client = Client(asynchronous=True, loop=loop)
-        assert client.asynchronous
-        assert isinstance(client.close(), NoOpAwaitable)
-        async with client:
-            pass
-
-    loop = asyncio.new_event_loop()
-    loop.run_until_complete(run())
-    loop.close()
-
-
-# FIXME shouldn't consistently fail on windows, may be an actual bug
-@pytest.mark.skipif(
-    WINDOWS
-    and math.isfinite(dask.config.get("distributed.scheduler.worker-saturation")),
-    reason="flaky on Windows with queuing active",
-)
 @pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny, timeout=60, nthreads=[("127.0.0.1", 3)] * 2)
 async def test_nested_compute(c, s, a, b):
@@ -7318,13 +7297,20 @@ async def test_log_event_warn(c, s, a, b):
     with pytest.warns(UserWarning, match="Hello!"):
         await c.submit(foo)
 
-    def bar():
+    def no_message():
         # missing "message" key should log TypeError
         get_worker().log_event("warn", {})
 
     with captured_logger(logging.getLogger("distributed.client")) as log:
-        await c.submit(bar)
+        await c.submit(no_message)
         assert "TypeError" in log.getvalue()
+
+    def no_category():
+        # missing "category" defaults to `UserWarning`
+        get_worker().log_event("warn", {"message": pickle.dumps("asdf")})
+
+    with pytest.warns(UserWarning, match="asdf"):
+        await c.submit(no_category)
 
 
 @gen_cluster(client=True)

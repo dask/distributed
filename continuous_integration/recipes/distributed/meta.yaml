@@ -29,7 +29,7 @@ requirements:
     - dask-core {{ dask_version }}
   run:
     - python >=3.8
-    - click >=6.6
+    - click >=7.0
     - cloudpickle >=1.5.0
     - cytoolz >=0.8.2
     - {{ pin_compatible('dask-core', max_pin='x.x.x.x') }}
