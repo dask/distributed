@@ -4856,7 +4856,7 @@ class Client(SyncMethodMixin):
         ----------
         logger_name : str, optional
             The name of the logger to begin forwarding. The usual rules of the
-            ``logging`` module's hirerarchical naming system apply. For example,
+            ``logging`` module's hierarchical naming system apply. For example,
             if ``name`` is ``"foo"``, then not only ``"foo"``, but also
             ``"foo.bar"``, ``"foo.baz"``, etc. will be forwarded. If ``name`` is
             ``None``, this indicates the root logger, and so *all* loggers will
@@ -4908,6 +4908,7 @@ class Client(SyncMethodMixin):
 
         >>> def do_error():
         ...     logging.getLogger("user.module").error("Hello error")
+        ...     return 42
         >>> client.submit(do_error).result()
         2022-11-09 03:43:25 ERROR    [worker tcp://127.0.0.1:34783] user.module     Hello error
         42
