@@ -1504,8 +1504,12 @@ class SchedulerState:
     #: Workers that are currently in running state
     running: set[WorkerState]
     #: Workers that are currently in running state and not fully utilized
+    #: Definition based on occupancy
     #: (actually a SortedDict, but the sortedcontainers package isn't annotated)
     idle: dict[str, WorkerState]
+    #: Similar to `idle`
+    #: Definition based on assigned tasks
+    idle_task_count: dict[str, WorkerState]
     #: Workers that are fully utilized. May include non-running workers.
     saturated: set[WorkerState]
     total_nthreads: int
@@ -1612,6 +1616,7 @@ class SchedulerState:
         self.extensions = {}
         self.host_info = host_info
         self.idle = SortedDict()
+        self.idle_task_count = dict()
         self.n_tasks = 0
         self.resources = resources
         self.saturated = set()
@@ -2146,13 +2151,16 @@ class SchedulerState:
             # (and actually pass in the task).
             assert not math.isinf(self.WORKER_SATURATION)
 
-        if not self.idle:
+        if not self.idle_task_count:
             # All workers busy? Task gets/stays queued.
             return None
 
         # Just pick the least busy worker.
         # NOTE: this will lead to worst-case scheduling with regards to co-assignment.
-        ws = min(self.idle.values(), key=lambda ws: len(ws.processing) / ws.nthreads)
+        ws = min(
+            self.idle_task_count.values(),
+            key=lambda ws: len(ws.processing) / ws.nthreads,
+        )
         if self.validate:
             assert not _worker_full(ws, self.WORKER_SATURATION), (
                 ws,
@@ -2791,7 +2799,7 @@ class SchedulerState:
             worker_msgs: dict = {}
 
             if self.validate:
-                assert not self.idle, (ts, self.idle)
+                assert not self.idle_task_count, (ts, self.idle_task_count)
                 _validate_ready(self, ts)
 
             ts.state = "queued"
@@ -3062,25 +3070,22 @@ class SchedulerState:
 
         idle = self.idle
         saturated = self.saturated
-        if (
-            self.is_unoccupied(ws, occ, p)
-            if math.isinf(self.WORKER_SATURATION)
-            else not _worker_full(ws, self.WORKER_SATURATION)
-        ):
+        saturated.discard(ws)
+        if self.is_unoccupied(ws, occ, p):
             if ws.status == Status.running:
                 idle[ws.address] = ws
-            saturated.discard(ws)
         else:
             idle.pop(ws.address, None)
-
             nc = ws.nthreads
             if p > nc:
                 pending = occ * (p - nc) / (p * nc)
                 if 0.4 < pending > 1.9 * (self.total_occupancy / self.total_nthreads):
                     saturated.add(ws)
-                    return
 
-            saturated.discard(ws)
+        self.idle_task_count.pop(ws.address, None)
+        if not _worker_full(ws, self.WORKER_SATURATION):
+            if ws.status == Status.running:
+                self.idle_task_count[ws.address] = ws
 
     def is_unoccupied(
         self, ws: WorkerState, occupancy: float, nprocessing: int
@@ -4746,6 +4751,7 @@ class Scheduler(SchedulerState, ServerNode):
         del self.stream_comms[address]
         del self.aliases[ws.name]
         self.idle.pop(ws.address, None)
+        self.idle_task_count.pop(ws.address, None)
         self.saturated.discard(ws)
         del self.workers[address]
         ws.status = Status.closed
