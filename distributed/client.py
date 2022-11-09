@@ -69,6 +69,8 @@ from distributed.core import (
     rpc,
 )
 from distributed.diagnostics.plugin import (
+    TOPIC_FORWARDED_LOG_RECORD,
+    ForwardLoggingPlugin,
     NannyPlugin,
     UploadFile,
     WorkerPlugin,
@@ -4822,6 +4824,152 @@ class Client(SyncMethodMixin):
         from distributed.active_memory_manager import AMMClientProxy
 
         return AMMClientProxy(self)
+
+    def _handle_forwarded_log_record(self, event):
+        # The client-side handler function for "forwarded-log-record" events.
+        # Sends the forwarded LogRecord to the client-side logger with the same
+        # name as that which originally handled the record on the worker-side.
+        _, record_attrs = event
+        # print(record_attrs, flush=True)
+        record = logging.makeLogRecord(record_attrs)
+        dest_logger = logging.getLogger(record.name)
+        dest_logger.handle(record)
+
+    def forward_logging(self, logger_name=None, level=logging.NOTSET):
+        """
+        Begin forwarding the given logger (by default the root) and all loggers
+        under it from worker tasks to the client process. Whenever the named
+        logger handles a LogRecord on the worker-side, the record will be
+        serialized, sent to the client, and handled by the logger with the same
+        name on the client-side.
+
+        Note that worker-side loggers will only handle LogRecords if their level
+        is set appropriately, and the client-side logger will only emit the
+        forwarded LogRecord if its own level is likewise set appropriately. For
+        example, if your submitted task logs a DEBUG message to logger "foo",
+        then in order for ``forward_logging()`` to cause that message to be
+        emitted in your client session, you must ensure that the logger "foo"
+        have its level set to DEBUG (or lower) in the woker process *and* in the
+        client process.
+
+        Parameters
+        ----------
+        logger_name : str, optional
+            The name of the logger to begin forwarding. The usual rules of the
+            ``logging`` module's hirerarchical naming system apply. For example,
+            if ``name`` is ``"foo"``, then not only ``"foo"``, but also
+            ``"foo.bar"``, ``"foo.baz"``, etc. will be forwarded. If ``name`` is
+            ``None``, this indicates the root logger, and so *all* loggers will
+            be forwarded.
+
+            Note that a logger will only forward a given LogRecord if the
+            logger's level is sufficient for the LogRecord to be handled at all.
+
+        level : str | int, optional
+            Optionally restrict forwarding to LogRecords of this level or
+            higher, even if the forwarded logger's own level is lower.
+
+        Examples
+        --------
+        For purposes of the examples, suppose we configure client-side logging
+        as a user might: with a single StreamHandler attached to the root logger
+        with an output level of INFO and a simple output format::
+
+            import logging
+            import distributed
+            import io, yaml
+
+            TYPICAL_LOGGING_CONFIG = '''
+            version: 1
+            handlers:
+              console:
+                class : logging.StreamHandler
+                formatter: default
+                level   : INFO
+            formatters:
+              default:
+                format: '%(asctime)s %(levelname)-8s [worker %(worker)s] %(name)-15s %(message)s'
+                datefmt: '%Y-%m-%d %H:%M:%S'
+            root:
+              handlers:
+                - console
+            '''
+            config = yaml.safe_load(io.StringIO(TYPICAL_LOGGING_CONFIG))
+            logging.config.dictConfig(config)
+
+        Now create a client and begin forwarding the root logger from workers
+        back to our local client process.
+
+        >>> client = distributed.Client()
+        >>> client.forward_logging()  # forward the root logger at any handled level
+
+        Then submit a task that does some error logging on a worker. We see
+        output from the client-side StreamHandler.
+
+        >>> def do_error():
+        ...     logging.getLogger("user.module").error("Hello error")
+        >>> client.submit(do_error).result()
+        2022-11-09 03:43:25 ERROR    [worker tcp://127.0.0.1:34783] user.module     Hello error
+        42
+
+        Note how an attribute ``"worker"`` is also added by dask to the
+        forwarded LogRecord, which our custom formatter uses. This is useful for
+        identifying exactly which worker logged the error.
+
+        One nuance worth highlighting: even though our client-side root logger
+        is configured with a level of INFO, the worker-side root loggers still
+        have their default level of ERROR because we haven't done any explicit
+        logging configuration on the workers. Therefore worker-side INFO logs
+        will *not* be forwarded because they never even get handled in the first
+        place.
+
+        >>> def do_info_1():
+        ...     # no output on the client side
+        ...     logging.getLogger("user.module").info("Hello info the first time")
+        ...     return 84
+        >>> client.submit(do_info_1).result()
+        84
+
+        It is necessary to set the client-side logger's level to INFO before the info
+        message will be handled and forwarded to the client. In other words, the
+        "effective" level of the client-side forwarded logging is the maximum of each
+        logger's client-side and worker-side levels.
+
+        >>> def do_info_2():
+        ...     logger = logging.getLogger("user.module")
+        ...     logger.setLevel(logging.INFO)
+        ...     # now produces output on the client side
+        ...     logger.info("Hello info the second time")
+        ...     return 84
+        >>> client.submit(do_info_2).result()
+        2022-11-09 03:57:39 INFO     [worker tcp://127.0.0.1:42815] user.module     Hello info the second time
+        84
+        """
+
+        # note that subscription is idempotent
+        self.subscribe_topic(
+            TOPIC_FORWARDED_LOG_RECORD, self._handle_forwarded_log_record
+        )
+        plugin_name = f"forward-logging-{logger_name or '<root>'}"
+        # note that any existing plugin with the same name will automatically be
+        # removed and torn down (see distributed.worker.Worker.plugin_add()), so
+        # this is effectively idempotent, i.e., forwarding the same logger twice
+        # won't cause every LogRecord to be forwarded twice
+        return self.register_worker_plugin(
+            ForwardLoggingPlugin(logger_name, level), plugin_name
+        )
+
+    def unforward_logging(self, logger_name=None):
+        """
+        Stop forwarding the given logger (default root) from worker tasks to the
+        client process.
+        """
+        plugin_name = f"forward-logging-{logger_name or '<root>'}"
+        return self.unregister_worker_plugin(plugin_name)
+        # Note that we should NOT unsubscribe from the topic because we don't
+        # actually know if we've unregistered *all* ForwardLoggingPlugins.
+        # Even if we do unregister all ForwardLoggingPlugins, it should be
+        # harmless for the handler to remain subscribed.
 
 
 class _WorkerSetupPlugin(WorkerPlugin):
