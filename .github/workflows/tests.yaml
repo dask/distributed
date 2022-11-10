@@ -200,6 +200,8 @@ jobs:
         uses: codecov/codecov-action@v3
         with:
           name: ${{ env.TEST_ID }}
+          # See https://community.codecov.com/t/upload-issues-unable-to-locate-build-via-github-actions-api/3954
+          token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload test results
         # ensure this runs even if pytest fails
