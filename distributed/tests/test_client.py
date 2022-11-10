@@ -6593,9 +6593,9 @@ async def test_as_completed_condition_loop(c, s, a, b):
     sys.version_info >= (3, 10),
     reason="On Py3.10+ semaphore._loop is not bound until .acquire() blocks",
 )
-def test_client_connectionpool_semaphore_loop(s, a, b):
-    with Client(s["address"]) as c:
-        assert c.rpc.semaphore._loop is c.loop.asyncio_loop
+def test_client_connectionpool_semaphore_loop(s, a, b, loop):
+    with Client(s["address"], loop=loop) as c:
+        assert c.rpc.semaphore._loop is loop.asyncio_loop
 
 
 @pytest.mark.slow
