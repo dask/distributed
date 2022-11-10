@@ -4848,7 +4848,7 @@ class Client(SyncMethodMixin):
         example, if your submitted task logs a DEBUG message to logger "foo",
         then in order for ``forward_logging()`` to cause that message to be
         emitted in your client session, you must ensure that the logger "foo"
-        have its level set to DEBUG (or lower) in the woker process *and* in the
+        have its level set to DEBUG (or lower) in the worker process *and* in the
         client process.
 
         Parameters
