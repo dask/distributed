@@ -83,7 +83,7 @@ from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
 from distributed.http import get_handlers
 from distributed.lock import LockExtension
-from distributed.metrics import CountdownTimer, time
+from distributed.metrics import time
 from distributed.multi_lock import MultiLockExtension
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
@@ -98,6 +98,7 @@ from distributed.shuffle import ShuffleSchedulerExtension
 from distributed.stealing import WorkStealing
 from distributed.utils import (
     All,
+    Deadline,
     TimeoutError,
     empty_context,
     get_fileno_limit,
@@ -5681,7 +5682,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     async def _restart(self, client=None, timeout=30):
         stimulus_id = f"restart-{time()}"
-        timer = CountdownTimer(timeout)
+        deadline = Deadline.after(timeout)
         workers = list(self.workers)
         self._expect_nannies(workers)
 
@@ -5697,7 +5698,7 @@ class Scheduler(SchedulerState, ServerNode):
         logger.debug("Clearing task state.")
         self._clear_task_state()
         assert not self.tasks
-        if timer.expired:
+        if deadline.expired:
             raise TimeoutError("Timed out while resetting task state.")
 
         self.report({"op": "restart"})
@@ -5718,11 +5719,11 @@ class Scheduler(SchedulerState, ServerNode):
                 f"{len(bad_plugins)}/{len(plugins)} plugins failed to restart",
                 bad_plugins,
             )
-        if timer.expired:
+        if deadline.expired:
             raise TimeoutError("Timed out while restarting plugins.")
 
         logger.debug("Restarting workers.")
-        await self._restart_workers(workers, timeout=timer.remaining)
+        await self._restart_workers(workers, timeout=deadline.remaining)
         self.log_event([client, "all"], {"action": "restart", "client": client})
         logger.info("Successfully restarted.")
 
