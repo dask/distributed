@@ -126,7 +126,7 @@ def prometheus_not_available():
     import sys
 
     with mock.patch.dict("sys.modules", {"prometheus_client": None}):
-        del sys.modules["distributed.http.scheduler.prometheus"]
+        sys.modules.pop("distributed.http.scheduler.prometheus", None)
         yield
 
 
