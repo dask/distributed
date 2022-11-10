@@ -19,7 +19,7 @@ import types
 import warnings
 import weakref
 import zipfile
-from collections import deque
+from collections import deque, namedtuple
 from collections.abc import Generator
 from contextlib import ExitStack, contextmanager, nullcontext
 from functools import partial
@@ -7838,3 +7838,17 @@ async def test_wait_for_workers_n_workers_value_check(c, s, a, b, value, excepti
         ctx = nullcontext()
     with ctx:
         await c.wait_for_workers(value)
+
+
+@gen_cluster(client=True)
+async def test_unpacks_remotedata_namedtuple(c, s, a, b):
+    class NamedTupleAnnotation(namedtuple("BaseAnnotation", field_names="value")):
+        def unwrap(self):
+            return self.value
+
+    def identity(x):
+        return x
+
+    outer_future = c.submit(identity, NamedTupleAnnotation("some-data"))
+    result = await outer_future
+    assert result == NamedTupleAnnotation(value="some-data")
