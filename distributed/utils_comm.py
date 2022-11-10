@@ -224,8 +224,7 @@ def unpack_remotedata(o, byte_keys=False, myset=None):
         else:
             return tuple(unpack_remotedata(item, byte_keys, myset) for item in o)
     elif is_namedtuple_instance(o):
-        result = typ(*[unpack_remotedata(item, byte_keys, myset) for item in o])
-        return result
+        return typ(*[unpack_remotedata(item, byte_keys, myset) for item in o])
 
     if typ in collection_types:
         if not o:
