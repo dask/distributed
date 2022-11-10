@@ -124,7 +124,7 @@ return an ``BaseActorFuture`` immediately.
    1
 
 ``BaseActorFuture`` are similar to normal Dask ``Future`` objects, but not as fully
-featured.  They curently *only* support the ``result`` method and nothing else.
+featured.  They currently *only* support the ``result`` method and nothing else.
 They don't currently work with any other Dask functions that expect futures,
 like ``as_completed``, ``wait``, or ``client.gather``.  They can't be placed
 into additional submit or map calls to form dependencies.  They communicate
@@ -174,7 +174,7 @@ Calling from coroutines and async/await
 ---------------------------------------
 
 If you use actors within a coroutine or async/await function then actor methods
-and attrbute access will return Tornado futures
+and attribute access will return Tornado futures
 
 .. code-block:: python
 

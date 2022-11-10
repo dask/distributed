@@ -1215,7 +1215,7 @@ class SystemTimeseries(DashboardComponent):
         workers as a function of time
 
     The metrics plotted come from the aggregation of from ws.metrics[key] for ws in
-    scheduler.workers.values() divided by nuber of workers.
+    scheduler.workers.values() divided by number of workers.
     """
 
     @log_errors
@@ -2607,7 +2607,7 @@ class TaskGroupGraph(DashboardComponent):
     @without_property_validation
     @log_errors
     def update_layout(self):
-        # Get dependecies per task group.
+        # Get dependencies per task group.
         # In some cases there are tg that have themselves as dependencies - we remove those.
         dependencies = {
             k: {ds.name for ds in ts.dependencies if ds.name != k}
@@ -2648,7 +2648,7 @@ class TaskGroupGraph(DashboardComponent):
 
             xs[tg], ys[tg] = x, y
 
-            # info neded for node layout to coulmn data source
+            # info needed for node layout to column data source
             nodes_layout[tg] = {"x": xs[tg], "y": ys[tg]}
 
             # info needed for arrow layout

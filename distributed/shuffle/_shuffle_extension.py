@@ -324,7 +324,7 @@ class ShuffleWorkerExtension:
         data: list[bytes],
     ) -> None:
         """
-        Hander: Receive an incoming shard of data from a peer worker.
+        Handler: Receive an incoming shard of data from a peer worker.
         Using an unknown ``shuffle_id`` is an error.
         """
         shuffle = await self._get_shuffle(shuffle_id)

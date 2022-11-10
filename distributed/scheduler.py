@@ -463,7 +463,7 @@ class WorkerState:
     long_running: set[TaskState]
 
     #: A dictionary of tasks that are currently being run on this worker.
-    #: Each task state is asssociated with the duration in seconds which the task has
+    #: Each task state is associated with the duration in seconds which the task has
     #: been running.
     executing: dict[TaskState, float]
 
@@ -2209,7 +2209,7 @@ class SchedulerState:
         else:
             # TODO if `is_rootish` would always return True for tasks without dependencies,
             # we could remove all this logic. The rootish assignment logic would behave
-            # more or less the same as this, maybe without gauranteed round-robin though?
+            # more or less the same as this, maybe without guaranteed round-robin though?
             # This path is only reachable when `ts` doesn't have dependencies, but its
             # group is also smaller than the cluster.
 
@@ -6388,7 +6388,7 @@ class Scheduler(SchedulerState, ServerNode):
                 gathers = defaultdict(dict)
                 for ts in list(tasks):
                     if ts.state == "forgotten":
-                        # task is no longer needed by any client or dependant task
+                        # task is no longer needed by any client or dependent task
                         tasks.remove(ts)
                         continue
                     n_missing = n - len(ts.who_has & workers)
@@ -8284,7 +8284,7 @@ def heartbeat_interval(n: int) -> float:
     elif n < 200:
         return 2
     else:
-        # No more than 200 hearbeats a second scaled by workers
+        # No more than 200 heartbeats a second scaled by workers
         return n / 200 + 1
 
 
