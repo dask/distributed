@@ -135,10 +135,11 @@ jobs:
         if: ${{ matrix.queuing == 'queue' }}
         run: echo "DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=1.0" >> $GITHUB_ENV
 
-      - name: Print host info
-        shell: bash -l {0}
-        run: |
-          python continuous_integration/scripts/host_info.py
+      # host_info.py imports numpy, either skip or refactor
+      # - name: Print host info
+      #   shell: bash -l {0}
+      #   run: |
+      #     python continuous_integration/scripts/host_info.py
 
       - name: Test
         id: run_tests
