@@ -63,7 +63,7 @@ def prometheus_not_available():
     import sys
 
     with mock.patch.dict("sys.modules", {"prometheus_client": None}):
-        del sys.modules["distributed.http.worker.prometheus"]
+        sys.modules.pop("distributed.http.worker.prometheus", None)
         yield
 
 
@@ -71,12 +71,9 @@ def prometheus_not_available():
 async def test_metrics_when_prometheus_client_not_installed(
     c, s, prometheus_not_available
 ):
-    with mock.patch.dict("sys.modules", {"prometheus_client": None}):
-        import distributed
-
-        async with distributed.Worker(s.address) as w:
-            body = await fetch_metrics_body(w.http_server.port)
-            assert "Prometheus metrics are not available" in body
+    async with Worker(s.address) as w:
+        body = await fetch_metrics_body(w.http_server.port)
+        assert "Prometheus metrics are not available" in body
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
