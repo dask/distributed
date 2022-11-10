@@ -23,10 +23,11 @@ def test_basic(Component):
 
 @gen_cluster(
     client=True,
+    nthreads=[("", 1)],
     clean_kwargs={"threads": False},
     config={"distributed.worker.profile.enabled": True},
 )
-async def test_profile_plot(c, s, a, b):
+async def test_profile_plot(c, s, a):
     p = ProfilePlot()
     assert not p.source.data["left"]
     while not len(p.source.data["left"]):

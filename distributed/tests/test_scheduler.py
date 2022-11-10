@@ -31,6 +31,7 @@ from distributed import (
     Nanny,
     SchedulerPlugin,
     Worker,
+    as_completed,
     fire_and_forget,
     wait,
 )
@@ -502,6 +503,24 @@ async def test_secede_opens_slot(c, s, a):
 
     await second.set()
     await c.gather(fs)
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_submit_waits_on_full_cluster(c, s, a):
+    "Make sure later `client.submit` doesn't cut in line (particularly with queuing on)"
+    event = Event()
+
+    fs = c.map(lambda i: event.wait(), range(10))
+    await async_wait_for(lambda: s.tasks, timeout=5)
+
+    extra = c.submit(inc, 1, fifo_timeout=0)
+    ac = as_completed(fs + [extra])
+    await async_wait_for(lambda: extra.key in s.tasks, timeout=5)
+
+    await event.set()
+
+    order = [f.key async for f in ac]
+    assert order[-1] == extra.key
 
 
 @pytest.mark.parametrize(
@@ -1544,6 +1563,17 @@ async def test_learn_occupancy_2(c, s, a, b):
 
     nproc = sum(ts.state == "processing" for ts in s.tasks.values())
     assert nproc * 0.1 < s.total_occupancy < nproc * 0.4
+
+
+@gen_cluster(
+    nthreads=[("", 2)] * 5,
+    client=True,
+    config={"distributed.scheduler.work-stealing": False},
+)
+async def test_balance_fewer_tasks_than_cluster(c, s, *workers):
+    fs = c.map(inc, range(4))
+    await wait(fs)
+    assert sorted(len(w.has_what) for w in s.workers.values()) == [0, 1, 1, 1, 1]
 
 
 @nodebug
@@ -2857,14 +2887,6 @@ async def test_get_worker_monitor_info(s, a, b):
         assert all(res[w.address]["range_query"][m] is not None for m in ms)
         assert res[w.address]["count"] is not None
         assert res[w.address]["last_time"] is not None
-
-
-@gen_cluster(client=True)
-async def test_quiet_cluster_round_robin(c, s, a, b):
-    await c.submit(inc, 1)
-    await c.submit(inc, 2)
-    await c.submit(inc, 3)
-    assert a.state.log and b.state.log
 
 
 def test_memorystate():

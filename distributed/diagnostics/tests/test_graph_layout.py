@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import operator
 
 from distributed import wait
@@ -45,9 +46,13 @@ async def test_states(c, s, a, b):
     s.add_plugin(gl)
     await c.submit(sum, c.map(inc, range(5)))
 
+    expected = {"waiting", "processing", "memory", "released"}
+    if math.isfinite(s.WORKER_SATURATION):
+        expected.add("queued")
+
     while True:
         updates = {state for _, state in gl.state_updates}
-        if updates == {"waiting", "processing", "memory", "released"}:
+        if updates == expected:
             break
         await asyncio.sleep(0.01)
 

@@ -26,7 +26,6 @@ from collections.abc import (
     Iterable,
     Iterator,
     Mapping,
-    Sequence,
     Set,
 )
 from contextlib import suppress
@@ -2103,8 +2102,11 @@ class SchedulerState:
             # Last-used worker is full, unknown, retiring, or paused;
             # pick a new worker for the next few tasks
             ws = min(pool, key=partial(self.worker_objective, ts))
-            tg.last_worker_tasks_left = math.floor(
-                (len(tg) / self.total_nthreads) * ws.nthreads
+            tg.last_worker_tasks_left = max(
+                1,
+                # This can evaluate to 0 for tasks with no dependencies
+                # (see definition of is_rootish)
+                int(len(tg) / self.total_nthreads * ws.nthreads),
             )
 
         # Record `last_worker`, or clear it on the final task
@@ -2113,9 +2115,10 @@ class SchedulerState:
         )
         tg.last_worker_tasks_left -= 1
 
-        if self.validate and ws is not None:
+        if self.validate:
             assert self.workers.get(ws.address) is ws
             assert ws in self.running, (ws, self.running)
+            assert tg.last_worker_tasks_left >= 0, tg.last_worker_tasks_left
 
         return ws
 
@@ -2199,43 +2202,17 @@ class SchedulerState:
             # If there were no restrictions, `valid_workers()` didn't subset by `running`.
             valid_workers = self.running
 
-        if ts.dependencies or valid_workers is not None:
-            ws = decide_worker(
-                ts,
-                self.running,
-                valid_workers,
-                partial(self.worker_objective, ts),
-            )
-        else:
-            # TODO if `is_rootish` would always return True for tasks without dependencies,
-            # we could remove all this logic. The rootish assignment logic would behave
-            # more or less the same as this, maybe without gauranteed round-robin though?
-            # This path is only reachable when `ts` doesn't have dependencies, but its
-            # group is also smaller than the cluster.
+        if self.validate:
+            assert (
+                ts.dependencies or valid_workers is not None
+            ), f"{ts} should be covered by root-ish case"
 
-            # Fastpath when there are no related tasks or restrictions
-            worker_pool = self.idle or self.workers
-            # FIXME idle and workers are SortedDict's declared as dicts
-            #       because sortedcontainers is not annotated
-            wp_vals = cast("Sequence[WorkerState]", worker_pool.values())
-            n_workers: int = len(wp_vals)
-            if n_workers < 20:  # smart but linear in small case
-                ws = min(wp_vals, key=operator.attrgetter("occupancy"))
-                assert ws
-                if ws.occupancy == 0:
-                    # special case to use round-robin; linear search
-                    # for next worker with zero occupancy (or just
-                    # land back where we started).
-                    wp_i: WorkerState
-                    start: int = self.n_tasks % n_workers
-                    i: int
-                    for i in range(n_workers):
-                        wp_i = wp_vals[(i + start) % n_workers]
-                        if wp_i.occupancy == 0:
-                            ws = wp_i
-                            break
-            else:  # dumb but fast in large case
-                ws = wp_vals[self.n_tasks % n_workers]
+        ws = decide_worker(
+            ts,
+            self.running,
+            valid_workers,
+            partial(self.worker_objective, ts),
+        )
 
         if self.validate and ws is not None:
             assert self.workers.get(ws.address) is ws
@@ -3028,10 +3005,16 @@ class SchedulerState:
         Root-ish tasks are part of a group that's much larger than the cluster,
         and have few or no dependencies.
         """
-        if ts.resource_restrictions or ts.worker_restrictions or ts.host_restrictions:
+        if (
+            ts.resource_restrictions
+            or ts.worker_restrictions
+            or ts.host_restrictions
+            or ts.actor
+        ):
             return False
+        if not ts.dependencies:
+            return True
         tg = ts.group
-        # TODO short-circuit to True if `not ts.dependencies`?
         return (
             len(tg) > self.total_nthreads * 2
             and len(tg.dependencies) < 5
