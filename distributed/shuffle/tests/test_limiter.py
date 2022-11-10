@@ -12,6 +12,7 @@ from distributed.utils_test import gen_test
 async def test_limiter_basic():
     res = ResourceLimiter(5)
 
+    assert isinstance(repr(res), str)
     res.increase(2)
     assert res.available() == 3
     res.increase(3)

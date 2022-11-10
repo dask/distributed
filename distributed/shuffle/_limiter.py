@@ -27,7 +27,6 @@ class ResourceLimiter:
         self._acquired = 0
         self._condition = asyncio.Condition()
         self._waiters = 0
-        self._backlog_size = 0
         self.time_blocked_total = 0.0
         self.time_blocked_avg = 0.0
 

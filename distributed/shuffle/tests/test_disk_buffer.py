@@ -31,6 +31,9 @@ async def test_basic(tmp_path):
         x = mf.read("x")
         y = mf.read("y")
 
+        with pytest.raises(KeyError):
+            mf.read("z")
+
         assert x == b"0" * 2000
         assert y == b"1" * 1000
 

@@ -57,6 +57,9 @@ async def test_memory_limit(big_payload):
         memory_limiter=limiter,
         concurrency_limit=2,
     ) as buf:
+        # It's OK to write nothing
+        await buf.write({})
+
         many_small = [asyncio.create_task(buf.write(small_payload)) for _ in range(9)]
         buf.allow_process.set()
         many_small = asyncio.gather(*many_small)
