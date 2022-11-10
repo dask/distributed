@@ -24,11 +24,6 @@ async def test_child_address_persists():
             self.address = address
             super().__init__()
 
-    c = Child()
-    assert c.address is None
-    c = Child("localhost")
-    assert c.address == "localhost"
-
     async with Child() as c:
         assert c.address is None
 
