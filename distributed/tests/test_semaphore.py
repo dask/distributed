@@ -481,7 +481,7 @@ async def test_metrics(c, s, a, b):
     assert actual == expected
 
 
-def test_threadpoolworkers_pick_correct_ioloop(cleanup, loop):
+def test_threadpoolworkers_pick_correct_ioloop(loop):
     # gh4057
 
     # About picking appropriate values for the various timings

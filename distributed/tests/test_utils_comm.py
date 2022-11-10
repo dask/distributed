@@ -60,7 +60,7 @@ async def test_gather_from_workers_permissive_flaky(c, s, a, b):
     assert bad_workers == [a.address]
 
 
-def test_retry_no_exception(cleanup):
+def test_retry_no_exception():
     n_calls = 0
     retval = object()
 
@@ -76,7 +76,7 @@ def test_retry_no_exception(cleanup):
     assert n_calls == 1
 
 
-def test_retry0_raises_immediately(cleanup):
+def test_retry0_raises_immediately():
     # test that using max_reties=0 raises after 1 call
 
     n_calls = 0
@@ -95,7 +95,7 @@ def test_retry0_raises_immediately(cleanup):
     assert n_calls == 1
 
 
-def test_retry_does_retry_and_sleep(cleanup):
+def test_retry_does_retry_and_sleep():
     # test the retry and sleep pattern of `retry`
     n_calls = 0
 

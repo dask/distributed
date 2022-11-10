@@ -83,7 +83,7 @@ def test_spec_sync(loop):
 
 
 @pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
-def test_loop_started_in_constructor(cleanup):
+def test_loop_started_in_constructor(gonna_run_distributed):
     # test that SpecCluster.__init__ starts a loop in another thread
     cluster = SpecCluster(worker_spec, scheduler=scheduler, loop=None)
     try:

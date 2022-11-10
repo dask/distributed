@@ -227,7 +227,7 @@ async def test_ping_pong_cupy(ucx_loop, shape):
 @pytest.mark.slow
 @pytest.mark.parametrize("n", [int(1e9), int(2.5e9)])
 @gen_test()
-async def test_large_cupy(ucx_loop, n, cleanup):
+async def test_large_cupy(ucx_loop, n, gonna_run_distributed):
     cupy = pytest.importorskip("cupy")
     com, serv_com = await get_comm_pair()
 
@@ -263,7 +263,7 @@ async def test_ping_pong_numba(ucx_loop):
 
 @pytest.mark.parametrize("processes", [True, False])
 @gen_test()
-async def test_ucx_localcluster(ucx_loop, processes, cleanup):
+async def test_ucx_localcluster(ucx_loop, processes, gonna_run_distributed):
     async with LocalCluster(
         protocol="ucx",
         host=HOST,
@@ -353,7 +353,7 @@ async def test_transpose(
 
 @pytest.mark.parametrize("port", [0, 1234])
 @gen_test()
-async def test_ucx_protocol(ucx_loop, cleanup, port):
+async def test_ucx_protocol(ucx_loop, gonna_run_distributed, port):
     async with Scheduler(protocol="ucx", port=port, dashboard_address=":0") as s:
         assert s.address.startswith("ucx://")
 

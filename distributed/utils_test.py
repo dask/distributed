@@ -129,11 +129,11 @@ def loop(loop_in_thread):
 
 
 @pytest.fixture
-def loop_in_thread(cleanup):
+def loop_in_thread():
     loop_started = concurrent.futures.Future()
-    with concurrent.futures.ThreadPoolExecutor(
+    with _check_clean(), config_for_cluster_tests(), concurrent.futures.ThreadPoolExecutor(
         1, thread_name_prefix="test IOLoop"
-    ) as tpe, config_for_cluster_tests():
+    ) as tpe:
 
         async def run():
             io_loop = IOLoop.current()
@@ -731,7 +731,7 @@ def gen_test(
     def _(func):
         @functools.wraps(func)
         @config_for_cluster_tests()
-        @clean(**clean_kwargs)
+        @_check_clean(**clean_kwargs)
         def test_func(*args, **kwargs):
             if not iscoroutinefunction(func):
                 raise RuntimeError("gen_test only works for coroutine functions.")
@@ -935,7 +935,7 @@ def gen_cluster(
 
         @functools.wraps(func)
         @config_for_cluster_tests(**{"distributed.comm.timeouts.connect": "5s"})
-        @clean(**clean_kwargs)
+        @_check_clean(**clean_kwargs)
         def test_func(*outer_args, **kwargs):
             @contextlib.asynccontextmanager
             async def _client_factory(s):
@@ -1790,7 +1790,8 @@ def config_for_cluster_tests(**extra_config):
 
 
 @contextmanager
-def clean(threads=True, instances=True, processes=True):
+def _check_clean(threads=True, instances=True, processes=True):
+    "Verify resources were not leaked. For internal use in other fixtures, which apply this automatically."
     asyncio.set_event_loop(None)
     with check_thread_leak() if threads else nullcontext():
         with check_process_leak(check=processes):
@@ -1800,7 +1801,29 @@ def clean(threads=True, instances=True, processes=True):
 
 @pytest.fixture
 def cleanup():
-    with clean():
+    raise RuntimeError(
+        "The `distributed.utils_test.cleanup` fixture is deprecated. "
+        "You should not be using this fixture directly. In most cases, use:\n"
+        " * `gen_cluster` if you just need to run a cluster\n"
+        " * `client` fixture or `cluster` contextmanager if you need a cluster in subprocesses\n"
+        " * `loop` + `popen` to call the dask CLIs yourself, and connect a Client to it using the `loop`\n"
+        "These methods all will check for resource leaks and set up default config values for you. "
+        "If none of these methods work, and you want to continue launching dask your own (likely deprecated) "
+        "way in tests (like calling `Client(..., loop=None)`, then use the `gonna_run_distributed` fixture to "
+        "set config values for tests, and check for resource leaks."
+    )
+
+
+@pytest.fixture
+def gonna_run_distributed():
+    """
+    Fixture for tests which will launch schedulers/workers/clients without other helpers.
+
+    Generally, you should be using the `loop` fixture, `client` fixture, or `gen_cluster`.
+    But if you're calling `LocalCluster` or `Client` directly, add this fixture to set
+    recommended config values for tests, and check for resource leaks.
+    """
+    with _check_clean(), config_for_cluster_tests():
         yield
 
 

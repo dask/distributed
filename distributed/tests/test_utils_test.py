@@ -66,7 +66,7 @@ def test_bare_cluster(loop):
         pass
 
 
-def test_cluster(cleanup):
+def test_cluster():
     async def identity():
         async with rpc(s["address"]) as scheduler_rpc:
             return await scheduler_rpc.identity()

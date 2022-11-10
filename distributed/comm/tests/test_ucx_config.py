@@ -24,7 +24,7 @@ rmm = pytest.importorskip("rmm")
 
 
 @gen_test()
-async def test_ucx_config(ucx_loop, cleanup):
+async def test_ucx_config(ucx_loop):
     ucx = {
         "nvlink": True,
         "infiniband": True,
@@ -112,7 +112,7 @@ async def test_ucx_config(ucx_loop, cleanup):
     reruns=10,
     reruns_delay=5,
 )
-def test_ucx_config_w_env_var(ucx_loop, cleanup, loop):
+def test_ucx_config_w_env_var(ucx_loop, loop):
     env = os.environ.copy()
     env["DASK_RMM__POOL_SIZE"] = "1000.00 MB"
 

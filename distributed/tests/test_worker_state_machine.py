@@ -72,7 +72,7 @@ def test_instruction_match():
     assert i != RescheduleMsg.match(key="x")
 
 
-def test_TaskState_tracking(cleanup):
+def test_TaskState_tracking():
     gc.collect()
     x = TaskState("x")
     assert len(TaskState._instances) == 1
