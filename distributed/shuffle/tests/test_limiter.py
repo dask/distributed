@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 
+from distributed.metrics import time
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.utils_test import gen_test
 
@@ -89,18 +90,18 @@ async def test_limiter_statistics():
     assert res.time_blocked_total == 0.0
 
     res.increase(1)
-
+    start = time()
     blocked_wait = asyncio.create_task(res.wait_for_available())
 
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.05)
 
     assert not blocked_wait.done()
 
     await res.decrease(1)
 
     await blocked_wait
-
-    assert 0.2 > res.time_blocked_total > 0.0
+    stop = time()
+    assert stop - start >= res.time_blocked_total > 0.0
     assert res.time_blocked_total > res.time_blocked_avg
 
     before_total = res.time_blocked_total
