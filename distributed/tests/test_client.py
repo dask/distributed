@@ -77,14 +77,7 @@ from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.metrics import time
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
 from distributed.sizeof import sizeof
-from distributed.utils import (
-    NoOpAwaitable,
-    get_mp_context,
-    is_valid_xml,
-    open_port,
-    sync,
-    tmp_text,
-)
+from distributed.utils import get_mp_context, is_valid_xml, open_port, sync, tmp_text
 from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
