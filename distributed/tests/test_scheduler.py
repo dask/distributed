@@ -489,7 +489,7 @@ async def test_queued_remove_add_worker(c, s, a, b):
 async def test_queued_balance_scale_up_from_one(c, s, a):
     event = Event()
     fs = c.map(lambda x: event.wait(), range(12), key=[f"wait-{i}" for i in range(12)])
-    await wait_for_state(fs[0].key, "processing", s)
+    await wait_for_state(fs[0].key, "executing", a)
     if len(a.state.tasks) != a.state.nthreads:
         pytest.fail(f"Test assumptions have changed, {a.state.tasks=}")
 
