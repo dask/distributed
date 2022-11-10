@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from dask.base import tokenize
@@ -8,6 +9,7 @@ from dask.layers import SimpleShuffleLayer
 
 from distributed.shuffle._shuffle_extension import ShuffleId, ShuffleWorkerExtension
 
+logger = logging.getLogger("distributed.shuffle")
 if TYPE_CHECKING:
     import pandas as pd
 
