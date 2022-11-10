@@ -4830,7 +4830,6 @@ class Client(SyncMethodMixin):
         # Sends the forwarded LogRecord to the client-side logger with the same
         # name as that which originally handled the record on the worker-side.
         _, record_attrs = event
-        # print(record_attrs, flush=True)
         record = logging.makeLogRecord(record_attrs)
         dest_logger = logging.getLogger(record.name)
         dest_logger.handle(record)
