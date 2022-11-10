@@ -12,7 +12,7 @@ from itertools import chain
 from types import ModuleType
 from typing import Any
 
-MIN_BOKEH_VERSION = "2.1.1"
+MIN_BOKEH_VERSION = "2.4.2"
 
 required_packages = [
     ("dask", lambda p: p.__version__),

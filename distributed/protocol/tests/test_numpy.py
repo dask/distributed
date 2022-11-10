@@ -19,7 +19,6 @@ from distributed.protocol import (
 )
 from distributed.protocol.compression import maybe_compress
 from distributed.protocol.numpy import itemsize
-from distributed.protocol.pickle import HIGHEST_PROTOCOL
 from distributed.protocol.utils import BIG_BYTES_SHARD_SIZE
 from distributed.system import MEMORY_LIMIT
 from distributed.utils import nbytes
@@ -87,10 +86,7 @@ def test_dumps_serialize_numpy(x):
     for frame in frames:
         assert isinstance(frame, (bytes, memoryview))
     if x.dtype.char == "O" and any(isinstance(e, np.ndarray) for e in x.flat):
-        if HIGHEST_PROTOCOL >= 5:
-            assert len(frames) > 1
-        else:
-            assert len(frames) == 1
+        assert len(frames) > 1  # pickle protocol >= 5
     y = deserialize(header, frames)
 
     assert x.shape == y.shape

@@ -1257,14 +1257,10 @@ class Worker(BaseWorker, ServerNode):
 
     @fail_hard
     async def handle_scheduler(self, comm: Comm) -> None:
-        await self.handle_stream(comm)
-        logger.info(
-            "Connection to scheduler broken. Closing without reporting. ID: %s Address %s Status: %s",
-            self.id,
-            self.address,
-            self.status,
-        )
-        await self.close(reason="worker-handle-scheduler-connection-broken")
+        try:
+            await self.handle_stream(comm)
+        finally:
+            await self.close(reason="worker-handle-scheduler-connection-broken")
 
     async def upload_file(
         self, filename: str, data: str | bytes, load: bool = True
@@ -2908,12 +2904,12 @@ def dumps_function(func) -> bytes:
         with _cache_lock:
             result = cache_dumps[func]
     except KeyError:
-        result = pickle.dumps(func, protocol=4)
+        result = pickle.dumps(func)
         if len(result) < 100000:
             with _cache_lock:
                 cache_dumps[func] = result
     except TypeError:  # Unhashable function
-        result = pickle.dumps(func, protocol=4)
+        result = pickle.dumps(func)
     return result
 
 
@@ -2953,7 +2949,7 @@ _warn_dumps_warned = [False]
 
 def warn_dumps(obj, dumps=pickle.dumps, limit=1e6):
     """Dump an object to bytes, warn if those bytes are large"""
-    b = dumps(obj, protocol=4)
+    b = dumps(obj)
     if not _warn_dumps_warned[0] and len(b) > limit:
         _warn_dumps_warned[0] = True
         s = str(obj)

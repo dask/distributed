@@ -11,8 +11,8 @@ import dask
 from dask.utils import parse_timedelta
 
 from distributed.compatibility import PeriodicCallback
-from distributed.metrics import CountdownTimer, time
-from distributed.utils import SyncMethodMixin, log_errors
+from distributed.metrics import time
+from distributed.utils import Deadline, SyncMethodMixin, log_errors
 from distributed.utils_comm import retry_operation
 from distributed.worker import get_client, get_worker
 
@@ -130,7 +130,7 @@ class SemaphoreExtension:
 
         if isinstance(name, list):
             name = tuple(name)
-        timer = CountdownTimer(timeout)
+        deadline = Deadline.after(timeout)
 
         self.metrics["pending"][name] += 1
         while True:
@@ -138,7 +138,7 @@ class SemaphoreExtension:
                 "Trying to acquire %s for %s with %s seconds left.",
                 lease_id,
                 name,
-                timer.remaining,
+                deadline.remaining,
             )
             # Reset the event and try to get a release. The event will be set if the state
             # is changed and helps to identify when it is worth to retry an acquire
@@ -150,7 +150,7 @@ class SemaphoreExtension:
             # been released and we can try to acquire again (continue loop)
             if not result:
                 future = asyncio.wait_for(
-                    self.events[name].wait(), timeout=timer.remaining
+                    self.events[name].wait(), timeout=deadline.remaining
                 )
                 try:
                     await future
@@ -162,11 +162,11 @@ class SemaphoreExtension:
                 lease_id,
                 name,
                 result,
-                timer.elapsed,
+                deadline.elapsed,
             )
             # We're about to return, so the lease is no longer "pending"
             self.metrics["average_pending_lease_time"][name] = (
-                self.metrics["average_pending_lease_time"][name] + timer.elapsed
+                self.metrics["average_pending_lease_time"][name] + deadline.elapsed
             ) / 2
             self.metrics["pending"][name] -= 1
 
