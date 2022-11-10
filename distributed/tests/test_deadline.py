@@ -59,7 +59,7 @@ async def test_deadline_progress():
 
 def test_deadline_expiration():
     deadline = Deadline.after(0.1)
-    sleep(0.1)
+    sleep(0.15)
     assert deadline.expired is True
     assert deadline.remaining == 0
     assert deadline.elapsed >= deadline.duration
