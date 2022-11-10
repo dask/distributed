@@ -3,29 +3,30 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python=3.7
-  - click=6.7
+  - python=3.8
+  - click=7.0
   - cloudpickle=1.5.0
+  - cytoolz=0.8.2
   - jinja2
+  - locket=1.0.0
   - msgpack-python=0.6.0
   - packaging=20.0
-  - psutil=5.4.7
-  - sortedcontainers=2.0.4
-  - tblib=1.6.0
-  - toolz=0.10.0
-  - tornado=5
-  - zict=0.1.3
+  - psutil=5.0
   - pyyaml
-  - setuptools
+  - sortedcontainers!=2.0.0,!=2.0.1
+  - tblib=1.6.0
+  - toolz=0.8.2
+  - tornado=6.0.3
+  - urllib3
+  - zict=0.1.3
+  # Distributed depends on the latest version of Dask
+  - pip
+  - pip:
+    - git+https://github.com/dask/dask
   # test dependencies
   - pytest
-  - pytest-asyncio<0.14.0
   - pytest-cov
   - pytest-faulthandler
   - pytest-repeat
   - pytest-rerunfailures
   - pytest-timeout
-  - pip
-  - pip:
-    # Distributed depends on the latest version of Dask
-    - git+https://github.com/dask/dask
