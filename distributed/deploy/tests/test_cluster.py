@@ -1,5 +1,6 @@
-from types import CoroutineType
 from __future__ import annotations
+
+from types import CoroutineType
 
 import pytest
 from tornado.ioloop import IOLoop

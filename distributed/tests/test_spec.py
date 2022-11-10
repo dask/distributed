@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from unittest.mock import MagicMock
 
 from distributed.deploy.spec import (
@@ -6,8 +8,6 @@ from distributed.deploy.spec import (
     Status,
     close_clusters,
 )
-from __future__ import annotations
-
 from distributed.utils_test import gen_test
 
 
@@ -32,7 +32,7 @@ async def test_child_address_persists():
 
 
 def test_close_clusters(monkeypatch):
-    def mock_cluster(status: Status, shutdown_on_close: bool = True):
+    def mock_cluster(status: Status, shutdown_on_close: bool = True) -> MagicMock:
         mock = MagicMock(spec=SpecCluster)
         mock.status = status
         mock.shutdown_on_close = shutdown_on_close
