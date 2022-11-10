@@ -7,10 +7,9 @@ import random
 import shutil
 from collections import defaultdict
 
-import pandas as pd
 import pytest
 
-pa = pytest.importorskip("pyarrow")
+pd = pytest.importorskip("pandas")
 
 import dask
 import dask.dataframe as dd
@@ -185,6 +184,8 @@ def test_processing_chain():
     In practice this takes place on many different workers.
     Here we verify its accuracy in a single threaded situation.
     """
+    pa = pytest.importorskip("pyarrow")
+
     workers = ["a", "b", "c"]
     npartitions = 5
     df = pd.DataFrame({"x": range(100), "y": range(100)})

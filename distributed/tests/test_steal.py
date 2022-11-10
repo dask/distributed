@@ -12,7 +12,6 @@ from operator import mul
 from time import sleep
 from typing import Callable, Iterable, Mapping, Sequence
 
-import numpy as np
 import pytest
 from tlz import merge, sliding_window
 
@@ -74,6 +73,7 @@ async def test_work_stealing(c, s, a, b):
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
 async def test_dont_steal_expensive_data_fast_computation(c, s, a, b):
     np = pytest.importorskip("numpy")
+
     x = c.submit(np.arange, 1000000, workers=a.address)
     await wait([x])
     future = c.submit(np.sum, [1], workers=a.address)  # learn that sum is fast
@@ -1349,6 +1349,8 @@ def test_steal_worker_state(ws_with_running_task):
 @pytest.mark.slow()
 @gen_cluster(nthreads=[("", 1)] * 4, client=True)
 async def test_steal_very_fast_tasks(c, s, *workers):
+    np = pytest.importorskip("numpy")
+
     # Ensure that very fast tasks are allowed to be stolen
     root = dask.delayed(lambda n: "x" * n)(
         dask.utils.parse_bytes("1MiB"), dask_key_name="root"
