@@ -11,7 +11,7 @@ from tlz import concat, drop, groupby, merge
 
 import dask.config
 from dask.optimization import SubgraphCallable
-from dask.utils import parse_timedelta, stringify, is_namedtuple_instance
+from dask.utils import is_namedtuple_instance, parse_timedelta, stringify
 
 from distributed.core import rpc
 from distributed.utils import All

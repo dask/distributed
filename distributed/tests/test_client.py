@@ -19,7 +19,7 @@ import types
 import warnings
 import weakref
 import zipfile
-from collections import deque
+from collections import deque, namedtuple
 from collections.abc import Generator
 from contextlib import ExitStack, contextmanager, nullcontext
 from functools import partial
@@ -28,7 +28,6 @@ from threading import Semaphore
 from time import sleep
 from typing import Any
 from unittest import mock
-from collections import namedtuple
 
 import psutil
 import pytest
@@ -7844,6 +7843,7 @@ async def test_wait_for_workers_n_workers_value_check(c, s, a, b, value, excepti
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 1)
 async def test_unpacks_remotedata_namedtuple(c, s, a):
     Point = namedtuple("Point", "x y")
+
     def f():
         return Point(2, 4)
 
@@ -7853,13 +7853,12 @@ async def test_unpacks_remotedata_namedtuple(c, s, a):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 1)
 async def test_unpacks_remotedata_namedtuple_inherited(c, s, a):
-    class NamedTupleAnnotation(
-        namedtuple("BaseAnnotation", field_names="value")
-    ):
+    class NamedTupleAnnotation(namedtuple("BaseAnnotation", field_names="value")):
         def unwrap(self):
             return self.value
 
     string = "my_value"
+
     def f():
         return NamedTupleAnnotation(value=string)
 
