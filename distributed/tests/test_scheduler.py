@@ -276,6 +276,11 @@ async def test_decide_worker_rootish_while_last_worker_is_retiring(c, s, a):
     evy = Event()
 
     async with BlockedGatherDep(s.address, nthreads=1) as b:
+        # Take up some memory on the new worker, so it's the less appealing option for
+        # `worker_objective_no_deps` (occupancy of both should be the same).
+        ballast = c.submit(lambda: "x" * 4096, workers=[b.address], key="ballast")
+        await wait(ballast)
+
         xs = [
             c.submit(lambda ev: ev.wait(), evx[0], key="x-0", workers=[a.address]),
             c.submit(lambda ev: ev.wait(), evx[1], key="x-1", workers=[a.address]),
@@ -302,8 +307,12 @@ async def test_decide_worker_rootish_while_last_worker_is_retiring(c, s, a):
         await evx[0].set()
         await wait_for_state("y-0", "processing", s)
         await wait_for_state("y-1", "processing", s)
-        assert s.tasks["y-2"].group.last_worker == s.workers[a.address]
-        assert s.tasks["y-2"].group.last_worker_tasks_left == 1
+        if (last_worker := s.tasks["y-2"].group.last_worker) != s.workers[a.address]:
+            pytest.fail(
+                f"Test assumptions have changed: {a=} not selected, instead {last_worker}."
+            )
+        if (tasks_left := s.tasks["y-2"].group.last_worker_tasks_left) != 1:
+            pytest.fail(f"Test assumptions have changed: {tasks_left=}.")
 
         # Take a out of the running pool, but without removing it from the cluster
         # completely
