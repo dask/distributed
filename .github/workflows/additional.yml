@@ -191,7 +191,7 @@ jobs:
           name: ${{ env.TEST_ID }}
           path: reports
 
-        - name: Upload gen_cluster dumps for failed tests
+      - name: Upload gen_cluster dumps for failed tests
         # ensure this runs even if pytest fails
         if: >
           always() &&
