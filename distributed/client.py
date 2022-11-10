@@ -4826,9 +4826,6 @@ class Client(SyncMethodMixin):
         return AMMClientProxy(self)
 
     def _handle_forwarded_log_record(self, event):
-        # The client-side handler function for "forwarded-log-record" events.
-        # Sends the forwarded LogRecord to the client-side logger with the same
-        # name as that which originally handled the record on the worker-side.
         _, record_attrs = event
         record = logging.makeLogRecord(record_attrs)
         dest_logger = logging.getLogger(record.name)
