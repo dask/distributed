@@ -216,21 +216,25 @@ def test_retries(client):
     with client.get_executor(retries=5, pure=False) as e:
         future = e.submit(varying(args))
         assert future.result() == 42
+        del future
 
     with client.get_executor(retries=4) as e:
         future = e.submit(varying(args))
         result = future.result()
         assert result == 42
+        del future
 
     with client.get_executor(retries=2) as e:
         future = e.submit(varying(args))
         with pytest.raises(ZeroDivisionError, match="two"):
             res = future.result()
+        del future
 
     with client.get_executor(retries=0) as e:
         future = e.submit(varying(args))
         with pytest.raises(ZeroDivisionError, match="one"):
             res = future.result()
+        del future
 
 
 def test_shutdown_wait(client):
