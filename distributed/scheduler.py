@@ -485,7 +485,7 @@ class WorkerState:
 
     # Reference to scheduler task_groups
     scheduler_ref: weakref.ref[SchedulerState] | None
-    task_groups_count: defaultdict[str, int]
+    task_prefix_count: defaultdict[str, int]
     _network_occ: float
     _occupancy_cache: float | None
 
@@ -543,7 +543,7 @@ class WorkerState:
         self.used_resources = {}
         self.extra = extra or {}
         self.scheduler_ref = weakref.ref(scheduler) if scheduler else None
-        self.task_groups_count = defaultdict(int)
+        self.task_prefix_count = defaultdict(int)
         self.needs_what = {}
         self._network_occ = 0
         self._occupancy_cache = None
@@ -722,9 +722,9 @@ class WorkerState:
         if self.scheduler.validate:
             assert ts not in self.processing
 
-        tg = ts.group
-        self.task_groups_count[tg.name] += 1
-        self.scheduler.task_groups_count_global[tg.name] += 1
+        tp = ts.prefix
+        self.task_prefix_count[tp.name] += 1
+        self.scheduler._task_prefix_count_global[tp.name] += 1
         self.processing.add(ts)
         for dts in ts.dependencies:
             if self not in dts.who_has:
@@ -735,7 +735,7 @@ class WorkerState:
             assert ts in self.processing
             assert ts not in self.long_running
 
-        self._remove_from_task_groups_count(ts)
+        self._remove_from_task_prefix_count(ts)
         # Cannot remove from processing since we're using this for things like
         # idleness detection. Idle workers are typically targeted for
         # downscaling but we should not downscale workers with long running
@@ -750,24 +750,24 @@ class WorkerState:
         if ts in self.long_running:
             self.long_running.discard(ts)
         else:
-            self._remove_from_task_groups_count(ts)
+            self._remove_from_task_prefix_count(ts)
         self.processing.remove(ts)
         for dts in ts.dependencies:
             if dts in self.needs_what:
                 self._dec_needs_replica(dts)
 
-    def _remove_from_task_groups_count(self, ts: TaskState) -> None:
-        count = self.task_groups_count[ts.group.name] - 1
+    def _remove_from_task_prefix_count(self, ts: TaskState) -> None:
+        count = self.task_prefix_count[ts.prefix.name] - 1
         if count:
-            self.task_groups_count[ts.group.name] = count
+            self.task_prefix_count[ts.prefix.name] = count
         else:
-            del self.task_groups_count[ts.group.name]
+            del self.task_prefix_count[ts.prefix.name]
 
-        count = self.scheduler.task_groups_count_global[ts.group.name] - 1
+        count = self.scheduler._task_prefix_count_global[ts.prefix.name] - 1
         if count:
-            self.scheduler.task_groups_count_global[ts.group.name] = count
+            self.scheduler._task_prefix_count_global[ts.prefix.name] = count
         else:
-            del self.scheduler.task_groups_count_global[ts.group.name]
+            del self.scheduler._task_prefix_count_global[ts.prefix.name]
 
     def remove_replica(self, ts: TaskState) -> None:
         """The worker no longer has a task in memory"""
@@ -822,7 +822,7 @@ class WorkerState:
     @property
     def occupancy(self) -> float:
         return self._occupancy_cache or self.scheduler._calc_occupancy(
-            self.task_groups_count, self._network_occ
+            self.task_prefix_count, self._network_occ
         )
 
 
@@ -1566,7 +1566,7 @@ class SchedulerState:
     #: In production, it should always be set to False.
     transition_counter_max: int | Literal[False]
 
-    task_groups_count_global: defaultdict[str, int]
+    _task_prefix_count_global: defaultdict[str, int]
     _network_occ_global: float
     ######################
     # Cached configuration
@@ -1634,7 +1634,7 @@ class SchedulerState:
         self.unrunnable = unrunnable
         self.validate = validate
         self.workers = workers
-        self.task_groups_count_global = defaultdict(int)
+        self._task_prefix_count_global = defaultdict(int)
         self._network_occ_global = 0.0
         self.running = {
             ws for ws in self.workers.values() if ws.status == Status.running
@@ -1761,19 +1761,19 @@ class SchedulerState:
     @property
     def total_occupancy(self) -> float:
         return self._calc_occupancy(
-            self.task_groups_count_global,
+            self._task_prefix_count_global,
             self._network_occ_global,
         )
 
     def _calc_occupancy(
         self,
-        task_groups_count: dict[str, int],
+        task_prefix_count: dict[str, int],
         network_occ: float,
     ) -> float:
         res = 0.0
-        for group_name, count in task_groups_count.items():
+        for prefix_name, count in task_prefix_count.items():
             # TODO: Deal with unknown tasks better
-            prefix = self.task_groups[group_name].prefix
+            prefix = self.task_prefixes[prefix_name]
             assert prefix is not None
             duration = prefix.duration_average
             if duration < 0:
@@ -5023,7 +5023,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.running,
             list(self.idle.values()),
         )
-        task_group_counts: defaultdict[str, int] = defaultdict(int)
+        task_prefix_counts: defaultdict[str, int] = defaultdict(int)
         for w, ws in self.workers.items():
             assert isinstance(w, str), (type(w), w)
             assert isinstance(ws, WorkerState), (type(ws), ws)
@@ -5043,14 +5043,14 @@ class Scheduler(SchedulerState, ServerNode):
                         actual_needs_what[tss] += 1
             assert actual_needs_what == ws.needs_what
             assert (ws.status == Status.running) == (ws in self.running)
-            for name, count in ws.task_groups_count.items():
-                task_group_counts[name] += count
+            for name, count in ws.task_prefix_count.items():
+                task_prefix_counts[name] += count
 
-        assert task_group_counts.keys() == self.task_groups_count_global.keys()
-        for name, global_count in self.task_groups_count_global.items():
+        assert task_prefix_counts.keys() == self._task_prefix_count_global.keys()
+        for name, global_count in self._task_prefix_count_global.items():
             assert (
-                task_group_counts[name] == global_count
-            ), f"{name}: {task_group_counts[name]} (wss), {global_count} (global)"
+                task_prefix_counts[name] == global_count
+            ), f"{name}: {task_prefix_counts[name]} (wss), {global_count} (global)"
 
         for ws in self.running:
             assert ws.status == Status.running
