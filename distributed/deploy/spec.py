@@ -674,4 +674,4 @@ def close_clusters():
         if getattr(cluster, "shutdown_on_close", False):
             with suppress(gen.TimeoutError, TimeoutError, RuntimeError):
                 if getattr(cluster, "status", Status.closed) != Status.closed:
-                    cluster.close(cluster.close, asynchronous=False, timeout=10)
+                    cluster.sync(cluster.close, asynchronous=False, callback_timeout=10)
