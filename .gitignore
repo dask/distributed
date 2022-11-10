@@ -30,6 +30,12 @@ dask-worker-space/
 tags
 .ipynb_checkpoints
 .venv/
+.mypy_cache/
 
-# Test timeouts will dump the cluster state in here
-test_timeout_dump/
+reports/
+test_report*.html
+test_report*.db
+test_short_report.html
+
+# Test failures will dump the cluster state in here
+test_cluster_dump/

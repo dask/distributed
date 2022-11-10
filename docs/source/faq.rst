@@ -20,7 +20,7 @@ Too many open file descriptors?
 
 Your operating system imposes a limit to how many open files or open network
 connections any user can have at once.  Depending on the scale of your
-cluster the ``dask-scheduler`` may run into this limit.
+cluster the ``dask scheduler`` may run into this limit.
 
 By default most Linux distributions set this limit at 1024 open
 files/connections and OS-X at 128 or 256.  Each worker adds a few open
@@ -34,8 +34,8 @@ doing you can change the limits on Linux by editing
 Level FD Limits":
 http://www.cyberciti.biz/faq/linux-increase-the-maximum-number-of-open-files/
 
-Error when running dask-worker about ``OMP_NUM_THREADS``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Error when running ``dask worker`` about ``OMP_NUM_THREADS``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 For more problems with OMP_NUM_THREADS, see
 http://stackoverflow.com/questions/39422092/error-with-omp-num-threads-when-using-dask-distributed

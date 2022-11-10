@@ -7,6 +7,8 @@ API
 
 **Client**
 
+The client connects to and submits computation to a Dask cluster (such as a :class:`distributed.LocalCluster`)
+
 .. autosummary::
    Client
 
@@ -21,6 +23,8 @@ API
    get_client
    secede
    rejoin
+   print
+   warn
    Reschedule
 
 .. currentmodule:: distributed.recreate_tasks
@@ -40,7 +44,7 @@ API
 .. autoautosummary:: distributed.Future
    :methods:
 
-**Client Coordination**
+**Synchronization**
 
 .. currentmodule:: distributed
 
@@ -48,6 +52,7 @@ API
    Event
    Lock
    MultiLock
+   Semaphore
    Queue
    Variable
 
@@ -122,6 +127,24 @@ Future
 .. autoclass:: Future
    :members:
 
+
+Synchronization
+---------------
+
+.. autoclass:: Event
+   :members:
+.. autoclass:: Lock
+   :members:
+.. autoclass:: MultiLock
+   :members:
+.. autoclass:: Semaphore
+   :members:
+.. autoclass:: Queue
+   :members:
+.. autoclass:: Variable
+   :members:
+
+
 Cluster
 -------
 
@@ -163,23 +186,12 @@ Other
 .. autofunction:: distributed.get_client
 .. autofunction:: distributed.secede
 .. autofunction:: distributed.rejoin
+.. autofunction:: distributed.print
+.. autofunction:: distributed.warn
 .. autoclass:: distributed.Reschedule
 .. autoclass:: get_task_stream
 .. autoclass:: get_task_metadata
 .. autoclass:: performance_report
-
-.. autoclass:: Event
-   :members:
-.. autoclass:: Lock
-   :members:
-.. autoclass:: MultiLock
-   :members:
-.. autoclass:: Semaphore
-   :members:
-.. autoclass:: Queue
-   :members:
-.. autoclass:: Variable
-   :members:
 
 
 Utilities

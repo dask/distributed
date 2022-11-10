@@ -1,13 +1,15 @@
+from __future__ import annotations
+
 import weakref
 
 import numba.cuda
 import numpy as np
 
-from .cuda import cuda_deserialize, cuda_serialize
-from .serialize import dask_deserialize, dask_serialize
+from distributed.protocol.cuda import cuda_deserialize, cuda_serialize
+from distributed.protocol.serialize import dask_deserialize, dask_serialize
 
 try:
-    from .rmm import dask_deserialize_rmm_device_buffer
+    from distributed.protocol.rmm import dask_deserialize_rmm_device_buffer
 except ImportError:
     dask_deserialize_rmm_device_buffer = None
 

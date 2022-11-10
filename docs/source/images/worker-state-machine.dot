@@ -1,0 +1,55 @@
+digraph {
+  graph [
+    bgcolor="#FFFFFFF00",
+    rankdir=TB,
+  ];
+
+  Scheduler [
+    shape=rect,
+    fontsize = 20,
+  ];
+
+  stimuli [
+    label="StateMachineEvent",
+    shape=rect,
+    style=filled,
+    color=grey,
+  ];
+
+  instructions [
+    label="list[Instruction]",
+    shape=rect,
+    style=filled,
+    color=grey,
+  ];
+
+  subgraph cluster_0 {
+    label = "Worker";
+    fontsize = 20;
+
+    Worker_handle_stimulus [label="handle_stimulus()"];
+    Worker_execute [label="execute()\ngather_dep()\nbatched_send()"];
+  }
+
+  subgraph cluster_1 {
+    label = "BaseWorker";
+    fontsize = 20;
+
+    BaseWorker_handle_stimulus [label="handle_stimulus()"];
+    BaseWorker_execute [label="execute()\ngather_dep()\nbatched_send()"];
+  }
+
+  subgraph cluster_2 {
+    label = "WorkerState";
+    fontsize = 20;
+
+    WorkerState_handle_stimulus [label="handle_stimulus()"];
+  }
+
+  Scheduler -> stimuli;
+  stimuli -> Worker_handle_stimulus;
+  Worker_handle_stimulus -> BaseWorker_handle_stimulus;
+  BaseWorker_handle_stimulus -> WorkerState_handle_stimulus;
+  # trick to have arrows going from the bottom to the top of the graph
+  stimuli -> Worker_execute -> BaseWorker_execute -> instructions -> WorkerState_handle_stimulus [dir=back];
+}

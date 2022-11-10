@@ -4,8 +4,8 @@ import itertools
 
 import dask
 
-from ..utils import get_ip_interface
-from . import registry
+from distributed.comm import registry
+from distributed.utils import get_ip_interface
 
 
 def parse_address(addr: str, strict: bool = False) -> tuple[str, str]:
@@ -197,26 +197,20 @@ def uri_from_host_port(
         loc, port_arg if port_arg is not None else default_port
     )
 
-    if port is None and port_arg is None:
-        port_arg = default_port
-
-    if port and port_arg and port != port_arg:
+    # Note `port = 0` means "choose a random port"
+    if port != 0 and port_arg and port != int(port_arg):
         raise ValueError(
             "port number given twice in options: "
-            "host %r and port %r" % (host_arg, port_arg)
+            f"host {host_arg} and port {port_arg}"
         )
-    if port is None and port_arg is not None:
-        port = port_arg
-    # Note `port = 0` means "choose a random port"
-    if port is None:
-        port = default_port
+
     loc = unparse_host_port(host, port)
     addr = unparse_address(scheme, loc)
 
     return addr
 
 
-def addresses_from_user_args(
+def addresses_from_user_args(  # type: ignore[no-untyped-def]
     host=None,
     port=None,
     interface=None,
@@ -264,7 +258,7 @@ def addresses_from_user_args(
         ]
 
 
-def address_from_user_args(
+def address_from_user_args(  # type: ignore[no-untyped-def]
     host=None,
     port=None,
     interface=None,
@@ -278,7 +272,10 @@ def address_from_user_args(
     if security and security.require_encryption and not protocol:
         protocol = "tls"
 
-    if protocol and protocol.rstrip("://") == "inplace":
+    if protocol and protocol.endswith("://"):
+        protocol, _, _ = protocol.rpartition("://")
+
+    if protocol == "inplace":
         if host or port or interface:
             raise ValueError(
                 "Can not specify inproc protocol and host or port or interface"
@@ -293,7 +290,7 @@ def address_from_user_args(
             host = get_ip_interface(interface)
 
     if protocol and host and "://" not in host:
-        host = protocol.rstrip("://") + "://" + host
+        host = protocol + "://" + host
 
     if host or port:
         addr = uri_from_host_port(host, port, default_port)
@@ -301,6 +298,6 @@ def address_from_user_args(
         addr = ""
 
     if protocol:
-        addr = protocol.rstrip("://") + "://" + addr.split("://")[-1]
+        addr = protocol + "://" + addr.split("://")[-1]
 
     return addr

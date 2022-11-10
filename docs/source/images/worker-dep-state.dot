@@ -3,8 +3,11 @@ digraph{
         bgcolor="#FFFFFFF00",
         rankdir=LR,
         ];
-    new -> fetch;
+
+    released -> fetch;
     fetch -> flight;
     flight -> fetch;
+    fetch -> missing;
+    missing -> fetch;
     flight -> memory;
 }

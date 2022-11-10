@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 from time import sleep
 
@@ -84,6 +86,29 @@ async def test_collect(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_no_startstops(c, s, a, b):
+    tasks = TaskStreamPlugin(s)
+    s.add_plugin(tasks)
+    # just to create the key on the scheduler
+    future = c.submit(inc, 1)
+    await wait(future)
+    assert len(tasks.buffer) == 1
+
+    tasks.transition(future.key, "processing", "erred")
+    # Transition was not recorded because it didn't contain `startstops`
+    assert len(tasks.buffer) == 1
+
+    tasks.transition(future.key, "processing", "erred", startstops=[])
+    # Transition was not recorded because `startstops` was empty
+    assert len(tasks.buffer) == 1
+
+    tasks.transition(
+        future.key, "processing", "erred", startstops=[dict(start=time(), stop=time())]
+    )
+    assert len(tasks.buffer) == 2
+
+
+@gen_cluster(client=True)
 async def test_client(c, s, a, b):
     L = await c.get_task_stream()
     assert L == ()
@@ -108,18 +133,18 @@ def test_client_sync(client):
 
 @gen_cluster(client=True)
 async def test_get_task_stream_plot(c, s, a, b):
-    bokeh = pytest.importorskip("bokeh")
+    bkm = pytest.importorskip("bokeh.models")
     await c.get_task_stream()
 
     futures = c.map(slowinc, range(10), delay=0.1)
     await wait(futures)
 
     data, figure = await c.get_task_stream(plot=True)
-    assert isinstance(figure, bokeh.plotting.Figure)
+    assert isinstance(figure, bkm.Plot)
 
 
 def test_get_task_stream_save(client, tmpdir):
-    bokeh = pytest.importorskip("bokeh")
+    bkm = pytest.importorskip("bokeh.models")
     tmpdir = str(tmpdir)
     fn = os.path.join(tmpdir, "foo.html")
 
@@ -130,4 +155,4 @@ def test_get_task_stream_save(client, tmpdir):
     assert "inc" in data
     assert "bokeh" in data
 
-    assert isinstance(ts.figure, bokeh.plotting.Figure)
+    assert isinstance(ts.figure, bkm.Plot)

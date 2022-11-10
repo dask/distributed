@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 
 import pytest
@@ -10,11 +12,12 @@ ucp = pytest.importorskip("ucp")
 
 from distributed import Client, Scheduler, wait
 from distributed.comm import connect, listen, parse_address, ucx
+from distributed.comm.core import CommClosedError
 from distributed.comm.registry import backends, get_backend
 from distributed.deploy.local import LocalCluster
 from distributed.diagnostics.nvml import has_cuda_context
 from distributed.protocol import to_serialize
-from distributed.utils_test import inc
+from distributed.utils_test import gen_test, inc
 
 try:
     HOST = ucp.get_address()
@@ -22,33 +25,17 @@ except Exception:
     HOST = "127.0.0.1"
 
 
-def handle_exception(loop, context):
-    msg = context.get("exception", context["message"])
-    print(msg)
-
-
-# Let's make sure that UCX gets time to cancel
-# progress tasks before closing the event loop.
-@pytest.fixture()
-def event_loop(scope="function"):
-    loop = asyncio.new_event_loop()
-    loop.set_exception_handler(handle_exception)
-    ucp.reset()
-    yield loop
-    ucp.reset()
-    loop.run_until_complete(asyncio.sleep(0))
-    loop.close()
-
-
-def test_registered():
+def test_registered(ucx_loop):
     assert "ucx" in backends
     backend = get_backend("ucx")
     assert isinstance(backend, ucx.UCXBackend)
 
 
 async def get_comm_pair(
-    listen_addr="ucx://" + HOST, listen_args={}, connect_args={}, **kwargs
+    listen_addr="ucx://" + HOST, listen_args=None, connect_args=None, **kwargs
 ):
+    listen_args = listen_args or {}
+    connect_args = connect_args or {}
     q = asyncio.queues.Queue()
 
     async def handle_comm(comm):
@@ -61,8 +48,8 @@ async def get_comm_pair(
         return (comm, serv_comm)
 
 
-@pytest.mark.asyncio
-async def test_ping_pong():
+@gen_test()
+async def test_ping_pong(ucx_loop):
     com, serv_com = await get_comm_pair()
     msg = {"op": "ping"}
     await com.write(msg)
@@ -79,8 +66,8 @@ async def test_ping_pong():
     await serv_com.close()
 
 
-@pytest.mark.asyncio
-async def test_comm_objs():
+@gen_test()
+async def test_comm_objs(ucx_loop):
     comm, serv_comm = await get_comm_pair()
 
     scheme, loc = parse_address(comm.peer_address)
@@ -92,8 +79,8 @@ async def test_comm_objs():
     assert comm.peer_address == serv_comm.local_address
 
 
-@pytest.mark.asyncio
-async def test_ucx_specific():
+@gen_test()
+async def test_ucx_specific(ucx_loop):
     """
     Test concrete UCX API.
     """
@@ -146,8 +133,8 @@ async def test_ucx_specific():
     listener.stop()
 
 
-@pytest.mark.asyncio
-async def test_ping_pong_data():
+@gen_test()
+async def test_ping_pong_data(ucx_loop):
     np = pytest.importorskip("numpy")
 
     data = np.ones((10, 10))
@@ -169,17 +156,16 @@ async def test_ping_pong_data():
     await serv_com.close()
 
 
-@pytest.mark.asyncio
-async def test_ucx_deserialize():
+@gen_test()
+async def test_ucx_deserialize(ucx_loop):
     # Note we see this error on some systems with this test:
     # `socket.gaierror: [Errno -5] No address associated with hostname`
     # This may be due to a system configuration issue.
-    from .test_comms import check_deserialize
+    from distributed.comm.tests.test_comms import check_deserialize
 
     await check_deserialize("tcp://")
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "g",
     [
@@ -196,7 +182,8 @@ async def test_ucx_deserialize():
         lambda cudf: cudf.DataFrame({"a": ["Check", "str"], "b": ["Sup", "port"]}),
     ],
 )
-async def test_ping_pong_cudf(g):
+@gen_test()
+async def test_ping_pong_cudf(ucx_loop, g):
     # if this test appears after cupy an import error arises
     # *** ImportError: /usr/lib/x86_64-linux-gnu/libstdc++.so.6: version `CXXABI_1.3.11'
     # not found (required by python3.7/site-packages/pyarrow/../../../libarrow.so.12)
@@ -219,9 +206,9 @@ async def test_ping_pong_cudf(g):
     await serv_com.close()
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("shape", [(100,), (10, 10), (4947,)])
-async def test_ping_pong_cupy(shape):
+@gen_test()
+async def test_ping_pong_cupy(ucx_loop, shape):
     cupy = pytest.importorskip("cupy")
     com, serv_com = await get_comm_pair()
 
@@ -238,9 +225,9 @@ async def test_ping_pong_cupy(shape):
 
 
 @pytest.mark.slow
-@pytest.mark.asyncio
 @pytest.mark.parametrize("n", [int(1e9), int(2.5e9)])
-async def test_large_cupy(n, cleanup):
+@gen_test()
+async def test_large_cupy(ucx_loop, n, cleanup):
     cupy = pytest.importorskip("cupy")
     com, serv_com = await get_comm_pair()
 
@@ -256,8 +243,8 @@ async def test_large_cupy(n, cleanup):
     await serv_com.close()
 
 
-@pytest.mark.asyncio
-async def test_ping_pong_numba():
+@gen_test()
+async def test_ping_pong_numba(ucx_loop):
     np = pytest.importorskip("numpy")
     numba = pytest.importorskip("numba")
     import numba.cuda
@@ -274,9 +261,9 @@ async def test_ping_pong_numba():
     assert result["op"] == "ping"
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("processes", [True, False])
-async def test_ucx_localcluster(processes, cleanup):
+@gen_test()
+async def test_ucx_localcluster(ucx_loop, processes, cleanup):
     async with LocalCluster(
         protocol="ucx",
         host=HOST,
@@ -296,8 +283,10 @@ async def test_ucx_localcluster(processes, cleanup):
 
 
 @pytest.mark.slow
-@pytest.mark.asyncio
-async def test_stress():
+@gen_test(timeout=60)
+async def test_stress(
+    ucx_loop,
+):
     da = pytest.importorskip("dask.array")
 
     chunksize = "10 MB"
@@ -314,23 +303,27 @@ async def test_stress():
             x = x.persist()
             await wait(x)
 
-            for i in range(10):
+            for _ in range(10):
                 x = x.rechunk((chunksize, -1))
                 x = x.rechunk((-1, chunksize))
                 x = x.persist()
                 await wait(x)
 
 
-@pytest.mark.asyncio
-async def test_simple():
+@gen_test()
+async def test_simple(
+    ucx_loop,
+):
     async with LocalCluster(protocol="ucx", asynchronous=True) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             assert cluster.scheduler_address.startswith("ucx://")
             assert await client.submit(lambda x: x + 1, 10) == 11
 
 
-@pytest.mark.asyncio
-async def test_cuda_context():
+@gen_test()
+async def test_cuda_context(
+    ucx_loop,
+):
     with dask.config.set({"distributed.comm.ucx.create-cuda-context": True}):
         async with LocalCluster(
             protocol="ucx", n_workers=1, asynchronous=True
@@ -343,8 +336,10 @@ async def test_cuda_context():
                 assert list(worker_cuda_context.values())[0] == 0
 
 
-@pytest.mark.asyncio
-async def test_transpose():
+@gen_test()
+async def test_transpose(
+    ucx_loop,
+):
     da = pytest.importorskip("dask.array")
 
     async with LocalCluster(protocol="ucx", asynchronous=True) as cluster:
@@ -356,13 +351,32 @@ async def test_transpose():
             await y
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("port", [0, 1234])
-async def test_ucx_protocol(cleanup, port):
+@gen_test()
+async def test_ucx_protocol(ucx_loop, cleanup, port):
     async with Scheduler(protocol="ucx", port=port, dashboard_address=":0") as s:
         assert s.address.startswith("ucx://")
 
 
-def test_ucx_unreachable():
+@pytest.mark.skipif(
+    not hasattr(ucp.exceptions, "UCXUnreachable"),
+    reason="Requires UCX-Py support for UCXUnreachable exception",
+)
+@gen_test()
+async def test_ucx_unreachable(
+    ucx_loop,
+):
     with pytest.raises(OSError, match="Timed out trying to connect to"):
-        Client("ucx://255.255.255.255:12345", timeout=1)
+        await Client("ucx://255.255.255.255:12345", timeout=1, asynchronous=True)
+
+
+@gen_test()
+async def test_comm_closed_on_read_error():
+    reader, writer = await get_comm_pair()
+
+    # Depending on the UCP protocol selected, it may raise either
+    # `asyncio.TimeoutError` or `CommClosedError`, so validate either one.
+    with pytest.raises((asyncio.TimeoutError, CommClosedError)):
+        await asyncio.wait_for(reader.read(), 0.01)
+
+    assert reader.closed()

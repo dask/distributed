@@ -1,19 +1,26 @@
+from __future__ import annotations
+
 import asyncio
 import datetime
 import logging
 import uuid
+import warnings
 from contextlib import suppress
 from inspect import isawaitable
+from typing import Any
 
-from tornado.ioloop import PeriodicCallback
+from packaging.version import parse as parse_version
+from tornado.ioloop import IOLoop
 
 import dask.config
 from dask.utils import _deprecated, format_bytes, parse_timedelta, typename
 from dask.widgets import get_template
 
-from ..core import Status
-from ..objects import SchedulerInfo
-from ..utils import (
+from distributed.compatibility import PeriodicCallback
+from distributed.core import Status
+from distributed.deploy.adaptive import Adaptive
+from distributed.objects import SchedulerInfo
+from distributed.utils import (
     Log,
     Logs,
     LoopRunner,
@@ -22,7 +29,6 @@ from ..utils import (
     format_dashboard_link,
     log_errors,
 )
-from .adaptive import Adaptive
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +57,7 @@ class Cluster(SyncMethodMixin):
     """
 
     _supports_scaling = True
-    _cluster_info: dict = {}
+    __loop: IOLoop | None = None
 
     def __init__(
         self,
@@ -63,7 +69,6 @@ class Cluster(SyncMethodMixin):
     ):
         self._asynchronous = asynchronous
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
-        self.loop = self._loop_runner.loop
 
         self.scheduler_info = {"workers": {}}
         self.periodic_callbacks = {}
@@ -81,13 +86,31 @@ class Cluster(SyncMethodMixin):
         if name is None:
             name = str(uuid.uuid4())[:8]
 
-        # Mask class attribute with instance attribute
         self._cluster_info = {
             "name": name,
             "type": typename(type(self)),
-            **type(self)._cluster_info,
         }
         self.status = Status.created
+
+    @property
+    def loop(self) -> IOLoop | None:
+        loop = self.__loop
+        if loop is None:
+            # If the loop is not running when this is called, the LoopRunner.loop
+            # property will raise a DeprecationWarning
+            # However subsequent calls might occur - eg atexit, where a stopped
+            # loop is still acceptable - so we cache access to the loop.
+            self.__loop = loop = self._loop_runner.loop
+        return loop
+
+    @loop.setter
+    def loop(self, value: IOLoop) -> None:
+        warnings.warn(
+            "setting the loop property is deprecated", DeprecationWarning, stacklevel=2
+        )
+        if value is None:
+            raise ValueError("expected an IOLoop, got None")
+        self.__loop = value
 
     @property
     def name(self):
@@ -99,6 +122,7 @@ class Cluster(SyncMethodMixin):
 
     async def _start(self):
         comm = await self.scheduler_comm.live_comm()
+        comm.name = "Cluster worker status"
         await comm.write({"op": "subscribe_worker_status"})
         self.scheduler_info = SchedulerInfo(await comm.read())
         self._watch_worker_status_comm = comm
@@ -152,7 +176,7 @@ class Cluster(SyncMethodMixin):
                         exc_info=True,
                     )
             # Sleep, with error backoff
-            interval = min(max_interval, self._sync_interval * 1.5 ** err_count)
+            interval = min(max_interval, self._sync_interval * 1.5**err_count)
             await asyncio.sleep(interval)
 
     async def _close(self):
@@ -193,10 +217,13 @@ class Cluster(SyncMethodMixin):
         with suppress(RuntimeError):  # loop closed during process shutdown
             return self.sync(self._close, callback_timeout=timeout)
 
-    def __del__(self):
-        if self.status != Status.closed:
-            with suppress(AttributeError, RuntimeError):  # during closing
-                self.loop.add_callback(self.close)
+    def __del__(self, _warn=warnings.warn):
+        if getattr(self, "status", Status.closed) != Status.closed:
+            try:
+                self_r = repr(self)
+            except Exception:
+                self_r = f"with a broken __repr__ {object.__repr__(self)}"
+            _warn(f"unclosed cluster {self_r}", ResourceWarning, source=self)
 
     async def _watch_worker_status(self, comm):
         """Listen to scheduler for updates on adding and removing workers"""
@@ -219,10 +246,10 @@ class Cluster(SyncMethodMixin):
             self.scheduler_info.update(msg)
         elif op == "remove":
             del self.scheduler_info["workers"][msg]
-        else:
+        else:  # pragma: no cover
             raise ValueError("Invalid op", op, msg)
 
-    def adapt(self, Adaptive=Adaptive, **kwargs) -> Adaptive:
+    def adapt(self, Adaptive: type[Adaptive] = Adaptive, **kwargs: Any) -> Adaptive:
         """Turn on adaptivity
 
         For keyword arguments see dask.distributed.Adaptive
@@ -282,6 +309,8 @@ class Cluster(SyncMethodMixin):
             logs["Scheduler"] = Log("\n".join(line for level, line in L))
 
         if workers:
+            if workers is True:
+                workers = None
             d = await self.scheduler_comm.worker_logs(workers=workers)
             for k, v in d.items():
                 logs[k] = Log("\n".join(line for level, line in v))
@@ -314,6 +343,22 @@ class Cluster(SyncMethodMixin):
     @_deprecated(use_instead="get_logs")
     def logs(self, *args, **kwargs):
         return self.get_logs(*args, **kwargs)
+
+    def get_client(self):
+        """Return client for the cluster
+
+        If a client has already been initialized for the cluster, return that
+        otherwise initialize a new client object.
+        """
+        from distributed.client import Client
+
+        try:
+            current_client = Client.current()
+            if current_client and current_client.cluster == self:
+                return current_client
+        except ValueError:
+            pass
+        return Client(self)
 
     @property
     def dashboard_link(self):
@@ -397,16 +442,16 @@ class Cluster(SyncMethodMixin):
 
             adapt.on_click(adapt_cb)
 
+            @log_errors
             def scale_cb(b):
-                with log_errors():
-                    n = request.value
-                    with suppress(AttributeError):
-                        self._adaptive.stop()
-                    self.scale(n)
-                    update()
+                n = request.value
+                with suppress(AttributeError):
+                    self._adaptive.stop()
+                self.scale(n)
+                update()
 
             scale.on_click(scale_cb)
-        else:
+        else:  # pragma: no cover
             accordion = HTML("")
 
         scale_status = HTML(self._scaling_status())
@@ -425,10 +470,13 @@ class Cluster(SyncMethodMixin):
         cluster_repr_interval = parse_timedelta(
             dask.config.get("distributed.deploy.cluster-repr-interval", default="ms")
         )
-        pc = PeriodicCallback(update, cluster_repr_interval * 1000)
-        self.periodic_callbacks["cluster-repr"] = pc
-        pc.start()
 
+        def install():
+            pc = PeriodicCallback(update, cluster_repr_interval * 1000)
+            self.periodic_callbacks["cluster-repr"] = pc
+            pc.start()
+
+        self.loop.add_callback(install)
         return tab
 
     def _repr_html_(self, cluster_status=None):
@@ -448,26 +496,44 @@ class Cluster(SyncMethodMixin):
         )
 
     def _ipython_display_(self, **kwargs):
-        widget = self._widget()
-        if widget is not None:
-            return widget._ipython_display_(**kwargs)
-        else:
-            from IPython.display import display
+        """Display the cluster rich IPython repr"""
+        # Note: it would be simpler to just implement _repr_mimebundle_,
+        # but we cannot do that until we drop ipywidgets 7 support, as
+        # it does not provide a public way to get the mimebundle for a
+        # widget. So instead we fall back on the more customizable _ipython_display_
+        # and display as a side-effect.
+        from IPython.display import display
 
-            data = {"text/plain": repr(self), "text/html": self._repr_html_()}
-            display(data, raw=True)
+        widget = self._widget()
+        if widget:
+            import ipywidgets
+
+            if parse_version(ipywidgets.__version__) >= parse_version("8.0.0"):
+                mimebundle = widget._repr_mimebundle_(**kwargs) or {}
+                mimebundle["text/plain"] = repr(self)
+                mimebundle["text/html"] = self._repr_html_()
+                display(mimebundle, raw=True)
+            else:
+                display(widget, **kwargs)
+        else:
+            mimebundle = {"text/plain": repr(self), "text/html": self._repr_html_()}
+            display(mimebundle, raw=True)
 
     def __enter__(self):
         return self.sync(self.__aenter__)
 
-    def __exit__(self, typ, value, traceback):
-        return self.sync(self.__aexit__, typ, value, traceback)
+    def __exit__(self, exc_type, exc_value, traceback):
+        return self.sync(self.__aexit__, exc_type, exc_value, traceback)
+
+    def __await__(self):
+        return self
+        yield
 
     async def __aenter__(self):
         await self
         return self
 
-    async def __aexit__(self, typ, value, traceback):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         f = self.close()
         if isawaitable(f):
             await f

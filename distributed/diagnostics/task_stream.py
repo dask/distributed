@@ -1,13 +1,14 @@
+from __future__ import annotations
+
 import logging
 from collections import deque
 
 import dask
-from dask.utils import format_time, parse_timedelta
+from dask.utils import format_time, key_split, parse_timedelta
 
-from ..metrics import time
-from ..utils import key_split
-from .plugin import SchedulerPlugin
-from .progress_stream import color_of
+from distributed.diagnostics.plugin import SchedulerPlugin
+from distributed.diagnostics.progress_stream import color_of
+from distributed.metrics import time
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,9 @@ class TaskStreamPlugin(SchedulerPlugin):
     def transition(self, key, start, finish, *args, **kwargs):
         if start == "processing":
             if key not in self.scheduler.tasks:
+                return
+            if not kwargs.get("startstops"):
+                # Other methods require `kwargs` to have a non-empty list of `startstops`
                 return
             kwargs["key"] = key
             if finish == "memory" or finish == "erred":

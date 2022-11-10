@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import concurrent.futures as cf
 import weakref
 
@@ -6,8 +8,8 @@ from tornado import gen
 
 from dask.utils import parse_timedelta
 
-from .metrics import time
-from .utils import TimeoutError, sync
+from distributed.metrics import time
+from distributed.utils import TimeoutError, sync
 
 
 @gen.coroutine
@@ -113,9 +115,11 @@ class ClientExecutor(cf.Executor):
 
         Raises
         ------
-        TimeoutError: If the entire result iterator could not be generated
-            before the given timeout.
-        Exception: If ``fn(*args)`` raises for any values.
+        concurrent.futures.TimeoutError:
+            If the entire result iterator could not be generated before the given
+            timeout.
+        Exception:
+            If ``fn(*args)`` raises for any values.
         """
         timeout = kwargs.pop("timeout", None)
         if timeout is not None:

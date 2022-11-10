@@ -1,14 +1,16 @@
+from __future__ import annotations
+
 import toolz
 
 from distributed.http.prometheus import PrometheusCollector
+from distributed.http.scheduler.prometheus.semaphore import SemaphoreMetricCollector
+from distributed.http.scheduler.prometheus.stealing import WorkStealingMetricCollector
 from distributed.http.utils import RequestHandler
-from distributed.scheduler import ALL_TASK_STATES
-
-from .semaphore import SemaphoreMetricCollector
+from distributed.scheduler import ALL_TASK_STATES, Scheduler
 
 
 class SchedulerMetricCollector(PrometheusCollector):
-    def __init__(self, server):
+    def __init__(self, server: Scheduler):
         super().__init__(server)
         self.subsystem = "scheduler"
 
@@ -68,11 +70,27 @@ class SchedulerMetricCollector(PrometheusCollector):
         )
 
         for state in ALL_TASK_STATES:
-            tasks.add_metric([state], task_counter.get(state, 0.0))
+            if state != "forgotten":
+                tasks.add_metric([state], task_counter.get(state, 0.0))
         yield tasks
 
+        prefix_state_counts = CounterMetricFamily(
+            self.build_name("prefix_state_totals"),
+            "Accumulated count of task prefix in each state",
+            labels=["task_prefix_name", "state"],
+        )
 
-COLLECTORS = [SchedulerMetricCollector, SemaphoreMetricCollector]
+        for tp in self.server.task_prefixes.values():
+            for state, count in tp.state_counts.items():
+                prefix_state_counts.add_metric([tp.name, state], count)
+        yield prefix_state_counts
+
+
+COLLECTORS = [
+    SchedulerMetricCollector,
+    SemaphoreMetricCollector,
+    WorkStealingMetricCollector,
+]
 
 
 class PrometheusHandler(RequestHandler):

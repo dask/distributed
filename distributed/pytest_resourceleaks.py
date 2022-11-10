@@ -1,311 +1,385 @@
+"""A pytest plugin to trace resource leaks.
+
+Usage
+-----
+This plugin is enabled from the command line with -L / --leaks.
+See `pytest --help` for further configuration settings.
+
+You may mark individual tests as known to be leaking with the fixture
+
+    @pytest.mark.leaking(check1, check2, ...)
+
+Where the valid checks are 'fds', 'memory', 'threads', 'processes', 'tracemalloc'.
+
+e.g.
+
+    @pytest.mark.leaking("threads")
+
+If you do, the specified checks won't report errors.
+
+Known issues
+------------
+- Tests that contain imports will be flagged as leaking RAM (memory and tracemallock
+  checks) if it's the first time in the test suite that the import happens; e.g.
+
+      def test1():
+          pytest.importorskip("numpy")
+
+  Same issue happens with tests that populate global caches (e.g. linecache, re).
+  A previous version of this plugin had an option to silently retry a test once after a
+  failure; that version is no longer working as of the latest pytest. Reinstating the
+  flag would solve this issue. See pytest_rerunfailures code for inspiration.
+
+- The @gen_cluster fixture leaks 2 fds on the first test decorated with it within a test
+  suite; This issue would also be fixed by rerunning failing tests.
+
+- The @pytest.mark.flaky decorator (pytest_rerunfailures) completely disables this
+  plugin for the decorated tests.
+
+- You cannot expect the process memory to go down immediately and deterministically as
+  soon as you garbage collect Python objects. This makes the 'memory' check very
+  unreliable. On Linux, this can be improved by reducing the MALLOC_TRIM glibc setting
+  (see distributed.yaml).
 """
-A pytest plugin to trace resource leaks.
-"""
-import collections
+from __future__ import annotations
+
 import gc
 import os
 import sys
 import threading
-import time
+import tracemalloc
+from collections import defaultdict
+from time import sleep
+from typing import Any, ClassVar
 
+import psutil
 import pytest
+
+from distributed.metrics import time
 
 
 def pytest_addoption(parser):
     group = parser.getgroup("resource leaks")
+    known_checkers = ", ".join(sorted("'%s'" % s for s in all_checkers))
     group.addoption(
         "-L",
         "--leaks",
-        action="store",
-        dest="leaks",
-        help="""\
-List of resources to monitor for leaks before and after each test.
-Can be 'all' or a comma-separated list of resource names
-(possible values: {known_checkers}).
-""".format(
-            known_checkers=", ".join(sorted("'%s'" % s for s in all_checkers))
-        ),
+        help="List of resources to monitor for leaks before and after each test. "
+        "Can be 'all' or a comma-separated list of resource names "
+        f"(possible values: {known_checkers}).",
     )
     group.addoption(
         "--leaks-timeout",
-        action="store",
         type=float,
-        dest="leaks_timeout",
         default=0.5,
-        help="""\
-Wait at most this number of seconds to mark a test leaking
-(default: %(default)s).
-""",
+        help="Wait at most these many seconds before marking a test as leaking "
+        "(default: %(default)s)",
     )
     group.addoption(
         "--leaks-fail",
         action="store_true",
-        dest="leaks_mark_failed",
-        default=False,
-        help="""Mark leaked tests failed.""",
-    )
-    group.addoption(
-        "--leak-retries",
-        action="store",
-        type=int,
-        dest="leak_retries",
-        default=1,
-        help="""\
-Max number of times to retry a test when it leaks, to ignore
-warmup-related issues (default: 1).
-""",
+        help="Mark leaked tests as failed",
     )
 
 
-def pytest_configure(config):
+def pytest_configure(config: pytest.Config) -> None:
     leaks = config.getvalue("leaks")
-    if leaks:
-        if leaks == "all":
-            leaks = sorted(all_checkers)
-        else:
-            leaks = leaks.split(",")
-        unknown = sorted(set(leaks) - set(all_checkers))
-        if unknown:
-            raise ValueError(f"unknown resources: {unknown!r}")
+    if not leaks:
+        return
+    if leaks == "all":
+        leaks = sorted(c for c in all_checkers if c != "demo")
+    else:
+        leaks = leaks.split(",")
+    unknown = sorted(set(leaks) - set(all_checkers))
+    if unknown:
+        raise ValueError(f"unknown resources: {unknown!r}")
 
-        checkers = [all_checkers[leak]() for leak in leaks]
-        checker = LeakChecker(
-            checkers=checkers,
-            grace_delay=config.getvalue("leaks_timeout"),
-            mark_failed=config.getvalue("leaks_mark_failed"),
-            max_retries=config.getvalue("leak_retries"),
-        )
-        config.pluginmanager.register(checker, "leaks_checker")
-
-
-all_checkers = {}
+    checkers = [all_checkers[leak]() for leak in leaks]
+    checker = LeakChecker(
+        checkers=checkers,
+        grace_delay=config.getvalue("leaks_timeout"),
+        mark_failed=config.getvalue("leaks_fail"),
+    )
+    config.pluginmanager.register(checker, "leaks_checker")
 
 
-def register_checker(name):
-    def decorate(cls):
-        assert issubclass(cls, ResourceChecker), cls
-        assert name not in all_checkers
-        all_checkers[name] = cls
-        return cls
-
-    return decorate
+all_checkers: dict[str, type[ResourceChecker]] = {}
 
 
 class ResourceChecker:
-    def on_start_test(self):
+    name: ClassVar[str]
+
+    def __init_subclass__(cls, name: str):
+        assert name not in all_checkers
+        cls.name = name
+        all_checkers[name] = cls
+
+    def on_start_test(self) -> None:
         pass
 
-    def on_stop_test(self):
+    def on_stop_test(self) -> None:
         pass
 
-    def on_retry(self):
+    def on_retry(self) -> None:
         pass
 
-    def measure(self):
+    def measure(self) -> Any:
         raise NotImplementedError
 
-    def has_leak(self, before, after):
+    def has_leak(self, before: Any, after: Any) -> bool:
         raise NotImplementedError
 
-    def format(self, before, after):
+    def format(self, before: Any, after: Any) -> str:
         raise NotImplementedError
 
 
-@register_checker("fds")
-class FDChecker(ResourceChecker):
-    def measure(self):
-        if os.name == "posix":
-            import psutil
+class DemoChecker(ResourceChecker, name="demo"):
+    """Checker that always leaks. Used to test the core LeakChecker functionality."""
 
-            return psutil.Process().num_fds()
-        else:
-            return 0
+    i: int
 
-    def has_leak(self, before, after):
+    def __init__(self):
+        self.i = 0
+
+    def measure(self) -> int:
+        self.i += 1
+        return self.i
+
+    def has_leak(self, before: int, after: int) -> bool:
         return after > before
 
-    def format(self, before, after):
-        return "leaked %d file descriptor(s)" % (after - before)
+    def format(self, before: int, after: int) -> str:
+        return f"counter increased from {before} to {after}"
 
 
-@register_checker("memory")
-class RSSMemoryChecker(ResourceChecker):
-    def measure(self):
-        import psutil
+class FDChecker(ResourceChecker, name="fds"):
+    def measure(self) -> int:
+        # Note: WINDOWS constant doesn't work with `mypy --platform win32`
+        if sys.platform == "win32":
+            # Don't use num_handles(); you'll get tens of thousands of reported leaks
+            return 0
+        else:
+            return psutil.Process().num_fds()
 
+    def has_leak(self, before: int, after: int) -> bool:
+        return after > before
+
+    def format(self, before: int, after: int) -> str:
+        return f"leaked {after - before} file descriptor(s) ({before}->{after})"
+
+
+class RSSMemoryChecker(ResourceChecker, name="memory"):
+    LEAK_THRESHOLD = 10 * 2**20
+
+    def measure(self) -> int:
         return psutil.Process().memory_info().rss
 
-    def has_leak(self, before, after):
-        return after > before + 1e7
+    def has_leak(self, before: int, after: int) -> bool:
+        return after > before + self.LEAK_THRESHOLD
 
-    def format(self, before, after):
-        return "leaked %d MB of RSS memory" % ((after - before) / 1e6)
+    def format(self, before: int, after: int) -> str:
+        return f"leaked {(after - before) / 2**20:.1f} MiB of RSS memory"
 
 
-@register_checker("threads")
-class ActiveThreadsChecker(ResourceChecker):
-    def measure(self):
+class ActiveThreadsChecker(ResourceChecker, name="threads"):
+    def measure(self) -> set[threading.Thread]:
         return set(threading.enumerate())
 
-    def has_leak(self, before, after):
+    def has_leak(
+        self, before: set[threading.Thread], after: set[threading.Thread]
+    ) -> bool:
         return not after <= before
 
-    def format(self, before, after):
+    def format(
+        self, before: set[threading.Thread], after: set[threading.Thread]
+    ) -> str:
         leaked = after - before
         assert leaked
-        return "leaked %d Python threads: %s" % (len(leaked), sorted(leaked, key=str))
+        return f"leaked {len(leaked)} Python thread(s): {sorted(leaked, key=str)}"
 
 
-class _ChildProcess(
-    collections.namedtuple("_ChildProcess", ("pid", "name", "cmdline"))
-):
-    @classmethod
-    def from_process(cls, p):
-        return cls(p.pid, p.name(), p.cmdline())
+class ChildProcess:
+    """Child process info
+
+    We use pid and creation time as keys to disambiguate between processes (and protect
+    against pid reuse); other properties such as cmdline may change for a given process
+    """
+
+    pid: int
+    name: str
+    cmdline: list[str]
+    create_time: float
+
+    def __init__(self, p: psutil.Process):
+        self.pid = p.pid
+        self.name = p.name()
+        self.cmdline = p.cmdline()
+        self.create_time = p.create_time()
+
+    def __hash__(self) -> int:
+        return self.pid
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, ChildProcess)
+            and self.pid == other.pid
+            and self.create_time == other.create_time
+        )
+
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, ChildProcess):
+            raise TypeError(other)
+        return self.pid < other.pid
 
 
-@register_checker("processes")
-class ChildProcessesChecker(ResourceChecker):
-    def measure(self):
-        import psutil
-
-        # We use pid and creation time as keys to disambiguate between
-        # processes (and protect against pid reuse)
-        # Other properties such as cmdline may change for a given process
-        children = {}
+class ChildProcessesChecker(ResourceChecker, name="processes"):
+    def measure(self) -> set[ChildProcess]:
+        children = set()
         p = psutil.Process()
         for c in p.children(recursive=True):
             try:
                 with c.oneshot():
-                    if c.ppid() == p.pid and os.path.samefile(c.exe(), sys.executable):
-                        cmdline = c.cmdline()
-                        if any(
+                    if (
+                        c.ppid() == p.pid
+                        and os.path.samefile(c.exe(), sys.executable)
+                        and any(
+                            # Skip multiprocessing resource tracker
                             a.startswith(
-                                "from multiprocessing.semaphore_tracker import main"
+                                "from multiprocessing.resource_tracker import main"
                             )
-                            for a in cmdline
-                        ):
-                            # Skip multiprocessing semaphore tracker
-                            continue
-                        if any(
-                            a.startswith("from multiprocessing.forkserver import main")
-                            for a in cmdline
-                        ):
-                            # Skip forkserver process, the forkserver's children
+                            # Skip forkserver process; the forkserver's children
                             # however will be recorded normally
-                            continue
-                    children[(c.pid, c.create_time())] = _ChildProcess.from_process(c)
+                            or a.startswith(
+                                "from multiprocessing.forkserver import main"
+                            )
+                            for a in c.cmdline()
+                        )
+                    ):
+                        continue
+
+                    children.add(ChildProcess(c))
             except psutil.NoSuchProcess:
                 pass
         return children
 
-    def has_leak(self, before, after):
-        return not set(after) <= set(before)
+    def has_leak(self, before: set[ChildProcess], after: set[ChildProcess]) -> bool:
+        return not after <= before
 
-    def format(self, before, after):
-        leaked = set(after) - set(before)
+    def format(self, before: set[ChildProcess], after: set[ChildProcess]) -> str:
+        leaked = sorted(after - before)
         assert leaked
-        formatted = []
-        for key in sorted(leaked):
-            p = after[key]
-            formatted.append(
-                "  - pid={p.pid}, name={p.name!r}, cmdline={p.cmdline!r}".format(p=p)
-            )
-        return "leaked %d processes:\n%s" % (len(leaked), "\n".join(formatted))
+        return f"leaked {len(leaked)} processes:\n" + "\n".join(
+            f"  - pid={p.pid}, name={p.name!r}, cmdline={p.cmdline!r}" for p in leaked
+        )
 
 
-@register_checker("tracemalloc")
-class TracemallocMemoryChecker(ResourceChecker):
-    def __init__(self):
-        global tracemalloc
-        import tracemalloc
+class TracemallocMemoryChecker(ResourceChecker, name="tracemalloc"):
+    # Report a leak if the traced memory increased by at least this many bytes
+    LEAK_THRESHOLD = 2**20
+    # Report at most this many leaks
+    NDIFF = 5
+    # Report less than NDIFF leaks if they amount to less than this many bytes
+    MIN_SIZE_DIFF = 200 * 1024
 
-    def on_start_test(self):
+    def on_start_test(self) -> None:
         tracemalloc.start(1)
 
-    def on_stop_test(self):
+    def on_stop_test(self) -> None:
         tracemalloc.stop()
 
-    def measure(self):
-        import tracemalloc
-
-        current, peak = tracemalloc.get_traced_memory()
+    def measure(self) -> tuple[int, tracemalloc.Snapshot]:
+        current, _ = tracemalloc.get_traced_memory()
         snap = tracemalloc.take_snapshot()
         return current, snap
 
-    def has_leak(self, before, after):
-        return after[0] > before[0] + 1e6
+    def has_leak(
+        self,
+        before: tuple[int, tracemalloc.Snapshot],
+        after: tuple[int, tracemalloc.Snapshot],
+    ) -> bool:
+        return after[0] > before[0] + self.LEAK_THRESHOLD
 
-    def format(self, before, after):
+    def format(
+        self,
+        before: tuple[int, tracemalloc.Snapshot],
+        after: tuple[int, tracemalloc.Snapshot],
+    ) -> str:
         bytes_before, snap_before = before
         bytes_after, snap_after = after
         diff = snap_after.compare_to(snap_before, "traceback")
-        ndiff = 5
-        min_size_diff = 2e5
 
-        lines = []
-        lines += [
-            "leaked %.1f MB of traced Python memory"
-            % ((bytes_after - bytes_before) / 1e6)
+        lines = [
+            f"leaked {(bytes_after - bytes_before) / 2 ** 20:.1f} MiB "
+            "of traced Python memory"
         ]
-        for stat in diff[:ndiff]:
+        for stat in diff[: self.NDIFF]:
             size_diff = stat.size_diff or stat.size
-            if size_diff < min_size_diff:
+            if size_diff < self.MIN_SIZE_DIFF:
                 break
             count = stat.count_diff or stat.count
-            lines += ["  - leaked %.1f MB in %d calls at:" % (size_diff / 1e6, count)]
+            lines += [f"  - leaked {size_diff / 2**20:.1f} MiB in {count} calls at:"]
             lines += ["    " + line for line in stat.traceback.format()]
 
         return "\n".join(lines)
 
 
 class LeakChecker:
-    def __init__(self, checkers, grace_delay, mark_failed, max_retries):
+    checkers: list[ResourceChecker]
+    grace_delay: float
+    mark_failed: bool
+
+    # {nodeid: {checkers}}
+    skip_checkers: dict[str, set[ResourceChecker]]
+    # {nodeid: {checker: [(before, after)]}}
+    counters: dict[str, dict[ResourceChecker, list[tuple[Any, Any]]]]
+    # {nodeid: [(checker, before, after)]}
+    leaks: dict[str, list[tuple[ResourceChecker, Any, Any]]]
+    # {nodeid: {outcomes}}
+    outcomes: defaultdict[str, set[str]]
+
+    def __init__(
+        self,
+        checkers: list[ResourceChecker],
+        grace_delay: float,
+        mark_failed: bool,
+    ):
         self.checkers = checkers
         self.grace_delay = grace_delay
         self.mark_failed = mark_failed
-        self.max_retries = max_retries
 
-        # {nodeid: {checkers}}
         self.skip_checkers = {}
-        # {nodeid: {checker: [(before, after)]}}
         self.counters = {}
-        # {nodeid: [(checker, before, after)]}
         self.leaks = {}
-        # {nodeid: {outcomes}}
-        self.outcomes = collections.defaultdict(set)
+        self.outcomes = defaultdict(set)
 
-        # Reentrancy guard
-        self._retrying = False
-
-    def cleanup(self):
+    def cleanup(self) -> None:
         gc.collect()
 
-    def checks_for_item(self, nodeid):
+    def checks_for_item(self, nodeid: str) -> list[ResourceChecker]:
         return [c for c in self.checkers if c not in self.skip_checkers.get(nodeid, ())]
 
-    def measure(self, nodeid):
+    def measure(self, nodeid: str) -> list[tuple[ResourceChecker, Any]]:
         # Return items in order
         return [(c, c.measure()) for c in self.checks_for_item(nodeid)]
 
-    def measure_before_test(self, nodeid):
+    def measure_before_test(self, nodeid: str) -> None:
         for checker in self.checks_for_item(nodeid):
             checker.on_start_test()
         for checker, before in self.measure(nodeid):
             assert before is not None
             self.counters[nodeid][checker].append((before, None))
 
-    def measure_after_test(self, nodeid):
+    def measure_after_test(self, nodeid: str) -> None:
         outcomes = self.outcomes[nodeid]
-        assert outcomes
-        if outcomes != {"passed"}:
+        # pytest_rerunfailures (@pytest.mark.flaky) breaks this plugin and causes
+        # outcomes to be empty.
+        if "passed" not in outcomes:
             # Test failed or skipped
             return
 
-        def run_measurements():
+        def run_measurements() -> list[tuple[ResourceChecker, Any, Any]]:
             leaks = []
             for checker, after in self.measure(nodeid):
-                assert after is not None
                 c = self.counters[nodeid][checker]
                 before, _ = c[-1]
                 c[-1] = (before, after)
@@ -313,7 +387,7 @@ class LeakChecker:
                     leaks.append((checker, before, after))
             return leaks
 
-        t1 = time.time()
+        t1 = time()
         deadline = t1 + self.grace_delay
         leaks = run_measurements()
         if leaks:
@@ -322,8 +396,8 @@ class LeakChecker:
                 c.on_retry()
             leaks = run_measurements()
 
-        while leaks and time.time() < deadline:
-            time.sleep(0.1)
+        while leaks and time() < deadline:
+            sleep(0.1)
             self.cleanup()
             for c, _, _ in leaks:
                 c.on_retry()
@@ -336,34 +410,6 @@ class LeakChecker:
 
         for checker in self.checks_for_item(nodeid):
             checker.on_stop_test()
-
-    def maybe_retry(self, item, nextitem=None):
-        def run_test_again():
-            # This invokes our setup/teardown hooks again
-            # Inspired by https://pypi.python.org/pypi/pytest-rerunfailures
-            from _pytest.runner import runtestprotocol
-
-            item._initrequest()  # Re-init fixtures
-            runtestprotocol(item, nextitem=nextitem, log=False)
-
-        nodeid = item.nodeid
-        leaks = self.leaks.get(nodeid)
-        if leaks:
-            self._retrying = True
-            try:
-                for i in range(self.max_retries):
-                    run_test_again()
-            except Exception:
-                print("--- Exception when re-running test ---")
-                import traceback
-
-                traceback.print_exc()
-            else:
-                leaks = self.leaks.get(nodeid)
-            finally:
-                self._retrying = False
-
-        return leaks
 
     # Note on hook execution order:
     #   pytest_runtest_protocol
@@ -378,22 +424,25 @@ class LeakChecker:
 
     @pytest.hookimpl(hookwrapper=True)
     def pytest_runtest_protocol(self, item, nextitem):
-        if not self._retrying:
-            nodeid = item.nodeid
-            assert nodeid not in self.counters
-            self.counters[nodeid] = {c: [] for c in self.checkers}
+        if not self.checkers:
+            return
 
-            leaking = item.get_marker("leaking")
-            if leaking is not None:
-                unknown = sorted(set(leaking.args) - set(all_checkers))
-                if unknown:
-                    raise ValueError(
-                        f"pytest.mark.leaking: unknown resources {unknown!r}"
-                    )
-                classes = tuple(all_checkers[a] for a in leaking.args)
-                self.skip_checkers[nodeid] = {
-                    c for c in self.checkers if isinstance(c, classes)
-                }
+        nodeid = item.nodeid
+        assert nodeid not in self.counters
+        self.counters[nodeid] = {c: [] for c in self.checkers}
+
+        leaking_mark = item.get_closest_marker("leaking")
+        if leaking_mark:
+            unknown = sorted(set(leaking_mark.args) - set(all_checkers))
+            if unknown:
+                raise ValueError(
+                    f"pytest.mark.leaking: unknown resources {unknown}; "
+                    f"must be one of {list(all_checkers)}"
+                )
+            classes = tuple(all_checkers[a] for a in leaking_mark.args)
+            self.skip_checkers[nodeid] = {
+                c for c in self.checkers if isinstance(c, classes)
+            }
 
         yield
 
@@ -406,34 +455,31 @@ class LeakChecker:
     def pytest_runtest_teardown(self, item):
         yield
         self.measure_after_test(item.nodeid)
-        if not self._retrying:
-            leaks = self.maybe_retry(item)
-            if leaks and self.mark_failed:
-                # Trigger fail here to allow stopping with `-x`
-                pytest.fail()
+        leaks = self.leaks.get(item.nodeid)
+        if leaks and self.mark_failed:
+            # Trigger fail here to allow stopping with `-x`
+            pytest.fail()
 
     @pytest.hookimpl(hookwrapper=True, trylast=True)
     def pytest_report_teststatus(self, report):
         nodeid = report.nodeid
-        outcomes = self.outcomes[nodeid]
-        outcomes.add(report.outcome)
+        self.outcomes[nodeid].add(report.outcome)
         outcome = yield
-        if not self._retrying:
-            if report.when == "teardown":
-                leaks = self.leaks.get(report.nodeid)
-                if leaks:
-                    if self.mark_failed:
-                        outcome.force_result(("failed", "L", "LEAKED"))
-                        report.outcome = "failed"
-                        report.longrepr = "\n".join(
-                            [
-                                f"{nodeid} {checker.format(before, after)}"
-                                for checker, before, after in leaks
-                            ]
-                        )
-                    else:
-                        outcome.force_result(("leaked", "L", "LEAKED"))
-                # XXX should we log retried tests
+        if report.when == "teardown":
+            leaks = self.leaks.get(report.nodeid)
+            if leaks:
+                if self.mark_failed:
+                    outcome.force_result(("failed", "L", "LEAKED"))
+                    report.outcome = "failed"
+                    report.longrepr = "\n".join(
+                        [
+                            f"{nodeid} leaking {checker.name}: "
+                            f"{checker.format(before, after)}"
+                            for checker, before, after in leaks
+                        ]
+                    )
+                else:
+                    outcome.force_result(("leaked", "L", "LEAKED"))
 
     @pytest.hookimpl
     def pytest_terminal_summary(self, terminalreporter, exitstatus):
@@ -446,4 +492,7 @@ class LeakChecker:
             for rep in leaked:
                 nodeid = rep.nodeid
                 for checker, before, after in self.leaks[nodeid]:
-                    tr.line(f"{rep.nodeid} {checker.format(before, after)}")
+                    tr.line(
+                        f"{rep.nodeid} leaking {checker.name}: "
+                        f"{checker.format(before, after)}"
+                    )

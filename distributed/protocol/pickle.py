@@ -1,16 +1,13 @@
+from __future__ import annotations
+
+import inspect
 import logging
-import sys
+import pickle
 
 import cloudpickle
+from packaging.version import parse as parse_version
 
-if sys.version_info < (3, 8):
-    try:
-        import pickle5 as pickle
-    except ImportError:
-        import pickle
-else:
-    import pickle
-
+CLOUDPICKLE_GTE_20 = parse_version(cloudpickle.__version__) >= parse_version("2.0.0")
 
 HIGHEST_PROTOCOL = pickle.HIGHEST_PROTOCOL
 
@@ -47,13 +44,14 @@ def dumps(x, *, buffer_callback=None, protocol=HIGHEST_PROTOCOL):
     try:
         buffers.clear()
         result = pickle.dumps(x, **dump_kwargs)
-        if len(result) < 1000:
-            if b"__main__" in result:
+        if b"__main__" in result or (
+            CLOUDPICKLE_GTE_20
+            and getattr(inspect.getmodule(x), "__name__", None)
+            in cloudpickle.list_registry_pickle_by_value()
+        ):
+            if len(result) < 1000 or not _always_use_pickle_for(x):
                 buffers.clear()
                 result = cloudpickle.dumps(x, **dump_kwargs)
-        elif not _always_use_pickle_for(x) and b"__main__" in result:
-            buffers.clear()
-            result = cloudpickle.dumps(x, **dump_kwargs)
     except Exception:
         try:
             buffers.clear()

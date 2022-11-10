@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import uuid
@@ -5,9 +7,9 @@ from collections import defaultdict, deque
 
 from dask.utils import parse_timedelta
 
-from .client import Client
-from .utils import TimeoutError, log_errors
-from .worker import get_worker
+from distributed.client import Client
+from distributed.utils import TimeoutError, log_errors
+from distributed.worker import get_worker
 
 logger = logging.getLogger(__name__)
 
@@ -30,47 +32,45 @@ class LockExtension:
             {"lock_acquire": self.acquire, "lock_release": self.release}
         )
 
-        self.scheduler.extensions["locks"] = self
+    @log_errors
+    async def acquire(self, name=None, id=None, timeout=None):
+        if isinstance(name, list):
+            name = tuple(name)
+        if name not in self.ids:
+            result = True
+        else:
+            while name in self.ids:
+                event = asyncio.Event()
+                self.events[name].append(event)
+                future = event.wait()
+                if timeout is not None:
+                    future = asyncio.wait_for(future, timeout)
+                try:
+                    await future
+                except TimeoutError:
+                    result = False
+                    break
+                else:
+                    result = True
+                finally:
+                    event2 = self.events[name].popleft()
+                    assert event is event2
+        if result:
+            assert name not in self.ids
+            self.ids[name] = id
+        return result
 
-    async def acquire(self, comm=None, name=None, id=None, timeout=None):
-        with log_errors():
-            if isinstance(name, list):
-                name = tuple(name)
-            if name not in self.ids:
-                result = True
-            else:
-                while name in self.ids:
-                    event = asyncio.Event()
-                    self.events[name].append(event)
-                    future = event.wait()
-                    if timeout is not None:
-                        future = asyncio.wait_for(future, timeout)
-                    try:
-                        await future
-                    except TimeoutError:
-                        result = False
-                        break
-                    else:
-                        result = True
-                    finally:
-                        event2 = self.events[name].popleft()
-                        assert event is event2
-            if result:
-                assert name not in self.ids
-                self.ids[name] = id
-            return result
-
-    def release(self, comm=None, name=None, id=None):
-        with log_errors():
-            if isinstance(name, list):
-                name = tuple(name)
-            if self.ids.get(name) != id:
-                raise ValueError("This lock has not yet been acquired")
-            del self.ids[name]
-            if self.events[name]:
-                self.scheduler.loop.add_callback(self.events[name][0].set)
-            else:
-                del self.events[name]
+    @log_errors
+    def release(self, name=None, id=None):
+        if isinstance(name, list):
+            name = tuple(name)
+        if self.ids.get(name) != id:
+            raise ValueError("This lock has not yet been acquired")
+        del self.ids[name]
+        if self.events[name]:
+            self.scheduler.loop.add_callback(self.events[name][0].set)
+        else:
+            del self.events[name]
 
 
 class Lock:
@@ -160,14 +160,14 @@ class Lock:
         self.acquire()
         return self
 
-    def __exit__(self, *args, **kwargs):
+    def __exit__(self, exc_type, exc_value, traceback):
         self.release()
 
     async def __aenter__(self):
         await self.acquire()
         return self
 
-    async def __aexit__(self, *args, **kwargs):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         await self.release()
 
     def __reduce__(self):

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import time
 
@@ -52,9 +54,9 @@ async def test_multi_sample(c, s, a, b):
     s2 = ms.sample("process", interval=0.2)
     async with s1, s2:
         idle_mem = s.memory.process
-        f = c.submit(lambda: "x" * 100 * 2 ** 20)  # 100 MiB
+        f = c.submit(lambda: "x" * 100 * 2**20)  # 100 MiB
         await f
-        while s.memory.process < idle_mem + 80 * 2 ** 20:
+        while s.memory.process < idle_mem + 80 * 2**20:
             # Wait for heartbeat
             await asyncio.sleep(0.01)
         await asyncio.sleep(0.6)
@@ -63,10 +65,10 @@ async def test_multi_sample(c, s, a, b):
     p = ms.samples["process"]
     assert len(m) >= 2
     assert m[0][1] == 0
-    assert m[-1][1] >= 100 * 2 ** 20
+    assert m[-1][1] >= 100 * 2**20
     assert len(p) >= 2
-    assert p[0][1] > 2 ** 20  # Assume > 1 MiB for idle process
-    assert p[-1][1] > p[0][1] + 80 * 2 ** 20
+    assert p[0][1] > 2**20  # Assume > 1 MiB for idle process
+    assert p[-1][1] > p[0][1] + 80 * 2**20
     assert m[-1][1] < p[-1][1]
 
 

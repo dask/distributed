@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import numba
 import numba.cuda
 import numpy
 import rmm
 
-from .cuda import cuda_deserialize, cuda_serialize
-from .serialize import dask_deserialize, dask_serialize
+from distributed.protocol.cuda import cuda_deserialize, cuda_serialize
+from distributed.protocol.serialize import dask_deserialize, dask_serialize
 
 # Used for RMM 0.11.0+ otherwise Numba serializers used
 if hasattr(rmm, "DeviceBuffer"):

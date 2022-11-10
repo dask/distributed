@@ -1,7 +1,11 @@
+from __future__ import annotations
+
 import collections
-import sys
 import time as timemod
+from collections.abc import Callable
 from functools import wraps
+
+from distributed.compatibility import WINDOWS
 
 _empty_namedtuple = collections.namedtuple("_empty_namedtuple", ())
 
@@ -14,13 +18,13 @@ def _psutil_caller(method_name, default=_empty_namedtuple):
     # Import only once to avoid the cost of a failing import at each wrapper() call
     try:
         import psutil
-    except ImportError:
+    except ImportError:  # pragma: no cover
         return default
 
     meth = getattr(psutil, method_name)
 
     @wraps(meth)
-    def wrapper():
+    def wrapper():  # pragma: no cover
         try:
             return meth()
         except RuntimeError:
@@ -36,15 +40,15 @@ net_io_counters = _psutil_caller("net_io_counters")
 
 
 class _WindowsTime:
-    """
-    Combine time.time() and time.perf_counter() to get an absolute clock
-    with fine resolution.
+    """Combine time.time() or time.monotonic() with time.perf_counter() to get an
+    absolute clock with fine resolution.
     """
 
     # Resync every N seconds, to avoid drifting
     RESYNC_EVERY = 600
 
-    def __init__(self):
+    def __init__(self, base: Callable[[], float]):
+        self.base_timer = base
         self.delta = None
         self.last_resync = float("-inf")
 
@@ -59,7 +63,7 @@ class _WindowsTime:
         return delta + cur
 
     def resync(self):
-        _time = timemod.time
+        _time = self.base_timer
         _perf_counter = self.perf_counter
         min_samples = 5
         while True:
@@ -77,19 +81,20 @@ class _WindowsTime:
 
 
 # A high-resolution wall clock timer measuring the seconds since Unix epoch
-if sys.platform.startswith("win"):
-    time = _WindowsTime().time
+if WINDOWS:
+    time = _WindowsTime(timemod.time).time
+    monotonic = _WindowsTime(timemod.monotonic).time
 else:
-    # Under modern Unices, time.time() should be good enough
+    # Under modern Unixes, time.time() and time.monotonic() should be good enough
     time = timemod.time
+    monotonic = timemod.monotonic
 
 process_time = timemod.process_time
 
 # Get a per-thread CPU timer function if possible, otherwise
 # use a per-process CPU timer function.
 try:
-    # thread_time is supported on Python 3.7+ but not all platforms
+    # thread_time is not supported on all platforms
     thread_time = timemod.thread_time
-except (AttributeError, OSError):
-    # process_time is supported on Python 3.3+ everywhere
+except (AttributeError, OSError):  # pragma: no cover
     thread_time = process_time

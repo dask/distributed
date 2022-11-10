@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import random
 
@@ -9,7 +11,7 @@ from distributed.core import CommClosedError, connect, listen
 from distributed.metrics import time
 from distributed.protocol import to_serialize
 from distributed.utils import All
-from distributed.utils_test import captured_logger
+from distributed.utils_test import captured_logger, gen_test
 
 
 class EchoServer:
@@ -33,11 +35,11 @@ class EchoServer:
         await self.listen()
         return self
 
-    async def __aexit__(self, exc, typ, tb):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         self.stop()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_BatchedSend():
     async with EchoServer() as e:
         comm = await connect(e.address)
@@ -62,9 +64,10 @@ async def test_BatchedSend():
         assert result == ("HELLO", "HELLO")
 
         assert b.byte_count > 1
+        await comm.close()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_send_before_start():
     async with EchoServer() as e:
         comm = await connect(e.address)
@@ -77,9 +80,10 @@ async def test_send_before_start():
         b.start(comm)
         result = await comm.read()
         assert result == ("hello", "world")
+        await comm.close()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_send_after_stream_start():
     async with EchoServer() as e:
         comm = await connect(e.address)
@@ -93,9 +97,10 @@ async def test_send_after_stream_start():
         if len(result) < 2:
             result += await comm.read()
         assert result == ("hello", "world")
+        await comm.close()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_send_before_close():
     async with EchoServer() as e:
         comm = await connect(e.address)
@@ -117,7 +122,7 @@ async def test_send_before_close():
             b.send("123")
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_close_closed():
     async with EchoServer() as e:
         comm = await connect(e.address)
@@ -133,13 +138,13 @@ async def test_close_closed():
         assert "closed" in str(b)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_close_not_started():
     b = BatchedSend(interval=10)
     await b.close()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_close_twice():
     async with EchoServer() as e:
         comm = await connect(e.address)
@@ -151,7 +156,7 @@ async def test_close_twice():
 
 
 @pytest.mark.slow
-@pytest.mark.asyncio
+@gen_test()
 async def test_stress():
     async with EchoServer() as e:
         comm = await connect(e.address)
@@ -215,18 +220,18 @@ async def run_traffic_jam(nsends, nbytes):
         await b.close()
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_sending_traffic_jam():
     await run_traffic_jam(50, 300000)
 
 
 @pytest.mark.slow
-@pytest.mark.asyncio
+@gen_test()
 async def test_large_traffic_jam():
     await run_traffic_jam(500, 1500000)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_serializers():
     async with EchoServer() as e:
         comm = await connect(e.address)

@@ -1,7 +1,6 @@
 name: Debug passwordless `ssh localhost`
 
-on: []
-# on: [pull_request]  # Uncomment to enable
+on: [push, pull_request]
 
 jobs:
   test:
