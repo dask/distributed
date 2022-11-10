@@ -224,7 +224,8 @@ def unpack_remotedata(o, byte_keys=False, myset=None):
         else:
             return tuple(unpack_remotedata(item, byte_keys, myset) for item in o)
     elif is_namedtuple_instance(o):
-        return typ(*[unpack_remotedata(item, byte_keys, myset) for item in o])
+        result = typ(*[unpack_remotedata(item, byte_keys, myset) for item in o])
+        return result
 
     if typ in collection_types:
         if not o:
@@ -277,6 +278,8 @@ def pack_data(o, d, key_types=object):
         return typ([pack_data(x, d, key_types=key_types) for x in o])
     elif typ is dict:
         return {k: pack_data(v, d, key_types=key_types) for k, v in o.items()}
+    elif is_namedtuple_instance(o):
+        return typ(*[pack_data(x, d, key_types=key_types) for x in o])
     else:
         return o
 
