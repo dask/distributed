@@ -1509,7 +1509,7 @@ class SchedulerState:
     idle: dict[str, WorkerState]
     #: Similar to `idle`
     #: Definition based on assigned tasks
-    idle_task_count: dict[str, WorkerState]
+    idle_task_count: set[WorkerState]
     #: Workers that are fully utilized. May include non-running workers.
     saturated: set[WorkerState]
     total_nthreads: int
@@ -1616,7 +1616,7 @@ class SchedulerState:
         self.extensions = {}
         self.host_info = host_info
         self.idle = SortedDict()
-        self.idle_task_count = dict()
+        self.idle_task_count = set()
         self.n_tasks = 0
         self.resources = resources
         self.saturated = set()
@@ -2158,7 +2158,7 @@ class SchedulerState:
         # Just pick the least busy worker.
         # NOTE: this will lead to worst-case scheduling with regards to co-assignment.
         ws = min(
-            self.idle_task_count.values(),
+            self.idle_task_count,
             key=lambda ws: len(ws.processing) / ws.nthreads,
         )
         if self.validate:
@@ -3082,10 +3082,11 @@ class SchedulerState:
                 if 0.4 < pending > 1.9 * (self.total_occupancy / self.total_nthreads):
                     saturated.add(ws)
 
-        self.idle_task_count.pop(ws.address, None)
         if not _worker_full(ws, self.WORKER_SATURATION):
             if ws.status == Status.running:
-                self.idle_task_count[ws.address] = ws
+                self.idle_task_count.add(ws)
+        else:
+            self.idle_task_count.discard(ws)
 
     def is_unoccupied(
         self, ws: WorkerState, occupancy: float, nprocessing: int
@@ -4751,7 +4752,7 @@ class Scheduler(SchedulerState, ServerNode):
         del self.stream_comms[address]
         del self.aliases[ws.name]
         self.idle.pop(ws.address, None)
-        self.idle_task_count.pop(ws.address, None)
+        self.idle_task_count.discard(ws)
         self.saturated.discard(ws)
         del self.workers[address]
         ws.status = Status.closed
@@ -5339,7 +5340,7 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             self.running.discard(ws)
             self.idle.pop(ws.address, None)
-            self.idle_task_count.pop(ws.address, None)
+            self.idle_task_count.discard(ws)
 
     async def handle_request_refresh_who_has(
         self, keys: Iterable[str], worker: str, stimulus_id: str
