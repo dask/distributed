@@ -41,7 +41,22 @@ class ShardsBuffer(Generic[ShardType]):
 
     shards: defaultdict[str, list[ShardType]]
     sizes: defaultdict[str, int]
+    concurrency_limit: int
+    memory_limiter: ResourceLimiter | None
+    diagnostics: dict[str, float]
+    max_message_size: int
+
+    bytes_total: int
+    bytes_memory: int
+    bytes_written: int
+    bytes_read: int
+
+    _closed: bool
+    _done: bool
     _exception: None | Exception
+    _tasks: list[asyncio.Task]
+    _shards_available: asyncio.Condition
+    _flush_lock: asyncio.Lock
 
     def __init__(
         self,
