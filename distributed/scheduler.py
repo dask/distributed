@@ -3239,10 +3239,16 @@ class SchedulerState:
 
     def worker_objective_ignore_deps(self, ws: WorkerState) -> tuple[float, float]:
         """
-        Objective function to determine the least-busy worker.
+        Objective function for tasks where dependencies are not relevant for scheduling.
 
-        Meant for use with tasks where dependencies are not relevant for scheduling
-        (no dependencies, or widely-shared).
+        Meant for use with tasks with no dependencies, or more importantly, with
+        widely-shared dependencies. These are tasks where `is_rootish` is True.
+        `is_rootish` implies that the tasks in the group will be assigned to every
+        worker in cluster. Therefore, any dependencies they have will be copied to every
+        worker in the cluster. To prevent edge cases, the objective function matches
+        this assumption. Otherwise, worker selection might be imbalanced or "dogpile"
+        towards towards the dependencies. This can take up capacity on the worker that
+        might be better used for downstream tasks.
 
         Minimize worker occupancy. If a tie then break with data storage.
         """
