@@ -32,6 +32,7 @@ dependencies:
   - pytest-repeat
   - pytest-rerunfailures
   - pytest-timeout
+  - pytest-asyncio
   - requests
   - s3fs  # overridden by git tip below
   - scikit-learn
