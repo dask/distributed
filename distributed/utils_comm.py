@@ -11,7 +11,7 @@ from tlz import concat, drop, groupby, merge
 
 import dask.config
 from dask.optimization import SubgraphCallable
-from dask.utils import parse_timedelta, stringify
+from dask.utils import parse_timedelta, stringify, is_namedtuple_instance
 
 from distributed.core import rpc
 from distributed.utils import All
@@ -223,6 +223,9 @@ def unpack_remotedata(o, byte_keys=False, myset=None):
                 return o
         else:
             return tuple(unpack_remotedata(item, byte_keys, myset) for item in o)
+    elif is_namedtuple_instance(o):
+        return typ(*[unpack_remotedata(item, byte_keys, myset) for item in o])
+
     if typ in collection_types:
         if not o:
             return o
