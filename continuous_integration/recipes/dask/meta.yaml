@@ -30,7 +30,7 @@ requirements:
     - numpy >=1.18
     - pandas >=1.0
     - bokeh >=2.4.2,<3
-    - jinja2 >=2.10.1
+    - jinja2 >=2.10.3
 
   run_constrained:
     - openssl !=1.1.1e

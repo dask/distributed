@@ -18,7 +18,7 @@ dependencies:
   - h5py
   - ipykernel
   - ipywidgets
-  - jinja2 >=2.10.1
+  - jinja2 >=2.10.3
   - locket >=1.0
   - lz4 >=0.23.1  # Only tested here
   - msgpack-python

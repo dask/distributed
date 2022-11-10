@@ -33,7 +33,7 @@ requirements:
     - cloudpickle >=1.5.0
     - cytoolz >=0.10.1
     - {{ pin_compatible('dask-core', max_pin='x.x.x.x') }}
-    - jinja2 >=2.10.1
+    - jinja2 >=2.10.3
     - locket >=1.0.0
     - msgpack-python >=0.6.2
     - packaging >=20.0

@@ -2,7 +2,7 @@ click >= 7.0
 cloudpickle >= 1.5.0
 dask == 2022.10.2
 cytoolz >= 0.10.1
-jinja2 >= 2.10.1
+jinja2 >= 2.10.3
 locket >= 1.0.0
 msgpack >= 0.6.2
 packaging >= 20.0
