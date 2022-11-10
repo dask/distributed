@@ -3578,6 +3578,8 @@ class BreakingWorker(Worker):
 @pytest.mark.slow
 @gen_cluster(client=True, Worker=BreakingWorker)
 async def test_broken_comm(c, s, a, b):
+    pytest.importorskip("dask.dataframe")
+
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
