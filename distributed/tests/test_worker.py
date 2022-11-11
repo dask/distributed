@@ -3822,6 +3822,17 @@ async def test_forward_output(c, s, a, b, capsys):
     assert "" == out
     assert "fatal\n" == err
 
+    # Registering the plugin is idempotent
+    other_plugin = ForwardOutput()
+    await c.register_worker_plugin(other_plugin, "forward")
+    out, err = capsys.readouterr()
+
+    await c.submit(print_stdout, "foo", key=next(counter))
+    out, err = capsys.readouterr()
+
+    assert "foo\n" == out
+    assert "" == err
+
     # After unregistering the plugin, we should once again not see any output
     await c.unregister_worker_plugin("forward")
     capsys.readouterr()

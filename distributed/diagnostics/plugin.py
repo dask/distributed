@@ -605,6 +605,19 @@ class UploadDirectory(NannyPlugin):
 
 
 class _ForwardingStream:
+    """Forward output from ``stdout`` or ``stderr`` and write it to the stream
+
+    This class uses line buffering, i.e., it only logs a new event when it encounters
+    a newline or it is flushed.
+
+    Parameters
+    ----------
+    stream
+        Name of the stream to forward, either 'stdout` or 'stderr'
+    worker
+        Worker instance used to log events
+    """
+
     def __init__(self, stream, worker):
         self.worker = worker
         self._original_stream = getattr(sys, stream)
@@ -644,6 +657,27 @@ class _ForwardingStream:
 
 
 class ForwardOutput(WorkerPlugin):
+    """A Worker Plugin that forwards ``stdout`` and ``stderr`` from workers to clients
+
+    This plugin forwards all output sent to ``stdout`` and ``stderr` on all workers
+    to all clients where it is written to the respective streams. Analogous to the
+    terminal, this plugin uses line buffering. To ensure that an output is written
+    without a newline, make sure to flush the stream.
+
+    .. warning::
+
+        Using this plugin will forward **all** output in ``stdout`` and ``stderr`` from
+        every worker to every client. If the output is very chatty, this will add
+        significant strain on the scheduler. Proceed with caution!
+
+    Examples
+    --------
+    >>> from dask.distributed import ForwardOutput
+    >>> plugin = ForwardOutput()
+
+    >>> client.register_worker_plugin(plugin)
+    """
+
     def setup(self, worker):
         self._exit_stack = contextlib.ExitStack()
         self._exit_stack.enter_context(
