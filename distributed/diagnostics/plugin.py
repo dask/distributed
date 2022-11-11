@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import abc
+import contextlib
 import logging
 import os
 import socket
@@ -601,3 +602,56 @@ class UploadDirectory(NannyPlugin):
                 sys.path.insert(0, path)
 
         os.remove(fn)
+
+
+class _ForwardingStream:
+    def __init__(self, stream, worker):
+        self.worker = worker
+        self._original_stream = getattr(sys, stream)
+        if stream == "stdout":
+            self._file = 1
+        elif stream == "stderr":
+            self._file = 2
+        else:
+            raise ValueError(
+                f"Expected stream to be 'stdout' or 'stderr'; got '{stream}'"
+            )
+
+        self._file = 1 if stream == "stdout" else 2
+        self._buffer = []
+
+    def write(self, data):
+        self._original_stream.write(data)
+        self._forward(data)
+
+    def _forward(self, data):
+        self._buffer.append(data)
+        # Mimic line buffering
+        if "\n" in data or "\r" in data:
+            self._send()
+
+    def _send(self):
+        msg = {"args": self._buffer, "file": self._file, "sep": "", "end": ""}
+        self.worker.log_event("print", msg)
+        self._buffer = []
+
+    def flush(self):
+        self._original_stream.flush()
+        self._send()
+
+    def close(self):
+        self.flush()
+
+
+class ForwardOutput(WorkerPlugin):
+    def setup(self, worker):
+        self._exit_stack = contextlib.ExitStack()
+        self._exit_stack.enter_context(
+            contextlib.redirect_stdout(_ForwardingStream("stdout", worker=worker))
+        )
+        self._exit_stack.enter_context(
+            contextlib.redirect_stderr(_ForwardingStream("stderr", worker=worker))
+        )
+
+    def teardown(self, worker):
+        self._exit_stack.close()
