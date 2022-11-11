@@ -3784,6 +3784,7 @@ async def test_forward_output(c, s, a, b, capsys):
 
     # After installing, output should be forwarded
     await c.register_worker_plugin(plugin, "forward")
+    await asyncio.sleep(0.1)  # Let setup messages come in
     capsys.readouterr()
 
     await c.submit(print_stdout, "foo", key=next(counter))
@@ -3825,6 +3826,7 @@ async def test_forward_output(c, s, a, b, capsys):
     # Registering the plugin is idempotent
     other_plugin = ForwardOutput()
     await c.register_worker_plugin(other_plugin, "forward")
+    await asyncio.sleep(0.1)  # Let teardown/setup messages come in
     out, err = capsys.readouterr()
 
     await c.submit(print_stdout, "foo", key=next(counter))
@@ -3835,6 +3837,7 @@ async def test_forward_output(c, s, a, b, capsys):
 
     # After unregistering the plugin, we should once again not see any output
     await c.unregister_worker_plugin("forward")
+    await asyncio.sleep(0.1)  # Let teardown messages come in
     capsys.readouterr()
 
     await c.submit(print_stdout, "foo", key=next(counter))

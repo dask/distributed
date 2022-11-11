@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import abc
 import contextlib
+import functools
 import logging
 import os
 import socket
@@ -604,23 +605,11 @@ class UploadDirectory(NannyPlugin):
         os.remove(fn)
 
 
-class _ForwardingStream:
-    """Forward output from ``stdout`` or ``stderr`` and write it to the stream
-
-    This class uses line buffering, i.e., it only logs a new event when it encounters
-    a newline or it is flushed.
-
-    Parameters
-    ----------
-    stream
-        Name of the stream to forward, either 'stdout` or 'stderr'
-    worker
-        Worker instance used to log events
-    """
-
+class forward_stream:
     def __init__(self, stream, worker):
-        self.worker = worker
-        self._original_stream = getattr(sys, stream)
+        self._worker = worker
+        self._original_methods = {}
+        self._stream = getattr(sys, stream)
         if stream == "stdout":
             self._file = 1
         elif stream == "stderr":
@@ -633,9 +622,9 @@ class _ForwardingStream:
         self._file = 1 if stream == "stdout" else 2
         self._buffer = []
 
-    def write(self, data):
-        self._original_stream.write(data)
+    def _write(self, write_fn, data):
         self._forward(data)
+        write_fn(data)
 
     def _forward(self, data):
         self._buffer.append(data)
@@ -645,15 +634,35 @@ class _ForwardingStream:
 
     def _send(self):
         msg = {"args": self._buffer, "file": self._file, "sep": "", "end": ""}
-        self.worker.log_event("print", msg)
+        self._worker.log_event("print", msg)
         self._buffer = []
 
-    def flush(self):
-        self._original_stream.flush()
+    def _flush(self, flush_fn):
         self._send()
+        flush_fn()
 
-    def close(self):
-        self.flush()
+    def _close(self, close_fn):
+        self._send()
+        close_fn()
+
+    def _intercept(self, method_name, interceptor):
+        original_method = getattr(self._stream, method_name)
+        self._original_methods[method_name] = original_method
+        setattr(
+            self._stream, method_name, functools.partial(interceptor, original_method)
+        )
+
+    def __enter__(self):
+        self._intercept("write", self._write)
+        self._intercept("flush", self._flush)
+        self._intercept("close", self._close)
+        return self._stream
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self._stream.flush()
+        for attr, original in self._original_methods.items():
+            setattr(self._stream, attr, original)
+        self._original_methods = {}
 
 
 class ForwardOutput(WorkerPlugin):
@@ -680,12 +689,8 @@ class ForwardOutput(WorkerPlugin):
 
     def setup(self, worker):
         self._exit_stack = contextlib.ExitStack()
-        self._exit_stack.enter_context(
-            contextlib.redirect_stdout(_ForwardingStream("stdout", worker=worker))
-        )
-        self._exit_stack.enter_context(
-            contextlib.redirect_stderr(_ForwardingStream("stderr", worker=worker))
-        )
+        self._exit_stack.enter_context(forward_stream("stdout", worker=worker))
+        self._exit_stack.enter_context(forward_stream("stderr", worker=worker))
 
     def teardown(self, worker):
         self._exit_stack.close()
