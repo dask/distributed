@@ -75,7 +75,7 @@ error
     deserialize. The full exception and traceback are stored in the task itself, so that
     they can be re-raised on the client.
 forgotten
-    The scheduler asked this worker to forget abot the task, and there are neither
+    The scheduler asked this worker to forget about the task, and there are neither
     dependents nor dependencies on the same worker. As soon as a task reaches this
     state, it is immediately dereferenced from the :class:`WorkerState` and will be soon
     garbage-collected. This is the only case where two instances of a :class:`TaskState`

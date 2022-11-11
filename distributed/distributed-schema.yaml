@@ -74,7 +74,7 @@ properties:
             - string
             - "null"
             description: |
-              Shut down the scheduler after this duration if no activity has occured
+              Shut down the scheduler after this duration if no activity has occurred
 
               This can be helpful to reduce costs and stop zombie processes from roaming the earth.
 
@@ -999,7 +999,7 @@ properties:
                   The maximum size of a websocket frame to send through a comm.
 
                   This is somewhat duplicative of distributed.comm.shard, but websockets
-                  often have much smaller maximum message sizes than othe protocols, so
+                  often have much smaller maximum message sizes than other protocols, so
                   this attribute is used to set a smaller default shard size and to
                   allow separate control of websocket message sharding.
 

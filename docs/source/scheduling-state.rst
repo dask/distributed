@@ -321,7 +321,7 @@ worker-status-change
     The global status of a worker has just changed, e.g. between ``running`` and
     ``paused``.
 log-event
-    A generic event happend on the worker, which should be logged centrally.
+    A generic event happened on the worker, which should be logged centrally.
     Note that this is in addition to the worker's log, which the client can fetch on
     request (up to a certain length).
 keep-alive
