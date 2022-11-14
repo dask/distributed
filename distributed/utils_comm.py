@@ -213,16 +213,9 @@ def unpack_remotedata(o, byte_keys=False, myset=None):
                     if byte_keys
                     else tuple(f.key for f in futures)
                 )
-                s = str(dsk)
                 inkeys = list(sc.inkeys)
-                for future in futures:
-                    if future in s:
-                        inkeys.append(future)
-                        breakpoint()
-                    else:
-                        inkeys.append("_")
-                # if futures:
-                #     breakpoint()
+                for _ in futures:
+                    inkeys.append("_")
                 return (
                     (SubgraphCallable(dsk, sc.outkey, inkeys, sc.name),)
                     + args
