@@ -85,6 +85,14 @@ class SchedulerMetricCollector(PrometheusCollector):
                 prefix_state_counts.add_metric([tp.name, state], count)
         yield prefix_state_counts
 
+        if self.server._max_tick_interval_observed != 0:
+            yield GaugeMetricFamily(
+                self.build_name("max_tick_interval"),
+                "Maximum tick interval observed.",
+                value=self.server._max_tick_interval_observed,
+            )
+        self.server._max_tick_interval_observed = 0
+
 
 COLLECTORS = [
     SchedulerMetricCollector,

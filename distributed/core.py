@@ -401,6 +401,9 @@ class Server:
             dask.config.get("distributed.admin.tick.interval"), default="ms"
         )
         self._tick_interval_observed = self._tick_interval
+        # This metric is exposed in prometheus and is reset there during
+        # collection
+        self._max_tick_interval_observed = self._tick_interval
         self.periodic_callbacks["tick"] = PeriodicCallback(
             self._measure_tick, self._tick_interval * 1000
         )
@@ -561,6 +564,9 @@ class Server:
         last, self._tick_count_last = self._tick_count_last, time()
         count, self._tick_counter = self._tick_counter, 0
         self._tick_interval_observed = (time() - last) / (count or 1)
+        self._max_tick_interval_observed = max(
+            self._tick_interval_observed, self._max_tick_interval_observed
+        )
 
     @property
     def address(self) -> str:
