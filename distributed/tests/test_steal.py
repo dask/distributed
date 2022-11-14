@@ -10,7 +10,7 @@ import weakref
 from collections import defaultdict
 from operator import mul
 from time import sleep
-from typing import Callable, Iterable, Mapping, Sequence
+from typing import Callable, Coroutine, Iterable, Mapping, Sequence
 
 import numpy as np
 import pytest
@@ -1384,9 +1384,9 @@ async def test_steal_very_fast_tasks(c, s, *workers):
 @pytest.mark.parametrize(
     "cost, ntasks, expect_steal",
     [
-        pytest.param(10, 5, False, id="not enough work to steal"),
-        pytest.param(10, 10, True, id="enough work to steal"),
-        pytest.param(20, 10, False, id="not enough work for increased cost"),
+        pytest.param(10, 10, False, id="not enough work to steal"),
+        pytest.param(10, 12, True, id="enough work to steal"),
+        pytest.param(20, 12, False, id="not enough work for increased cost"),
     ],
 )
 def test_balance_expensive_tasks(cost, ntasks, expect_steal):
@@ -1817,13 +1817,22 @@ async def _place_tasks(
     # Make sure all tasks are scheduled on the workers
     # We are relying on the futures not to be rootish (and thus not to remain in the
     # scheduler-side queue) because they have worker restrictions
-    wait_for_states = []
+    waits_for_state: list[Coroutine] = []
     for w, fs in futures_per_worker.items():
-        for i, f in enumerate(fs):
-            # Make sure the first task is executing, all others are ready
-            state = "executing" if i == 0 else "ready"
-            wait_for_states.append(wait_for_state(f.key, state, w))
-    await asyncio.gather(*wait_for_states)
+        waits_for_executing_state = []
+        for f in fs:
+            # Every task should be either ready or executing
+            waits_for_state.append(wait_for_state(f.key, ["executing", "ready"], w))
+            waits_for_executing_state.append(
+                asyncio.create_task(wait_for_state(f.key, "executing", w))
+            )
+        # Ensure that each worker has started executing a task
+        waits_for_state.append(
+            asyncio.wait(waits_for_executing_state, return_when="FIRST_COMPLETED")
+        )
+    await asyncio.gather(
+        *waits_for_state,
+    )
 
     return ev, futures_per_worker
 
