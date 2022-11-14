@@ -48,6 +48,7 @@ from distributed.utils_test import (
     slowadd,
     slowidentity,
     slowinc,
+    wait_for_state,
 )
 from distributed.worker_state_machine import (
     ExecuteSuccessEvent,
