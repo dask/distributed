@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import importlib.metadata
+from importlib import metadata as importlib_metadata
 
 import distributed
 
 
 def test_version() -> None:
-    assert distributed.__version__ == importlib.metadata.version("distributed")
+    assert distributed.__version__ == importlib_metadata.version("distributed")
 
 
 def test_git_revision() -> None:
