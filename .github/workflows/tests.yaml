@@ -107,13 +107,6 @@ jobs:
         run: mamba env update -n dask-distributed -f ${{ env.CONDA_FILE }}
         if: steps.skip-caching.outputs.trigger-found == 'true' || steps.cache.outputs.cache-hit != 'true'
 
-      - name: Install old bokeh
-        if: matrix.python-version == '3.9'
-        shell: bash -l {0}
-        run: |
-          conda uninstall --force bokeh
-          mamba install -c conda-forge bokeh<3
-
       - name: Install
         shell: bash -l {0}
         run: |
