@@ -1633,6 +1633,8 @@ def _run_dependency_balance_test(
                     "distributed.scheduler.default-task-durations": default_task_durations,
                 },
             ),
+            # Avoid heartbeats since comm costs are sensitive to bandwidth updates
+            worker_kwargs={"heartbeat_interval": "100s"},
         )(_run)()
 
 
