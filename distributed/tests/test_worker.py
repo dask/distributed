@@ -479,7 +479,7 @@ async def test_plugin_internal_exception():
             async with Worker(
                 s.address,
                 plugins={
-                    b"corrupting pickle" + pickle.dumps(lambda: None, protocol=4),
+                    b"corrupting pickle" + pickle.dumps(lambda: None),
                 },
             ) as w:
                 pass
@@ -2462,7 +2462,7 @@ async def test_worker_state_error_release_error_last(c, s, a, b):
     f.release()
     g.release()
 
-    # We no longer hold any refs to f or g and B didn't have any erros. It
+    # We no longer hold any refs to f or g and B didn't have any errors. It
     # releases everything as expected
     while b.state.tasks:
         await asyncio.sleep(0.01)
@@ -2529,7 +2529,7 @@ async def test_worker_state_error_release_error_first(c, s, a, b):
     # Expected states after we release references to the futures
 
     res.release()
-    # We no longer hold any refs to f or g and B didn't have any erros. It
+    # We no longer hold any refs to f or g and B didn't have any errors. It
     # releases everything as expected
     while res.key in a.state.tasks:
         await asyncio.sleep(0.01)
@@ -2594,7 +2594,7 @@ async def test_worker_state_error_release_error_int(c, s, a, b):
 
     f.release()
     res.release()
-    # We no longer hold any refs to f or g and B didn't have any erros. It
+    # We no longer hold any refs to f or g and B didn't have any errors. It
     # releases everything as expected
     while len(a.state.tasks) > 1:
         await asyncio.sleep(0.01)

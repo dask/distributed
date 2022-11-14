@@ -175,7 +175,7 @@ def test_nested_deserialize():
 
 def test_serialize_iterate_collection():
     # Use iterate_collection to ensure elements of
-    # a collection will be serialized seperately
+    # a collection will be serialized separately
 
     arr = "special-data"
     sarr = Serialized(*serialize(arr))

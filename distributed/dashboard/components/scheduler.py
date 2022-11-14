@@ -1215,7 +1215,7 @@ class SystemTimeseries(DashboardComponent):
         workers as a function of time
 
     The metrics plotted come from the aggregation of from ws.metrics[key] for ws in
-    scheduler.workers.values() divided by nuber of workers.
+    scheduler.workers.values() divided by number of workers.
     """
 
     @log_errors
@@ -2607,7 +2607,7 @@ class TaskGroupGraph(DashboardComponent):
     @without_property_validation
     @log_errors
     def update_layout(self):
-        # Get dependecies per task group.
+        # Get dependencies per task group.
         # In some cases there are tg that have themselves as dependencies - we remove those.
         dependencies = {
             k: {ds.name for ds in ts.dependencies if ds.name != k}
@@ -2648,7 +2648,7 @@ class TaskGroupGraph(DashboardComponent):
 
             xs[tg], ys[tg] = x, y
 
-            # info neded for node layout to coulmn data source
+            # info needed for node layout to column data source
             nodes_layout[tg] = {"x": xs[tg], "y": ys[tg]}
 
             # info needed for arrow layout
@@ -3827,7 +3827,6 @@ class Shuffling(DashboardComponent):
                     "comm_memory": [],
                     "comm_memory_limit": [],
                     "comm_buckets": [],
-                    "comm_active": [],
                     "comm_avg_duration": [],
                     "comm_avg_size": [],
                     "comm_read": [],
@@ -3836,7 +3835,6 @@ class Shuffling(DashboardComponent):
                     "disk_memory": [],
                     "disk_memory_limit": [],
                     "disk_buckets": [],
-                    "disk_active": [],
                     "disk_avg_duration": [],
                     "disk_avg_size": [],
                     "disk_read": [],
@@ -3953,88 +3951,39 @@ class Shuffling(DashboardComponent):
 
             input = list(input.values())[-1]  # TODO: multiple concurrent shuffles
 
-            data = {
-                "worker": [],
-                "y": [],
-                "comm_memory": [],
-                "comm_memory_limit": [],
-                "comm_buckets": [],
-                "comm_active": [],
-                "comm_avg_duration": [],
-                "comm_avg_size": [],
-                "comm_read": [],
-                "comm_written": [],
-                "comm_color": [],
-                "disk_memory": [],
-                "disk_memory_limit": [],
-                "disk_buckets": [],
-                "disk_active": [],
-                "disk_avg_duration": [],
-                "disk_avg_size": [],
-                "disk_read": [],
-                "disk_written": [],
-                "disk_color": [],
-            }
+            data = defaultdict(list)
             now = time()
 
             for i, (worker, d) in enumerate(input.items()):
                 data["y"].append(i)
                 data["worker"].append(worker)
-                data["comm_memory"].append(d["comms"]["memory"])
-                data["comm_memory_limit"].append(d["comms"]["memory_limit"])
-                data["comm_buckets"].append(d["comms"]["buckets"])
-                data["comm_active"].append(d["comms"]["active"])
-                data["comm_avg_duration"].append(
-                    d["comms"]["diagnostics"].get("avg_duration", 0)
-                )
-                data["comm_avg_size"].append(
-                    d["comms"]["diagnostics"].get("avg_size", 0)
-                )
-                data["comm_read"].append(d["comms"]["read"])
-                data["comm_written"].append(d["comms"]["written"])
-                try:
+                for prefix in ["comm", "disk"]:
+                    data[f"{prefix}_total"].append(d[prefix]["total"])
+                    data[f"{prefix}_memory"].append(d[prefix]["memory"])
+                    data[f"{prefix}_memory_limit"].append(d[prefix]["memory_limit"])
+                    data[f"{prefix}_buckets"].append(d[prefix]["buckets"])
+                    data[f"{prefix}_avg_duration"].append(
+                        d[prefix]["diagnostics"].get("avg_duration", 0)
+                    )
+                    data[f"{prefix}_avg_size"].append(
+                        d[prefix]["diagnostics"].get("avg_size", 0)
+                    )
+                    data[f"{prefix}_read"].append(d[prefix]["read"])
+                    data[f"{prefix}_written"].append(d[prefix]["written"])
                     if self.scheduler.workers[worker].last_seen < now - 5:
-                        data["comm_color"].append("gray")
-                    elif d["comms"]["active"]:
-                        data["comm_color"].append("green")
-                    elif d["comms"]["memory"] > d["comms"]["memory_limit"]:
-                        data["comm_color"].append("red")
+                        data[f"{prefix}_color"].append("gray")
+                    elif d[prefix]["memory"] > d[prefix]["memory_limit"]:
+                        data[f"{prefix}_color"].append("red")
                     else:
-                        data["comm_color"].append("blue")
-                except KeyError:
-                    data["comm_color"].append("black")
-
-                data["disk_memory"].append(d["disk"]["memory"])
-                data["disk_memory_limit"].append(d["disk"]["memory_limit"])
-                data["disk_buckets"].append(d["disk"]["buckets"])
-                data["disk_active"].append(d["disk"]["active"])
-                data["disk_avg_duration"].append(
-                    d["disk"]["diagnostics"].get("avg_duration", 0)
-                )
-                data["disk_avg_size"].append(
-                    d["disk"]["diagnostics"].get("avg_size", 0)
-                )
-                data["disk_read"].append(d["disk"]["read"])
-                data["disk_written"].append(d["disk"]["written"])
-                try:
-                    if self.scheduler.workers[worker].last_seen < now - 5:
-                        data["disk_color"].append("gray")
-                    elif d["disk"]["active"]:
-                        data["disk_color"].append("green")
-                    elif d["disk"]["memory"] > d["disk"]["memory_limit"]:
-                        data["disk_color"].append("red")
-                    else:
-                        data["disk_color"].append("blue")
-                except KeyError:
-                    data["disk_color"].append("black")
+                        data[f"{prefix}_color"].append("blue")
 
             """
             singletons = {
-                "comm_avg_duration": [
-                    sum(data["comm_avg_duration"]) / len(data["comm_avg_duration"])
+                f"{prefix}_avg_duration": [
+                    sum(data[f"{prefix}_avg_duration"]) / len(data[f"{prefix}_avg_duration"])
                 ],
-                "comm_avg_size": [
-                    sum(data["comm_avg_size"]) / len(data["comm_avg_size"])
+                f"{prefix}_avg_size": [
+                    sum(data[f"{prefix}_avg_size"]) / len(data[f"{prefix}_avg_size"])
                 ],
                 "disk_avg_duration": [
                     sum(data["disk_avg_duration"]) / len(data["disk_avg_duration"])
@@ -4043,8 +3992,8 @@ class Shuffling(DashboardComponent):
                     sum(data["disk_avg_size"]) / len(data["disk_avg_size"])
                 ],
             }
-            singletons["comm_avg_bandwidth"] = [
-                singletons["comm_avg_size"][0] / singletons["comm_avg_duration"][0]
+            singletons[f"{prefix}_avg_bandwidth"] = [
+                singletons[f"{prefix}_avg_size"][0] / singletons[f"{prefix}_avg_duration"][0]
             ]
             singletons["disk_avg_bandwidth"] = [
                 singletons["disk_avg_size"][0] / singletons["disk_avg_duration"][0]
@@ -4063,7 +4012,7 @@ class Shuffling(DashboardComponent):
             }
             update(self.totals_source, totals)
 
-            update(self.source, data)
+            update(self.source, dict(data))
             limit = max(data["comm_memory_limit"] + data["disk_memory_limit"]) * 1.2
             self.comm_memory.x_range.end = limit
             self.disk_memory.x_range.end = limit

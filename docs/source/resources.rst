@@ -59,7 +59,7 @@ Equivalently, we can specify resource constraints using the dask annotations mac
 Specifying Resources
 --------------------
 
-Resources can be specifed in several ways. The easiest option will depend on exactly
+Resources can be specified in several ways. The easiest option will depend on exactly
 how your cluster is being created.
 
 **From the command line**

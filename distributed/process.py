@@ -155,7 +155,7 @@ class AsyncProcess:
                 parent_alive_pipe.recv()
             except EOFError:
                 # Parent process went away unexpectedly. Exit immediately. Could
-                # consider other exiting approches here. My initial preference
+                # consider other exiting approaches here. My initial preference
                 # is to unconditionally and immediately exit. If we're in this
                 # state it is possible that a "clean" process exit won't work
                 # anyway - if, for example, the system is getting bogged down

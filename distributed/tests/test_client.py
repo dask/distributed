@@ -6,7 +6,6 @@ import functools
 import gc
 import inspect
 import logging
-import math
 import operator
 import os
 import pathlib
@@ -20,7 +19,7 @@ import types
 import warnings
 import weakref
 import zipfile
-from collections import deque
+from collections import deque, namedtuple
 from collections.abc import Generator
 from contextlib import ExitStack, contextmanager, nullcontext
 from functools import partial
@@ -106,7 +105,6 @@ from distributed.utils_test import (
     map_varying,
     nodebug,
     popen,
-    pristine_loop,
     randominc,
     save_sys_modules,
     slowadd,
@@ -2207,8 +2205,26 @@ async def test_multi_client(s, a, b):
         await asyncio.sleep(0.01)
 
 
+@contextmanager
+def _pristine_loop():
+    IOLoop.clear_instance()
+    IOLoop.clear_current()
+    loop = IOLoop()
+    loop.make_current()
+    assert IOLoop.current() is loop
+    try:
+        yield loop
+    finally:
+        try:
+            loop.close(all_fds=True)
+        except (KeyError, ValueError):
+            pass
+        IOLoop.clear_instance()
+        IOLoop.clear_current()
+
+
 def long_running_client_connection(address):
-    with pristine_loop():
+    with _pristine_loop():
         c = Client(address)
         x = c.submit(lambda x: x + 1, 10)
         x.result()
@@ -5602,7 +5618,7 @@ def test_client_async_before_loop_starts(cleanup):
         async with client:
             pass
 
-    with pristine_loop() as loop:
+    with _pristine_loop() as loop:
         with pytest.warns(
             DeprecationWarning,
             match=r"Constructing LoopRunner\(loop=loop\) without a running loop is deprecated",
@@ -5613,12 +5629,6 @@ def test_client_async_before_loop_starts(cleanup):
         loop.run_sync(close)  # TODO: client.close() does not unset global client
 
 
-# FIXME shouldn't consistently fail on windows, may be an actual bug
-@pytest.mark.skipif(
-    WINDOWS
-    and math.isfinite(dask.config.get("distributed.scheduler.worker-saturation")),
-    reason="flaky on Windows with queuing active",
-)
 @pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny, timeout=60, nthreads=[("127.0.0.1", 3)] * 2)
 async def test_nested_compute(c, s, a, b):
@@ -6526,7 +6536,7 @@ async def test_performance_report(c, s, a, b):
                 data = f.read()
         return data
 
-    # Ensure default kwarg maintains backward compatability
+    # Ensure default kwarg maintains backward compatibility
     data = await f(stacklevel=1)
 
     assert "Also, we want this comment to appear" in data
@@ -7321,13 +7331,20 @@ async def test_log_event_warn(c, s, a, b):
     with pytest.warns(UserWarning, match="Hello!"):
         await c.submit(foo)
 
-    def bar():
+    def no_message():
         # missing "message" key should log TypeError
         get_worker().log_event("warn", {})
 
     with captured_logger(logging.getLogger("distributed.client")) as log:
-        await c.submit(bar)
+        await c.submit(no_message)
         assert "TypeError" in log.getvalue()
+
+    def no_category():
+        # missing "category" defaults to `UserWarning`
+        get_worker().log_event("warn", {"message": pickle.dumps("asdf")})
+
+    with pytest.warns(UserWarning, match="asdf"):
+        await c.submit(no_category)
 
 
 @gen_cluster(client=True)
@@ -7821,3 +7838,17 @@ async def test_wait_for_workers_n_workers_value_check(c, s, a, b, value, excepti
         ctx = nullcontext()
     with ctx:
         await c.wait_for_workers(value)
+
+
+@gen_cluster(client=True)
+async def test_unpacks_remotedata_namedtuple(c, s, a, b):
+    class NamedTupleAnnotation(namedtuple("BaseAnnotation", field_names="value")):
+        def unwrap(self):
+            return self.value
+
+    def identity(x):
+        return x
+
+    outer_future = c.submit(identity, NamedTupleAnnotation("some-data"))
+    result = await outer_future
+    assert result == NamedTupleAnnotation(value="some-data")

@@ -22,10 +22,12 @@ from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from functools import partial
+from importlib.metadata import PackageNotFoundError, version
 from numbers import Number
 from queue import Queue as pyQueue
 from typing import Any, ClassVar, Coroutine, Literal, Sequence, TypedDict
 
+from packaging.version import parse as parse_version
 from tlz import first, groupby, keymap, merge, partition_all, valmap
 
 import dask
@@ -476,7 +478,7 @@ class Future(WrappedKey):
         try:
             self.release()
         except AttributeError:
-            # Ocassionally we see this error when shutting down the client
+            # Occasionally we see this error when shutting down the client
             # https://github.com/dask/distributed/issues/4305
             if not sys.is_finalizing():
                 raise
@@ -676,9 +678,13 @@ def _handle_warn(event):
                 "_handle_warn: client received a warn event missing the required "
                 '"message" argument.'
             )
+        if "category" in msg:
+            category = pickle.loads(msg["category"])
+        else:
+            category = None
         warnings.warn(
             pickle.loads(msg["message"]),
-            category=pickle.loads(msg.get("category", None)),
+            category=category,
         )
 
 
@@ -1146,6 +1152,12 @@ class Client(SyncMethodMixin):
             return f"<{self.__class__.__name__}: No scheduler connected>"
 
     def _repr_html_(self):
+        try:
+            dle_version = parse_version(version("dask-labextension"))
+            JUPYTERLAB = False if dle_version < parse_version("6.0.0") else True
+        except PackageNotFoundError:
+            JUPYTERLAB = False
+
         scheduler, info = self._get_scheduler_info()
 
         return get_template("client.html.j2").render(
@@ -1155,6 +1167,7 @@ class Client(SyncMethodMixin):
             cluster=self.cluster,
             scheduler_file=self.scheduler_file,
             dashboard_link=self.dashboard_link,
+            jupyterlab=JUPYTERLAB,
         )
 
     def start(self, **kwargs):
@@ -2702,9 +2715,9 @@ class Client(SyncMethodMixin):
 
     async def _run_on_scheduler(self, function, *args, wait=True, **kwargs):
         response = await self.scheduler.run_function(
-            function=dumps(function, protocol=4),
-            args=dumps(args, protocol=4),
-            kwargs=dumps(kwargs, protocol=4),
+            function=dumps(function),
+            args=dumps(args),
+            kwargs=dumps(kwargs),
             wait=wait,
         )
         if response["status"] == "error":
@@ -2765,10 +2778,10 @@ class Client(SyncMethodMixin):
         responses = await self.scheduler.broadcast(
             msg=dict(
                 op="run",
-                function=dumps(function, protocol=4),
-                args=dumps(args, protocol=4),
+                function=dumps(function),
+                args=dumps(args),
                 wait=wait,
-                kwargs=dumps(kwargs, protocol=4),
+                kwargs=dumps(kwargs),
             ),
             workers=workers,
             nanny=nanny,
@@ -2838,7 +2851,7 @@ class Client(SyncMethodMixin):
         wait : boolean (optional)
             If the function is asynchronous whether or not to wait until that
             function finishes.
-        nanny : bool, defualt False
+        nanny : bool, default False
             Whether to run ``function`` on the nanny. By default, the function
             is run on the worker process.  If specified, the addresses in
             ``workers`` should still be the worker addresses, not the nanny addresses.
@@ -4193,7 +4206,7 @@ class Client(SyncMethodMixin):
         Parameters
         ----------
         n : int
-            Number of logs to retrive.  Maxes out at 10000 by default,
+            Number of logs to retrieve.  Maxes out at 10000 by default,
             configurable via the ``distributed.admin.log-length``
             configuration value.
 
@@ -4209,7 +4222,7 @@ class Client(SyncMethodMixin):
         Parameters
         ----------
         n : int
-            Number of logs to retrive.  Maxes out at 10000 by default,
+            Number of logs to retrieve.  Maxes out at 10000 by default,
             configurable via the ``distributed.admin.log-length``
             configuration value.
         workers : iterable
@@ -4614,7 +4627,7 @@ class Client(SyncMethodMixin):
 
     async def _register_scheduler_plugin(self, plugin, name, idempotent=False):
         return await self.scheduler.register_scheduler_plugin(
-            plugin=dumps(plugin, protocol=4),
+            plugin=dumps(plugin),
             name=name,
             idempotent=idempotent,
         )
@@ -4670,7 +4683,7 @@ class Client(SyncMethodMixin):
         else:
             method = self.scheduler.register_worker_plugin
 
-        responses = await method(plugin=dumps(plugin, protocol=4), name=name)
+        responses = await method(plugin=dumps(plugin), name=name)
         for response in responses.values():
             if response["status"] == "error":
                 _, exc, tb = clean_exception(
