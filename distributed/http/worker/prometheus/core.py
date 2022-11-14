@@ -20,7 +20,7 @@ class WorkerMetricCollector(PrometheusCollector):
             import crick  # noqa: F401
         except ImportError:
             self.crick_available = False
-            self.logger.info(
+            self.logger.debug(
                 "Not all prometheus metrics available are exported. "
                 "Digest-based metrics require crick to be installed"
             )
