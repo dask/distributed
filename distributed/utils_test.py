@@ -160,24 +160,6 @@ def loop_in_thread(cleanup):
                 return
 
 
-@contextmanager
-def pristine_loop():
-    IOLoop.clear_instance()
-    IOLoop.clear_current()
-    loop = IOLoop()
-    loop.make_current()
-    assert IOLoop.current() is loop
-    try:
-        yield loop
-    finally:
-        try:
-            loop.close(all_fds=True)
-        except (KeyError, ValueError):
-            pass
-        IOLoop.clear_instance()
-        IOLoop.clear_current()
-
-
 original_config = copy.deepcopy(dask.config.config)
 
 
@@ -2481,13 +2463,17 @@ def requires_default_ports(name_of_test):
     yield
 
 
-async def fetch_metrics(port: int, prefix: str | None = None) -> dict[str, Any]:
-    from prometheus_client.parser import text_string_to_metric_families
-
+async def fetch_metrics_body(port: int) -> str:
     http_client = AsyncHTTPClient()
     response = await http_client.fetch(f"http://localhost:{port}/metrics")
     assert response.code == 200
-    txt = response.body.decode("utf8")
+    return response.body.decode("utf8")
+
+
+async def fetch_metrics(port: int, prefix: str | None = None) -> dict[str, Any]:
+    from prometheus_client.parser import text_string_to_metric_families
+
+    txt = await fetch_metrics_body(port)
     families = {
         family.name: family
         for family in text_string_to_metric_families(txt)
@@ -2505,10 +2491,7 @@ async def fetch_metrics_sample_names(port: int, prefix: str | None = None) -> se
     """
     from prometheus_client.parser import text_string_to_metric_families
 
-    http_client = AsyncHTTPClient()
-    response = await http_client.fetch(f"http://localhost:{port}/metrics")
-    assert response.code == 200
-    txt = response.body.decode("utf8")
+    txt = await fetch_metrics_body(port)
     sample_names = set().union(
         *[
             {sample.name for sample in family.samples}

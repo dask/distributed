@@ -157,7 +157,6 @@ async def test_cluster_dump_to_yamls(c, s, a, b, tmp_path):
         "events.yaml",
         "extensions.yaml",
         "general.yaml",
-        "log.yaml",
         "task_groups.yaml",
         "tasks.yaml",
         "transition_log.yaml",

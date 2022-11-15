@@ -32,7 +32,7 @@ from collections.abc import (
 from contextlib import suppress
 from functools import partial
 from numbers import Number
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, overload
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, cast, overload
 
 import psutil
 from sortedcontainers import SortedDict, SortedSet
@@ -463,7 +463,7 @@ class WorkerState:
     long_running: set[TaskState]
 
     #: A dictionary of tasks that are currently being run on this worker.
-    #: Each task state is asssociated with the duration in seconds which the task has
+    #: Each task state is associated with the duration in seconds which the task has
     #: been running.
     executing: dict[TaskState, float]
 
@@ -485,7 +485,7 @@ class WorkerState:
 
     # Reference to scheduler task_groups
     scheduler_ref: weakref.ref[SchedulerState] | None
-    task_groups_count: defaultdict[str, int]
+    task_prefix_count: defaultdict[str, int]
     _network_occ: float
     _occupancy_cache: float | None
 
@@ -543,7 +543,7 @@ class WorkerState:
         self.used_resources = {}
         self.extra = extra or {}
         self.scheduler_ref = weakref.ref(scheduler) if scheduler else None
-        self.task_groups_count = defaultdict(int)
+        self.task_prefix_count = defaultdict(int)
         self.needs_what = {}
         self._network_occ = 0
         self._occupancy_cache = None
@@ -722,9 +722,9 @@ class WorkerState:
         if self.scheduler.validate:
             assert ts not in self.processing
 
-        tg = ts.group
-        self.task_groups_count[tg.name] += 1
-        self.scheduler.task_groups_count_global[tg.name] += 1
+        tp = ts.prefix
+        self.task_prefix_count[tp.name] += 1
+        self.scheduler._task_prefix_count_global[tp.name] += 1
         self.processing.add(ts)
         for dts in ts.dependencies:
             if self not in dts.who_has:
@@ -735,7 +735,7 @@ class WorkerState:
             assert ts in self.processing
             assert ts not in self.long_running
 
-        self._remove_from_task_groups_count(ts)
+        self._remove_from_task_prefix_count(ts)
         # Cannot remove from processing since we're using this for things like
         # idleness detection. Idle workers are typically targeted for
         # downscaling but we should not downscale workers with long running
@@ -750,24 +750,24 @@ class WorkerState:
         if ts in self.long_running:
             self.long_running.discard(ts)
         else:
-            self._remove_from_task_groups_count(ts)
+            self._remove_from_task_prefix_count(ts)
         self.processing.remove(ts)
         for dts in ts.dependencies:
             if dts in self.needs_what:
                 self._dec_needs_replica(dts)
 
-    def _remove_from_task_groups_count(self, ts: TaskState) -> None:
-        count = self.task_groups_count[ts.group.name] - 1
+    def _remove_from_task_prefix_count(self, ts: TaskState) -> None:
+        count = self.task_prefix_count[ts.prefix.name] - 1
         if count:
-            self.task_groups_count[ts.group.name] = count
+            self.task_prefix_count[ts.prefix.name] = count
         else:
-            del self.task_groups_count[ts.group.name]
+            del self.task_prefix_count[ts.prefix.name]
 
-        count = self.scheduler.task_groups_count_global[ts.group.name] - 1
+        count = self.scheduler._task_prefix_count_global[ts.prefix.name] - 1
         if count:
-            self.scheduler.task_groups_count_global[ts.group.name] = count
+            self.scheduler._task_prefix_count_global[ts.prefix.name] = count
         else:
-            del self.scheduler.task_groups_count_global[ts.group.name]
+            del self.scheduler._task_prefix_count_global[ts.prefix.name]
 
     def remove_replica(self, ts: TaskState) -> None:
         """The worker no longer has a task in memory"""
@@ -822,7 +822,7 @@ class WorkerState:
     @property
     def occupancy(self) -> float:
         return self._occupancy_cache or self.scheduler._calc_occupancy(
-            self.task_groups_count, self._network_occ
+            self.task_prefix_count, self._network_occ
         )
 
 
@@ -1448,6 +1448,17 @@ class TaskState:
         return recursive_to_dict(self, exclude=exclude, members=True)
 
 
+class Transition(NamedTuple):
+    """An entry in :attr:`SchedulerState.transition_log`"""
+
+    key: str
+    start: TaskStateState
+    finish: TaskStateState
+    recommendations: dict[str, TaskStateState]
+    stimulus_id: str
+    timestamp: float
+
+
 class SchedulerState:
     """Underlying task state of dynamic scheduler
 
@@ -1493,8 +1504,12 @@ class SchedulerState:
     #: Workers that are currently in running state
     running: set[WorkerState]
     #: Workers that are currently in running state and not fully utilized
+    #: Definition based on occupancy
     #: (actually a SortedDict, but the sortedcontainers package isn't annotated)
     idle: dict[str, WorkerState]
+    #: Similar to `idle`
+    #: Definition based on assigned tasks
+    idle_task_count: set[WorkerState]
     #: Workers that are fully utilized. May include non-running workers.
     saturated: set[WorkerState]
     total_nthreads: int
@@ -1536,8 +1551,13 @@ class SchedulerState:
 
     #: History of erred tasks.
     #: The length can be tweaked through
-    #: distributed.diagnostics.erred-tasks.ax-history
+    #: distributed.diagnostics.erred-tasks.max-history
     erred_tasks: deque[ErredTask]
+
+    #: History of task state transitions.
+    #: The length can be tweaked through
+    #: distributed.scheduler.transition-log-length
+    transition_log: deque[Transition]
 
     #: Total number of transitions since the cluster was started
     transition_counter: int
@@ -1550,7 +1570,7 @@ class SchedulerState:
     #: In production, it should always be set to False.
     transition_counter_max: int | Literal[False]
 
-    task_groups_count_global: defaultdict[str, int]
+    _task_prefix_count_global: defaultdict[str, int]
     _network_occ_global: float
     ######################
     # Cached configuration
@@ -1596,6 +1616,7 @@ class SchedulerState:
         self.extensions = {}
         self.host_info = host_info
         self.idle = SortedDict()
+        self.idle_task_count = set()
         self.n_tasks = 0
         self.resources = resources
         self.saturated = set()
@@ -1618,12 +1639,19 @@ class SchedulerState:
         self.unrunnable = unrunnable
         self.validate = validate
         self.workers = workers
-        self.task_groups_count_global = defaultdict(int)
+        self._task_prefix_count_global = defaultdict(int)
         self._network_occ_global = 0.0
         self.running = {
             ws for ws in self.workers.values() if ws.status == Status.running
         }
         self.plugins = {} if not plugins else {_get_plugin_name(p): p for p in plugins}
+
+        self.transition_log = deque(
+            maxlen=dask.config.get("distributed.scheduler.transition-log-length")
+        )
+        self.transition_counter = 0
+        self._idle_transition_counter = 0
+        self.transition_counter_max = transition_counter_max
 
         # Variables from dask.config, cached by __init__ for performance
         self.UNKNOWN_TASK_DURATION = parse_timedelta(
@@ -1646,16 +1674,21 @@ class SchedulerState:
             / 2.0
         )
 
-        sat = dask.config.get("distributed.scheduler.worker-saturation")
-        try:
-            self.WORKER_SATURATION = float(sat)
-        except ValueError:
-            raise ValueError(
-                f"Unsupported `distributed.scheduler.worker-saturation` value {sat!r}. Must be a float."
+        self.WORKER_SATURATION = dask.config.get(
+            "distributed.scheduler.worker-saturation"
+        )
+        if self.WORKER_SATURATION == "inf":
+            # Special case necessary because there's no way to parse a float infinity
+            # from a DASK_* environment variable
+            self.WORKER_SATURATION = math.inf
+        if (
+            not isinstance(self.WORKER_SATURATION, (int, float))
+            or self.WORKER_SATURATION <= 0
+        ):
+            raise ValueError(  # pragma: nocover
+                "`distributed.scheduler.worker-saturation` must be a float > 0; got "
+                + repr(self.WORKER_SATURATION)
             )
-        self.transition_counter = 0
-        self._idle_transition_counter = 0
-        self.transition_counter_max = transition_counter_max
 
     @property
     def memory(self) -> MemoryState:
@@ -1733,19 +1766,19 @@ class SchedulerState:
     @property
     def total_occupancy(self) -> float:
         return self._calc_occupancy(
-            self.task_groups_count_global,
+            self._task_prefix_count_global,
             self._network_occ_global,
         )
 
     def _calc_occupancy(
         self,
-        task_groups_count: dict[str, int],
+        task_prefix_count: dict[str, int],
         network_occ: float,
     ) -> float:
         res = 0.0
-        for group_name, count in task_groups_count.items():
+        for prefix_name, count in task_prefix_count.items():
             # TODO: Deal with unknown tasks better
-            prefix = self.task_groups[group_name].prefix
+            prefix = self.task_prefixes[prefix_name]
             assert prefix is not None
             duration = prefix.duration_average
             if duration < 0:
@@ -1850,21 +1883,19 @@ class SchedulerState:
 
                 start = "released"
             else:
-                # FIXME downcast antipattern
-                scheduler = cast(Scheduler, self)
                 raise RuntimeError(
                     f"Impossible transition from {start} to {finish} for {key!r}: "
-                    f"{stimulus_id=}, {args=}, {kwargs=}, story={scheduler.story(ts)}"
+                    f"{stimulus_id=}, {args=}, {kwargs=}, story={self.story(ts)}"
                 )
 
             if not stimulus_id:
                 stimulus_id = STIMULUS_ID_UNSET
 
             actual_finish = ts._state
-            # FIXME downcast antipattern
-            scheduler = cast(Scheduler, self)
-            scheduler.transition_log.append(
-                (key, start, actual_finish, recommendations, stimulus_id, time())
+            self.transition_log.append(
+                Transition(
+                    key, start, actual_finish, recommendations, stimulus_id, time()
+                )
             )
             if self.validate:
                 if stimulus_id == STIMULUS_ID_UNSET:
@@ -2120,13 +2151,16 @@ class SchedulerState:
             # (and actually pass in the task).
             assert not math.isinf(self.WORKER_SATURATION)
 
-        if not self.idle:
+        if not self.idle_task_count:
             # All workers busy? Task gets/stays queued.
             return None
 
         # Just pick the least busy worker.
         # NOTE: this will lead to worst-case scheduling with regards to co-assignment.
-        ws = min(self.idle.values(), key=lambda ws: len(ws.processing) / ws.nthreads)
+        ws = min(
+            self.idle_task_count,
+            key=lambda ws: len(ws.processing) / ws.nthreads,
+        )
         if self.validate:
             assert not _worker_full(ws, self.WORKER_SATURATION), (
                 ws,
@@ -2175,7 +2209,7 @@ class SchedulerState:
         else:
             # TODO if `is_rootish` would always return True for tasks without dependencies,
             # we could remove all this logic. The rootish assignment logic would behave
-            # more or less the same as this, maybe without gauranteed round-robin though?
+            # more or less the same as this, maybe without guaranteed round-robin though?
             # This path is only reachable when `ts` doesn't have dependencies, but its
             # group is also smaller than the cluster.
 
@@ -2316,12 +2350,10 @@ class SchedulerState:
 
             if ws != ts.processing_on:  # pragma: nocover
                 assert ts.processing_on
-                # FIXME downcast antipattern
-                scheduler = cast(Scheduler, self)
                 raise RuntimeError(
                     f"Task {ts.key!r} transitioned from processing to memory on worker "
                     f"{ws}, while it was expected from {ts.processing_on}. This should "
-                    f"be impossible. {stimulus_id=}, story={scheduler.story(ts)}"
+                    f"be impossible. {stimulus_id=}, story={self.story(ts)}"
                 )
 
             #############################
@@ -2766,7 +2798,7 @@ class SchedulerState:
             worker_msgs: dict = {}
 
             if self.validate:
-                assert not self.idle, (ts, self.idle)
+                assert not self.idle_task_count, (ts, self.idle_task_count)
                 self._validate_ready(ts)
 
             ts.state = "queued"
@@ -2976,6 +3008,14 @@ class SchedulerState:
         ("released", "erred"): transition_released_erred,
     }
 
+    def story(self, *keys_or_tasks_or_stimuli: str | TaskState) -> list[Transition]:
+        """Get all transitions that touch one of the input keys or stimulus_id's"""
+        keys_or_stimuli = {
+            key.key if isinstance(key, TaskState) else key
+            for key in keys_or_tasks_or_stimuli
+        }
+        return scheduler_story(keys_or_stimuli, self.transition_log)
+
     ##############################
     # Assigning Tasks to Workers #
     ##############################
@@ -3025,37 +3065,36 @@ class SchedulerState:
         if occ < 0:
             occ = ws.occupancy
 
-        nc: int = ws.nthreads
-        p: int = len(ws.processing)
-        avg: float = self.total_occupancy / self.total_nthreads
+        p = len(ws.processing)
 
         idle = self.idle
         saturated = self.saturated
-        if (
-            self.is_unoccupied(ws, occ, p)
-            if math.isinf(self.WORKER_SATURATION)
-            else not _worker_full(ws, self.WORKER_SATURATION)
-        ):
+        saturated.discard(ws)
+        if self.is_unoccupied(ws, occ, p):
             if ws.status == Status.running:
                 idle[ws.address] = ws
-            saturated.discard(ws)
         else:
             idle.pop(ws.address, None)
-
+            nc = ws.nthreads
             if p > nc:
-                pending: float = occ * (p - nc) / (p * nc)
-                if 0.4 < pending > 1.9 * avg:
+                pending = occ * (p - nc) / (p * nc)
+                if 0.4 < pending > 1.9 * (self.total_occupancy / self.total_nthreads):
                     saturated.add(ws)
-                    return
 
-            saturated.discard(ws)
+        if not _worker_full(ws, self.WORKER_SATURATION):
+            if ws.status == Status.running:
+                self.idle_task_count.add(ws)
+        else:
+            self.idle_task_count.discard(ws)
 
     def is_unoccupied(
         self, ws: WorkerState, occupancy: float, nprocessing: int
     ) -> bool:
         nthreads = ws.nthreads
-        avg_occ_per_thread = self.total_occupancy / self.total_nthreads
-        return nprocessing < nthreads or occupancy < nthreads * avg_occ_per_thread / 2
+        return (
+            nprocessing < nthreads
+            or occupancy < nthreads * (self.total_occupancy / self.total_nthreads) / 2
+        )
 
     def get_comm_cost(self, ts: TaskState, ws: WorkerState) -> float:
         """
@@ -3755,12 +3794,6 @@ class Scheduler(SchedulerState, ServerNode):
             aliases,
         ]
 
-        self.transition_log = deque(
-            maxlen=dask.config.get("distributed.scheduler.transition-log-length")
-        )
-        self.log = deque(
-            maxlen=dask.config.get("distributed.scheduler.transition-log-length")
-        )
         self.events = defaultdict(
             partial(
                 deque, maxlen=dask.config.get("distributed.scheduler.events-log-length")
@@ -3951,7 +3984,6 @@ class Scheduler(SchedulerState, ServerNode):
         extra = {
             "transition_log": self.transition_log,
             "transition_counter": self.transition_counter,
-            "log": self.log,
             "tasks": self.tasks,
             "task_groups": self.task_groups,
             # Overwrite dict of WorkerState.identity from info
@@ -4971,6 +5003,7 @@ class Scheduler(SchedulerState, ServerNode):
         del self.stream_comms[address]
         del self.aliases[ws.name]
         self.idle.pop(ws.address, None)
+        self.idle_task_count.discard(ws)
         self.saturated.discard(ws)
         del self.workers[address]
         ws.status = Status.closed
@@ -4993,7 +5026,6 @@ class Scheduler(SchedulerState, ServerNode):
                             last_worker=ws.clean(),
                             allowed_failures=self.allowed_failures,
                         ),
-                        protocol=4,
                     )
                     r = self.transition(
                         k,
@@ -5249,7 +5281,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.running,
             list(self.idle.values()),
         )
-        task_group_counts: defaultdict[str, int] = defaultdict(int)
+        task_prefix_counts: defaultdict[str, int] = defaultdict(int)
         for w, ws in self.workers.items():
             assert isinstance(w, str), (type(w), w)
             assert isinstance(ws, WorkerState), (type(ws), ws)
@@ -5269,14 +5301,14 @@ class Scheduler(SchedulerState, ServerNode):
                         actual_needs_what[tss] += 1
             assert actual_needs_what == ws.needs_what
             assert (ws.status == Status.running) == (ws in self.running)
-            for name, count in ws.task_groups_count.items():
-                task_group_counts[name] += count
+            for name, count in ws.task_prefix_count.items():
+                task_prefix_counts[name] += count
 
-        assert task_group_counts.keys() == self.task_groups_count_global.keys()
-        for name, global_count in self.task_groups_count_global.items():
+        assert task_prefix_counts.keys() == self._task_prefix_count_global.keys()
+        for name, global_count in self._task_prefix_count_global.items():
             assert (
-                task_group_counts[name] == global_count
-            ), f"{name}: {task_group_counts[name]} (wss), {global_count} (global)"
+                task_prefix_counts[name] == global_count
+            ), f"{name}: {task_prefix_counts[name]} (wss), {global_count} (global)"
 
         for ws in self.running:
             assert ws.status == Status.running
@@ -5559,6 +5591,7 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             self.running.discard(ws)
             self.idle.pop(ws.address, None)
+            self.idle_task_count.discard(ws)
 
     async def handle_request_refresh_who_has(
         self, keys: Iterable[str], worker: str, stimulus_id: str
@@ -6053,7 +6086,7 @@ class Scheduler(SchedulerState, ServerNode):
                 elif on_error == "return":
                     return e
                 elif on_error == "return_pickle":
-                    return dumps(e, protocol=4)
+                    return dumps(e)
                 elif on_error == "ignore":
                     return ERROR
                 else:
@@ -6606,7 +6639,7 @@ class Scheduler(SchedulerState, ServerNode):
                 gathers = defaultdict(dict)
                 for ts in list(tasks):
                     if ts.state == "forgotten":
-                        # task is no longer needed by any client or dependant task
+                        # task is no longer needed by any client or dependent task
                         tasks.remove(ts)
                         continue
                     n_missing = n - len(ts.who_has & workers)
@@ -7376,7 +7409,7 @@ class Scheduler(SchedulerState, ServerNode):
         try:
             self.worker_plugins.pop(name)
         except KeyError:
-            raise ValueError(f"The worker plugin {name} does not exists")
+            raise ValueError(f"The worker plugin {name} does not exist")
 
         responses = await self.broadcast(msg=dict(op="plugin-remove", name=name))
         return responses
@@ -7396,7 +7429,7 @@ class Scheduler(SchedulerState, ServerNode):
         try:
             self.nanny_plugins.pop(name)
         except KeyError:
-            raise ValueError(f"The nanny plugin {name} does not exists")
+            raise ValueError(f"The nanny plugin {name} does not exist")
 
         responses = await self.broadcast(
             msg=dict(op="plugin_remove", name=name), nanny=True
@@ -7442,18 +7475,13 @@ class Scheduler(SchedulerState, ServerNode):
         self._transitions(recommendations, client_msgs, worker_msgs, stimulus_id)
         self.send_all(client_msgs, worker_msgs)
 
-    def story(self, *keys_or_tasks_or_stimuli: str | TaskState) -> list[tuple]:
-        """Get all transitions that touch one of the input keys or stimulus_id's"""
-        keys_or_stimuli = {
-            key.key if isinstance(key, TaskState) else key
-            for key in keys_or_tasks_or_stimuli
-        }
-        return scheduler_story(keys_or_stimuli, self.transition_log)
+    async def get_story(self, keys_or_stimuli: Iterable[str]) -> list[Transition]:
+        """RPC hook for :meth:`SchedulerState.story`.
 
-    async def get_story(self, keys_or_stimuli: Iterable[str]) -> list[tuple]:
+        Note that the msgpack serialization/deserialization round-trip will transform
+        the :class:`Transition` namedtuples into regular tuples.
+        """
         return self.story(*keys_or_stimuli)
-
-    transition_story = story
 
     def _reschedule(
         self, key: str, worker: str | None = None, *, stimulus_id: str
@@ -8239,7 +8267,7 @@ def heartbeat_interval(n: int) -> float:
     elif n < 200:
         return 2
     else:
-        # No more than 200 hearbeats a second scaled by workers
+        # No more than 200 heartbeats a second scaled by workers
         return n / 200 + 1
 
 

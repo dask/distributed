@@ -1218,7 +1218,7 @@ def test_expects_comm():
         def stream_not_leading_position(self, other, stream):
             ...
 
-    expected_warning = "first arugment of a RPC handler `stream` is deprecated"
+    expected_warning = "first argument of a RPC handler `stream` is deprecated"
 
     instance = A()
 
