@@ -31,7 +31,7 @@ requirements:
     - python >=3.8
     - click >=7.0
     - cloudpickle >=1.5.0
-    - cytoolz >=0.8.2
+    - cytoolz >=0.10.0
     - {{ pin_compatible('dask-core', max_pin='x.x.x.x') }}
     - jinja2
     - locket >=1.0.0
@@ -41,7 +41,7 @@ requirements:
     - pyyaml
     - sortedcontainers !=2.0.0,!=2.0.1
     - tblib >=1.6.0
-    - toolz >=0.8.2
+    - toolz >=0.10.0
     - tornado >=6.0.3,<6.2
     - urllib3
     - zict >=0.1.3
