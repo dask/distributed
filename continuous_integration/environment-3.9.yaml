@@ -8,8 +8,7 @@ dependencies:
   - packaging
   - pip
   - asyncssh
-  # Temporarily installing from PyPI until `bokeh=3.0.2` is on conda-forge
-  # - bokeh
+  - bokeh
   - click
   - cloudpickle
   - coverage
@@ -49,7 +48,5 @@ dependencies:
   - zict
   - zstandard >=0.9.0
   - pip:
-      # Install `bokeh` with conda once 3.0.2 is on conda-forge
-      - bokeh >= 3.0.2
       - git+https://github.com/dask/dask
       - keras
