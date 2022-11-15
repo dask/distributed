@@ -1,6 +1,6 @@
 click >= 7.0
 cloudpickle >= 1.5.0
-dask == 2022.10.2
+dask == 2022.11.0
 cytoolz >= 0.10.1
 jinja2 >= 2.10.3
 locket >= 1.0.0
