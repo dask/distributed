@@ -2130,6 +2130,23 @@ def ucx_loop():
     ucp.reset()
     loop.close()
 
+    # Reset also Distributed's UCX initialization, i.e., revert the effects of
+    # `distributed.comm.ucx.init_once()`.
+    import distributed.comm.ucx
+
+    distributed.comm.ucx.ucp = None
+    # If the test created a context, clean it up.
+    # TODO: should we check if there's already a context _before_ the test runs?
+    # I think that would be useful.
+    from distributed.diagnostics.nvml import has_cuda_context
+
+    ctx = has_cuda_context()
+    if ctx.has_context:
+        import numba.cuda
+
+        ctx = numba.cuda.current_context()
+        ctx.device.reset()
+
 
 def wait_for_log_line(
     match: bytes, stream: IO[bytes] | None, max_lines: int | None = 10
