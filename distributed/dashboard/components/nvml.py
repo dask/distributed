@@ -46,7 +46,6 @@ class GPUCurrentLoad(DashboardComponent):
         memory = figure(
             title="GPU Memory",
             tools="",
-            id="bk-gpu-memory-worker-plot",
             width=int(width / 2),
             name="gpu_memory_histogram",
             **kwargs,
@@ -64,7 +63,6 @@ class GPUCurrentLoad(DashboardComponent):
         utilization = figure(
             title="GPU Utilization",
             tools="",
-            id="bk-gpu-utilization-worker-plot",
             width=int(width / 2),
             name="gpu_utilization_histogram",
             **kwargs,
