@@ -3507,7 +3507,7 @@ class Client(SyncMethodMixin):
         """
         Restart a specified set of workers
 
-        This methods expects all workers to have nannies to be able to restart them.
+        This methods expects all workers specified to have nannies to be able to restart them.
         If workers without nannies exist, ``Client.restart_workers`` will raise a
         ``ValueError`` that lists the workers without nannies. Consider removing
         those workers and calling ``Client.restart_workers`` again afterward.
