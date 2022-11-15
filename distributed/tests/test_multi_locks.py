@@ -105,7 +105,7 @@ async def test_multiple_locks(c, s, a, b):
         assert ext.requests_left[l3.id] == 2
         assert l3.id in ext.events
     else:
-        assert False  # We except a TimeoutError since `l3` isn't availabe
+        assert False  # We except a TimeoutError since `l3` isn't available
 
     # Releasing `l1` isn't enough since `l3` also requires `l2`
     await l1.release()
@@ -167,7 +167,7 @@ async def test_num_locks(c, s, a, b):
         assert list(ext.requests_left.values()) == [0, 0, 2]
         assert l3.id in ext.events
     else:
-        assert False  # We except a TimeoutError since `l3` isn't availabe
+        assert False  # We except a TimeoutError since `l3` isn't available
 
     # Releasing `l1` isn't enough since `l3` also requires three locks
     await l1.release()

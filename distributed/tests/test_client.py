@@ -6537,7 +6537,7 @@ async def test_performance_report(c, s, a, b):
                 data = f.read()
         return data
 
-    # Ensure default kwarg maintains backward compatability
+    # Ensure default kwarg maintains backward compatibility
     data = await f(stacklevel=1)
 
     assert "Also, we want this comment to appear" in data

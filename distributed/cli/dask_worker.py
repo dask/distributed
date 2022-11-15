@@ -462,7 +462,7 @@ def _apportion_ports(
 
     Returns
     =======
-    List of kwargs to pass to the Worker or Nanny construtors
+    List of kwargs to pass to the Worker or Nanny constructors
     """
     seen = set()
 

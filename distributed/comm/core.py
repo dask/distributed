@@ -299,7 +299,7 @@ async def connect(
         except (asyncio.TimeoutError, OSError) as exc:
             active_exception = exc
 
-            # As descibed above, the intermediate timeout is used to distributed
+            # As described above, the intermediate timeout is used to distributed
             # initial, bulk connect attempts homogeneously. In particular with
             # the jitter upon retries we should not be worred about overloading
             # any more DNS servers

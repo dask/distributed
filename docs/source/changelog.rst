@@ -446,11 +446,11 @@ Maintenance
 - Refactor resource restriction handling in ``WorkerState`` (:pr:`6672`) `Hendrik Makait`_
 - ``test_signal`` and ``test_terminate`` occasionally return ``SIGKILL`` on MacOS (:pr:`6671`) `crusaderky`_
 - Use the ``loop`` fixture in even more tests (:pr:`6674`) `Thomas Grainger`_
-- Inconditionally ``import ssl`` (:pr:`6670`) `Thomas Grainger`_
+- Unconditionally ``import ssl`` (:pr:`6670`) `Thomas Grainger`_
 - Use the ``loop`` fixture in more tests (:pr:`6642`) `Thomas Grainger`_
 - Pin tornado to <6.2 (:pr:`6668`) `Florian Jetter`_
 - Handle ``AsyncTaskGroupClosedError`` (:pr:`6664`) `Hendrik Makait`_
-- Replace occurences of large delay ``slowinc`` with locks (:pr:`6656`) `Florian Jetter`_
+- Replace occurrences of large delay ``slowinc`` with locks (:pr:`6656`) `Florian Jetter`_
 - Merge ``extend-ignore`` and ``ignore`` values for ``flake8`` (:pr:`6660`) `Hendrik Makait`_
 - Remove server close background task grace period (:pr:`6633`) `Thomas Grainger`_
 - Do not use tempfile in ``utils_test`` (:pr:`6651`) `Florian Jetter`_
@@ -1114,7 +1114,7 @@ Maintenance
 - Revert "Pin coverage to 6.2 (:pr:`5716`)" (:pr:`5770`) `Thomas Grainger`_
 - Trigger test runs periodically to increases failure statistics (:pr:`5769`) `Florian Jetter`_
 - More fault tolerant test report (:pr:`5732`) `Ian Rose`_
-- Pin ``pillow<9`` to work around ``torch`` incompatability (:pr:`5755`) `Thomas Grainger`_
+- Pin ``pillow<9`` to work around ``torch`` incompatibility (:pr:`5755`) `Thomas Grainger`_
 - Overhaul ``check_process_leak`` (:pr:`5739`) `crusaderky`_
 - Fix flaky ``test_exit_callback test`` (:pr:`5713`) `Jim Crist-Harif`_
 - Generate tests summary (:pr:`5710`) `crusaderky`_
@@ -1455,7 +1455,7 @@ Released on September 3, 2021
 
 - Fix ``add_plugin`` warnings (:pr:`5267`) `Doug Davis`_
 - Add ``list`` around iterator in ``handle_missing_dep`` (:pr:`5285`) `Matthew Rocklin`_
-- Jupyter-client 7 compatiblity (:pr:`5286`) `Min RK`_
+- Jupyter-client 7 compatibility (:pr:`5286`) `Min RK`_
 - Replace ``atop`` with ``blockwise`` (:pr:`5289`) `James Bourbeau`_
 - Add pytest color to CI (:pr:`5276`) `James Bourbeau`_
 - Fix ``test_map`` and others (:pr:`5278`) `crusaderky`_
@@ -1994,7 +1994,7 @@ All changes
 
 - Some common optimizations across transitions (:pr:`4348`) `jakirkham`_
 - Drop serialize extension (:pr:`4344`) `jakirkham`_
-- Log duplciate workers in scheduler (:pr:`4338`) `Matthew Rocklin`_
+- Log duplicate workers in scheduler (:pr:`4338`) `Matthew Rocklin`_
 - Annotation of some comm related methods in the ``Scheduler`` (:pr:`4341`) `jakirkham`_
 - Optimize ``assert`` in ``validate_waiting`` (:pr:`4342`) `jakirkham`_
 - Optimize ``decide_worker`` (:pr:`4332`) `jakirkham`_
@@ -2208,7 +2208,7 @@ All changes
 - Serialize builtin array (:pr:`4013`) `jakirkham`_
 - Use cuDF's ``assert_eq`` (:pr:`4014`) `jakirkham`_
 - Clear function cache whenever we upload a new file (:pr:`3993`) `Jack Xiaosong Xu`_
-- Emmit warning when assign/comparing string with ``Status`` ``Enum`` (:pr:`3875`) `Matthias Bussonnier`_
+- Emit warning when assign/comparing string with ``Status`` ``Enum`` (:pr:`3875`) `Matthias Bussonnier`_
 - Track mutable frames (:pr:`4004`) `jakirkham`_
 - Improve ``bytes`` and ``bytearray`` serialization (:pr:`4009`) `jakirkham`_
 - Fix memory histogram values in dashboard (:pr:`4006`) `Willi Rath`_
@@ -2442,7 +2442,7 @@ All changes
 - Remove openssl 1.1.1d pin for Travis (:pr:`3668`) `Jonathan J. Helmus`_
 - More documentation for ``Semaphore`` (:pr:`3664`) `Florian Jetter`_
 - Get CUDA context to finalize Numba ``DeviceNDArray`` (:pr:`3666`) `jakirkham`_
-- Add Resouces option to ``get_task_stream`` and call ``output_file`` (:pr:`3653`) `Prasun Anand`_
+- Add Resources option to ``get_task_stream`` and call ``output_file`` (:pr:`3653`) `Prasun Anand`_
 - Add ``Semaphore`` extension (:pr:`3573`) `Lucas Rademaker`_
 - Replace ``ncores`` with ``nthreads`` in work stealing tests (:pr:`3615`) `James Bourbeau`_
 - Clean up some test warnings (:pr:`3662`) `Matthew Rocklin`_
@@ -2815,7 +2815,7 @@ This release drops support for Python 3.5
 -  Fix worker preload config (:pr:`3027`) `byjott`_
 -  Fix widget with spec that generates multiple workers (:pr:`3067`) `Loïc Estève`_
 -  Make Client.get_versions async friendly (:pr:`3064`) `Jacob Tomlinson`_
--  Add configuation option for longer error tracebacks (:pr:`3086`) `Daniel Farrell`_
+-  Add configuration option for longer error tracebacks (:pr:`3086`) `Daniel Farrell`_
 -  Have Client get Security from passed Cluster (:pr:`3079`) `Matthew Rocklin`_
 -  Respect Cluster.dashboard_link in Client._repr_html_ if it exists (:pr:`3077`) `Matthew Rocklin`_
 -  Add monitoring with dask cluster docs (:pr:`3072`) `Arpit Solanki`_
@@ -3185,7 +3185,7 @@ This is a small bugfix release due to a config change upstream.
 -  Ensure async behavior in event loop with LocalCluster (:pr:`2484`) `Matthew Rocklin`_
 -  Fix spurious CancelledError (:pr:`2485`) `Loïc Estève`_
 -  Properly reset dask.config scheduler and shuffle when closing the client (:pr:`2475`) `George Sakkis`_
--  Make it more explict that resources are per worker. (:pr:`2470`) `Loïc Estève`_
+-  Make it more explicit that resources are per worker. (:pr:`2470`) `Loïc Estève`_
 -  Remove references to center (:pr:`2488`)  `Matthew Rocklin`_
 -  Expand client clearing timeout to 10s in testing (:pr:`2493`) `Matthew Rocklin`_
 -  Propagate key keyword in progressbar (:pr:`2492`) `Matthew Rocklin`_
@@ -3475,7 +3475,7 @@ This is a small bugfix release due to a config change upstream.
 -  Newline needed for doctest rendering (:pr:`1917`) `Loïc Estève`_
 -  Support Client._repr_html_ when in async mode (:pr:`1909`) `Matthew Rocklin`_
 -  Add parameters to dask-ssh command (:pr:`1910`) `Irene Rodriguez`_
--  Santize get_dataset trace (:pr:`1888`) `John Kirkham`_
+-  Sanitize get_dataset trace (:pr:`1888`) `John Kirkham`_
 -  Fix bug where queues would not clean up cleanly (:pr:`1922`) `Matthew Rocklin`_
 -  Delete cached file safely in upload file (:pr:`1921`) `Matthew Rocklin`_
 -  Accept KeyError when closing tornado IOLoop in tests (:pr:`1937`) `Matthew Rocklin`_
@@ -3523,7 +3523,7 @@ This is a small bugfix release due to a config change upstream.
 -  Add fifo timeout to control priority generation (:pr:`1828`) `Matthew Rocklin`_
 -  Add retire_workers API to Client (:pr:`1876`) `Matthew Rocklin`_
 -  Catch NoSuchProcess error in Nanny.memory_monitor (:pr:`1877`) `Matthew Rocklin`_
--  Add uid to nanny queue communitcations (:pr:`1880`) `Matthew Rocklin`_
+-  Add uid to nanny queue communications (:pr:`1880`) `Matthew Rocklin`_
 
 
 .. _v1.21.4 - 2018-03-21:
@@ -3728,7 +3728,7 @@ This is a small bugfix release due to a config change upstream.
 -  Future uses default client by default (:pr:`1449`)
 -  Add keys= keyword to Client.call_stack (:pr:`1446`)
 -  Add get_current_task to worker (:pr:`1444`)
--  Ensure that Client remains asynchornous before ioloop starts (:pr:`1452`)
+-  Ensure that Client remains asynchronous before ioloop starts (:pr:`1452`)
 -  Remove "click for worker page" in bokeh plot (:pr:`1453`)
 -  Add Client.current() (:pr:`1450`)
 -  Clean handling of restart timeouts (:pr:`1442`)
@@ -3805,7 +3805,7 @@ This is a small bugfix release due to a config change upstream.
 -  Multi-threading safety (:pr:`1191`), (:pr:`1228`), (:pr:`1229`)
 -  Improve handling of byte counting (:pr:`1198`) (:pr:`1224`)
 -  Add get_client, secede functions, refactor worker-client relationship (:pr:`1201`)
--  Allow logging configuraiton using logging.dictConfig() (:pr:`1206`) (:pr:`1211`)
+-  Allow logging configuration using logging.dictConfig() (:pr:`1206`) (:pr:`1211`)
 -  Offload serialization and deserialization to separate thread (:pr:`1218`)
 -  Support fire-and-forget tasks (:pr:`1221`)
 -  Support bytestrings as keys (for Julia) (:pr:`1234`)
@@ -3837,7 +3837,7 @@ This is a small bugfix release due to a config change upstream.
 -  Support TLS/SSL connections for security (:pr:`866`) (:pr:`1034`)
 -  Always create new worker directory when passed ``--local-directory``
    (:pr:`1079`)
--  Support pre-scattering data when using joblib frontent (:pr:`1022`)
+-  Support pre-scattering data when using joblib frontend (:pr:`1022`)
 -  Make workers more robust to failure of ``sizeof`` function (:pr:`1108`) and
    writing to disk (:pr:`1096`)
 -  Add ``is_empty`` and ``update`` methods to ``as_completed`` (:pr:`1113`)
@@ -3939,7 +3939,7 @@ This is a small bugfix release due to a config change upstream.
 1.15.1 - 2017-01-11
 ---------------------------
 
-*  Make compatibile with Bokeh 0.12.4 (:pr:`803`)
+*  Make compatible with Bokeh 0.12.4 (:pr:`803`)
 *  Avoid compressing arrays if not helpful  (:pr:`777`)
 *  Optimize inter-worker data transfer (:pr:`770`) (:pr:`790`)
 *  Add --local-directory keyword to worker (:pr:`788`)

@@ -29,7 +29,7 @@ async def test_prometheus(c, s, a, b):
 
     active_metrics = await fetch_metrics(s.http_server.port, "dask_semaphore_")
     assert active_metrics.keys() == expected_metrics
-    # Assert values are set upon intialization
+    # Assert values are set upon initialization
     for name, v in active_metrics.items():
         samples = v.samples
         assert len(samples) == 1

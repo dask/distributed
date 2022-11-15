@@ -31,7 +31,7 @@ from distributed.dashboard.components.shared import (
     ProfileTimePlot,
     SystemMonitor,
 )
-from distributed.dashboard.utils import transpose, update
+from distributed.dashboard.utils import _DATATABLE_STYLESHEETS_KWARGS, transpose, update
 from distributed.metrics import time
 from distributed.utils import log_errors
 
@@ -78,7 +78,10 @@ class StateTable(DashboardComponent):
         columns = {name: TableColumn(field=name, title=name) for name in names}
 
         table = DataTable(
-            source=self.source, columns=[columns[n] for n in names], height=70
+            source=self.source,
+            columns=[columns[n] for n in names],
+            height=70,
+            **_DATATABLE_STYLESHEETS_KWARGS,
         )
         self.root = table
 

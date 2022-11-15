@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
+
 from distributed.http.prometheus import PrometheusCollector
 
 
@@ -9,7 +11,6 @@ class SemaphoreMetricCollector(PrometheusCollector):
         self.subsystem = "semaphore"
 
     def collect(self):
-        from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
 
         try:
             sem_ext = self.server.extensions["semaphores"]

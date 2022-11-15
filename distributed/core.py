@@ -109,9 +109,9 @@ def _expects_comm(func: Callable) -> bool:
         return True
     if params and params[0] == "stream":
         warnings.warn(
-            "Calling the first arugment of a RPC handler `stream` is "
+            "Calling the first argument of a RPC handler `stream` is "
             "deprecated. Defining this argument is optional. Either remove the "
-            f"arugment or rename it to `comm` in {func}.",
+            f"argument or rename it to `comm` in {func}.",
             FutureWarning,
         )
         return True

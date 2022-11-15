@@ -97,6 +97,8 @@ body {
   }
 }
 
+/* The bokeh-specific CSS below can be removed once `bokeh=3` is the
+minimum supported version */
 .bk-root .bk-toolbar-box .bk-toolbar-right {
   top: 4px;
   right: 4px;

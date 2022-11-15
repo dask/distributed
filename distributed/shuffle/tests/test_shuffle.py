@@ -90,7 +90,6 @@ async def test_concurrent(c, s, a, b):
     clean_scheduler(s)
 
 
-@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/7208")
 @gen_cluster(client=True)
 async def test_bad_disk(c, s, a, b):
 
