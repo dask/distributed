@@ -29,7 +29,6 @@ from time import sleep
 from typing import Any
 from unittest import mock
 
-import msgpack
 import psutil
 import pytest
 import yaml
@@ -7509,23 +7508,11 @@ def _verify_cluster_dump(
     url = str(url) + (".msgpack.gz" if format == "msgpack" else ".yaml")
     state = load_cluster_dump(url)
 
-    # msgpack < 1.0.0 returns state dict with bytes key/values
-    MSGPACK_LT_1_0_0 = format == "msgpack" and msgpack.version < (1, 0, 0)
-
-    scheduler_key = b"scheduler" if MSGPACK_LT_1_0_0 else "scheduler"
-    workers_key = b"workers" if MSGPACK_LT_1_0_0 else "workers"
-    versions_key = b"versions" if MSGPACK_LT_1_0_0 else "versions"
-    state_addresses = (
-        {k.decode("utf-8") for k in state[workers_key].keys()}
-        if MSGPACK_LT_1_0_0
-        else state[workers_key].keys()
-    )
-
     assert isinstance(state, dict)
-    assert scheduler_key in state
-    assert workers_key in state
-    assert versions_key in state
-    assert state_addresses == addresses
+    assert "scheduler" in state
+    assert "workers" in state
+    assert "versions" in state
+    assert state["workers"].keys() == addresses
     return state
 
 

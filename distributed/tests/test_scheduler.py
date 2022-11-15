@@ -14,7 +14,6 @@ from time import sleep
 from typing import ClassVar, Collection
 
 import cloudpickle
-import msgpack
 import psutil
 import pytest
 from tlz import concat, first, merge, valmap
@@ -3881,35 +3880,14 @@ def _verify_cluster_state(
     state: dict,
     workers: Collection[Worker],
     allow_missing: bool = False,
-    format: str = "yaml",
 ) -> None:
-    # msgpack < 1.0.0 returns state dict with bytes key/values
-    MSGPACK_LT_1_0_0 = format == "msgpack" and msgpack.version < (1, 0, 0)
-
-    workers_key = b"workers" if MSGPACK_LT_1_0_0 else "workers"
-    versions_key = b"versions" if MSGPACK_LT_1_0_0 else "versions"
-
-    state_keys = (
-        {k.decode("utf-8") for k in state.keys()} if MSGPACK_LT_1_0_0 else state.keys()
-    )
-    state_addrs = (
-        {k.decode("utf-8") for k in state[workers_key].keys()}
-        if MSGPACK_LT_1_0_0
-        else state[workers_key].keys()
-    )
-    state_versions_addrs = (
-        {k.decode("utf-8") for k in state[versions_key][workers_key].keys()}
-        if MSGPACK_LT_1_0_0
-        else state[versions_key][workers_key].keys()
-    )
-
     addrs = {w.address for w in workers}
-    assert state_keys == {"scheduler", "workers", "versions"}
-    assert state_addrs == addrs
+    assert state.keys() == {"scheduler", "workers", "versions"}
+    assert state["workers"].keys() == addrs
     if allow_missing:
-        assert state_versions_addrs <= addrs
+        assert state["versions"]["workers"].keys() <= addrs
     else:
-        assert state_versions_addrs == addrs
+        assert state["versions"]["workers"].keys() == addrs
 
 
 @gen_cluster(nthreads=[("", 1)] * 2)
@@ -3959,7 +3937,7 @@ def _verify_cluster_dump(url: str, format: str, workers: Collection[Worker]) -> 
     with fsspec.open(url, mode="rb", compression="infer") as f:
         state = loader(f)
 
-    _verify_cluster_state(state, workers, format=format)
+    _verify_cluster_state(state, workers)
     return state
 
 
