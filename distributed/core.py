@@ -415,7 +415,7 @@ class Server:
             self.thread_id = threading.get_ident()
 
         self.io_loop.add_callback(set_thread_ident)
-        self._startup_lock = asyncio.Lock()
+        self._startstop_lock = asyncio.Lock()
         self.__startup_exc: Exception | None = None
 
         self.rpc = ConnectionPool(
@@ -465,7 +465,7 @@ class Server:
 
     @final
     async def start(self):
-        async with self._startup_lock:
+        async with self._startstop_lock:
             if self.status == Status.failed:
                 assert self.__startup_exc is not None
                 raise self.__startup_exc
@@ -866,33 +866,47 @@ class Server:
             await comm.close()
             assert comm.closed()
 
-    async def close(self, timeout=None):
-        try:
-            for pc in self.periodic_callbacks.values():
-                pc.stop()
+    async def close_unsafe(
+        self, timeout: float | None, reason: str | None, **kwargs: Any
+    ) -> None:
+        """Attempt to close the server. This is not idempotent and not protected against concurrent closing attempts.
 
-            if not self.__stopped:
-                self.__stopped = True
-                _stops = set()
-                for listener in self.listeners:
-                    future = listener.stop()
-                    if inspect.isawaitable(future):
-                        warnings.warn(
-                            f"{type(listener)} is using an asynchronous `stop` method. "
-                            "Support for asynchronous `Listener.stop` will be removed in a future version",
-                            PendingDeprecationWarning,
-                        )
-                        _stops.add(future)
-                if _stops:
-                    await asyncio.gather(*_stops)
+        This is intended to be overwritten or called by subclasses. For a safe
+        close, please use ``Server.close`` instead.
+        """
 
-            # TODO: Deal with exceptions
-            await self._ongoing_background_tasks.stop()
+    @final
+    async def close(
+        self, timeout: float | None = None, reason: str | None = None, **kwargs: Any
+    ) -> None:
+        async with self._startstop_lock:
+            if self.status in (Status.closed, Status.closing, Status.failed):
+                return None
 
-            await self.rpc.close()
-            await asyncio.gather(*[comm.close() for comm in list(self._comms)])
-        finally:
-            self._event_finished.set()
+            self.status = Status.closing
+            logger.info(
+                "Closing %r at %r. Reason: %s",
+                type(self).__name__,
+                self.address_safe,
+                reason,
+            )
+            try:
+                for pc in self.periodic_callbacks.values():
+                    pc.stop()
+                self.periodic_callbacks.clear()
+                self.stop()
+
+                await asyncio.wait_for(self.close_unsafe(**kwargs), timeout)
+
+                # TODO: Deal with exceptions
+                await self._ongoing_background_tasks.stop()
+
+                await asyncio.gather(*[comm.close() for comm in list(self._comms)])
+                await self.rpc.close()
+            finally:
+                self._event_finished.set()
+                # TODO: This might break the worker
+                self.status = Status.closed
 
 
 def pingpong(comm):

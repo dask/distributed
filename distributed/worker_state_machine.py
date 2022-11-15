@@ -3666,7 +3666,7 @@ class BaseWorker(abc.ABC):
                 self._async_instructions.add(task)
                 task.add_done_callback(self._handle_stimulus_from_task)
 
-    async def close(self, timeout: float = 30) -> None:
+    async def close_unsafe(self, timeout: float = 30) -> None:
         """Cancel all asynchronous instructions"""
         if not self._async_instructions:
             return

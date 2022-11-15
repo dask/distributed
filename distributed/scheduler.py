@@ -3889,21 +3889,13 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle(f"dask scheduler [{self.address}]")
         return self
 
-    async def close(self, fast=None, close_workers=None):
+    async def close_unsafe(self, timeout: float | None, reason: str | None, **kwargs):
         """Send cleanup signal to all coroutines then wait until finished
 
         See Also
         --------
         Scheduler.cleanup
         """
-        if fast is not None or close_workers is not None:
-            warnings.warn(
-                "The 'fast' and 'close_workers' parameters in Scheduler.close have no effect and will be removed in a future version of distributed.",
-                FutureWarning,
-            )
-        if self.status in (Status.closing, Status.closed):
-            await self.finished()
-            return
 
         async def log_errors(func):
             try:
@@ -3914,8 +3906,6 @@ class Scheduler(SchedulerState, ServerNode):
         await asyncio.gather(
             *[log_errors(plugin.before_close) for plugin in list(self.plugins.values())]
         )
-
-        self.status = Status.closing
 
         logger.info("Scheduler closing...")
         setproctitle("dask scheduler [closing]")
@@ -3929,10 +3919,6 @@ class Scheduler(SchedulerState, ServerNode):
         await asyncio.gather(
             *[log_errors(plugin.close) for plugin in list(self.plugins.values())]
         )
-
-        for pc in self.periodic_callbacks.values():
-            pc.stop()
-        self.periodic_callbacks.clear()
 
         self.stop_services()
 
@@ -3960,12 +3946,6 @@ class Scheduler(SchedulerState, ServerNode):
 
         for comm in self.client_comms.values():
             comm.abort()
-
-        await self.rpc.close()
-
-        self.status = Status.closed
-        self.stop()
-        await super().close()
 
         setproctitle("dask scheduler [closed]")
         disable_gc_diagnosis()

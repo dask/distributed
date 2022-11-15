@@ -1456,12 +1456,13 @@ class Worker(BaseWorker, ServerNode):
         return self
 
     @log_errors
-    async def close(  # type: ignore
+    async def close_unsafe(  # type: ignore
         self,
         timeout: float = 30,
         executor_wait: bool = True,
         nanny: bool = True,
         reason: str = "worker-close",
+        **kwargs,
     ) -> str | None:
         """Close the worker
 
@@ -1488,14 +1489,6 @@ class Worker(BaseWorker, ServerNode):
         # is the other way round. If an external caller wants to close
         # nanny+worker, the nanny must be notified first. ==> Remove kwarg
         # nanny, see also Scheduler.retire_workers
-        if self.status in (Status.closed, Status.closing, Status.failed):
-            logging.debug(
-                "Attempted to close worker that is already %s. Reason: %s",
-                self.status,
-                reason,
-            )
-            await self.finished()
-            return None
 
         if self.status == Status.init:
             # If the worker is still in startup/init and is started by a nanny,
@@ -1526,7 +1519,7 @@ class Worker(BaseWorker, ServerNode):
             pc.stop()
 
         # Cancel async instructions
-        await BaseWorker.close(self, timeout=timeout)
+        await BaseWorker.close_unsafe(self, timeout=timeout)
 
         for preload in self.preloads:
             try:
@@ -1625,12 +1618,6 @@ class Worker(BaseWorker, ServerNode):
                     _close(
                         executor=executor, wait=executor_wait
                     )  # Just run it directly
-
-        self.stop()
-        await self.rpc.close()
-
-        self.status = Status.closed
-        await ServerNode.close(self)
 
         setproctitle("dask worker [closed]")
         return "OK"

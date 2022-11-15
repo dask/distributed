@@ -16,8 +16,7 @@ import weakref
 from collections.abc import Collection
 from inspect import isawaitable
 from queue import Empty
-from time import sleep as sync_sleep
-from typing import TYPE_CHECKING, Callable, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal
 
 from toolz import merge
 from tornado.ioloop import IOLoop
@@ -570,22 +569,15 @@ class Nanny(ServerNode):
             "Closing Nanny gracefully at %r. Reason: %s", self.address_safe, reason
         )
 
-    async def close(
-        self, timeout: float = 5, reason: str = "nanny-close"
-    ) -> Literal["OK"]:
+    async def close_unsafe(
+        self,
+        timeout: float | None = 5,
+        reason: str | None = "nanny-close",
+        **kwargs: Any,
+    ) -> None:
         """
         Close the worker process, stop all comms.
         """
-        if self.status == Status.closing:
-            await self.finished()
-            assert self.status == Status.closed
-
-        if self.status == Status.closed:
-            return "OK"
-
-        self.status = Status.closing
-        logger.info("Closing Nanny at %r. Reason: %s", self.address_safe, reason)
-
         for preload in self.preloads:
             await preload.teardown()
 
@@ -600,14 +592,13 @@ class Nanny(ServerNode):
         self.stop()
         try:
             if self.process is not None:
+                assert timeout is not None
+                assert reason is not None
                 await self.kill(timeout=timeout, reason=reason)
         except Exception:
             logger.exception("Error in Nanny killing Worker subprocess")
         self.process = None
         await self.rpc.close()
-        self.status = Status.closed
-        await super().close()
-        return "OK"
 
     async def _log_event(self, topic, msg):
         await self.scheduler.log_event(
@@ -817,8 +808,8 @@ class WorkerProcess:
                 "reason": reason,
             }
         )
-        await asyncio.sleep(0)  # otherwise we get broken pipe errors
         queue.close()
+        queue.join_thread()
         del queue
 
         try:
@@ -943,14 +934,7 @@ class WorkerProcess:
                 logger.exception(f"Failed to {failure_type} worker")
                 init_result_q.put({"uid": uid, "exception": e})
                 init_result_q.close()
-                # If we hit an exception here we need to wait for a least
-                # one interval for the outside to pick up this message.
-                # Otherwise we arrive in a race condition where the process
-                # cleanup wipes the queue before the exception can be
-                # properly handled. See also
-                # WorkerProcess._wait_until_connected (the 3 is for good
-                # measure)
-                sync_sleep(cls._init_msg_interval * 3)
+                init_result_q.join_thread()
 
         with contextlib.ExitStack() as stack:
 
