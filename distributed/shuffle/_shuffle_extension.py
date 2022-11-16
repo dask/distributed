@@ -396,7 +396,6 @@ class ShuffleWorkerExtension:
     async def _register_complete(self, shuffle: Shuffle) -> None:
         self.raise_if_closed()
         await shuffle.close()
-        self.raise_if_closed()
         await self.worker.scheduler.shuffle_register_complete(
             id=shuffle.id,
             worker=self.worker.address,
