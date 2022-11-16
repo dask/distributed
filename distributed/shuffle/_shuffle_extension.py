@@ -152,6 +152,7 @@ class Shuffle:
         self.diagnostics[name] += stop - start
 
     async def barrier(self) -> None:
+        self.raise_if_closed()
         # FIXME: This should restrict communication to only workers
         # participating in this specific shuffle. This will not only reduce the
         # number of workers we need to contact but will also simplify error
@@ -196,8 +197,7 @@ class Shuffle:
         await self._receive(data)
 
     async def _receive(self, data: list[bytes]) -> None:
-        if self._exception:
-            raise self._exception
+        self.raise_if_closed()
 
         try:
             self.total_recvd += sum(map(len, data))
@@ -221,13 +221,13 @@ class Shuffle:
                     for k, v in groups.items()
                 }
             )
-            self.check_closed()
+            self.raise_if_closed()
             await self._disk_buffer.write(groups)
         except Exception as e:
             self._exception = e
             raise
 
-    def check_closed(self) -> None:
+    def raise_if_closed(self) -> None:
         if self.closed:
             if self._exception:
                 raise self._exception
@@ -255,6 +255,7 @@ class Shuffle:
         await self._comm_buffer.write(out)
 
     async def get_output_partition(self, i: int) -> pd.DataFrame:
+        self.raise_if_closed()
         assert self.transferred, "`get_output_partition` called before barrier task"
 
         assert self.worker_for[i] == self.local_address, (
@@ -269,7 +270,7 @@ class Shuffle:
         ), f"No outputs remaining, but requested output partition {i} on {self.local_address}."
         await self.flush_receive()
         try:
-            self.check_closed()
+            self.raise_if_closed()
             df = self._disk_buffer.read(i)
             with self.time("cpu"):
                 out = df.to_pandas()
@@ -281,7 +282,7 @@ class Shuffle:
     async def inputs_done(self) -> None:
         assert not self.transferred, "`inputs_done` called multiple times"
         self.transferred = True
-        self.check_closed()
+        self.raise_if_closed()
         await self._comm_buffer.flush()
         try:
             self._comm_buffer.raise_on_exception()
@@ -293,7 +294,7 @@ class Shuffle:
         return self.transferred and self.output_partitions_left == 0
 
     async def flush_receive(self) -> None:
-        self.check_closed()
+        self.raise_if_closed()
         await self._disk_buffer.flush()
 
     async def close(self) -> None:
@@ -330,6 +331,7 @@ class ShuffleWorkerExtension:
         self.shuffles: dict[ShuffleId, Shuffle] = {}
         self.memory_limiter_disk = ResourceLimiter(parse_bytes("1 GiB"))
         self.memory_limiter_comms = ResourceLimiter(parse_bytes("100 MiB"))
+        self.closed = False
 
     # Handlers
     ##########
@@ -392,7 +394,9 @@ class ShuffleWorkerExtension:
         await shuffle.barrier()
 
     async def _register_complete(self, shuffle: Shuffle) -> None:
+        self.raise_if_closed()
         await shuffle.close()
+        self.raise_if_closed()
         await self.worker.scheduler.shuffle_register_complete(
             id=shuffle.id,
             worker=self.worker.address,
@@ -425,6 +429,8 @@ class ShuffleWorkerExtension:
         "Get a shuffle by ID; raise ValueError if it's not registered."
         import pyarrow as pa
 
+        self.raise_if_closed()
+
         try:
             return self.shuffles[shuffle_id]
         except KeyError:
@@ -448,6 +454,7 @@ class ShuffleWorkerExtension:
 
                 raise Reschedule()
             else:
+                self.raise_if_closed()
                 if shuffle_id not in self.shuffles:
                     shuffle = Shuffle(
                         column=result["column"],
@@ -469,9 +476,16 @@ class ShuffleWorkerExtension:
                 return self.shuffles[shuffle_id]
 
     async def close(self) -> None:
+        self.closed = True
         while self.shuffles:
             _, shuffle = self.shuffles.popitem()
             await shuffle.close()
+
+    def raise_if_closed(self) -> None:
+        if self.closed:
+            raise RuntimeError(
+                f"ShuffleExtension already closed on {self.worker.address}"
+            )
 
     #############################
     # Methods for worker thread #
@@ -521,6 +535,7 @@ class ShuffleWorkerExtension:
 
         Calling this for a ``shuffle_id`` which is unknown or incomplete is an error.
         """
+        self.raise_if_closed()
         assert shuffle_id in self.shuffles, "Shuffle worker restrictions misbehaving"
         shuffle = self.shuffles[shuffle_id]
         output = sync(self.worker.loop, shuffle.get_output_partition, output_partition)
