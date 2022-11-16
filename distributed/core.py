@@ -867,7 +867,7 @@ class Server:
             assert comm.closed()
 
     async def close_unsafe(
-        self, timeout: float | None, reason: str | None, **kwargs: Any
+        self, timeout: float | None = None, reason: str | None = None, **kwargs: Any
     ) -> None:
         """Attempt to close the server. This is not idempotent and not protected against concurrent closing attempts.
 

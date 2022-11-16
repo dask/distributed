@@ -3889,7 +3889,9 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle(f"dask scheduler [{self.address}]")
         return self
 
-    async def close_unsafe(self, timeout: float | None, reason: str | None, **kwargs):
+    async def close_unsafe(
+        self, timeout: float | None = None, reason: str | None = None, **kwargs
+    ):
         """Send cleanup signal to all coroutines then wait until finished
 
         See Also
