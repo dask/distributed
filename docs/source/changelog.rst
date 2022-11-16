@@ -10,7 +10,8 @@ Released on November 15, 2022
 
     This release changes the default scheduling mode to use :ref:`queuing <queuing>`.
     This will significantly reduce cluster memory use in most cases, and generally
-    improve stability and performance. `Learn more here <https://www.coiled.io/blog/reducing-dask-memory-usage>`_.
+    improve stability and performance. `Learn more here <https://www.coiled.io/blog/reducing-dask-memory-usage>`_
+    and please provide any feedback `on this discussion <https://github.com/dask/distributed/discussions/7128>`.
 
     In rare cases, this could make some workloads slower. See the :ref:`documentation <adjust-queuing>`
     for more information, and how to switch back to the old mode.
