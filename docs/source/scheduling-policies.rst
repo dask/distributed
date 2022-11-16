@@ -264,8 +264,8 @@ Adjusting or disabling queuing
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 *It's rare to need to adjust queuing. The default value works well for almost all cases.
-Only advanced users wanting to tune performance in unusual cases might consider adjusing
-this parameter.*
+*Only advanced users wanting to tune performance in unusual cases might consider
+*adjusting this parameter.*
 
 Queuing behavior is controlled by the ``distributed.scheduler.worker-saturation`` config
 value. This is set via the :doc:`Dask configuration system <configuration>`. The config
