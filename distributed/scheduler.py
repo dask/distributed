@@ -2039,7 +2039,7 @@ class SchedulerState:
 
         if ws := self.decide_worker_non_rootish(ts):
             self.unrunnable.discard(ts)
-            worker_msgs = _add_to_processing(self, ts, ws)
+            worker_msgs = self._add_to_processing(ts, ws)
         # If no worker, task just stays in `no-worker`
 
         return recommendations, client_msgs, worker_msgs
@@ -2253,7 +2253,7 @@ class SchedulerState:
             if not (ws := self.decide_worker_non_rootish(ts)):
                 return {ts.key: "no-worker"}, {}, {}
 
-        worker_msgs = _add_to_processing(self, ts, ws)
+        worker_msgs = self._add_to_processing(ts, ws)
         return {}, {}, worker_msgs
 
     def transition_waiting_memory(
@@ -2356,10 +2356,10 @@ class SchedulerState:
         # last, allowing higher-priority downstream tasks to be transitioned first.
         # FIXME: this would be incorrect if queued tasks are user-annotated as higher
         #        priority.
-        _exit_processing_common(self, ts, recommendations)
+        self._exit_processing_common(ts, recommendations)
 
-        _add_to_memory(
-            self, ts, ws, recommendations, client_msgs, type=type, typename=typename
+        self._add_to_memory(
+            ts, ws, recommendations, client_msgs, type=type, typename=typename
         )
 
         if self.validate:
@@ -2547,7 +2547,7 @@ class SchedulerState:
             assert not ts.waiting_on
             assert ts.state == "processing"
 
-        ws = _exit_processing_common(self, ts, recommendations)
+        ws = self._exit_processing_common(ts, recommendations)
         if ws:
             worker_msgs[ws.address] = [
                 {
@@ -2557,7 +2557,7 @@ class SchedulerState:
                 }
             ]
 
-        _propagate_released(self, ts, recommendations)
+        self._propagate_released(ts, recommendations)
         return recommendations, {}, worker_msgs
 
     def transition_processing_erred(
@@ -2617,7 +2617,7 @@ class SchedulerState:
             ws = ts.processing_on
             ws.actors.remove(ts)
 
-        _exit_processing_common(self, ts, recommendations)
+        self._exit_processing_common(ts, recommendations)
 
         ts.erred_on.add(worker)
         if exception is not None:
@@ -2667,8 +2667,7 @@ class SchedulerState:
 
         cs = self.clients["fire-and-forget"]
         if ts in cs.wants_what:
-            _client_releases_keys(
-                self,
+            self._client_releases_keys(
                 cs=cs,
                 keys=[key],
                 recommendations=recommendations,
@@ -2709,7 +2708,7 @@ class SchedulerState:
 
         if self.validate:
             assert not self.idle_task_count, (ts, self.idle_task_count)
-            _validate_ready(self, ts)
+            self._validate_ready(ts)
 
         ts.state = "queued"
         self.queued.add(ts)
@@ -2723,7 +2722,7 @@ class SchedulerState:
         worker_msgs: dict = {}
 
         if self.validate:
-            _validate_ready(self, ts)
+            self._validate_ready(ts)
 
         ts.state = "no-worker"
         self.unrunnable.add(ts)
@@ -2742,7 +2741,7 @@ class SchedulerState:
 
         self.queued.remove(ts)
 
-        _propagate_released(self, ts, recommendations)
+        self._propagate_released(ts, recommendations)
         return recommendations, client_msgs, worker_msgs
 
     def transition_queued_processing(self, key, stimulus_id):
@@ -2757,7 +2756,7 @@ class SchedulerState:
 
         if ws := self.decide_worker_rootish_queuing_enabled():
             self.queued.discard(ts)
-            worker_msgs = _add_to_processing(self, ts, ws)
+            worker_msgs = self._add_to_processing(ts, ws)
         # If no worker, task just stays `queued`
 
         return recommendations, client_msgs, worker_msgs
@@ -2801,7 +2800,7 @@ class SchedulerState:
             for ws in ts.who_has:
                 ws.actors.discard(ts)
 
-        _propagate_forgotten(self, ts, recommendations, worker_msgs, stimulus_id)
+        self._propagate_forgotten(ts, recommendations, worker_msgs, stimulus_id)
 
         client_msgs = _task_to_client_msgs(ts)
         self._remove_key(key)
@@ -2830,9 +2829,9 @@ class SchedulerState:
                 # It's ok to forget a task that nobody needs
                 pass
             else:
-                assert 0, (ts,)
+                assert False, ts
 
-        _propagate_forgotten(self, ts, recommendations, worker_msgs, stimulus_id)
+        self._propagate_forgotten(ts, recommendations, worker_msgs, stimulus_id)
 
         client_msgs = _task_to_client_msgs(ts)
         self._remove_key(key)
@@ -3131,7 +3130,7 @@ class SchedulerState:
 
         Returns priority-ordered recommendations.
         """
-        maybe_runnable = list(_next_queued_tasks_for_worker(self, ws))[::-1]
+        maybe_runnable = list(self._next_queued_tasks_for_worker(ws))[::-1]
 
         # Schedule any restricted tasks onto the new worker, if the worker can run them
         for ts in self.unrunnable:
@@ -3143,6 +3142,258 @@ class SchedulerState:
         maybe_runnable.sort(key=operator.attrgetter("priority"), reverse=True)
         # Note not all will necessarily be run; transition->processing will decide
         return {ts.key: "processing" for ts in maybe_runnable}
+
+    def _validate_ready(self, ts: TaskState) -> None:
+        """Validation for ready states (processing, queued, no-worker)"""
+        assert not ts.waiting_on
+        assert not ts.who_has
+        assert not ts.exception_blame
+        assert not ts.processing_on
+        assert not ts.has_lost_dependencies
+        assert ts not in self.unrunnable
+        assert ts not in self.queued
+        assert all(dts.who_has for dts in ts.dependencies)
+
+    def _add_to_processing(self, ts: TaskState, ws: WorkerState) -> dict[str, list]:
+        """Set a task as processing on a worker and return the worker messages to send."""
+        if self.validate:
+            self._validate_ready(ts)
+            assert ws in self.running, self.running
+            assert (o := self.workers.get(ws.address)) is ws, (ws, o)
+
+        ws.add_to_processing(ts)
+        ts.processing_on = ws
+        ts.state = "processing"
+        self.acquire_resources(ts, ws)
+        self.check_idle_saturated(ws)
+        self.n_tasks += 1
+
+        if ts.actor:
+            ws.actors.add(ts)
+
+        return {ws.address: [self._task_to_msg(ts)]}
+
+    def _exit_processing_common(
+        self, ts: TaskState, recommendations: Recs
+    ) -> WorkerState | None:
+        """Remove *ts* from the set of processing tasks.
+
+        Returns
+        -------
+        Worker state of the worker that processed *ts* if the worker is current,
+        None if the worker is stale.
+
+        See also
+        --------
+        Scheduler._set_duration_estimate
+        """
+        ws = ts.processing_on
+        assert ws
+        ts.processing_on = None
+
+        ws.remove_from_processing(ts)
+        if self.workers.get(ws.address) is not ws:  # may have been removed
+            return None
+
+        self.check_idle_saturated(ws)
+        self.release_resources(ts, ws)
+
+        for qts in self._next_queued_tasks_for_worker(ws):
+            if self.validate:
+                assert qts.key not in recommendations, recommendations[qts.key]
+            recommendations[qts.key] = "processing"
+
+        return ws
+
+    def _next_queued_tasks_for_worker(self, ws: WorkerState) -> Iterator[TaskState]:
+        """Queued tasks to run, in priority order, on all open slots on a worker"""
+        if not self.queued or ws.status != Status.running:
+            return
+
+        # NOTE: this is called most frequently because a single task has completed, so there
+        # are <= 1 task slots available on the worker.
+        # `peekn` has fast paths for the cases N<=0 and N==1.
+        for qts in self.queued.peekn(_task_slots_available(ws, self.WORKER_SATURATION)):
+            if self.validate:
+                assert qts.state == "queued", qts.state
+                assert not qts.processing_on
+                assert not qts.waiting_on
+            yield qts
+
+    def _add_to_memory(
+        self,
+        ts: TaskState,
+        ws: WorkerState,
+        recommendations: dict[str, str],
+        client_msgs: dict[str, list[dict[str, str | bytes]]],
+        type: bytes | None = None,
+        typename: str | None = None,
+    ) -> None:
+        """Add ts to the set of in-memory tasks"""
+        if self.validate:
+            assert ts not in ws.has_what
+
+        self.add_replica(ts, ws)
+
+        deps = list(ts.dependents)
+        if len(deps) > 1:
+            deps.sort(key=operator.attrgetter("priority"), reverse=True)
+
+        for dts in deps:
+            s = dts.waiting_on
+            if ts in s:
+                s.discard(ts)
+                if not s:  # new task ready to run
+                    recommendations[dts.key] = "processing"
+
+        for dts in ts.dependencies:
+            s = dts.waiters
+            s.discard(ts)
+            if not s and not dts.who_wants:
+                recommendations[dts.key] = "released"
+
+        report_msg: dict[str, Any] = {}
+        if not ts.waiters and not ts.who_wants:
+            recommendations[ts.key] = "released"
+        else:
+            report_msg["op"] = "key-in-memory"
+            report_msg["key"] = ts.key
+            if type is not None:
+                report_msg["type"] = type
+
+            for cs in ts.who_wants:
+                client_msgs[cs.client_key] = [report_msg]
+
+        ts.state = "memory"
+        ts.type = typename  # type: ignore
+        ts.group.types.add(typename)  # type: ignore
+
+        cs = self.clients["fire-and-forget"]
+        if ts in cs.wants_what:
+            self._client_releases_keys(
+                cs=cs,
+                keys=[ts.key],
+                recommendations=recommendations,
+            )
+
+    def _propagate_released(
+        self,
+        ts: TaskState,
+        recommendations: Recs,
+    ) -> None:
+        ts.state = "released"
+        key = ts.key
+
+        if ts.has_lost_dependencies:
+            recommendations[key] = "forgotten"
+        elif ts.waiters or ts.who_wants:
+            recommendations[key] = "waiting"
+
+        if recommendations.get(key) != "waiting":
+            for dts in ts.dependencies:
+                if dts.state != "released":
+                    dts.waiters.discard(ts)
+                    if not dts.waiters and not dts.who_wants:
+                        recommendations[dts.key] = "released"
+            ts.waiters.clear()
+
+        if self.validate:
+            assert not ts.processing_on
+            assert ts not in self.queued
+
+    def _propagate_forgotten(
+        self,
+        ts: TaskState,
+        recommendations: dict[str, str],
+        worker_msgs: dict[str, list[dict[str, Any]]],
+        stimulus_id: str,
+    ) -> None:
+        ts.state = "forgotten"
+        for dts in ts.dependents:
+            dts.has_lost_dependencies = True
+            dts.dependencies.remove(ts)
+            dts.waiting_on.discard(ts)
+            if dts.state not in ("memory", "erred"):
+                # Cannot compute task anymore
+                recommendations[dts.key] = "forgotten"
+        ts.dependents.clear()
+        ts.waiters.clear()
+
+        for dts in ts.dependencies:
+            dts.dependents.remove(ts)
+            dts.waiters.discard(ts)
+            if not dts.dependents and not dts.who_wants:
+                # Task not needed anymore
+                assert dts is not ts
+                recommendations[dts.key] = "forgotten"
+        ts.dependencies.clear()
+        ts.waiting_on.clear()
+
+        for ws in ts.who_has:
+            if ws.address in self.workers:  # in case worker has died
+                worker_msgs[ws.address] = [
+                    {
+                        "op": "free-keys",
+                        "keys": [ts.key],
+                        "stimulus_id": stimulus_id,
+                    }
+                ]
+        self.remove_all_replicas(ts)
+
+    def _client_releases_keys(
+        self,
+        keys: Collection[str],
+        cs: ClientState,
+        recommendations: dict[str, str],
+    ) -> None:
+        """Remove keys from client desired list"""
+        logger.debug("Client %s releases keys: %s", cs.client_key, keys)
+        for key in keys:
+            ts = self.tasks.get(key)
+            if ts is not None and ts in cs.wants_what:
+                cs.wants_what.remove(ts)
+                ts.who_wants.remove(cs)
+                if not ts.who_wants:
+                    if not ts.dependents:
+                        # No live dependents, can forget
+                        recommendations[ts.key] = "forgotten"
+                    elif ts.state != "erred" and not ts.waiters:
+                        recommendations[ts.key] = "released"
+
+    def _task_to_msg(self, ts: TaskState, duration: float = -1) -> dict[str, Any]:
+        """Convert a single computational task to a message"""
+        # FIXME: The duration attribute is not used on worker. We could save ourselves the
+        #        time to compute and submit this
+        if duration < 0:
+            duration = self.get_task_duration(ts)
+
+        msg: dict[str, Any] = {
+            "op": "compute-task",
+            "key": ts.key,
+            "priority": ts.priority,
+            "duration": duration,
+            "stimulus_id": f"compute-task-{time()}",
+            "who_has": {
+                dts.key: [ws.address for ws in dts.who_has] for dts in ts.dependencies
+            },
+            "nbytes": {dts.key: dts.nbytes for dts in ts.dependencies},
+            "run_spec": None,
+            "function": None,
+            "args": None,
+            "kwargs": None,
+            "resource_restrictions": ts.resource_restrictions,
+            "actor": ts.actor,
+            "annotations": ts.annotations,
+        }
+        if self.validate:
+            assert all(msg["who_has"].values())
+
+        if isinstance(ts.run_spec, dict):
+            msg.update(ts.run_spec)
+        else:
+            msg["run_spec"] = ts.run_spec
+
+        return msg
 
 
 class Scheduler(SchedulerState, ServerNode):
@@ -4764,7 +5015,7 @@ class Scheduler(SchedulerState, ServerNode):
         cs: ClientState = self.clients[client]
         recommendations: dict = {}
 
-        _client_releases_keys(self, keys=keys, cs=cs, recommendations=recommendations)
+        self._client_releases_keys(keys=keys, cs=cs, recommendations=recommendations)
         self.transitions(recommendations, stimulus_id)
 
     def client_heartbeat(self, client=None):
@@ -5086,7 +5337,7 @@ class Scheduler(SchedulerState, ServerNode):
     def send_task_to_worker(self, worker, ts: TaskState, duration: float = -1):
         """Send a single computational task to a worker"""
         try:
-            msg: dict = _task_to_msg(self, ts, duration)
+            msg: dict = self._task_to_msg(ts, duration)
             self.worker_send(worker, msg)
         except Exception as e:
             logger.exception(e)
@@ -5162,7 +5413,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.check_idle_saturated(ws)
 
         recommendations = {
-            qts.key: "processing" for qts in _next_queued_tasks_for_worker(self, ws)
+            qts.key: "processing" for qts in self._next_queued_tasks_for_worker(ws)
         }
         if self.validate:
             assert len(recommendations) <= 1, (ws, recommendations)
@@ -7648,274 +7899,6 @@ class Scheduler(SchedulerState, ServerNode):
                 "stimulus_id": stimulus_id,
             }
         )
-
-
-def _validate_ready(state: SchedulerState, ts: TaskState) -> None:
-    """Validation for ready states (processing, queued, no-worker)"""
-    assert not ts.waiting_on
-    assert not ts.who_has
-    assert not ts.exception_blame
-    assert not ts.processing_on
-    assert not ts.has_lost_dependencies
-    assert ts not in state.unrunnable
-    assert ts not in state.queued
-    assert all(dts.who_has for dts in ts.dependencies)
-
-
-def _add_to_processing(
-    state: SchedulerState, ts: TaskState, ws: WorkerState
-) -> dict[str, list]:
-    """Set a task as processing on a worker and return the worker messages to send."""
-    if state.validate:
-        _validate_ready(state, ts)
-        assert ws in state.running, state.running
-        assert (o := state.workers.get(ws.address)) is ws, (ws, o)
-
-    ws.add_to_processing(ts)
-    ts.processing_on = ws
-    ts.state = "processing"
-    state.acquire_resources(ts, ws)
-    state.check_idle_saturated(ws)
-    state.n_tasks += 1
-
-    if ts.actor:
-        ws.actors.add(ts)
-
-    return {ws.address: [_task_to_msg(state, ts)]}
-
-
-def _exit_processing_common(
-    state: SchedulerState, ts: TaskState, recommendations: Recs
-) -> WorkerState | None:
-    """Remove *ts* from the set of processing tasks.
-
-    Returns
-    -------
-    Worker state of the worker that processed *ts* if the worker is current,
-    None if the worker is stale.
-
-    See also
-    --------
-    Scheduler._set_duration_estimate
-    """
-    ws = ts.processing_on
-    assert ws
-    ts.processing_on = None
-
-    ws.remove_from_processing(ts)
-    if state.workers.get(ws.address) is not ws:  # may have been removed
-        return None
-
-    state.check_idle_saturated(ws)
-    state.release_resources(ts, ws)
-
-    for qts in _next_queued_tasks_for_worker(state, ws):
-        if state.validate:
-            assert qts.key not in recommendations, recommendations[qts.key]
-        recommendations[qts.key] = "processing"
-
-    return ws
-
-
-def _next_queued_tasks_for_worker(
-    state: SchedulerState, ws: WorkerState
-) -> Iterator[TaskState]:
-    """Queued tasks to run, in priority order, on all open slots on a worker"""
-    if not state.queued or ws.status != Status.running:
-        return
-
-    # NOTE: this is called most frequently because a single task has completed, so there
-    # are <= 1 task slots available on the worker.
-    # `peekn` has fast paths for the cases N<=0 and N==1.
-    for qts in state.queued.peekn(_task_slots_available(ws, state.WORKER_SATURATION)):
-        if state.validate:
-            assert qts.state == "queued", qts.state
-            assert not qts.processing_on
-            assert not qts.waiting_on
-        yield qts
-
-
-def _add_to_memory(
-    state: SchedulerState,
-    ts: TaskState,
-    ws: WorkerState,
-    recommendations: dict[str, str],
-    client_msgs: dict[str, list[dict[str, str | bytes]]],
-    type: bytes | None = None,
-    typename: str | None = None,
-) -> None:
-    """Add ts to the set of in-memory tasks"""
-    if state.validate:
-        assert ts not in ws.has_what
-
-    state.add_replica(ts, ws)
-
-    deps = list(ts.dependents)
-    if len(deps) > 1:
-        deps.sort(key=operator.attrgetter("priority"), reverse=True)
-
-    for dts in deps:
-        s = dts.waiting_on
-        if ts in s:
-            s.discard(ts)
-            if not s:  # new task ready to run
-                recommendations[dts.key] = "processing"
-
-    for dts in ts.dependencies:
-        s = dts.waiters
-        s.discard(ts)
-        if not s and not dts.who_wants:
-            recommendations[dts.key] = "released"
-
-    report_msg: dict[str, Any] = {}
-    if not ts.waiters and not ts.who_wants:
-        recommendations[ts.key] = "released"
-    else:
-        report_msg["op"] = "key-in-memory"
-        report_msg["key"] = ts.key
-        if type is not None:
-            report_msg["type"] = type
-
-        for cs in ts.who_wants:
-            client_msgs[cs.client_key] = [report_msg]
-
-    ts.state = "memory"
-    ts.type = typename  # type: ignore
-    ts.group.types.add(typename)  # type: ignore
-
-    cs = state.clients["fire-and-forget"]
-    if ts in cs.wants_what:
-        _client_releases_keys(
-            state,
-            cs=cs,
-            keys=[ts.key],
-            recommendations=recommendations,
-        )
-
-
-def _propagate_released(
-    state: SchedulerState,
-    ts: TaskState,
-    recommendations: Recs,
-) -> None:
-    ts.state = "released"
-    key = ts.key
-
-    if ts.has_lost_dependencies:
-        recommendations[key] = "forgotten"
-    elif ts.waiters or ts.who_wants:
-        recommendations[key] = "waiting"
-
-    if recommendations.get(key) != "waiting":
-        for dts in ts.dependencies:
-            if dts.state != "released":
-                dts.waiters.discard(ts)
-                if not dts.waiters and not dts.who_wants:
-                    recommendations[dts.key] = "released"
-        ts.waiters.clear()
-
-    if state.validate:
-        assert not ts.processing_on
-        assert ts not in state.queued
-
-
-def _propagate_forgotten(
-    state: SchedulerState,
-    ts: TaskState,
-    recommendations: dict[str, str],
-    worker_msgs: dict[str, list[dict[str, Any]]],
-    stimulus_id: str,
-) -> None:
-    ts.state = "forgotten"
-    for dts in ts.dependents:
-        dts.has_lost_dependencies = True
-        dts.dependencies.remove(ts)
-        dts.waiting_on.discard(ts)
-        if dts.state not in ("memory", "erred"):
-            # Cannot compute task anymore
-            recommendations[dts.key] = "forgotten"
-    ts.dependents.clear()
-    ts.waiters.clear()
-
-    for dts in ts.dependencies:
-        dts.dependents.remove(ts)
-        dts.waiters.discard(ts)
-        if not dts.dependents and not dts.who_wants:
-            # Task not needed anymore
-            assert dts is not ts
-            recommendations[dts.key] = "forgotten"
-    ts.dependencies.clear()
-    ts.waiting_on.clear()
-
-    for ws in ts.who_has:
-        if ws.address in state.workers:  # in case worker has died
-            worker_msgs[ws.address] = [
-                {
-                    "op": "free-keys",
-                    "keys": [ts.key],
-                    "stimulus_id": stimulus_id,
-                }
-            ]
-    state.remove_all_replicas(ts)
-
-
-def _client_releases_keys(
-    state: SchedulerState,
-    keys: Collection[str],
-    cs: ClientState,
-    recommendations: dict[str, str],
-) -> None:
-    """Remove keys from client desired list"""
-    logger.debug("Client %s releases keys: %s", cs.client_key, keys)
-    for key in keys:
-        ts = state.tasks.get(key)
-        if ts is not None and ts in cs.wants_what:
-            cs.wants_what.remove(ts)
-            ts.who_wants.remove(cs)
-            if not ts.who_wants:
-                if not ts.dependents:
-                    # No live dependents, can forget
-                    recommendations[ts.key] = "forgotten"
-                elif ts.state != "erred" and not ts.waiters:
-                    recommendations[ts.key] = "released"
-
-
-def _task_to_msg(
-    state: SchedulerState, ts: TaskState, duration: float = -1
-) -> dict[str, Any]:
-    """Convert a single computational task to a message"""
-    # FIXME: The duration attribute is not used on worker. We could save ourselves the
-    #        time to compute and submit this
-    if duration < 0:
-        duration = state.get_task_duration(ts)
-
-    msg: dict[str, Any] = {
-        "op": "compute-task",
-        "key": ts.key,
-        "priority": ts.priority,
-        "duration": duration,
-        "stimulus_id": f"compute-task-{time()}",
-        "who_has": {
-            dts.key: [ws.address for ws in dts.who_has] for dts in ts.dependencies
-        },
-        "nbytes": {dts.key: dts.nbytes for dts in ts.dependencies},
-        "run_spec": None,
-        "function": None,
-        "args": None,
-        "kwargs": None,
-        "resource_restrictions": ts.resource_restrictions,
-        "actor": ts.actor,
-        "annotations": ts.annotations,
-    }
-    if state.validate:
-        assert all(msg["who_has"].values())
-
-    if isinstance(ts.run_spec, dict):
-        msg.update(ts.run_spec)
-    else:
-        msg["run_spec"] = ts.run_spec
-
-    return msg
 
 
 def _task_to_report_msg(ts: TaskState) -> dict[str, Any] | None:
