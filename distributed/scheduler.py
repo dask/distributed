@@ -1311,6 +1311,10 @@ class TaskState:
     #: Cached hash of :attr:`~TaskState.client_key`
     _hash: int
 
+    #: Cached while tasks are in `queued` or `no-worker`; set in
+    #: `transition_waiting_processing` and `_add_to_processing`
+    _rootish: bool | None
+
     # Support for weakrefs to a class with __slots__
     __weakref__: Any = None
     __slots__ = tuple(__annotations__)
@@ -1352,6 +1356,7 @@ class TaskState:
         self.metadata = {}
         self.annotations = {}
         self.erred_on = set()
+        self._rootish = None
         TaskState._instances.add(self)
 
     def __hash__(self) -> int:
@@ -1526,10 +1531,14 @@ class SchedulerState:
     #: All tasks currently known to the scheduler
     tasks: dict[str, TaskState]
 
-    #: Tasks in the "queued" state, ordered by priority
+    #: Tasks in the "queued" state, ordered by priority.
+    #: They are all root-ish.
+    #: Always empty if `worker-saturation` is set to `inf`.
     queued: HeapSet[TaskState]
 
-    #: Tasks in the "no-worker" state
+    #: Tasks in the "no-worker" state.
+    #: They may or may not have restrictions.
+    #: Only contains root-ish tasks if `worker-saturation` is set to `inf`.
     unrunnable: set[TaskState]
 
     #: Subset of tasks that exist in memory on more than one worker
@@ -2045,10 +2054,18 @@ class SchedulerState:
                 assert not ts.actor, f"Actors can't be in `no-worker`: {ts}"
                 assert ts in self.unrunnable
 
-            if ws := self.decide_worker_non_rootish(ts):
+            decide_worker = (
+                self.decide_worker_rootish_queuing_disabled
+                if self.is_rootish(ts)
+                else self.decide_worker_non_rootish
+            )
+            if ws := decide_worker(ts):
                 self.unrunnable.discard(ts)
                 worker_msgs = _add_to_processing(self, ts, ws)
             # If no worker, task just stays in `no-worker`
+
+            if self.validate and self.is_rootish(ts):
+                assert ws is not None
 
             return recommendations, client_msgs, worker_msgs
         except Exception as e:
@@ -2083,8 +2100,8 @@ class SchedulerState:
             ``no-worker``.
         """
         if self.validate:
-            # See root-ish-ness note below in `decide_worker_rootish_queuing_enabled`
             assert math.isinf(self.WORKER_SATURATION)
+            assert self.is_rootish(ts)
 
         pool = self.idle.values() if self.idle else self.running
         if not pool:
@@ -2144,11 +2161,6 @@ class SchedulerState:
 
         """
         if self.validate:
-            # We don't `assert self.is_rootish(ts)` here, because that check is dependent on
-            # cluster size. It's possible a task looked root-ish when it was queued, but the
-            # cluster has since scaled up and it no longer does when coming out of the queue.
-            # If `is_rootish` changes to a static definition, then add that assertion here
-            # (and actually pass in the task).
             assert not math.isinf(self.WORKER_SATURATION)
 
         if not self.idle_task_count:
@@ -2188,6 +2200,9 @@ class SchedulerState:
             ``ts`` or there are no running workers, returns None, in which case the task
             should be transitioned to ``no-worker``.
         """
+        if self.validate:
+            assert not self.is_rootish(ts)
+
         if not self.running:
             return None
 
@@ -2256,6 +2271,7 @@ class SchedulerState:
                 # NOTE: having two root-ish methods is temporary. When the feature flag is removed,
                 # there should only be one, which combines co-assignment and queuing.
                 # Eventually, special-casing root tasks might be removed entirely, with better heuristics.
+                ts._rootish = True  # cached until `processing`
                 if math.isinf(self.WORKER_SATURATION):
                     if not (ws := self.decide_worker_rootish_queuing_disabled(ts)):
                         return {ts.key: "no-worker"}, {}, {}
@@ -2263,6 +2279,7 @@ class SchedulerState:
                     if not (ws := self.decide_worker_rootish_queuing_enabled()):
                         return {ts.key: "queued"}, {}, {}
             else:
+                ts._rootish = False  # cached until `processing`
                 if not (ws := self.decide_worker_non_rootish(ts)):
                     return {ts.key: "no-worker"}, {}, {}
 
@@ -3028,6 +3045,15 @@ class SchedulerState:
         Root-ish tasks are part of a group that's much larger than the cluster,
         and have few or no dependencies.
         """
+        # NOTE: the result of `is_rootish` is cached in `waiting->processing`, and
+        # invalidated when entering `processing`. This is for the benefit of the
+        # `queued` and and `no-worker` states. We cache `is_rootish` not for
+        # performance, but so it can't change if `TaskGroup` and cluster size does. That
+        # avoids annoying edge cases where a task does/doesn't look root-ish when it
+        # goes into `queued` or `unrunnable`, but that's flipped when it comes out.
+        if (cached := ts._rootish) is not None:
+            return cached
+
         if ts.resource_restrictions or ts.worker_restrictions or ts.host_restrictions:
             return False
         tg = ts.group
@@ -4924,6 +4950,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert not any([ts in dts.waiters for dts in ts.dependencies])
         assert ts not in self.unrunnable
         assert ts not in self.queued
+        assert ts._rootish is None, ts._rootish
 
     def validate_waiting(self, key):
         ts: TaskState = self.tasks[key]
@@ -4932,6 +4959,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert not ts.processing_on
         assert ts not in self.unrunnable
         assert ts not in self.queued
+        assert ts._rootish is None, ts._rootish
         for dts in ts.dependencies:
             # We are waiting on a dependency iff it's not stored
             assert bool(dts.who_has) != (dts in ts.waiting_on)
@@ -4944,6 +4972,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert not ts.waiting_on
         assert not ts.who_has
         assert not ts.processing_on
+        assert ts._rootish is True, ts._rootish
         assert not (
             ts.worker_restrictions or ts.host_restrictions or ts.resource_restrictions
         )
@@ -4960,6 +4989,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert ts in ws.processing
         assert not ts.who_has
         assert ts not in self.queued
+        assert ts._rootish is None, ts._rootish
         for dts in ts.dependencies:
             assert dts.who_has
             assert ts in dts.waiters
@@ -4973,6 +5003,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert not ts.waiting_on
         assert ts not in self.unrunnable
         assert ts not in self.queued
+        assert ts._rootish is None, ts._rootish
         for dts in ts.dependents:
             assert (dts in ts.waiters) == (
                 dts.state in ("waiting", "queued", "processing", "no-worker")
@@ -4987,6 +5018,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert not ts.processing_on
         assert not ts.who_has
         assert ts not in self.queued
+        assert ts._rootish is not None, ts._rootish
         for dts in ts.dependencies:
             assert dts.who_has
 
@@ -4995,6 +5027,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert ts.exception_blame
         assert not ts.who_has
         assert ts not in self.queued
+        assert ts._rootish is None, ts._rootish
 
     def validate_key(self, key, ts: TaskState | None = None):
         try:
@@ -7085,6 +7118,8 @@ class Scheduler(SchedulerState, ServerNode):
     def set_restrictions(self, worker: dict[str, Collection[str] | str]):
         for key, restrictions in worker.items():
             ts = self.tasks[key]
+            if ts._rootish is not None:
+                raise ValueError(f"cannot set restrictions on ready {ts}")
             if isinstance(restrictions, str):
                 restrictions = {restrictions}
             ts.worker_restrictions = set(restrictions)
@@ -7798,6 +7833,7 @@ def _validate_ready(state: SchedulerState, ts: TaskState) -> None:
     assert ts not in state.unrunnable
     assert ts not in state.queued
     assert all(dts.who_has for dts in ts.dependencies)
+    assert ts._rootish is not None, ts._rootish
 
 
 def _add_to_processing(
@@ -7809,6 +7845,7 @@ def _add_to_processing(
         assert ws in state.running, state.running
         assert (o := state.workers.get(ws.address)) is ws, (ws, o)
 
+    ts._rootish = None
     ws.add_to_processing(ts)
     ts.processing_on = ws
     ts.state = "processing"
@@ -7836,6 +7873,9 @@ def _exit_processing_common(
     --------
     Scheduler._set_duration_estimate
     """
+    if state.validate:
+        assert ts._rootish is None, ts._rootish
+
     ws = ts.processing_on
     assert ws
     ts.processing_on = None
@@ -7937,6 +7977,7 @@ def _propagate_released(
     recommendations: Recs,
 ) -> None:
     ts.state = "released"
+    ts._rootish = None
     key = ts.key
 
     if ts.has_lost_dependencies:
