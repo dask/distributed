@@ -121,7 +121,6 @@ async def test_bad_disk(c, s, a, b):
     # clean_scheduler(s)
 
 
-@pytest.mark.skip
 @pytest.mark.slow
 @gen_cluster(client=True)
 async def test_crashed_worker(c, s, a, b):
@@ -140,7 +139,7 @@ async def test_crashed_worker(c, s, a, b):
             [
                 ts
                 for ts in s.tasks.values()
-                if "shuffle_transfer" in ts.key and ts.state == "memory"
+                if "shuffle-transfer" in ts.key and ts.state == "memory"
             ]
         )
         < 3

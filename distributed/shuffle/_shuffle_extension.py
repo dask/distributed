@@ -115,6 +115,7 @@ class Shuffle:
             partitions_of[addr].append(part)
         self.partitions_of = dict(partitions_of)
         self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
+        self.closed = False
 
         def _dump_batch(batch: pa.Buffer, file: BinaryIO) -> None:
             return dump_batch(batch, file, self.schema)
@@ -138,6 +139,7 @@ class Shuffle:
         self.total_recvd = 0
         self.start_time = time.time()
         self._exception: Exception | None = None
+        self._close_lock = asyncio.Lock()
 
     def __repr__(self) -> str:
         return f"<Shuffle id: {self.id} on {self.local_address}>"
@@ -219,10 +221,19 @@ class Shuffle:
                     for k, v in groups.items()
                 }
             )
+            self.check_closed()
             await self._disk_buffer.write(groups)
         except Exception as e:
             self._exception = e
             raise
+
+    def check_closed(self) -> None:
+        if self.closed:
+            if self._exception:
+                raise self._exception
+            raise RuntimeError(
+                f"Shuffle {self.id} has been closed on {self.local_address}"
+            )
 
     async def add_partition(self, data: pd.DataFrame) -> None:
         if self.transferred:
@@ -258,6 +269,7 @@ class Shuffle:
         ), f"No outputs remaining, but requested output partition {i} on {self.local_address}."
         await self.flush_receive()
         try:
+            self.check_closed()
             df = self._disk_buffer.read(i)
             with self.time("cpu"):
                 out = df.to_pandas()
@@ -269,6 +281,7 @@ class Shuffle:
     async def inputs_done(self) -> None:
         assert not self.transferred, "`inputs_done` called multiple times"
         self.transferred = True
+        self.check_closed()
         await self._comm_buffer.flush()
         try:
             self._comm_buffer.raise_on_exception()
@@ -280,17 +293,18 @@ class Shuffle:
         return self.transferred and self.output_partitions_left == 0
 
     async def flush_receive(self) -> None:
-        if self._exception:
-            raise self._exception
+        self.check_closed()
         await self._disk_buffer.flush()
 
     async def close(self) -> None:
-        await self._comm_buffer.close()
-        await self._disk_buffer.close()
-        try:
-            self.executor.shutdown(cancel_futures=True)
-        except Exception:
-            self.executor.shutdown()
+        self.closed = True
+        async with self._close_lock:
+            await self._comm_buffer.close()
+            await self._disk_buffer.close()
+            try:
+                self.executor.shutdown(cancel_futures=True)
+            except Exception:
+                self.executor.shutdown()
 
 
 class ShuffleWorkerExtension:
