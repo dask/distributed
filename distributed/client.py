@@ -2885,7 +2885,7 @@ class Client(SyncMethodMixin):
         >>> def get_status(dask_worker):
         ...     return dask_worker.status
 
-        >>> c.run(get_hostname)  # doctest: +SKIP
+        >>> c.run(get_status)  # doctest: +SKIP
         {'192.168.0.100:9000': 'running',
          '192.168.0.101:9000': 'running}
 
