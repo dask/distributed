@@ -269,6 +269,7 @@ class Shuffle:
         assert not self.transferred, "`inputs_done` called multiple times"
         self.transferred = True
         await self._comm_buffer.flush()
+        self._comm_buffer.raise_on_exception()
 
     def done(self) -> bool:
         return self.transferred and self.output_partitions_left == 0
