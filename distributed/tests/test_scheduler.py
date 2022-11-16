@@ -8,6 +8,7 @@ import operator
 import pickle
 import re
 import sys
+from contextlib import AsyncExitStack
 from itertools import product
 from textwrap import dedent
 from time import sleep
@@ -482,6 +483,140 @@ async def test_queued_remove_add_worker(c, s, a, b):
 
         await event.set()
         await wait(fs)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 2)],
+    config={
+        "distributed.scheduler.worker-saturation": 1.0,
+    },
+)
+async def test_queued_oversaturates_after_group_shrinks(c, s, a):
+    """
+    When tasks switch from root-ish to non-root-ish, even though they're in `queued`,
+    they're scheduled without regard to worker-saturation.
+
+    This isn't really desireable behavior, it's just what happens to occur right now. If
+    this changes, that's okay (maybe even good).
+    """
+    root = c.submit(inc, 1, key="root")
+
+    # Put some tasks in the queue
+    es = [Event() for _ in range(5)]
+    fs = c.map(lambda _, e: e.wait(), [root] * len(es), es)
+    await wait_for_state(fs[0].key, "processing", s)
+    assert s.queued
+
+    # Add a downstream task that depends on fs[0]
+    de = Event()
+    downstream = c.submit(lambda _: de.wait(), fs[0])
+    await wait_for_state(downstream.key, "waiting", s)
+
+    # Cancel one task. Group is now too small to be root-ish.
+    del fs[-1], es[-1]
+    await async_wait_for(lambda: len(s.tasks) == len(fs) + 2, 5)
+    if s.is_rootish(s.tasks[fs[0].key]):
+        pytest.fail(
+            "Test assumptions have changed; task is still root-ish. Test may no longer be relevant."
+        )
+
+    # Let the downstream task schedule.
+    # When a slot opens and we try to schedule the next task on the queue,
+    # it gets scheduled as non-root-ish. So both the downstream task and the next
+    # queued task get assigned to the worker, exceeding worker-saturation.
+    await es[0].set()
+    await wait_for_state(downstream.key, "processing", s)
+    # KEY ASSERTION:
+    # the next task on the queue got scheduled, exceeding worker-saturation, because
+    # even though it was in `queued`, it was no longer root-ish.
+    assert len(s.workers[a.address].processing) == a.state.nthreads + 1
+
+    # Everything runs
+    await de.set()
+    await downstream
+    await asyncio.gather(*(e.set() for e in es))
+
+    await c.gather(fs)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 2)] * 2,
+    config={
+        "distributed.worker.memory.pause": False,
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": False,
+        "distributed.scheduler.work-stealing": False,
+    },
+)
+async def test_queued_rootish_changes_while_paused(c, s, a, b):
+    "Some tasks are root-ish, some aren't. So both `unrunnable` and `queued` contain non-restricted tasks."
+    # NOTE: this tests the `no-worker->queued` transition when queueing is active.
+
+    root = c.submit(inc, 1, key="root")
+    await root
+
+    # manually pause the workers
+    a.status = Status.paused
+    b.status = Status.paused
+
+    await async_wait_for(lambda: not s.running, 5)
+
+    fs = [c.submit(inc, root, key=f"inc-{i}") for i in range(s.total_nthreads * 2 + 1)]
+    # ^ `c.submit` in a for-loop so the first tasks don't look root-ish (`TaskGroup` too
+    # small), then the last one does. So N-1 tasks will go to `no-worker`, and the last
+    # to `queued`. `is_rootish` is just messed up like that.
+
+    await async_wait_for(lambda: len(s.tasks) > len(fs), 5)
+
+    # un-pause
+    a.status = Status.running
+    b.status = Status.running
+    await async_wait_for(lambda: len(s.running) == len(s.workers), 5)
+
+    await c.gather(fs)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    config={"distributed.scheduler.work-stealing": False},
+)
+async def test_queued_rootish_changes_scale_up(c, s, a):
+    "Tasks are initially root-ish. After cluster scales, they aren't."
+
+    root = c.submit(inc, 1, key="root")
+
+    event = Event()
+    clog = c.submit(event.wait, key="clog")
+    await wait_for_state(clog.key, "processing", s)
+
+    fs = c.map(inc, [root] * 5, key=[f"inc-{i}" for i in range(5)])
+
+    await async_wait_for(lambda: len(s.tasks) > len(fs), 5)
+
+    if not s.is_rootish(s.tasks[fs[0].key]):
+        pytest.fail(
+            "Test assumptions have changed; task is not root-ish. Test may no longer be relevant."
+        )
+    if math.isfinite(s.WORKER_SATURATION):
+        assert s.queued
+
+    async with AsyncExitStack() as stack:
+        for _ in range(3):
+            await stack.enter_async_context(Worker(s.address, nthreads=2))
+
+        if s.is_rootish(s.tasks[fs[0].key]):
+            pytest.fail(
+                "Test assumptions have changed; task is still root-ish. Test may no longer be relevant."
+            )
+
+        await event.set()
+        await clog
+
+    # Just verify it doesn't deadlock
+    await c.gather(fs)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])

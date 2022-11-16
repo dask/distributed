@@ -2034,23 +2034,22 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_no_worker_processing(self, key, stimulus_id):
+    def transition_no_worker_queued(self, key, stimulus_id):
         try:
             ts: TaskState = self.tasks[key]
-            recommendations: Recs = {}
-            client_msgs: dict = {}
-            worker_msgs: dict = {}
 
             if self.validate:
-                assert not ts.actor, f"Actors can't be in `no-worker`: {ts}"
-                assert ts in self.unrunnable
+                assert self.is_rootish(
+                    ts
+                ), "Non root-ish task should remain in no-worker"
+                assert not ts.actor, f"Actors can't be queued: {ts}"
+                assert ts not in self.queued
 
-            if ws := self.decide_worker_non_rootish(ts):
-                self.unrunnable.discard(ts)
-                worker_msgs = _add_to_processing(self, ts, ws)
-            # If no worker, task just stays in `no-worker`
+            self.unrunnable.remove(ts)
+            self.queued.add(ts)
+            ts.state = "queued"
 
-            return recommendations, client_msgs, worker_msgs
+            return {}, {}, {}
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2059,7 +2058,29 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def decide_worker_rootish_queuing_disabled(
+    def transition_no_worker_processing(self, key, stimulus_id):
+        try:
+            ts: TaskState = self.tasks[key]
+
+            if self.validate:
+                assert not ts.actor, f"Actors can't be in `no-worker`: {ts}"
+                assert ts in self.unrunnable
+
+            ws_or_state = self.decide_worker_or_next_state(ts)
+            if isinstance(ws_or_state, str):
+                return {key: ws_or_state}, {}, {}
+
+            self.unrunnable.discard(ts)
+            return {}, {}, _add_to_processing(self, ts, ws_or_state)
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
+
+    def _decide_worker_rootish_queuing_disabled(
         self, ts: TaskState
     ) -> WorkerState | None:
         """Pick a worker for a runnable root-ish task, without queuing.
@@ -2119,7 +2140,7 @@ class SchedulerState:
 
         return ws
 
-    def decide_worker_rootish_queuing_enabled(self) -> WorkerState | None:
+    def _decide_worker_rootish_queuing_enabled(self) -> WorkerState | None:
         """Pick a worker for a runnable root-ish task, if not all are busy.
 
         Picks the least-busy worker out of the ``idle`` workers (idle workers have fewer
@@ -2174,7 +2195,7 @@ class SchedulerState:
 
         return ws
 
-    def decide_worker_non_rootish(self, ts: TaskState) -> WorkerState | None:
+    def _decide_worker_non_rootish(self, ts: TaskState) -> WorkerState | None:
         """Pick a worker for a runnable non-root task, considering dependencies and restrictions.
 
         Out of eligible workers holding dependencies of ``ts``, selects the worker
@@ -2243,6 +2264,32 @@ class SchedulerState:
 
         return ws
 
+    def decide_worker_or_next_state(
+        self, ts: TaskState
+    ) -> WorkerState | Literal["queued", "no-worker"]:
+        """
+        Pick a worker for a runnable task, or if there is none, which state to hold the task in.
+
+        Selects an appropriate worker to run the task, based on whether the task is
+        root-ish or not and whether queuing is enabled. If there is none, instead
+        returns the next state the task should go do.
+        """
+        if self.is_rootish(ts):
+            # NOTE: having two root-ish methods is temporary. When the feature flag is removed,
+            # there should only be one, which combines co-assignment and queuing.
+            # Eventually, special-casing root tasks might be removed entirely, with better heuristics.
+            if math.isinf(self.WORKER_SATURATION):
+                if not (ws := self._decide_worker_rootish_queuing_disabled(ts)):
+                    return "no-worker"
+            else:
+                if not (ws := self._decide_worker_rootish_queuing_enabled()):
+                    return "queued"
+        else:
+            if not (ws := self._decide_worker_non_rootish(ts)):
+                return "no-worker"
+
+        return ws
+
     def transition_waiting_processing(self, key, stimulus_id):
         """Possibly schedule a ready task. This is the primary dispatch for ready tasks.
 
@@ -2252,22 +2299,11 @@ class SchedulerState:
         try:
             ts: TaskState = self.tasks[key]
 
-            if self.is_rootish(ts):
-                # NOTE: having two root-ish methods is temporary. When the feature flag is removed,
-                # there should only be one, which combines co-assignment and queuing.
-                # Eventually, special-casing root tasks might be removed entirely, with better heuristics.
-                if math.isinf(self.WORKER_SATURATION):
-                    if not (ws := self.decide_worker_rootish_queuing_disabled(ts)):
-                        return {ts.key: "no-worker"}, {}, {}
-                else:
-                    if not (ws := self.decide_worker_rootish_queuing_enabled()):
-                        return {ts.key: "queued"}, {}, {}
-            else:
-                if not (ws := self.decide_worker_non_rootish(ts)):
-                    return {ts.key: "no-worker"}, {}, {}
+            ws_or_state = self.decide_worker_or_next_state(ts)
+            if isinstance(ws_or_state, str):
+                return {key: ws_or_state}, {}, {}
 
-            worker_msgs = _add_to_processing(self, ts, ws)
-            return {}, {}, worker_msgs
+            return {}, {}, _add_to_processing(self, ts, ws_or_state)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2859,23 +2895,44 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    def transition_queued_no_worker(self, key, stimulus_id):
+        # FIXME this transition may be unreachable?
+        try:
+            ts: TaskState = self.tasks[key]
+
+            if self.validate:
+                assert not self.is_rootish(ts), "Root-ish task should remain in queued"
+                assert not ts.actor, f"Actors can't be queued: {ts}"
+                assert ts not in self.unrunnable
+
+            self.queued.remove(ts)
+            self.unrunnable.add(ts)
+            ts.state = "no-worker"
+
+            return {}, {}, {}
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
+
     def transition_queued_processing(self, key, stimulus_id):
         try:
             ts: TaskState = self.tasks[key]
-            recommendations: Recs = {}
-            client_msgs: dict = {}
-            worker_msgs: dict = {}
 
             if self.validate:
                 assert not ts.actor, f"Actors can't be queued: {ts}"
                 assert ts in self.queued
 
-            if ws := self.decide_worker_rootish_queuing_enabled():
-                self.queued.discard(ts)
-                worker_msgs = _add_to_processing(self, ts, ws)
-            # If no worker, task just stays `queued`
+            ws_or_state = self.decide_worker_or_next_state(ts)
+            if isinstance(ws_or_state, str):
+                return {key: ws_or_state}, {}, {}
 
-            return recommendations, client_msgs, worker_msgs
+            self.queued.discard(ts)
+            return {}, {}, _add_to_processing(self, ts, ws_or_state)
+
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2996,11 +3053,13 @@ class SchedulerState:
         ("waiting", "queued"): transition_waiting_queued,
         ("waiting", "memory"): transition_waiting_memory,
         ("queued", "released"): transition_queued_released,
+        ("queued", "no-worker"): transition_queued_no_worker,
         ("queued", "processing"): transition_queued_processing,
         ("processing", "released"): transition_processing_released,
         ("processing", "memory"): transition_processing_memory,
         ("processing", "erred"): transition_processing_erred,
         ("no-worker", "released"): transition_no_worker_released,
+        ("no-worker", "queued"): transition_no_worker_queued,
         ("no-worker", "processing"): transition_no_worker_processing,
         ("released", "forgotten"): transition_released_forgotten,
         ("memory", "forgotten"): transition_memory_forgotten,
@@ -3028,7 +3087,12 @@ class SchedulerState:
         Root-ish tasks are part of a group that's much larger than the cluster,
         and have few or no dependencies.
         """
-        if ts.resource_restrictions or ts.worker_restrictions or ts.host_restrictions:
+        if (
+            ts.resource_restrictions
+            or ts.worker_restrictions
+            or ts.host_restrictions
+            or ts.actor
+        ):
             return False
         tg = ts.group
         # TODO short-circuit to True if `not ts.dependencies`?
