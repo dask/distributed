@@ -31,18 +31,17 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, Container, Literal, cast
 
 import psutil
-from tornado.ioloop import PeriodicCallback
 
 import dask.config
 from dask.system import CPU_COUNT
 from dask.utils import format_bytes, parse_bytes, parse_timedelta
 
 from distributed import system
-from distributed.compatibility import WINDOWS
+from distributed.compatibility import WINDOWS, PeriodicCallback
 from distributed.core import Status
 from distributed.metrics import monotonic
 from distributed.spill import ManualEvictProto, SpillBuffer
-from distributed.utils import log_errors
+from distributed.utils import has_arg, log_errors
 from distributed.utils_perf import ThrottledGC
 
 if TYPE_CHECKING:
@@ -54,6 +53,24 @@ logger = logging.getLogger(__name__)
 
 
 class WorkerMemoryManager:
+    """Management of worker memory usage
+
+    Parameters
+    ----------
+    worker
+        Worker to manage
+
+    For meaning of the remaining parameters, see the matching
+    parameter names in :class:`~.distributed.worker.Worker`.
+
+    Notes
+    -----
+
+    If data is a callable and has the argument ``worker_local_directory`` in its
+    signature, it will be filled with the worker's attr:``local_directory``.
+
+    """
+
     data: MutableMapping[str, object]  # {task key: task payload}
     memory_limit: int | None
     memory_target_fraction: float | Literal[False]
@@ -61,7 +78,6 @@ class WorkerMemoryManager:
     memory_pause_fraction: float | Literal[False]
     max_spill: int | Literal[False]
     memory_monitor_interval: float
-    _memory_monitoring: bool
     _throttled_gc: ThrottledGC
 
     def __init__(
@@ -75,6 +91,8 @@ class WorkerMemoryManager:
         data: (
             MutableMapping[str, Any]  # pre-initialised
             | Callable[[], MutableMapping[str, Any]]  # constructor
+            # constructor, passed worker.local_directory
+            | Callable[[str], MutableMapping[str, Any]]
             | tuple[
                 Callable[..., MutableMapping[str, Any]], dict[str, Any]
             ]  # (constructor, kwargs to constructor)
@@ -109,9 +127,22 @@ class WorkerMemoryManager:
         if isinstance(data, MutableMapping):
             self.data = data
         elif callable(data):
-            self.data = data()
+            if has_arg(data, "worker_local_directory"):
+                data = cast("Callable[[str], MutableMapping[str, Any]]", data)
+                self.data = data(worker.local_directory)
+            else:
+                data = cast("Callable[[], MutableMapping[str, Any]]", data)
+                self.data = data()
         elif isinstance(data, tuple):
-            self.data = data[0](**data[1])
+            func, kwargs = data
+            if not callable(func):
+                raise ValueError("Expecting a callable")
+            if has_arg(func, "worker_local_directory"):
+                self.data = func(
+                    worker_local_directory=worker.local_directory, **kwargs
+                )
+            else:
+                self.data = func(**kwargs)
         elif self.memory_limit and (
             self.memory_target_fraction or self.memory_spill_fraction
         ):
@@ -129,8 +160,6 @@ class WorkerMemoryManager:
             )
         else:
             self.data = {}
-
-        self._memory_monitoring = False
 
         self.memory_monitor_interval = parse_timedelta(
             dask.config.get("distributed.worker.memory.monitor-interval"),
@@ -161,18 +190,12 @@ class WorkerMemoryManager:
         If process memory rises above the pause threshold (80%), stop execution of new
         tasks.
         """
-        if self._memory_monitoring:
-            return
-        self._memory_monitoring = True
-        try:
-            # Don't use psutil directly; instead read from the same API that is used
-            # to send info to the Scheduler (e.g. for the benefit of Active Memory
-            # Manager) and which can be easily mocked in unit tests.
-            memory = worker.monitor.get_process_memory()
-            self._maybe_pause_or_unpause(worker, memory)
-            await self._maybe_spill(worker, memory)
-        finally:
-            self._memory_monitoring = False
+        # Don't use psutil directly; instead read from the same API that is used
+        # to send info to the Scheduler (e.g. for the benefit of Active Memory
+        # Manager) and which can be easily mocked in unit tests.
+        memory = worker.monitor.get_process_memory()
+        self._maybe_pause_or_unpause(worker, memory)
+        await self._maybe_spill(worker, memory)
 
     def _maybe_pause_or_unpause(self, worker: Worker, memory: int) -> None:
         if self.memory_pause_fraction is False:
@@ -385,7 +408,7 @@ def parse_memory_limit(
 ) -> int | None:
     if memory_limit is None:
         return None
-
+    orig = memory_limit
     if memory_limit == "auto":
         memory_limit = int(system.MEMORY_LIMIT * min(1, nthreads / total_cores))
     with suppress(ValueError, TypeError):
@@ -401,7 +424,15 @@ def parse_memory_limit(
     assert isinstance(memory_limit, int)
     if memory_limit == 0:
         return None
-    return min(memory_limit, system.MEMORY_LIMIT)
+    if system.MEMORY_LIMIT < memory_limit:
+        logger.warning(
+            "Ignoring provided memory limit %s due to system memory limit of %s",
+            orig,
+            format_bytes(system.MEMORY_LIMIT),
+        )
+        return system.MEMORY_LIMIT
+    else:
+        return memory_limit
 
 
 def _parse_threshold(

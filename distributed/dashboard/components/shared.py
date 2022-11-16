@@ -56,7 +56,6 @@ class Processing(DashboardComponent):
             title="Processing and Pending",
             tools="",
             x_range=x_range,
-            id="bk-processing-stacks-plot",
             **kwargs,
         )
         fig.quad(
@@ -504,14 +503,14 @@ class SystemMonitor(DashboardComponent):
         self.bandwidth.line(
             source=self.source,
             x="time",
-            y="read_bytes",
+            y="host_net_io.read_bps",
             color="red",
             legend_label="read",
         )
         self.bandwidth.line(
             source=self.source,
             x="time",
-            y="write_bytes",
+            y="host_net_io.write_bps",
             color="blue",
             legend_label="write",
         )

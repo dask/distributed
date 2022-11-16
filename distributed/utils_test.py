@@ -24,7 +24,7 @@ import threading
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Mapping
 from contextlib import contextmanager, nullcontext, suppress
 from itertools import count
 from time import sleep
@@ -33,11 +33,13 @@ from typing import IO, Any, Generator, Iterator, Literal
 import pytest
 import yaml
 from tlz import assoc, memoize, merge
+from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import IOLoop
 
 import dask
+from dask.sizeof import sizeof
 
-from distributed import Scheduler, system
+from distributed import Event, Scheduler, system
 from distributed import versions as version_module
 from distributed.batched import BatchedSend
 from distributed.client import Client, _global_clients, default_client
@@ -110,6 +112,11 @@ logging_levels = {
 _TEST_TIMEOUT = 30
 _offload_executor.submit(lambda: None).result()  # create thread during import
 
+# Dask configuration to completely disable the Active Memory Manager.
+# This is typically used with @gen_cluster(config=NO_AMM)
+# or @gen_cluster(config=merge(NO_AMM, {<more config options})).
+NO_AMM = {"distributed.scheduler.active-memory-manager.start": False}
+
 
 async def cleanup_global_workers():
     for worker in Worker._instances:
@@ -151,24 +158,6 @@ def loop_in_thread(cleanup):
                 # the loop failed to close and we need to raise the exception
                 ran.result()
                 return
-
-
-@contextmanager
-def pristine_loop():
-    IOLoop.clear_instance()
-    IOLoop.clear_current()
-    loop = IOLoop()
-    loop.make_current()
-    assert IOLoop.current() is loop
-    try:
-        yield loop
-    finally:
-        try:
-            loop.close(all_fds=True)
-        except (KeyError, ValueError):
-            pass
-        IOLoop.clear_instance()
-        IOLoop.clear_current()
 
 
 original_config = copy.deepcopy(dask.config.config)
@@ -286,6 +275,10 @@ def slowidentity(*args, **kwargs):
 def lock_inc(x, lock):
     with lock:
         return x + 1
+
+
+def block_on_event(event: Event) -> None:
+    event.wait()
 
 
 class _UnhashableCallable:
@@ -525,6 +518,24 @@ def client(loop, cluster_fixture):
         yield client
 
 
+@pytest.fixture
+def client_no_amm(client):
+    """Sync client with the Active Memory Manager (AMM) turned off.
+    This works regardless of the AMM being on or off in the dask config.
+    """
+    before = client.amm.running()
+    if before:
+        client.amm.stop()  # pragma: nocover
+
+    yield client
+
+    after = client.amm.running()
+    if before and not after:
+        client.amm.start()  # pragma: nocover
+    elif not before and after:  # pragma: nocover
+        client.amm.stop()
+
+
 # Compatibility. A lot of tests simply use `c` as fixture name
 c = client
 
@@ -669,7 +680,7 @@ def cluster(
                         nthreads = await s.ncores_running()
                         if len(nthreads) == nworkers:
                             break
-                        if time() - start > 5:
+                        if time() - start > 5:  # pragma: nocover
                             raise Exception("Timeout on cluster creation")
 
             _run_and_close_tornado(wait_for_workers)
@@ -2119,6 +2130,23 @@ def ucx_loop():
     ucp.reset()
     loop.close()
 
+    # Reset also Distributed's UCX initialization, i.e., revert the effects of
+    # `distributed.comm.ucx.init_once()`.
+    import distributed.comm.ucx
+
+    distributed.comm.ucx.ucp = None
+    # If the test created a context, clean it up.
+    # TODO: should we check if there's already a context _before_ the test runs?
+    # I think that would be useful.
+    from distributed.diagnostics.nvml import has_cuda_context
+
+    ctx = has_cuda_context()
+    if ctx.has_context:
+        import numba.cuda
+
+        ctx = numba.cuda.current_context()
+        ctx.device.reset()
+
 
 def wait_for_log_line(
     match: bytes, stream: IO[bytes] | None, max_lines: int | None = 10
@@ -2281,13 +2309,13 @@ def freeze_data_fetching(w: Worker, *, jump_start: bool = False) -> Iterator[Non
         If True, trigger ensure_communicating on exit; this simulates e.g. an unrelated
         worker moving out of in_flight_workers.
     """
-    old_out_connections = w.state.total_out_connections
-    old_comm_threshold = w.state.comm_threshold_bytes
-    w.state.total_out_connections = 0
-    w.state.comm_threshold_bytes = 0
+    old_count_limit = w.state.transfer_incoming_count_limit
+    old_threshold = w.state.transfer_incoming_bytes_throttle_threshold
+    w.state.transfer_incoming_count_limit = 0
+    w.state.transfer_incoming_bytes_throttle_threshold = 0
     yield
-    w.state.total_out_connections = old_out_connections
-    w.state.comm_threshold_bytes = old_comm_threshold
+    w.state.transfer_incoming_count_limit = old_count_limit
+    w.state.transfer_incoming_bytes_throttle_threshold = old_threshold
     if jump_start:
         w.status = Status.paused
         w.status = Status.running
@@ -2324,11 +2352,17 @@ def freeze_batched_send(bcomm: BatchedSend) -> Iterator[LockedComm]:
 
 
 async def wait_for_state(
-    key: str, state: str, dask_worker: Worker | Scheduler, *, interval: float = 0.01
+    key: str,
+    state: str | Collection[str],
+    dask_worker: Worker | Scheduler,
+    *,
+    interval: float = 0.01,
 ) -> None:
     """Wait for a task to appear on a Worker or on the Scheduler and to be in a specific
-    state.
+    state or one of a set of possible states.
     """
+    tasks: Mapping[str, SchedulerTaskState | WorkerTaskState]
+
     if isinstance(dask_worker, Worker):
         tasks = dask_worker.state.tasks
     elif isinstance(dask_worker, Scheduler):
@@ -2336,14 +2370,18 @@ async def wait_for_state(
     else:
         raise TypeError(dask_worker)  # pragma: nocover
 
+    if isinstance(state, str):
+        state = (state,)
+    state_str = repr(next(iter(state))) if len(state) == 1 else str(state)
+
     try:
-        while key not in tasks or tasks[key].state != state:
+        while key not in tasks or tasks[key].state not in state:
             await asyncio.sleep(interval)
     except (asyncio.CancelledError, asyncio.TimeoutError):
         if key in tasks:
             msg = (
                 f"tasks[{key}].state={tasks[key].state!r} on {dask_worker.address}; "
-                f"expected {state=}"
+                f"expected state={state_str}"
             )
         else:
             msg = f"tasks[{key}] not found on {dask_worker.address}"
@@ -2440,3 +2478,66 @@ def requires_default_ports(name_of_test):
         raise TimeoutError(f"Default ports didn't open up in time for {name_of_test}")
 
     yield
+
+
+async def fetch_metrics_body(port: int) -> str:
+    http_client = AsyncHTTPClient()
+    response = await http_client.fetch(f"http://localhost:{port}/metrics")
+    assert response.code == 200
+    return response.body.decode("utf8")
+
+
+async def fetch_metrics(port: int, prefix: str | None = None) -> dict[str, Any]:
+    from prometheus_client.parser import text_string_to_metric_families
+
+    txt = await fetch_metrics_body(port)
+    families = {
+        family.name: family
+        for family in text_string_to_metric_families(txt)
+        if prefix is None or family.name.startswith(prefix)
+    }
+    return families
+
+
+async def fetch_metrics_sample_names(port: int, prefix: str | None = None) -> set[str]:
+    """
+    Get all the names of samples returned by Prometheus.
+
+    This mostly matches list of metric families, but when there's `foo` (gauge) and `foo_total` (count)
+    these will both have `foo` as the family.
+    """
+    from prometheus_client.parser import text_string_to_metric_families
+
+    txt = await fetch_metrics_body(port)
+    sample_names = set().union(
+        *[
+            {sample.name for sample in family.samples}
+            for family in text_string_to_metric_families(txt)
+            if prefix is None or family.name.startswith(prefix)
+        ]
+    )
+    return sample_names
+
+
+class SizeOf:
+    """
+    An object that returns exactly nbytes when inspected by dask.sizeof.sizeof
+    """
+
+    def __init__(self, nbytes: int) -> None:
+        if not isinstance(nbytes, int):
+            raise TypeError(f"Expected integer for nbytes but got {type(nbytes)}")
+        size_obj = sizeof(object())
+        if nbytes < size_obj:
+            raise ValueError(
+                f"Expected a value larger than {size_obj} integer but got {nbytes}."
+            )
+        self._nbytes = nbytes - size_obj
+
+    def __sizeof__(self) -> int:
+        return self._nbytes
+
+
+def gen_nbytes(nbytes: int) -> SizeOf:
+    """A function that emulates exactly nbytes on the worker data structure."""
+    return SizeOf(nbytes)

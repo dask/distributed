@@ -1,6 +1,338 @@
 Changelog
 =========
 
+2022.11.0
+---------
+
+Released on November 15, 2022
+
+.. note::
+
+    This release changes the default scheduling mode to use :ref:`queuing <queuing>`.
+    This will significantly reduce cluster memory use in most cases, and generally
+    improve stability and performance. `Learn more here <https://www.coiled.io/blog/reducing-dask-memory-usage>`_
+    and please provide any feedback `on this discussion <https://github.com/dask/distributed/discussions/7128>`_.
+
+    In rare cases, this could make some workloads slower. See the :ref:`documentation <adjust-queuing>`
+    for more information, and how to switch back to the old mode.
+
+New Features
+^^^^^^^^^^^^
+- Add ``ForwardOutput`` worker plugin to forward ``stdout`` and ``stderr`` to client. (:pr:`7297`) `Hendrik Makait`_
+- Duration counters on prefix level (:pr:`7288`) `Florian Jetter`_
+- Include button for launching JupyterLab layout in repr (:pr:`7218`) `Ian Rose`_
+
+Enhancements
+^^^^^^^^^^^^
+- Support MIG parsing during CUDA context creation in UCX initialization (:pr:`6720`) `Peter Andreas Entschev`_
+- Handle ``/metrics`` endpoint without ``prometheus-client`` installed (:pr:`7234`) `Hendrik Makait`_
+- Add support for unpacking namedtuples in remote data (:pr:`7282`) `Andrew`_
+- Enable queuing by default (:pr:`7279`) `Florian Jetter`_
+- Fix ``exists``->``exist`` typo in scheduler error messages (:pr:`7281`) `Matthew Plough`_
+- If there's an exception in the ``Client`` async context manager body then close fast (:pr:`6920`) `Thomas Grainger`_
+
+Documentation
+^^^^^^^^^^^^^
+- Copyediting typos + ``codespell`` ``pre-commit`` hook for docs (:pr:`7294`) `Matthew Plough`_
+- Queuing docs (:pr:`7203`) `Gabe Joseph`_
+
+Bug Fixes
+^^^^^^^^^
+- Ensure category is optional when logging ``"warn"`` events (:pr:`7169`) `James Bourbeau`_
+- Edge and impossible transitions to memory (:pr:`7205`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Use ``conda-incubator/setup-miniconda@v2.2.0`` (:pr:`7310`) `jakirkham`_
+- Allow ``bokeh=3``  (:pr:`5648`) `James Bourbeau`_
+- Fix typos in P2P shuffle code (:pr:`7304`) `Hendrik Makait`_
+- Reenable ``test_bad_disk`` (:pr:`7300`) `Florian Jetter`_
+- Reduce max-runs in test reports (:pr:`7299`) `Florian Jetter`_
+- Revert idle classification when ``worker-saturation`` is set (:pr:`7278`) `Florian Jetter`_
+- Fix flaky ``deadline_expiration`` (:pr:`7287`) `Florian Jetter`_
+- Rewrite of P2P control flow (:pr:`7268`) `Florian Jetter`_
+- Add codecov token (:pr:`7277`) `Florian Jetter`_
+- Bump minimum ``bokeh`` version to 2.4.2 (:pr:`7271`) `James Bourbeau`_
+- Remove deprecated code calls to ``IOLoop.make_current()`` (:pr:`7240`) `Thomas Grainger`_
+- Improved test for balancing expensive tasks (:pr:`7272`) `Hendrik Makait`_
+- Refactor ``semaphore._Watch`` into general-purpose ``Deadline`` utility (:pr:`7238`) `Hendrik Makait`_
+- Coverage report fixing (:pr:`7270`) `Tom Hu`_
+- Require Click 7.0+ (:pr:`7226`) `jakirkham`_
+- Drop tests (:pr:`7269`) `Hendrik Makait`_
+- Replace ``test_(do_not_)steal_communication_heavy_tasks`` tests with more robust versions (:pr:`7243`) `Hendrik Makait`_
+- ``xfail`` ``test_bad_disk`` (:pr:`7265`) `crusaderky`_
+- Move ``transition_log`` from ``Scheduler`` to ``SchedulerState`` (:pr:`7254`) `crusaderky`_
+- Remove ``Scheduler.log`` (:pr:`7258`) `crusaderky`_
+- Use latest ``pickle`` (:pr:`5826`) `jakirkham`_
+- Polish parsing of ``worker-saturation`` from config (:pr:`7255`) `crusaderky`_
+- Avoid expensive occupancy calculation when unused (:pr:`7257`) `Gabe Joseph`_
+- Un-skip ``test_nested_compute`` (:pr:`7247`) `Gabe Joseph`_
+- Review ``test_do_not_steal_communication_heavy_tasks`` (:pr:`7250`) `crusaderky`_
+- Fix ``test_stress_creation_and_deletion`` (:pr:`7215`) `crusaderky`_
+- Raise exceptions in ``Server.handle_stream`` instead of swallowing/logging (:pr:`7162`) `Hendrik Makait`_
+- Upgrade to ``mypy`` v0.982 (:pr:`7241`) `Thomas Grainger`_
+- Fix ``_update_scheduler_info`` hanging failed tests (:pr:`7225`) `Gabe Joseph`_
+- Bump ``xarray-contrib/ci-trigger`` from 1.1 to 1.2 (:pr:`7232`)
+
+
+.. _v2022.10.2:
+
+2022.10.2
+---------
+
+Released on October 31, 2022
+
+- Reverted a bug where Bokeh was accidentally made non-optional (:pr:`7230`) `Oliver Holworthy`_
+- Schedule a queued task when a task secedes (:pr:`7224`) `Gabe Joseph`_
+
+This was a hotfix release
+
+.. _v2022.10.1:
+
+2022.10.1
+---------
+
+Released on October 28, 2022
+
+New Features
+^^^^^^^^^^^^
+- Add ``Client.restart_workers`` method (:pr:`7154`) `James Bourbeau`_
+- Implement ``PackageInstall`` plugin for ``pip`` and ``conda`` (:pr:`7126`) `Hendrik Makait`_
+
+Enhancements
+^^^^^^^^^^^^
+- Add prometheus collector for work-stealing (:pr:`7206`) `Hendrik Makait`_
+- Track reason of workers closing and restarting (:pr:`7166`) `Hendrik Makait`_
+- Show no-worker on task progress bar (:pr:`7171`) `Florian Jetter`_
+- Set ``OPENBLAS_NUM_THREADS`` by default (:pr:`7177`) `James Bourbeau`_
+- Optionally provide local directory to data constructor (:pr:`7153`) `Lawrence Mitchell`_
+- Introduce ``distributed.comm.ucx.environment`` config slot (:pr:`7164`) `Lawrence Mitchell`_
+- Log information about memory limit (:pr:`7160`) `Florian Jetter`_
+- Improve log messages on scheduler for restart (:pr:`7150`) `Florian Jetter`_
+- More comprehensive ``WorkerState`` task counters (:pr:`7167`) `crusaderky`_
+
+Documentation
+^^^^^^^^^^^^^
+- Add note to changelog about new CLI (:pr:`7178`) `James Bourbeau`_
+- Update AMM docs (:pr:`7158`) `Benjamin Zaitlen`_
+- Add ``CondaInstall`` to plugins doc (:pr:`7149`) `James Bourbeau`_
+
+Bug Fixes
+^^^^^^^^^
+- Update minimum ``bokeh`` version message (:pr:`7172`) `James Bourbeau`_
+- Revamped implementations of remote ``print()`` and ``warn()``, fixing #7095 (:pr:`7129`) `Max Bane`_
+
+Maintenance
+^^^^^^^^^^^
+- Temporarily restrict ``bokeh<3`` (:pr:`7219`) `James Bourbeau`_
+- Make ``Scheduler.reschedule`` private (:pr:`7216`) `crusaderky`_
+- Fix ``decide_worker_rootish_queuing_disabled`` assert (:pr:`7065`) `Gabe Joseph`_
+- Fix flaky ``test_include_communication_in_occupancy`` (:pr:`7212`) `Gabe Joseph`_
+- Do not raise on leaked websockets (:pr:`7199`) `Florian Jetter`_
+- Update nightly recipes with CLI tests, dependency changes (:pr:`7201`) `Charles Blackmon-Luca`_
+- Make ``p2p`` shuffle submodules private (:pr:`7186`) `Florian Jetter`_
+- Backport tornado ``PeriodicCallback`` (:pr:`7165`) `Florian Jetter`_
+- Fix ``mypy`` failure on CI (:pr:`7198`) `Florian Jetter`_
+- User a layer for ``p2p`` shuffle (:pr:`7180`) `Florian Jetter`_
+- Type annotations for shuffle (:pr:`7185`) `Florian Jetter`_
+- Do not close worker on comm error in heartbeat (:pr:`7163`) `Hendrik Makait`_
+- Errors when setting TCP timeouts log as error (:pr:`7161`) `Florian Jetter`_
+- Remove incorrect advice from ``pre-commit`` config (:pr:`7159`) `crusaderky`_
+- Bump ``the-coding-turtle/ga-yaml-parser`` from 0.1.1 to 0.1.2 (:pr:`7146`)
+- Bump ``JamesIves/github-pages-deploy-action`` from 4.1.7 to 4.4.1 (:pr:`7145`)
+- Use functionalities network for codecov uploader (:pr:`7148`) `Florian Jetter`_
+- Use counter metric type where appropriate, ``incoming_count`` was reporting bytes (:pr:`7125`) `Nat Tabris`_
+
+
+
+.. _v2022.10.0:
+
+2022.10.0
+---------
+
+Released on October 14, 2022
+
+.. note::
+
+    This release deprecates ``dask-scheduler``, ``dask-worker``, and ``dask-ssh``
+    CLIs in favor of ``dask scheduler``, ``dask worker``, and ``dask ssh``,
+    respectively. The old-style CLIs will continue to work for a time, but will be
+    removed in a future release.
+
+    As part of this migration the ``--reconnect``, ``--nprocs``, ``--bokeh``,
+    ``--bokeh-port`` CLI options have also been removed for both the old- and new-style
+    CLIs. These options had already previously been deprecated.
+
+
+Enhancements
+^^^^^^^^^^^^
+- Use of new dask CLI (:pr:`6735`) `Doug Davis`_
+- Refactor occupancy (:pr:`7075`) `Hendrik Makait`_
+- Expose managed/unmanaged/spilled memory to Prometheus (:pr:`7112`) `crusaderky`_
+- Round up ``saturation-factor`` (:pr:`7116`) `Gabe Joseph`_
+- Return default on ``KeyError`` at any level in ``get_metadata`` (:pr:`7109`) `Hendrik Makait`_
+- Count task states per task prefix and expose to Prometheus (:pr:`7088`) `Nat Tabris`_
+- Add ``scheduler-sni`` option for dask workers (:pr:`6290`) `Burt Holzman`_
+
+Bug Fixes
+^^^^^^^^^
+- Improve exception catching in UCX communication (:pr:`7132`) `Peter Andreas Entschev`_
+- Improve robustness of ``PipInstall`` plugin (:pr:`7111`) `Hendrik Makait`_
+
+Maintenance
+^^^^^^^^^^^
+- Fix dependencies that should point to ``dask/dask`` (:pr:`7138`) `James Bourbeau`_
+- Hold on to ``z.sum()`` until test completes (:pr:`7136`) `Lawrence Mitchell`_
+- Bump ``peter-evans/create-pull-request`` from 3 to 4 (:pr:`7120`)
+- Update typing for ``system_monitor`` after ``python/typeshed#8829`` (:pr:`7131`) `Lawrence Mitchell`_
+- Fix two potentially flaky queuing tests (:pr:`7124`) `Gabe Joseph`_
+- Bump ``EnricoMi/publish-unit-test-result-action`` from 1 to 2 (:pr:`7121`)
+- Bump ``actions/checkout`` from 2 to 3.1.0 (:pr:`7119`)
+- Revamp ``SystemMonitor`` (:pr:`7097`) `crusaderky`_
+- Bump ``actions/cache`` from 2 to 3 (:pr:`7118`)
+- Bump ``actions/upload-artifact`` from 2 to 3 (:pr:`7117`)
+- Move dependabot configuration file (:pr:`7115`) `James Bourbeau`_
+- Enable dependabot for GitHub Actions (:pr:`7101`) `Florian Jetter`_
+- Update coverage upload action (:pr:`7100`) `Florian Jetter`_
+- Adjust hardware benchmarks bokeh test (:pr:`7096`) `Florian Jetter`_
+- Multi-platform mypy checks (:pr:`7094`) `crusaderky`_
+- Update gpuCI ``RAPIDS_VER`` to ``22.12`` (:pr:`7084`)
+
+
+.. _v2022.9.2:
+
+2022.9.2
+--------
+
+Released on September 30, 2022
+
+Enhancements
+^^^^^^^^^^^^
+- Smarter stealing with dependencies (:pr:`7024`) `Hendrik Makait`_
+- Enable Active Memory Manager by default (:pr:`7042`) `crusaderky`_
+- Allow timeout strings in ``distributed.wait`` (:pr:`7081`) `James Bourbeau`_
+- Make AMM memory measure configurable (:pr:`7062`) `crusaderky`_
+- AMM support for actors (:pr:`7072`) `crusaderky`_
+- Expose ``message-bytes-limit`` in config (:pr:`7074`) `Hendrik Makait`_
+- Detect mismatching Python version in scheduler (:pr:`7018`) `Hendrik Makait`_
+- Improve ``KilledWorker`` message users see (:pr:`7043`) `James Bourbeau`_
+- Support for cgroups v2 and respect soft limits (:pr:`7051`) `Samantha Hughes`_
+
+Bug Fixes
+^^^^^^^^^
+- Catch ``BaseException`` on UCX read error (:pr:`6996`) `Peter Andreas Entschev`_
+- Fix transfer limiting in ``_select_keys_for_gather`` (:pr:`7071`) `Hendrik Makait`_
+- Parse ``worker-saturation`` if a string (:pr:`7064`) `Gabe Joseph`_
+- ``Nanny(config=...)`` parameter overlays global dask config (:pr:`7069`) `crusaderky`_
+- Ensure default clients don't propagate to subprocesses (:pr:`7028`) `Florian Jetter`_
+
+Documentation
+^^^^^^^^^^^^^
+- Improve documentation of ``message-bytes-limit`` (:pr:`7077`) `Hendrik Makait`_
+- Minor tweaks to Sphinx documentation (:pr:`7041`) `crusaderky`_
+- Improve ``upload_file`` API documentation (:pr:`7040`) `Florian Jetter`_
+
+Maintenance
+^^^^^^^^^^^
+- ``test_serialize_numba``: Workaround issue with ``np.empty_like`` in NP 1.23 (:pr:`7089`) `Graham Markall`_
+- Type platform constants for ``mypy`` (:pr:`7091`) `jakirkham`_
+- ``dask-worker-space`` (:pr:`7054`) `crusaderky`_
+- Remove failing test case (:pr:`7087`) `Hendrik Makait`_
+- ``test_default_client`` (:pr:`7058`) `crusaderky`_
+- Fix ``pre-commit`` fails with recent versions of ``mypy`` and ``pandas`` (:pr:`7068`) `crusaderky`_
+- Add factorization utility (:pr:`7048`) `James Bourbeau`_
+
+
+.. _v2022.9.1:
+
+2022.9.1
+--------
+
+Released on September 16, 2022
+
+Enhancements
+^^^^^^^^^^^^
+- Add dashboard component for size of open data transfers (:pr:`6982`) `Hendrik Makait`_
+- Allow very fast keys and very expensive transfers as stealing candidates (:pr:`7022`) `Florian Jetter`_
+
+Bug Fixes
+^^^^^^^^^
+- No longer double count transfer cost in stealing (:pr:`7036`) `Hendrik Makait`_
+
+Maintenance
+^^^^^^^^^^^
+- Make ``test_wait_first_completed`` robust (:pr:`7039`) `Florian Jetter`_
+- Partial annotations for ``SchedulerState`` (:pr:`7023`) `crusaderky`_
+- Add more type annotations to ``stealing.py`` (:pr:`7009`) `Florian Jetter`_
+- Update codecov settings (:pr:`7015`) `Florian Jetter`_
+- Speed up ``test_balance`` (:pr:`7008`) `Florian Jetter`_
+- Fix test report after queuing job added (:pr:`7012`) `Gabe Joseph`_
+- Clean up env variables in Gihub Actions (:pr:`7001`) `crusaderky`_
+- Make ``test_steal_reschedule_reset_in_flight_occupancy`` non timing dependent (:pr:`7010`) `Florian Jetter`_
+- Replaced ``distributed.utils.key_split`` with ``dask.utils.key_split`` (:pr:`7005`) `Luke Conibear`_
+- Revert "Revert "Limit incoming data transfers by amount of data" (:pr:`6994)" (:pr:`7007`) `Florian Jetter`_
+- CI job running tests with queuing on (:pr:`6989`) `Gabe Joseph`_
+- Fix ``distributed/tests/test_client_executor.py::test_wait`` (:pr:`6990`) `Florian Jetter`_
+
+
+.. _v2022.9.0:
+
+2022.9.0
+--------
+
+Released on September 2, 2022
+
+Enhancements
+^^^^^^^^^^^^
+- Limit incoming data transfers by amount of data (:pr:`6975`) `Hendrik Makait`_
+- Expose transfer-related metrics in ``Worker.get_metrics`` and ``WorkerMetricCollector`` (:pr:`6936`) `Hendrik Makait`_
+- Withhold root tasks (no co assignment) (:pr:`6614`) `Gabe Joseph`_
+- Improve differentiation between incoming/outgoing connections and transfers (:pr:`6933`) `Hendrik Makait`_
+- Change memory bars color on spilling/paused status (:pr:`6959`) `crusaderky`_
+- Ensure restart clears taskgroups et al (:pr:`6944`) `Florian Jetter`_
+- Optimise ``scheduler.get_comm_cost`` set difference (:pr:`6931`) `Lawrence Mitchell`_
+- Expose setting multiple protocols and ports via the ``dask-scheduler`` CLI (:pr:`6898`) `Jacob Tomlinson`_
+- Make ``TextProgressBar`` clear the line when finished (:pr:`5968`) `Vincenzo Eduardo Padulano`_
+
+Bug Fixes
+^^^^^^^^^
+- Revert ``getaddrinfo`` fast path for Python 3.8 (:pr:`6978`) `Florian Jetter`_
+- cancelled/resumed->long-running transitions (:pr:`6916`) `crusaderky`_
+
+Deprecations
+^^^^^^^^^^^^
+- Deprecate default value for ``Client.wait_for_workers`` (:pr:`6942`) `Florian Jetter`_
+
+Documentation
+^^^^^^^^^^^^^
+- Document ``Scheduler`` and ``Worker`` state machine (:pr:`6948`) `crusaderky`_
+- Insert ``memory_limit`` parameter into ``LocalCluster`` docstring (:pr:`6839`) `Crislana Rafael`_
+
+Maintenance
+^^^^^^^^^^^
+- Revert "Limit incoming data transfers by amount of data" (:pr:`6994`) `Florian Jetter`_
+- Cache conda environment between CI test runs (:pr:`6855`) `Charles Blackmon-Luca`_
+- Revert "Fix co-assignment for binary operations" (:pr:`6985`) `Gabe Joseph`_
+- Cache ``test_report`` shelves in CI (:pr:`6937`) `Florian Jetter`_
+- Cleanup ``ipywidgets`` mocking (:pr:`6918`) `Thomas Grainger`_
+- Improve testing of ``{Scheduler|Worker}MetricCollector`` (:pr:`6945`) `Hendrik Makait`_
+- Clean up nanny ``WorkerProcess.kill`` (:pr:`6972`) `Gabe Joseph`_
+- Rewrite ``test_reconnect`` to use subprocess to kill scheduler reliably (:pr:`6967`) `Florian Jetter`_
+- Task state domain on the scheduler side (:pr:`6929`) `crusaderky`_
+- Remove ``@avoid_ci`` from ``test_steal`` (:pr:`6872`) `crusaderky`_
+- Use ``async with Worker`` in tests (:pr:`6958`) `crusaderky`_
+- Ignore spurious warnings in ``test_quiet_close_process`` (:pr:`6955`) `crusaderky`_
+- Fix tests on Windows (:pr:`6954`) `Hendrik Makait`_
+- Prevent duplicates in ``HeapSet.sorted()`` (:pr:`6952`) `crusaderky`_
+- Propagate worker address and improve ``_remove_from_processing`` behavior (:pr:`6946`) `Hendrik Makait`_
+- Add ``HeapSet._sorted`` internal flag (:pr:`6949`) `Gabe Joseph`_
+- Add ``HeapSet.peekn`` (:pr:`6947`) `Gabe Joseph`_
+- Fix ``pyright`` error when importing from ``distributed`` (:pr:`6904`) `Ian Liu Rodrigues`_
+- Always return ``ws.address`` from ``_remove_from_processing`` (:pr:`6884`) `Hendrik Makait`_
+- Use ``async with Client:`` in tests (:pr:`6921`) `Thomas Grainger`_
+- Ensure relative memory limits work as percentage of system memory (:pr:`6923`) `Florian Jetter`_
+
+
 .. _v2022.8.1:
 
 2022.8.1
@@ -188,11 +520,11 @@ Maintenance
 - Refactor resource restriction handling in ``WorkerState`` (:pr:`6672`) `Hendrik Makait`_
 - ``test_signal`` and ``test_terminate`` occasionally return ``SIGKILL`` on MacOS (:pr:`6671`) `crusaderky`_
 - Use the ``loop`` fixture in even more tests (:pr:`6674`) `Thomas Grainger`_
-- Inconditionally ``import ssl`` (:pr:`6670`) `Thomas Grainger`_
+- Unconditionally ``import ssl`` (:pr:`6670`) `Thomas Grainger`_
 - Use the ``loop`` fixture in more tests (:pr:`6642`) `Thomas Grainger`_
 - Pin tornado to <6.2 (:pr:`6668`) `Florian Jetter`_
 - Handle ``AsyncTaskGroupClosedError`` (:pr:`6664`) `Hendrik Makait`_
-- Replace occurences of large delay ``slowinc`` with locks (:pr:`6656`) `Florian Jetter`_
+- Replace occurrences of large delay ``slowinc`` with locks (:pr:`6656`) `Florian Jetter`_
 - Merge ``extend-ignore`` and ``ignore`` values for ``flake8`` (:pr:`6660`) `Hendrik Makait`_
 - Remove server close background task grace period (:pr:`6633`) `Thomas Grainger`_
 - Do not use tempfile in ``utils_test`` (:pr:`6651`) `Florian Jetter`_
@@ -220,7 +552,7 @@ Released on June 24, 2022
 Highlights
 ^^^^^^^^^^
 This release includes the Worker State Machine refactor. The expectation should be that the worker
-state is its own synchronous subclass. Pulling all the state out into its own class allows us 
+state is its own synchronous subclass. Pulling all the state out into its own class allows us
 to write targeted unit tests without invoking any concurrent or asynchronous code.
 
 See :pr:`5736` for more information.
@@ -856,7 +1188,7 @@ Maintenance
 - Revert "Pin coverage to 6.2 (:pr:`5716`)" (:pr:`5770`) `Thomas Grainger`_
 - Trigger test runs periodically to increases failure statistics (:pr:`5769`) `Florian Jetter`_
 - More fault tolerant test report (:pr:`5732`) `Ian Rose`_
-- Pin ``pillow<9`` to work around ``torch`` incompatability (:pr:`5755`) `Thomas Grainger`_
+- Pin ``pillow<9`` to work around ``torch`` incompatibility (:pr:`5755`) `Thomas Grainger`_
 - Overhaul ``check_process_leak`` (:pr:`5739`) `crusaderky`_
 - Fix flaky ``test_exit_callback test`` (:pr:`5713`) `Jim Crist-Harif`_
 - Generate tests summary (:pr:`5710`) `crusaderky`_
@@ -1197,7 +1529,7 @@ Released on September 3, 2021
 
 - Fix ``add_plugin`` warnings (:pr:`5267`) `Doug Davis`_
 - Add ``list`` around iterator in ``handle_missing_dep`` (:pr:`5285`) `Matthew Rocklin`_
-- Jupyter-client 7 compatiblity (:pr:`5286`) `Min RK`_
+- Jupyter-client 7 compatibility (:pr:`5286`) `Min RK`_
 - Replace ``atop`` with ``blockwise`` (:pr:`5289`) `James Bourbeau`_
 - Add pytest color to CI (:pr:`5276`) `James Bourbeau`_
 - Fix ``test_map`` and others (:pr:`5278`) `crusaderky`_
@@ -1736,7 +2068,7 @@ All changes
 
 - Some common optimizations across transitions (:pr:`4348`) `jakirkham`_
 - Drop serialize extension (:pr:`4344`) `jakirkham`_
-- Log duplciate workers in scheduler (:pr:`4338`) `Matthew Rocklin`_
+- Log duplicate workers in scheduler (:pr:`4338`) `Matthew Rocklin`_
 - Annotation of some comm related methods in the ``Scheduler`` (:pr:`4341`) `jakirkham`_
 - Optimize ``assert`` in ``validate_waiting`` (:pr:`4342`) `jakirkham`_
 - Optimize ``decide_worker`` (:pr:`4332`) `jakirkham`_
@@ -1950,7 +2282,7 @@ All changes
 - Serialize builtin array (:pr:`4013`) `jakirkham`_
 - Use cuDF's ``assert_eq`` (:pr:`4014`) `jakirkham`_
 - Clear function cache whenever we upload a new file (:pr:`3993`) `Jack Xiaosong Xu`_
-- Emmit warning when assign/comparing string with ``Status`` ``Enum`` (:pr:`3875`) `Matthias Bussonnier`_
+- Emit warning when assign/comparing string with ``Status`` ``Enum`` (:pr:`3875`) `Matthias Bussonnier`_
 - Track mutable frames (:pr:`4004`) `jakirkham`_
 - Improve ``bytes`` and ``bytearray`` serialization (:pr:`4009`) `jakirkham`_
 - Fix memory histogram values in dashboard (:pr:`4006`) `Willi Rath`_
@@ -2184,7 +2516,7 @@ All changes
 - Remove openssl 1.1.1d pin for Travis (:pr:`3668`) `Jonathan J. Helmus`_
 - More documentation for ``Semaphore`` (:pr:`3664`) `Florian Jetter`_
 - Get CUDA context to finalize Numba ``DeviceNDArray`` (:pr:`3666`) `jakirkham`_
-- Add Resouces option to ``get_task_stream`` and call ``output_file`` (:pr:`3653`) `Prasun Anand`_
+- Add Resources option to ``get_task_stream`` and call ``output_file`` (:pr:`3653`) `Prasun Anand`_
 - Add ``Semaphore`` extension (:pr:`3573`) `Lucas Rademaker`_
 - Replace ``ncores`` with ``nthreads`` in work stealing tests (:pr:`3615`) `James Bourbeau`_
 - Clean up some test warnings (:pr:`3662`) `Matthew Rocklin`_
@@ -2557,7 +2889,7 @@ This release drops support for Python 3.5
 -  Fix worker preload config (:pr:`3027`) `byjott`_
 -  Fix widget with spec that generates multiple workers (:pr:`3067`) `Loïc Estève`_
 -  Make Client.get_versions async friendly (:pr:`3064`) `Jacob Tomlinson`_
--  Add configuation option for longer error tracebacks (:pr:`3086`) `Daniel Farrell`_
+-  Add configuration option for longer error tracebacks (:pr:`3086`) `Daniel Farrell`_
 -  Have Client get Security from passed Cluster (:pr:`3079`) `Matthew Rocklin`_
 -  Respect Cluster.dashboard_link in Client._repr_html_ if it exists (:pr:`3077`) `Matthew Rocklin`_
 -  Add monitoring with dask cluster docs (:pr:`3072`) `Arpit Solanki`_
@@ -2927,7 +3259,7 @@ This is a small bugfix release due to a config change upstream.
 -  Ensure async behavior in event loop with LocalCluster (:pr:`2484`) `Matthew Rocklin`_
 -  Fix spurious CancelledError (:pr:`2485`) `Loïc Estève`_
 -  Properly reset dask.config scheduler and shuffle when closing the client (:pr:`2475`) `George Sakkis`_
--  Make it more explict that resources are per worker. (:pr:`2470`) `Loïc Estève`_
+-  Make it more explicit that resources are per worker. (:pr:`2470`) `Loïc Estève`_
 -  Remove references to center (:pr:`2488`)  `Matthew Rocklin`_
 -  Expand client clearing timeout to 10s in testing (:pr:`2493`) `Matthew Rocklin`_
 -  Propagate key keyword in progressbar (:pr:`2492`) `Matthew Rocklin`_
@@ -3217,7 +3549,7 @@ This is a small bugfix release due to a config change upstream.
 -  Newline needed for doctest rendering (:pr:`1917`) `Loïc Estève`_
 -  Support Client._repr_html_ when in async mode (:pr:`1909`) `Matthew Rocklin`_
 -  Add parameters to dask-ssh command (:pr:`1910`) `Irene Rodriguez`_
--  Santize get_dataset trace (:pr:`1888`) `John Kirkham`_
+-  Sanitize get_dataset trace (:pr:`1888`) `John Kirkham`_
 -  Fix bug where queues would not clean up cleanly (:pr:`1922`) `Matthew Rocklin`_
 -  Delete cached file safely in upload file (:pr:`1921`) `Matthew Rocklin`_
 -  Accept KeyError when closing tornado IOLoop in tests (:pr:`1937`) `Matthew Rocklin`_
@@ -3265,7 +3597,7 @@ This is a small bugfix release due to a config change upstream.
 -  Add fifo timeout to control priority generation (:pr:`1828`) `Matthew Rocklin`_
 -  Add retire_workers API to Client (:pr:`1876`) `Matthew Rocklin`_
 -  Catch NoSuchProcess error in Nanny.memory_monitor (:pr:`1877`) `Matthew Rocklin`_
--  Add uid to nanny queue communitcations (:pr:`1880`) `Matthew Rocklin`_
+-  Add uid to nanny queue communications (:pr:`1880`) `Matthew Rocklin`_
 
 
 .. _v1.21.4 - 2018-03-21:
@@ -3470,7 +3802,7 @@ This is a small bugfix release due to a config change upstream.
 -  Future uses default client by default (:pr:`1449`)
 -  Add keys= keyword to Client.call_stack (:pr:`1446`)
 -  Add get_current_task to worker (:pr:`1444`)
--  Ensure that Client remains asynchornous before ioloop starts (:pr:`1452`)
+-  Ensure that Client remains asynchronous before ioloop starts (:pr:`1452`)
 -  Remove "click for worker page" in bokeh plot (:pr:`1453`)
 -  Add Client.current() (:pr:`1450`)
 -  Clean handling of restart timeouts (:pr:`1442`)
@@ -3547,7 +3879,7 @@ This is a small bugfix release due to a config change upstream.
 -  Multi-threading safety (:pr:`1191`), (:pr:`1228`), (:pr:`1229`)
 -  Improve handling of byte counting (:pr:`1198`) (:pr:`1224`)
 -  Add get_client, secede functions, refactor worker-client relationship (:pr:`1201`)
--  Allow logging configuraiton using logging.dictConfig() (:pr:`1206`) (:pr:`1211`)
+-  Allow logging configuration using logging.dictConfig() (:pr:`1206`) (:pr:`1211`)
 -  Offload serialization and deserialization to separate thread (:pr:`1218`)
 -  Support fire-and-forget tasks (:pr:`1221`)
 -  Support bytestrings as keys (for Julia) (:pr:`1234`)
@@ -3579,7 +3911,7 @@ This is a small bugfix release due to a config change upstream.
 -  Support TLS/SSL connections for security (:pr:`866`) (:pr:`1034`)
 -  Always create new worker directory when passed ``--local-directory``
    (:pr:`1079`)
--  Support pre-scattering data when using joblib frontent (:pr:`1022`)
+-  Support pre-scattering data when using joblib frontend (:pr:`1022`)
 -  Make workers more robust to failure of ``sizeof`` function (:pr:`1108`) and
    writing to disk (:pr:`1096`)
 -  Add ``is_empty`` and ``update`` methods to ``as_completed`` (:pr:`1113`)
@@ -3681,7 +4013,7 @@ This is a small bugfix release due to a config change upstream.
 1.15.1 - 2017-01-11
 ---------------------------
 
-*  Make compatibile with Bokeh 0.12.4 (:pr:`803`)
+*  Make compatible with Bokeh 0.12.4 (:pr:`803`)
 *  Avoid compressing arrays if not helpful  (:pr:`777`)
 *  Optimize inter-worker data transfer (:pr:`770`) (:pr:`790`)
 *  Add --local-directory keyword to worker (:pr:`788`)
@@ -4092,3 +4424,16 @@ significantly without many new features.
 .. _`Martí Zamora`: https://github.com/z4m0
 .. _`Johannes Lange`: https://github.com/jolange
 .. _`Pieter Gijsbers`: https://github.com/PGijsbers
+.. _`Crislana Rafael`: https://github.com/crislanarafael
+.. _`Ian Liu Rodrigues`: https://github.com/ianliu
+.. _`Vincenzo Eduardo Padulano`: https://github.com/vepadulano
+.. _`Luke Conibear`: https://github.com/lukeconibear
+.. _`Samantha Hughes`: https://github.com/shughes-uk
+.. _`Graham Markall`: https://github.com/gmarkall
+.. _`Nat Tabris`: https://github.com/ntabris
+.. _`Burt Holzman`: https://github.com/holzman
+.. _`Max Bane`: https://github.com/maxbane
+.. _`Oliver Holworthy`: https://github.com/oliverholworthy
+.. _`Andrew`: https://github.com/ahuang11
+.. _`Matthew Plough`: https://github.com/mplough-kobold
+.. _`Tom Hu`: https://github.com/thomasrockhu-codecov

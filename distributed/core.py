@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Callable, ClassVar, TypedDict, TypeVar, f
 
 import tblib
 from tlz import merge
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import IOLoop
 
 import dask
 from dask.utils import parse_timedelta
@@ -34,6 +34,7 @@ from distributed.comm import (
     normalize_address,
     unparse_host_port,
 )
+from distributed.compatibility import PeriodicCallback
 from distributed.metrics import time
 from distributed.system_monitor import SystemMonitor
 from distributed.utils import (
@@ -108,9 +109,9 @@ def _expects_comm(func: Callable) -> bool:
         return True
     if params and params[0] == "stream":
         warnings.warn(
-            "Calling the first arugment of a RPC handler `stream` is "
+            "Calling the first argument of a RPC handler `stream` is "
             "deprecated. Defining this argument is optional. Either remove the "
-            f"arugment or rename it to `comm` in {func}.",
+            f"argument or rename it to `comm` in {func}.",
             FutureWarning,
         )
         return True
@@ -814,40 +815,48 @@ class Server:
 
     async def handle_stream(self, comm, extra=None):
         extra = extra or {}
-        logger.info("Starting established connection")
+        logger.info("Starting established connection to %s", comm.peer_address)
 
         closed = False
         try:
             while not closed:
-                msgs = await comm.read()
+                try:
+                    msgs = await comm.read()
+                # If another coroutine has closed the comm, stop handling the stream.
+                except CommClosedError:
+                    closed = True
+                    logger.info(
+                        "Connection to %s has been closed.",
+                        comm.peer_address,
+                    )
+                    break
                 if not isinstance(msgs, (tuple, list)):
                     msgs = (msgs,)
 
-                if not comm.closed():
-                    for msg in msgs:
-                        if msg == "OK":  # from close
+                for msg in msgs:
+                    if msg == "OK":
+                        break
+                    op = msg.pop("op")
+                    if op:
+                        if op == "close-stream":
+                            closed = True
+                            logger.info(
+                                "Received 'close-stream' from %s; closing.",
+                                comm.peer_address,
+                            )
                             break
-                        op = msg.pop("op")
-                        if op:
-                            if op == "close-stream":
-                                closed = True
-                                break
-                            handler = self.stream_handlers[op]
-                            if iscoroutinefunction(handler):
-                                self._ongoing_background_tasks.call_soon(
-                                    handler, **merge(extra, msg)
-                                )
-                                await asyncio.sleep(0)
-                            else:
-                                handler(**merge(extra, msg))
+                        handler = self.stream_handlers[op]
+                        if iscoroutinefunction(handler):
+                            self._ongoing_background_tasks.call_soon(
+                                handler, **merge(extra, msg)
+                            )
+                            await asyncio.sleep(0)
                         else:
-                            logger.error("odd message %s", msg)
-                    await asyncio.sleep(0)
-
-        except OSError:
-            pass
-        except Exception as e:
-            logger.exception(e)
+                            handler(**merge(extra, msg))
+                    else:
+                        logger.error("odd message %s", msg)
+                await asyncio.sleep(0)
+        except Exception:
             if LOG_PDB:
                 import pdb
 

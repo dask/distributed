@@ -4,9 +4,9 @@ import uuid
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-from tornado.ioloop import PeriodicCallback
+from distributed.compatibility import PeriodicCallback
 
 if TYPE_CHECKING:
     # Optional runtime dependencies
@@ -142,7 +142,7 @@ class MemorySampler:
             s.name = label
             if align:
                 # convert datetime to timedelta from the first sample
-                s.index -= s.index[0]
+                s.index -= cast(pd.Timestamp, s.index[0])
             ss[label] = s
 
         df = pd.DataFrame(ss)

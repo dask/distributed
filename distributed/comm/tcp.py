@@ -111,8 +111,8 @@ def set_tcp_timeout(comm):
             logger.debug("Setting TCP user timeout: %d ms", timeout * 1000)
             TCP_USER_TIMEOUT = 18  # since Linux 2.6.37
             sock.setsockopt(socket.SOL_TCP, TCP_USER_TIMEOUT, timeout * 1000)
-    except OSError as e:
-        logger.warning("Could not set timeout on TCP stream: %s", e)
+    except OSError:
+        logger.exception("Could not set timeout on TCP stream.")
 
 
 def get_stream_address(comm):
@@ -420,22 +420,29 @@ _NUMERIC_ONLY = socket.AI_NUMERICHOST | socket.AI_NUMERICSERV
 
 
 async def _getaddrinfo(host, port, *, family, type=socket.SOCK_STREAM):
-    # If host and port are numeric, then getaddrinfo doesn't block and we can
-    # skip get_running_loop().getaddrinfo which is implemented by running in
-    # a ThreadPoolExecutor.
-    # So we try first with the _NUMERIC_ONLY flags set, and then only use the
-    # threadpool if that fails with EAI_NONAME:
-    try:
-        return socket.getaddrinfo(
-            host,
-            port,
-            family=family,
-            type=type,
-            flags=_NUMERIC_ONLY,
-        )
-    except socket.gaierror as e:
-        if e.errno != socket.EAI_NONAME:
-            raise
+    # On Python3.8 we are observing problems, particularly on slow systems
+    # For additional info, see
+    # https://github.com/dask/distributed/pull/6847#issuecomment-1208179864
+    # https://github.com/dask/distributed/pull/6847
+    # https://github.com/dask/distributed/issues/6896
+    # https://github.com/dask/distributed/issues/6846
+    if sys.version_info >= (3, 9):
+        # If host and port are numeric, then getaddrinfo doesn't block and we
+        # can skip get_running_loop().getaddrinfo which is implemented by
+        # running in a ThreadPoolExecutor. So we try first with the
+        # _NUMERIC_ONLY flags set, and then only use the threadpool if that
+        # fails with EAI_NONAME:
+        try:
+            return socket.getaddrinfo(
+                host,
+                port,
+                family=family,
+                type=type,
+                flags=_NUMERIC_ONLY,
+            )
+        except socket.gaierror as e:
+            if e.errno != socket.EAI_NONAME:
+                raise
 
     # That failed; it's a real hostname. We better use a thread.
     return await asyncio.get_running_loop().getaddrinfo(
@@ -481,10 +488,18 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
         kwargs = self._get_connect_args(**connection_args)
 
         try:
-            stream = await self.client.connect(
-                ip, port, max_buffer_size=MAX_BUFFER_SIZE, **kwargs
-            )
-            # Under certain circumstances tornado will have a closed connnection with an
+            # server_hostname option (for SNI) only works with tornado.iostream.IOStream
+            if "server_hostname" in kwargs:
+                stream = await self.client.connect(
+                    ip, port, max_buffer_size=MAX_BUFFER_SIZE
+                )
+                stream = await stream.start_tls(False, **kwargs)
+            else:
+                stream = await self.client.connect(
+                    ip, port, max_buffer_size=MAX_BUFFER_SIZE, **kwargs
+                )
+
+            # Under certain circumstances tornado will have a closed connection with an
             # error and not raise a StreamClosedError.
             #
             # This occurs with tornado 5.x and openssl 1.1+
@@ -525,8 +540,10 @@ class TLSConnector(BaseTCPConnector):
     encrypted = True
 
     def _get_connect_args(self, **connection_args):
-        ctx = _expect_tls_context(connection_args)
-        return {"ssl_options": ctx}
+        tls_args = {"ssl_options": _expect_tls_context(connection_args)}
+        if connection_args.get("server_hostname"):
+            tls_args["server_hostname"] = connection_args["server_hostname"]
+        return tls_args
 
 
 class BaseTCPListener(Listener, RequireEncryptionMixin):

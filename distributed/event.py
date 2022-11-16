@@ -219,7 +219,7 @@ class Event:
 
         Returns
         -------
-        True if the event was set of false, if a timeout happend
+        True if the event was set of false, if a timeout happened
         """
         timeout = parse_timedelta(timeout)
 

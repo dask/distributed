@@ -7,35 +7,16 @@ import warnings
 from asyncio import TimeoutError
 from collections import defaultdict, deque
 
-from tornado.ioloop import PeriodicCallback
-
 import dask
 from dask.utils import parse_timedelta
 
+from distributed.compatibility import PeriodicCallback
 from distributed.metrics import time
-from distributed.utils import SyncMethodMixin, log_errors
+from distributed.utils import Deadline, SyncMethodMixin, log_errors
 from distributed.utils_comm import retry_operation
 from distributed.worker import get_client, get_worker
 
 logger = logging.getLogger(__name__)
-
-
-class _Watch:
-    def __init__(self, duration=None):
-        self.duration = duration
-        self.started_at = None
-
-    def start(self):
-        self.started_at = time()
-
-    def elapsed(self):
-        return time() - self.started_at
-
-    def leftover(self):
-        if self.duration is None:
-            return None
-        else:
-            return max(0, self.duration - self.elapsed())
 
 
 class SemaphoreExtension:
@@ -149,8 +130,7 @@ class SemaphoreExtension:
 
         if isinstance(name, list):
             name = tuple(name)
-        w = _Watch(timeout)
-        w.start()
+        deadline = Deadline.after(timeout)
 
         self.metrics["pending"][name] += 1
         while True:
@@ -158,7 +138,7 @@ class SemaphoreExtension:
                 "Trying to acquire %s for %s with %s seconds left.",
                 lease_id,
                 name,
-                w.leftover(),
+                deadline.remaining,
             )
             # Reset the event and try to get a release. The event will be set if the state
             # is changed and helps to identify when it is worth to retry an acquire
@@ -170,7 +150,7 @@ class SemaphoreExtension:
             # been released and we can try to acquire again (continue loop)
             if not result:
                 future = asyncio.wait_for(
-                    self.events[name].wait(), timeout=w.leftover()
+                    self.events[name].wait(), timeout=deadline.remaining
                 )
                 try:
                     await future
@@ -182,11 +162,11 @@ class SemaphoreExtension:
                 lease_id,
                 name,
                 result,
-                w.elapsed(),
+                deadline.elapsed,
             )
             # We're about to return, so the lease is no longer "pending"
             self.metrics["average_pending_lease_time"][name] = (
-                self.metrics["average_pending_lease_time"][name] + w.elapsed()
+                self.metrics["average_pending_lease_time"][name] + deadline.elapsed
             ) / 2
             self.metrics["pending"][name] -= 1
 
@@ -320,7 +300,7 @@ class Semaphore(SyncMethodMixin):
         When registering, this needs to be awaited.
     scheduler_rpc: ConnectionPool
         The ConnectionPool to connect to the scheduler. If None is provided, it
-        uses the worker or client pool. This paramter is mostly used for
+        uses the worker or client pool. This parameter is mostly used for
         testing.
     loop: IOLoop
         The event loop this instance is using. If None is provided, reuse the

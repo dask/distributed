@@ -18,6 +18,8 @@ def test_progress_quads():
         "erred": {"inc": 0, "dec": 1, "add": 0},
         "released": {"inc": 1, "dec": 0, "add": 1},
         "processing": {"inc": 1, "dec": 0, "add": 2},
+        "queued": {"inc": 1, "dec": 0, "add": 2},
+        "no-worker": {"inc": 1, "dec": 0, "add": 0},
     }
 
     d = progress_quads(msg, nrows=2)
@@ -35,11 +37,15 @@ def test_progress_quads():
         "memory": [2, 1, 0],
         "erred": [0, 0, 1],
         "processing": [1, 2, 0],
+        "queued": [1, 2, 0],
+        "no-worker": [1, 0, 0],
         "done": ["3 / 5", "2 / 4", "1 / 1"],
         "released-loc": [0.9 * 1 / 5, 0.25 * 0.9, 1.0],
         "memory-loc": [0.9 * 3 / 5, 0.5 * 0.9, 1.0],
         "erred-loc": [0.9 * 3 / 5, 0.5 * 0.9, 1.9],
         "processing-loc": [0.9 * 4 / 5, 1 * 0.9, 1 * 0.9 + 1],
+        "queued-loc": [1 * 0.9, 1.5 * 0.9, 1 * 0.9 + 1],
+        "no-worker-loc": [1 * 0.9, 1.5 * 0.9, 1 * 0.9 + 1],
     }
     assert d == expected
 
@@ -52,6 +58,7 @@ def test_progress_quads_too_many():
         "erred": {k: 0 for k in keys},
         "released": {k: 0 for k in keys},
         "processing": {k: 0 for k in keys},
+        "queued": {k: 0 for k in keys},
     }
 
     d = progress_quads(msg, nrows=6, ncols=3)
@@ -78,6 +85,7 @@ async def test_progress_stream(c, s, a, b):
         "memory": {"div": 9, "inc": 1},
         "released": {"inc": 4},
         "processing": {},
+        "queued": {},
     }
     assert set(nbytes) == set(msg["all"])
     assert all(v > 0 for v in nbytes.values())
@@ -95,6 +103,7 @@ def test_progress_quads_many_functions():
         "erred": {fn: 0 for fn in funcnames},
         "released": {fn: 0 for fn in funcnames},
         "processing": {fn: 0 for fn in funcnames},
+        "queued": {fn: 0 for fn in funcnames},
     }
 
     d = progress_quads(msg, nrows=2)

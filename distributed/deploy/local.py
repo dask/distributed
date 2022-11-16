@@ -30,6 +30,19 @@ class LocalCluster(SpecCluster):
     ----------
     n_workers: int
         Number of workers to start
+    memory_limit: str, float, int, or None, default "auto"
+        Sets the memory limit *per worker*.
+
+        Notes regarding argument data type:
+
+        * If None or 0, no limit is applied.
+        * If "auto", the total system memory is split evenly between the workers.
+        * If a float, that fraction of the system memory is used *per worker*.
+        * If a string giving a number of bytes (like ``"1GiB"``), that amount is used *per worker*.
+        * If an int, that number of bytes is used *per worker*.
+
+        Note that the limit will only be enforced when ``processes=True``, and the limit is only
+        enforced on a best-effort basis — it's still possible for workers to exceed this limit.
     processes: bool
         Whether to use processes (True) or threads (False).  Defaults to True, unless
         worker_class=Worker, in which case it defaults to False.

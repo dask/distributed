@@ -302,7 +302,11 @@ def test_basic_no_loop(cleanup):
 @gen_test()
 async def test_target_duration():
     with dask.config.set(
-        {"distributed.scheduler.default-task-durations": {"slowinc": 1}}
+        {
+            "distributed.scheduler.default-task-durations": {"slowinc": 1},
+            # adaptive target for queued tasks doesn't yet consider default or learned task durations
+            "distributed.scheduler.worker-saturation": float("inf"),
+        }
     ):
         async with LocalCluster(
             n_workers=0,
@@ -405,8 +409,8 @@ async def test_update_adaptive():
         dashboard_address=":0",
         asynchronous=True,
     ) as cluster:
-        first = cluster.adapt(maxmimum=1)
-        second = cluster.adapt(maxmimum=2)
+        first = cluster.adapt(maximum=1)
+        second = cluster.adapt(maximum=2)
         await asyncio.sleep(0.2)
         assert first.periodic_callback is None
         assert second.periodic_callback.is_running()

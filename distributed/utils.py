@@ -50,6 +50,7 @@ from tornado.ioloop import IOLoop
 import dask
 from dask import istask
 from dask.utils import ensure_bytes as _ensure_bytes
+from dask.utils import key_split
 from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
@@ -643,66 +644,8 @@ def is_kernel():
     return getattr(get_ipython(), "kernel", None) is not None
 
 
-hex_pattern = re.compile("[a-f]+")
-
-
-@functools.lru_cache(100000)
-def key_split(s):
-    """
-    >>> key_split('x')
-    'x'
-    >>> key_split('x-1')
-    'x'
-    >>> key_split('x-1-2-3')
-    'x'
-    >>> key_split(('x-2', 1))
-    'x'
-    >>> key_split("('x-2', 1)")
-    'x'
-    >>> key_split("('x', 1)")
-    'x'
-    >>> key_split('hello-world-1')
-    'hello-world'
-    >>> key_split(b'hello-world-1')
-    'hello-world'
-    >>> key_split('ae05086432ca935f6eba409a8ecd4896')
-    'data'
-    >>> key_split('<module.submodule.myclass object at 0xdaf372')
-    'myclass'
-    >>> key_split(None)
-    'Other'
-    >>> key_split('x-abcdefab')  # ignores hex
-    'x'
-    """
-    if type(s) is bytes:
-        s = s.decode()
-    if type(s) is tuple:
-        s = s[0]
-    try:
-        words = s.split("-")
-        if not words[0][0].isalpha():
-            result = words[0].split(",")[0].strip("'(\"")
-        else:
-            result = words[0]
-        for word in words[1:]:
-            if word.isalpha() and not (
-                len(word) == 8 and hex_pattern.match(word) is not None
-            ):
-                result += "-" + word
-            else:
-                break
-        if len(result) == 32 and re.match(r"[a-f0-9]{32}", result):
-            return "data"
-        else:
-            if result[0] == "<":
-                result = result.strip("<>").split()[0].split(".")[-1]
-            return result
-    except Exception:
-        return "Other"
-
-
 def key_split_group(x: object) -> str:
-    """A more fine-grained version of key_split
+    """A more fine-grained version of key_split.
 
     >>> key_split_group(('x-2', 1))
     'x-2'
@@ -1400,7 +1343,7 @@ def cli_keywords(
         A string with the name of a module, or the module containing a
         click-generated command with a "main" function, or the function itself.
         It may be used to parse a module's custom arguments (that is, arguments that
-        are not part of Worker class), such as nworkers from dask-worker CLI or
+        are not part of Worker class), such as nworkers from dask worker CLI or
         enable_nvlink from dask-cuda-worker CLI.
 
     Examples
@@ -1760,3 +1703,59 @@ def is_python_shutting_down() -> bool:
     from distributed import _python_shutting_down
 
     return _python_shutting_down
+
+
+class Deadline:
+    """Utility class tracking a deadline and the progress toward it"""
+
+    #: Expiry time of the deadline in seconds since the epoch
+    #: or None if the deadline never expires
+    expires_at: float | None
+    #: Seconds since the epoch when the deadline was created
+    started_at: float
+
+    def __init__(self, expires_at: float | None = None):
+        self.expires_at = expires_at
+        self.started_at = time()
+
+    @classmethod
+    def after(cls, duration: float | None = None) -> Deadline:
+        """Create a new ``Deadline`` that expires in ``duration`` seconds
+        or never if ``duration`` is None"""
+        started_at = time()
+        expires_at = duration + started_at if duration is not None else duration
+        deadline = cls(expires_at)
+        deadline.started_at = started_at
+        return deadline
+
+    @property
+    def duration(self) -> float | None:
+        """Seconds between the creation and expiration time of the deadline
+        if the deadline expires, None otherwise"""
+        if self.expires_at is None:
+            return None
+        return self.expires_at - self.started_at
+
+    @property
+    def expires(self) -> bool:
+        """Whether the deadline ever expires"""
+        return self.expires_at is not None
+
+    @property
+    def elapsed(self) -> float:
+        """Seconds that elapsed since the deadline was created"""
+        return time() - self.started_at
+
+    @property
+    def remaining(self) -> float | None:
+        """Seconds remaining until the deadline expires if an expiry time is set,
+        None otherwise"""
+        if self.expires_at is None:
+            return None
+        else:
+            return max(0, self.expires_at - time())
+
+    @property
+    def expired(self) -> bool:
+        """Whether the deadline has already expired"""
+        return self.remaining == 0

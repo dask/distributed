@@ -12,11 +12,10 @@ from collections import defaultdict
 from collections.abc import Generator
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
-from tornado.ioloop import PeriodicCallback
-
 import dask
 from dask.utils import parse_timedelta
 
+from distributed.compatibility import PeriodicCallback
 from distributed.core import Status
 from distributed.metrics import time
 from distributed.utils import import_term, log_errors
@@ -46,14 +45,20 @@ class ActiveMemoryManagerExtension:
     ``distributed.scheduler.active-memory-manager``.
     """
 
+    #: Back-reference to the scheduler holding this extension
     scheduler: Scheduler
+    #: All active policies
     policies: set[ActiveMemoryManagerPolicy]
+    #: Memory measure to use. Must be one of the attributes or properties of
+    #: :class:`distributed.scheduler.MemoryState`.
+    measure: str
+    #: Run automatically every this many seconds
     interval: float
-
-    # These attributes only exist within the scope of self.run()
-    # Current memory (in bytes) allocated on each worker, plus/minus pending actions
+    #: Current memory (in bytes) allocated on each worker, plus/minus pending actions
+    #: This attribute only exist within the scope of self.run().
     workers_memory: dict[WorkerState, int]
-    # Pending replications and deletions for each task
+    #: Pending replications and deletions for each task
+    #: This attribute only exist within the scope of self.run().
     pending: dict[TaskState, tuple[set[WorkerState], set[WorkerState]]]
 
     def __init__(
@@ -63,6 +68,7 @@ class ActiveMemoryManagerExtension:
         # away on the fly a specialized manager, separate from the main one.
         policies: set[ActiveMemoryManagerPolicy] | None = None,
         *,
+        measure: str | None = None,
         register: bool = True,
         start: bool | None = None,
         interval: float | None = None,
@@ -83,6 +89,23 @@ class ActiveMemoryManagerExtension:
         for policy in policies:
             self.add_policy(policy)
 
+        if not measure:
+            measure = dask.config.get(
+                "distributed.scheduler.active-memory-manager.measure"
+            )
+        mem = scheduler.memory
+        measure_domain = {
+            name
+            for name in dir(mem)
+            if not name.startswith("_") and isinstance(getattr(mem, name), int)
+        }
+        if not isinstance(measure, str) or measure not in measure_domain:
+            raise ValueError(
+                "distributed.scheduler.active-memory-manager.measure "
+                "must be one of " + ", ".join(sorted(measure_domain))
+            )
+        self.measure = measure
+
         if register:
             scheduler.extensions["amm"] = self
             scheduler.handlers["amm_handler"] = self.amm_handler
@@ -92,6 +115,7 @@ class ActiveMemoryManagerExtension:
                 dask.config.get("distributed.scheduler.active-memory-manager.interval")
             )
         self.interval = interval
+
         if start is None:
             start = dask.config.get("distributed.scheduler.active-memory-manager.start")
         if start:
@@ -140,8 +164,9 @@ class ActiveMemoryManagerExtension:
         assert not hasattr(self, "pending")
 
         self.pending = {}
+        measure = self.measure
         self.workers_memory = {
-            w: w.memory.optimistic for w in self.scheduler.workers.values()
+            ws: getattr(ws.memory, measure) for ws in self.scheduler.workers.values()
         }
         try:
             # populate self.pending
@@ -230,6 +255,10 @@ class ActiveMemoryManagerExtension:
             log_reject(f"ts.state = {ts.state}")
             return None
 
+        if ts.actor:
+            log_reject("task is an actor")
+            return None
+
         if candidates is None:
             candidates = self.scheduler.running.copy()
         else:
@@ -280,6 +309,10 @@ class ActiveMemoryManagerExtension:
 
         if len(ts.who_has) - len(pending_drop) < 2:
             log_reject("less than 2 replicas exist")
+            return None
+
+        if ts.actor:
+            log_reject("task is an actor")
             return None
 
         if candidates is None:
@@ -591,11 +624,26 @@ class RetireWorker(ActiveMemoryManagerPolicy):
             self.manager.policies.remove(self)
             return
 
+        if ws.actors:
+            logger.warning(
+                f"Tried retiring worker {self.address}, but it holds actor(s) "
+                f"{set(ws.actors)}, which can't be moved."
+                "The worker will not be retired."
+            )
+            self.no_recipients = True
+            self.manager.policies.remove(self)
+            return
+
         nrepl = 0
         nno_rec = 0
 
         logger.debug("Retiring %s", ws)
         for ts in ws.has_what:
+            if ts.actor:
+                # This is just a proxy Actor object; if there were any originals we
+                # would have stopped earlier
+                continue
+
             if len(ts.who_has) > 1:
                 # There are already replicas of this key on other workers.
                 # Suggest dropping the replica from this worker.
@@ -663,10 +711,10 @@ class RetireWorker(ActiveMemoryManagerPolicy):
     def done(self) -> bool:
         """Return True if it is safe to close the worker down; False otherwise"""
         if self not in self.manager.policies:
-            # Either the no_recipients flag has been raised, or there were no unique replicas
-            # as of the latest AMM run. Note that due to tasks transitioning from running to
-            # memory there may be some now; it's OK to lose them and just recompute them
-            # somewhere else.
+            # Either the no_recipients flag has been raised, or there were no unique
+            # replicas as of the latest AMM run. Note that due to tasks transitioning
+            # from running to memory there may be some now; it's OK to lose them and
+            # just recompute them somewhere else.
             return True
         ws = self.manager.scheduler.workers.get(self.address)
         if ws is None:

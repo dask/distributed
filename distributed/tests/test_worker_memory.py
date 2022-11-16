@@ -11,6 +11,7 @@ from time import sleep
 
 import psutil
 import pytest
+from tlz import merge
 
 import dask.config
 
@@ -20,7 +21,13 @@ from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import Status
 from distributed.metrics import monotonic
 from distributed.spill import has_zict_210
-from distributed.utils_test import captured_logger, gen_cluster, inc
+from distributed.utils_test import (
+    NO_AMM,
+    captured_logger,
+    gen_cluster,
+    inc,
+    wait_for_state,
+)
 from distributed.worker_memory import parse_memory_limit
 from distributed.worker_state_machine import (
     ComputeTaskEvent,
@@ -88,6 +95,46 @@ async def test_parse_memory_limit_nanny(c, s, n):
 )
 async def test_dict_data_if_no_spill_to_disk(s, w):
     assert type(w.data) is dict
+
+
+class WorkerData(dict):
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.kwargs = kwargs
+
+
+class WorkerDataLocalDirectory(dict):
+    def __init__(self, worker_local_directory, **kwargs):
+        super().__init__()
+        self.local_directory = worker_local_directory
+        self.kwargs = kwargs
+
+
+@gen_cluster(
+    nthreads=[("", 1)], Worker=Worker, worker_kwargs={"data": WorkerDataLocalDirectory}
+)
+async def test_worker_data_callable_local_directory(s, w):
+    assert type(w.memory_manager.data) is WorkerDataLocalDirectory
+    assert w.memory_manager.data.local_directory == w.local_directory
+
+
+@gen_cluster(
+    nthreads=[("", 1)],
+    Worker=Worker,
+    worker_kwargs={"data": (WorkerDataLocalDirectory, {"a": "b"})},
+)
+async def test_worker_data_callable_local_directory_kwargs(s, w):
+    assert type(w.memory_manager.data) is WorkerDataLocalDirectory
+    assert w.memory_manager.data.local_directory == w.local_directory
+    assert w.memory_manager.data.kwargs == {"a": "b"}
+
+
+@gen_cluster(
+    nthreads=[("", 1)], Worker=Worker, worker_kwargs={"data": (WorkerData, {"a": "b"})}
+)
+async def test_worker_data_callable_kwargs(s, w):
+    assert type(w.memory_manager.data) is WorkerData
+    assert w.memory_manager.data.kwargs == {"a": "b"}
 
 
 class CustomError(Exception):
@@ -589,11 +636,14 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
 @gen_cluster(
     client=True,
     nthreads=[("", 1), ("", 1)],
-    config={
-        "distributed.worker.memory.target": False,
-        "distributed.worker.memory.spill": False,
-        "distributed.worker.memory.pause": False,
-    },
+    config=merge(
+        NO_AMM,
+        {
+            "distributed.worker.memory.target": False,
+            "distributed.worker.memory.spill": False,
+            "distributed.worker.memory.pause": False,
+        },
+    ),
 )
 async def test_pause_prevents_deps_fetch(c, s, a, b):
     """A worker is paused while there are dependencies ready to fetch, but all other
@@ -639,8 +689,7 @@ async def test_pause_prevents_deps_fetch(c, s, a, b):
     # - ensure_communicating is triggered again
     # - ensure_communicating refuses to fetch y because the worker is paused
 
-    while "y" not in a.state.tasks or a.state.tasks["y"].state != "fetch":
-        await asyncio.sleep(0.01)
+    await wait_for_state("y", "fetch", a)
     await asyncio.sleep(0.1)
     assert a.state.tasks["y"].state == "fetch"
     assert "y" not in a.data
@@ -694,10 +743,9 @@ async def test_override_data_worker(s):
     async with Worker(s.address, data=UserDict) as w:
         assert type(w.data) is UserDict
 
-    data = UserDict({"x": 1})
+    data = UserDict()
     async with Worker(s.address, data=data) as w:
         assert w.data is data
-        assert w.data == {"x": 1}
 
 
 @gen_cluster(
@@ -922,16 +970,21 @@ async def test_pause_while_spilling(c, s, a):
             return bool, (paused,)
 
     futs = c.map(SlowSpill, range(N_TOTAL))
-    while len(a.data.slow) < N_PAUSE + 1:
+    while len(a.data.slow) < (N_PAUSE + 1 if a.state.ready else N_PAUSE):
         await asyncio.sleep(0.01)
 
     assert a.status == Status.paused
     # Worker should have become paused after the first `SlowSpill` was evicted, because
     # the spill to disk took longer than the memory monitor interval.
     assert len(a.data.fast) == 0
-    assert len(a.data.slow) == N_PAUSE + 1
-    n_spilled_while_paused = sum(paused is True for paused in a.data.slow.values())
-    assert N_PAUSE <= n_spilled_while_paused <= N_PAUSE + 1
+    # With queuing enabled, after the 3rd `SlowSpill` has been created, there's a race
+    # between the scheduler sending the worker a new task, and the memory monitor
+    # running and pausing the worker. If the worker gets paused before the 4th task
+    # lands, only 3 will be in memory. If after, the 4th will block on the semaphore
+    # until one of the others is spilled.
+    assert len(a.data.slow) in (N_PAUSE, N_PAUSE + 1)
+    n_spilled_while_not_paused = sum(paused is False for paused in a.data.slow.values())
+    assert 0 <= n_spilled_while_not_paused <= 1
 
 
 @pytest.mark.slow

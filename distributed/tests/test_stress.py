@@ -11,12 +11,13 @@ from tlz import concat, sliding_window
 
 from dask import delayed
 
-from distributed import Client, Nanny, wait
+from distributed import Client, Nanny, Worker, wait
 from distributed.chaos import KillWorker
 from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 from distributed.utils import CancelledError
 from distributed.utils_test import (
+    NO_AMM,
     bump_rlimit,
     cluster,
     gen_cluster,
@@ -90,14 +91,10 @@ def test_cancel_stress_sync(loop):
                 c.cancel(f)
 
 
-@pytest.mark.xfail(
-    reason="Flaky and re-fails on rerun. See https://github.com/dask/distributed/issues/5388"
-)
 @pytest.mark.slow
 @gen_cluster(
     nthreads=[],
     client=True,
-    timeout=180,
     scheduler_kwargs={"allowed_failures": 100_000},
 )
 async def test_stress_creation_and_deletion(c, s):
@@ -112,17 +109,20 @@ async def test_stress_creation_and_deletion(c, s):
     async def create_and_destroy_worker(delay):
         start = time()
         while time() < start + 5:
-            async with Nanny(s.address, nthreads=2) as n:
+            async with Worker(s.address, nthreads=2) as n:
                 await asyncio.sleep(delay)
-            print("Killed nanny")
 
     await asyncio.gather(*(create_and_destroy_worker(0.1 * i) for i in range(20)))
 
-    async with Nanny(s.address, nthreads=2):
+    async with Worker(s.address, nthreads=2):
         assert await c.compute(z) == 8000884.93
 
 
-@gen_cluster(nthreads=[("", 1)] * 10, client=True)
+@gen_cluster(
+    nthreads=[("", 1)] * 10,
+    client=True,
+    config=NO_AMM,
+)
 async def test_stress_scatter_death(c, s, *workers):
     s.allowed_failures = 1000
     np = pytest.importorskip("numpy")

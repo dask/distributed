@@ -10,13 +10,14 @@ from dask.utils import stringify
 
 from distributed import Lock, Worker
 from distributed.client import wait
-from distributed.utils_test import gen_cluster, inc, lock_inc, slowadd, slowinc
+from distributed.utils_test import NO_AMM, gen_cluster, inc, lock_inc, slowadd, slowinc
 from distributed.worker_state_machine import (
     ComputeTaskEvent,
     Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
     FreeKeysEvent,
+    LongRunningMsg,
     RescheduleEvent,
     TaskFinishedMsg,
 )
@@ -132,23 +133,20 @@ async def test_map(c, s, a, b):
 
 @gen_cluster(
     client=True,
-    nthreads=[
-        ("127.0.0.1", 1, {"resources": {"A": 1}}),
-        ("127.0.0.1", 1, {"resources": {"B": 1}}),
-    ],
+    nthreads=[("", 1, {"resources": {"A": 1}}), ("", 1, {"resources": {"B": 1}})],
+    config=NO_AMM,
 )
 async def test_persist(c, s, a, b):
     with dask.annotate(resources={"A": 1}):
-        x = delayed(inc)(1)
+        x = delayed(inc)(1, dask_key_name="x")
     with dask.annotate(resources={"B": 1}):
-        y = delayed(inc)(x)
+        y = delayed(inc)(x, dask_key_name="y")
 
     xx, yy = c.persist([x, y], optimize_graph=False)
-
     await wait([xx, yy])
 
-    assert x.key in a.data
-    assert y.key in b.data
+    assert set(a.data) == {"x"}
+    assert set(b.data) == {"x", "y"}
 
 
 @gen_cluster(
@@ -565,6 +563,8 @@ def test_resumed_with_different_resources(ws_with_running_task, done_ev_cls):
     """
     ws = ws_with_running_task
     assert ws.available_resources == {"R": 0}
+    ts = ws.tasks["x"]
+    prev_state = ts.state
 
     ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="s1"))
     assert ws.available_resources == {"R": 0}
@@ -572,7 +572,12 @@ def test_resumed_with_different_resources(ws_with_running_task, done_ev_cls):
     instructions = ws.handle_stimulus(
         ComputeTaskEvent.dummy("x", stimulus_id="s2", resource_restrictions={"R": 0.4})
     )
-    assert not instructions
+    if prev_state == "long-running":
+        assert instructions == [
+            LongRunningMsg(key="x", compute_duration=None, stimulus_id="s2")
+        ]
+    else:
+        assert not instructions
     assert ws.available_resources == {"R": 0}
 
     ws.handle_stimulus(done_ev_cls.dummy(key="x", stimulus_id="s3"))

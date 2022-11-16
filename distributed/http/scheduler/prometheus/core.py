@@ -1,20 +1,22 @@
 from __future__ import annotations
 
+import prometheus_client
 import toolz
+from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
 
 from distributed.http.prometheus import PrometheusCollector
 from distributed.http.scheduler.prometheus.semaphore import SemaphoreMetricCollector
+from distributed.http.scheduler.prometheus.stealing import WorkStealingMetricCollector
 from distributed.http.utils import RequestHandler
-from distributed.scheduler import ALL_TASK_STATES
+from distributed.scheduler import ALL_TASK_STATES, Scheduler
 
 
 class SchedulerMetricCollector(PrometheusCollector):
-    def __init__(self, server):
+    def __init__(self, server: Scheduler):
         super().__init__(server)
         self.subsystem = "scheduler"
 
     def collect(self):
-        from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
 
         yield GaugeMetricFamily(
             self.build_name("clients"),
@@ -69,19 +71,33 @@ class SchedulerMetricCollector(PrometheusCollector):
         )
 
         for state in ALL_TASK_STATES:
-            tasks.add_metric([state], task_counter.get(state, 0.0))
+            if state != "forgotten":
+                tasks.add_metric([state], task_counter.get(state, 0.0))
         yield tasks
 
+        prefix_state_counts = CounterMetricFamily(
+            self.build_name("prefix_state_totals"),
+            "Accumulated count of task prefix in each state",
+            labels=["task_prefix_name", "state"],
+        )
 
-COLLECTORS = [SchedulerMetricCollector, SemaphoreMetricCollector]
+        for tp in self.server.task_prefixes.values():
+            for state, count in tp.state_counts.items():
+                prefix_state_counts.add_metric([tp.name, state], count)
+        yield prefix_state_counts
+
+
+COLLECTORS = [
+    SchedulerMetricCollector,
+    SemaphoreMetricCollector,
+    WorkStealingMetricCollector,
+]
 
 
 class PrometheusHandler(RequestHandler):
     _collectors = None
 
     def __init__(self, *args, dask_server=None, **kwargs):
-        import prometheus_client
-
         super().__init__(*args, dask_server=dask_server, **kwargs)
 
         if PrometheusHandler._collectors:
@@ -99,7 +115,5 @@ class PrometheusHandler(RequestHandler):
             prometheus_client.REGISTRY.register(instantiated_collector)
 
     def get(self):
-        import prometheus_client
-
         self.write(prometheus_client.generate_latest())
         self.set_header("Content-Type", "text/plain; version=0.0.4")
