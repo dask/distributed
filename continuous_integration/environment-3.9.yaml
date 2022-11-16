@@ -8,8 +8,7 @@ dependencies:
   - packaging
   - pip
   - asyncssh
-  # Temporary restriction until https://github.com/dask/distributed/issues/7173 is resolved
-  - bokeh<3
+  - bokeh
   - click
   - cloudpickle
   - coverage

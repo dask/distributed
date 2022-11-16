@@ -1,6 +1,80 @@
 Changelog
 =========
 
+2022.11.0
+---------
+
+Released on November 15, 2022
+
+.. note::
+
+    This release changes the default scheduling mode to use :ref:`queuing <queuing>`.
+    This will significantly reduce cluster memory use in most cases, and generally
+    improve stability and performance. `Learn more here <https://www.coiled.io/blog/reducing-dask-memory-usage>`_
+    and please provide any feedback `on this discussion <https://github.com/dask/distributed/discussions/7128>`_.
+
+    In rare cases, this could make some workloads slower. See the :ref:`documentation <adjust-queuing>`
+    for more information, and how to switch back to the old mode.
+
+New Features
+^^^^^^^^^^^^
+- Add ``ForwardOutput`` worker plugin to forward ``stdout`` and ``stderr`` to client. (:pr:`7297`) `Hendrik Makait`_
+- Duration counters on prefix level (:pr:`7288`) `Florian Jetter`_
+- Include button for launching JupyterLab layout in repr (:pr:`7218`) `Ian Rose`_
+
+Enhancements
+^^^^^^^^^^^^
+- Support MIG parsing during CUDA context creation in UCX initialization (:pr:`6720`) `Peter Andreas Entschev`_
+- Handle ``/metrics`` endpoint without ``prometheus-client`` installed (:pr:`7234`) `Hendrik Makait`_
+- Add support for unpacking namedtuples in remote data (:pr:`7282`) `Andrew`_
+- Enable queuing by default (:pr:`7279`) `Florian Jetter`_
+- Fix ``exists``->``exist`` typo in scheduler error messages (:pr:`7281`) `Matthew Plough`_
+- If there's an exception in the ``Client`` async context manager body then close fast (:pr:`6920`) `Thomas Grainger`_
+
+Documentation
+^^^^^^^^^^^^^
+- Copyediting typos + ``codespell`` ``pre-commit`` hook for docs (:pr:`7294`) `Matthew Plough`_
+- Queuing docs (:pr:`7203`) `Gabe Joseph`_
+
+Bug Fixes
+^^^^^^^^^
+- Ensure category is optional when logging ``"warn"`` events (:pr:`7169`) `James Bourbeau`_
+- Edge and impossible transitions to memory (:pr:`7205`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Use ``conda-incubator/setup-miniconda@v2.2.0`` (:pr:`7310`) `jakirkham`_
+- Allow ``bokeh=3``  (:pr:`5648`) `James Bourbeau`_
+- Fix typos in P2P shuffle code (:pr:`7304`) `Hendrik Makait`_
+- Reenable ``test_bad_disk`` (:pr:`7300`) `Florian Jetter`_
+- Reduce max-runs in test reports (:pr:`7299`) `Florian Jetter`_
+- Revert idle classification when ``worker-saturation`` is set (:pr:`7278`) `Florian Jetter`_
+- Fix flaky ``deadline_expiration`` (:pr:`7287`) `Florian Jetter`_
+- Rewrite of P2P control flow (:pr:`7268`) `Florian Jetter`_
+- Add codecov token (:pr:`7277`) `Florian Jetter`_
+- Bump minimum ``bokeh`` version to 2.4.2 (:pr:`7271`) `James Bourbeau`_
+- Remove deprecated code calls to ``IOLoop.make_current()`` (:pr:`7240`) `Thomas Grainger`_
+- Improved test for balancing expensive tasks (:pr:`7272`) `Hendrik Makait`_
+- Refactor ``semaphore._Watch`` into general-purpose ``Deadline`` utility (:pr:`7238`) `Hendrik Makait`_
+- Coverage report fixing (:pr:`7270`) `Tom Hu`_
+- Require Click 7.0+ (:pr:`7226`) `jakirkham`_
+- Drop tests (:pr:`7269`) `Hendrik Makait`_
+- Replace ``test_(do_not_)steal_communication_heavy_tasks`` tests with more robust versions (:pr:`7243`) `Hendrik Makait`_
+- ``xfail`` ``test_bad_disk`` (:pr:`7265`) `crusaderky`_
+- Move ``transition_log`` from ``Scheduler`` to ``SchedulerState`` (:pr:`7254`) `crusaderky`_
+- Remove ``Scheduler.log`` (:pr:`7258`) `crusaderky`_
+- Use latest ``pickle`` (:pr:`5826`) `jakirkham`_
+- Polish parsing of ``worker-saturation`` from config (:pr:`7255`) `crusaderky`_
+- Avoid expensive occupancy calculation when unused (:pr:`7257`) `Gabe Joseph`_
+- Un-skip ``test_nested_compute`` (:pr:`7247`) `Gabe Joseph`_
+- Review ``test_do_not_steal_communication_heavy_tasks`` (:pr:`7250`) `crusaderky`_
+- Fix ``test_stress_creation_and_deletion`` (:pr:`7215`) `crusaderky`_
+- Raise exceptions in ``Server.handle_stream`` instead of swallowing/logging (:pr:`7162`) `Hendrik Makait`_
+- Upgrade to ``mypy`` v0.982 (:pr:`7241`) `Thomas Grainger`_
+- Fix ``_update_scheduler_info`` hanging failed tests (:pr:`7225`) `Gabe Joseph`_
+- Bump ``xarray-contrib/ci-trigger`` from 1.1 to 1.2 (:pr:`7232`)
+
+
 .. _v2022.10.2:
 
 2022.10.2
@@ -4360,3 +4434,6 @@ significantly without many new features.
 .. _`Burt Holzman`: https://github.com/holzman
 .. _`Max Bane`: https://github.com/maxbane
 .. _`Oliver Holworthy`: https://github.com/oliverholworthy
+.. _`Andrew`: https://github.com/ahuang11
+.. _`Matthew Plough`: https://github.com/mplough-kobold
+.. _`Tom Hu`: https://github.com/thomasrockhu-codecov
