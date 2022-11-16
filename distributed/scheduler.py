@@ -2829,7 +2829,7 @@ class SchedulerState:
                 # It's ok to forget a task that nobody needs
                 pass
             else:
-                assert False, ts
+                raise AssertionError("Unreachable", str(ts))  # pragma: nocover
 
         self._propagate_forgotten(ts, recommendations, worker_msgs, stimulus_id)
 
