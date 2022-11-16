@@ -767,8 +767,8 @@ async def test_error_receive(tmpdir, loop_in_thread):
         loop=loop_in_thread,
     )
     try:
-        await sA.add_partition(dfs[0])
+        await sB.add_partition(dfs[0])
         with pytest.raises(RuntimeError, match="Error during receive"):
-            await sA.barrier()
+            await sB.barrier()
     finally:
         await asyncio.gather(*[s.close() for s in [sA, sB]])
