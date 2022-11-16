@@ -667,8 +667,8 @@ async def test_error_offload(tmpdir, loop_in_thread):
     )
     try:
         await sB.add_partition(dfs[0])
-        await sB.add_partition(dfs[1])
         with pytest.raises(RuntimeError, match="Error during deserialization"):
+            await sB.add_partition(dfs[1])
             await sB.barrier()
     finally:
         await asyncio.gather(*[s.close() for s in [sA, sB]])
@@ -719,6 +719,56 @@ async def test_error_send(tmpdir, loop_in_thread):
     try:
         await sA.add_partition(dfs[0])
         with pytest.raises(RuntimeError, match="Error during send"):
+            await sA.barrier()
+    finally:
+        await asyncio.gather(*[s.close() for s in [sA, sB]])
+
+
+@gen_test()
+async def test_error_receive(tmpdir, loop_in_thread):
+    dfs = []
+    rows_per_df = 10
+    n_input_partitions = 1
+    npartitions = 2
+    for ix in range(n_input_partitions):
+        df = pd.DataFrame({"x": range(rows_per_df * ix, rows_per_df * (ix + 1))})
+        df["_partition"] = df.x % npartitions
+        dfs.append(df)
+
+    workers = ["A", "B"]
+
+    worker_for_mapping = {}
+    partitions_for_worker = defaultdict(list)
+
+    for part in range(npartitions):
+        worker_for_mapping[part] = w = get_worker_for(part, workers, npartitions)
+        partitions_for_worker[w].append(part)
+    schema = pa.Schema.from_pandas(dfs[0])
+
+    local_shuffle_pool = ShuffleTestPool()
+
+    class ErrorReceive(Shuffle):
+        async def receive(self, data: list[bytes]) -> None:
+            raise RuntimeError("Error during receive")
+
+    sA = local_shuffle_pool.new_shuffle(
+        name="A",
+        worker_for_mapping=worker_for_mapping,
+        schema=schema,
+        directory=tmpdir,
+        loop=loop_in_thread,
+        Shuffle=ErrorReceive,
+    )
+    sB = local_shuffle_pool.new_shuffle(
+        name="B",
+        worker_for_mapping=worker_for_mapping,
+        schema=schema,
+        directory=tmpdir,
+        loop=loop_in_thread,
+    )
+    try:
+        await sA.add_partition(dfs[0])
+        with pytest.raises(RuntimeError, match="Error during receive"):
             await sA.barrier()
     finally:
         await asyncio.gather(*[s.close() for s in [sA, sB]])
