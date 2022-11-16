@@ -3565,6 +3565,9 @@ async def test_broken_comm(c, s, a, b):
 
 @gen_cluster(nthreads=[])
 async def test_do_not_block_event_loop_during_shutdown(s):
+    # An earlier implementation of Close blocked the event loop during
+    # threadpool closing. This was removed by now but closing should not block,
+    # ever, so the test is still OK
     loop = asyncio.get_running_loop()
     called_handler = threading.Event()
     block_handler = threading.Event()
@@ -3591,8 +3594,7 @@ async def test_do_not_block_event_loop_during_shutdown(s):
 
     async def close():
         called_handler.wait()
-        # executor_wait is True by default but we want to be explicit here
-        await w.close(executor_wait=True)
+        await w.close()
 
     await asyncio.gather(block(), close(), set_future())
 

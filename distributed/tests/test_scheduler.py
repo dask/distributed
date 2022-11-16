@@ -4214,7 +4214,7 @@ async def test_ensure_events_dont_include_taskstate_objects(c, s, a, b):
     while not a.state.tasks:
         await asyncio.sleep(0.1)
 
-    await a.close(executor_wait=False)
+    await a.close()
     await event.set()
     await c.gather(futs)
 
