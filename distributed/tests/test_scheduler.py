@@ -517,6 +517,9 @@ async def test_decide_worker_memory_tiebreaker_idle_cluster(c, s, *workers):
     assert first(last_ts.who_has) is not first(big_ts.who_has)
 
 
+@pytest.mark.skip(
+    "Not yet implemented: https://github.com/dask/distributed/issues/7266"
+)
 @gen_cluster(
     client=True,
     nthreads=[],

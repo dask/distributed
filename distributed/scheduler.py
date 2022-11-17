@@ -3252,7 +3252,7 @@ class SchedulerState:
 
         Minimize worker occupancy. If a tie then break with data storage.
         """
-        return (ws.occupancy / ws.nthreads, ws.nbytes / (ws.memory_limit or 1))
+        return (ws.occupancy / ws.nthreads, ws.nbytes)
 
     def add_replica(self, ts: TaskState, ws: WorkerState):
         """Note that a worker holds a replica of a task with state='memory'"""
