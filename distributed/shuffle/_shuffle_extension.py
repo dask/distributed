@@ -670,7 +670,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             )
             self.scheduler.stimulus_task_erred(
                 f"shuffle-barrier-{shuffle_id}",
-                exception=RuntimeError(message),
+                exception=to_serialize(RuntimeError(message)),
                 stimulus_id="shuffle-remove-worker",
             )
         await asyncio.gather(*broadcasts, return_exceptions=True)
