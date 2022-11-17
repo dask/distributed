@@ -177,6 +177,7 @@ class Shuffle:
         )
 
     async def offload(self, func: Callable[..., T], *args: Any) -> T:
+        self.raise_if_closed()
         with self.time("cpu"):
             return await asyncio.get_running_loop().run_in_executor(
                 self.executor,
