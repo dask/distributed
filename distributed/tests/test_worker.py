@@ -1570,7 +1570,7 @@ async def test_close_async_task_handles_cancellation(c, s, a):
     )
     start = time()
     with captured_logger(
-        "distributed.worker_state_machine", level=logging.ERROR
+        "distributed.worker.state_machine", level=logging.ERROR
     ) as logger:
         await a.close(timeout=1)
     assert "Failed to cancel asyncio task" in logger.getvalue()
@@ -3733,8 +3733,7 @@ async def test_deprecation_of_renamed_worker_attributes(s, a, b):
 
 @gen_cluster(nthreads=[])
 async def test_worker_log_memory_limit_too_high(s):
-    with captured_logger("distributed.worker_memory") as caplog:
-        # caplog.set_level(logging.WARN, logger="distributed.worker")
+    with captured_logger("distributed.worker.memory") as caplog:
         async with Worker(s.address, memory_limit="1PB"):
             pass
 
