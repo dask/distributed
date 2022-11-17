@@ -196,9 +196,9 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
         expected = await c.compute(df.x.size)
         assert actual == expected
 
-        # clean_worker(a)  # TODO: clean up on exception
-        # clean_worker(b)
-        # clean_scheduler(s)
+        clean_worker(a)
+        clean_worker(b)
+        clean_scheduler(s)
 
 
 @pytest.mark.parametrize("close_barrier_worker", [True, False])
@@ -235,8 +235,8 @@ async def test_closed_worker_during_barrier(c, s, a, b, close_barrier_worker):
 
     assert shuffle_id in str(e.value)
 
-    # clean_worker(a)  # TODO: clean up on exception
-    # clean_worker(b)
+    clean_worker(a)
+    clean_worker(b)
     # clean_scheduler(s)
 
 
@@ -271,8 +271,8 @@ async def test_closed_worker_during_unpack(c, s, a, b):
 
     assert b.address in str(e.value)
 
-    # clean_worker(a)  # TODO: clean up on exception
-    # clean_worker(b)
+    clean_worker(a)
+    clean_worker(b)
     # clean_scheduler(s)
 
 
@@ -591,9 +591,9 @@ async def test_clean_after_close(c, s, a, b):
 
     await a.close()
     clean_worker(a)
+    clean_worker(b)
 
     # clean_scheduler(s)  # TODO
-    # clean_worker(b)  # TODO
 
 
 class PooledRPCShuffle(PooledRPCCall):
