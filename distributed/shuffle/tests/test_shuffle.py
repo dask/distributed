@@ -178,7 +178,7 @@ async def test_closed_worker_during_barrier(c, s, a, b, close_barrier_worker):
     shuffle_id = next(iter(ext.shuffle_ids()))
 
     barrier_key = f"shuffle-barrier-{shuffle_id}"
-    await wait_for_state(barrier_key, "processing", s)
+    await wait_for_state(barrier_key, "processing", s, interval=0)
     ts = s.tasks[barrier_key]
     processing_worker = a if ts.processing_on.address == a.address else b
     if (processing_worker == a) == close_barrier_worker:
