@@ -53,7 +53,7 @@ from distributed.diagnostics.plugin import (
 )
 from distributed.metrics import time
 from distributed.protocol import pickle
-from distributed.scheduler import Scheduler
+from distributed.scheduler import KilledWorker, Scheduler
 from distributed.utils_test import (
     NO_AMM,
     BlockedExecute,
@@ -3712,6 +3712,32 @@ async def test_execute_preamble_abort_retirement(c, s):
 
         # Test that y does not get stuck.
         assert await y == 2
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "exc_type", [BaseException, SystemExit, KeyboardInterrupt, asyncio.CancelledError]
+)
+@gen_cluster(
+    nthreads=[("", 1)],
+    client=True,
+    Worker=Nanny,
+    config={"distributed.scheduler.allowed-failures": 0},
+    reraise_fail_hard=False,
+)
+async def test_base_exception_in_task(c, s, a, exc_type):
+    def raiser():
+        raise exc_type(f"this is a {exc_type}")
+
+    f = c.submit(raiser)
+
+    # NOTE: if this changes to re-raising the `BaseException` on the client, that's
+    # okay if there's justification for it. What matters is that the task terminates.
+    with pytest.raises(KilledWorker):
+        await f
+
+    # Nanny restarts it
+    await c.wait_for_workers(1)
 
 
 @gen_cluster()

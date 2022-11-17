@@ -752,6 +752,7 @@ async def start_cluster(
     Worker: type[ServerNode] = Worker,
     scheduler_kwargs: dict[str, Any] | None = None,
     worker_kwargs: dict[str, Any] | None = None,
+    reraise_fail_hard: bool = True,
 ) -> tuple[Scheduler, list[ServerNode]]:
     scheduler_kwargs = scheduler_kwargs or {}
     worker_kwargs = worker_kwargs or {}
@@ -795,7 +796,8 @@ async def start_cluster(
             await s.close()
             check_invalid_worker_transitions(s)
             check_invalid_task_states(s)
-            check_worker_fail_hard(s)
+            if reraise_fail_hard:
+                check_worker_fail_hard(s)
             raise TimeoutError("Cluster creation timeout")
     return s, workers
 
@@ -842,7 +844,7 @@ def check_worker_fail_hard(s: Scheduler) -> None:
         raise exc.with_traceback(tb)
 
 
-async def end_cluster(s, workers):
+async def end_cluster(s, workers, reraise_fail_hard=True):
     logger.debug("Closing out test cluster")
 
     async def end_worker(w):
@@ -854,7 +856,8 @@ async def end_cluster(s, workers):
     s.stop()
     check_invalid_worker_transitions(s)
     check_invalid_task_states(s)
-    check_worker_fail_hard(s)
+    if reraise_fail_hard:
+        check_worker_fail_hard(s)
 
 
 def gen_cluster(
@@ -871,6 +874,7 @@ def gen_cluster(
     config: dict[str, Any] | None = None,
     clean_kwargs: dict[str, Any] | None = None,
     allow_unclosed: bool = False,
+    reraise_fail_hard: bool = True,
     cluster_dump_directory: str | Literal[False] = "test_cluster_dump",
 ) -> Callable[[Callable], Callable]:
     from distributed import Client
@@ -965,6 +969,7 @@ def gen_cluster(
                                 Worker=Worker,
                                 scheduler_kwargs=scheduler_kwargs,
                                 worker_kwargs=worker_kwargs,
+                                reraise_fail_hard=reraise_fail_hard,
                             )
                         except Exception as e:
                             logger.error(
@@ -980,7 +985,7 @@ def gen_cluster(
                         raise Exception("Could not start cluster")
                     yield s, workers
                 finally:
-                    await end_cluster(s, workers)
+                    await end_cluster(s, workers, reraise_fail_hard=reraise_fail_hard)
                     await asyncio.wait_for(cleanup_global_workers(), 1)
 
             async def async_fn():

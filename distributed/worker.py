@@ -177,7 +177,8 @@ def fail_hard(method: Callable[P, T]) -> Callable[P, T]:
         async def wrapper(self, *args: P.args, **kwargs: P.kwargs) -> Any:
             try:
                 return await method(self, *args, **kwargs)  # type: ignore
-            except Exception as e:
+            except BaseException as e:
+                # NOTE: catch `BaseException` because nothing above us will (Tornado drops them)
                 if self.status not in (Status.closed, Status.closing):
                     self.log_event("worker-fail-hard", error_message(e))
                     logger.exception(e)
@@ -190,7 +191,8 @@ def fail_hard(method: Callable[P, T]) -> Callable[P, T]:
         def wrapper(self, *args: P.args, **kwargs: P.kwargs) -> T:
             try:
                 return method(self, *args, **kwargs)
-            except Exception as e:
+            except BaseException as e:
+                # NOTE: catch `BaseException` because nothing above us will (Tornado drops them)
                 if self.status not in (Status.closed, Status.closing):
                     self.log_event("worker-fail-hard", error_message(e))
                     logger.exception(e)
