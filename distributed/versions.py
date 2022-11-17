@@ -13,6 +13,7 @@ from types import ModuleType
 from typing import Any
 
 MIN_BOKEH_VERSION = "2.4.2"
+MAX_BOKEH_VERSION = "2.4.3"
 
 required_packages = [
     ("dask", lambda p: p.__version__),
