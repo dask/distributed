@@ -7,6 +7,7 @@ import random
 import shutil
 from collections import defaultdict
 from typing import Any
+from unittest import mock
 
 import pandas as pd
 import pytest
@@ -150,11 +151,50 @@ async def test_closed_worker_during_transfer(c, s, a, b):
     with pytest.raises(Exception) as e:
         out = await c.compute(out)
 
-    assert b.address in str(e.value)
+    assert f"{b.address} left during active shuffle" in str(e.value)
 
-    # clean_worker(a)  # TODO: clean up on exception
-    # clean_worker(b)
-    # clean_scheduler(s)
+
+@pytest.mark.xfail(reason="distributed#7324")
+@pytest.mark.slow
+@gen_cluster(client=True)
+async def test_closed_input_only_worker_during_transfer(c, s, a, b):
+    def mock_get_worker_for(
+        output_partition: int, workers: list[str], npartitions: int
+    ) -> str:
+        return a.address
+
+    with mock.patch(
+        "distributed.shuffle._shuffle_extension.get_worker_for", mock_get_worker_for
+    ):
+        df = dask.datasets.timeseries(
+            start="2000-01-01",
+            end="2000-01-10",
+            dtypes={"x": float, "y": float},
+            freq="10 s",
+        )
+        out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+        out = out.persist()
+
+        while (
+            len(
+                [
+                    ts
+                    for ts in s.tasks.values()
+                    if "shuffle-transfer" in ts.key and ts.state == "memory"
+                ]
+            )
+            < 3
+        ):
+            await asyncio.sleep(0.01)
+        await b.close()
+
+        actual = await c.compute(out.x.size)
+        expected = await c.compute(df.x.size)
+        assert actual == expected
+
+        # clean_worker(a)  # TODO: clean up on exception
+        # clean_worker(b)
+        # clean_scheduler(s)
 
 
 @pytest.mark.parametrize("close_barrier_worker", [True, False])
