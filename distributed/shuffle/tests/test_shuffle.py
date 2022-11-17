@@ -28,7 +28,7 @@ from distributed.shuffle._shuffle_extension import (
     split_by_partition,
     split_by_worker,
 )
-from distributed.utils_test import gen_cluster, gen_test
+from distributed.utils_test import gen_cluster, gen_test, wait_for_state
 
 pa = pytest.importorskip("pyarrow")
 
@@ -123,7 +123,7 @@ async def test_bad_disk(c, s, a, b):
 
 @pytest.mark.slow
 @gen_cluster(client=True)
-async def test_crashed_worker(c, s, a, b):
+async def test_closed_worker_during_transfer(c, s, a, b):
 
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -140,6 +140,81 @@ async def test_crashed_worker(c, s, a, b):
                 ts
                 for ts in s.tasks.values()
                 if "shuffle-transfer" in ts.key and ts.state == "memory"
+            ]
+        )
+        < 3
+    ):
+        await asyncio.sleep(0.01)
+    await b.close()
+
+    with pytest.raises(Exception) as e:
+        out = await c.compute(out)
+
+    assert b.address in str(e.value)
+
+    # clean_worker(a)  # TODO: clean up on exception
+    # clean_worker(b)
+    # clean_scheduler(s)
+
+
+@pytest.mark.parametrize("close_barrier_worker", [True, False])
+@pytest.mark.slow
+@gen_cluster(client=True)
+async def test_closed_worker_during_barrier(c, s, a, b, close_barrier_worker):
+    ext = s.extensions["shuffle"]
+
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = out.persist()
+
+    while not ext.shuffle_ids():
+        await asyncio.sleep(0.01)
+    assert len(ext.shuffle_ids()) == 1
+    shuffle_id = next(iter(ext.shuffle_ids()))
+
+    barrier_key = f"shuffle-barrier-{shuffle_id}"
+    await wait_for_state(barrier_key, "processing", s)
+    ts = s.tasks[barrier_key]
+    processing_worker = a if ts.processing_on.address == a.address else b
+    if (processing_worker == a) == close_barrier_worker:
+        await a.close()
+    else:
+        await b.close()
+
+    with pytest.raises(Exception) as e:
+        out = await c.compute(out)
+
+    assert shuffle_id in str(e.value)
+
+    # clean_worker(a)  # TODO: clean up on exception
+    # clean_worker(b)
+    # clean_scheduler(s)
+
+
+@pytest.mark.slow
+@gen_cluster(client=True)
+async def test_closed_worker_during_unpack(c, s, a, b):
+
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = out.persist()
+
+    while (
+        len(
+            [
+                ts
+                for ts in s.tasks.values()
+                if "shuffle-p2p" in ts.key and ts.state == "memory"
             ]
         )
         < 3
