@@ -216,6 +216,7 @@ def test_retries(client):
     with client.get_executor(retries=5, pure=False) as e:
         future = e.submit(varying(args))
         assert future.result() == 42
+        # Ensure that the task is released on the scheduler before the next update-graph
         del future
 
     with client.get_executor(retries=4) as e:
