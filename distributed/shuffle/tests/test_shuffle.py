@@ -153,6 +153,10 @@ async def test_closed_worker_during_transfer(c, s, a, b):
 
     assert f"{b.address} left during active shuffle" in str(e.value)
 
+    clean_worker(a)
+    clean_worker(b)
+    # clean_scheduler(s)
+
 
 @pytest.mark.xfail(reason="distributed#7324")
 @pytest.mark.slow

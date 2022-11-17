@@ -313,9 +313,9 @@ class Shuffle:
             except Exception:
                 self.executor.shutdown()
 
-    async def set_exception(self, message: str) -> None:
+    async def set_exception(self, exception: Exception) -> None:
         if not self.closed:
-            self._exception = RuntimeError(message)
+            self._exception = exception
             await self.close()
 
 
@@ -331,6 +331,13 @@ class ShuffleWorkerExtension:
     - collecting instrumentation of ongoing shuffles and route to scheduler/worker
     """
 
+    worker: Worker
+    shuffles: dict[ShuffleId, Shuffle]
+    erred_shuffles: dict[ShuffleId, Exception]
+    memory_limiter_comms: ResourceLimiter
+    memory_limiter_disk: ResourceLimiter
+    closed: bool
+
     def __init__(self, worker: Worker) -> None:
         # Attach to worker
         worker.handlers["shuffle_receive"] = self.shuffle_receive
@@ -339,10 +346,11 @@ class ShuffleWorkerExtension:
         worker.extensions["shuffle"] = self
 
         # Initialize
-        self.worker: Worker = worker
-        self.shuffles: dict[ShuffleId, Shuffle] = {}
-        self.memory_limiter_disk = ResourceLimiter(parse_bytes("1 GiB"))
+        self.worker = worker
+        self.shuffles = {}
+        self.erred_shuffles = {}
         self.memory_limiter_comms = ResourceLimiter(parse_bytes("100 MiB"))
+        self.memory_limiter_disk = ResourceLimiter(parse_bytes("1 GiB"))
         self.closed = False
 
     # Handlers
@@ -387,8 +395,10 @@ class ShuffleWorkerExtension:
                 await self._register_complete(shuffle)
 
     async def shuffle_set_exception(self, shuffle_id: ShuffleId, message: str) -> None:
-        shuffle = await self._get_shuffle(shuffle_id)
-        await shuffle.set_exception(message)
+        shuffle = self.shuffles.pop(shuffle_id)
+        exception = RuntimeError(message)
+        self.erred_shuffles[shuffle_id] = exception
+        await shuffle.set_exception(exception)
 
     def add_partition(
         self,
@@ -451,6 +461,8 @@ class ShuffleWorkerExtension:
 
         self.raise_if_closed()
 
+        if exception := self.erred_shuffles.get(shuffle_id):
+            raise exception
         try:
             return self.shuffles[shuffle_id]
         except KeyError:
@@ -464,7 +476,9 @@ class ShuffleWorkerExtension:
                     column=column,
                 )
                 if result["status"] == "ERROR":
-                    raise RuntimeError(f"Worker left the shuffle {result['worker']}")
+                    raise RuntimeError(
+                        f"Worker {result['worker']} left during active shuffle {shuffle_id}"
+                    )
                 assert result["status"] == "OK"
             except KeyError:
                 # Even the scheduler doesn't know about this shuffle
@@ -559,8 +573,10 @@ class ShuffleWorkerExtension:
         Calling this for a ``shuffle_id`` which is unknown or incomplete is an error.
         """
         self.raise_if_closed()
-        assert shuffle_id in self.shuffles, "Shuffle worker restrictions misbehaving"
-        shuffle = self.shuffles[shuffle_id]
+        assert (
+            shuffle_id in self.shuffles or shuffle_id in self.erred_shuffles
+        ), "Shuffle worker restrictions misbehaving"
+        shuffle = self.get_shuffle(shuffle_id)
         output = sync(self.worker.loop, shuffle.get_output_partition, output_partition)
         # key missing if another thread got to it first
         if shuffle.done() and shuffle_id in self.shuffles:
