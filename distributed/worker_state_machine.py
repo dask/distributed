@@ -3777,13 +3777,14 @@ class BaseWorker(abc.ABC):
         """Cancel all asynchronous instructions"""
         if not self._async_instructions:
             return
-        pending = self._async_instructions
-        while pending:
+        pending_to_cancel = self._async_instructions
+        while pending_to_cancel:
             for task in self._async_instructions:
                 task.cancel()
             # async tasks can handle cancellation and could take an arbitrary amount
             # of time to terminate
-            _, pending = await asyncio.wait(self._async_instructions)
+            _, pending = await asyncio.wait(self._async_instructions, timeout=0.1)
+            pending_to_cancel.update(pending)
 
     @abc.abstractmethod
     def batched_send(self, msg: dict[str, Any]) -> None:

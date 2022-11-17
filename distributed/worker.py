@@ -27,7 +27,6 @@ from collections.abc import (
     MutableMapping,
 )
 from concurrent.futures import Executor
-from contextlib import suppress
 from functools import wraps
 from inspect import isawaitable
 from typing import (
@@ -1648,8 +1647,7 @@ class Worker(BaseWorker, ServerNode):
         self.batched_send({"op": "close-stream"})
 
         if self.batched_stream:
-            with suppress(TimeoutError):
-                await self.batched_stream.close()
+            await self.batched_stream.close()
 
         for executor in self.executors.values():
             if executor is utils._offload_executor:
