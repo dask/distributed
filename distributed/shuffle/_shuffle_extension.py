@@ -41,6 +41,10 @@ T = TypeVar("T")
 logger = logging.getLogger(__name__)
 
 
+class ShuffleClosedError(RuntimeError):
+    pass
+
+
 class Shuffle:
     """State for a single active shuffle
 
@@ -233,7 +237,7 @@ class Shuffle:
         if self.closed:
             if self._exception:
                 raise self._exception
-            raise RuntimeError(
+            raise ShuffleClosedError(
                 f"Shuffle {self.id} has been closed on {self.local_address}"
             )
 
@@ -357,8 +361,13 @@ class ShuffleWorkerExtension:
         Handler: Receive an incoming shard of data from a peer worker.
         Using an unknown ``shuffle_id`` is an error.
         """
-        shuffle = await self._get_shuffle(shuffle_id)
-        await shuffle.receive(data)
+        try:
+            shuffle = await self._get_shuffle(shuffle_id)
+            await shuffle.receive(data)
+        except ShuffleClosedError:
+            from distributed.worker import Reschedule
+
+            raise Reschedule()
 
     async def shuffle_inputs_done(self, shuffle_id: ShuffleId) -> None:
         """
@@ -497,8 +506,8 @@ class ShuffleWorkerExtension:
 
     def raise_if_closed(self) -> None:
         if self.closed:
-            raise RuntimeError(
-                f"ShuffleExtension already closed on {self.worker.address}"
+            raise ShuffleClosedError(
+                f"{self.__class__.__name__} already closed on {self.worker.address}"
             )
 
     #############################
