@@ -5732,6 +5732,40 @@ async def test_logs(c, s, a, b):
             assert "distributed.nanny" in msg
 
 
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_logs_from_worker_submodules(c, s, a):
+    def on_worker(dask_worker):
+        from distributed.worker import logger as l1
+        from distributed.worker_state_machine import logger as l2
+
+        l1.info("AAA")
+        l2.info("BBB")
+        dask_worker.memory_manager.logger.info("CCC")
+
+    await c.run(on_worker)
+    logs = await c.get_worker_logs()
+    logs = [row[1].partition(" - ")[2] for row in logs[a.worker_address]]
+    assert logs[-3:] == [
+        "distributed.worker - INFO - AAA",
+        "distributed.worker.state_machine - INFO - BBB",
+        "distributed.worker.memory - INFO - CCC",
+    ]
+
+    def on_nanny(dask_worker):
+        from distributed.nanny import logger as l3
+
+        l3.info("DDD")
+        dask_worker.memory_manager.logger.info("EEE")
+
+    await c.run(on_nanny, nanny=True)
+    logs = await c.get_worker_logs(nanny=True)
+    logs = [row[1].partition(" - ")[2] for row in logs[a.worker_address]]
+    assert logs[-2:] == [
+        "distributed.nanny - INFO - DDD",
+        "distributed.nanny.memory - INFO - EEE",
+    ]
+
+
 @gen_cluster(client=True)
 async def test_avoid_delayed_finalize(c, s, a, b):
     x = delayed(inc)(1)
