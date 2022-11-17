@@ -668,7 +668,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
                     workers=list(contact_workers),
                 )
             )
-            self.scheduler.stimulus_task_erred(
+            self.scheduler.handle_task_erred(
                 f"shuffle-barrier-{shuffle_id}",
                 exception=to_serialize(RuntimeError(message)),
                 stimulus_id="shuffle-remove-worker",
