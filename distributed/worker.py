@@ -81,7 +81,6 @@ from distributed.threadpoolexecutor import secede as tpe_secede
 from distributed.utils import (
     TimeoutError,
     _maybe_complex,
-    get_ip,
     has_arg,
     import_file,
     in_async_call,
@@ -1354,9 +1353,7 @@ class Worker(BaseWorker, ServerNode):
             kwargs = self.security.get_listen_args("worker")
             if self._protocol in ("tcp", "tls"):
                 kwargs = kwargs.copy()
-                kwargs["default_host"] = get_ip(
-                    get_address_host(self.scheduler.address)
-                )
+                kwargs["remote_host"] = get_address_host(self.scheduler.address)
             try:
                 await self.listen(start_address, **kwargs)
             except OSError as e:

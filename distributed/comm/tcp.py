@@ -553,13 +553,13 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         comm_handler,
         deserialize=True,
         allow_offload=True,
-        default_host=None,
+        remote_host=None,
         default_port=0,
         **connection_args,
     ):
         self._check_encryption(address, connection_args)
         self.ip, self.port = parse_host_port(address, default_port)
-        self.default_host = default_host
+        self.remote_host = remote_host
         self.comm_handler = comm_handler
         self.deserialize = deserialize
         self.allow_offload = allow_offload
@@ -645,7 +645,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         The contact address as a string.
         """
         host, port = self.get_host_port()
-        host = ensure_concrete_host(host, default_host=self.default_host)
+        host = ensure_concrete_host(host, remote_host=self.remote_host)
         return self.prefix + unparse_host_port(host, port)
 
 

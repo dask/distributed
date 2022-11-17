@@ -135,14 +135,14 @@ def get_tcp_server_address(tcp_server):
     return get_tcp_server_addresses(tcp_server)[0]
 
 
-def ensure_concrete_host(host, default_host=None):
+def ensure_concrete_host(host, remote_host=None):
     """
     Ensure the given host string (or IP) denotes a concrete host, not a
     wildcard listening address.
     """
     if host in ("0.0.0.0", ""):
-        return default_host or get_ip()
+        return get_ip(remote_host)
     elif host == "::":
-        return default_host or get_ipv6()
+        return get_ipv6(remote_host)
     else:
         return host

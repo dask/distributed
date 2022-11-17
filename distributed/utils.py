@@ -152,7 +152,7 @@ def get_fileno_limit():
         return 512
 
 
-# toolz.memoize ignores kwargs, so pass all arguments positionally
+# toolz.memoize ignores kwargs, so pass all arguments positionally
 @toolz.memoize
 def _get_ip(host, port, family):
     # By using a UDP socket, we don't actually try to connect but
@@ -176,21 +176,21 @@ def _get_ip(host, port, family):
         sock.close()
 
 
-def get_ip(host="8.8.8.8", port=80):
+def get_ip(host=None, port=80):
     """
     Get the local IP address through which the *host* is reachable.
 
     *host* defaults to a well-known Internet host (one of Google's public
     DNS servers).
     """
-    return _get_ip(host, port, socket.AF_INET)
+    return _get_ip(host or "8.8.8.8", port, socket.AF_INET)
 
 
-def get_ipv6(host="2001:4860:4860::8888", port=80):
+def get_ipv6(host=None, port=80):
     """
     The same as get_ip(), but for IPv6.
     """
-    return _get_ip(host, port, socket.AF_INET6)
+    return _get_ip(host or "2001:4860:4860::8888", port, socket.AF_INET6)
 
 
 def get_ip_interface(ifname):
