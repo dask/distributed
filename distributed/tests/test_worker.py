@@ -445,10 +445,15 @@ async def test_base_exception_in_task(c, s, a, sync, exc_type):
 
     f = c.submit(raiser)
 
-    with pytest.raises(
-        KilledWorker if exc_type in (SystemExit, KeyboardInterrupt) else exc_type
-    ):
-        await f
+    try:
+        with pytest.raises(
+            KilledWorker if exc_type in (SystemExit, KeyboardInterrupt) else exc_type
+        ):
+            await f
+    except BaseException as e:
+        # Prevent test failure from killing the whole pytest process
+        traceback.print_exc()
+        pytest.fail(f"BaseException propagated back to test: {e!r}. See stdout.")
 
     # Nanny restarts it
     await c.wait_for_workers(1)
