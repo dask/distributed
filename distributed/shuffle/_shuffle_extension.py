@@ -313,7 +313,7 @@ class Shuffle:
             except Exception:
                 self.executor.shutdown()
 
-    async def set_exception(self, exception: Exception) -> None:
+    async def fail(self, exception: Exception) -> None:
         if not self.closed:
             self._exception = exception
             await self.close()
@@ -342,7 +342,7 @@ class ShuffleWorkerExtension:
         # Attach to worker
         worker.handlers["shuffle_receive"] = self.shuffle_receive
         worker.handlers["shuffle_inputs_done"] = self.shuffle_inputs_done
-        worker.handlers["shuffle_set_exception"] = self.shuffle_set_exception
+        worker.handlers["shuffle_fail"] = self.shuffle_fail
         worker.extensions["shuffle"] = self
 
         # Initialize
@@ -394,11 +394,11 @@ class ShuffleWorkerExtension:
                 logger.critical(f"Shuffle inputs done {shuffle}")
                 await self._register_complete(shuffle)
 
-    async def shuffle_set_exception(self, shuffle_id: ShuffleId, message: str) -> None:
+    async def shuffle_fail(self, shuffle_id: ShuffleId, message: str) -> None:
         shuffle = self.shuffles.pop(shuffle_id)
         exception = RuntimeError(message)
         self.erred_shuffles[shuffle_id] = exception
-        await shuffle.set_exception(exception)
+        await shuffle.fail(exception)
 
     def add_partition(
         self,
@@ -686,7 +686,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             broadcasts.append(
                 scheduler.broadcast(
                     msg={
-                        "op": "shuffle_set_exception",
+                        "op": "shuffle_fail",
                         "message": message,
                         "shuffle_id": shuffle_id,
                     },
@@ -699,6 +699,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
                 stimulus_id="shuffle-remove-worker",
             )
         await asyncio.gather(*broadcasts, return_exceptions=True)
+        # TODO: Clean up scheduler
 
     def register_complete(self, id: ShuffleId, worker: str) -> None:
         """Learn from a worker that it has completed all reads of a shuffle"""
