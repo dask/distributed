@@ -1839,6 +1839,10 @@ class SchedulerState:
             if self.transition_counter_max:
                 assert self.transition_counter < self.transition_counter_max
 
+            recommendations: dict = {}
+            worker_msgs: dict = {}
+            client_msgs: dict = {}
+
             if self.plugins:
                 dependents = set(ts.dependents)
                 dependencies = set(ts.dependencies)
@@ -1851,13 +1855,19 @@ class SchedulerState:
 
             elif "released" not in (start, finish):
                 assert not kwargs, (kwargs, start, finish)
-                recommendations, client_msgs, worker_msgs = self._transition(
+                a_recs, a_cmsgs, a_wmsgs = self._transition(
                     key, "released", stimulus_id
                 )
 
-                v = recommendations.get(key, finish)
+                v = a_recs.get(key, finish)
                 func = self._TRANSITIONS_TABLE["released", v]
                 b_recs, b_cmsgs, b_wmsgs = func(self, key, stimulus_id)
+
+                recommendations.update(a_recs)
+                for c, new_msgs in a_cmsgs.items():
+                    client_msgs.setdefault(c, []).extend(new_msgs)
+                for w, new_msgs in a_wmsgs.items():
+                    worker_msgs.setdefault(w, []).extend(new_msgs)
 
                 recommendations.update(b_recs)
                 for c, new_msgs in b_cmsgs.items():
@@ -1943,8 +1953,7 @@ class SchedulerState:
             key, finish = recommendations.popitem()
             keys.add(key)
 
-            new = self._transition(key, finish, stimulus_id)
-            new_recs, new_cmsgs, new_wmsgs = new
+            new_recs, new_cmsgs, new_wmsgs = self._transition(key, finish, stimulus_id)
 
             recommendations.update(new_recs)
             for c, new_msgs in new_cmsgs.items():
@@ -2369,7 +2378,6 @@ class SchedulerState:
         ts.state = "released"
 
         report_msg = {"op": "lost-data", "key": key}
-        cs: ClientState
         for cs in ts.who_wants:
             client_msgs[cs.client_key] = [report_msg]
 
