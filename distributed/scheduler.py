@@ -136,8 +136,15 @@ if TYPE_CHECKING:
     # {task key -> finish state}
     # Not to be confused with distributed.worker_state_machine.Recs
     Recs: TypeAlias = "dict[str, TaskStateState]"
+    # {client or worker address: [{op: <key>, ...}, ...]}
+    Msgs: TypeAlias = "dict[str, list[dict[str, Any]]]"
+    # (recommendations, client messages, worker messages)
+    RecsMsgs: TypeAlias = "tuple[Recs, Msgs, Msgs]"
 else:
     TaskStateState = str
+    Recs = dict
+    Msgs = dict
+    RecsMsgs = tuple
 
 ALL_TASK_STATES: set[TaskStateState] = {
     "released",
@@ -711,7 +718,7 @@ class WorkerState:
         )
 
     @property
-    def scheduler(self):
+    def scheduler(self) -> SchedulerState:
         assert self.scheduler_ref
         s = self.scheduler_ref()
         assert s
@@ -874,7 +881,7 @@ class Computation:
             return -1
 
     @property
-    def states(self) -> dict[str, int]:
+    def states(self) -> dict[TaskStateState, int]:
         return merge_with(sum, (tg.states for tg in self.groups))
 
     def __repr__(self) -> str:
@@ -947,7 +954,7 @@ class TaskPrefix:
         self.max_exec_time = -1
         self.suspicious = 0
 
-    def add_exec_time(self, duration: float):
+    def add_exec_time(self, duration: float) -> None:
         self.max_exec_time = max(duration, self.max_exec_time)
         if duration > 2 * self.duration_average:
             self.duration_average = -1
@@ -1454,7 +1461,7 @@ class Transition(NamedTuple):
     key: str
     start: TaskStateState
     finish: TaskStateState
-    recommendations: dict[str, TaskStateState]
+    recommendations: Recs
     stimulus_id: str
     timestamp: float
 
@@ -1606,7 +1613,7 @@ class SchedulerState:
         validate: bool,
         plugins: Iterable[SchedulerPlugin] = (),
         transition_counter_max: int | Literal[False] = False,
-        **kwargs,  # Passed verbatim to Server.__init__()
+        **kwargs: Any,  # Passed verbatim to Server.__init__()
     ):
         logger.info("State start")
         self.aliases = aliases
@@ -1695,7 +1702,7 @@ class SchedulerState:
         return MemoryState.sum(*(w.memory for w in self.workers.values()))
 
     @property
-    def __pdict__(self):
+    def __pdict__(self) -> dict[str, Any]:
         return {
             "bandwidth": self.bandwidth,
             "resources": self.resources,
@@ -1748,10 +1755,9 @@ class SchedulerState:
 
         return ts
 
-    def _clear_task_state(self):
-
+    def _clear_task_state(self) -> None:
         logger.debug("Clear task state")
-        for collection in [
+        for collection in (
             self.unrunnable,
             self.erred_tasks,
             self.computations,
@@ -1760,8 +1766,8 @@ class SchedulerState:
             self.task_metadata,
             self.unknown_durations,
             self.replicated_tasks,
-        ]:
-            collection.clear()
+        ):
+            collection.clear()  # type: ignore
 
     @property
     def total_occupancy(self) -> float:
@@ -1796,18 +1802,22 @@ class SchedulerState:
     #####################
 
     def _transition(
-        self, key: str, finish: TaskStateState, stimulus_id: str, *args, **kwargs
-    ) -> tuple[Recs, dict, dict]:
+        self, key: str, finish: TaskStateState, stimulus_id: str, **kwargs: Any
+    ) -> RecsMsgs:
         """Transition a key from its current state to the finish state
 
         Examples
         --------
         >>> self._transition('x', 'waiting')
-        {'x': 'processing'}
+        {'x': 'processing'}, {}, {}
 
         Returns
         -------
-        Dictionary of recommendations for future transitions
+        Tuple of:
+
+        - Dictionary of recommendations for future transitions {key: new state}
+        - Messages to clients {client address: [msg, msg, ...]}
+        - Messages to workers {worker address: [msg, msg, ...]}
 
         See Also
         --------
@@ -1829,10 +1839,6 @@ class SchedulerState:
             if self.transition_counter_max:
                 assert self.transition_counter < self.transition_counter_max
 
-            recommendations: dict = {}
-            worker_msgs: dict = {}
-            client_msgs: dict = {}
-
             if self.plugins:
                 dependents = set(ts.dependents)
                 dependencies = set(ts.dependencies)
@@ -1840,52 +1846,30 @@ class SchedulerState:
             func = self._TRANSITIONS_TABLE.get((start, finish))
             if func is not None:
                 recommendations, client_msgs, worker_msgs = func(
-                    self, key, stimulus_id, *args, **kwargs
+                    self, key, stimulus_id, **kwargs
                 )
 
             elif "released" not in (start, finish):
-                assert not args and not kwargs, (args, kwargs, start, finish)
-                a_recs, a_cmsgs, a_wmsgs = self._transition(
+                assert not kwargs, (kwargs, start, finish)
+                recommendations, client_msgs, worker_msgs = self._transition(
                     key, "released", stimulus_id
                 )
 
-                v = a_recs.get(key, finish)
+                v = recommendations.get(key, finish)
                 func = self._TRANSITIONS_TABLE["released", v]
                 b_recs, b_cmsgs, b_wmsgs = func(self, key, stimulus_id)
 
-                recommendations.update(a_recs)
-                for c, new_msgs in a_cmsgs.items():
-                    msgs = client_msgs.get(c)
-                    if msgs is not None:
-                        msgs.extend(new_msgs)
-                    else:
-                        client_msgs[c] = new_msgs
-                for w, new_msgs in a_wmsgs.items():
-                    msgs = worker_msgs.get(w)
-                    if msgs is not None:
-                        msgs.extend(new_msgs)
-                    else:
-                        worker_msgs[w] = new_msgs
-
                 recommendations.update(b_recs)
                 for c, new_msgs in b_cmsgs.items():
-                    msgs = client_msgs.get(c)
-                    if msgs is not None:
-                        msgs.extend(new_msgs)
-                    else:
-                        client_msgs[c] = new_msgs
+                    client_msgs.setdefault(c, []).extend(new_msgs)
                 for w, new_msgs in b_wmsgs.items():
-                    msgs = worker_msgs.get(w)
-                    if msgs is not None:
-                        msgs.extend(new_msgs)
-                    else:
-                        worker_msgs[w] = new_msgs
+                    worker_msgs.setdefault(w, []).extend(new_msgs)
 
                 start = "released"
             else:
                 raise RuntimeError(
                     f"Impossible transition from {start} to {finish} for {key!r}: "
-                    f"{stimulus_id=}, {args=}, {kwargs=}, story={self.story(ts)}"
+                    f"{stimulus_id=}, {kwargs=}, story={self.story(ts)}"
                 )
 
             if not stimulus_id:
@@ -1918,7 +1902,7 @@ class SchedulerState:
                     self.tasks[ts.key] = ts
                 for plugin in list(self.plugins.values()):
                     try:
-                        plugin.transition(key, start, actual_finish, *args, **kwargs)
+                        plugin.transition(key, start, actual_finish, **kwargs)
                     except Exception:
                         logger.info("Plugin failed with exception", exc_info=True)
                 if ts.state == "forgotten":
@@ -1943,8 +1927,8 @@ class SchedulerState:
     def _transitions(
         self,
         recommendations: Recs,
-        client_msgs: dict,
-        worker_msgs: dict,
+        client_msgs: Msgs,
+        worker_msgs: Msgs,
         stimulus_id: str,
     ) -> None:
         """Process transitions until none are left
@@ -1964,17 +1948,9 @@ class SchedulerState:
 
             recommendations.update(new_recs)
             for c, new_msgs in new_cmsgs.items():
-                msgs = client_msgs.get(c)
-                if msgs is not None:
-                    msgs.extend(new_msgs)
-                else:
-                    client_msgs[c] = new_msgs
+                client_msgs.setdefault(c, []).extend(new_msgs)
             for w, new_msgs in new_wmsgs.items():
-                msgs = worker_msgs.get(w)
-                if msgs is not None:
-                    msgs.extend(new_msgs)
-                else:
-                    worker_msgs[w] = new_msgs
+                worker_msgs.setdefault(w, []).extend(new_msgs)
 
         if self.validate:
             # FIXME downcast antipattern
@@ -1982,12 +1958,8 @@ class SchedulerState:
             for key in keys:
                 scheduler.validate_key(key)
 
-    def transition_released_waiting(self, key, stimulus_id):
-        ts: TaskState = self.tasks[key]
-        dts: TaskState
-        recommendations: dict = {}
-        client_msgs: dict = {}
-        worker_msgs: dict = {}
+    def transition_released_waiting(self, key: str, stimulus_id: str) -> RecsMsgs:
+        ts = self.tasks[key]
 
         if self.validate:
             assert ts.run_spec
@@ -1997,24 +1969,22 @@ class SchedulerState:
             assert not any([dts.state == "forgotten" for dts in ts.dependencies])
 
         if ts.has_lost_dependencies:
-            recommendations[key] = "forgotten"
-            return recommendations, client_msgs, worker_msgs
+            return {key: "forgotten"}, {}, {}
 
         ts.state = "waiting"
 
-        dts: TaskState
         for dts in ts.dependencies:
             if dts.exception_blame:
                 ts.exception_blame = dts.exception_blame
-                recommendations[key] = "erred"
-                return recommendations, client_msgs, worker_msgs
+                return {key: "erred"}, {}, {}
+
+        recommendations: Recs = {}
 
         for dts in ts.dependencies:
-            dep = dts.key
             if not dts.who_has:
                 ts.waiting_on.add(dts)
             if dts.state == "released":
-                recommendations[dep] = "waiting"
+                recommendations[dts.key] = "waiting"
             else:
                 dts.waiters.add(ts)
 
@@ -2025,13 +1995,11 @@ class SchedulerState:
             # necessary
             recommendations[key] = "processing"
 
-        return recommendations, client_msgs, worker_msgs
+        return recommendations, {}, {}
 
-    def transition_no_worker_processing(self, key, stimulus_id):
-        ts: TaskState = self.tasks[key]
-        recommendations: Recs = {}
-        client_msgs: dict = {}
-        worker_msgs: dict = {}
+    def transition_no_worker_processing(self, key: str, stimulus_id: str) -> RecsMsgs:
+        ts = self.tasks[key]
+        worker_msgs: Msgs = {}
 
         if self.validate:
             assert not ts.actor, f"Actors can't be in `no-worker`: {ts}"
@@ -2042,7 +2010,7 @@ class SchedulerState:
             worker_msgs = self._add_to_processing(ts, ws)
         # If no worker, task just stays in `no-worker`
 
-        return recommendations, client_msgs, worker_msgs
+        return {}, {}, worker_msgs
 
     def decide_worker_rootish_queuing_disabled(
         self, ts: TaskState
@@ -2205,7 +2173,7 @@ class SchedulerState:
             # FIXME idle and workers are SortedDict's declared as dicts
             #       because sortedcontainers is not annotated
             wp_vals = cast("Sequence[WorkerState]", worker_pool.values())
-            n_workers: int = len(wp_vals)
+            n_workers = len(wp_vals)
             if n_workers < 20:  # smart but linear in small case
                 ws = min(wp_vals, key=operator.attrgetter("occupancy"))
                 assert ws
@@ -2213,9 +2181,7 @@ class SchedulerState:
                     # special case to use round-robin; linear search
                     # for next worker with zero occupancy (or just
                     # land back where we started).
-                    wp_i: WorkerState
-                    start: int = self.n_tasks % n_workers
-                    i: int
+                    start = self.n_tasks % n_workers
                     for i in range(n_workers):
                         wp_i = wp_vals[(i + start) % n_workers]
                         if wp_i.occupancy == 0:
@@ -2230,13 +2196,13 @@ class SchedulerState:
 
         return ws
 
-    def transition_waiting_processing(self, key, stimulus_id):
+    def transition_waiting_processing(self, key: str, stimulus_id: str) -> RecsMsgs:
         """Possibly schedule a ready task. This is the primary dispatch for ready tasks.
 
         If there's no appropriate worker for the task (but the task is otherwise
         runnable), it will be recommended to ``no-worker`` or ``queued``.
         """
-        ts: TaskState = self.tasks[key]
+        ts = self.tasks[key]
 
         if self.is_rootish(ts):
             # NOTE: having two root-ish methods is temporary. When the feature flag is
@@ -2266,7 +2232,7 @@ class SchedulerState:
         typename: str | None = None,
         worker: str,
         **kwargs: Any,
-    ):
+    ) -> RecsMsgs:
         """This transition exclusively happens in a race condition where the scheduler
         believes that the only copy of a dependency task has just been lost, so it
         transitions all dependents back to waiting, but actually a replica has already
@@ -2295,10 +2261,7 @@ class SchedulerState:
         worker: str,
         startstops: list[dict] | None = None,
         **kwargs: Any,
-    ):
-        recommendations: dict = {}
-        client_msgs: dict = {}
-        worker_msgs: dict = {}
+    ) -> RecsMsgs:
         ts = self.tasks[key]
 
         assert worker
@@ -2338,8 +2301,7 @@ class SchedulerState:
                     action=startstop["action"],
                 )
 
-        s: set = self.unknown_durations.pop(ts.prefix.name, set())
-        tts: TaskState
+        s = self.unknown_durations.pop(ts.prefix.name, set())
         steal = self.extensions.get("stealing")
         if steal:
             for tts in s:
@@ -2349,6 +2311,9 @@ class SchedulerState:
         ############################
         # Update State Information #
         ############################
+        recommendations: Recs = {}
+        client_msgs: Msgs = {}
+
         if nbytes is not None:
             ts.set_nbytes(nbytes)
 
@@ -2366,15 +2331,12 @@ class SchedulerState:
             assert not ts.processing_on
             assert not ts.waiting_on
 
-        return recommendations, client_msgs, worker_msgs
+        return recommendations, client_msgs, {}
 
-    def transition_memory_released(self, key, stimulus_id, safe: bool = False):
-        ws: WorkerState
-        ts: TaskState = self.tasks[key]
-        dts: TaskState
-        recommendations: dict = {}
-        client_msgs: dict = {}
-        worker_msgs: dict = {}
+    def transition_memory_released(
+        self, key: str, stimulus_id: str, *, safe: bool = False
+    ) -> RecsMsgs:
+        ts = self.tasks[key]
 
         if self.validate:
             assert not ts.waiting_on
@@ -2388,12 +2350,11 @@ class SchedulerState:
             if ts.who_wants:
                 ts.exception_blame = ts
                 ts.exception = "Worker holding Actor was lost"
-                recommendations[ts.key] = "erred"
-                return (
-                    recommendations,
-                    client_msgs,
-                    worker_msgs,
-                )  # don't try to recreate
+                return {ts.key: "erred"}, {}, {}  # don't try to recreate
+
+        recommendations: Recs = {}
+        client_msgs: Msgs = {}
+        worker_msgs: Msgs = {}
 
         # XXX factor this out?
         worker_msg = {
@@ -2430,13 +2391,10 @@ class SchedulerState:
 
         return recommendations, client_msgs, worker_msgs
 
-    def transition_released_erred(self, key, stimulus_id):
-        ts: TaskState = self.tasks[key]
-        dts: TaskState
-        failing_ts: TaskState
-        recommendations: dict = {}
-        client_msgs: dict = {}
-        worker_msgs: dict = {}
+    def transition_released_erred(self, key: str, stimulus_id: str) -> RecsMsgs:
+        ts = self.tasks[key]
+        recommendations: Recs = {}
+        client_msgs: Msgs = {}
 
         if self.validate:
             with log_errors(pdb=LOG_PDB):
@@ -2446,6 +2404,7 @@ class SchedulerState:
                 assert not ts.waiters
 
         failing_ts = ts.exception_blame
+        assert failing_ts
 
         for dts in ts.dependents:
             dts.exception_blame = failing_ts
@@ -2458,21 +2417,19 @@ class SchedulerState:
             "exception": failing_ts.exception,
             "traceback": failing_ts.traceback,
         }
-        cs: ClientState
         for cs in ts.who_wants:
             client_msgs[cs.client_key] = [report_msg]
 
         ts.state = "erred"
 
         # TODO: waiting data?
-        return recommendations, client_msgs, worker_msgs
+        return recommendations, client_msgs, {}
 
-    def transition_erred_released(self, key, stimulus_id):
-        ts: TaskState = self.tasks[key]
-        dts: TaskState
-        recommendations: dict = {}
-        client_msgs: dict = {}
-        worker_msgs: dict = {}
+    def transition_erred_released(self, key: str, stimulus_id: str) -> RecsMsgs:
+        ts = self.tasks[key]
+        recommendations: Recs = {}
+        client_msgs: Msgs = {}
+        worker_msgs: Msgs = {}
 
         if self.validate:
             with log_errors(pdb=LOG_PDB):
@@ -2499,7 +2456,6 @@ class SchedulerState:
         ts.erred_on.clear()
 
         report_msg = {"op": "task-retried", "key": key}
-        cs: ClientState
         for cs in ts.who_wants:
             client_msgs[cs.client_key] = [report_msg]
 
@@ -2507,17 +2463,14 @@ class SchedulerState:
 
         return recommendations, client_msgs, worker_msgs
 
-    def transition_waiting_released(self, key, stimulus_id):
-        ts: TaskState = self.tasks[key]
-        recommendations: dict = {}
-        client_msgs: dict = {}
-        worker_msgs: dict = {}
+    def transition_waiting_released(self, key: str, stimulus_id: str) -> RecsMsgs:
+        ts = self.tasks[key]
+        recommendations: Recs = {}
 
         if self.validate:
             assert not ts.who_has
             assert not ts.processing_on
 
-        dts: TaskState
         for dts in ts.dependencies:
             if ts in dts.waiters:
                 dts.waiters.discard(ts)
@@ -2534,12 +2487,12 @@ class SchedulerState:
         else:
             ts.waiters.clear()
 
-        return recommendations, client_msgs, worker_msgs
+        return recommendations, {}, {}
 
-    def transition_processing_released(self, key: str, stimulus_id: str):
+    def transition_processing_released(self, key: str, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
         recommendations: Recs = {}
-        worker_msgs = {}
+        worker_msgs: Msgs = {}
 
         if self.validate:
             assert ts.processing_on
@@ -2564,6 +2517,7 @@ class SchedulerState:
         self,
         key: str,
         stimulus_id: str,
+        *,
         worker: str,
         cause: str | None = None,
         exception=None,
@@ -2571,7 +2525,7 @@ class SchedulerState:
         exception_text: str | None = None,
         traceback_text: str | None = None,
         **kwargs,
-    ):
+    ) -> RecsMsgs:
         """Processed a recommended transition processing -> erred.
 
         Parameters
@@ -2599,12 +2553,9 @@ class SchedulerState:
         -------
         Recommendations, client messages and worker messages to process
         """
-        ts: TaskState = self.tasks[key]
-        dts: TaskState
-        failing_ts: TaskState
-        recommendations: dict = {}
-        client_msgs: dict = {}
-        worker_msgs: dict = {}
+        ts = self.tasks[key]
+        recommendations: Recs = {}
+        client_msgs: Msgs = {}
 
         if self.validate:
             assert cause or ts.exception_blame
@@ -2613,8 +2564,8 @@ class SchedulerState:
             assert not ts.waiting_on
 
         if ts.actor:
-            assert ts.processing_on
             ws = ts.processing_on
+            assert ws
             ws.actors.remove(ts)
 
         self._exit_processing_common(ts, recommendations)
@@ -2661,7 +2612,6 @@ class SchedulerState:
             "exception": failing_ts.exception,
             "traceback": failing_ts.traceback,
         }
-        cs: ClientState
         for cs in ts.who_wants:
             client_msgs[cs.client_key] = [report_msg]
 
@@ -2676,14 +2626,10 @@ class SchedulerState:
         if self.validate:
             assert not ts.processing_on
 
-        return recommendations, client_msgs, worker_msgs
+        return recommendations, client_msgs, {}
 
-    def transition_no_worker_released(self, key, stimulus_id):
-        ts: TaskState = self.tasks[key]
-        dts: TaskState
-        recommendations: dict = {}
-        client_msgs: dict = {}
-        worker_msgs: dict = {}
+    def transition_no_worker_released(self, key: str, stimulus_id: str) -> RecsMsgs:
+        ts = self.tasks[key]
 
         if self.validate:
             assert self.tasks[key].state == "no-worker"
@@ -2698,13 +2644,10 @@ class SchedulerState:
 
         ts.waiters.clear()
 
-        return recommendations, client_msgs, worker_msgs
+        return {}, {}, {}
 
-    def transition_waiting_queued(self, key, stimulus_id):
-        ts: TaskState = self.tasks[key]
-        recommendations: Recs = {}
-        client_msgs: dict = {}
-        worker_msgs: dict = {}
+    def transition_waiting_queued(self, key: str, stimulus_id: str) -> RecsMsgs:
+        ts = self.tasks[key]
 
         if self.validate:
             assert not self.idle_task_count, (ts, self.idle_task_count)
@@ -2713,13 +2656,10 @@ class SchedulerState:
         ts.state = "queued"
         self.queued.add(ts)
 
-        return recommendations, client_msgs, worker_msgs
+        return {}, {}, {}
 
-    def transition_waiting_no_worker(self, key, stimulus_id):
-        ts: TaskState = self.tasks[key]
-        recommendations: Recs = {}
-        client_msgs: dict = {}
-        worker_msgs: dict = {}
+    def transition_waiting_no_worker(self, key: str, stimulus_id: str) -> RecsMsgs:
+        ts = self.tasks[key]
 
         if self.validate:
             self._validate_ready(ts)
@@ -2727,13 +2667,10 @@ class SchedulerState:
         ts.state = "no-worker"
         self.unrunnable.add(ts)
 
-        return recommendations, client_msgs, worker_msgs
+        return {}, {}, {}
 
-    def transition_queued_released(self, key, stimulus_id):
-        ts: TaskState = self.tasks[key]
-        recommendations: Recs = {}
-        client_msgs: dict = {}
-        worker_msgs: dict = {}
+    def transition_queued_released(self, key: str, stimulus_id: str) -> RecsMsgs:
+        ts = self.tasks[key]
 
         if self.validate:
             assert ts in self.queued
@@ -2741,14 +2678,14 @@ class SchedulerState:
 
         self.queued.remove(ts)
 
-        self._propagate_released(ts, recommendations)
-        return recommendations, client_msgs, worker_msgs
-
-    def transition_queued_processing(self, key, stimulus_id):
-        ts: TaskState = self.tasks[key]
         recommendations: Recs = {}
-        client_msgs: dict = {}
-        worker_msgs: dict = {}
+        self._propagate_released(ts, recommendations)
+        return recommendations, {}, {}
+
+    def transition_queued_processing(self, key: str, stimulus_id: str) -> RecsMsgs:
+        ts = self.tasks[key]
+        recommendations: Recs = {}
+        worker_msgs: Msgs = {}
 
         if self.validate:
             assert not ts.actor, f"Actors can't be queued: {ts}"
@@ -2759,13 +2696,12 @@ class SchedulerState:
             worker_msgs = self._add_to_processing(ts, ws)
         # If no worker, task just stays `queued`
 
-        return recommendations, client_msgs, worker_msgs
+        return recommendations, {}, worker_msgs
 
-    def _remove_key(self, key):
-        ts: TaskState = self.tasks.pop(key)
+    def _remove_key(self, key: str) -> None:
+        ts = self.tasks.pop(key)
         assert ts.state == "forgotten"
         self.unrunnable.discard(ts)
-        cs: ClientState
         for cs in ts.who_wants:
             cs.wants_what.remove(ts)
         ts.who_wants.clear()
@@ -2773,12 +2709,8 @@ class SchedulerState:
         ts.exception_blame = ts.exception = ts.traceback = None
         self.task_metadata.pop(key, None)
 
-    def transition_memory_forgotten(self, key, stimulus_id):
-        ws: WorkerState
-        ts: TaskState = self.tasks[key]
-        recommendations: dict = {}
-        client_msgs: dict = {}
-        worker_msgs: dict = {}
+    def transition_memory_forgotten(self, key: str, stimulus_id: str) -> RecsMsgs:
+        ts = self.tasks[key]
 
         if self.validate:
             assert ts.state == "memory"
@@ -2794,12 +2726,14 @@ class SchedulerState:
                 # It's ok to forget a task that nobody needs
                 pass
             else:
-                assert 0, (ts,)
+                raise AssertionError("Unreachable", ts)  # pragma: nocover
 
         if ts.actor:
             for ws in ts.who_has:
                 ws.actors.discard(ts)
 
+        recommendations: Recs = {}
+        worker_msgs: Msgs = {}
         self._propagate_forgotten(ts, recommendations, worker_msgs, stimulus_id)
 
         client_msgs = _task_to_client_msgs(ts)
@@ -2807,11 +2741,8 @@ class SchedulerState:
 
         return recommendations, client_msgs, worker_msgs
 
-    def transition_released_forgotten(self, key, stimulus_id):
-        ts: TaskState = self.tasks[key]
-        recommendations: dict = {}
-        client_msgs: dict = {}
-        worker_msgs: dict = {}
+    def transition_released_forgotten(self, key: str, stimulus_id: str) -> RecsMsgs:
+        ts = self.tasks[key]
 
         if self.validate:
             assert ts.state in ("released", "erred")
@@ -2831,6 +2762,8 @@ class SchedulerState:
             else:
                 raise AssertionError("Unreachable", str(ts))  # pragma: nocover
 
+        recommendations: Recs = {}
+        worker_msgs: Msgs = {}
         self._propagate_forgotten(ts, recommendations, worker_msgs, stimulus_id)
 
         client_msgs = _task_to_client_msgs(ts)
@@ -2841,13 +2774,13 @@ class SchedulerState:
     # {
     #     (start, finish):
     #     transition_<start>_<finish>(
-    #         self, key: str, stimulus_id: str, *args, **kwargs
+    #         self, key: str, stimulus_id: str, **kwargs
     #     ) -> (recommendations, client_msgs, worker_msgs)
     # }
     _TRANSITIONS_TABLE: ClassVar[
         Mapping[
             tuple[TaskStateState, TaskStateState],
-            Callable[..., tuple[Recs, dict, dict]],
+            Callable[..., RecsMsgs],
         ]
     ] = {
         ("released", "waiting"): transition_released_waiting,
@@ -3154,8 +3087,8 @@ class SchedulerState:
         assert ts not in self.queued
         assert all(dts.who_has for dts in ts.dependencies)
 
-    def _add_to_processing(self, ts: TaskState, ws: WorkerState) -> dict[str, list]:
-        """Set a task as processing on a worker and return the worker messages to send."""
+    def _add_to_processing(self, ts: TaskState, ws: WorkerState) -> Msgs:
+        """Set a task as processing on a worker and return the worker messages to send"""
         if self.validate:
             self._validate_ready(ts)
             assert ws in self.running, self.running
@@ -3224,8 +3157,8 @@ class SchedulerState:
         self,
         ts: TaskState,
         ws: WorkerState,
-        recommendations: dict[str, str],
-        client_msgs: dict[str, list[dict[str, str | bytes]]],
+        recommendations: Recs,
+        client_msgs: Msgs,
         type: bytes | None = None,
         typename: str | None = None,
     ) -> None:
@@ -3304,8 +3237,8 @@ class SchedulerState:
     def _propagate_forgotten(
         self,
         ts: TaskState,
-        recommendations: dict[str, str],
-        worker_msgs: dict[str, list[dict[str, Any]]],
+        recommendations: Recs,
+        worker_msgs: Msgs,
         stimulus_id: str,
     ) -> None:
         ts.state = "forgotten"
@@ -3344,7 +3277,7 @@ class SchedulerState:
         self,
         keys: Collection[str],
         cs: ClientState,
-        recommendations: dict[str, str],
+        recommendations: Recs,
     ) -> None:
         """Remove keys from client desired list"""
         logger.debug("Client %s releases keys: %s", cs.client_key, keys)
@@ -4650,7 +4583,7 @@ class Scheduler(SchedulerState, ServerNode):
                 ts.retries = v
 
         # Compute recommendations
-        recommendations: dict = {}
+        recommendations: Recs = {}
 
         for ts in sorted(runnables, key=operator.attrgetter("priority"), reverse=True):
             if ts.state == "released" and ts.run_spec:
@@ -4696,9 +4629,9 @@ class Scheduler(SchedulerState, ServerNode):
         """Mark that a task has finished execution on a particular worker"""
         logger.debug("Stimulus task finished %s, %s", key, worker)
 
-        recommendations: dict = {}
-        client_msgs: dict = {}
-        worker_msgs: dict = {}
+        recommendations: Recs = {}
+        client_msgs: Msgs = {}
+        worker_msgs: Msgs = {}
 
         ws: WorkerState = self.workers[worker]
         ts: TaskState = self.tasks.get(key)
@@ -4782,7 +4715,7 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 roots.append(key)
 
-        recommendations: dict = {key: "waiting" for key in roots}
+        recommendations: Recs = {key: "waiting" for key in roots}
         self.transitions(recommendations, f"stimulus-retry-{time()}")
 
         if self.validate:
@@ -4871,7 +4804,7 @@ class Scheduler(SchedulerState, ServerNode):
         ws.status = Status.closed
         self.running.discard(ws)
 
-        recommendations: dict = {}
+        recommendations: Recs = {}
 
         ts: TaskState
         for ts in list(ws.processing):
@@ -5012,8 +4945,8 @@ class Scheduler(SchedulerState, ServerNode):
         stimulus_id = stimulus_id or f"client-releases-keys-{time()}"
         if not isinstance(keys, list):
             keys = list(keys)
-        cs: ClientState = self.clients[client]
-        recommendations: dict = {}
+        cs = self.clients[client]
+        recommendations: Recs = {}
 
         self._client_releases_keys(keys=keys, cs=cs, recommendations=recommendations)
         self.transitions(recommendations, stimulus_id)
@@ -5412,7 +5345,7 @@ class Scheduler(SchedulerState, ServerNode):
         ws.add_to_long_running(ts)
         self.check_idle_saturated(ws)
 
-        recommendations = {
+        recommendations: Recs = {
             qts.key: "processing" for qts in self._next_queued_tasks_for_worker(ws)
         }
         if self.validate:
@@ -5446,8 +5379,8 @@ class Scheduler(SchedulerState, ServerNode):
             self.check_idle_saturated(ws)
             recs = self.bulk_schedule_after_adding_worker(ws)
             if recs:
-                client_msgs: dict = {}
-                worker_msgs: dict = {}
+                client_msgs: Msgs = {}
+                worker_msgs: Msgs = {}
                 self._transitions(recs, client_msgs, worker_msgs, stimulus_id)
                 self.send_all(client_msgs, worker_msgs)
         else:
@@ -5623,14 +5556,11 @@ class Scheduler(SchedulerState, ServerNode):
                     "Closed comm %r while trying to write %s", c, msg, exc_info=True
                 )
 
-    def send_all(self, client_msgs: dict, worker_msgs: dict):
+    def send_all(self, client_msgs: Msgs, worker_msgs: Msgs) -> None:
         """Send messages to client and workers"""
-        client_comms: dict = self.client_comms
-        stream_comms: dict = self.stream_comms
-        msgs: list
 
         for client, msgs in client_msgs.items():
-            c = client_comms.get(client)
+            c = self.client_comms.get(client)
             if c is None:
                 continue
             try:
@@ -5646,7 +5576,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         for worker, msgs in worker_msgs.items():
             try:
-                w = stream_comms[worker]
+                w = self.stream_comms[worker]
                 w.send(*msgs)
             except KeyError:
                 # worker already gone
@@ -7302,7 +7232,6 @@ class Scheduler(SchedulerState, ServerNode):
         self,
         key: str,
         finish: TaskStateState,
-        *args: Any,
         stimulus_id: str,
         **kwargs: Any,
     ) -> Recs:
@@ -7321,19 +7250,19 @@ class Scheduler(SchedulerState, ServerNode):
         --------
         Scheduler.transitions: transitive version of this function
         """
-        a: tuple = self._transition(key, finish, stimulus_id, *args, **kwargs)
+        a: tuple = self._transition(key, finish, stimulus_id, **kwargs)
         recommendations, client_msgs, worker_msgs = a
         self.send_all(client_msgs, worker_msgs)
         return recommendations
 
-    def transitions(self, recommendations: dict, stimulus_id: str):
+    def transitions(self, recommendations: Recs, stimulus_id: str) -> None:
         """Process transitions until none are left
 
         This includes feedback from previous transitions and continues until we
         reach a steady state
         """
-        client_msgs: dict = {}
-        worker_msgs: dict = {}
+        client_msgs: Msgs = {}
+        worker_msgs: Msgs = {}
         self._transitions(recommendations, client_msgs, worker_msgs, stimulus_id)
         self.send_all(client_msgs, worker_msgs)
 
