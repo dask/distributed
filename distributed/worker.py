@@ -3015,10 +3015,17 @@ def apply_function_simple(
     start = time()
     try:
         result = function(*args, **kwargs)
+    except (SystemExit, KeyboardInterrupt):
+        # Special-case these, just like asyncio does all over the place. They will pass through `fail_hard`,
+        # pass through `_handle_stimulus_from_task`, and eventually be caught by special-case logic in asyncio:
+        # https://github.com/python/cpython/blob/v3.9.4/Lib/asyncio/events.py#L81-L82
+        # Note that any other `BaseException` types would ultimately be ignored by asyncio if raised here,
+        # after messing up the worker state machine along their way.
+        raise
     except BaseException as e:
-        # NOTE: SIGINT would always raise `KeyboardInterrupt` in the main thread, so we can assume
-        # `BaseException`s come from user code. Users _shouldn't_ use `BaseException`s, but if they do, we can
-        # assume they aren't a reason to shut down the whole system. This does block `sys.exit()` from user code.
+        # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they
+        # aren't a reason to shut down the whole system (since we allow the
+        # system-shutting-down `SystemExit` and `KeyboardInterrupt` to pass through)
         msg = error_message(e)
         msg["op"] = "task-erred"
         msg["actual-exception"] = e
