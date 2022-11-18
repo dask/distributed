@@ -3016,11 +3016,12 @@ def apply_function_simple(
     try:
         result = function(*args, **kwargs)
     except (SystemExit, KeyboardInterrupt):
-        # Special-case these, just like asyncio does all over the place. They will pass through `fail_hard`,
-        # pass through `_handle_stimulus_from_task`, and eventually be caught by special-case logic in asyncio:
+        # Special-case these, just like asyncio does all over the place. They will pass
+        # through `fail_hard` and `_handle_stimulus_from_task`, and eventually be caught
+        # by special-case logic in asyncio:
         # https://github.com/python/cpython/blob/v3.9.4/Lib/asyncio/events.py#L81-L82
-        # Note that any other `BaseException` types would ultimately be ignored by asyncio if raised here,
-        # after messing up the worker state machine along their way.
+        # Any other `BaseException` types would ultimately be ignored by asyncio if
+        # raised here, after messing up the worker state machine along their way.
         raise
     except BaseException as e:
         # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they
@@ -3061,9 +3062,20 @@ async def apply_function_async(
     start = time()
     try:
         result = await function(*args, **kwargs)
-    except Exception as e:
-        # NOTE: we don't catch `BaseException`s because we're running in the main thread,
-        # plus `asyncio.CancelledError` is a `BaseException`
+    except (SystemExit, KeyboardInterrupt):
+        # Special-case these, just like asyncio does all over the place. They will pass
+        # through `fail_hard` and `_handle_stimulus_from_task`, and eventually be caught
+        # by special-case logic in asyncio:
+        # https://github.com/python/cpython/blob/v3.9.4/Lib/asyncio/events.py#L81-L82
+        # Any other `BaseException` types would ultimately be ignored by asyncio if
+        # raised here, after messing up the worker state machine along their way.
+        raise
+    except BaseException as e:
+        # NOTE: this includes `CancelledError`! Since it's a user task, that's _not_ a
+        # reason to shut down the worker.
+        # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they
+        # aren't a reason to shut down the whole system (since we allow the
+        # system-shutting-down `SystemExit` and `KeyboardInterrupt` to pass through)
         msg = error_message(e)
         msg["op"] = "task-erred"
         msg["actual-exception"] = e

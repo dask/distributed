@@ -422,6 +422,7 @@ async def test_chained_error_message(c, s, a, b):
 
 
 @pytest.mark.slow
+@pytest.mark.parametrize("sync", [True, False])
 @pytest.mark.parametrize(
     "exc_type", [BaseException, SystemExit, KeyboardInterrupt, asyncio.CancelledError]
 )
@@ -431,9 +432,16 @@ async def test_chained_error_message(c, s, a, b):
     Worker=Nanny,
     config={"distributed.scheduler.allowed-failures": 0},
 )
-async def test_base_exception_in_task(c, s, a, exc_type):
-    def raiser():
-        raise exc_type(f"this is a {exc_type}")
+async def test_base_exception_in_task(c, s, a, sync, exc_type):
+    if sync:
+
+        def raiser():
+            raise exc_type(f"this is a {exc_type}")
+
+    else:
+
+        async def raiser():
+            raise exc_type(f"this is a {exc_type}")
 
     f = c.submit(raiser)
 
