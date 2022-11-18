@@ -175,6 +175,7 @@ class Shuffle:
         # TODO handle errors from workers and scheduler, and cancellation.
 
     async def send(self, address: str, shards: list[bytes]) -> None:
+        self.raise_if_closed()
         return await self.rpc(address).shuffle_receive(
             data=to_serialize(shards),
             shuffle_id=self.id,
@@ -227,11 +228,14 @@ class Shuffle:
                     for k, v in groups.items()
                 }
             )
-            self.raise_if_closed()
-            await self._disk_buffer.write(groups)
+            await self._write_to_disk(groups)
         except Exception as e:
             self._exception = e
             raise
+
+    async def _write_to_disk(self, data: dict[str, list[bytes]]) -> None:
+        self.raise_if_closed()
+        await self._disk_buffer.write(data)
 
     def raise_if_closed(self) -> None:
         if self.closed:
@@ -242,6 +246,7 @@ class Shuffle:
             )
 
     async def add_partition(self, data: pd.DataFrame) -> None:
+        self.raise_if_closed()
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to shuffle {self}")
 
@@ -258,7 +263,11 @@ class Shuffle:
             return out
 
         out = await self.offload(_)
-        await self._comm_buffer.write(out)
+        await self._write_to_comm(out)
+
+    async def _write_to_comm(self, data: dict[str, list[bytes]]) -> None:
+        self.raise_if_closed()
+        await self._comm_buffer.write(data)
 
     async def get_output_partition(self, i: int) -> pd.DataFrame:
         self.raise_if_closed()
@@ -276,8 +285,7 @@ class Shuffle:
         ), f"No outputs remaining, but requested output partition {i} on {self.local_address}."
         await self.flush_receive()
         try:
-            self.raise_if_closed()
-            df = self._disk_buffer.read(i)
+            df = self._read_from_disk(i)
             with self.time("cpu"):
                 out = df.to_pandas()
         except KeyError:
@@ -285,16 +293,24 @@ class Shuffle:
         self.output_partitions_left -= 1
         return out
 
+    def _read_from_disk(self, id: int | str) -> pa.Table:
+        self.raise_if_closed()
+        return self._disk_buffer.read(id)
+
     async def inputs_done(self) -> None:
+        self.raise_if_closed()
         assert not self.transferred, "`inputs_done` called multiple times"
         self.transferred = True
-        self.raise_if_closed()
-        await self._comm_buffer.flush()
+        await self._flush_comm()
         try:
             self._comm_buffer.raise_on_exception()
         except Exception as e:
             self._exception = e
             raise
+
+    async def _flush_comm(self) -> None:
+        self.raise_if_closed()
+        await self._comm_buffer.flush()
 
     def done(self) -> bool:
         return self.transferred and self.output_partitions_left == 0
@@ -427,6 +443,7 @@ class ShuffleWorkerExtension:
     async def _register_complete(self, shuffle: Shuffle) -> None:
         self.raise_if_closed()
         await shuffle.close()
+        self.raise_if_closed()
         await self.worker.scheduler.shuffle_register_complete(
             id=shuffle.id,
             worker=self.worker.address,
