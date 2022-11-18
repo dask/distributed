@@ -443,6 +443,47 @@ class Server:
             raise TypeError(f"Expected Status; got {value!r}")
         self._status = value
 
+    @property
+    def incoming_comms_open(self) -> int:
+        """The number of total incoming connections listening to remote RPCs"""
+        return len(self._comms)
+
+    @property
+    def incoming_comms_active(self) -> int:
+        """The number of connections currently handling a remote RPC"""
+        return len([c for c, op in self._comms.items() if op is not None])
+
+    @property
+    def outgoing_comms_open(self) -> int:
+        """The number of connections currently handling a remote RPC"""
+        return self.rpc.open
+
+    @property
+    def outgoing_comms_active(self) -> int:
+        """The number of outgoing connections that are currently used to
+        execute a RPC"""
+        return self.rpc.active
+
+    def get_connection_counters(self) -> dict[str, int]:
+        """A dict with various connection counters
+
+        See also
+        --------
+        Server.incoming_comms_open
+        Server.incoming_comms_active
+        Server.outgoing_comms_open
+        Server.outgoing_comms_active
+        """
+        return {
+            attr: getattr(self, attr)
+            for attr in [
+                "incoming_comms_open",
+                "incoming_comms_active",
+                "outgoing_comms_open",
+                "outgoing_comms_active",
+            ]
+        }
+
     async def finished(self):
         """Wait until the server has finished"""
         await self._event_finished.wait()

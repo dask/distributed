@@ -89,6 +89,9 @@ class Comm(ABC):
             ``distributed.protocol.core.dumps`` for valid values.
         """
 
+    async def aclose(self):
+        await self.close()
+
     @abstractmethod
     async def close(self):
         """
@@ -280,7 +283,7 @@ async def connect(
 
     backoff_base = 0.01
     attempt = 0
-
+    logger.debug("Establishing connection to %s", loc)
     # Prefer multiple small attempts than one long attempt. This should protect
     # primarily from DNS race conditions
     # gh3104, gh4176, gh4167
