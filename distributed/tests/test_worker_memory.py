@@ -953,7 +953,7 @@ async def test_pause_while_spilling(c, s, a):
             return 0
         elif a.data.fast and not a.data.slow:
             # Trigger spilling
-            return parse_bytes("1.5 GiB")
+            return parse_bytes("1.6 GiB")
         else:
             # Trigger pause, but only after we started spilling
             return parse_bytes("1.9 GiB")
