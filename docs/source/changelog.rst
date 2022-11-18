@@ -1,10 +1,51 @@
 Changelog
 =========
 
+.. _v2022.11.1:
+
+2022.11.1
+---------
+
+Released on November 18, 2022
+
+New Features
+^^^^^^^^^^^^
+
+Enhancements
+^^^^^^^^^^^^
+- Restrict ``bokeh=3`` support (:pr:`7329`) `Gabe Joseph`_
+- Respect death timeout when waiting for scheduler file (:pr:`7296`) `Florian Jetter`_
+- Always raise exception if ``P2PShuffle`` s send fails (:pr:`7317`) `Hendrik Makait`_
+
+Documentation
+^^^^^^^^^^^^^
+- Fix typo in ``client.run()`` docstring (:pr:`7315`) `Richard Pelgrim`_
+- Note queuing default change in changelog (:pr:`7314`) `Gabe Joseph`_
+
+Maintenance
+^^^^^^^^^^^
+- Update ``ga-yaml-parser`` step in gpuCI updating workflow (:pr:`7335`) `Charles Blackmon-Luca`_
+- Remove exception handling from transitions (:pr:`7316`) `crusaderky`_
+- Turn private functions into private ``SchedulerState`` methods (:pr:`7260`) `Hendrik Makait`_
+- Bump ``toolz`` minimum version to ``0.10.0`` (:pr:`7309`) `Sam Grayson`_
+
+
+.. _v2022.11.0:
+
 2022.11.0
 ---------
 
 Released on November 15, 2022
+
+.. note::
+
+    This release changes the default scheduling mode to use :ref:`queuing <queuing>`.
+    This will significantly reduce cluster memory use in most cases, and generally
+    improve stability and performance. `Learn more here <https://www.coiled.io/blog/reducing-dask-memory-usage>`_
+    and please provide any feedback `on this discussion <https://github.com/dask/distributed/discussions/7128>`_.
+
+    In rare cases, this could make some workloads slower. See the :ref:`documentation <adjust-queuing>`
+    for more information, and how to switch back to the old mode.
 
 New Features
 ^^^^^^^^^^^^
@@ -4427,3 +4468,4 @@ significantly without many new features.
 .. _`Andrew`: https://github.com/ahuang11
 .. _`Matthew Plough`: https://github.com/mplough-kobold
 .. _`Tom Hu`: https://github.com/thomasrockhu-codecov
+.. _`Richard Pelgrim`: https://github.com/rrpelgrim
