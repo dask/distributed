@@ -2295,13 +2295,20 @@ class Worker(BaseWorker, ServerNode):
                 )
 
             task_exc = result["actual-exception"]
-            if isinstance(task_exc, Reschedule) or (
+            close_cancelled = (
                 self.status == Status.closing
                 and isinstance(task_exc, asyncio.CancelledError)
                 and iscoroutinefunction(function)
-            ):
-                # HACK: `Worker.cancel` will cause async user tasks will raise `CancelledError`.
-                # Since we cancelled those tasks, we shouldn't treat them as failures.
+            )
+            if isinstance(task_exc, Reschedule) or close_cancelled:
+                if close_cancelled:
+                    # `Worker.cancel` will cause async user tasks to raise `CancelledError`.
+                    # Since we cancelled those tasks, we shouldn't treat them as failures.
+                    # This is just a heuristic; it's _possible_ the task happened to
+                    # fail independently with `CancelledError`.
+                    logger.info(
+                        f"Async task {key!r} cancelled during worker close; rescheduling."
+                    )
                 return RescheduleEvent(key=ts.key, stimulus_id=f"reschedule-{time()}")
 
             logger.warning(
