@@ -382,13 +382,8 @@ class ShuffleWorkerExtension:
         Handler: Receive an incoming shard of data from a peer worker.
         Using an unknown ``shuffle_id`` is an error.
         """
-        try:
-            shuffle = await self._get_shuffle(shuffle_id)
-            await shuffle.receive(data)
-        except ShuffleClosedError:
-            from distributed.worker import Reschedule
-
-            raise Reschedule()
+        shuffle = await self._get_shuffle(shuffle_id)
+        await shuffle.receive(data)
 
     async def shuffle_inputs_done(self, shuffle_id: ShuffleId) -> None:
         """

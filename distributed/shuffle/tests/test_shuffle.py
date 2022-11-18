@@ -128,6 +128,23 @@ async def test_bad_disk(c, s, a, b):
     # clean_scheduler(s)
 
 
+async def wait_until_worker_has_tasks(
+    prefix: str, worker: str, count: int, scheduler: Scheduler, interval: float = 0.01
+) -> None:
+    ws = scheduler.workers[worker]
+    while (
+        len(
+            [
+                key
+                for key, ts in scheduler.tasks.items()
+                if prefix in key and ts.state == "memory" and ws in ts.who_has
+            ]
+        )
+        < count
+    ):
+        await asyncio.sleep(interval)
+
+
 async def wait_for_tasks_in_state(
     prefix: str,
     state: str,
@@ -173,7 +190,7 @@ async def test_closed_worker_during_transfer(c, s, a, b):
     )
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = out.persist()
-    await wait_for_tasks_in_state("shuffle-transfer", "memory", 3, s)
+    await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
     await b.close()
 
     with pytest.raises(Exception) as e:
@@ -202,7 +219,7 @@ async def test_crashed_worker_during_transfer(c, s, a):
         )
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
         out = out.persist()
-        await wait_for_tasks_in_state("shuffle-transfer", "memory", 3, s)
+        await wait_until_worker_has_tasks("shuffle-transfer", n.worker_address, 1, s)
         os.kill(n.pid, signal.SIGKILL)
 
         with pytest.raises(Exception) as e:
@@ -234,7 +251,7 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
         )
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
         out = out.persist()
-        await wait_for_tasks_in_state("shuffle-transfer", "memory", 3, s)
+        await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
         await b.close()
 
         actual = await c.compute(out.x.size)
@@ -267,7 +284,9 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
             )
             out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
             out = out.persist()
-            await wait_for_tasks_in_state("shuffle-transfer", "memory", 3, s)
+            await wait_until_worker_has_tasks(
+                "shuffle-transfer", n.worker_address, 1, s
+            )
             os.kill(n.pid, signal.SIGKILL)
 
             actual = await c.compute(out.x.size)
@@ -372,7 +391,7 @@ async def test_closed_worker_during_unpack(c, s, a, b):
     )
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = out.persist()
-    await wait_for_tasks_in_state("shuffle-p2p", "memory", 3, s)
+    await wait_for_tasks_in_state("shuffle-p2p", "memory", 1, b)
     await b.close()
 
     with pytest.raises(Exception) as e:
@@ -400,7 +419,7 @@ async def test_crashed_worker_during_unpack(c, s, a):
         )
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
         out = out.persist()
-        await wait_for_tasks_in_state("shuffle-p2p", "memory", 3, s)
+        await wait_until_worker_has_tasks("shuffle-p2p", killed_worker_address, 1, s)
         os.kill(n.pid, signal.SIGKILL)
 
         with pytest.raises(Exception) as e:
