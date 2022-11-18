@@ -211,27 +211,24 @@ class Shuffle:
             # TODO: Is it actually a good idea to dispatch multiple times instead of
             # only once?
             # An ugly way of turning these batches back into an arrow table
-            data = await self.offload(
-                list_of_buffers_to_table,
-                data,
-                self.schema,
-            )
-
-            groups = await self.offload(split_by_partition, data, self.column)
-
-            assert len(data) == sum(map(len, groups.values()))
-            del data
-
-            groups = await self.offload(
-                lambda: {
-                    k: [batch.serialize() for batch in v.to_batches()]
-                    for k, v in groups.items()
-                }
-            )
+            groups = await self.offload(self._repartition_buffers, data)
             await self._write_to_disk(groups)
         except Exception as e:
             self._exception = e
             raise
+
+    def _repartition_buffers(self, data: list[bytes]) -> dict[str, list[bytes]]:
+        # TODO: Is it actually a good idea to dispatch multiple times instead of
+        # only once?
+        # An ugly way of turning these batches back into an arrow table
+        table = list_of_buffers_to_table(data, self.schema)
+        groups = split_by_partition(table, self.column)
+        assert len(table) == sum(map(len, groups.values()))
+        del data
+        return {
+            k: [batch.serialize() for batch in v.to_batches()]
+            for k, v in groups.items()
+        }
 
     async def _write_to_disk(self, data: dict[str, list[bytes]]) -> None:
         self.raise_if_closed()
