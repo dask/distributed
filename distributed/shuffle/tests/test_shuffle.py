@@ -193,10 +193,8 @@ async def test_closed_worker_during_transfer(c, s, a, b):
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
     await b.close()
 
-    with pytest.raises(Exception) as e:
+    with pytest.raises(Exception, match=f"{b.address} left during active shuffle") as e:
         out = await c.compute(out)
-
-    assert f"{b.address} left during active shuffle" in str(e.value)
 
     clean_worker(a)
     clean_worker(b)
@@ -222,10 +220,9 @@ async def test_crashed_worker_during_transfer(c, s, a):
         await wait_until_worker_has_tasks("shuffle-transfer", n.worker_address, 1, s)
         os.kill(n.pid, signal.SIGKILL)
 
-        with pytest.raises(Exception) as e:
+        with pytest.raises(Exception, match=killed_worker_address) as e:
             out = await c.compute(out)
 
-        assert killed_worker_address in str(e.value)
         await extA.failed_event.wait()
         clean_worker(a)
     # clean_scheduler(s)
@@ -329,10 +326,8 @@ async def test_closed_worker_during_barrier(c, s, a, b, close_barrier_worker):
         running_worker = a
     await close_worker.close()
 
-    with pytest.raises(Exception) as e:
+    with pytest.raises(Exception, match=shuffle_id) as e:
         out = await c.compute(out)
-
-    assert shuffle_id in str(e.value)
 
     extW = running_worker.extensions["shuffle"]
     await extW.failed_event.wait()
@@ -371,10 +366,9 @@ async def test_crashed_worker_during_barrier(c, s, a, b, close_barrier_worker):
         close_nanny = b
     os.kill(close_nanny.pid, signal.SIGKILL)
 
-    with pytest.raises(Exception) as e:
+    with pytest.raises(Exception, match=shuffle_id) as e:
         out = await c.compute(out)
 
-    assert shuffle_id in str(e.value)
     # clean_scheduler(s)
 
 
@@ -394,10 +388,9 @@ async def test_closed_worker_during_unpack(c, s, a, b):
     await wait_for_tasks_in_state("shuffle-p2p", "memory", 1, b)
     await b.close()
 
-    with pytest.raises(Exception) as e:
+    with pytest.raises(Exception, match=b.address) as e:
         out = await c.compute(out)
 
-    assert b.address in str(e.value)
     await extA.failed_event.wait()
     clean_worker(a)
     clean_worker(b)
@@ -422,10 +415,9 @@ async def test_crashed_worker_during_unpack(c, s, a):
         await wait_until_worker_has_tasks("shuffle-p2p", killed_worker_address, 1, s)
         os.kill(n.pid, signal.SIGKILL)
 
-        with pytest.raises(Exception) as e:
+        with pytest.raises(Exception, match=killed_worker_address) as e:
             out = await c.compute(out)
 
-        assert killed_worker_address in str(e.value)
         await extA.failed_event.wait()
         clean_worker(a)
     # clean_scheduler(s)
