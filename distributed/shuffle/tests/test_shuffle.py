@@ -246,6 +246,38 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
         clean_scheduler(s)
 
 
+@pytest.mark.xfail(reason="distributed#7324")
+@pytest.mark.slow
+@gen_cluster(client=True, nthreads=[("", 2)])
+async def test_crashed_input_only_worker_during_transfer(c, s, a):
+    def mock_get_worker_for(
+        output_partition: int, workers: list[str], npartitions: int
+    ) -> str:
+        return a.address
+
+    with mock.patch(
+        "distributed.shuffle._shuffle_extension.get_worker_for", mock_get_worker_for
+    ):
+        async with Nanny(s.address, nthreads=2) as n:
+            df = dask.datasets.timeseries(
+                start="2000-01-01",
+                end="2000-01-10",
+                dtypes={"x": float, "y": float},
+                freq="10 s",
+            )
+            out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+            out = out.persist()
+            await wait_for_tasks_in_state("shuffle-transfer", "memory", 3, s)
+            os.kill(n.pid, signal.SIGKILL)
+
+            actual = await c.compute(out.x.size)
+            expected = await c.compute(df.x.size)
+            assert actual == expected
+
+            clean_worker(a)
+            clean_scheduler(s)
+
+
 @pytest.mark.parametrize("close_barrier_worker", [True, False])
 @pytest.mark.slow
 @mock.patch.dict(DEFAULT_EXTENSIONS, {"shuffle": FailedEventShuffleWorkerExtension})
@@ -289,6 +321,42 @@ async def test_closed_worker_during_barrier(c, s, a, b, close_barrier_worker):
 
     clean_worker(a)
     clean_worker(b)
+    # clean_scheduler(s)
+
+
+@pytest.mark.parametrize("close_barrier_worker", [True, False])
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=Nanny)
+async def test_crashed_worker_during_barrier(c, s, a, b, close_barrier_worker):
+    extS = s.extensions["shuffle"]
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = out.persist()
+
+    while not extS.shuffle_ids():
+        await asyncio.sleep(0.01)
+    assert len(extS.shuffle_ids()) == 1
+    shuffle_id = next(iter(extS.shuffle_ids()))
+
+    barrier_key = f"shuffle-barrier-{shuffle_id}"
+    await wait_for_state(barrier_key, "processing", s, interval=0)
+    ts = s.tasks[barrier_key]
+    processing_worker = a if ts.processing_on.address == a.worker_address else b
+    if (processing_worker == a) == close_barrier_worker:
+        close_nanny = a
+    else:
+        close_nanny = b
+    os.kill(close_nanny.pid, signal.SIGKILL)
+
+    with pytest.raises(Exception) as e:
+        out = await c.compute(out)
+
+    assert shuffle_id in str(e.value)
     # clean_scheduler(s)
 
 
