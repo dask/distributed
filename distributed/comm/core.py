@@ -89,9 +89,6 @@ class Comm(ABC):
             ``distributed.protocol.core.dumps`` for valid values.
         """
 
-    async def aclose(self):
-        await self.close()
-
     @abstractmethod
     async def close(self):
         """
