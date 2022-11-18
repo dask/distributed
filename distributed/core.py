@@ -455,7 +455,7 @@ class Server:
 
     @property
     def outgoing_comms_open(self) -> int:
-        """The number of connections currently handling a remote RPC"""
+        """The number of connections currently open and waiting for a remote RPC"""
         return self.rpc.open
 
     @property
