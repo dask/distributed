@@ -7250,8 +7250,9 @@ class Scheduler(SchedulerState, ServerNode):
         --------
         Scheduler.transitions: transitive version of this function
         """
-        a: tuple = self._transition(key, finish, stimulus_id, **kwargs)
-        recommendations, client_msgs, worker_msgs = a
+        recommendations, client_msgs, worker_msgs = self._transition(
+            key, finish, stimulus_id, **kwargs
+        )
         self.send_all(client_msgs, worker_msgs)
         return recommendations
 
