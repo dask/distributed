@@ -1585,7 +1585,7 @@ async def test_close_while_executing(c, s, a, sync):
         task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
     )
     await a.close()
-    assert task.cancelled()
+    assert task.done()
     assert s.tasks["f1"].state in ("queued", "no-worker")
 
 
