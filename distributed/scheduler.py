@@ -2535,7 +2535,7 @@ class SchedulerState:
         traceback: Serialized | None = None,
         exception_text: str | None = None,
         traceback_text: str | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> RecsMsgs:
         """Processed a recommended transition processing -> erred.
 
