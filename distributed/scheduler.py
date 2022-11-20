@@ -2840,7 +2840,7 @@ class SchedulerState:
             and sum(map(len, tg.dependencies)) < 5
         )
 
-    def check_idle_saturated(self, ws: WorkerState, occ: float = -1.0):
+    def check_idle_saturated(self, ws: WorkerState, occ: float = -1.0) -> None:
         """Update the status of the idle and saturated state
 
         The scheduler keeps track of workers that are ..
@@ -2904,8 +2904,6 @@ class SchedulerState:
         Get the estimated communication cost (in s.) to compute the task
         on the given worker.
         """
-        dts: TaskState
-        deps: set
         if 10 * len(ts.dependencies) < len(ws.has_what):
             # In the common case where the number of dependencies is
             # much less than the number of tasks that we have,
@@ -2916,9 +2914,7 @@ class SchedulerState:
             deps = {dep for dep in ts.dependencies if dep not in ws.has_what}
         else:
             deps = ts.dependencies.difference(ws.has_what)
-        nbytes: int = 0
-        for dts in deps:
-            nbytes += dts.nbytes
+        nbytes = sum(dts.nbytes for dts in deps)
         return nbytes / self.bandwidth
 
     def get_task_duration(self, ts: TaskState) -> float:
@@ -2953,7 +2949,7 @@ class SchedulerState:
         *  host_restrictions
         *  resource_restrictions
         """
-        s: set | None = None
+        s: set[str] | None = None
 
         if ts.worker_restrictions:
             s = {addr for addr in ts.worker_restrictions if addr in self.workers}
@@ -2961,15 +2957,15 @@ class SchedulerState:
         if ts.host_restrictions:
             # Resolve the alias here rather than early, for the worker
             # may not be connected when host_restrictions is populated
-            hr: list = [self.coerce_hostname(h) for h in ts.host_restrictions]
+            hr = [self.coerce_hostname(h) for h in ts.host_restrictions]
             # XXX need HostState?
-            sl: list = []
+            sl = []
             for h in hr:
                 dh = self.host_info.get(h)
                 if dh is not None:
                     sl.append(dh["addresses"])
 
-            ss: set = set.union(*sl) if sl else set()
+            ss = set.union(*sl) if sl else set()
             if s is None:
                 s = ss
             else:
@@ -2982,31 +2978,32 @@ class SchedulerState:
                 if dr is None:
                     self.resources[resource] = dr = {}
 
-                sw: set = set()
+                sw = set()
                 for addr, supplied in dr.items():
                     if supplied >= required:
                         sw.add(addr)
 
                 dw[resource] = sw
 
-            ww: set = set.intersection(*dw.values())
+            ww = set.intersection(*dw.values())
             if s is None:
                 s = ww
             else:
                 s &= ww
 
-        if s:
-            s = {self.workers[addr] for addr in s}
-            if len(self.running) < len(self.workers):
-                s &= self.running
+        if s is None:
+            return None
 
-        return s
+        s_ws = {self.workers[addr] for addr in s}
+        if len(self.running) < len(self.workers):
+            s_ws &= self.running
+        return s_ws
 
-    def acquire_resources(self, ts: TaskState, ws: WorkerState):
+    def acquire_resources(self, ts: TaskState, ws: WorkerState) -> None:
         for r, required in ts.resource_restrictions.items():
             ws.used_resources[r] += required
 
-    def release_resources(self, ts: TaskState, ws: WorkerState):
+    def release_resources(self, ts: TaskState, ws: WorkerState) -> None:
         for r, required in ts.resource_restrictions.items():
             ws.used_resources[r] -= required
 
@@ -3023,42 +3020,35 @@ class SchedulerState:
             return host
 
     def worker_objective(self, ts: TaskState, ws: WorkerState) -> tuple:
-        """
-        Objective function to determine which worker should get the task
+        """Objective function to determine which worker should get the task
 
         Minimize expected start time.  If a tie then break with data storage.
         """
-        dts: TaskState
-        comm_bytes: int = 0
-        for dts in ts.dependencies:
-            if ws not in dts.who_has:
-                nbytes = dts.get_nbytes()
-                comm_bytes += nbytes
+        comm_bytes = sum(
+            dts.get_nbytes() for dts in ts.dependencies if ws not in dts.who_has
+        )
 
-        stack_time: float = ws.occupancy / ws.nthreads
-        start_time: float = stack_time + comm_bytes / self.bandwidth
+        stack_time = ws.occupancy / ws.nthreads
+        start_time = stack_time + comm_bytes / self.bandwidth
 
-        if ts.actor:
-            return (len(ws.actors), start_time, ws.nbytes)
-        else:
-            return (start_time, ws.nbytes)
+        n_actors = len(ws.actors) if ts.actor else 0
+        return n_actors, start_time, ws.nbytes
 
-    def add_replica(self, ts: TaskState, ws: WorkerState):
+    def add_replica(self, ts: TaskState, ws: WorkerState) -> None:
         """Note that a worker holds a replica of a task with state='memory'"""
         ws.add_replica(ts)
         if len(ts.who_has) == 2:
             self.replicated_tasks.add(ts)
 
-    def remove_replica(self, ts: TaskState, ws: WorkerState):
+    def remove_replica(self, ts: TaskState, ws: WorkerState) -> None:
         """Note that a worker no longer holds a replica of a task"""
         ws.remove_replica(ts)
         if len(ts.who_has) == 1:
             self.replicated_tasks.remove(ts)
 
-    def remove_all_replicas(self, ts: TaskState):
+    def remove_all_replicas(self, ts: TaskState) -> None:
         """Remove all replicas of a task from all workers"""
-        ws: WorkerState
-        nbytes: int = ts.get_nbytes()
+        nbytes = ts.get_nbytes()
         for ws in ts.who_has:
             ws.nbytes -= nbytes
             del ws._has_what[ts]
@@ -3067,7 +3057,8 @@ class SchedulerState:
         ts.who_has.clear()
 
     def bulk_schedule_after_adding_worker(self, ws: WorkerState) -> Recs:
-        """Send ``queued`` or ``no-worker`` tasks to ``processing`` that this worker can handle.
+        """Send ``queued`` or ``no-worker`` tasks to ``processing`` that this worker can
+        handle.
 
         Returns priority-ordered recommendations.
         """
@@ -3151,8 +3142,8 @@ class SchedulerState:
         if not self.queued or ws.status != Status.running:
             return
 
-        # NOTE: this is called most frequently because a single task has completed, so there
-        # are <= 1 task slots available on the worker.
+        # NOTE: this is called most frequently because a single task has completed, so
+        # there are <= 1 task slots available on the worker.
         # `peekn` has fast paths for the cases N<=0 and N==1.
         for qts in self.queued.peekn(_task_slots_available(ws, self.WORKER_SATURATION)):
             if self.validate:
@@ -3193,15 +3184,12 @@ class SchedulerState:
             if not s and not dts.who_wants:
                 recommendations[dts.key] = "released"
 
-        report_msg: dict[str, Any] = {}
         if not ts.waiters and not ts.who_wants:
             recommendations[ts.key] = "released"
         else:
-            report_msg["op"] = "key-in-memory"
-            report_msg["key"] = ts.key
+            report_msg: dict[str, Any] = {"op": "key-in-memory", "key": ts.key}
             if type is not None:
                 report_msg["type"] = type
-
             for cs in ts.who_wants:
                 client_msgs[cs.client_key] = [report_msg]
 
@@ -3217,11 +3205,7 @@ class SchedulerState:
                 recommendations=recommendations,
             )
 
-    def _propagate_released(
-        self,
-        ts: TaskState,
-        recommendations: Recs,
-    ) -> None:
+    def _propagate_released(self, ts: TaskState, recommendations: Recs) -> None:
         ts.state = "released"
         key = ts.key
 
