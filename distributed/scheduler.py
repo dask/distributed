@@ -88,6 +88,7 @@ from distributed.multi_lock import MultiLockExtension
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
 from distributed.protocol.pickle import dumps, loads
+from distributed.protocol.serialize import Serialized, serialize
 from distributed.publish import PublishExtension
 from distributed.pubsub import PubSubSchedulerExtension
 from distributed.queues import QueueExtension
@@ -1242,10 +1243,10 @@ class TaskState:
     type: str
 
     #: If this task failed executing, the exception object is stored here.
-    exception: object | None
+    exception: Serialized | None
 
     #: If this task failed executing, the traceback object is stored here.
-    traceback: object | None
+    traceback: Serialized | None
 
     #: string representation of exception
     exception_text: str
@@ -2358,7 +2359,9 @@ class SchedulerState:
                 ws.actors.discard(ts)
             if ts.who_wants:
                 ts.exception_blame = ts
-                ts.exception = "Worker holding Actor was lost"
+                ts.exception = Serialized(
+                    *serialize(ValueError("Worker holding Actor was lost"))
+                )
                 return {ts.key: "erred"}, {}, {}  # don't try to recreate
 
         recommendations: Recs = {}
@@ -2528,8 +2531,8 @@ class SchedulerState:
         *,
         worker: str,
         cause: str | None = None,
-        exception=None,
-        traceback=None,
+        exception: Serialized | None = None,
+        traceback: Serialized | None = None,
         exception_text: str | None = None,
         traceback_text: str | None = None,
         **kwargs,
@@ -2555,7 +2558,6 @@ class SchedulerState:
             String representation of the exception
         traceback_text
             String representation of the traceback
-
 
         Returns
         -------
