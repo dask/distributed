@@ -14,6 +14,7 @@ import pytest
 from tlz import merge
 
 import dask.config
+from dask.utils import format_bytes, parse_bytes
 
 import distributed.system
 from distributed import Client, Event, KilledWorker, Nanny, Scheduler, Worker, wait
@@ -928,11 +929,12 @@ async def test_disk_cleanup_on_terminate(c, s, a, ignore_sigterm):
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,
-    worker_kwargs={"memory_limit": "10 GiB"},
+    worker_kwargs={"memory_limit": "2 GiB"},
+    # ^ must be smaller than system memory limit, otherwise that will take precedence
     config={
         "distributed.worker.memory.target": False,
-        "distributed.worker.memory.spill": 0.7,
-        "distributed.worker.memory.pause": 0.9,
+        "distributed.worker.memory.spill": 0.5,
+        "distributed.worker.memory.pause": 0.8,
         "distributed.worker.memory.monitor-interval": "10ms",
     },
 )
@@ -940,16 +942,21 @@ async def test_pause_while_spilling(c, s, a):
     N_PAUSE = 3
     N_TOTAL = 5
 
+    if a.memory_manager.memory_limit < parse_bytes("2 GiB"):
+        pytest.fail(
+            f"Set 2 GiB memory limit, got {format_bytes(a.memory_manager.memory_limit)}."
+        )
+
     def get_process_memory():
         if len(a.data) < N_PAUSE:
             # Don't trigger spilling until after all tasks have completed
             return 0
         elif a.data.fast and not a.data.slow:
             # Trigger spilling
-            return 8 * 2**30
+            return parse_bytes("1.6 GiB")
         else:
             # Trigger pause, but only after we started spilling
-            return 10 * 2**30
+            return parse_bytes("1.9 GiB")
 
     a.monitor.get_process_memory = get_process_memory
 
