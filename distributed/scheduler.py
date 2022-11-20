@@ -2994,8 +2994,11 @@ class SchedulerState:
                 s &= ww
 
         if s is None:
-            return None
+            return None  # All workers are valid
+        if not s:
+            return set()  # No workers are valid
 
+        # Some workers are valid
         s_ws = {self.workers[addr] for addr in s}
         if len(self.running) < len(self.workers):
             s_ws &= self.running
@@ -3033,8 +3036,10 @@ class SchedulerState:
         stack_time = ws.occupancy / ws.nthreads
         start_time = stack_time + comm_bytes / self.bandwidth
 
-        n_actors = len(ws.actors) if ts.actor else 0
-        return n_actors, start_time, ws.nbytes
+        if ts.actor:
+            return (len(ws.actors), start_time, ws.nbytes)
+        else:
+            return (start_time, ws.nbytes)
 
     def add_replica(self, ts: TaskState, ws: WorkerState) -> None:
         """Note that a worker holds a replica of a task with state='memory'"""
