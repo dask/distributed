@@ -29,7 +29,7 @@ from collections.abc import (
 from concurrent.futures import Executor
 from contextlib import suppress
 from datetime import timedelta
-from functools import wraps
+from functools import wraps, partial
 from inspect import isawaitable
 from typing import (
     TYPE_CHECKING,
@@ -2304,17 +2304,11 @@ class Worker(BaseWorker, ServerNode):
             try:
                 ts.start_time = time()
                 if iscoroutinefunction(function):
-                    token = _worker_cvar.set(self)
-                    try:
-                        result = await apply_function_async(
-                            function,
-                            args2,
-                            kwargs2,
-                            self.scheduler_delay,
-                        )
-                    finally:
-                        _worker_cvar.reset(token)
-                elif "ThreadPoolExecutor" in str(type(e)):
+                    coro = function(*args2, **kwargs2)
+                    function = partial(asyncio.run, coro)
+                    args2 = ()
+                    kwargs2 = {}
+                if "ThreadPoolExecutor" in str(type(e)):
                     # The 'executor' time metric should be almost zero most of the time,
                     # e.g. thread synchronization overhead only, since thread-noncpu and
                     # thread-cpu inside the thread detract from it. However, it may
