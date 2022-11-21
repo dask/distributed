@@ -19,13 +19,12 @@ from dask.distributed import Nanny, Worker
 from dask.utils import stringify
 
 from distributed.core import PooledRPCCall
-from distributed.scheduler import DEFAULT_EXTENSIONS, Scheduler
+from distributed.scheduler import Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._shuffle_extension import (
     Shuffle,
     ShuffleId,
-    ShuffleSchedulerExtension,
     dump_batch,
     get_worker_for,
     list_of_buffers_to_table,
@@ -168,21 +167,26 @@ async def wait_for_tasks_in_state(
         await asyncio.sleep(interval)
 
 
-class RemovedEventShuffleSchedulerExtension(ShuffleSchedulerExtension):
-    def __init__(self, scheduler: Scheduler):
-        super().__init__(scheduler)
-        self.removed_worker_event = asyncio.Event()
+async def wait_for_cleanup(scheduler: Scheduler) -> None:
+    scheduler_extension = scheduler.extensions["shuffle"]
+    waits = []
+    for ev in scheduler_extension.removed_state_events.values():
+        waits.append(ev.wait())
+    await asyncio.gather(*waits)
 
-    async def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
-        await super().remove_worker(scheduler, worker)
-        self.removed_worker_event.set()
+
+async def get_shuffle_id(scheduler: Scheduler) -> ShuffleId:
+    scheduler_extension = scheduler.extensions["shuffle"]
+    while not scheduler_extension.shuffle_ids():
+        await asyncio.sleep(0.01)
+    shuffle_ids = scheduler_extension.shuffle_ids()
+    assert len(shuffle_ids) == 1
+    return next(iter(shuffle_ids))
 
 
 @pytest.mark.slow
-@mock.patch.dict(DEFAULT_EXTENSIONS, {"shuffle": RemovedEventShuffleSchedulerExtension})
 @gen_cluster(client=True)
 async def test_closed_worker_during_transfer(c, s, a, b):
-    scheduler_extension = s.extensions["shuffle"]
 
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -198,19 +202,17 @@ async def test_closed_worker_during_transfer(c, s, a, b):
     with pytest.raises(Exception, match=b.address):
         out = await c.compute(out)
 
-    await scheduler_extension.removed_worker_event.wait()
+    await wait_for_cleanup(s)
     clean_worker(a)
     clean_worker(b)
     clean_scheduler(s)
 
 
 @pytest.mark.slow
-@mock.patch.dict(DEFAULT_EXTENSIONS, {"shuffle": RemovedEventShuffleSchedulerExtension})
 @gen_cluster(client=True, nthreads=[("", 2)])
 async def test_crashed_worker_during_transfer(c, s, a):
     async with Nanny(s.address, nthreads=2) as n:
         killed_worker_address = n.worker_address
-        scheduler_extension = s.extensions["shuffle"]
         df = dask.datasets.timeseries(
             start="2000-01-01",
             end="2000-01-10",
@@ -225,7 +227,7 @@ async def test_crashed_worker_during_transfer(c, s, a):
         with pytest.raises(Exception, match=killed_worker_address):
             out = await c.compute(out)
 
-        await scheduler_extension.removed_worker_event.wait()
+        await wait_for_cleanup(s)
         clean_worker(a)
         clean_scheduler(s)
 
@@ -298,10 +300,8 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
 
 @pytest.mark.parametrize("close_barrier_worker", [True, False])
 @pytest.mark.slow
-@mock.patch.dict(DEFAULT_EXTENSIONS, {"shuffle": RemovedEventShuffleSchedulerExtension})
 @gen_cluster(client=True)
 async def test_closed_worker_during_barrier(c, s, a, b, close_barrier_worker):
-    scheduler_extension = s.extensions["shuffle"]
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -310,11 +310,7 @@ async def test_closed_worker_during_barrier(c, s, a, b, close_barrier_worker):
     )
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = out.persist()
-
-    while not scheduler_extension.shuffle_ids():
-        await asyncio.sleep(0.01)
-    assert len(scheduler_extension.shuffle_ids()) == 1
-    shuffle_id = next(iter(scheduler_extension.shuffle_ids()))
+    shuffle_id = await get_shuffle_id(s)
 
     barrier_key = f"shuffle-barrier-{shuffle_id}"
     await wait_for_state(barrier_key, "processing", s, interval=0)
@@ -329,7 +325,7 @@ async def test_closed_worker_during_barrier(c, s, a, b, close_barrier_worker):
     with pytest.raises(Exception, match=shuffle_id):
         out = await c.compute(out)
 
-    await scheduler_extension.removed_worker_event.wait()
+    await wait_for_cleanup(s)
     clean_worker(a)
     clean_worker(b)
     clean_scheduler(s)
@@ -337,10 +333,8 @@ async def test_closed_worker_during_barrier(c, s, a, b, close_barrier_worker):
 
 @pytest.mark.parametrize("close_barrier_worker", [True, False])
 @pytest.mark.slow
-@mock.patch.dict(DEFAULT_EXTENSIONS, {"shuffle": RemovedEventShuffleSchedulerExtension})
 @gen_cluster(client=True, Worker=Nanny)
 async def test_crashed_worker_during_barrier(c, s, a, b, close_barrier_worker):
-    scheduler_extension = s.extensions["shuffle"]
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -349,11 +343,7 @@ async def test_crashed_worker_during_barrier(c, s, a, b, close_barrier_worker):
     )
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = out.persist()
-
-    while not scheduler_extension.shuffle_ids():
-        await asyncio.sleep(0.01)
-    assert len(scheduler_extension.shuffle_ids()) == 1
-    shuffle_id = next(iter(scheduler_extension.shuffle_ids()))
+    shuffle_id = await get_shuffle_id(s)
 
     barrier_key = f"shuffle-barrier-{shuffle_id}"
     await wait_for_state(barrier_key, "processing", s, interval=0)
@@ -368,15 +358,13 @@ async def test_crashed_worker_during_barrier(c, s, a, b, close_barrier_worker):
     with pytest.raises(Exception, match=shuffle_id):
         out = await c.compute(out)
 
-    await scheduler_extension.removed_worker_event.wait()
+    await wait_for_cleanup(s)
     clean_scheduler(s)
 
 
 @pytest.mark.slow
-@mock.patch.dict(DEFAULT_EXTENSIONS, {"shuffle": RemovedEventShuffleSchedulerExtension})
 @gen_cluster(client=True)
 async def test_closed_worker_during_unpack(c, s, a, b):
-    scheduler_extension = s.extensions["shuffle"]
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -391,19 +379,17 @@ async def test_closed_worker_during_unpack(c, s, a, b):
     with pytest.raises(Exception, match=b.address):
         out = await c.compute(out)
 
-    await scheduler_extension.removed_worker_event.wait()
+    await wait_for_cleanup(s)
     clean_worker(a)
     clean_worker(b)
     clean_scheduler(s)
 
 
 @pytest.mark.slow
-@mock.patch.dict(DEFAULT_EXTENSIONS, {"shuffle": RemovedEventShuffleSchedulerExtension})
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_crashed_worker_during_unpack(c, s, a):
     async with Nanny(s.address, nthreads=2) as n:
         killed_worker_address = n.worker_address
-        scheduler_extension = s.extensions["shuffle"]
         df = dask.datasets.timeseries(
             start="2000-01-01",
             end="2000-01-10",
@@ -418,7 +404,7 @@ async def test_crashed_worker_during_unpack(c, s, a):
         with pytest.raises(Exception, match=killed_worker_address):
             out = await c.compute(out)
 
-        await scheduler_extension.removed_worker_event.wait()
+        await wait_for_cleanup(s)
         clean_worker(a)
         clean_scheduler(s)
 
@@ -738,6 +724,7 @@ async def test_clean_after_close(c, s, a, b):
 
     await a.close()
     clean_worker(a)
+    await wait_for_cleanup(s)
 
 
 class PooledRPCShuffle(PooledRPCCall):

@@ -408,7 +408,10 @@ class ShuffleWorkerExtension:
                 await self._register_complete(shuffle)
 
     async def shuffle_fail(self, shuffle_id: ShuffleId, message: str) -> None:
-        shuffle = self.shuffles.pop(shuffle_id)
+        try:
+            shuffle = self.shuffles.pop(shuffle_id)
+        except KeyError:
+            return
         exception = RuntimeError(message)
         self.erred_shuffles[shuffle_id] = exception
         await shuffle.fail(exception)
@@ -626,6 +629,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     completed_workers: dict[ShuffleId, set[str]]
     participating_workers: dict[ShuffleId, set[str]]
     erred_shuffles: dict[ShuffleId, str]
+    removed_state_events: dict[ShuffleId, asyncio.Event]
 
     def __init__(self, scheduler: Scheduler):
         self.scheduler = scheduler
@@ -643,6 +647,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self.completed_workers = {}
         self.participating_workers = {}
         self.erred_shuffles = {}
+        self.removed_state_events = {}
         self.scheduler.add_plugin(self)
 
     def shuffle_ids(self) -> set[ShuffleId]:
@@ -689,6 +694,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             self.output_workers[id] = output_workers
             self.completed_workers[id] = set()
             self.participating_workers[id] = output_workers.copy()
+            self.removed_state_events[id] = asyncio.Event()
 
         self.participating_workers[id].add(worker)
         return {
@@ -700,13 +706,15 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         }
 
     async def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
+        logger.warning(f"Removing worker {worker}")
         affected_shuffles = {}
         broadcasts = []
-        for shuffle_id, participating_workers in self.participating_workers.items():
-            if worker not in participating_workers:
+        participating_workers = self.participating_workers.copy()
+        for shuffle_id, shuffle_workers in participating_workers.items():
+            if worker not in shuffle_workers:
                 continue
             self.erred_shuffles[shuffle_id] = worker
-            contact_workers = participating_workers.copy()
+            contact_workers = shuffle_workers.copy()
             contact_workers.discard(worker)
             message = f"Worker {worker} left during active shuffle {shuffle_id}"
             affected_shuffles[shuffle_id] = message
@@ -728,21 +736,27 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
                 exception=to_serialize(RuntimeError(message)),
                 stimulus_id="shuffle-remove-worker",
             )
-            self._remove_shuffle(shuffle_id)
+            self._remove_state(shuffle_id)
         if exceptions:
+            # TODO: Do we need to handle errors here?
             raise RuntimeError(exceptions)
 
     def register_complete(self, id: ShuffleId, worker: str) -> None:
         """Learn from a worker that it has completed all reads of a shuffle"""
+        if erred_worker := self.erred_shuffles.get(id):
+            raise RuntimeError(f"Worker {erred_worker} left during active shuffle {id}")
+        logger.warning(f"Registering complete on worker {worker}")
         if id not in self.completed_workers:
             logger.info("Worker shuffle reported complete after shuffle was removed")
             return
         self.completed_workers[id].add(worker)
 
         if self.output_workers[id].issubset(self.completed_workers[id]):
-            self._remove_shuffle(id)
+            self._remove_state(id)
 
-    def _remove_shuffle(self, id: ShuffleId) -> None:
+    def _remove_state(self, id: ShuffleId) -> None:
+        if self.removed_state_events[id].is_set():
+            return
         del self.worker_for[id]
         del self.schemas[id]
         del self.columns[id]
@@ -751,6 +765,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         del self.participating_workers[id]
         with contextlib.suppress(KeyError):
             del self.heartbeats[id]
+        self.removed_state_events[id].set()
 
 
 def get_worker_for(output_partition: int, workers: list[str], npartitions: int) -> str:
