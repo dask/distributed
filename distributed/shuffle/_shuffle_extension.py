@@ -694,6 +694,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         }
 
     async def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
+        affected_shuffles = {}
         broadcasts = []
         for shuffle_id, output_workers in self.output_workers.items():
             if worker not in output_workers:
@@ -702,6 +703,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             contact_workers = output_workers.copy()
             contact_workers.discard(worker)
             message = f"Worker {worker} left during active shuffle {shuffle_id}"
+            affected_shuffles[shuffle_id] = message
             broadcasts.append(
                 scheduler.broadcast(
                     msg={
@@ -712,15 +714,17 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
                     workers=list(contact_workers),
                 )
             )
+        results = await asyncio.gather(*broadcasts, return_exceptions=True)
+        exceptions = [result for result in results if isinstance(result, Exception)]
+        for shuffle_id, message in affected_shuffles.items():
             self.scheduler.handle_task_erred(
                 f"shuffle-barrier-{shuffle_id}",
                 exception=to_serialize(RuntimeError(message)),
                 stimulus_id="shuffle-remove-worker",
             )
             self._remove_shuffle(shuffle_id)
-        results = await asyncio.gather(*broadcasts, return_exceptions=True)
-        exceptions = [result for result in results if isinstance(result, Exception)]
-        raise RuntimeError(exceptions)
+        if exceptions:
+            raise RuntimeError(exceptions)
 
     def register_complete(self, id: ShuffleId, worker: str) -> None:
         """Learn from a worker that it has completed all reads of a shuffle"""

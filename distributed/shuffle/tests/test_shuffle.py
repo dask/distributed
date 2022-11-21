@@ -336,6 +336,7 @@ async def test_closed_worker_during_barrier(c, s, a, b, close_barrier_worker):
 
 @pytest.mark.parametrize("close_barrier_worker", [True, False])
 @pytest.mark.slow
+@mock.patch.dict(DEFAULT_EXTENSIONS, {"shuffle": RemovedEventShuffleSchedulerExtension})
 @gen_cluster(client=True, Worker=Nanny)
 async def test_crashed_worker_during_barrier(c, s, a, b, close_barrier_worker):
     scheduler_extension = s.extensions["shuffle"]
@@ -416,7 +417,7 @@ async def test_crashed_worker_during_unpack(c, s, a):
         with pytest.raises(Exception, match=killed_worker_address):
             out = await c.compute(out)
 
-        await scheduler_extension.removed_scheduler_event.wait()
+        await scheduler_extension.removed_worker_event.wait()
         clean_worker(a)
         clean_scheduler(s)
 
