@@ -5,7 +5,6 @@ import io
 import os
 import random
 import shutil
-import signal
 from collections import defaultdict
 from typing import Any, Mapping
 from unittest import mock
@@ -222,7 +221,7 @@ async def test_crashed_worker_during_transfer(c, s, a):
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
         out = out.persist()
         await wait_until_worker_has_tasks("shuffle-transfer", n.worker_address, 1, s)
-        os.kill(n.pid, signal.SIGKILL)
+        await n.process.process.kill()
 
         with pytest.raises(Exception, match=killed_worker_address):
             out = await c.compute(out)
@@ -288,8 +287,7 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
             await wait_until_worker_has_tasks(
                 "shuffle-transfer", n.worker_address, 1, s
             )
-            os.kill(n.pid, signal.SIGKILL)
-
+            await n.process.process.kill()
             actual = await c.compute(out.x.size)
             expected = await c.compute(df.x.size)
             assert actual == expected
@@ -353,8 +351,7 @@ async def test_crashed_worker_during_barrier(c, s, a, b, close_barrier_worker):
         close_nanny = a
     else:
         close_nanny = b
-    os.kill(close_nanny.pid, signal.SIGKILL)
-
+    await close_nanny.process.process.kill()
     with pytest.raises(Exception, match=shuffle_id):
         out = await c.compute(out)
 
@@ -399,8 +396,7 @@ async def test_crashed_worker_during_unpack(c, s, a):
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
         out = out.persist()
         await wait_until_worker_has_tasks("shuffle-p2p", killed_worker_address, 1, s)
-        os.kill(n.pid, signal.SIGKILL)
-
+        await n.process.process.kill()
         with pytest.raises(Exception, match=killed_worker_address):
             out = await c.compute(out)
 
@@ -425,7 +421,7 @@ async def test_crashed_worker_after_unpack(c, s, a):
         await c.compute(out.head(compute=False))
 
         await asyncio.sleep(1)
-        os.kill(n.pid, signal.SIGKILL)
+        await n.process.process.kill()
 
         try:
             await asyncio.wait_for(c.compute(out.tail(compute=False)), timeout=10)
