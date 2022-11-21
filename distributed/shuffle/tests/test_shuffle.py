@@ -19,13 +19,13 @@ from dask.distributed import Nanny, Worker
 from dask.utils import stringify
 
 from distributed.core import PooledRPCCall
-from distributed.scheduler import Scheduler
+from distributed.scheduler import DEFAULT_EXTENSIONS, Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._shuffle_extension import (
     Shuffle,
     ShuffleId,
-    ShuffleWorkerExtension,
+    ShuffleSchedulerExtension,
     dump_batch,
     get_worker_for,
     list_of_buffers_to_table,
@@ -34,7 +34,6 @@ from distributed.shuffle._shuffle_extension import (
     split_by_worker,
 )
 from distributed.utils_test import gen_cluster, gen_test, wait_for_state
-from distributed.worker import DEFAULT_EXTENSIONS
 from distributed.worker_state_machine import TaskState as WorkerTaskState
 
 pa = pytest.importorskip("pyarrow")
@@ -168,19 +167,21 @@ async def wait_for_tasks_in_state(
         await asyncio.sleep(interval)
 
 
-class FailedEventShuffleWorkerExtension(ShuffleWorkerExtension):
-    def __init__(self, worker: Worker) -> None:
-        super().__init__(worker)
-        self.failed_event = asyncio.Event()
+class RemovedEventShuffleSchedulerExtension(ShuffleSchedulerExtension):
+    def __init__(self, scheduler: Scheduler):
+        super().__init__(scheduler)
+        self.removed_worker_event = asyncio.Event()
 
-    async def shuffle_fail(self, shuffle_id: ShuffleId, message: str) -> None:
-        await super().shuffle_fail(shuffle_id, message)
-        self.failed_event.set()
+    async def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
+        await super().remove_worker(scheduler, worker)
+        self.removed_worker_event.set()
 
 
 @pytest.mark.slow
+@mock.patch.dict(DEFAULT_EXTENSIONS, {"shuffle": RemovedEventShuffleSchedulerExtension})
 @gen_cluster(client=True)
 async def test_closed_worker_during_transfer(c, s, a, b):
+    scheduler_extension = s.extensions["shuffle"]
 
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -193,22 +194,22 @@ async def test_closed_worker_during_transfer(c, s, a, b):
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
     await b.close()
 
-    with pytest.raises(Exception, match=f"{b.address} left during active shuffle") as e:
+    with pytest.raises(Exception, match=b.address):
         out = await c.compute(out)
 
+    await scheduler_extension.removed_worker_event.wait()
     clean_worker(a)
     clean_worker(b)
-    # clean_scheduler(s)
+    clean_scheduler(s)
 
 
 @pytest.mark.slow
-@mock.patch.dict(DEFAULT_EXTENSIONS, {"shuffle": FailedEventShuffleWorkerExtension})
+@mock.patch.dict(DEFAULT_EXTENSIONS, {"shuffle": RemovedEventShuffleSchedulerExtension})
 @gen_cluster(client=True, nthreads=[("", 2)])
 async def test_crashed_worker_during_transfer(c, s, a):
     async with Nanny(s.address, nthreads=2) as n:
         killed_worker_address = n.worker_address
-        extA = a.extensions["shuffle"]
-
+        scheduler_extension = s.extensions["shuffle"]
         df = dask.datasets.timeseries(
             start="2000-01-01",
             end="2000-01-10",
@@ -220,12 +221,12 @@ async def test_crashed_worker_during_transfer(c, s, a):
         await wait_until_worker_has_tasks("shuffle-transfer", n.worker_address, 1, s)
         os.kill(n.pid, signal.SIGKILL)
 
-        with pytest.raises(Exception, match=killed_worker_address) as e:
+        with pytest.raises(Exception, match=killed_worker_address):
             out = await c.compute(out)
 
-        await extA.failed_event.wait()
+        await scheduler_extension.removed_worker_event.wait()
         clean_worker(a)
-    # clean_scheduler(s)
+        clean_scheduler(s)
 
 
 @pytest.mark.xfail(reason="distributed#7324")
@@ -296,10 +297,10 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
 
 @pytest.mark.parametrize("close_barrier_worker", [True, False])
 @pytest.mark.slow
-@mock.patch.dict(DEFAULT_EXTENSIONS, {"shuffle": FailedEventShuffleWorkerExtension})
+@mock.patch.dict(DEFAULT_EXTENSIONS, {"shuffle": RemovedEventShuffleSchedulerExtension})
 @gen_cluster(client=True)
 async def test_closed_worker_during_barrier(c, s, a, b, close_barrier_worker):
-    extS = s.extensions["shuffle"]
+    scheduler_extension = s.extensions["shuffle"]
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -309,10 +310,10 @@ async def test_closed_worker_during_barrier(c, s, a, b, close_barrier_worker):
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = out.persist()
 
-    while not extS.shuffle_ids():
+    while not scheduler_extension.shuffle_ids():
         await asyncio.sleep(0.01)
-    assert len(extS.shuffle_ids()) == 1
-    shuffle_id = next(iter(extS.shuffle_ids()))
+    assert len(scheduler_extension.shuffle_ids()) == 1
+    shuffle_id = next(iter(scheduler_extension.shuffle_ids()))
 
     barrier_key = f"shuffle-barrier-{shuffle_id}"
     await wait_for_state(barrier_key, "processing", s, interval=0)
@@ -320,28 +321,24 @@ async def test_closed_worker_during_barrier(c, s, a, b, close_barrier_worker):
     processing_worker = a if ts.processing_on.address == a.address else b
     if (processing_worker == a) == close_barrier_worker:
         close_worker = a
-        running_worker = b
     else:
         close_worker = b
-        running_worker = a
     await close_worker.close()
 
-    with pytest.raises(Exception, match=shuffle_id) as e:
+    with pytest.raises(Exception, match=shuffle_id):
         out = await c.compute(out)
 
-    extW = running_worker.extensions["shuffle"]
-    await extW.failed_event.wait()
-
+    await scheduler_extension.removed_worker_event.wait()
     clean_worker(a)
     clean_worker(b)
-    # clean_scheduler(s)
+    clean_scheduler(s)
 
 
 @pytest.mark.parametrize("close_barrier_worker", [True, False])
 @pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny)
 async def test_crashed_worker_during_barrier(c, s, a, b, close_barrier_worker):
-    extS = s.extensions["shuffle"]
+    scheduler_extension = s.extensions["shuffle"]
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -351,10 +348,10 @@ async def test_crashed_worker_during_barrier(c, s, a, b, close_barrier_worker):
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = out.persist()
 
-    while not extS.shuffle_ids():
+    while not scheduler_extension.shuffle_ids():
         await asyncio.sleep(0.01)
-    assert len(extS.shuffle_ids()) == 1
-    shuffle_id = next(iter(extS.shuffle_ids()))
+    assert len(scheduler_extension.shuffle_ids()) == 1
+    shuffle_id = next(iter(scheduler_extension.shuffle_ids()))
 
     barrier_key = f"shuffle-barrier-{shuffle_id}"
     await wait_for_state(barrier_key, "processing", s, interval=0)
@@ -366,17 +363,18 @@ async def test_crashed_worker_during_barrier(c, s, a, b, close_barrier_worker):
         close_nanny = b
     os.kill(close_nanny.pid, signal.SIGKILL)
 
-    with pytest.raises(Exception, match=shuffle_id) as e:
+    with pytest.raises(Exception, match=shuffle_id):
         out = await c.compute(out)
 
-    # clean_scheduler(s)
+    await scheduler_extension.removed_worker_event.wait()
+    clean_scheduler(s)
 
 
 @pytest.mark.slow
-@mock.patch.dict(DEFAULT_EXTENSIONS, {"shuffle": FailedEventShuffleWorkerExtension})
+@mock.patch.dict(DEFAULT_EXTENSIONS, {"shuffle": RemovedEventShuffleSchedulerExtension})
 @gen_cluster(client=True)
 async def test_closed_worker_during_unpack(c, s, a, b):
-    extA = a.extensions["shuffle"]
+    scheduler_extension = s.extensions["shuffle"]
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -388,22 +386,22 @@ async def test_closed_worker_during_unpack(c, s, a, b):
     await wait_for_tasks_in_state("shuffle-p2p", "memory", 1, b)
     await b.close()
 
-    with pytest.raises(Exception, match=b.address) as e:
+    with pytest.raises(Exception, match=b.address):
         out = await c.compute(out)
 
-    await extA.failed_event.wait()
+    await scheduler_extension.removed_worker_event.wait()
     clean_worker(a)
     clean_worker(b)
-    # clean_scheduler(s)
+    clean_scheduler(s)
 
 
 @pytest.mark.slow
-@mock.patch.dict(DEFAULT_EXTENSIONS, {"shuffle": FailedEventShuffleWorkerExtension})
+@mock.patch.dict(DEFAULT_EXTENSIONS, {"shuffle": RemovedEventShuffleSchedulerExtension})
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_crashed_worker_during_unpack(c, s, a):
     async with Nanny(s.address, nthreads=2) as n:
         killed_worker_address = n.worker_address
-        extA = a.extensions["shuffle"]
+        scheduler_extension = s.extensions["shuffle"]
         df = dask.datasets.timeseries(
             start="2000-01-01",
             end="2000-01-10",
@@ -415,12 +413,12 @@ async def test_crashed_worker_during_unpack(c, s, a):
         await wait_until_worker_has_tasks("shuffle-p2p", killed_worker_address, 1, s)
         os.kill(n.pid, signal.SIGKILL)
 
-        with pytest.raises(Exception, match=killed_worker_address) as e:
+        with pytest.raises(Exception, match=killed_worker_address):
             out = await c.compute(out)
 
-        await extA.failed_event.wait()
+        await scheduler_extension.removed_scheduler_event.wait()
         clean_worker(a)
-    # clean_scheduler(s)
+        clean_scheduler(s)
 
 
 @gen_cluster(client=True)

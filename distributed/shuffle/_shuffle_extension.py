@@ -707,8 +707,10 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
                 exception=to_serialize(RuntimeError(message)),
                 stimulus_id="shuffle-remove-worker",
             )
-        await asyncio.gather(*broadcasts, return_exceptions=True)
-        # TODO: Clean up scheduler
+            self._remove_shuffle(shuffle_id)
+        results = await asyncio.gather(*broadcasts, return_exceptions=True)
+        exceptions = [result for result in results if isinstance(result, Exception)]
+        raise RuntimeError(exceptions)
 
     def register_complete(self, id: ShuffleId, worker: str) -> None:
         """Learn from a worker that it has completed all reads of a shuffle"""
@@ -718,13 +720,16 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self.completed_workers[id].add(worker)
 
         if self.output_workers[id].issubset(self.completed_workers[id]):
-            del self.worker_for[id]
-            del self.schemas[id]
-            del self.columns[id]
-            del self.output_workers[id]
-            del self.completed_workers[id]
-            with contextlib.suppress(KeyError):
-                del self.heartbeats[id]
+            self._remove_shuffle(id)
+
+    def _remove_shuffle(self, id: ShuffleId) -> None:
+        del self.worker_for[id]
+        del self.schemas[id]
+        del self.columns[id]
+        del self.output_workers[id]
+        del self.completed_workers[id]
+        with contextlib.suppress(KeyError):
+            del self.heartbeats[id]
 
 
 def get_worker_for(output_partition: int, workers: list[str], npartitions: int) -> str:
