@@ -494,9 +494,7 @@ class ShuffleWorkerExtension:
                     worker=self.worker.address,
                 )
                 if result["status"] == "ERROR":
-                    raise RuntimeError(
-                        f"Worker {result['worker']} left during active shuffle {shuffle_id}"
-                    )
+                    raise RuntimeError(result["message"])
                 assert result["status"] == "OK"
             except KeyError:
                 # Even the scheduler doesn't know about this shuffle
@@ -629,6 +627,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     completed_workers: dict[ShuffleId, set[str]]
     participating_workers: dict[ShuffleId, set[str]]
     erred_shuffles: dict[ShuffleId, str]
+    completed_shuffles: set[ShuffleId]
     removed_state_events: dict[ShuffleId, asyncio.Event]
 
     def __init__(self, scheduler: Scheduler):
@@ -647,6 +646,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self.completed_workers = {}
         self.participating_workers = {}
         self.erred_shuffles = {}
+        self.completed_shuffles = set()
         self.removed_state_events = {}
         self.scheduler.add_plugin(self)
 
@@ -666,7 +666,13 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         worker: str,
     ) -> dict:
         if id in self.erred_shuffles:
-            return {"status": "ERROR", "worker": self.erred_shuffles[id]}
+            message = (
+                f"Worker {self.erred_shuffles[id]} left during active shuffle {id}"
+            )
+            return {"status": "ERROR", "message": message}
+        elif id in self.completed_shuffles:
+            message = f"Shuffle {id} already completed"
+            return {"Status": "ERROR", "message": message}
 
         if id not in self.worker_for:
             assert schema is not None
@@ -752,6 +758,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self.completed_workers[id].add(worker)
 
         if self.output_workers[id].issubset(self.completed_workers[id]):
+            self.completed_shuffles.add(id)
             self._remove_state(id)
 
     def _remove_state(self, id: ShuffleId) -> None:
