@@ -409,6 +409,33 @@ async def test_crashed_worker_during_unpack(c, s, a):
         clean_scheduler(s)
 
 
+@pytest.mark.slow
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_crashed_worker_after_unpack(c, s, a):
+    async with Nanny(s.address, nthreads=2) as n:
+        killed_worker_address = n.worker_address
+        df = dask.datasets.timeseries(
+            start="2000-01-01",
+            end="2000-01-10",
+            dtypes={"x": float, "y": float},
+            freq="10 s",
+        )
+        out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+        out = out.persist()
+        await c.compute(out.head(compute=False))
+
+        await asyncio.sleep(1)
+        os.kill(n.pid, signal.SIGKILL)
+
+        try:
+            await asyncio.wait_for(c.compute(out.tail(compute=False)), timeout=10)
+        except Exception as e:
+            raise
+        await wait_for_cleanup(s)
+        clean_worker(a)
+        clean_scheduler(s)
+
+
 @gen_cluster(client=True)
 async def test_heartbeat(c, s, a, b):
     await a.heartbeat()
