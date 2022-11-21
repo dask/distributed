@@ -56,6 +56,7 @@ def clean_scheduler(scheduler):
     assert not scheduler.extensions["shuffle"].columns
     assert not scheduler.extensions["shuffle"].output_workers
     assert not scheduler.extensions["shuffle"].completed_workers
+    assert not scheduler.extensions["shuffle"].participating_workers
 
 
 @gen_cluster(client=True)
