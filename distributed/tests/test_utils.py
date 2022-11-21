@@ -12,6 +12,7 @@ import traceback
 import warnings
 from array import array
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from time import sleep
 
 import pytest
@@ -37,6 +38,7 @@ from distributed.utils import (
     is_kernel,
     is_valid_xml,
     iscoroutinefunction,
+    json_load_robust,
     log_errors,
     nbytes,
     offload,
@@ -983,3 +985,21 @@ async def test_log_errors():
                 raise CustomError("err7")
 
     assert caplog.getvalue().startswith("err7\n")
+
+
+def test_load_json_robust_timeout(tmpdir):
+    path = tmpdir / "foo.json"
+    with pytest.raises(TimeoutError):
+        json_load_robust(path, timeout=0.01)
+
+    with ThreadPoolExecutor() as tpe:
+
+        fut = tpe.submit(json_load_robust, path, timeout=30)
+        import json
+
+        with open(path, "w") as fd:
+            json.dump({"foo": "bar"}, fd)
+
+        assert fut.result() == {"foo": "bar"}
+
+    assert json_load_robust(path) == {"foo": "bar"}
