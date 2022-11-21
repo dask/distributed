@@ -488,6 +488,7 @@ class ShuffleWorkerExtension:
                     else None,
                     npartitions=npartitions,
                     column=column,
+                    worker=self.worker.address,
                 )
                 if result["status"] == "ERROR":
                     raise RuntimeError(
@@ -623,6 +624,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     columns: dict[ShuffleId, str]
     output_workers: dict[ShuffleId, set[str]]
     completed_workers: dict[ShuffleId, set[str]]
+    participating_workers: dict[ShuffleId, set[str]]
     erred_shuffles: dict[ShuffleId, str]
 
     def __init__(self, scheduler: Scheduler):
@@ -639,6 +641,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self.columns = {}
         self.output_workers = {}
         self.completed_workers = {}
+        self.participating_workers = {}
         self.erred_shuffles = {}
         self.scheduler.add_plugin(self)
 
@@ -655,6 +658,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         schema: bytes | None,
         column: str | None,
         npartitions: int | None,
+        worker: str,
     ) -> dict:
         if id in self.erred_shuffles:
             return {"status": "ERROR", "worker": self.erred_shuffles[id]}
@@ -684,7 +688,9 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             self.columns[id] = column
             self.output_workers[id] = output_workers
             self.completed_workers[id] = set()
+            self.participating_workers[id] = output_workers.copy()
 
+        self.participating_workers[id].add(worker)
         return {
             "status": "OK",
             "worker_for": self.worker_for[id],
@@ -696,11 +702,11 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     async def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
         affected_shuffles = {}
         broadcasts = []
-        for shuffle_id, output_workers in self.output_workers.items():
-            if worker not in output_workers:
+        for shuffle_id, participating_workers in self.participating_workers.items():
+            if worker not in participating_workers:
                 continue
             self.erred_shuffles[shuffle_id] = worker
-            contact_workers = output_workers.copy()
+            contact_workers = participating_workers.copy()
             contact_workers.discard(worker)
             message = f"Worker {worker} left during active shuffle {shuffle_id}"
             affected_shuffles[shuffle_id] = message
