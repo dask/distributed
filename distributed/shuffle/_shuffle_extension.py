@@ -144,7 +144,7 @@ class Shuffle:
         self.total_recvd = 0
         self.start_time = time.time()
         self._exception: Exception | None = None
-        self._close_lock = asyncio.Lock()
+        self._closed_event = asyncio.Event()
 
     def __repr__(self) -> str:
         return f"<Shuffle id: {self.id} on {self.local_address}>"
@@ -317,14 +317,18 @@ class Shuffle:
         await self._disk_buffer.flush()
 
     async def close(self) -> None:
+        if self.closed:
+            await self._closed_event.wait()
+            return
+
         self.closed = True
-        async with self._close_lock:
-            await self._comm_buffer.close()
-            await self._disk_buffer.close()
-            try:
-                self.executor.shutdown(cancel_futures=True)
-            except Exception:
-                self.executor.shutdown()
+        await self._comm_buffer.close()
+        await self._disk_buffer.close()
+        try:
+            self.executor.shutdown(cancel_futures=True)
+        except Exception:
+            self.executor.shutdown()
+        self._closed_event.set()
 
     async def fail(self, exception: Exception) -> None:
         if not self.closed:
@@ -365,6 +369,7 @@ class ShuffleWorkerExtension:
         self.memory_limiter_comms = ResourceLimiter(parse_bytes("100 MiB"))
         self.memory_limiter_disk = ResourceLimiter(parse_bytes("1 GiB"))
         self.closed = False
+        self._closed_event = asyncio.Event()
 
     # Handlers
     ##########
@@ -522,10 +527,15 @@ class ShuffleWorkerExtension:
                 return self.shuffles[shuffle_id]
 
     async def close(self) -> None:
+        if self.closed:
+            await self._closed_event.wait()
+            return
+
         self.closed = True
         while self.shuffles:
             _, shuffle = self.shuffles.popitem()
             await shuffle.close()
+        self._closed_event.set()
 
     def raise_if_closed(self) -> None:
         if self.closed:
