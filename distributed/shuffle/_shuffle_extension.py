@@ -707,7 +707,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         }
 
     async def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
-        logger.warning(f"Removing worker {worker}")
         affected_shuffles = {}
         broadcasts = []
         participating_workers = self.participating_workers.copy()
@@ -746,7 +745,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         """Learn from a worker that it has completed all reads of a shuffle"""
         if erred_worker := self.erred_shuffles.get(id):
             raise RuntimeError(f"Worker {erred_worker} left during active shuffle {id}")
-        logger.warning(f"Registering complete on worker {worker}")
         if id not in self.completed_workers:
             logger.info("Worker shuffle reported complete after shuffle was removed")
             return
