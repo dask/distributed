@@ -603,6 +603,9 @@ async def test_closed_other_worker_during_final_register_complete(c, s, a, b):
     clean_scheduler(s)
 
 
+# TODO: Add test for failure AFTER shuffle
+
+
 @gen_cluster(client=True)
 async def test_heartbeat(c, s, a, b):
     await a.heartbeat()
