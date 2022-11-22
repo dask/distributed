@@ -194,7 +194,7 @@ def _unpack_remotedata_inner(
                     if byte_keys
                     else tuple(f.key for f in futures)
                 )
-                inkeys = sc.inkeys + future_keys
+                inkeys = tuple(sc.inkeys) + future_keys
                 sc = SubgraphCallable(dsk, sc.outkey, inkeys, sc.name)
             return (sc,) + args + future_keys
         else:
