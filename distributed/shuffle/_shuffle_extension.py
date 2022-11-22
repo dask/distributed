@@ -14,7 +14,7 @@ import toolz
 
 from dask.utils import parse_bytes
 
-from distributed.core import PooledRPCCall
+from distributed.core import PooledRPCCall, error_message
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.protocol import to_serialize
 from distributed.shuffle._arrow import (
@@ -594,9 +594,6 @@ class ShuffleWorkerExtension:
         Calling this for a ``shuffle_id`` which is unknown or incomplete is an error.
         """
         self.raise_if_closed()
-        assert (
-            shuffle_id in self.shuffles or shuffle_id in self.erred_shuffles
-        ), "Shuffle worker restrictions misbehaving"
         shuffle = self.get_shuffle(shuffle_id)
         output = sync(self.worker.loop, shuffle.get_output_partition, output_partition)
         # key missing if another thread got to it first
@@ -749,8 +746,16 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         if "shuffle-p2p-" not in key:
             return
 
-        self.scheduler.set_restrictions({key: []})
-        self.scheduler.transitions({key: "waiting"}, stimulus_id="shuffle-p2p-failed")
+        stimulus_id = "shuffle-p2p-failed"
+        error_msg = error_message(RuntimeError("Shuffle failed"))
+        r = self.scheduler._transition(
+            key, "erred", stimulus_id, cause=key, **error_msg
+        )
+        recommendations, client_msgs, worker_msgs = r
+        self.scheduler._transitions(
+            recommendations, client_msgs, worker_msgs, stimulus_id
+        )
+        self.scheduler.send_all(client_msgs, worker_msgs)
 
     def register_complete(self, id: ShuffleId, worker: str) -> None:
         """Learn from a worker that it has completed all reads of a shuffle"""
