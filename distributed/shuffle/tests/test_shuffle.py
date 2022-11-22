@@ -528,15 +528,13 @@ class BlockedRegisterCompleteShuffleWorkerExtension(ShuffleWorkerExtension):
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("close_busy_worker", [True, False])
-@mock.patch(
-    "distributed.shuffle._shuffle_extension.ShuffleWorkerExtension",
-    BlockedRegisterCompleteShuffleWorkerExtension,
+@gen_cluster(
+    client=True,
+    worker_kwargs={
+        "extensions": {"shuffle": BlockedRegisterCompleteShuffleWorkerExtension}
+    },
 )
-@gen_cluster(client=True)
-async def test_closed_worker_during_final_register_complete(
-    c, s, a, b, close_busy_worker
-):
+async def test_closed_worker_during_final_register_complete(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-03-10",
@@ -545,18 +543,55 @@ async def test_closed_worker_during_final_register_complete(
     )
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = out.persist()
-    shuffle_id = await get_shuffle_id(s)
-    shuffleA = a.extensions["shuffle"].shuffles[shuffle_id]
-    shuffleB = b.extensions["shuffle"].shuffles[shuffle_id]
-    await shuffleA.in_register_complete.wait()
-    await shuffleB.in_register_complete.wait()
+    shuffle_ext_a = a.extensions["shuffle"]
+    shuffle_ext_b = b.extensions["shuffle"]
+    await shuffle_ext_a.in_register_complete.wait()
+    await shuffle_ext_b.in_register_complete.wait()
 
-    if close_busy_worker:
-        shuffleB.block_register_complete.set()
-    await asyncio.sleep(0)
+    shuffle_ext_a.block_register_complete.set()
+    while a.state.executing:
+        await asyncio.sleep(0.01)
+    await b.close(timeout=2)
 
+    with pytest.raises(
+        RuntimeError, match=f"shuffle_unpack failed because worker {b.address} left"
+    ):
+        out = await c.compute(out)
+
+    shuffle_ext_b.block_register_complete.set()
+    await wait_for_cleanup(s)
+    clean_worker(a)
+    clean_worker(b)
+    clean_scheduler(s)
+
+
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    worker_kwargs={
+        "extensions": {"shuffle": BlockedRegisterCompleteShuffleWorkerExtension}
+    },
+)
+async def test_closed_other_worker_during_final_register_complete(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-03-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = out.persist()
+    shuffle_ext_a = a.extensions["shuffle"]
+    shuffle_ext_b = b.extensions["shuffle"]
+    await shuffle_ext_a.in_register_complete.wait()
+    await shuffle_ext_b.in_register_complete.wait()
+
+    shuffle_ext_b.block_register_complete.set()
+    while b.state.executing:
+        await asyncio.sleep(0.01)
     await b.close()
 
+    shuffle_ext_a.block_register_complete.set()
     with pytest.raises(
         RuntimeError, match=f"shuffle_unpack failed because worker {b.address} left"
     ):
