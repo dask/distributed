@@ -603,29 +603,6 @@ async def test_closed_other_worker_during_final_register_complete(c, s, a, b):
     clean_scheduler(s)
 
 
-# TODO: Make this test useful
-@pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_crashed_worker_after_unpack(c, s, a):
-    async with Nanny(s.address, nthreads=2) as n:
-        killed_worker_address = n.worker_address
-        df = dask.datasets.timeseries(
-            start="2000-01-01",
-            end="2000-01-10",
-            dtypes={"x": float, "y": float},
-            freq="10 s",
-        )
-        out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-        await c.compute(out.head(compute=False))
-
-        await n.process.process.kill()
-
-        c.compute(out.tail(compute=False))
-        await wait_for_cleanup(s)
-        clean_worker(a)
-        clean_scheduler(s)
-
-
 @gen_cluster(client=True)
 async def test_heartbeat(c, s, a, b):
     await a.heartbeat()
