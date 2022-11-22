@@ -67,6 +67,8 @@ def test_range_query():
 
 
 def test_disk_config():
+    breakpoint()
+
     sm = SystemMonitor()
     a = sm.update()
     assert "host_disk_io.read_bps" in a
