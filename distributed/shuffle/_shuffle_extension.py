@@ -746,8 +746,15 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         if "shuffle-p2p-" not in key:
             return
 
+        ts = self.scheduler.tasks[key]
+        assert len(ts.worker_restrictions) == 1
+        worker = next(iter(ts.worker_restrictions))
         stimulus_id = "shuffle-p2p-failed"
-        error_msg = error_message(RuntimeError("Shuffle failed"))
+        error_msg = error_message(
+            RuntimeError(
+                f"shuffle_unpack failed because worker {worker} left during active shuffle"
+            )
+        )
         r = self.scheduler._transition(
             key, "erred", stimulus_id, cause=key, **error_msg
         )
