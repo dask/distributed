@@ -62,15 +62,20 @@ class SystemMonitor:
         if monitor_disk_io is None:
             monitor_disk_io = dask.config.get("distributed.admin.system-monitor.disk")
         if monitor_disk_io:
-            # try:
-            #     disk_ioc = psutil.disk_io_counters()
-            # if disk_ioc is None:  # pragma: nocover
-            #     # diskless machine
-            #     monitor_disk_io = False
-            # else:
-            self._last_disk_io_counters = psutil.disk_io_counters()
-            self.quantities["host_disk_io.read_bps"] = deque(maxlen=maxlen)
-            self.quantities["host_disk_io.write_bps"] = deque(maxlen=maxlen)
+            try:
+                disk_ioc = psutil.disk_io_counters()
+            except Exception:
+                # FIXME occurs when psutil version doesn't have handling for given platform / kernel;
+                # should we explicitly error in this case?
+                monitor_disk_io = False  # pragma: nocover
+            else:
+                if disk_ioc is None:  # pragma: nocover
+                    # diskless machine
+                    monitor_disk_io = False
+                else:
+                    self._last_disk_io_counters = disk_ioc
+                    self.quantities["host_disk_io.read_bps"] = deque(maxlen=maxlen)
+                    self.quantities["host_disk_io.write_bps"] = deque(maxlen=maxlen)
         self.monitor_disk_io = monitor_disk_io
 
         if monitor_host_cpu is None:
