@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     import pandas as pd
     import pyarrow as pa
 
-    from distributed.scheduler import Scheduler, WorkerState
+    from distributed.scheduler import Scheduler, TaskStateState, WorkerState
     from distributed.worker import Worker
 
 ShuffleId = NewType("ShuffleId", str)
@@ -734,6 +734,23 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         if exceptions:
             # TODO: Do we need to handle errors here?
             raise RuntimeError(exceptions)
+
+    def transition(
+        self,
+        key: str,
+        start: TaskStateState,
+        finish: TaskStateState,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        if finish != "no-worker":
+            return
+
+        if "shuffle-p2p-" not in key:
+            return
+
+        self.scheduler.set_restrictions({key: []})
+        self.scheduler.transitions({key: "waiting"}, stimulus_id="shuffle-p2p-failed")
 
     def register_complete(self, id: ShuffleId, worker: str) -> None:
         """Learn from a worker that it has completed all reads of a shuffle"""
