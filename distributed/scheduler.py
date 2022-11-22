@@ -3548,10 +3548,8 @@ class Scheduler(SchedulerState, ServerNode):
         self.bandwidth_workers = defaultdict(float)
         self.bandwidth_types = defaultdict(float)
 
-        if not preload:
-            preload = dask.config.get("distributed.scheduler.preload")
-        if not preload_argv:
-            preload_argv = dask.config.get("distributed.scheduler.preload-argv")
+        preload = (preload or []) + dask.config.get("distributed.scheduler.preload")
+        preload_argv = (preload_argv or []) + dask.config.get("distributed.scheduler.preload-argv")
         self.preloads = preloading.process_preloads(self, preload, preload_argv)
 
         if isinstance(security, dict):
