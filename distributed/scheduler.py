@@ -2059,6 +2059,93 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    def transition_no_worker_erred(
+        self,
+        key,
+        stimulus_id,
+        cause: str | None = None,
+        exception=None,
+        traceback=None,
+        exception_text: str | None = None,
+        traceback_text: str | None = None,
+        **kwargs,
+    ):
+        try:
+            ts = self.tasks[key]
+            failing_ts: TaskState
+            recommendations = {}
+            client_msgs: dict = {}
+            worker_msgs: dict = {}
+
+            if self.validate:
+                assert cause or ts.exception_blame
+                assert not ts.actor, f"Actors can't be in `no-worker`: {ts}"
+                assert ts in self.unrunnable
+                assert not ts.waiting_on
+                assert not ts.processing_on
+                assert not ts.who_has
+
+            self.unrunnable.discard(ts)
+            if exception is not None:
+                ts.exception = exception
+                ts.exception_text = exception_text  # type: ignore
+            if traceback is not None:
+                ts.traceback = traceback
+                ts.traceback_text = traceback_text  # type: ignore
+            if cause is not None:
+                failing_ts = self.tasks[cause]
+                ts.exception_blame = failing_ts
+            else:
+                failing_ts = ts.exception_blame  # type: ignore
+
+            self.erred_tasks.appendleft(
+                ErredTask(
+                    ts.key,
+                    time(),
+                    ts.erred_on.copy(),
+                    exception_text or "",
+                    traceback_text or "",
+                )
+            )
+
+            for dts in ts.dependents:
+                dts.exception_blame = failing_ts
+                recommendations[dts.key] = "erred"
+
+            for dts in ts.dependencies:
+                dts.waiters.discard(ts)
+                if not dts.waiters and not dts.who_wants:
+                    recommendations[dts.key] = "released"
+
+            ts.waiters.clear()
+
+            ts.state = "erred"
+
+            report_msg = {
+                "op": "task-erred",
+                "key": key,
+                "exception": failing_ts.exception,
+                "traceback": failing_ts.exception,
+            }
+
+            for cs in ts.who_wants:
+                client_msgs[cs.client_key] = [report_msg]
+
+            cs = self.clients["fire-and-forget"]
+            if ts in cs.wants_what:
+                self._client_releases_keys(
+                    cs=cs, keys=[key], recommendations=recommendations
+                )
+
+            return recommendations, client_msgs, worker_msgs
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
+
     def decide_worker_rootish_queuing_disabled(
         self, ts: TaskState
     ) -> WorkerState | None:
@@ -3001,6 +3088,7 @@ class SchedulerState:
         ("processing", "erred"): transition_processing_erred,
         ("no-worker", "released"): transition_no_worker_released,
         ("no-worker", "processing"): transition_no_worker_processing,
+        ("no-worker", "erred"): transition_no_worker_erred,
         ("released", "forgotten"): transition_released_forgotten,
         ("memory", "forgotten"): transition_memory_forgotten,
         ("erred", "released"): transition_erred_released,
