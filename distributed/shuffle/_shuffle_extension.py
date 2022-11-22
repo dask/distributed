@@ -707,7 +707,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         }
 
     async def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
-        affected_shuffles = {}
+        affected_shuffles = set()
         broadcasts = []
         participating_workers = self.participating_workers.copy()
         for shuffle_id, shuffle_workers in participating_workers.items():
@@ -716,13 +716,12 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             self.erred_shuffles[shuffle_id] = worker
             contact_workers = shuffle_workers.copy()
             contact_workers.discard(worker)
-            message = f"Worker {worker} left during active shuffle {shuffle_id}"
-            affected_shuffles[shuffle_id] = message
+            affected_shuffles.add(shuffle_id)
             broadcasts.append(
                 scheduler.broadcast(
                     msg={
                         "op": "shuffle_fail",
-                        "message": message,
+                        "message": f"Worker {worker} left during active shuffle {shuffle_id}",
                         "shuffle_id": shuffle_id,
                     },
                     workers=list(contact_workers),
@@ -730,12 +729,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             )
         results = await asyncio.gather(*broadcasts, return_exceptions=True)
         exceptions = [result for result in results if isinstance(result, Exception)]
-        for shuffle_id, message in affected_shuffles.items():
-            self.scheduler.handle_task_erred(
-                f"shuffle-barrier-{shuffle_id}",
-                exception=to_serialize(RuntimeError(message)),
-                stimulus_id="shuffle-remove-worker",
-            )
+        for shuffle_id in affected_shuffles:
             self._remove_state(shuffle_id)
         if exceptions:
             # TODO: Do we need to handle errors here?
