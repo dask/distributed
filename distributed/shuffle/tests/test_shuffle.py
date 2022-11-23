@@ -553,9 +553,7 @@ async def test_closed_worker_during_final_register_complete(c, s, a, b):
         await asyncio.sleep(0.01)
     await b.close(timeout=2)
 
-    with pytest.raises(
-        RuntimeError, match=f"shuffle_unpack failed because worker {b.address} left"
-    ):
+    with pytest.raises(RuntimeError, match="shuffle_unpack failed"):
         out = await c.compute(out)
 
     shuffle_ext_b.block_register_complete.set()
