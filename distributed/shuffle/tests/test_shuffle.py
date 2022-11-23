@@ -792,7 +792,7 @@ async def test_closed_worker_between_repeats(c, s, w1, w2, w3):
         seed=42,
     )
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    h1 = await c.compute(out.head(compute=False))
+    await c.compute(out.head(compute=False))
 
     clean_worker(w1)
     clean_worker(w2)
@@ -807,8 +807,7 @@ async def test_closed_worker_between_repeats(c, s, w1, w2, w3):
     clean_scheduler(s)
 
     await w2.close()
-    h2 = await c.compute(out.head(compute=False))
-    assert h1.equals(h2)
+    await c.compute(out.head(compute=False))
     clean_worker(w1)
     clean_scheduler(s)
 
