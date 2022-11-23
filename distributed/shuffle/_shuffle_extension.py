@@ -208,9 +208,6 @@ class Shuffle:
 
         try:
             self.total_recvd += sum(map(len, data))
-            # TODO: Is it actually a good idea to dispatch multiple times instead of
-            # only once?
-            # An ugly way of turning these batches back into an arrow table
             groups = await self.offload(self._repartition_buffers, data)
             await self._write_to_disk(groups)
         except Exception as e:
@@ -218,9 +215,6 @@ class Shuffle:
             raise
 
     def _repartition_buffers(self, data: list[bytes]) -> dict[str, list[bytes]]:
-        # TODO: Is it actually a good idea to dispatch multiple times instead of
-        # only once?
-        # An ugly way of turning these batches back into an arrow table
         table = list_of_buffers_to_table(data, self.schema)
         groups = split_by_partition(table, self.column)
         assert len(table) == sum(map(len, groups.values()))
