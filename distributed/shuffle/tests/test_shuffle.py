@@ -32,7 +32,12 @@ from distributed.shuffle._shuffle_extension import (
     split_by_partition,
     split_by_worker,
 )
-from distributed.utils_test import gen_cluster, gen_test, wait_for_state
+from distributed.utils_test import (
+    gen_cluster,
+    gen_test,
+    raises_with_cause,
+    wait_for_state,
+)
 from distributed.worker_state_machine import TaskState as WorkerTaskState
 
 pa = pytest.importorskip("pyarrow")
@@ -203,9 +208,10 @@ async def test_closed_worker_during_transfer(c, s, a, b):
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
     await b.close()
 
-    with pytest.raises(RuntimeError, match="shuffle_transfer failed") as exc_info:
+    with raises_with_cause(
+        RuntimeError, "shuffle_transfer failed", RuntimeError, b.address
+    ):
         out = await c.compute(out)
-    assert b.address in str(exc_info.value.__cause__)
 
     await wait_for_cleanup(s)
     clean_worker(a)
@@ -231,9 +237,10 @@ async def test_crashed_worker_during_transfer(c, s, a):
         )
         await n.process.process.kill()
 
-        with pytest.raises(RuntimeError, match="shuffle_transfer failed") as exc_info:
+        with raises_with_cause(
+            RuntimeError, "shuffle_transfer failed", Exception, killed_worker_address
+        ):
             out = await c.compute(out)
-        assert killed_worker_address in str(exc_info.value.__cause__)
 
         await wait_for_cleanup(s)
         clean_worker(a)
@@ -377,9 +384,10 @@ async def test_closed_worker_during_barrier(c, s, a, b):
 
     alive_shuffle.block_inputs_done.set()
 
-    with pytest.raises(RuntimeError, match="shuffle_transfer failed") as exc_info:
+    with raises_with_cause(
+        RuntimeError, "shuffle_transfer failed", Exception, close_worker.address
+    ):
         out = await c.compute(out)
-    assert close_worker.address in str(exc_info.value.__cause__)
 
     await wait_for_cleanup(s)
     clean_worker(a)
