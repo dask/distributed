@@ -12,14 +12,25 @@ from packaging.version import parse as parse_version
 import dask
 
 from distributed.dashboard.utils import BOKEH_VERSION
-from distributed.versions import MIN_BOKEH_VERSION
+from distributed.versions import MAX_BOKEH_VERSION, MIN_BOKEH_VERSION
 
-if BOKEH_VERSION < parse_version(MIN_BOKEH_VERSION):
+if BOKEH_VERSION < parse_version(MIN_BOKEH_VERSION) or BOKEH_VERSION > parse_version(
+    MAX_BOKEH_VERSION
+):
     warnings.warn(
         f"\nDask needs bokeh >= {MIN_BOKEH_VERSION}, < 3 for the dashboard."
+        f"\nYou have bokeh=={BOKEH_VERSION}."
         "\nContinuing without the dashboard."
     )
-    raise ImportError(f"Dask needs bokeh >= {MIN_BOKEH_VERSION}, < 3")
+    raise ImportError(
+        f"Dask needs bokeh >= {MIN_BOKEH_VERSION}, < 3, not bokeh=={BOKEH_VERSION}"
+    )
+
+
+if BOKEH_VERSION.major < 3:
+    from bokeh.models import Panel as TabPanel  # noqa: F401
+else:
+    from bokeh.models import TabPanel  # noqa: F401
 
 
 def BokehApplication(applications, server, prefix="/", template_variables=None):

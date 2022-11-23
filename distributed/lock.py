@@ -125,7 +125,7 @@ class Lock:
 
         Returns
         -------
-        True or False whether or not it sucessfully acquired the lock
+        True or False whether or not it successfully acquired the lock
         """
         timeout = parse_timedelta(timeout)
 

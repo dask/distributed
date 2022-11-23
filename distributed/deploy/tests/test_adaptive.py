@@ -410,8 +410,8 @@ async def test_update_adaptive():
         dashboard_address=":0",
         asynchronous=True,
     ) as cluster:
-        first = cluster.adapt(maxmimum=1)
-        second = cluster.adapt(maxmimum=2)
+        first = cluster.adapt(maximum=1)
+        second = cluster.adapt(maximum=2)
         await asyncio.sleep(0.2)
         assert first.periodic_callback is None
         assert second.periodic_callback.is_running()

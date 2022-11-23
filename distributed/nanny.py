@@ -201,8 +201,9 @@ class Nanny(ServerNode):
             self, preload_nanny, preload_nanny_argv, file_dir=self.local_directory
         )
 
+        self.death_timeout = parse_timedelta(death_timeout)
         if scheduler_file:
-            cfg = json_load_robust(scheduler_file)
+            cfg = json_load_robust(scheduler_file, timeout=self.death_timeout)
             self.scheduler_addr = cfg["address"]
         elif scheduler_ip is None and dask.config.get("scheduler-address"):
             self.scheduler_addr = dask.config.get("scheduler-address")
@@ -221,7 +222,6 @@ class Nanny(ServerNode):
         self.reconnect = reconnect
         self.validate = validate
         self.resources = resources
-        self.death_timeout = parse_timedelta(death_timeout)
 
         self.Worker = Worker if worker_class is None else worker_class
 

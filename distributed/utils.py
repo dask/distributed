@@ -1097,19 +1097,21 @@ def nbytes(frame, _bytes_like=(bytes, bytearray)):
             return len(frame)
 
 
-def json_load_robust(fn, load=json.load):
+def json_load_robust(fn, load=json.load, timeout=None):
     """Reads a JSON file from disk that may be being written as we read"""
-    while not os.path.exists(fn):
-        sleep(0.01)
-    for _ in range(10):
-        try:
-            with open(fn) as f:
-                cfg = load(f)
-            if cfg:
-                return cfg
-        except (ValueError, KeyError):  # race with writing process
-            pass
+    deadline = Deadline.after(timeout)
+    while not deadline.expires or deadline.remaining:
+        if os.path.exists(fn):
+            try:
+                with open(fn) as f:
+                    cfg = load(f)
+                if cfg:
+                    return cfg
+            except (ValueError, KeyError):  # race with writing process
+                pass
         sleep(0.1)
+    else:
+        raise TimeoutError(f"Could not load file after {timeout}s.")
 
 
 class DequeHandler(logging.Handler):

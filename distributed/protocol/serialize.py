@@ -429,7 +429,7 @@ def deserialize(header, frames, deserializers=None):
 def serialize_and_split(
     x, serializers=None, on_error="message", context=None, size=None
 ):
-    """Serialize and split compressable frames
+    """Serialize and split compressible frames
 
     This function is a drop-in replacement of `serialize()` that calls `serialize()`
     followed by `frame_split_size()` on frames that should be compressed.
@@ -462,7 +462,7 @@ def serialize_and_split(
             out_compression.append(compression)
     assert len(out_compression) == len(out_frames)
 
-    # Notice, in order to match msgpack's implicit convertion to tuples,
+    # Notice, in order to match msgpack's implicit conversion to tuples,
     # we convert to tuples here as well.
     header["split-num-sub-frames"] = tuple(num_sub_frames)
     header["split-offsets"] = tuple(offsets)

@@ -478,7 +478,7 @@ class Future(WrappedKey):
         try:
             self.release()
         except AttributeError:
-            # Ocassionally we see this error when shutting down the client
+            # Occasionally we see this error when shutting down the client
             # https://github.com/dask/distributed/issues/4305
             if not sys.is_finalizing():
                 raise
@@ -2851,7 +2851,7 @@ class Client(SyncMethodMixin):
         wait : boolean (optional)
             If the function is asynchronous whether or not to wait until that
             function finishes.
-        nanny : bool, defualt False
+        nanny : bool, default False
             Whether to run ``function`` on the nanny. By default, the function
             is run on the worker process.  If specified, the addresses in
             ``workers`` should still be the worker addresses, not the nanny addresses.
@@ -2885,7 +2885,7 @@ class Client(SyncMethodMixin):
         >>> def get_status(dask_worker):
         ...     return dask_worker.status
 
-        >>> c.run(get_hostname)  # doctest: +SKIP
+        >>> c.run(get_status)  # doctest: +SKIP
         {'192.168.0.100:9000': 'running',
          '192.168.0.101:9000': 'running}
 
@@ -4206,7 +4206,7 @@ class Client(SyncMethodMixin):
         Parameters
         ----------
         n : int
-            Number of logs to retrive.  Maxes out at 10000 by default,
+            Number of logs to retrieve.  Maxes out at 10000 by default,
             configurable via the ``distributed.admin.log-length``
             configuration value.
 
@@ -4222,7 +4222,7 @@ class Client(SyncMethodMixin):
         Parameters
         ----------
         n : int
-            Number of logs to retrive.  Maxes out at 10000 by default,
+            Number of logs to retrieve.  Maxes out at 10000 by default,
             configurable via the ``distributed.admin.log-length``
             configuration value.
         workers : iterable

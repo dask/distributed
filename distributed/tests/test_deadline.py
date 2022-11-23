@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from time import sleep
 
 from distributed.metrics import time
 from distributed.utils import Deadline
@@ -56,10 +57,19 @@ async def test_deadline_progress():
     )
 
 
-@gen_test()
-async def test_deadline_expiration():
+def test_deadline_expiration():
     deadline = Deadline.after(0.1)
-    await asyncio.sleep(0.1)
+    sleep(0.15)
+    assert deadline.expired is True
+    assert deadline.remaining == 0
+    assert deadline.elapsed >= deadline.duration
+
+
+@gen_test()
+async def test_deadline_expiration_async():
+    deadline = Deadline.after(0.1)
+    # Asyncio clock is slightly different, therefore sleep a bit longer
+    await asyncio.sleep(0.2)
     assert deadline.expired is True
     assert deadline.remaining == 0
     assert deadline.elapsed >= deadline.duration

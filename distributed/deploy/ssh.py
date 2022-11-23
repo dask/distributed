@@ -46,7 +46,7 @@ class Process(ProcessInterface):
 
 
 class Worker(Process):
-    """A Remote Dask Worker controled by SSH
+    """A Remote Dask Worker controlled by SSH
 
     Parameters
     ----------
