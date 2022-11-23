@@ -2070,6 +2070,15 @@ class SchedulerState:
         traceback_text: str | None = None,
         **kwargs,
     ):
+        """Transition a task from ``no-worker`` to ``erred``.
+
+        This transition cannot not naturally and needs to be triggered manually.
+
+        See Also
+        --------
+        transition_no_worker_processing
+        transition_processing_erred
+        """
         try:
             ts = self.tasks[key]
             failing_ts: TaskState
