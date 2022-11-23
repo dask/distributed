@@ -21,7 +21,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 from dask import delayed
-from dask.utils import apply, parse_timedelta, stringify, tmpfile, typename
+from dask.utils import apply, parse_bytes, parse_timedelta, stringify, tmpfile, typename
 
 from distributed import (
     CancelledError,
@@ -276,6 +276,11 @@ async def test_decide_worker_rootish_while_last_worker_is_retiring(c, s, a):
     evy = Event()
 
     async with BlockedGatherDep(s.address, nthreads=1) as b:
+        # Take up some memory on the new worker, so it's the less appealing option for
+        # `worker_objective_no_deps` (occupancy of both should be the same).
+        ballast = c.submit(lambda: "x" * 4096, workers=[b.address], key="ballast")
+        await wait(ballast)
+
         xs = [
             c.submit(lambda ev: ev.wait(), evx[0], key="x-0", workers=[a.address]),
             c.submit(lambda ev: ev.wait(), evx[1], key="x-1", workers=[a.address]),
@@ -302,8 +307,12 @@ async def test_decide_worker_rootish_while_last_worker_is_retiring(c, s, a):
         await evx[0].set()
         await wait_for_state("y-0", "processing", s)
         await wait_for_state("y-1", "processing", s)
-        assert s.tasks["y-2"].group.last_worker == s.workers[a.address]
-        assert s.tasks["y-2"].group.last_worker_tasks_left == 1
+        if (last_worker := s.tasks["y-2"].group.last_worker) != s.workers[a.address]:
+            pytest.fail(
+                f"Test assumptions have changed: {a=} not selected, instead {last_worker}."
+            )
+        if (tasks_left := s.tasks["y-2"].group.last_worker_tasks_left) != 1:
+            pytest.fail(f"Test assumptions have changed: {tasks_left=}.")
 
         # Take a out of the running pool, but without removing it from the cluster
         # completely
@@ -482,6 +491,65 @@ async def test_queued_remove_add_worker(c, s, a, b):
 
         await event.set()
         await wait(fs)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 2)] * 3,
+)
+async def test_decide_worker_memory_tiebreaker_idle_cluster(c, s, *workers):
+    big = c.submit(lambda: "x" * 4096)
+    await big
+    f2 = c.submit(inc, 1)
+    await f2
+    f3 = c.submit(inc, 2)
+    await f3
+
+    assert all(len(w.state.tasks) == 1 for w in workers), [
+        w.state.tasks for w in workers
+    ]
+
+    last = c.submit(inc, 3)
+    await last
+
+    big_ts = s.tasks[big.key]
+    last_ts = s.tasks[last.key]
+    assert first(last_ts.who_has) is not first(big_ts.who_has)
+
+
+@pytest.mark.skip(
+    "Not yet implemented: https://github.com/dask/distributed/issues/7266"
+)
+@gen_cluster(
+    client=True,
+    nthreads=[],
+    config={
+        "distributed.worker.memory.pause": False,
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": False,
+    },
+)
+async def test_decide_worker_memory_tiebreaker_idle_heterogeneous_cluster(c, s):
+    async with Worker(s.address, nthreads=2, memory_limit="500mib") as w_small:
+        async with Worker(s.address, nthreads=2, memory_limit="1000mib") as w_large:
+            f200 = c.submit(
+                lambda: "x" * parse_bytes("200mib"),
+                workers=[w_small.address],
+                key="f200",
+            )
+            f300 = c.submit(
+                lambda: "x" * parse_bytes("300mib"),
+                workers=[w_large.address],
+                key="f300",
+            )
+            await wait([f200, f300])
+
+            # `w_large` has more absolute memory use, but a lower percentage memory use.
+            # We should pick it over `w_small` since it's under less memory pressure.
+            f = c.submit(inc, 1)
+            await f
+
+            assert f.key in w_large.state.tasks
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])

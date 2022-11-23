@@ -2087,7 +2087,7 @@ class SchedulerState:
         else:
             # Last-used worker is full, unknown, retiring, or paused;
             # pick a new worker for the next few tasks
-            ws = min(pool, key=partial(self.worker_objective, ts))
+            ws = min(pool, key=self.worker_objective_ignore_deps)
             tg.last_worker_tasks_left = math.floor(
                 (len(tg) / self.total_nthreads) * ws.nthreads
             )
@@ -2142,10 +2142,7 @@ class SchedulerState:
 
         # Just pick the least busy worker.
         # NOTE: this will lead to worst-case scheduling with regards to co-assignment.
-        ws = min(
-            self.idle_task_count,
-            key=lambda ws: len(ws.processing) / ws.nthreads,
-        )
+        ws = min(self.idle_task_count, key=self.worker_objective_ignore_deps)
         if self.validate:
             assert not _worker_full(ws, self.WORKER_SATURATION), (
                 ws,
@@ -2207,18 +2204,17 @@ class SchedulerState:
             wp_vals = cast("Sequence[WorkerState]", worker_pool.values())
             n_workers: int = len(wp_vals)
             if n_workers < 20:  # smart but linear in small case
-                ws = min(wp_vals, key=operator.attrgetter("occupancy"))
+                ws = min(wp_vals, key=self.worker_objective_ignore_deps)
                 assert ws
-                if ws.occupancy == 0:
+                if sum(self.worker_objective_ignore_deps(ws)) == 0:
                     # special case to use round-robin; linear search
-                    # for next worker with zero occupancy (or just
-                    # land back where we started).
+                    # for next empty worker (or just land back where we started).
                     wp_i: WorkerState
                     start: int = self.n_tasks % n_workers
                     i: int
                     for i in range(n_workers):
                         wp_i = wp_vals[(i + start) % n_workers]
-                        if wp_i.occupancy == 0:
+                        if sum(self.worker_objective_ignore_deps(wp_i)) == 0:
                             ws = wp_i
                             break
             else:  # dumb but fast in large case
@@ -3101,6 +3097,23 @@ class SchedulerState:
             return (len(ws.actors), start_time, ws.nbytes)
         else:
             return (start_time, ws.nbytes)
+
+    def worker_objective_ignore_deps(self, ws: WorkerState) -> tuple[float, float]:
+        """
+        Objective function for tasks where dependencies are not relevant for scheduling.
+
+        Meant for use with tasks with no dependencies, or more importantly, with
+        widely-shared dependencies. These are tasks where `is_rootish` is True.
+        `is_rootish` implies that the tasks in the group will be assigned to every
+        worker in cluster. Therefore, any dependencies they have will be copied to every
+        worker in the cluster. To prevent edge cases, the objective function matches
+        this assumption. Otherwise, worker selection might be imbalanced or "dogpile"
+        towards towards the dependencies. This can take up capacity on the worker that
+        might be better used for downstream tasks.
+
+        Minimize worker occupancy. If a tie then break with data storage.
+        """
+        return (ws.occupancy / ws.nthreads, ws.nbytes)
 
     def add_replica(self, ts: TaskState, ws: WorkerState):
         """Note that a worker holds a replica of a task with state='memory'"""
