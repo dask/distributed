@@ -360,6 +360,7 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     shuffle_id = await get_shuffle_id(s)
 
     barrier_key = f"shuffle-barrier-{shuffle_id}"
+    await wait_for_state(barrier_key, "processing", s)
     shuffleA = a.extensions["shuffle"].shuffles[shuffle_id]
     shuffleB = b.extensions["shuffle"].shuffles[shuffle_id]
     await shuffleA.in_inputs_done.wait()
