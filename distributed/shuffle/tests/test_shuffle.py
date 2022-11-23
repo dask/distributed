@@ -789,6 +789,7 @@ async def test_closed_worker_between_repeats(c, s, w1, w2, w3):
         end="2000-01-10",
         dtypes={"x": float, "y": float},
         freq="100 s",
+        seed=42,
     )
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     h1 = await c.compute(out.head(compute=False))
