@@ -804,7 +804,7 @@ class WorkerProcess:
         If the worker process does not terminate within ``timeout`` seconds,
         even after being killed, `asyncio.TimeoutError` is raised.
         """
-        if executor_wait is not None:
+        if executor_wait is not None:  # pragma: nocover
             warnings.warn(
                 "`executor_wait` has no functionality and will be removed in a future version",
                 FutureWarning,

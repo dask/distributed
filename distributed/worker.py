@@ -1531,12 +1531,12 @@ class Worker(BaseWorker, ServerNode):
             logger.info("Stopping worker. Reason: %s", reason)
         if self.status not in WORKER_ANY_RUNNING:
             logger.info("Closed worker has not yet started: %s", self.status)
-        if executor_wait is not None:
+        if executor_wait is not None:  # pragma: nocover
             warnings.warn(
                 "`executor_wait` has no functionality and will be removed in a future version",
                 FutureWarning,
             )
-        if timeout is not None:
+        if timeout is not None:  # pragma: nocover
             warnings.warn(
                 "timeout has no functionality and will be removed in a future version",
                 FutureWarning,

@@ -9,6 +9,7 @@ import random
 import sys
 import warnings
 from contextlib import suppress
+from time import sleep
 from unittest import mock
 
 import psutil
@@ -797,9 +798,8 @@ async def test_worker_thread_does_not_block_shutdown(c, s):
 
         def block_forever():
             event.set()
-            import time
 
-            time.sleep(100000000)
+            sleep(100000000)
 
         c.submit(block_forever)
         await event.wait()
