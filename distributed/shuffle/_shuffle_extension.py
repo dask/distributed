@@ -327,7 +327,7 @@ class Shuffle:
     async def fail(self, exception: Exception) -> None:
         if not self.closed:
             self._exception = exception
-            await self.close()
+        await self.close()
 
 
 class ShuffleWorkerExtension:
