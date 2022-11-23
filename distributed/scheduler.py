@@ -2072,7 +2072,10 @@ class SchedulerState:
     ):
         """Transition a task from ``no-worker`` to ``erred``.
 
-        This transition cannot not naturally and needs to be triggered manually.
+        Currently, this transition is only triggered in P2P shuffling when a worker
+        is removed. Generally, this transition can be used to enable tasks with
+        worker restrictions to fail if all required workers are removed and the task
+        would otherwise wait indefinitely for workers to rejoin.
 
         See Also
         --------
