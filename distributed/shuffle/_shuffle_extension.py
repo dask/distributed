@@ -617,7 +617,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     output_workers: dict[ShuffleId, set[str]]
     completed_workers: dict[ShuffleId, set[str]]
     participating_workers: dict[ShuffleId, set[str]]
-    erred_shuffles: dict[ShuffleId, str]
+    erred_shuffles: dict[ShuffleId, Exception]
     removed_state_events: dict[ShuffleId, asyncio.Event]
 
     def __init__(self, scheduler: Scheduler):
@@ -654,11 +654,8 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         npartitions: int | None,
         worker: str,
     ) -> dict:
-        if id in self.erred_shuffles:
-            message = (
-                f"Worker {self.erred_shuffles[id]} left during active shuffle {id}"
-            )
-            return {"status": "ERROR", "message": message}
+        if exception := self.erred_shuffles.get(id):
+            return {"status": "ERROR", "message": str(exception)}
 
         if id not in self.worker_for:
             assert schema is not None
@@ -704,7 +701,10 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         for shuffle_id, shuffle_workers in participating_workers.items():
             if worker not in shuffle_workers:
                 continue
-            self.erred_shuffles[shuffle_id] = worker
+            exception = RuntimeError(
+                f"Worker {worker} left during active shuffle {shuffle_id}"
+            )
+            self.erred_shuffles[shuffle_id] = exception
             contact_workers = shuffle_workers.copy()
             contact_workers.discard(worker)
             affected_shuffles.add(shuffle_id)
@@ -712,7 +712,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
                 scheduler.broadcast(
                     msg={
                         "op": "shuffle_fail",
-                        "message": f"Worker {worker} left during active shuffle {shuffle_id}",
+                        "message": str(exception),
                         "shuffle_id": shuffle_id,
                     },
                     workers=list(contact_workers),
@@ -760,8 +760,8 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
 
     def register_complete(self, id: ShuffleId, worker: str) -> None:
         """Learn from a worker that it has completed all reads of a shuffle"""
-        if erred_worker := self.erred_shuffles.get(id):
-            raise RuntimeError(f"Worker {erred_worker} left during active shuffle {id}")
+        if exception := self.erred_shuffles.get(id):
+            raise exception
         if id not in self.completed_workers:
             logger.info("Worker shuffle reported complete after shuffle was removed")
             return
