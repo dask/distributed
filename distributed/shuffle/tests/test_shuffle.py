@@ -456,7 +456,7 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
         await n.process.process.kill()
         shuffle.block_inputs_done.set()
 
-        with pytest.raises(RuntimeError, match="failed during shuffle"):
+        with pytest.raises(RuntimeError, match="shuffle"):
             out = await c.compute(out)
 
         await wait_for_cleanup(s)
