@@ -189,7 +189,6 @@ async def get_shuffle_id(scheduler: Scheduler) -> ShuffleId:
     return next(iter(shuffle_ids))
 
 
-@pytest.mark.slow
 @gen_cluster(client=True)
 async def test_closed_worker_during_transfer(c, s, a, b):
 
@@ -345,7 +344,6 @@ class BlockedInputsDoneShuffle(Shuffle):
         await super().inputs_done()
 
 
-@pytest.mark.slow
 @mock.patch("distributed.shuffle._shuffle_extension.Shuffle", BlockedInputsDoneShuffle)
 @gen_cluster(client=True)
 async def test_closed_worker_during_barrier(c, s, a, b):
@@ -389,7 +387,6 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     clean_scheduler(s)
 
 
-@pytest.mark.slow
 @mock.patch("distributed.shuffle._shuffle_extension.Shuffle", BlockedInputsDoneShuffle)
 @gen_cluster(client=True)
 async def test_closed_other_worker_during_barrier(c, s, a, b):
@@ -527,7 +524,6 @@ class BlockedRegisterCompleteShuffleWorkerExtension(ShuffleWorkerExtension):
         await self.block_register_complete.wait()
 
 
-@pytest.mark.slow
 @gen_cluster(
     client=True,
     worker_kwargs={
@@ -551,7 +547,7 @@ async def test_closed_worker_during_final_register_complete(c, s, a, b):
     shuffle_ext_a.block_register_complete.set()
     while a.state.executing:
         await asyncio.sleep(0.01)
-    await b.close(timeout=2)
+    await b.close(timeout=0.1)
 
     with pytest.raises(RuntimeError, match="shuffle_unpack failed"):
         out = await c.compute(out)
@@ -563,7 +559,6 @@ async def test_closed_worker_during_final_register_complete(c, s, a, b):
     clean_scheduler(s)
 
 
-@pytest.mark.slow
 @gen_cluster(
     client=True,
     worker_kwargs={
@@ -781,7 +776,6 @@ async def test_repeat(c, s, a, b):
     clean_scheduler(s)
 
 
-@pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)
 async def test_closed_worker_between_repeats(c, s, w1, w2, w3):
     df = dask.datasets.timeseries(
