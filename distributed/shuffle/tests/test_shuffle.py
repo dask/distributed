@@ -351,7 +351,7 @@ class BlockedInputsDoneShuffle(Shuffle):
 async def test_closed_worker_during_barrier(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
-        end="2000-03-01",
+        end="2000-01-10",
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
@@ -395,7 +395,7 @@ async def test_closed_worker_during_barrier(c, s, a, b):
 async def test_closed_other_worker_during_barrier(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
-        end="2000-03-01",
+        end="2000-01-10",
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
@@ -440,7 +440,7 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
     async with Nanny(s.address, nthreads=2) as n:
         df = dask.datasets.timeseries(
             start="2000-01-01",
-            end="2000-03-01",
+            end="2000-01-10",
             dtypes={"x": float, "y": float},
             freq="10 s",
         )
@@ -469,7 +469,7 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
 async def test_closed_worker_during_unpack(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
-        end="2000-03-10",
+        end="2000-03-01",
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
@@ -515,7 +515,6 @@ async def test_crashed_worker_during_unpack(c, s, a):
         clean_scheduler(s)
 
 
-# TODO: Test edge-case where surviving worker is done
 class BlockedRegisterCompleteShuffleWorkerExtension(ShuffleWorkerExtension):
     def __init__(self, worker: Worker) -> None:
         super().__init__(worker)
@@ -538,7 +537,7 @@ class BlockedRegisterCompleteShuffleWorkerExtension(ShuffleWorkerExtension):
 async def test_closed_worker_during_final_register_complete(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
-        end="2000-03-10",
+        end="2000-01-10",
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
@@ -576,7 +575,7 @@ async def test_closed_worker_during_final_register_complete(c, s, a, b):
 async def test_closed_other_worker_during_final_register_complete(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
-        end="2000-03-10",
+        end="2000-01-10",
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
@@ -602,9 +601,6 @@ async def test_closed_other_worker_during_final_register_complete(c, s, a, b):
     clean_worker(a)
     clean_worker(b)
     clean_scheduler(s)
-
-
-# TODO: Add test for failure AFTER shuffle
 
 
 @gen_cluster(client=True)
@@ -784,6 +780,37 @@ async def test_repeat(c, s, a, b):
 
     clean_worker(a)
     clean_worker(b)
+    clean_scheduler(s)
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, nthreads=[("", 1)] * 3)
+async def test_closed_worker_between_repeats(c, s, w1, w2, w3):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="100 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    h1 = await c.compute(out.head(compute=False))
+
+    clean_worker(w1)
+    clean_worker(w2)
+    clean_worker(w3)
+    clean_scheduler(s)
+
+    await w3.close()
+    await c.compute(out.tail(compute=False))
+
+    clean_worker(w1)
+    clean_worker(w2)
+    clean_scheduler(s)
+
+    await w2.close()
+    h2 = await c.compute(out.head(compute=False))
+    assert h1.equals(h2)
+    clean_worker(w1)
     clean_scheduler(s)
 
 
