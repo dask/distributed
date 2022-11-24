@@ -10,20 +10,21 @@ from distributed.http.prometheus import PrometheusCollector
 from distributed.http.utils import RequestHandler
 from distributed.worker import Worker
 
+logger = logging.getLogger("distributed.prometheus.worker")
+
 
 class WorkerMetricCollector(PrometheusCollector):
     server: Worker
 
     def __init__(self, server: Worker):
         super().__init__(server)
-        self.logger = logging.getLogger("distributed.dask_worker")
         self.subsystem = "worker"
         self.crick_available = True
         try:
             import crick  # noqa: F401
         except ImportError:
             self.crick_available = False
-            self.logger.info(
+            logger.debug(
                 "Not all prometheus metrics available are exported. "
                 "Digest-based metrics require crick to be installed"
             )
