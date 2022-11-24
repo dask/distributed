@@ -137,7 +137,7 @@ class WorkerMetricCollector(PrometheusCollector):
 
             yield GaugeMetricFamily(
                 self.build_name("transfer_bandwidth_median_bytes"),
-                "Bandwidth for transfer at worker in Bytes.",
+                "Bandwidth for transfer at worker.",
                 value=self.server.digests["transfer-bandwidth"]
                 .components[1]
                 .quantile(50),

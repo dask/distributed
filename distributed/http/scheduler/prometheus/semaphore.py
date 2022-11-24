@@ -18,7 +18,8 @@ class SemaphoreMetricCollector(PrometheusCollector):
             return
         semaphore_max_leases_family = GaugeMetricFamily(
             self.build_name("max_leases"),
-            "Maximum leases allowed per semaphore, this will be constant for each semaphore during its lifetime.",
+            "Maximum leases allowed per semaphore, this will be constant for "
+            "each semaphore during its lifetime.",
             labels=["name"],
         )
         semaphore_active_leases_family = GaugeMetricFamily(
@@ -41,7 +42,7 @@ class SemaphoreMetricCollector(PrometheusCollector):
         semaphore_release_total = CounterMetricFamily(
             self.build_name("release_total"),
             "Total number of leases released per semaphore.\n"
-            "Note: if a semaphore is closed while there are still leases active, this count will not equal "
+            "Note: If a semaphore is closed while there are still leases active, this count will not equal "
             "`semaphore_acquired_total` after execution.",
             labels=["name"],
         )
@@ -50,9 +51,8 @@ class SemaphoreMetricCollector(PrometheusCollector):
             self.build_name("average_pending_lease_time"),
             "Exponential moving average of the time it took to acquire a lease per semaphore.\n"
             "Note: this only includes time spent on scheduler side, "
-            "it does"
-            " not include time spent on communication.\n"
-            "Note: this average is calculated based on order of leases instead of time of lease acquisition.",
+            "it does not include time spent on communication.\n"
+            "Note: This average is calculated based on order of leases instead of time of lease acquisition.",
             labels=["name"],
             unit="s",
         )

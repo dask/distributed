@@ -52,7 +52,7 @@ class SchedulerMetricCollector(PrometheusCollector):
 
         suspicious_tasks = CounterMetricFamily(
             self.build_name("tasks_suspicious"),
-            "Total number of times a task has been marked suspicious",
+            "Total number of times a task has been marked suspicious.",
             labels=["task_prefix_name"],
         )
 
@@ -77,7 +77,7 @@ class SchedulerMetricCollector(PrometheusCollector):
 
         prefix_state_counts = CounterMetricFamily(
             self.build_name("prefix_state_totals"),
-            "Accumulated count of task prefix in each state",
+            "Accumulated count of task prefix in each state.",
             labels=["task_prefix_name", "state"],
         )
 
