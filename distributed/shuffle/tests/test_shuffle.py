@@ -177,10 +177,10 @@ async def wait_for_tasks_in_state(
         await asyncio.sleep(interval)
 
 
-async def wait_for_cleanup(scheduler: Scheduler) -> None:
+async def wait_until_shuffles_closed(scheduler: Scheduler) -> None:
     scheduler_extension = scheduler.extensions["shuffle"]
     waits = []
-    for ev in scheduler_extension.removed_state_events.values():
+    for ev in scheduler_extension.shuffle_closed_events.values():
         waits.append(ev.wait())
     await asyncio.gather(*waits)
 
@@ -213,7 +213,7 @@ async def test_closed_worker_during_transfer(c, s, a, b):
     ):
         out = await c.compute(out)
 
-    await wait_for_cleanup(s)
+    await wait_until_shuffles_closed(s)
     clean_worker(a)
     clean_worker(b)
     clean_scheduler(s)
@@ -242,7 +242,7 @@ async def test_crashed_worker_during_transfer(c, s, a):
         ):
             out = await c.compute(out)
 
-        await wait_for_cleanup(s)
+        await wait_until_shuffles_closed(s)
         clean_worker(a)
         clean_scheduler(s)
 
@@ -389,7 +389,7 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     ):
         out = await c.compute(out)
 
-    await wait_for_cleanup(s)
+    await wait_until_shuffles_closed(s)
     clean_worker(a)
     clean_worker(b)
     clean_scheduler(s)
@@ -432,7 +432,7 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
     with pytest.raises(RuntimeError, match="shuffle_barrier failed"):
         out = await c.compute(out)
 
-    await wait_for_cleanup(s)
+    await wait_until_shuffles_closed(s)
     clean_worker(a)
     clean_worker(b)
     clean_scheduler(s)
@@ -464,7 +464,7 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
         with pytest.raises(RuntimeError, match="shuffle"):
             out = await c.compute(out)
 
-        await wait_for_cleanup(s)
+        await wait_until_shuffles_closed(s)
         clean_worker(a)
         clean_scheduler(s)
 
@@ -488,7 +488,7 @@ async def test_closed_worker_during_unpack(c, s, a, b):
     ):
         out = await c.compute(out)
 
-    await wait_for_cleanup(s)
+    await wait_until_shuffles_closed(s)
     clean_worker(a)
     clean_worker(b)
     clean_scheduler(s)
@@ -515,7 +515,7 @@ async def test_crashed_worker_during_unpack(c, s, a):
         ):
             out = await c.compute(out)
 
-        await wait_for_cleanup(s)
+        await wait_until_shuffles_closed(s)
         clean_worker(a)
         clean_scheduler(s)
 
@@ -561,7 +561,7 @@ async def test_closed_worker_during_final_register_complete(c, s, a, b):
         out = await c.compute(out)
 
     shuffle_ext_b.block_register_complete.set()
-    await wait_for_cleanup(s)
+    await wait_until_shuffles_closed(s)
     clean_worker(a)
     clean_worker(b)
     clean_scheduler(s)
@@ -598,7 +598,7 @@ async def test_closed_other_worker_during_final_register_complete(c, s, a, b):
     ):
         out = await c.compute(out)
 
-    await wait_for_cleanup(s)
+    await wait_until_shuffles_closed(s)
     clean_worker(a)
     clean_worker(b)
     clean_scheduler(s)
@@ -949,7 +949,7 @@ async def test_clean_after_close(c, s, a, b):
 
     await a.close()
     clean_worker(a)
-    await wait_for_cleanup(s)
+    await wait_until_shuffles_closed(s)
 
 
 class PooledRPCShuffle(PooledRPCCall):

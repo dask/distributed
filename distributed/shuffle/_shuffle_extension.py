@@ -618,7 +618,9 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     completed_workers: dict[ShuffleId, set[str]]
     participating_workers: dict[ShuffleId, set[str]]
     erred_shuffles: dict[ShuffleId, Exception]
-    removed_state_events: dict[ShuffleId, asyncio.Event]
+    #: Mapping of shuffle IDs to ``asyncio.Event``s that are set once a shuffle
+    #: is closed and properly cleaned up on the cluster
+    shuffle_closed_events: dict[ShuffleId, asyncio.Event]
 
     def __init__(self, scheduler: Scheduler):
         self.scheduler = scheduler
@@ -636,7 +638,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self.completed_workers = {}
         self.participating_workers = {}
         self.erred_shuffles = {}
-        self.removed_state_events = {}
+        self.shuffle_closed_events = {}
         self.scheduler.add_plugin(self)
 
     def shuffle_ids(self) -> set[ShuffleId]:
@@ -683,7 +685,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             self.output_workers[id] = output_workers
             self.completed_workers[id] = set()
             self.participating_workers[id] = output_workers.copy()
-            self.removed_state_events[id] = asyncio.Event()
+            self.shuffle_closed_events[id] = asyncio.Event()
 
         self.participating_workers[id].add(worker)
         return {
@@ -721,7 +723,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         results = await asyncio.gather(*broadcasts, return_exceptions=True)
         exceptions = [result for result in results if isinstance(result, Exception)]
         for shuffle_id in affected_shuffles:
-            self._remove_state(shuffle_id)
+            self._close_on_scheduler(shuffle_id)
         if exceptions:
             # TODO: Do we need to handle errors here?
             raise RuntimeError(exceptions)
@@ -768,10 +770,15 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self.completed_workers[id].add(worker)
 
         if self.output_workers[id].issubset(self.completed_workers[id]):
-            self._remove_state(id)
+            self._close_on_scheduler(id)
 
-    def _remove_state(self, id: ShuffleId) -> None:
-        if self.removed_state_events[id].is_set():
+    def _close_on_scheduler(self, id: ShuffleId) -> None:
+        """Closes a shuffle on the scheduler and removes state.
+
+        This method expects that the shuffle has already been properly closed on
+        the workers for correctly setting the ``self.closed_shuffles[id]`` event.
+        """
+        if self.shuffle_closed_events[id].is_set():
             return
         del self.worker_for[id]
         del self.schemas[id]
@@ -781,7 +788,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         del self.participating_workers[id]
         with contextlib.suppress(KeyError):
             del self.heartbeats[id]
-        self.removed_state_events[id].set()
+        self.shuffle_closed_events[id].set()
 
 
 def get_worker_for(output_partition: int, workers: list[str], npartitions: int) -> str:
