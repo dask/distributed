@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
 import sys
@@ -19,7 +20,7 @@ path = "/tmp/plasma"
 @pytest.fixture(scope="module")
 def plasma_process():
     pytest.importorskip("pyarrow.plasma")
-    cmd = shlex.split(f"plasma_store -m 10000000 -s {path}")  # 10MB
+    cmd = shlex.split(f"plasma-store-server -m 10000000 -s {path}")  # 10MB
     proc = subprocess.Popen(cmd)
     yield
     proc.terminate()
@@ -96,6 +97,10 @@ def test_plasma_worker_worker(plasma_session):
 def lmdb_deleter():
     pytest.importorskip("lmdb")
     import shutil
+    try:
+        os.mkdir("/tmp/lmdb")
+    except OSError:
+        pass
 
     yield
     shutil.rmtree("/tmp/lmdb")
