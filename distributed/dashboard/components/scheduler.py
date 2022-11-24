@@ -2222,7 +2222,7 @@ def task_stream_figure(clear_interval="20s", **kwargs):
         PanTool(dimensions="width"),
         WheelZoomTool(dimensions="width"),
     )
-    if ExportTool:
+    if ExportTool:  # type: ignore
         export = ExportTool()
         export.register_plot(root)
         root.add_tools(export)

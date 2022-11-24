@@ -11,7 +11,7 @@ import sys
 from itertools import product
 from textwrap import dedent
 from time import sleep
-from typing import ClassVar, Collection
+from typing import Collection
 
 import cloudpickle
 import psutil
@@ -343,11 +343,11 @@ async def test_graph_execution_width(c, s, *workers):
     class Refcount:
         "Track how many instances of this class exist; logs the count at creation and deletion"
 
-        count: ClassVar[int] = 0
-        lock: ClassVar[dask.utils.SerializableLock] = dask.utils.SerializableLock()
-        log: ClassVar[list[int]] = []
+        count = 0
+        lock = dask.utils.SerializableLock()
+        log = []
 
-        def __init__(self) -> None:
+        def __init__(self):
             with self.lock:
                 type(self).count += 1
                 self.log.append(self.count)
@@ -2511,7 +2511,7 @@ class NoSchedulerDelayWorker(Worker):
     comparisons using times reported from workers.
     """
 
-    @property  # type: ignore
+    @property
     def scheduler_delay(self):
         return 0
 
