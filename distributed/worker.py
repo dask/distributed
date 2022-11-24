@@ -601,8 +601,9 @@ class Worker(BaseWorker, ServerNode):
             self, preload, preload_argv, file_dir=self.local_directory
         )
 
+        self.death_timeout = parse_timedelta(death_timeout)
         if scheduler_file:
-            cfg = json_load_robust(scheduler_file)
+            cfg = json_load_robust(scheduler_file, timeout=self.death_timeout)
             scheduler_addr = cfg["address"]
         elif scheduler_ip is None and dask.config.get("scheduler-address", None):
             scheduler_addr = dask.config.get("scheduler-address")
@@ -635,8 +636,6 @@ class Worker(BaseWorker, ServerNode):
         if resources is None:
             resources = dask.config.get("distributed.worker.resources")
             assert isinstance(resources, dict)
-
-        self.death_timeout = parse_timedelta(death_timeout)
 
         self.extensions = {}
         if silence_logs:
