@@ -180,7 +180,7 @@ async def wait_for_tasks_in_state(
 async def wait_until_shuffles_closed(scheduler: Scheduler) -> None:
     scheduler_extension = scheduler.extensions["shuffle"]
     waits = []
-    for ev in scheduler_extension.shuffle_closed_events.values():
+    for ev in scheduler_extension._shuffle_closed_events.values():
         waits.append(ev.wait())
     await asyncio.gather(*waits)
 

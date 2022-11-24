@@ -620,7 +620,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     erred_shuffles: dict[ShuffleId, Exception]
     #: Mapping of shuffle IDs to ``asyncio.Event``s that are set once a shuffle
     #: is closed and properly cleaned up on the cluster
-    shuffle_closed_events: dict[ShuffleId, asyncio.Event]
+    _shuffle_closed_events: dict[ShuffleId, asyncio.Event]
 
     def __init__(self, scheduler: Scheduler):
         self.scheduler = scheduler
@@ -638,7 +638,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self.completed_workers = {}
         self.participating_workers = {}
         self.erred_shuffles = {}
-        self.shuffle_closed_events = {}
+        self._shuffle_closed_events = {}
         self.scheduler.add_plugin(self)
 
     def shuffle_ids(self) -> set[ShuffleId]:
@@ -685,7 +685,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             self.output_workers[id] = output_workers
             self.completed_workers[id] = set()
             self.participating_workers[id] = output_workers.copy()
-            self.shuffle_closed_events[id] = asyncio.Event()
+            self._shuffle_closed_events[id] = asyncio.Event()
 
         self.participating_workers[id].add(worker)
         return {
@@ -778,7 +778,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         This method expects that the shuffle has already been properly closed on
         the workers for correctly setting the ``self.closed_shuffles[id]`` event.
         """
-        if self.shuffle_closed_events[id].is_set():
+        if self._shuffle_closed_events[id].is_set():
             return
         del self.worker_for[id]
         del self.schemas[id]
@@ -788,7 +788,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         del self.participating_workers[id]
         with contextlib.suppress(KeyError):
             del self.heartbeats[id]
-        self.shuffle_closed_events[id].set()
+        self._shuffle_closed_events[id].set()
 
 
 def get_worker_for(output_partition: int, workers: list[str], npartitions: int) -> str:
