@@ -287,11 +287,8 @@ async def test_failed_worker(c, s, a, b):
 
     await a.close()
 
-    with pytest.raises(Exception) as info:
+    with pytest.raises(ValueError, match="Worker holding Actor was lost"):
         await counter.increment()
-
-    assert "actor" in str(info.value).lower()
-    assert "worker" in str(info.value).lower()
 
 
 @gen_cluster(client=True)

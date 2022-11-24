@@ -281,6 +281,7 @@ async def test_no_more_workers_than_tasks():
 
 
 @pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
+@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
 def test_basic_no_loop(cleanup):
     loop = None
     try:
