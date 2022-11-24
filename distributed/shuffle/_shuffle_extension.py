@@ -435,9 +435,9 @@ class ShuffleWorkerExtension:
         await shuffle.barrier()
 
     async def _register_complete(self, shuffle: Shuffle) -> None:
-        self.raise_if_closed()
         await shuffle.close()
-        self.raise_if_closed()
+        # All the relevant work has already succeeded if we reached this point,
+        # so we do not need to check if the extension is closed.
         await self.worker.scheduler.shuffle_register_complete(
             id=shuffle.id,
             worker=self.worker.address,
