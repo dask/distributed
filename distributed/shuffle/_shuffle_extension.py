@@ -776,7 +776,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         """Closes a shuffle on the scheduler and removes state.
 
         This method expects that the shuffle has already been properly closed on
-        the workers for correctly setting the ``self.closed_shuffles[id]`` event.
+        the workers for correctly setting the ``self._shuffle_closed_events[id]`` event.
         """
         if self._shuffle_closed_events[id].is_set():
             return
