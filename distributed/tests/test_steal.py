@@ -1390,9 +1390,9 @@ async def test_steal_very_fast_tasks(c, s, *workers):
     ],
 )
 def test_balance_expensive_tasks(cost, ntasks, expect_steal):
-    dependencies = {"a": cost, "b": cost}
-    dependency_placement = [["a"], ["b"]]
-    task_placement = [[["a", "b"]] * ntasks, []]
+    dependencies = {"a": cost}
+    dependency_placement = [["a"], []]
+    task_placement = [[["a"]] * ntasks, []]
 
     def _correct_placement(actual):
         actual_task_counts = [len(placed) for placed in actual]
