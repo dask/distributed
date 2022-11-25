@@ -70,7 +70,9 @@ from distributed.worker import dumps_function, dumps_task, get_worker, secede
 
 pytestmark = pytest.mark.ci1
 
-
+QUEUING_ON_BY_DEFAULT = math.isfinite(
+    float(dask.config.get("distributed.scheduler.worker-saturation"))
+)
 alice = "alice:1234"
 bob = "bob:1234"
 
@@ -257,7 +259,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
 
 
 @pytest.mark.skipif(
-    math.isfinite(float(dask.config.get("distributed.scheduler.worker-saturation"))),
+    QUEUING_ON_BY_DEFAULT,
     reason="Not relevant with queuing on; see https://github.com/dask/distributed/issues/7204",
 )
 @gen_cluster(
@@ -4152,7 +4154,19 @@ async def test_transition_waiting_memory(c, s, a, b):
     assert_story(s.story("y"), [("y", "waiting", "waiting", {})])
 
 
-@pytest.mark.parametrize("rootish", [True, False])
+@pytest.mark.parametrize(
+    "rootish",
+    [
+        pytest.param(
+            True,
+            marks=pytest.mark.skipif(
+                not QUEUING_ON_BY_DEFAULT,
+                reason="Nothing will be classified as root-ish",
+            ),
+        ),
+        False,
+    ],
+)
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_deadlock_resubmit_queued_tasks_fast(c, s, a, rootish):
     # See https://github.com/dask/distributed/issues/7200
@@ -4199,9 +4213,6 @@ async def test_deadlock_resubmit_queued_tasks_fast(c, s, a, rootish):
     fut2 = c.map(
         block_on_event, range(nblocking_tasks), block=block2, executing=executing2
     )
-
-    while len(s.tasks) != nblocking_tasks + len(keys):
-        await asyncio.sleep(0.005)
 
     # Once the task is on the threadpool, the client/scheduler may start its
     # release chain
