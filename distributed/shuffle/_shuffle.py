@@ -145,9 +145,9 @@ class P2PShuffleLayer(SimpleShuffleLayer):
         dsk: dict[tuple | str, tuple] = {}
         barrier_key = "shuffle-barrier-" + token
         name = "shuffle-transfer-" + token
-        tranfer_keys = list()
+        transfer_keys = list()
         for i in range(self.npartitions_input):
-            tranfer_keys.append((name, i))
+            transfer_keys.append((name, i))
             dsk[(name, i)] = (
                 shuffle_transfer,
                 (self.name_input, i),
@@ -156,7 +156,7 @@ class P2PShuffleLayer(SimpleShuffleLayer):
                 self.column,
             )
 
-        dsk[barrier_key] = (shuffle_barrier, token, tranfer_keys)
+        dsk[barrier_key] = (shuffle_barrier, token, transfer_keys)
 
         name = self.name
         for part_out in self.parts_out:

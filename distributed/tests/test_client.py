@@ -2889,6 +2889,7 @@ async def test_startup_close_startup(s, a, b):
 
 
 @pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
+@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
 def test_startup_close_startup_sync(loop):
     with cluster() as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
@@ -5613,6 +5614,8 @@ async def test_future_auto_inform(c, s, a, b):
 
 
 @pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
+@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
+@pytest.mark.filterwarnings("ignore:clear_current is deprecated:DeprecationWarning")
 def test_client_async_before_loop_starts(cleanup):
     async def close():
         async with client:
@@ -6590,9 +6593,9 @@ async def test_as_completed_condition_loop(c, s, a, b):
     sys.version_info >= (3, 10),
     reason="On Py3.10+ semaphore._loop is not bound until .acquire() blocks",
 )
-def test_client_connectionpool_semaphore_loop(s, a, b):
-    with Client(s["address"]) as c:
-        assert c.rpc.semaphore._loop is c.loop.asyncio_loop
+def test_client_connectionpool_semaphore_loop(s, a, b, loop):
+    with Client(s["address"], loop=loop) as c:
+        assert c.rpc.semaphore._loop is loop.asyncio_loop
 
 
 @pytest.mark.slow
@@ -6924,6 +6927,7 @@ async def test_workers_collection_restriction(c, s, a, b):
 
 
 @pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
+@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_get_client_functions_spawn_clusters(c, s, a):
     # see gh4565

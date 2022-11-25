@@ -3,9 +3,14 @@ from __future__ import annotations
 import logging
 from typing import ClassVar
 
+import prometheus_client
+from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
+
 from distributed.http.prometheus import PrometheusCollector
 from distributed.http.utils import RequestHandler
 from distributed.worker import Worker
+
+logger = logging.getLogger("distributed.prometheus.worker")
 
 
 class WorkerMetricCollector(PrometheusCollector):
@@ -13,20 +18,18 @@ class WorkerMetricCollector(PrometheusCollector):
 
     def __init__(self, server: Worker):
         super().__init__(server)
-        self.logger = logging.getLogger("distributed.dask_worker")
         self.subsystem = "worker"
         self.crick_available = True
         try:
             import crick  # noqa: F401
         except ImportError:
             self.crick_available = False
-            self.logger.info(
+            logger.debug(
                 "Not all prometheus metrics available are exported. "
                 "Digest-based metrics require crick to be installed"
             )
 
     def collect(self):
-        from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
 
         ws = self.server.state
 
@@ -145,8 +148,6 @@ class PrometheusHandler(RequestHandler):
     _collector: ClassVar[WorkerMetricCollector | None] = None
 
     def __init__(self, *args, dask_server=None, **kwargs):
-        import prometheus_client
-
         super().__init__(*args, dask_server=dask_server, **kwargs)
 
         if PrometheusHandler._collector:
@@ -160,7 +161,5 @@ class PrometheusHandler(RequestHandler):
         prometheus_client.REGISTRY.register(PrometheusHandler._collector)
 
     def get(self):
-        import prometheus_client
-
         self.write(prometheus_client.generate_latest())
         self.set_header("Content-Type", "text/plain; version=0.0.4")

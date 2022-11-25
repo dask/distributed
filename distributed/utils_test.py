@@ -1628,9 +1628,7 @@ def check_thread_leak():
 
             frames = sys._current_frames()
             try:
-                lines: list[str] = [
-                    f"{len(bad_threads)} thread(s) were leaked from test\n"
-                ]
+                lines = [f"{len(bad_threads)} thread(s) were leaked from test\n"]
                 for i, thread in enumerate(bad_threads, 1):
                     lines.append(
                         f"------ Call stack of leaked thread {i}/{len(bad_threads)}: {thread} ------"
@@ -2130,6 +2128,23 @@ def ucx_loop():
     ucp.reset()
     loop.close()
 
+    # Reset also Distributed's UCX initialization, i.e., revert the effects of
+    # `distributed.comm.ucx.init_once()`.
+    import distributed.comm.ucx
+
+    distributed.comm.ucx.ucp = None
+    # If the test created a context, clean it up.
+    # TODO: should we check if there's already a context _before_ the test runs?
+    # I think that would be useful.
+    from distributed.diagnostics.nvml import has_cuda_context
+
+    ctx = has_cuda_context()
+    if ctx.has_context:
+        import numba.cuda
+
+        ctx = numba.cuda.current_context()
+        ctx.device.reset()
+
 
 def wait_for_log_line(
     match: bytes, stream: IO[bytes] | None, max_lines: int | None = 10
@@ -2463,13 +2478,17 @@ def requires_default_ports(name_of_test):
     yield
 
 
-async def fetch_metrics(port: int, prefix: str | None = None) -> dict[str, Any]:
-    from prometheus_client.parser import text_string_to_metric_families
-
+async def fetch_metrics_body(port: int) -> str:
     http_client = AsyncHTTPClient()
     response = await http_client.fetch(f"http://localhost:{port}/metrics")
     assert response.code == 200
-    txt = response.body.decode("utf8")
+    return response.body.decode("utf8")
+
+
+async def fetch_metrics(port: int, prefix: str | None = None) -> dict[str, Any]:
+    from prometheus_client.parser import text_string_to_metric_families
+
+    txt = await fetch_metrics_body(port)
     families = {
         family.name: family
         for family in text_string_to_metric_families(txt)
@@ -2487,10 +2506,7 @@ async def fetch_metrics_sample_names(port: int, prefix: str | None = None) -> se
     """
     from prometheus_client.parser import text_string_to_metric_families
 
-    http_client = AsyncHTTPClient()
-    response = await http_client.fetch(f"http://localhost:{port}/metrics")
-    assert response.code == 200
-    txt = response.body.decode("utf8")
+    txt = await fetch_metrics_body(port)
     sample_names = set().union(
         *[
             {sample.name for sample in family.samples}

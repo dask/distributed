@@ -13,7 +13,6 @@ import dask.dataframe as dd
 from dask.blockwise import Blockwise
 from dask.utils_test import hlg_layer_topological
 
-from distributed.shuffle._shuffle_extension import ShuffleWorkerExtension
 from distributed.utils_test import gen_cluster
 
 
@@ -35,7 +34,7 @@ async def test_basic_state(c, s, *workers):
     df = dd.demo.make_timeseries(freq="15D", partition_freq="30D")
     shuffled = df.shuffle("id", shuffle="p2p")
 
-    exts: list[ShuffleWorkerExtension] = [w.extensions["shuffle"] for w in workers]
+    exts = [w.extensions["shuffle"] for w in workers]
     for ext in exts:
         assert not ext.shuffles
 

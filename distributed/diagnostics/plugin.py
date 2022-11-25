@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import abc
+import contextlib
+import functools
 import logging
 import os
 import socket
@@ -236,7 +238,7 @@ def _get_plugin_name(plugin: SchedulerPlugin | WorkerPlugin | NannyPlugin) -> st
 
     """
     if hasattr(plugin, "name"):
-        return plugin.name  # type: ignore
+        return plugin.name
     else:
         return funcname(type(plugin)) + "-" + str(uuid.uuid4())
 
@@ -601,3 +603,94 @@ class UploadDirectory(NannyPlugin):
                 sys.path.insert(0, path)
 
         os.remove(fn)
+
+
+class forward_stream:
+    def __init__(self, stream, worker):
+        self._worker = worker
+        self._original_methods = {}
+        self._stream = getattr(sys, stream)
+        if stream == "stdout":
+            self._file = 1
+        elif stream == "stderr":
+            self._file = 2
+        else:
+            raise ValueError(
+                f"Expected stream to be 'stdout' or 'stderr'; got '{stream}'"
+            )
+
+        self._file = 1 if stream == "stdout" else 2
+        self._buffer = []
+
+    def _write(self, write_fn, data):
+        self._forward(data)
+        write_fn(data)
+
+    def _forward(self, data):
+        self._buffer.append(data)
+        # Mimic line buffering
+        if "\n" in data or "\r" in data:
+            self._send()
+
+    def _send(self):
+        msg = {"args": self._buffer, "file": self._file, "sep": "", "end": ""}
+        self._worker.log_event("print", msg)
+        self._buffer = []
+
+    def _flush(self, flush_fn):
+        self._send()
+        flush_fn()
+
+    def _close(self, close_fn):
+        self._send()
+        close_fn()
+
+    def _intercept(self, method_name, interceptor):
+        original_method = getattr(self._stream, method_name)
+        self._original_methods[method_name] = original_method
+        setattr(
+            self._stream, method_name, functools.partial(interceptor, original_method)
+        )
+
+    def __enter__(self):
+        self._intercept("write", self._write)
+        self._intercept("flush", self._flush)
+        self._intercept("close", self._close)
+        return self._stream
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self._stream.flush()
+        for attr, original in self._original_methods.items():
+            setattr(self._stream, attr, original)
+        self._original_methods = {}
+
+
+class ForwardOutput(WorkerPlugin):
+    """A Worker Plugin that forwards ``stdout`` and ``stderr`` from workers to clients
+
+    This plugin forwards all output sent to ``stdout`` and ``stderr` on all workers
+    to all clients where it is written to the respective streams. Analogous to the
+    terminal, this plugin uses line buffering. To ensure that an output is written
+    without a newline, make sure to flush the stream.
+
+    .. warning::
+
+        Using this plugin will forward **all** output in ``stdout`` and ``stderr`` from
+        every worker to every client. If the output is very chatty, this will add
+        significant strain on the scheduler. Proceed with caution!
+
+    Examples
+    --------
+    >>> from dask.distributed import ForwardOutput
+    >>> plugin = ForwardOutput()
+
+    >>> client.register_worker_plugin(plugin)
+    """
+
+    def setup(self, worker):
+        self._exit_stack = contextlib.ExitStack()
+        self._exit_stack.enter_context(forward_stream("stdout", worker=worker))
+        self._exit_stack.enter_context(forward_stream("stderr", worker=worker))
+
+    def teardown(self, worker):
+        self._exit_stack.close()
