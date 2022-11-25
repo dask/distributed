@@ -3645,8 +3645,8 @@ async def test_reconnect_argument_deprecated(s):
 @gen_cluster(client=True, nthreads=[])
 async def test_worker_running_before_running_plugins(c, s, caplog):
     class InitWorkerNewThread(WorkerPlugin):
-        name: str = "init_worker_new_thread"
-        setup_status: Status | None = None
+        name = "init_worker_new_thread"
+        setup_status = None
 
         def setup(self, worker):
             self.setup_status = worker.status

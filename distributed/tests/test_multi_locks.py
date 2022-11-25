@@ -7,7 +7,6 @@ import pytest
 
 from distributed import MultiLock, get_client
 from distributed.metrics import time
-from distributed.multi_lock import MultiLockExtension
 from distributed.utils_test import gen_cluster
 
 
@@ -26,7 +25,7 @@ async def test_single_lock(c, s, a, b):
 
     futures = c.map(f, range(20))
     await c.gather(futures)
-    ext: MultiLockExtension = s.extensions["multi_locks"]
+    ext = s.extensions["multi_locks"]
     assert not ext.events
     assert not ext.requests
     assert not ext.requests_left
@@ -35,7 +34,7 @@ async def test_single_lock(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_timeout(c, s, a, b):
-    ext: MultiLockExtension = s.extensions["multi_locks"]
+    ext = s.extensions["multi_locks"]
     lock1 = MultiLock(names=["x"])
     result = await lock1.acquire()
     assert result is True
@@ -80,7 +79,7 @@ async def test_timeout_wake_waiter(s, a, b):
 
 @gen_cluster(client=True)
 async def test_multiple_locks(c, s, a, b):
-    ext: MultiLockExtension = s.extensions["multi_locks"]
+    ext = s.extensions["multi_locks"]
     l1 = MultiLock(names=["l1"])
     l2 = MultiLock(names=["l2"])
     l3 = MultiLock(names=["l1", "l2"])
@@ -137,7 +136,7 @@ async def test_multiple_locks(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_num_locks(c, s, a, b):
-    ext: MultiLockExtension = s.extensions["multi_locks"]
+    ext = s.extensions["multi_locks"]
     l1 = MultiLock(names=["l1", "l2", "l3"])
     l2 = MultiLock(names=["l1", "l2", "l3"])
     l3 = MultiLock(names=["l1", "l2", "l3", "l4"])

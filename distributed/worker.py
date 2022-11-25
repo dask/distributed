@@ -1927,7 +1927,7 @@ class Worker(BaseWorker, ServerNode):
             super().handle_stimulus(*stims)
         except Exception as e:
             if hasattr(e, "to_event"):
-                topic, msg = e.to_event()  # type: ignore
+                topic, msg = e.to_event()
                 self.log_event(topic, msg)
             raise
 
@@ -2586,7 +2586,7 @@ class Worker(BaseWorker, ServerNode):
                 pdb.set_trace()
 
             if hasattr(e, "to_event"):
-                topic, msg = e.to_event()  # type: ignore
+                topic, msg = e.to_event()
                 self.log_event(topic, msg)
 
             raise
