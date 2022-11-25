@@ -4200,7 +4200,7 @@ async def test_deadlock_resubmit_queued_tasks_fast(c, s, a, rootish):
         block_on_event, range(nblocking_tasks), block=block2, executing=executing2
     )
 
-    while len(s.tasks) == nblocking_tasks + len(keys):
+    while len(s.tasks) != nblocking_tasks + len(keys):
         await asyncio.sleep(0.005)
 
     # Once the task is on the threadpool, the client/scheduler may start its
