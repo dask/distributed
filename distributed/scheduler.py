@@ -1979,17 +1979,13 @@ class SchedulerState:
             assert not ts.waiting_on
             assert not ts.who_has
             assert not ts.processing_on
-            assert not any([dts.state == "forgotten" for dts in ts.dependencies])
+            for dts in ts.dependencies:
+                assert dts.state not in {"forgotten", "erred"}
 
         if ts.has_lost_dependencies:
             return {key: "forgotten"}, {}, {}
 
         ts.state = "waiting"
-
-        for dts in ts.dependencies:
-            if dts.exception_blame:
-                ts.exception_blame = dts.exception_blame
-                return {key: "erred"}, {}, {}
 
         recommendations: Recs = {}
 

@@ -4247,3 +4247,12 @@ async def test_deadlock_resubmit_queued_tasks_fast(c, s, a, rootish):
     await block2.set()
     await c.gather(fut2)
     await c.gather(fut3)
+
+
+@gen_cluster(client=True)
+async def test_submit_dependency_of_erred_task(c, s, a, b):
+    x = c.submit(lambda: 1 / 0, key="x")
+    await wait(x)
+    y = c.submit(inc, x, key="y")
+    with pytest.raises(ZeroDivisionError):
+        await y
