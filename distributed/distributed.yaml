@@ -3,7 +3,7 @@ distributed:
   # logging:
   #   distributed: info
   #   distributed.client: warning
-  #   bokeh: critical
+  #   bokeh: error
   #   # http://stackoverflow.com/questions/21234772/python-tornado-disable-logging-to-stderr
   #   tornado: critical
   #   tornado.application: error

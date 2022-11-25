@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -11,114 +11,53 @@ import pytest
 import yaml
 
 from distributed.config import initialize_logging
-from distributed.utils_test import (
-    captured_handler,
-    captured_logger,
-    new_config,
-    new_config_file,
+from distributed.utils_test import new_config, new_config_file
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {},
+        None,
+    ],
 )
-
-
-def dump_logger_list():
-    root = logging.getLogger()
-    loggers = root.manager.loggerDict
-    print()
-    print("== Loggers (name, level, effective level, propagate) ==")
-
-    def logger_info(name, logger):
-        return (
-            name,
-            logging.getLevelName(logger.level),
-            logging.getLevelName(logger.getEffectiveLevel()),
-            logger.propagate,
-        )
-
-    infos = []
-    infos.append(logger_info("<root>", root))
-
-    for name, logger in sorted(loggers.items()):
-        if not isinstance(logger, logging.Logger):
-            # Skip 'PlaceHolder' objects
-            continue
-        assert logger.name == name
-        infos.append(logger_info(name, logger))
-
-    for info in infos:
-        print("%-40s %-8s %-8s %-5s" % info)
-
-    print()
-
-
-def test_logging_default():
+def test_logging_default(caplog, config):
     """
     Test default logging configuration.
     """
-    d = logging.getLogger("distributed")
-    assert len(d.handlers) == 1
-    assert isinstance(d.handlers[0], logging.StreamHandler)
+    if config is None:
+        ctx = contextlib.nullcontext()
+    else:
+        ctx = new_config(config)
+    with ctx:
+        d = logging.getLogger("distributed")
+        assert isinstance(d.handlers[0], logging.StreamHandler)
 
-    # Work around Bokeh messing with the root logger level
-    # https://github.com/bokeh/bokeh/issues/5793
-    root = logging.getLogger("")
-    old_root_level = root.level
-    root.setLevel("WARN")
-
-    for handler in d.handlers:
-        handler.setLevel("INFO")
-
-    try:
         dfb = logging.getLogger("distributed.foo.bar")
+        dfc = logging.getLogger("distributed.client")
         f = logging.getLogger("foo")
         fb = logging.getLogger("foo.bar")
 
-        with captured_handler(d.handlers[0]) as distributed_log:
-            with captured_logger(root, level=logging.ERROR) as foreign_log:
-                h = logging.StreamHandler(foreign_log)
-                fmt = "[%(levelname)s in %(name)s] - %(message)s"
-                h.setFormatter(logging.Formatter(fmt))
-                fb.addHandler(h)
-                fb.propagate = False
+        d.debug("1: debug")
+        d.info("2: info")
+        dfb.info("3: info")
+        fb.info("4: info")
+        fb.error("5: error")
+        f.info("6: info")
+        f.error("7: error")
+        dfc.info("8: ignore me")
+        dfc.warning("9: important")
 
-                # For debugging
-                dump_logger_list()
-
-                d.debug("1: debug")
-                d.info("2: info")
-                dfb.info("3: info")
-                fb.info("4: info")
-                fb.error("5: error")
-                f.info("6: info")
-                f.error("7: error")
-
-        distributed_log = distributed_log.getvalue().splitlines()
-        foreign_log = foreign_log.getvalue().splitlines()
-        # Filter out asctime
-        pattern = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d* - (.*)$")
-        without_timestamps = []
-        for msg in distributed_log:
-            m = re.match(pattern, msg)
-            if m:
-                without_timestamps.append(m.group(1))
-            else:
-                raise AssertionError(f"Unknown format encountered {msg}")
-
-        # distributed log is configured at INFO level by default
-        assert without_timestamps == [
-            "distributed - INFO - 2: info",
-            "distributed.foo.bar - INFO - 3: info",
+        expected_logs = [
+            ("distributed", logging.INFO, "2: info"),
+            ("distributed.foo.bar", logging.INFO, "3: info"),
+            # Info logs of foreign libraries are not logged because default is
+            # WARNING
+            ("foo.bar", logging.ERROR, "5: error"),
+            ("foo", logging.ERROR, "7: error"),
+            ("distributed.client", logging.WARN, "9: important"),
         ]
-
-        # foreign logs should be unaffected by distributed's logging
-        # configuration.  They get the default ERROR level from logging.
-        assert foreign_log == ["[ERROR in foo.bar] - 5: error", "7: error"]
-
-    finally:
-        root.setLevel(old_root_level)
-
-
-def test_logging_empty_simple():
-    with new_config({}):
-        test_logging_default()
+        assert expected_logs == caplog.record_tuples
 
 
 def test_logging_simple_under_distributed():

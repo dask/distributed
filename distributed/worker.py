@@ -132,7 +132,6 @@ from distributed.worker_state_machine import (
     UpdateDataEvent,
     WorkerState,
 )
-from distributed.worker_state_machine import logger as wsm_logger
 
 if TYPE_CHECKING:
     # FIXME import from typing (needs Python >=3.10)
@@ -572,7 +571,7 @@ class Worker(BaseWorker, ServerNode):
         profile_cycle_interval = parse_timedelta(profile_cycle_interval, default="ms")
         assert profile_cycle_interval
 
-        self._setup_logging(logger, wsm_logger)
+        self._setup_logging(logger)
 
         if not local_directory:
             local_directory = (
@@ -1488,7 +1487,7 @@ class Worker(BaseWorker, ServerNode):
         # nanny+worker, the nanny must be notified first. ==> Remove kwarg
         # nanny, see also Scheduler.retire_workers
         if self.status in (Status.closed, Status.closing, Status.failed):
-            logging.debug(
+            logger.debug(
                 "Attempted to close worker that is already %s. Reason: %s",
                 self.status,
                 reason,
