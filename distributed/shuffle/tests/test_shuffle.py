@@ -247,8 +247,7 @@ async def test_crashed_worker_during_transfer(c, s, a):
         clean_scheduler(s)
 
 
-@pytest.mark.xfail(reason="distributed#7324")
-@pytest.mark.slow
+# TODO: Deduplicate instead of failing: distributed#7324
 @gen_cluster(client=True)
 async def test_closed_input_only_worker_during_transfer(c, s, a, b):
     def mock_get_worker_for(
@@ -267,19 +266,21 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
         )
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
         out = out.persist()
-        await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
+        await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b, 0.001)
         await b.close()
 
-        actual = await c.compute(out.x.size)
-        expected = await c.compute(df.x.size)
-        assert actual == expected
+        with raises_with_cause(
+            RuntimeError, "shuffle_transfer failed", RuntimeError, b.address
+        ):
+            out = await c.compute(out)
 
+        await wait_until_shuffles_closed(s)
         clean_worker(a)
         clean_worker(b)
         clean_scheduler(s)
 
 
-@pytest.mark.xfail(reason="distributed#7324")
+# TODO: Deduplicate instead of failing: distributed#7324
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 2)])
 async def test_crashed_input_only_worker_during_transfer(c, s, a):
@@ -292,6 +293,7 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
         "distributed.shuffle._shuffle_extension.get_worker_for", mock_get_worker_for
     ):
         async with Nanny(s.address, nthreads=2) as n:
+            killed_worker_address = n.worker_address
             df = dask.datasets.timeseries(
                 start="2000-01-01",
                 end="2000-03-01",
@@ -304,10 +306,16 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
                 "shuffle-transfer", n.worker_address, 1, s
             )
             await n.process.process.kill()
-            actual = await c.compute(out.x.size)
-            expected = await c.compute(df.x.size)
-            assert actual == expected
 
+            with raises_with_cause(
+                RuntimeError,
+                "shuffle_transfer failed",
+                Exception,
+                killed_worker_address,
+            ):
+                out = await c.compute(out)
+
+            await wait_until_shuffles_closed(s)
             clean_worker(a)
             clean_scheduler(s)
 
