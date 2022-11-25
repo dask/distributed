@@ -1134,11 +1134,71 @@ async def test_server_comms_mark_active_handlers():
         while not server._comms:
             await asyncio.sleep(0.05)
         assert set(server._comms.values()) == {"wait"}
+
+        assert server.incoming_comms_open == 1
+        assert server.incoming_comms_active == 1
+
+        def validate_dict(server):
+            assert (
+                server.get_connection_counters()["incoming_comms_open"]
+                == server.incoming_comms_open
+            )
+            assert (
+                server.get_connection_counters()["incoming_comms_active"]
+                == server.incoming_comms_active
+            )
+
+            assert (
+                server.get_connection_counters()["outgoing_comms_open"]
+                == server.rpc.open
+            )
+            assert (
+                server.get_connection_counters()["outgoing_comms_active"]
+                == server.rpc.active
+            )
+
+        validate_dict(server)
+
         assert await comm.read() == "done"
         assert set(server._comms.values()) == {None}
+        assert server.incoming_comms_open == 1
+        assert server.incoming_comms_active == 0
+        validate_dict(server)
         await comm.close()
+
         while server._comms:
             await asyncio.sleep(0.01)
+        assert server.incoming_comms_active == 0
+        assert server.incoming_comms_open == 0
+        validate_dict(server)
+
+        async with Server({}) as server2:
+            rpc_ = server2.rpc(server.address)
+            task = asyncio.create_task(rpc_.wait())
+            while not server.incoming_comms_active:
+                await asyncio.sleep(0.1)
+            assert server.incoming_comms_active == 1
+            assert server.incoming_comms_open == 1
+            assert server.outgoing_comms_active == 0
+            assert server.outgoing_comms_open == 0
+
+            assert server2.incoming_comms_active == 0
+            assert server2.incoming_comms_open == 0
+            assert server2.outgoing_comms_active == 1
+            assert server2.outgoing_comms_open == 1
+            validate_dict(server)
+
+            await task
+            assert server.incoming_comms_active == 0
+            assert server.incoming_comms_open == 1
+            assert server.outgoing_comms_active == 0
+            assert server.outgoing_comms_open == 0
+
+            assert server2.incoming_comms_active == 0
+            assert server2.incoming_comms_open == 0
+            assert server2.outgoing_comms_active == 0
+            assert server2.outgoing_comms_open == 1
+            validate_dict(server)
 
 
 @pytest.mark.parametrize("close_via_rpc", [True, False])
@@ -1218,7 +1278,7 @@ def test_expects_comm():
         def stream_not_leading_position(self, other, stream):
             ...
 
-    expected_warning = "first arugment of a RPC handler `stream` is deprecated"
+    expected_warning = "first argument of a RPC handler `stream` is deprecated"
 
     instance = A()
 

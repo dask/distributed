@@ -300,7 +300,7 @@ class Semaphore(SyncMethodMixin):
         When registering, this needs to be awaited.
     scheduler_rpc: ConnectionPool
         The ConnectionPool to connect to the scheduler. If None is provided, it
-        uses the worker or client pool. This paramter is mostly used for
+        uses the worker or client pool. This parameter is mostly used for
         testing.
     loop: IOLoop
         The event loop this instance is using. If None is provided, reuse the

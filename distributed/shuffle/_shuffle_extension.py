@@ -222,6 +222,7 @@ class Shuffle:
             await self._disk_buffer.write(groups)
         except Exception as e:
             self._exception = e
+            raise
 
     async def add_partition(self, data: pd.DataFrame) -> None:
         if self.transferred:
@@ -269,6 +270,11 @@ class Shuffle:
         assert not self.transferred, "`inputs_done` called multiple times"
         self.transferred = True
         await self._comm_buffer.flush()
+        try:
+            self._comm_buffer.raise_on_exception()
+        except Exception as e:
+            self._exception = e
+            raise
 
     def done(self) -> bool:
         return self.transferred and self.output_partitions_left == 0
@@ -324,7 +330,7 @@ class ShuffleWorkerExtension:
         data: list[bytes],
     ) -> None:
         """
-        Hander: Receive an incoming shard of data from a peer worker.
+        Handler: Receive an incoming shard of data from a peer worker.
         Using an unknown ``shuffle_id`` is an error.
         """
         shuffle = await self._get_shuffle(shuffle_id)

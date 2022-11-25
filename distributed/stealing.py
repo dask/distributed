@@ -251,7 +251,7 @@ class WorkStealing(SchedulerPlugin):
         compute_time = self.scheduler.get_task_duration(ts)
 
         if not compute_time:
-            # occupancy/ws.proccessing[ts] is only allowed to be zero for
+            # occupancy/ws.processing[ts] is only allowed to be zero for
             # long running tasks which cannot be stolen
             assert ts.processing_on
             assert ts in ts.processing_on.long_running
@@ -292,7 +292,7 @@ class WorkStealing(SchedulerPlugin):
                 thief.occupancy,
             )
 
-            # TODO: occupancy no longer concats linearily so we can't easily
+            # TODO: occupancy no longer concats linearly so we can't easily
             # assume that the network cost would go down by that much
             victim_duration = self.scheduler.get_task_duration(
                 ts

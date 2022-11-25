@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from enum import IntEnum, auto
 from platform import uname
+from typing import NamedTuple
 
 from packaging.version import parse as parse_version
 
@@ -27,6 +28,17 @@ class NVMLState(IntEnum):
     """PyNVML available, but NVML not installed"""
     DISABLED_WSL_INSUFFICIENT_DRIVER = auto()
     """PyNVML and NVML available, but on WSL and the driver version is insufficient"""
+
+
+class CudaDeviceInfo(NamedTuple):
+    uuid: bytes | None = None
+    device_index: int | None = None
+    mig_index: int | None = None
+
+
+class CudaContext(NamedTuple):
+    has_context: bool
+    device_info: CudaDeviceInfo | None = None
 
 
 # Initialisation must occur per-process, so an initialised state is a
@@ -147,27 +159,138 @@ def _pynvml_handles():
         return pynvml.nvmlDeviceGetHandleByIndex(gpu_idx)
 
 
+def _running_process_matches(handle):
+    """Check whether the current process is same as that of handle
+
+    Parameters
+    ----------
+    handle : pyvnml.nvml.LP_struct_c_nvmlDevice_t
+        NVML handle to CUDA device
+
+    Returns
+    -------
+    out : bool
+        Whether the device handle has a CUDA context on the running process.
+    """
+    init_once()
+    if hasattr(pynvml, "nvmlDeviceGetComputeRunningProcesses_v2"):
+        running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses_v2(handle)
+    else:
+        running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+    return any(os.getpid() == proc.pid for proc in running_processes)
+
+
 def has_cuda_context():
     """Check whether the current process already has a CUDA context created.
 
     Returns
     -------
-    ``False`` if current process has no CUDA context created, otherwise returns the
-    index of the device for which there's a CUDA context.
+    out : CudaContext
+        Object containing information as to whether the current process has a CUDA
+        context created, and in the positive case containing also information about
+        the device the context belongs to.
     """
     init_once()
-    if not is_initialized():
-        return False
-    for index in range(device_get_count()):
-        handle = pynvml.nvmlDeviceGetHandleByIndex(index)
-        if hasattr(pynvml, "nvmlDeviceGetComputeRunningProcesses_v2"):
-            running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses_v2(handle)
-        else:
-            running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
-        for proc in running_processes:
-            if os.getpid() == proc.pid:
-                return index
-    return False
+    if is_initialized():
+        for index in range(device_get_count()):
+            handle = pynvml.nvmlDeviceGetHandleByIndex(index)
+            try:
+                mig_current_mode, mig_pending_mode = pynvml.nvmlDeviceGetMigMode(handle)
+            except pynvml.NVMLError_NotSupported:
+                mig_current_mode = pynvml.NVML_DEVICE_MIG_DISABLE
+            if mig_current_mode == pynvml.NVML_DEVICE_MIG_ENABLE:
+                for mig_index in range(pynvml.nvmlDeviceGetMaxMigDeviceCount(handle)):
+                    try:
+                        mig_handle = pynvml.nvmlDeviceGetMigDeviceHandleByIndex(
+                            handle, mig_index
+                        )
+                    except pynvml.NVMLError_NotFound:
+                        # No MIG device with that index
+                        continue
+                    if _running_process_matches(mig_handle):
+                        uuid = pynvml.nvmlDeviceGetUUID(mig_handle)
+                        return CudaContext(
+                            has_context=True,
+                            device_info=CudaDeviceInfo(
+                                uuid=uuid, device_index=index, mig_index=mig_index
+                            ),
+                        )
+            else:
+                if _running_process_matches(handle):
+                    uuid = pynvml.nvmlDeviceGetUUID(handle)
+                    return CudaContext(
+                        has_context=True,
+                        device_info=CudaDeviceInfo(uuid=uuid, device_index=index),
+                    )
+    return CudaContext(has_context=False)
+
+
+def get_device_index_and_uuid(device):
+    """Get both device index and UUID from device index or UUID
+
+    Parameters
+    ----------
+    device : int, bytes or str
+        An ``int`` with the index of a GPU, or ``bytes`` or ``str`` with the UUID
+        of a CUDA (either GPU or MIG) device.
+
+    Returns
+    -------
+    out : CudaDeviceInfo
+        Object containing information about the device.
+
+    Examples
+    --------
+    >>> get_device_index_and_uuid(0)  # doctest: +SKIP
+    {'device-index': 0, 'uuid': b'GPU-e1006a74-5836-264f-5c26-53d19d212dfe'}
+
+    >>> get_device_index_and_uuid('GPU-e1006a74-5836-264f-5c26-53d19d212dfe')  # doctest: +SKIP
+    {'device-index': 0, 'uuid': b'GPU-e1006a74-5836-264f-5c26-53d19d212dfe'}
+
+    >>> get_device_index_and_uuid('MIG-7feb6df5-eccf-5faa-ab00-9a441867e237')  # doctest: +SKIP
+    {'device-index': 0, 'uuid': b'MIG-7feb6df5-eccf-5faa-ab00-9a441867e237'}
+    """
+    init_once()
+    try:
+        device_index = int(device)
+        device_handle = pynvml.nvmlDeviceGetHandleByIndex(device_index)
+        uuid = pynvml.nvmlDeviceGetUUID(device_handle)
+    except ValueError:
+        uuid = device if isinstance(device, bytes) else bytes(device, "utf-8")
+
+        # Validate UUID, get index and UUID as seen with `nvidia-smi -L`
+        uuid_handle = pynvml.nvmlDeviceGetHandleByUUID(uuid)
+        device_index = pynvml.nvmlDeviceGetIndex(uuid_handle)
+        uuid = pynvml.nvmlDeviceGetUUID(uuid_handle)
+
+    return CudaDeviceInfo(uuid=uuid, device_index=device_index)
+
+
+def get_device_mig_mode(device):
+    """Get MIG mode for a device index or UUID
+
+    Parameters
+    ----------
+    device: int, bytes or str
+        An ``int`` with the index of a GPU, or ``bytes`` or ``str`` with the UUID
+        of a CUDA (either GPU or MIG) device.
+
+    Returns
+    -------
+    out : list
+        A ``list`` with two integers ``[current_mode, pending_mode]``.
+    """
+    init_once()
+    try:
+        device_index = int(device)
+        handle = pynvml.nvmlDeviceGetHandleByIndex(device_index)
+    except ValueError:
+        uuid = device if isinstance(device, bytes) else bytes(device, "utf-8")
+        handle = pynvml.nvmlDeviceGetHandleByUUID(uuid)
+    try:
+        return pynvml.nvmlDeviceGetMigMode(handle)
+    except pynvml.NVMLError_NotSupported:
+        return [0, 0]
 
 
 def _get_utilization(h):

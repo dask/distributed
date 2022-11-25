@@ -499,7 +499,7 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
                     ip, port, max_buffer_size=MAX_BUFFER_SIZE, **kwargs
                 )
 
-            # Under certain circumstances tornado will have a closed connnection with an
+            # Under certain circumstances tornado will have a closed connection with an
             # error and not raise a StreamClosedError.
             #
             # This occurs with tornado 5.x and openssl 1.1+

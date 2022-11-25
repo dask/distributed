@@ -9,7 +9,7 @@ class ResourceLimiter:
     """Limit an abstract resource
 
     This allows us to track usage of an abstract resource. If the usage of this
-    resources goes beyond a defined maxvalue, we can block further exection
+    resources goes beyond a defined maxvalue, we can block further execution
 
     Example::
 

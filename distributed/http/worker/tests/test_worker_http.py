@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from unittest import mock
 
 import pytest
 from tornado.httpclient import AsyncHTTPClient
@@ -10,6 +11,7 @@ from distributed import Event, Worker, wait
 from distributed.sizeof import sizeof
 from distributed.utils_test import (
     fetch_metrics,
+    fetch_metrics_body,
     fetch_metrics_sample_names,
     gen_cluster,
 )
@@ -54,6 +56,24 @@ async def test_prometheus(c, s, a):
     # request data twice since there once was a case where metrics got registered
     # multiple times resulting in prometheus_client errors
     await fetch_metrics(a.http_server.port, prefix="dask_worker_")
+
+
+@pytest.fixture
+def prometheus_not_available():
+    import sys
+
+    with mock.patch.dict("sys.modules", {"prometheus_client": None}):
+        sys.modules.pop("distributed.http.worker.prometheus", None)
+        yield
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_metrics_when_prometheus_client_not_installed(
+    c, s, prometheus_not_available
+):
+    async with Worker(s.address) as w:
+        body = await fetch_metrics_body(w.http_server.port)
+        assert "Prometheus metrics are not available" in body
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])

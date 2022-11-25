@@ -11,7 +11,7 @@ import sys
 from itertools import product
 from textwrap import dedent
 from time import sleep
-from typing import ClassVar, Collection
+from typing import Collection
 
 import cloudpickle
 import psutil
@@ -257,7 +257,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
 
 
 @pytest.mark.skipif(
-    math.isfinite(dask.config.get("distributed.scheduler.worker-saturation")),
+    math.isfinite(float(dask.config.get("distributed.scheduler.worker-saturation"))),
     reason="Not relevant with queuing on; see https://github.com/dask/distributed/issues/7204",
 )
 @gen_cluster(
@@ -343,11 +343,11 @@ async def test_graph_execution_width(c, s, *workers):
     class Refcount:
         "Track how many instances of this class exist; logs the count at creation and deletion"
 
-        count: ClassVar[int] = 0
-        lock: ClassVar[dask.utils.SerializableLock] = dask.utils.SerializableLock()
-        log: ClassVar[list[int]] = []
+        count = 0
+        lock = dask.utils.SerializableLock()
+        log = []
 
-        def __init__(self) -> None:
+        def __init__(self):
             with self.lock:
                 type(self).count += 1
                 self.log.append(self.count)
@@ -918,8 +918,10 @@ def test_dumps_task():
     assert set(d) == {"function", "args"}
 
 
+@pytest.mark.parametrize("worker_saturation", [1.0, float("inf")])
 @gen_cluster()
-async def test_ready_remove_worker(s, a, b):
+async def test_ready_remove_worker(s, a, b, worker_saturation):
+    s.WORKER_SATURATION = worker_saturation
     s.update_graph(
         tasks={"x-%d" % i: dumps_task((inc, i)) for i in range(20)},
         keys=["x-%d" % i for i in range(20)],
@@ -1539,7 +1541,10 @@ async def test_balance_many_workers(c, s, *workers):
 # FIXME test is very timing-based; if some threads are consistently slower than others,
 # they'll receive fewer tasks from the queue (a good thing).
 @pytest.mark.skipif(
-    MACOS and math.isfinite(dask.config.get("distributed.scheduler.worker-saturation")),
+    MACOS
+    and math.isfinite(
+        float(dask.config.get("distributed.scheduler.worker-saturation"))
+    ),
     reason="flaky on macOS with queuing active",
 )
 @nodebug
@@ -2490,7 +2495,7 @@ class NoSchedulerDelayWorker(Worker):
     comparisons using times reported from workers.
     """
 
-    @property  # type: ignore
+    @property
     def scheduler_delay(self):
         return 0
 

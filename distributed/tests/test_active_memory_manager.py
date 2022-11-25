@@ -949,7 +949,7 @@ async def test_RetireWorker_new_keys_arrive_after_all_keys_moved_away(c, s, a, b
 
     t = asyncio.create_task(c.retire_workers([a.address]))
 
-    amm: ActiveMemoryManagerExtension = s.extensions["amm"]
+    amm = s.extensions["amm"]
     while not amm.policies:
         await asyncio.sleep(0)
     policy = next(iter(amm.policies))

@@ -32,7 +32,6 @@ from bokeh.models import (
     NumberFormatter,
     NumeralTickFormatter,
     OpenURL,
-    Panel,
     PanTool,
     Range1d,
     ResetTool,
@@ -72,7 +71,14 @@ from distributed.dashboard.components.shared import (
     ProfileTimePlot,
     SystemMonitor,
 )
-from distributed.dashboard.utils import BOKEH_VERSION, PROFILING, transpose, update
+from distributed.dashboard.core import TabPanel
+from distributed.dashboard.utils import (
+    _DATATABLE_STYLESHEETS_KWARGS,
+    BOKEH_VERSION,
+    PROFILING,
+    transpose,
+    update,
+)
 from distributed.diagnostics.graph_layout import GraphLayout
 from distributed.diagnostics.progress import GroupTiming
 from distributed.diagnostics.progress_stream import color_of, progress_quads
@@ -134,7 +140,6 @@ class Occupancy(DashboardComponent):
             title="Occupancy",
             tools="",
             toolbar_location="above",
-            id="bk-occupancy-plot",
             x_axis_type="datetime",
             min_border_bottom=50,
             **kwargs,
@@ -211,7 +216,6 @@ class ProcessingHistogram(DashboardComponent):
 
         self.root = figure(
             title="Tasks Processing (count)",
-            id="bk-nprocessing-histogram-plot",
             name="processing",
             y_axis_label="frequency",
             tools="",
@@ -316,7 +320,6 @@ class ClusterMemory(DashboardComponent, MemoryColor):
         self.root = figure(
             title="Bytes stored on cluster",
             tools="",
-            id="bk-cluster-memory-plot",
             width=int(width / 2),
             name="cluster_memory",
             min_border_bottom=50,
@@ -454,7 +457,6 @@ class WorkersMemory(DashboardComponent, MemoryColor):
         self.root = figure(
             title="Bytes stored per worker",
             tools="",
-            id="bk-workers-memory-plot",
             width=int(width / 2),
             name="workers_memory",
             min_border_bottom=50,
@@ -595,7 +597,6 @@ class WorkersMemoryHistogram(DashboardComponent):
         self.root = figure(
             title="Bytes stored per worker",
             name="workers_memory",
-            id="bk-workers-memory-histogram-plot",
             y_axis_label="frequency",
             tools="",
             **kwargs,
@@ -650,7 +651,6 @@ class WorkersTransferBytes(DashboardComponent):
         self.root = figure(
             title=f"Bytes transferring: {format_bytes(0)}",
             tools="",
-            id="bk-workers-transfer-bytes-plot",
             width=int(width / 2),
             name="workers_transfer_bytes",
             min_border_bottom=50,
@@ -902,7 +902,6 @@ class BandwidthTypes(DashboardComponent):
         self.root = figure(
             title="Bandwidth by Type",
             tools="",
-            id="bk-bandwidth-type-plot",
             name="bandwidth_type_histogram",
             y_range=["a", "b"],
             **kwargs,
@@ -973,7 +972,6 @@ class BandwidthWorkers(DashboardComponent):
         self.root = figure(
             title="Bandwidth by Worker",
             tools="",
-            id="bk-bandwidth-worker-plot",
             name="bandwidth_worker_heatmap",
             x_range=["a", "b"],
             y_range=["a", "b"],
@@ -1071,7 +1069,6 @@ class WorkerNetworkBandwidth(DashboardComponent):
         self.bandwidth = figure(
             title="Worker Network Bandwidth",
             tools="",
-            id="bk-worker-net-bandwidth",
             name="worker_network_bandwidth",
             **kwargs,
         )
@@ -1112,7 +1109,6 @@ class WorkerNetworkBandwidth(DashboardComponent):
         self.disk = figure(
             title="Workers Disk",
             tools="",
-            id="bk-workers-disk",
             name="worker_disk",
             **kwargs,
         )
@@ -1215,7 +1211,7 @@ class SystemTimeseries(DashboardComponent):
         workers as a function of time
 
     The metrics plotted come from the aggregation of from ws.metrics[key] for ws in
-    scheduler.workers.values() divided by nuber of workers.
+    scheduler.workers.values() divided by number of workers.
     """
 
     @log_errors
@@ -1245,7 +1241,6 @@ class SystemTimeseries(DashboardComponent):
             x_axis_type="datetime",
             tools=tools,
             x_range=x_range,
-            id="bk-worker-network-bandwidth-ts",
             name="worker_network_bandwidth-timeseries",
             **kwargs,
         )
@@ -1277,7 +1272,6 @@ class SystemTimeseries(DashboardComponent):
             x_axis_type="datetime",
             tools=tools,
             x_range=x_range,
-            id="bk-worker-cpu-ts",
             name="worker_cpu-timeseries",
             **kwargs,
         )
@@ -1297,7 +1291,6 @@ class SystemTimeseries(DashboardComponent):
             x_axis_type="datetime",
             tools=tools,
             x_range=x_range,
-            id="bk-worker-memory-ts",
             name="worker_memory-timeseries",
             **kwargs,
         )
@@ -1318,7 +1311,6 @@ class SystemTimeseries(DashboardComponent):
             x_axis_type="datetime",
             tools=tools,
             x_range=x_range,
-            id="bk-worker-disk-ts",
             name="worker_disk-timeseries",
             **kwargs,
         )
@@ -1420,7 +1412,6 @@ class ComputePerKey(DashboardComponent):
         fig = figure(
             title="Compute Time Per Task",
             tools="",
-            id="bk-Compute-by-key-plot",
             name="compute_time_per_key",
             x_range=["a", "b"],
             **kwargs,
@@ -1465,12 +1456,11 @@ class ComputePerKey(DashboardComponent):
         )
 
         self.fig = fig
-        tab1 = Panel(child=fig, title="Bar Chart")
+        tab1 = TabPanel(child=fig, title="Bar Chart")
 
         fig2 = figure(
             title="Compute Time Per Task",
             tools="",
-            id="bk-Compute-by-key-pie",
             name="compute_time_per_key-pie",
             x_range=(-0.5, 1.0),
             **kwargs,
@@ -1509,7 +1499,7 @@ class ComputePerKey(DashboardComponent):
         hover.point_policy = "follow_mouse"
         fig2.add_tools(hover)
         self.wedge_fig = fig2
-        tab2 = Panel(child=fig2, title="Pie Chart")
+        tab2 = TabPanel(child=fig2, title="Pie Chart")
 
         self.root = Tabs(tabs=[tab1, tab2])
 
@@ -1579,7 +1569,6 @@ class AggregateAction(DashboardComponent):
         self.root = figure(
             title="Aggregate Per Action",
             tools="",
-            id="bk-aggregate-per-action-plot",
             name="aggregate_per_action",
             x_range=["a", "b"],
             **kwargs,
@@ -1671,7 +1660,6 @@ class MemoryByKey(DashboardComponent):
         self.root = figure(
             title="Memory Use",
             tools="",
-            id="bk-memory-by-key-plot",
             name="memory_by_key",
             x_range=["a", "b"],
             **kwargs,
@@ -1748,7 +1736,6 @@ class CurrentLoad(DashboardComponent):
         processing = figure(
             title="Tasks Processing",
             tools="",
-            id="bk-nprocessing-plot",
             name="processing",
             width=int(width / 2),
             min_border_bottom=50,
@@ -1768,7 +1755,6 @@ class CurrentLoad(DashboardComponent):
         cpu = figure(
             title="CPU Utilization",
             tools="",
-            id="bk-cpu-worker-plot",
             width=int(width / 2),
             name="cpu_hist",
             x_range=(0, 100),
@@ -2187,7 +2173,6 @@ def task_stream_figure(clear_interval="20s", **kwargs):
     root = figure(
         name="task_stream",
         title="Task Stream",
-        id="bk-task-stream-plot",
         x_range=x_range,
         y_range=y_range,
         toolbar_location="above",
@@ -2237,7 +2222,7 @@ def task_stream_figure(clear_interval="20s", **kwargs):
         PanTool(dimensions="width"),
         WheelZoomTool(dimensions="width"),
     )
-    if ExportTool:
+    if ExportTool:  # type: ignore
         export = ExportTool()
         export.register_plot(root)
         root.add_tools(export)
@@ -2264,12 +2249,13 @@ class TaskGraph(DashboardComponent):
         )
         self.edge_source = ColumnDataSource({"x": [], "y": [], "visible": []})
 
-        node_view = CDSView(
-            filters=[GroupFilter(column_name="visible", group="True")],
-        )
-        edge_view = CDSView(
-            filters=[GroupFilter(column_name="visible", group="True")],
-        )
+        filter = GroupFilter(column_name="visible", group="True")
+        if BOKEH_VERSION.major < 3:
+            filter_kwargs = {"filters": [filter]}
+        else:
+            filter_kwargs = {"filter": filter}
+        node_view = CDSView(**filter_kwargs)
+        edge_view = CDSView(**filter_kwargs)
 
         # Bokeh >= 3.0 automatically infers the source to use
         if BOKEH_VERSION.major < 3:
@@ -2607,7 +2593,7 @@ class TaskGroupGraph(DashboardComponent):
     @without_property_validation
     @log_errors
     def update_layout(self):
-        # Get dependecies per task group.
+        # Get dependencies per task group.
         # In some cases there are tg that have themselves as dependencies - we remove those.
         dependencies = {
             k: {ds.name for ds in ts.dependencies if ds.name != k}
@@ -2648,7 +2634,7 @@ class TaskGroupGraph(DashboardComponent):
 
             xs[tg], ys[tg] = x, y
 
-            # info neded for node layout to coulmn data source
+            # info needed for node layout to column data source
             nodes_layout[tg] = {"x": xs[tg], "y": ys[tg]}
 
             # info needed for arrow layout
@@ -2902,7 +2888,6 @@ class TaskGroupProgress(DashboardComponent):
         y_range = Range1d(0, max(self.plugin.nthreads))
 
         self.root = figure(
-            id="bk-task-group-progress-plot",
             title="Task Group Progress",
             name="task_group_progress",
             toolbar_location="above",
@@ -3175,7 +3160,6 @@ class TaskProgress(DashboardComponent):
         y_range = Range1d(-8, 0)
 
         self.root = figure(
-            id="bk-task-progress-plot",
             title="Progress",
             name="task_progress",
             x_range=x_range,
@@ -3506,6 +3490,7 @@ class ExceptionsTable(DashboardComponent):
             sortable=True,
             width=width,
             index_position=None,
+            **_DATATABLE_STYLESHEETS_KWARGS,
             **sizing_mode,
         )
 
@@ -3639,6 +3624,7 @@ class WorkerTable(DashboardComponent):
             sortable=True,
             width=width,
             index_position=None,
+            **_DATATABLE_STYLESHEETS_KWARGS,
         )
 
         for name in table_names:
@@ -3658,6 +3644,7 @@ class WorkerTable(DashboardComponent):
             sortable=True,
             width=width,
             index_position=None,
+            **_DATATABLE_STYLESHEETS_KWARGS,
         )
 
         for name in extra_names:
@@ -3736,7 +3723,7 @@ class WorkerTable(DashboardComponent):
         if self.extra_names:
             components.append(extra_table)
 
-        self.root = column(*components, id="bk-worker-table", **sizing_mode)
+        self.root = column(*components, **sizing_mode)
 
     @without_property_validation
     def update(self):
@@ -4018,6 +4005,22 @@ class Shuffling(DashboardComponent):
             self.disk_memory.x_range.end = limit
 
 
+_STYLES = {
+    "width": "100%",
+    "height": "100%",
+    "max-width": "1920px",
+    "max-height": "1080px",
+    "padding": "12px",
+    "border": "1px solid lightgray",
+    "box-shadow": "inset 1px 0 8px 0 lightgray",
+    "overflow": "auto",
+}
+if BOKEH_VERSION.major < 3:
+    _BOKEH_STYLES_KWARGS = {"style": _STYLES}
+else:
+    _BOKEH_STYLES_KWARGS = {"styles": _STYLES}
+
+
 class SchedulerLogs:
     def __init__(self, scheduler, start=None):
         logs = scheduler.get_logs(start=start, timestamps=True)
@@ -4035,19 +4038,7 @@ class SchedulerLogs:
                 )
             )._repr_html_()
 
-        self.root = Div(
-            text=logs_html,
-            style={
-                "width": "100%",
-                "height": "100%",
-                "max-width": "1920px",
-                "max-height": "1080px",
-                "padding": "12px",
-                "border": "1px solid lightgray",
-                "box-shadow": "inset 1px 0 8px 0 lightgray",
-                "overflow": "auto",
-            },
-        )
+        self.root = Div(text=logs_html, **_BOKEH_STYLES_KWARGS)
 
 
 @log_errors
@@ -4257,10 +4248,10 @@ def status_doc(scheduler, extra, doc):
 
     doc.add_root(workers_memory.root)
 
-    tab1 = Panel(child=processing_root, title="Processing")
-    tab2 = Panel(child=cpu_root, title="CPU")
-    tab3 = Panel(child=occupancy_root, title="Occupancy")
-    tab4 = Panel(child=workers_transfer_bytes.root, title="Data Transfer")
+    tab1 = TabPanel(child=processing_root, title="Processing")
+    tab2 = TabPanel(child=cpu_root, title="CPU")
+    tab3 = TabPanel(child=occupancy_root, title="Occupancy")
+    tab4 = TabPanel(child=workers_transfer_bytes.root, title="Data Transfer")
 
     proc_tabs = Tabs(tabs=[tab1, tab2, tab3, tab4], name="processing_tabs")
     doc.add_root(proc_tabs)
