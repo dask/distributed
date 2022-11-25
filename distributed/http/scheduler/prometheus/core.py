@@ -20,19 +20,19 @@ class SchedulerMetricCollector(PrometheusCollector):
 
         yield GaugeMetricFamily(
             self.build_name("clients"),
-            "Number of clients connected.",
+            "Number of clients connected",
             value=len([k for k in self.server.clients if k != "fire-and-forget"]),
         )
 
         yield GaugeMetricFamily(
             self.build_name("desired_workers"),
-            "Number of workers scheduler needs for task graph.",
+            "Number of workers scheduler needs for task graph",
             value=self.server.adaptive_target(),
         )
 
         worker_states = GaugeMetricFamily(
             self.build_name("workers"),
-            "Number of workers known by scheduler.",
+            "Number of workers known by scheduler",
             labels=["state"],
         )
         worker_states.add_metric(["connected"], len(self.server.workers))
@@ -42,7 +42,7 @@ class SchedulerMetricCollector(PrometheusCollector):
 
         tasks = GaugeMetricFamily(
             self.build_name("tasks"),
-            "Number of tasks known by scheduler.",
+            "Number of tasks known by scheduler",
             labels=["state"],
         )
 
@@ -52,7 +52,7 @@ class SchedulerMetricCollector(PrometheusCollector):
 
         suspicious_tasks = CounterMetricFamily(
             self.build_name("tasks_suspicious"),
-            "Total number of times a task has been marked suspicious.",
+            "Total number of times a task has been marked suspicious",
             labels=["task_prefix_name"],
         )
 
@@ -64,8 +64,9 @@ class SchedulerMetricCollector(PrometheusCollector):
             self.build_name("tasks_forgotten"),
             (
                 "Total number of processed tasks no longer in memory and already "
-                "removed from the scheduler job queue. Note task groups on the "
-                "scheduler which have all tasks in the forgotten state are not included."
+                "removed from the scheduler job queue\n"
+                "Note: Task groups on the scheduler which have all tasks "
+                "in the forgotten state are not included."
             ),
             value=task_counter.get("forgotten", 0.0),
         )
@@ -77,7 +78,7 @@ class SchedulerMetricCollector(PrometheusCollector):
 
         prefix_state_counts = CounterMetricFamily(
             self.build_name("prefix_state_totals"),
-            "Accumulated count of task prefix in each state.",
+            "Accumulated count of task prefix in each state",
             labels=["task_prefix_name", "state"],
         )
 
