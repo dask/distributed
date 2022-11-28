@@ -1800,8 +1800,17 @@ async def _place_tasks(
 
     counter = itertools.count()
     futures_per_worker = defaultdict(list)
-    for worker, tasks in zip(workers, placement):
+    for worker, tasks, placed_dependencies in zip(
+        workers, placement, dependency_placement
+    ):
         for dependencies in tasks:
+            for dependency in dependencies:
+                assert dependency in placed_dependencies, (
+                    f"Dependency {dependency} of task {dependencies} not found "
+                    "on worker {worker}. Make sure that workers already hold all "
+                    "dependencies of their tasks to avoid transfers and skewing "
+                    "bandwidth measurements"
+                )
             i = next(counter)
             key = f"{compose_task_prefix(dependencies)}-{i}"
             f = c.submit(
