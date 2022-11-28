@@ -363,7 +363,6 @@ class ShuffleWorkerExtension:
         self.memory_limiter_comms = ResourceLimiter(parse_bytes("100 MiB"))
         self.memory_limiter_disk = ResourceLimiter(parse_bytes("1 GiB"))
         self.closed = False
-        self._closed_event = asyncio.Event()
 
     # Handlers
     ##########
@@ -524,15 +523,12 @@ class ShuffleWorkerExtension:
                 return self.shuffles[shuffle_id]
 
     async def close(self) -> None:
-        if self.closed:
-            await self._closed_event.wait()
-            return
+        assert not self.closed
 
         self.closed = True
         while self.shuffles:
             _, shuffle = self.shuffles.popitem()
             await shuffle.close()
-        self._closed_event.set()
 
     #############################
     # Methods for worker thread #
