@@ -699,8 +699,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     async def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
         affected_shuffles = set()
         broadcasts = []
-        participating_workers = self.participating_workers.copy()
-        for shuffle_id, shuffle_workers in participating_workers.items():
+        for shuffle_id, shuffle_workers in self.participating_workers.items():
             if worker not in shuffle_workers:
                 continue
             exception = RuntimeError(
