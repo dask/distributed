@@ -470,8 +470,6 @@ class ShuffleWorkerExtension:
         "Get a shuffle by ID; raise ValueError if it's not registered."
         import pyarrow as pa
 
-        self.raise_if_closed()
-
         if exception := self.erred_shuffles.get(shuffle_id):
             raise exception
         try:
@@ -501,7 +499,10 @@ class ShuffleWorkerExtension:
 
                 raise Reschedule()
             else:
-                self.raise_if_closed()
+                if self.closed:
+                    raise ShuffleClosedError(
+                        f"{self.__class__.__name__} already closed on {self.worker.address}"
+                    )
                 if shuffle_id not in self.shuffles:
                     shuffle = Shuffle(
                         column=result["column"],
@@ -532,12 +533,6 @@ class ShuffleWorkerExtension:
             _, shuffle = self.shuffles.popitem()
             await shuffle.close()
         self._closed_event.set()
-
-    def raise_if_closed(self) -> None:
-        if self.closed:
-            raise ShuffleClosedError(
-                f"{self.__class__.__name__} already closed on {self.worker.address}"
-            )
 
     #############################
     # Methods for worker thread #
@@ -587,7 +582,6 @@ class ShuffleWorkerExtension:
 
         Calling this for a ``shuffle_id`` which is unknown or incomplete is an error.
         """
-        self.raise_if_closed()
         shuffle = self.get_shuffle(shuffle_id)
         output = sync(self.worker.loop, shuffle.get_output_partition, output_partition)
         # key missing if another thread got to it first
