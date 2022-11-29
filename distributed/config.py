@@ -100,9 +100,22 @@ def _initialize_logging_old_style(config):
             level = logging_names[level.upper()]
         logger = logging.getLogger(name)
         logger.setLevel(level)
-        logger.handlers[:] = []
-        logger.addHandler(handler)
-        logger.propagate = False
+
+        # Ensure that we're not registering the logger twice in this hierarchy.
+        anc = None
+        already_registered = False
+        for ancestor in name.split("."):
+            if anc is None:
+                anc = logging.getLogger(ancestor)
+            else:
+                anc.getChild(ancestor)
+
+            if handler in anc.handlers:
+                already_registered = True
+                break
+
+        if not already_registered:
+            logger.addHandler(handler)
 
 
 def _initialize_logging_new_style(config):

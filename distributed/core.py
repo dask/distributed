@@ -416,7 +416,7 @@ class Server:
 
         self.io_loop.add_callback(set_thread_ident)
         self._startup_lock = asyncio.Lock()
-        self.__startup_exc: Exception | None = None
+        self.__startup_exc = None
 
         self.rpc = ConnectionPool(
             limit=connection_limit,

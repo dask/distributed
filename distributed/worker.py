@@ -132,7 +132,6 @@ from distributed.worker_state_machine import (
     UpdateDataEvent,
     WorkerState,
 )
-from distributed.worker_state_machine import logger as wsm_logger
 
 if TYPE_CHECKING:
     # FIXME import from typing (needs Python >=3.10)
@@ -572,7 +571,7 @@ class Worker(BaseWorker, ServerNode):
         profile_cycle_interval = parse_timedelta(profile_cycle_interval, default="ms")
         assert profile_cycle_interval
 
-        self._setup_logging(logger, wsm_logger)
+        self._setup_logging(logger)
 
         if not local_directory:
             local_directory = (
@@ -1488,7 +1487,7 @@ class Worker(BaseWorker, ServerNode):
         # nanny+worker, the nanny must be notified first. ==> Remove kwarg
         # nanny, see also Scheduler.retire_workers
         if self.status in (Status.closed, Status.closing, Status.failed):
-            logging.debug(
+            logger.debug(
                 "Attempted to close worker that is already %s. Reason: %s",
                 self.status,
                 reason,
@@ -1927,7 +1926,7 @@ class Worker(BaseWorker, ServerNode):
             super().handle_stimulus(*stims)
         except Exception as e:
             if hasattr(e, "to_event"):
-                topic, msg = e.to_event()  # type: ignore
+                topic, msg = e.to_event()
                 self.log_event(topic, msg)
             raise
 
@@ -2293,8 +2292,24 @@ class Worker(BaseWorker, ServerNode):
                     stimulus_id=f"task-finished-{time()}",
                 )
 
-            if isinstance(result["actual-exception"], Reschedule):
+            task_exc = result["actual-exception"]
+            if isinstance(task_exc, Reschedule):
                 return RescheduleEvent(key=ts.key, stimulus_id=f"reschedule-{time()}")
+            if (
+                self.status == Status.closing
+                and isinstance(task_exc, asyncio.CancelledError)
+                and iscoroutinefunction(function)
+            ):
+                # `Worker.cancel` will cause async user tasks to raise `CancelledError`.
+                # Since we cancelled those tasks, we shouldn't treat them as failures.
+                # This is just a heuristic; it's _possible_ the task happened to
+                # fail independently with `CancelledError`.
+                logger.info(
+                    f"Async task {key!r} cancelled during worker close; rescheduling."
+                )
+                return RescheduleEvent(
+                    key=ts.key, stimulus_id=f"cancelled-by-worker-close-{time()}"
+                )
 
             logger.warning(
                 "Compute Failed\n"
@@ -2586,7 +2601,7 @@ class Worker(BaseWorker, ServerNode):
                 pdb.set_trace()
 
             if hasattr(e, "to_event"):
-                topic, msg = e.to_event()  # type: ignore
+                topic, msg = e.to_event()
                 self.log_event(topic, msg)
 
             raise
@@ -3014,7 +3029,18 @@ def apply_function_simple(
     start = time()
     try:
         result = function(*args, **kwargs)
-    except Exception as e:
+    except (SystemExit, KeyboardInterrupt):
+        # Special-case these, just like asyncio does all over the place. They will pass
+        # through `fail_hard` and `_handle_stimulus_from_task`, and eventually be caught
+        # by special-case logic in asyncio:
+        # https://github.com/python/cpython/blob/v3.9.4/Lib/asyncio/events.py#L81-L82
+        # Any other `BaseException` types would ultimately be ignored by asyncio if
+        # raised here, after messing up the worker state machine along their way.
+        raise
+    except BaseException as e:
+        # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they
+        # aren't a reason to shut down the whole system (since we allow the
+        # system-shutting-down `SystemExit` and `KeyboardInterrupt` to pass through)
         msg = error_message(e)
         msg["op"] = "task-erred"
         msg["actual-exception"] = e
@@ -3050,7 +3076,20 @@ async def apply_function_async(
     start = time()
     try:
         result = await function(*args, **kwargs)
-    except Exception as e:
+    except (SystemExit, KeyboardInterrupt):
+        # Special-case these, just like asyncio does all over the place. They will pass
+        # through `fail_hard` and `_handle_stimulus_from_task`, and eventually be caught
+        # by special-case logic in asyncio:
+        # https://github.com/python/cpython/blob/v3.9.4/Lib/asyncio/events.py#L81-L82
+        # Any other `BaseException` types would ultimately be ignored by asyncio if
+        # raised here, after messing up the worker state machine along their way.
+        raise
+    except BaseException as e:
+        # NOTE: this includes `CancelledError`! Since it's a user task, that's _not_ a
+        # reason to shut down the worker.
+        # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they
+        # aren't a reason to shut down the whole system (since we allow the
+        # system-shutting-down `SystemExit` and `KeyboardInterrupt` to pass through)
         msg = error_message(e)
         msg["op"] = "task-erred"
         msg["actual-exception"] = e

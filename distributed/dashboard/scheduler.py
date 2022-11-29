@@ -122,7 +122,7 @@ applications = {
 def template_variables():
     from distributed.diagnostics.nvml import device_get_count
 
-    template_variables: dict = {
+    template_variables = {
         "pages": [
             "status",
             "workers",
