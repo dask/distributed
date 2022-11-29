@@ -2021,97 +2021,6 @@ class SchedulerState:
 
         return {}, {}, worker_msgs
 
-    def transition_no_worker_erred(
-        self,
-        key: str,
-        stimulus_id: str,
-        *,
-        cause: str | None = None,
-        exception: Serialized | None = None,
-        traceback: Serialized | None = None,
-        exception_text: str | None = None,
-        traceback_text: str | None = None,
-        **kwargs: Any,
-    ) -> RecsMsgs:
-        """Transition a task from ``no-worker`` to ``erred``.
-
-        Currently, this transition is only triggered in P2P shuffling when a worker
-        is removed. Generally, this transition can be used to enable tasks with
-        worker restrictions to fail if all required workers are removed and the task
-        would otherwise wait indefinitely for workers to rejoin.
-
-        See Also
-        --------
-        transition_no_worker_processing
-        transition_processing_erred
-        """
-        ts = self.tasks[key]
-        failing_ts: TaskState
-        recommendations: Recs = {}
-        client_msgs: Msgs = {}
-
-        if self.validate:
-            assert cause or ts.exception_blame
-            assert not ts.actor, f"Actors can't be in `no-worker`: {ts}"
-            assert ts in self.unrunnable
-            assert not ts.waiting_on
-            assert not ts.processing_on
-            assert not ts.who_has
-
-        self.unrunnable.discard(ts)
-        if exception is not None:
-            ts.exception = exception
-            ts.exception_text = exception_text  # type: ignore
-        if traceback is not None:
-            ts.traceback = traceback
-            ts.traceback_text = traceback_text  # type: ignore
-        if cause is not None:
-            failing_ts = self.tasks[cause]
-            ts.exception_blame = failing_ts
-        else:
-            failing_ts = ts.exception_blame  # type: ignore
-
-        self.erred_tasks.appendleft(
-            ErredTask(
-                ts.key,
-                time(),
-                ts.erred_on.copy(),
-                exception_text or "",
-                traceback_text or "",
-            )
-        )
-
-        for dts in ts.dependents:
-            dts.exception_blame = failing_ts
-            recommendations[dts.key] = "erred"
-
-        for dts in ts.dependencies:
-            dts.waiters.discard(ts)
-            if not dts.waiters and not dts.who_wants:
-                recommendations[dts.key] = "released"
-
-        ts.waiters.clear()
-
-        ts.state = "erred"
-
-        report_msg = {
-            "op": "task-erred",
-            "key": key,
-            "exception": failing_ts.exception,
-            "traceback": failing_ts.exception,
-        }
-
-        for cs in ts.who_wants:
-            client_msgs[cs.client_key] = [report_msg]
-
-        cs = self.clients["fire-and-forget"]
-        if ts in cs.wants_what:
-            self._client_releases_keys(
-                cs=cs, keys=[key], recommendations=recommendations
-            )
-
-        return recommendations, client_msgs, {}
-
     def decide_worker_rootish_queuing_disabled(
         self, ts: TaskState
     ) -> WorkerState | None:
@@ -2896,7 +2805,6 @@ class SchedulerState:
         ("processing", "erred"): transition_processing_erred,
         ("no-worker", "released"): transition_no_worker_released,
         ("no-worker", "processing"): transition_no_worker_processing,
-        ("no-worker", "erred"): transition_no_worker_erred,
         ("released", "forgotten"): transition_released_forgotten,
         ("memory", "forgotten"): transition_memory_forgotten,
         ("erred", "released"): transition_erred_released,

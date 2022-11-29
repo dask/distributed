@@ -629,6 +629,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self.participating_workers = {}
         self.erred_shuffles = {}
         self._shuffle_closed_events = {}
+        self.barriers = {}
         self.scheduler.add_plugin(self)
 
     def shuffle_ids(self) -> set[ShuffleId]:
@@ -637,6 +638,15 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     def heartbeat(self, ws: WorkerState, data: dict) -> None:
         for shuffle_id, d in data.items():
             self.heartbeats[shuffle_id][ws.address].update(d)
+
+    @classmethod
+    def barrier_key(cls, shuffle_id):
+        return "shuffle-barrier-" + shuffle_id
+
+    @classmethod
+    def id_from_key(cls, key):
+        assert "shuffle-barrier-" in key
+        return ShuffleId(key.replace("shuffle-barrier-", ""))
 
     def get(
         self,
@@ -657,6 +667,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             output_workers = set()
 
             name = "shuffle-barrier-" + id  # TODO single-source task name
+            self.barriers[id] = name
             mapping = {}
 
             for ts in self.scheduler.tasks[name].dependents:
@@ -689,6 +700,11 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     async def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
         affected_shuffles = set()
         broadcasts = []
+        from time import time
+
+        recs = {}
+        stimulus_id = f"shuffle-failed-worker-left-{time()}"
+        barriers = []
         for shuffle_id, shuffle_workers in self.participating_workers.items():
             if worker not in shuffle_workers:
                 continue
@@ -699,20 +715,42 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             contact_workers = shuffle_workers.copy()
             contact_workers.discard(worker)
             affected_shuffles.add(shuffle_id)
-            broadcasts.append(
-                scheduler.broadcast(
-                    msg={
-                        "op": "shuffle_fail",
-                        "message": str(exception),
-                        "shuffle_id": shuffle_id,
-                    },
-                    workers=list(contact_workers),
+            name = self.barriers[shuffle_id]
+            barrier_task = self.scheduler.tasks.get(name)
+            if barrier_task:
+                barriers.append(barrier_task)
+                broadcasts.append(
+                    scheduler.broadcast(
+                        msg={
+                            "op": "shuffle_fail",
+                            "message": str(exception),
+                            "shuffle_id": shuffle_id,
+                        },
+                        workers=list(contact_workers),
+                    )
                 )
-            )
+
         results = await asyncio.gather(*broadcasts, return_exceptions=True)
+        for barrier_task in barriers:
+            if barrier_task.state == "memory":
+                for dt in barrier_task.dependents:
+                    dt.worker_restrictions.clear()
+                    if dt.state == "no-worker":
+                        recs.update({dt.key: "waiting"})
+                    else:
+                        recs.update({dt.key: "released"})
+            else:
+                # TODO
+                raise NotImplementedError()
+        self.scheduler.transitions(recs, stimulus_id=stimulus_id)
+
+        # Assumption: No new shuffle tasks scheduled on the worker
+        # + no existing tasks anymore
+        # All task-finished/task-errer are queued up in batched stream
+
         exceptions = [result for result in results if isinstance(result, Exception)]
-        for shuffle_id in affected_shuffles:
-            self._close_on_scheduler(shuffle_id)
+        # for shuffle_id in affected_shuffles:
+        #     self._close_on_scheduler(shuffle_id)
         if exceptions:
             # TODO: Do we need to handle errors here?
             raise RuntimeError(exceptions)
@@ -725,29 +763,15 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         *args: Any,
         **kwargs: Any,
     ) -> None:
-        if finish != "no-worker":
+        if finish != "forgotten":
+            return
+        if key not in self.barriers.values():
+
             return
 
-        if "shuffle-p2p-" not in key:
-            return
+        shuffle_id = ShuffleSchedulerExtension.id_from_key(key)
+        self._close_on_scheduler(shuffle_id)
 
-        ts = self.scheduler.tasks[key]
-        assert len(ts.worker_restrictions) == 1
-        worker = next(iter(ts.worker_restrictions))
-        stimulus_id = "shuffle-p2p-failed"
-        error_msg = error_message(
-            RuntimeError(
-                f"shuffle_unpack failed because worker {worker} left during active shuffle"
-            )
-        )
-        r = self.scheduler._transition(
-            key, "erred", stimulus_id, cause=key, **error_msg
-        )
-        recommendations, client_msgs, worker_msgs = r
-        self.scheduler._transitions(
-            recommendations, client_msgs, worker_msgs, stimulus_id
-        )
-        self.scheduler.send_all(client_msgs, worker_msgs)
 
     def register_complete(self, id: ShuffleId, worker: str) -> None:
         """Learn from a worker that it has completed all reads of a shuffle"""
@@ -758,8 +782,8 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             return
         self.completed_workers[id].add(worker)
 
-        if self.output_workers[id].issubset(self.completed_workers[id]):
-            self._close_on_scheduler(id)
+        # if self.output_workers[id].issubset(self.completed_workers[id]):
+        #     self._close_on_scheduler(id)
 
     def _close_on_scheduler(self, id: ShuffleId) -> None:
         """Closes a shuffle on the scheduler and removes state.

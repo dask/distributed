@@ -477,7 +477,6 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
         clean_scheduler(s)
 
 
-@pytest.mark.slow
 @gen_cluster(client=True)
 async def test_closed_worker_during_unpack(c, s, a, b):
     df = dask.datasets.timeseries(
@@ -491,9 +490,7 @@ async def test_closed_worker_during_unpack(c, s, a, b):
     await wait_for_tasks_in_state("shuffle-p2p", "memory", 1, b)
     await b.close()
 
-    with pytest.raises(
-        RuntimeError, match=f"shuffle_unpack failed because worker {b.address} left"
-    ):
+    with pytest.raises(RuntimeError):
         out = await c.compute(out)
 
     await wait_until_shuffles_closed(s)
@@ -540,13 +537,15 @@ class BlockedRegisterCompleteShuffleWorkerExtension(ShuffleWorkerExtension):
         await self.block_register_complete.wait()
 
 
+@pytest.mark.parametrize("kill_barrier", [True, False])
 @gen_cluster(
     client=True,
     worker_kwargs={
         "extensions": {"shuffle": BlockedRegisterCompleteShuffleWorkerExtension}
     },
 )
-async def test_closed_worker_during_final_register_complete(c, s, a, b):
+async def test_closed_worker_during_final_register_complete(c, s, a, b, kill_barrier):
+
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -560,19 +559,33 @@ async def test_closed_worker_during_final_register_complete(c, s, a, b):
     await shuffle_ext_a.in_register_complete.wait()
     await shuffle_ext_b.in_register_complete.wait()
 
-    shuffle_ext_a.block_register_complete.set()
-    while a.state.executing:
-        await asyncio.sleep(0.01)
-    await b.close(timeout=0.1)
+    shuffle_id = await get_shuffle_id(s)
+    barrier_key = f"shuffle-barrier-{shuffle_id}"
+    # TODO: properly parametrize over kill_barrier
+    if barrier_key in b.state.tasks:
+        shuffle_ext_a.block_register_complete.set()
+        while a.state.executing:
+            await asyncio.sleep(0.01)
+        b.batched_stream.abort()
+    else:
+        shuffle_ext_b.block_register_complete.set()
+        while b.state.executing:
+            await asyncio.sleep(0.01)
+        a.batched_stream.abort()
 
     with pytest.raises(RuntimeError, match="shuffle_unpack failed"):
         out = await c.compute(out)
 
     shuffle_ext_b.block_register_complete.set()
+
+    # something is holding on to refs of out s.t. we cannot release the futures.
+    # The shuffle will only be cleaned up once the tasks area released
+    await c.close()
     await wait_until_shuffles_closed(s)
     clean_worker(a)
     clean_worker(b)
     clean_scheduler(s)
+
 
 
 @gen_cluster(
@@ -601,11 +614,10 @@ async def test_closed_other_worker_during_final_register_complete(c, s, a, b):
     await b.close()
 
     shuffle_ext_a.block_register_complete.set()
-    with pytest.raises(
-        RuntimeError, match=f"shuffle_unpack failed because worker {b.address} left"
-    ):
+    with pytest.raises(RuntimeError):
         out = await c.compute(out)
 
+    del df, out
     await wait_until_shuffles_closed(s)
     clean_worker(a)
     clean_worker(b)
