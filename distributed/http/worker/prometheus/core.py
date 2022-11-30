@@ -146,7 +146,7 @@ class WorkerMetricCollector(PrometheusCollector):
 
         now = time()
         max_tick_duration = max(
-            self.server._max_tick_duration, now() - self.server._last_tick
+            self.server._max_tick_duration, now - self.server._last_tick
         )
         self.server._max_tick_duration = 0
         yield GaugeMetricFamily(
@@ -158,6 +158,7 @@ class WorkerMetricCollector(PrometheusCollector):
         yield CounterMetricFamily(
             self.build_name("tick_count_total"),
             "Total number of ticks observed since the server started",
+            value=self.server._tick_counter,
         )
 
 
