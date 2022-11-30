@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from time import time
+
 import prometheus_client
 import toolz
 from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
@@ -86,6 +88,22 @@ class SchedulerMetricCollector(PrometheusCollector):
             for state, count in tp.state_counts.items():
                 prefix_state_counts.add_metric([tp.name, state], count)
         yield prefix_state_counts
+
+        now = time()
+        max_tick_duration = max(
+            self.server._max_tick_duration, now() - self.server._last_tick
+        )
+        self.server._max_tick_duration = 0
+        yield GaugeMetricFamily(
+            self.build_name("tick_duration_maximum_seconds"),
+            "Maximum tick duration observed since Prometheus last scraped metrics",
+            value=max_tick_duration,
+        )
+
+        yield CounterMetricFamily(
+            self.build_name("tick_count_total"),
+            "Total number of ticks observed since the server started",
+        )
 
 
 COLLECTORS = [
