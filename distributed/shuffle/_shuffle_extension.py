@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     import pandas as pd
     import pyarrow as pa
 
-    from distributed.scheduler import Scheduler, TaskStateState, WorkerState
+    from distributed.scheduler import Recs, Scheduler, TaskStateState, WorkerState
     from distributed.worker import Worker
 
 ShuffleId = NewType("ShuffleId", str)
@@ -608,6 +608,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     completed_workers: dict[ShuffleId, set[str]]
     participating_workers: dict[ShuffleId, set[str]]
     erred_shuffles: dict[ShuffleId, Exception]
+    barriers: dict[ShuffleId, str]
     #: Mapping of shuffle IDs to ``asyncio.Event``s that are set once a shuffle
     #: is closed and properly cleaned up on the cluster
     _shuffle_closed_events: dict[ShuffleId, asyncio.Event]
@@ -640,11 +641,11 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             self.heartbeats[shuffle_id][ws.address].update(d)
 
     @classmethod
-    def barrier_key(cls, shuffle_id):
+    def barrier_key(cls, shuffle_id: ShuffleId) -> str:
         return "shuffle-barrier-" + shuffle_id
 
     @classmethod
-    def id_from_key(cls, key):
+    def id_from_key(cls, key: str) -> ShuffleId:
         assert "shuffle-barrier-" in key
         return ShuffleId(key.replace("shuffle-barrier-", ""))
 
@@ -702,7 +703,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         broadcasts = []
         from time import time
 
-        recs = {}
+        recs: Recs = {}
         stimulus_id = f"shuffle-failed-worker-left-{time()}"
         barriers = []
         for shuffle_id, shuffle_workers in self.participating_workers.items():
@@ -737,11 +738,21 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
                     dt.worker_restrictions.clear()
                     if dt.state == "no-worker":
                         recs.update({dt.key: "waiting"})
+                    elif dt.state == "processing":
+                        err_msg = error_message(RuntimeError("Worker removed"))
+                        self.scheduler.handle_task_erred(
+                            key=dt.key, stimulus_id=stimulus_id, **err_msg
+                        )
+                    elif dt.state == "erred":
+                        continue
                     else:
                         recs.update({dt.key: "released"})
-            else:
-                # TODO
-                raise NotImplementedError()
+            # elif barrier_task.state == "processing":
+            # err_msg = error_message(RuntimeError("Worker removed"))
+            # self.handle_task_erred(
+            # key=NameError, stimulus_id=stimulus_id, cause=name, **err_msg
+            # )
+            # TODO: Do we need to handle other states?
         self.scheduler.transitions(recs, stimulus_id=stimulus_id)
 
         # Assumption: No new shuffle tasks scheduled on the worker
@@ -749,8 +760,8 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         # All task-finished/task-errer are queued up in batched stream
 
         exceptions = [result for result in results if isinstance(result, Exception)]
-        # for shuffle_id in affected_shuffles:
-        #     self._close_on_scheduler(shuffle_id)
+        for shuffle_id in affected_shuffles:
+            self._close_on_scheduler(shuffle_id)
         if exceptions:
             # TODO: Do we need to handle errors here?
             raise RuntimeError(exceptions)
@@ -770,8 +781,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             return
 
         shuffle_id = ShuffleSchedulerExtension.id_from_key(key)
-        self._close_on_scheduler(shuffle_id)
-
+        self._clean_on_scheduler(shuffle_id)
 
     def register_complete(self, id: ShuffleId, worker: str) -> None:
         """Learn from a worker that it has completed all reads of a shuffle"""
@@ -782,8 +792,8 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             return
         self.completed_workers[id].add(worker)
 
-        # if self.output_workers[id].issubset(self.completed_workers[id]):
-        #     self._close_on_scheduler(id)
+        if self.output_workers[id].issubset(self.completed_workers[id]):
+            self._close_on_scheduler(id)
 
     def _close_on_scheduler(self, id: ShuffleId) -> None:
         """Closes a shuffle on the scheduler and removes state.
@@ -793,6 +803,9 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         """
         if self._shuffle_closed_events[id].is_set():
             return
+        self._shuffle_closed_events[id].set()
+
+    def _clean_on_scheduler(self, id: ShuffleId) -> None:
         del self.worker_for[id]
         del self.schemas[id]
         del self.columns[id]
@@ -801,7 +814,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         del self.participating_workers[id]
         with contextlib.suppress(KeyError):
             del self.heartbeats[id]
-        self._shuffle_closed_events[id].set()
 
 
 def get_worker_for(output_partition: int, workers: list[str], npartitions: int) -> str:
