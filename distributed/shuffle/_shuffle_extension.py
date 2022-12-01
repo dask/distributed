@@ -14,7 +14,7 @@ import toolz
 
 from dask.utils import parse_bytes
 
-from distributed.core import PooledRPCCall, error_message
+from distributed.core import PooledRPCCall
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.protocol import to_serialize
 from distributed.shuffle._arrow import (
@@ -735,23 +735,13 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         for barrier_task in barriers:
             if barrier_task.state == "memory":
                 for dt in barrier_task.dependents:
+                    if worker not in dt.worker_restrictions:
+                        continue
                     dt.worker_restrictions.clear()
                     if dt.state == "no-worker":
                         recs.update({dt.key: "waiting"})
-                    elif dt.state == "processing":
-                        err_msg = error_message(RuntimeError("Worker removed"))
-                        self.scheduler.handle_task_erred(
-                            key=dt.key, stimulus_id=stimulus_id, **err_msg
-                        )
-                    elif dt.state == "erred":
-                        continue
                     else:
                         recs.update({dt.key: "released"})
-            # elif barrier_task.state == "processing":
-            # err_msg = error_message(RuntimeError("Worker removed"))
-            # self.handle_task_erred(
-            # key=NameError, stimulus_id=stimulus_id, cause=name, **err_msg
-            # )
             # TODO: Do we need to handle other states?
         self.scheduler.transitions(recs, stimulus_id=stimulus_id)
 

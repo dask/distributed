@@ -517,7 +517,6 @@ async def test_crashed_worker_during_unpack(c, s, a):
         await n.process.process.kill()
         with pytest.raises(
             RuntimeError,
-            match="shuffle_unpack failed",
         ):
             out = await c.compute(out)
 
