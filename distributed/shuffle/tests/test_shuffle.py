@@ -14,7 +14,7 @@ import pytest
 
 import dask
 import dask.dataframe as dd
-from dask.distributed import Nanny, Worker
+from dask.distributed import Event, Nanny, Worker
 from dask.utils import stringify
 
 from distributed.core import PooledRPCCall
@@ -801,6 +801,59 @@ async def test_repeat(c, s, a, b):
     clean_worker(a)
     clean_worker(b)
     clean_scheduler(s)
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_crashed_worker_after_shuffle(c, s, a):
+    in_event = Event()
+    block_event = Event()
+
+    @dask.delayed
+    def block(df, in_event, block_event):
+        in_event.set()
+        block_event.wait()
+        return df
+
+    async with Nanny(s.address, nthreads=1) as n:
+        df = df = dask.datasets.timeseries(
+            start="2000-01-01",
+            end="2000-03-01",
+            dtypes={"x": float, "y": float},
+            freq="100 s",
+            seed=42,
+        )
+        out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+        in_event = Event()
+        block_event = Event()
+        with dask.annotate(workers=[n.worker_address], allow_other_workers=True):
+            out = block(out, in_event, block_event)
+        fut = c.compute(out)
+
+        await in_event.wait()
+        await n.process.process.kill()
+        block_event.set()
+        with pytest.raises(RuntimeError):
+            await fut
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_crashed_worker_after_shuffle_persisted(c, s, a):
+    async with Nanny(s.address, nthreads=1) as n:
+        df = df = dask.datasets.timeseries(
+            start="2000-01-01",
+            end="2000-03-01",
+            dtypes={"x": float, "y": float},
+            freq="100 s",
+            seed=42,
+        )
+        out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+        out = out.persist()
+        await c.compute(out)
+
+        await n.process.process.kill()
+
+        with pytest.raises(RuntimeError):
+            await c.compute(out.x.size)
 
 
 @pytest.mark.xfail
