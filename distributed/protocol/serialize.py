@@ -10,8 +10,10 @@ from types import ModuleType
 from typing import Any, Literal
 
 import msgpack
+import numpy as np
 
 import dask
+from dask import is_dask_collection
 from dask.base import normalize_token
 from dask.utils import typename
 
@@ -56,6 +58,8 @@ def dask_dumps(x, context=None):
 def dask_loads(header, frames):
     typ = pickle.loads(header["type-serialized"])
     loads = dask_deserialize.dispatch(typ)
+    if header.get("sub-header") is None:
+        return loads(header, frames)
     return loads(header["sub-header"], frames)
 
 
@@ -193,9 +197,66 @@ register_serialization_family("msgpack", msgpack_dumps, msgpack_loads)
 register_serialization_family("error", None, serialization_error_loads)
 
 
+def infer_if_recurse_to_serialize_list(x: list) -> bool:
+    """Determine how to serialize lists
+
+    The serialize() function takes a parameter iterate_collection, which determines
+    if we will recursively iterate into the collection, serializing each object indivdually
+    or if instead, we can serialize the entire collection at once using the "dask" serializer
+
+    If we can serialize the entire list at once, it allows us to leverage dask's
+    customer serializaiton logic for numpy arrays (Dask Dispatch) which will be much more performant
+    than recursively iterating into the collection.  However, we must be selective about this
+    since we sometimes pass keys to the task graph around (usually as strings) in lists.  These currently
+    expect iterate_collection=True
+
+    To be safe, we confine these to list that are all the same dtype, and contain either
+    Python ints or floats
+
+
+    Lists that would return False and serialized with Dask Dispatch
+    ---------------------------------------------------------------
+    list(range(100))
+    [0.0, 1.2, 2.3]
+
+
+    Lists that would return True and be serialized recursively
+    ----------------------------------------------------------
+    [pd.Timestamp(2022), pd.Timestamp(2023)]
+    [0, "a", 2]
+    [[0,1], [2,3]]
+    [("a", "b"), ("b", "c")]
+    [0, 1.2, 3]
+    ["a", "b", "c"]
+    """
+
+    if len(x) == 0:
+        return False
+    first_val = x[0]
+    if is_dask_collection(first_val) or typename(type(first_val)) not in [
+        "int",
+        "float",
+    ]:
+        # Sometimes we get func.partial or pd.Timestamp objects
+        # from shuffle unit tests
+        return True
+    if all((type(i) is type(first_val)) for i in x):
+        return False
+    else:
+        # We default to serializing the list recursively with pickle
+        return True
+
+
 def check_dask_serializable(x):
+    """
+    This function sets the iterate_collection variable
+    for serialize
+    """
     if type(x) in (list, set, tuple) and len(x):
-        return check_dask_serializable(next(iter(x)))
+        if type(x) is list:
+            return infer_if_recurse_to_serialize_list(x)
+        else:
+            return check_dask_serializable(next(iter(x)))
     elif type(x) is dict and len(x):
         return check_dask_serializable(next(iter(x.items()))[1])
     else:
@@ -268,21 +329,26 @@ def serialize(  # type: ignore[no-untyped-def]
             serializers=serializers,
             on_error=on_error,
             context=context,
-            iterate_collection=True,
+            iterate_collection=None if type(x.data) is list else True,
         )
 
     # Note: don't use isinstance(), as it would match subclasses
     # (e.g. namedtuple, defaultdict) which however would revert to the base class on a
     # round-trip through msgpack
+
     if iterate_collection is None and type(x) in (list, set, tuple, dict):
-        if type(x) is list and "msgpack" in serializers:
-            # Note: "msgpack" will always convert lists to tuples
-            #       (see GitHub #3716), so we should iterate
-            #       through the list if "msgpack" comes before "pickle"
-            #       in the list of serializers.
-            iterate_collection = ("pickle" not in serializers) or (
-                serializers.index("pickle") > serializers.index("msgpack")
-            )
+        if type(x) is list:
+            if "msgpack" in serializers:
+                # Note: "msgpack" will always convert lists to tuples
+                #       (see GitHub #3716), so we should iterate
+                #       through the list if "msgpack" comes before "pickle"
+                #       in the list of serializers.
+                iterate_collection = ("pickle" not in serializers) or (
+                    serializers.index("pickle") > serializers.index("msgpack")
+                )
+            else:
+                iterate_collection = infer_if_recurse_to_serialize_list(x)
+
         if not iterate_collection:
             # Check for "dask"-serializable data in dict/list/set
             iterate_collection = check_dask_serializable(x)
@@ -298,9 +364,9 @@ def serialize(  # type: ignore[no-untyped-def]
 
     if (
         type(x) in (list, set, tuple)
-        and iterate_collection
+        and iterate_collection is True
         or type(x) is dict
-        and iterate_collection
+        and iterate_collection is True
         and dict_safe
     ):
         if isinstance(x, dict):
@@ -315,7 +381,11 @@ def serialize(  # type: ignore[no-untyped-def]
             assert isinstance(x, (list, set, tuple))
             headers_frames = [
                 serialize(
-                    obj, serializers=serializers, on_error=on_error, context=context
+                    obj,
+                    serializers=serializers,
+                    on_error=on_error,
+                    context=context,
+                    iterate_collection=iterate_collection,
                 )
                 for obj in x
             ]
@@ -804,6 +874,21 @@ def _deserialize_memoryview(header, frames):
         assert out.shape == header["shape"]
 
     return out
+
+
+@dask_serialize.register(list)
+def _serialize_list_as_ndarray(x):
+    first_type = type(x[0])
+    x = np.array(x, dtype=first_type)
+    header, frames = dask_serialize(x)
+    header["type-serialized"] = pickle.dumps(type(x))
+    return header, frames
+
+
+@dask_deserialize.register(list)
+def _deserialize_list_from_ndarray(header, frames):
+    x = dask_loads(header, frames)
+    return x.tolist()
 
 
 #########################
