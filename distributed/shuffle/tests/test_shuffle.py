@@ -195,7 +195,7 @@ async def get_shuffle_id(scheduler: Scheduler) -> ShuffleId:
     return next(iter(shuffle_ids))
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_worker_during_transfer(c, s, a, b):
 
     df = dask.datasets.timeseries(
@@ -221,9 +221,9 @@ async def test_closed_worker_during_transfer(c, s, a, b):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("", 2)])
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_crashed_worker_during_transfer(c, s, a):
-    async with Nanny(s.address, nthreads=2) as n:
+    async with Nanny(s.address, nthreads=1) as n:
         killed_worker_address = n.worker_address
         df = dask.datasets.timeseries(
             start="2000-01-01",
@@ -249,7 +249,7 @@ async def test_crashed_worker_during_transfer(c, s, a):
 
 
 # TODO: Deduplicate instead of failing: distributed#7324
-@gen_cluster(client=True)
+@gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_input_only_worker_during_transfer(c, s, a, b):
     def mock_get_worker_for(
         output_partition: int, workers: list[str], npartitions: int
@@ -261,7 +261,7 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
     ):
         df = dask.datasets.timeseries(
             start="2000-01-01",
-            end="2000-03-01",
+            end="2000-05-01",
             dtypes={"x": float, "y": float},
             freq="10 s",
         )
@@ -270,9 +270,7 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
         await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b, 0.001)
         await b.close()
 
-        with raises_with_cause(
-            RuntimeError, "shuffle_transfer failed", RuntimeError, b.address
-        ):
+        with pytest.raises(RuntimeError):
             out = await c.compute(out)
 
         await wait_until_shuffles_closed(s)
@@ -283,7 +281,7 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
 
 # TODO: Deduplicate instead of failing: distributed#7324
 @pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("", 2)])
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_crashed_input_only_worker_during_transfer(c, s, a):
     def mock_get_worker_for(
         output_partition: int, workers: list[str], npartitions: int
@@ -293,7 +291,7 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
     with mock.patch(
         "distributed.shuffle._shuffle_extension.get_worker_for", mock_get_worker_for
     ):
-        async with Nanny(s.address, nthreads=2) as n:
+        async with Nanny(s.address, nthreads=1) as n:
             killed_worker_address = n.worker_address
             df = dask.datasets.timeseries(
                 start="2000-01-01",
@@ -308,12 +306,7 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
             )
             await n.process.process.kill()
 
-            with raises_with_cause(
-                RuntimeError,
-                "shuffle_transfer failed",
-                Exception,
-                killed_worker_address,
-            ):
+            with pytest.raises(RuntimeError):
                 out = await c.compute(out)
 
             await wait_until_shuffles_closed(s)
@@ -361,7 +354,7 @@ class BlockedInputsDoneShuffle(Shuffle):
 
 
 @mock.patch("distributed.shuffle._shuffle_extension.Shuffle", BlockedInputsDoneShuffle)
-@gen_cluster(client=True)
+@gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_worker_during_barrier(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -405,7 +398,7 @@ async def test_closed_worker_during_barrier(c, s, a, b):
 
 
 @mock.patch("distributed.shuffle._shuffle_extension.Shuffle", BlockedInputsDoneShuffle)
-@gen_cluster(client=True)
+@gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_other_worker_during_barrier(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -449,9 +442,9 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
 
 @pytest.mark.slow
 @mock.patch("distributed.shuffle._shuffle_extension.Shuffle", BlockedInputsDoneShuffle)
-@gen_cluster(client=True, nthreads=[("", 2)])
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_crashed_other_worker_during_barrier(c, s, a):
-    async with Nanny(s.address, nthreads=2) as n:
+    async with Nanny(s.address, nthreads=1) as n:
         df = dask.datasets.timeseries(
             start="2000-01-01",
             end="2000-01-10",
@@ -478,7 +471,7 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
         clean_scheduler(s)
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_worker_during_unpack(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -543,6 +536,7 @@ class BlockedRegisterCompleteShuffleWorkerExtension(ShuffleWorkerExtension):
     worker_kwargs={
         "extensions": {"shuffle": BlockedRegisterCompleteShuffleWorkerExtension}
     },
+    nthreads=[("", 1)] * 2,
 )
 async def test_closed_worker_during_final_register_complete(c, s, a, b, kill_barrier):
 
@@ -592,6 +586,7 @@ async def test_closed_worker_during_final_register_complete(c, s, a, b, kill_bar
     worker_kwargs={
         "extensions": {"shuffle": BlockedRegisterCompleteShuffleWorkerExtension}
     },
+    nthreads=[("", 1)] * 2,
 )
 async def test_closed_other_worker_during_final_register_complete(c, s, a, b):
     df = dask.datasets.timeseries(
