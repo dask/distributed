@@ -802,6 +802,9 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         del self.output_workers[id]
         del self.completed_workers[id]
         del self.participating_workers[id]
+        del self.erred_shuffles[id]
+        del self._shuffle_closed_events[id]
+        del self.barriers[id]
         with contextlib.suppress(KeyError):
             del self.heartbeats[id]
 
