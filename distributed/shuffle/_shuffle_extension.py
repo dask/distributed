@@ -344,7 +344,6 @@ class ShuffleWorkerExtension:
 
     worker: Worker
     shuffles: dict[ShuffleId, Shuffle]
-    erred_shuffles: dict[ShuffleId, Exception]
     memory_limiter_comms: ResourceLimiter
     memory_limiter_disk: ResourceLimiter
     closed: bool
@@ -359,7 +358,6 @@ class ShuffleWorkerExtension:
         # Initialize
         self.worker = worker
         self.shuffles = {}
-        self.erred_shuffles = {}
         self.memory_limiter_comms = ResourceLimiter(parse_bytes("100 MiB"))
         self.memory_limiter_disk = ResourceLimiter(parse_bytes("1 GiB"))
         self.closed = False
@@ -396,18 +394,18 @@ class ShuffleWorkerExtension:
                 # `get_output_partition` will never be called.
                 # This happens when there are fewer output partitions than workers.
                 assert shuffle._disk_buffer.empty
-                del self.shuffles[shuffle_id]
                 logger.critical(f"Shuffle inputs done {shuffle}")
                 await self._register_complete(shuffle)
+                del self.shuffles[shuffle_id]
 
     async def shuffle_fail(self, shuffle_id: ShuffleId, message: str) -> None:
         try:
-            shuffle = self.shuffles.pop(shuffle_id)
+            shuffle = self.shuffles[shuffle_id]
         except KeyError:
             return
         exception = RuntimeError(message)
-        self.erred_shuffles[shuffle_id] = exception
         await shuffle.fail(exception)
+        del self.shuffles[shuffle_id]
 
     def add_partition(
         self,
@@ -469,10 +467,8 @@ class ShuffleWorkerExtension:
         "Get a shuffle by ID; raise ValueError if it's not registered."
         import pyarrow as pa
 
-        if exception := self.erred_shuffles.get(shuffle_id):
-            raise exception
         try:
-            return self.shuffles[shuffle_id]
+            shuffle = self.shuffles[shuffle_id]
         except KeyError:
             try:
                 result = await self.worker.scheduler.shuffle_get(
@@ -521,6 +517,10 @@ class ShuffleWorkerExtension:
                     )
                     self.shuffles[shuffle_id] = shuffle
                 return self.shuffles[shuffle_id]
+        else:
+            if shuffle._exception:
+                raise shuffle._exception
+            return shuffle
 
     async def close(self) -> None:
         assert not self.closed
