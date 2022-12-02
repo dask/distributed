@@ -324,10 +324,9 @@ class Shuffle:
             self.executor.shutdown()
         self._closed_event.set()
 
-    async def fail(self, exception: Exception) -> None:
+    def fail(self, exception: Exception) -> None:
         if not self.closed:
             self._exception = exception
-        await self.close()
 
 
 class ShuffleWorkerExtension:
@@ -404,7 +403,8 @@ class ShuffleWorkerExtension:
         except KeyError:
             return
         exception = RuntimeError(message)
-        await shuffle.fail(exception)
+        shuffle.fail(exception)
+        await shuffle.close()
         del self.shuffles[shuffle_id]
 
     def add_partition(
