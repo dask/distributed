@@ -32,20 +32,22 @@ from distributed.shuffle._shuffle_extension import (
     split_by_partition,
     split_by_worker,
 )
-from distributed.utils_test import (
-    gen_cluster,
-    gen_test,
-    raises_with_cause,
-    wait_for_state,
-)
+from distributed.utils_test import gen_cluster, gen_test, wait_for_state
 from distributed.worker_state_machine import TaskState as WorkerTaskState
 
 pa = pytest.importorskip("pyarrow")
 
 
-def clean_worker(worker):
+async def wait_until_shuffles_forgotten(
+    scheduler: Scheduler, interval: float = 0.01
+) -> None:
+    extension = scheduler.extensions["shuffle"]
+    while extension.worker_for:
+        await asyncio.sleep(interval)
+
+
+def clean_worker(worker: Worker, interval: float = 0.01) -> None:
     """Assert that the worker has no shuffle state"""
-    assert not worker.extensions["shuffle"].shuffles
     for dirpath, dirnames, filenames in os.walk(worker.local_directory):
         assert "shuffle" not in dirpath
         for fn in dirnames + filenames:
@@ -53,15 +55,14 @@ def clean_worker(worker):
 
 
 def clean_scheduler(scheduler):
-    return
     """Assert that the scheduler has no shuffle state"""
-    # assert not scheduler.extensions["shuffle"].worker_for
-    # assert not scheduler.extensions["shuffle"].heartbeats
-    # assert not scheduler.extensions["shuffle"].schemas
-    # assert not scheduler.extensions["shuffle"].columns
-    # assert not scheduler.extensions["shuffle"].output_workers
-    # assert not scheduler.extensions["shuffle"].completed_workers
-    # assert not scheduler.extensions["shuffle"].participating_workers
+    assert not scheduler.extensions["shuffle"].worker_for
+    assert not scheduler.extensions["shuffle"].heartbeats
+    assert not scheduler.extensions["shuffle"].schemas
+    assert not scheduler.extensions["shuffle"].columns
+    assert not scheduler.extensions["shuffle"].output_workers
+    assert not scheduler.extensions["shuffle"].completed_workers
+    assert not scheduler.extensions["shuffle"].participating_workers
 
 
 @gen_cluster(client=True)
@@ -80,6 +81,7 @@ async def test_basic_integration(c, s, a, b):
 
     clean_worker(a)
     clean_worker(b)
+    await wait_until_shuffles_forgotten(s)
     clean_scheduler(s)
 
 
@@ -100,6 +102,7 @@ async def test_concurrent(c, s, a, b):
 
     clean_worker(a)
     clean_worker(b)
+    await wait_until_shuffles_forgotten(s)
     clean_scheduler(s)
 
 
@@ -122,20 +125,13 @@ async def test_bad_disk(c, s, a, b):
     while not b.extensions["shuffle"].shuffles:
         await asyncio.sleep(0.01)
     shutil.rmtree(b.local_directory)
-    with pytest.raises(
-        RuntimeError, match=f"shuffle_transfer failed .* {shuffle_id}"
-    ) as exc_info:
+    with pytest.raises(RuntimeError, match=f"shuffle_transfer failed .* {shuffle_id}"):
         out = await c.compute(out)
 
-    cause = exc_info.value.__cause__
-    assert isinstance(cause, FileNotFoundError)
-    assert os.path.split(a.local_directory)[-1] in str(cause) or os.path.split(
-        b.local_directory
-    )[-1] in str(cause)
-
-    # clean_worker(a)  # TODO: clean up on exception
-    # clean_worker(b)  # TODO: clean up on exception
-    # clean_scheduler(s)
+    await c.close()
+    clean_worker(a)
+    clean_worker(b)
+    clean_scheduler(s)
 
 
 async def wait_until_worker_has_tasks(
@@ -178,14 +174,6 @@ async def wait_for_tasks_in_state(
         await asyncio.sleep(interval)
 
 
-async def wait_until_shuffles_closed(scheduler: Scheduler) -> None:
-    scheduler_extension = scheduler.extensions["shuffle"]
-    waits = []
-    for ev in scheduler_extension._shuffle_closed_events.values():
-        waits.append(ev.wait())
-    await asyncio.gather(*waits)
-
-
 async def get_shuffle_id(scheduler: Scheduler) -> ShuffleId:
     scheduler_extension = scheduler.extensions["shuffle"]
     while not scheduler_extension.shuffle_ids():
@@ -209,12 +197,10 @@ async def test_closed_worker_during_transfer(c, s, a, b):
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
     await b.close()
 
-    with raises_with_cause(
-        RuntimeError, "shuffle_transfer failed", RuntimeError, b.address
-    ):
+    with pytest.raises(RuntimeError):
         out = await c.compute(out)
 
-    await wait_until_shuffles_closed(s)
+    await c.close()
     clean_worker(a)
     clean_worker(b)
     clean_scheduler(s)
@@ -238,12 +224,10 @@ async def test_crashed_worker_during_transfer(c, s, a):
         )
         await n.process.process.kill()
 
-        with raises_with_cause(
-            RuntimeError, "shuffle_transfer failed", Exception, killed_worker_address
-        ):
+        with pytest.raises(RuntimeError):
             out = await c.compute(out)
 
-        await wait_until_shuffles_closed(s)
+        await c.close()
         clean_worker(a)
         clean_scheduler(s)
 
@@ -273,7 +257,7 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
         with pytest.raises(RuntimeError):
             out = await c.compute(out)
 
-        await wait_until_shuffles_closed(s)
+        await c.close()
         clean_worker(a)
         clean_worker(b)
         clean_scheduler(s)
@@ -309,7 +293,7 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
             with pytest.raises(RuntimeError):
                 out = await c.compute(out)
 
-            await wait_until_shuffles_closed(s)
+            await c.close()
             clean_worker(a)
             clean_scheduler(s)
 
@@ -386,12 +370,10 @@ async def test_closed_worker_during_barrier(c, s, a, b):
 
     alive_shuffle.block_inputs_done.set()
 
-    with raises_with_cause(
-        RuntimeError, "shuffle_transfer failed", Exception, close_worker.address
-    ):
+    with pytest.raises(RuntimeError):
         out = await c.compute(out)
 
-    await wait_until_shuffles_closed(s)
+    await c.close()
     clean_worker(a)
     clean_worker(b)
     clean_scheduler(s)
@@ -434,7 +416,7 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
     with pytest.raises(RuntimeError, match="shuffle_barrier failed"):
         out = await c.compute(out)
 
-    await wait_until_shuffles_closed(s)
+    await c.close()
     clean_worker(a)
     clean_worker(b)
     clean_scheduler(s)
@@ -466,7 +448,7 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
         with pytest.raises(RuntimeError, match="shuffle"):
             out = await c.compute(out)
 
-        await wait_until_shuffles_closed(s)
+        await c.close()
         clean_worker(a)
         clean_scheduler(s)
 
@@ -487,7 +469,7 @@ async def test_closed_worker_during_unpack(c, s, a, b):
     with pytest.raises(RuntimeError):
         out = await c.compute(out)
 
-    await wait_until_shuffles_closed(s)
+    await c.close()
     clean_worker(a)
     clean_worker(b)
     clean_scheduler(s)
@@ -513,7 +495,7 @@ async def test_crashed_worker_during_unpack(c, s, a):
         ):
             out = await c.compute(out)
 
-        await wait_until_shuffles_closed(s)
+        await c.close()
         clean_worker(a)
         clean_scheduler(s)
 
@@ -575,7 +557,6 @@ async def test_closed_worker_during_final_register_complete(c, s, a, b, kill_bar
     # something is holding on to refs of out s.t. we cannot release the futures.
     # The shuffle will only be cleaned up once the tasks area released
     await c.close()
-    await wait_until_shuffles_closed(s)
     clean_worker(a)
     clean_worker(b)
     clean_scheduler(s)
@@ -611,8 +592,7 @@ async def test_closed_other_worker_during_final_register_complete(c, s, a, b):
     with pytest.raises(RuntimeError):
         out = await c.compute(out)
 
-    del df, out
-    await wait_until_shuffles_closed(s)
+    await c.close()
     clean_worker(a)
     clean_worker(b)
     clean_scheduler(s)
@@ -640,6 +620,8 @@ async def test_heartbeat(c, s, a, b):
 
     clean_worker(a)
     clean_worker(b)
+    del out
+    await wait_until_shuffles_forgotten(s)
     clean_scheduler(s)
 
 
@@ -734,6 +716,8 @@ async def test_head(c, s, a, b):
 
     clean_worker(a)
     clean_worker(b)
+    del out
+    await wait_until_shuffles_forgotten(s)
     clean_scheduler(s)
 
 
@@ -767,6 +751,7 @@ async def test_tail(c, s, a, b):
 
     clean_worker(a)
     clean_worker(b)
+    await wait_until_shuffles_forgotten(s)
     clean_scheduler(s)
 
 
@@ -783,18 +768,21 @@ async def test_repeat(c, s, a, b):
 
     clean_worker(a)
     clean_worker(b)
+    await wait_until_shuffles_forgotten(s)
     clean_scheduler(s)
 
     await c.compute(out.tail(compute=False))
 
     clean_worker(a)
     clean_worker(b)
+    await wait_until_shuffles_forgotten(s)
     clean_scheduler(s)
 
     await c.compute(out.head(compute=False))
 
     clean_worker(a)
     clean_worker(b)
+    await wait_until_shuffles_forgotten(s)
     clean_scheduler(s)
 
 
@@ -830,6 +818,10 @@ async def test_crashed_worker_after_shuffle(c, s, a):
         with pytest.raises(RuntimeError):
             await fut
 
+        await c.close()
+        clean_worker(a)
+        clean_scheduler(s)
+
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_crashed_worker_after_shuffle_persisted(c, s, a):
@@ -850,6 +842,10 @@ async def test_crashed_worker_after_shuffle_persisted(c, s, a):
         with pytest.raises(RuntimeError):
             await c.compute(out.x.size)
 
+        await c.close()
+        clean_worker(a)
+        clean_scheduler(s)
+
 
 @pytest.mark.xfail
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)
@@ -867,6 +863,7 @@ async def test_closed_worker_between_repeats(c, s, w1, w2, w3):
     clean_worker(w1)
     clean_worker(w2)
     clean_worker(w3)
+    await wait_until_shuffles_forgotten(s)
     clean_scheduler(s)
 
     await w3.close()
@@ -874,11 +871,13 @@ async def test_closed_worker_between_repeats(c, s, w1, w2, w3):
 
     clean_worker(w1)
     clean_worker(w2)
+    await wait_until_shuffles_forgotten(s)
     clean_scheduler(s)
 
     await w2.close()
     await c.compute(out.head(compute=False))
     clean_worker(w1)
+    await wait_until_shuffles_forgotten(s)
     clean_scheduler(s)
 
 
@@ -897,11 +896,13 @@ async def test_new_worker(c, s, a, b):
 
     async with Worker(s.address) as w:
 
-        out = await c.compute(persisted)
+        await c.compute(persisted)
 
         clean_worker(a)
         clean_worker(b)
         clean_worker(w)
+        del persisted
+        await wait_until_shuffles_forgotten(s)
         clean_scheduler(s)
 
 
@@ -928,6 +929,7 @@ async def test_multi(c, s, a, b):
 
     clean_worker(a)
     clean_worker(b)
+    await wait_until_shuffles_forgotten(s)
     clean_scheduler(s)
 
 
@@ -975,6 +977,7 @@ async def test_delete_some_results(c, s, a, b):
 
     clean_worker(a)
     clean_worker(b)
+    await wait_until_shuffles_forgotten(s)
     clean_scheduler(s)
 
 
@@ -998,6 +1001,9 @@ async def test_add_some_results(c, s, a, b):
 
     clean_worker(a)
     clean_worker(b)
+    del x
+    del y
+    await wait_until_shuffles_forgotten(s)
     clean_scheduler(s)
 
 
@@ -1017,7 +1023,6 @@ async def test_clean_after_close(c, s, a, b):
 
     await a.close()
     clean_worker(a)
-    await wait_until_shuffles_closed(s)
 
 
 class PooledRPCShuffle(PooledRPCCall):
