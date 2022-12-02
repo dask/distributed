@@ -45,8 +45,8 @@ def shuffle_transfer(
         _get_worker_extension().add_partition(
             input, id, npartitions=npartitions, column=column
         )
-    except Exception as e:
-        raise RuntimeError(f"shuffle_transfer failed during shuffle {id}") from e
+    except Exception:
+        raise RuntimeError(f"shuffle_transfer failed during shuffle {id}")
 
 
 def shuffle_unpack(
@@ -54,15 +54,15 @@ def shuffle_unpack(
 ) -> pd.DataFrame:
     try:
         return _get_worker_extension().get_output_partition(id, output_partition)
-    except Exception as e:
-        raise RuntimeError(f"shuffle_unpack failed during shuffle {id}") from e
+    except Exception:
+        raise RuntimeError(f"shuffle_unpack failed during shuffle {id}")
 
 
 def shuffle_barrier(id: ShuffleId, transfers: list[None]) -> None:
     try:
         return _get_worker_extension().barrier(id)
-    except Exception as e:
-        raise RuntimeError(f"shuffle_barrier failed during shuffle {id}") from e
+    except Exception:
+        raise RuntimeError(f"shuffle_barrier failed during shuffle {id}")
 
 
 def rearrange_by_column_p2p(
