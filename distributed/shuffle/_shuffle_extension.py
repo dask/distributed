@@ -634,7 +634,8 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
 
     def heartbeat(self, ws: WorkerState, data: dict) -> None:
         for shuffle_id, d in data.items():
-            self.heartbeats[shuffle_id][ws.address].update(d)
+            if shuffle_id in self.output_workers:
+                self.heartbeats[shuffle_id][ws.address].update(d)
 
     @classmethod
     def barrier_key(cls, shuffle_id: ShuffleId) -> str:
