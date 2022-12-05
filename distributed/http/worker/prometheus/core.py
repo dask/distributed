@@ -40,7 +40,12 @@ class WorkerMetricCollector(PrometheusCollector):
             labels=["state"],
         )
         for k, n in ws.task_counts.items():
-            tasks.add_metric([k], n)
+            if k == "memory" and hasattr(self.server.data, "slow"):
+                n_spilled = len(self.server.data.slow)
+                tasks.add_metric(["memory"], n - n_spilled)
+                tasks.add_metric(["disk"], n_spilled)
+            else:
+                tasks.add_metric([k], n)
         yield tasks
 
         yield GaugeMetricFamily(
@@ -166,14 +171,102 @@ class WorkerMetricCollector(PrometheusCollector):
         )
 
     def collect_spillbuffer(self) -> Iterator[Metric]:
+        """SpillBuffer-specific metrics.
+
+        Additionally, you can obtain derived metrics as follows:
+
+        cache hit ratios:
+          by keys  = spill_count_total.memory_read / (spill_count_total.memory_read + spill_count_total.disk_read)
+          by bytes = spill_bytes_total.memory_read / (spill_bytes_total.memory_read + spill_bytes_total.disk_read)
+
+        mean times per key:
+          pickle   = spill_time_total.pickle     / spill_count_total.disk_write
+          write    = spill_time_total.disk_write / spill_count_total.disk_write
+          unpickle = spill_time_total.unpickle   / spill_count_total.disk_read
+          read     = spill_time_total.disk_read  / spill_count_total.disk_read
+
+        mean bytes per key:
+          write    = spill_bytes_total.disk_write / spill_count_total.disk_write
+          read     = spill_bytes_total.disk_read  / spill_count_total.disk_read
+
+        mean bytes per second:
+          write    = spill_bytes_total.disk_write / spill_time_total.disk_write
+          read     = spill_bytes_total.disk_read  / spill_time_total.disk_read
+        """
         try:
             get_metrics = self.server.data.get_metrics  # type: ignore
         except AttributeError:
             return  # spilling is disabled
         metrics = get_metrics()
 
-        # TODO
-        yield from []
+        total_bytes = CounterMetricFamily(
+            self.build_name("spill_bytes_total"),
+            "Total size of memory and disk accesses caused by managed data "
+            "since the latest worker restart",
+            labels=["event"],
+        )
+        # Note: memory_read is used to calculate cache hit ratios (see docstring)
+        for k in ("memory_read", "disk_read", "disk_write"):
+            total_bytes.add_metric([k], metrics[f"{k}_bytes_total"])
+
+        total_counts = CounterMetricFamily(
+            self.build_name("spill_count_total"),
+            "Total number of memory and disk accesses caused by managed data "
+            "since the latest worker restart",
+            labels=["event"],
+        )
+        # Note: memory_read is used to calculate cache hit ratios (see docstring)
+        for k in ("memory_read", "disk_read", "disk_write"):
+            total_counts.add_metric([k], metrics[f"{k}_count_total"])
+
+        total_times = CounterMetricFamily(
+            self.build_name("spill_time_total"),
+            "Total time spent spilling/unspilling since the latest worker restart",
+            labels=["event"],
+        )
+        for k in ("pickle", "disk_write", "disk_read", "unpickle"):
+            total_times.add_metric([k], metrics[f"{k}_time_total"])
+        yield total_times
+
+        max_times = GaugeMetricFamily(
+            self.build_name("spill_time_per_key_max"),
+            "Maximum time spent spilling/unspilling a single key "
+            "since the latest worker restart",
+            labels=["event"],
+        )
+        for k in ("pickle", "disk_write", "disk_read", "unpickle"):
+            max_times.add_metric([k], metrics[f"{k}_time_per_key_max"])
+        yield max_times
+
+        max_counts = GaugeMetricFamily(
+            self.build_name("memory_count_max"),
+            "Maximum number of keys in memory since the latest worker restart",
+            labels=["where"],
+        )
+        max_counts.add_metric(["memory"], metrics["memory_count_max"])
+        max_counts.add_metric(["disk"], metrics["disk_count_max"])
+        max_counts.add_metric(["total"], metrics["count_max"])
+        yield max_counts
+
+        max_bytes = GaugeMetricFamily(
+            self.build_name("memory_bytes_max"),
+            "Maximum bytes worth of keys in memory since the latest worker restart",
+            labels=["where"],
+        )
+        max_bytes.add_metric(["memory"], metrics["memory_bytes_max"])
+        max_bytes.add_metric(["disk"], metrics["disk_bytes_max"])
+        max_bytes.add_metric(["total"], metrics["bytes_max"])
+        yield max_bytes
+
+        max_bytes_per_key = GaugeMetricFamily(
+            self.build_name("memory_per_key_bytes_max"),
+            "Maximum bytes used by a single key in memory "
+            "since the latest worker restart",
+            labels=["where"],
+        )
+        max_bytes_per_key.add_metric(["memory"], metrics["memory_bytes_per_key_max"])
+        max_bytes_per_key.add_metric(["disk"], metrics["disk_bytes_per_key_max"])
+        yield max_bytes_per_key
 
 
 class PrometheusHandler(RequestHandler):

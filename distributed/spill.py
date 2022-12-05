@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import math
 import time
 from collections.abc import Iterator, Mapping, MutableMapping, Sized
 from contextlib import contextmanager
@@ -348,6 +347,28 @@ class SpillBuffer(zict.Buffer):
         return self._slow_uncached.total_weight
 
     def get_metrics(self) -> dict[str, float]:
+        """Metrics to be exported to Prometheus or to be parsed directly.
+
+        From these you may generate derived metrics:
+
+        cache hit ratio:
+          by keys  = memory_read_count_total / (memory_read_count_total + disk_read_count_total)
+          by bytes = memory_read_bytes_total / (memory_read_bytes_total + disk_read_bytes_total)
+
+        mean times per key:
+          pickle   = pickle_time_total     / disk_write_count_total
+          write    = disk_write_time_total / disk_write_count_total
+          unpickle = unpickle_time_total   / disk_read_count_total
+          read     = disk_read_time_total  / disk_read_count_total
+
+        mean bytes per key:
+          write    = disk_write_bytes_total / disk_write_count_total
+          read     = disk_read_bytes_total  / disk_read_count_total
+
+        mean bytes per second:
+          write    = disk_write_bytes_total / disk_write_time_total
+          read     = disk_read_bytes_total  / disk_read_time_total
+        """
         fm = self.fast_metrics
         sm = self._slow_uncached.metrics
 
@@ -358,28 +379,6 @@ class SpillBuffer(zict.Buffer):
             "memory_bytes": self.fast.total_weight,
             "disk_count": len(self.slow),
             "disk_bytes": self._slow_uncached.total_weight.disk,
-            # Derived measures
-            "bytes_per_key_max": max(fm.bytes_per_key_max, sm.bytes_per_key_max),
-            "cache_hit_count_ratio": fm.read_count_total
-            / ((fm.read_count_total + sm.read_count_total) or math.nan),
-            "cache_hit_bytes_ratio": fm.read_bytes_total
-            / ((fm.read_bytes_total + sm.read_bytes_total) or math.nan),
-            "disk_read_bytes_per_key_mean": sm.read_bytes_total
-            / (sm.read_count_total or math.nan),
-            "disk_read_time_per_key_mean": sm.read_time_total
-            / (sm.read_count_total or math.nan),
-            "disk_read_bps_mean": sm.read_bytes_total
-            / (sm.read_time_total or math.nan),
-            "disk_write_bytes_per_key_mean": sm.write_bytes_total
-            / (sm.write_count_total or math.nan),
-            "disk_write_time_per_key_mean": sm.write_time_total
-            / (sm.write_count_total or math.nan),
-            "disk_write_bps_mean": sm.write_bytes_total
-            / (sm.write_time_total or math.nan),
-            "pickle_time_per_key_mean": sm.pickle_time_total
-            / (sm.write_count_total or math.nan),
-            "unpickle_time_per_key_mean": sm.unpickle_time_total
-            / (sm.read_count_total or math.nan),
         }
         for k, v in fm.__dict__.items():
             out[f"memory_{k}"] = v
