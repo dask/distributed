@@ -197,7 +197,7 @@ class WorkerMetricCollector(PrometheusCollector):
             get_metrics = self.server.data.get_metrics  # type: ignore
         except AttributeError:
             return  # spilling is disabled
-        metrics = get_metrics()
+        metrics = get_metrics(reset_max=True)
 
         total_bytes = CounterMetricFamily(
             self.build_name("spill_bytes_total"),
@@ -231,7 +231,7 @@ class WorkerMetricCollector(PrometheusCollector):
         max_times = GaugeMetricFamily(
             self.build_name("spill_time_per_key_max"),
             "Maximum time spent spilling/unspilling a single key "
-            "since the latest worker restart",
+            "since the previous poll",
             labels=["event"],
         )
         for k in ("pickle", "disk_write", "disk_read", "unpickle"):
@@ -240,7 +240,7 @@ class WorkerMetricCollector(PrometheusCollector):
 
         max_counts = GaugeMetricFamily(
             self.build_name("memory_count_max"),
-            "Maximum number of keys in memory since the latest worker restart",
+            "Maximum number of keys in memory since the previous poll",
             labels=["where"],
         )
         max_counts.add_metric(["memory"], metrics["memory_count_max"])
@@ -250,7 +250,7 @@ class WorkerMetricCollector(PrometheusCollector):
 
         max_bytes = GaugeMetricFamily(
             self.build_name("memory_bytes_max"),
-            "Maximum bytes worth of keys in memory since the latest worker restart",
+            "Maximum bytes worth of keys in memory since the previous poll",
             labels=["where"],
         )
         max_bytes.add_metric(["memory"], metrics["memory_bytes_max"])
@@ -260,8 +260,7 @@ class WorkerMetricCollector(PrometheusCollector):
 
         max_bytes_per_key = GaugeMetricFamily(
             self.build_name("memory_per_key_bytes_max"),
-            "Maximum bytes used by a single key in memory "
-            "since the latest worker restart",
+            "Maximum bytes used by a single key in memory since the previous poll",
             labels=["where"],
         )
         max_bytes_per_key.add_metric(["memory"], metrics["memory_bytes_per_key_max"])

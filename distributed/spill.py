@@ -68,8 +68,11 @@ class ManualEvictProto(Protocol):
 
 @dataclass
 class FastMetrics:
+    # Cumulative metrics since the latest worker restart
     read_count_total: int = 0
     read_bytes_total: int = 0
+    # Maximum metrics since the previous Prometheus poll.
+    # If Prometheus is not running, then they're since the latest worker restart.
     count_max: int = 0
     bytes_max: int = 0
     bytes_per_key_max: int = 0
@@ -86,6 +89,7 @@ class FastMetrics:
 
 @dataclass
 class SlowMetrics:
+    # Cumulative metrics since the latest worker restart
     read_count_total: int = 0
     read_bytes_total: int = 0
     read_time_total: float = 0
@@ -95,6 +99,8 @@ class SlowMetrics:
     pickle_time_total: float = 0
     unpickle_time_total: float = 0
 
+    # Maximum metrics since the previous Prometheus poll.
+    # If Prometheus is not running, then they're since the latest worker restart.
     count_max: int = 0
     bytes_max: int = 0
     bytes_per_key_max: int = 0
@@ -156,6 +162,9 @@ class SpillBuffer(zict.Buffer):
     min_log_interval: float
     logged_pickle_errors: set[str]
     fast_metrics: FastMetrics
+
+    # Maximum global metrics since the previous Prometheus poll.
+    # If Prometheus is not running, then they're since the latest worker restart.
     count_max: int
     bytes_max: int
 
@@ -346,7 +355,7 @@ class SpillBuffer(zict.Buffer):
         """
         return self._slow_uncached.total_weight
 
-    def get_metrics(self) -> dict[str, float]:
+    def get_metrics(self, reset_max: bool = False) -> dict[str, float]:
         """Metrics to be exported to Prometheus or to be parsed directly.
 
         From these you may generate derived metrics:
@@ -380,10 +389,18 @@ class SpillBuffer(zict.Buffer):
             "disk_count": len(self.slow),
             "disk_bytes": self._slow_uncached.total_weight.disk,
         }
+        if reset_max:
+            self.count_max = 0
+            self.bytes_max = 0
+
         for k, v in fm.__dict__.items():
             out[f"memory_{k}"] = v
+            if reset_max and k.endswith("_max"):
+                setattr(fm, k, 0)
         for k, v in sm.__dict__.items():
             out[k if "pickle" in k else f"disk_{k}"] = v
+            if reset_max and k.endswith("_max"):
+                setattr(sm, k, 0)
         return out
 
 
