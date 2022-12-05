@@ -4507,7 +4507,7 @@ class Scheduler(SchedulerState, ServerNode):
             ts.actor = True
 
         priority = priority or dask.order.order(
-            tasks
+            tasks, dependencies=dependencies
         )  # TODO: define order wrt old graph
 
         if submitting_task:  # sub-tasks get better priority than parent tasks
