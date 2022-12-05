@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import logging
 import os
 import time
@@ -158,21 +159,9 @@ class Shuffle:
 
     async def barrier(self) -> None:
         self.raise_if_closed()
-        # FIXME: This should restrict communication to only workers
-        # participating in this specific shuffle. This will not only reduce the
-        # number of workers we need to contact but will also simplify error
-        # handling, e.g. if a non-participating worker is not reachable in time
         # TODO: Consider broadcast pinging once when the shuffle starts to warm
         # up the comm pool on scheduler side
-        out = await self.broadcast(
-            msg={"op": "shuffle_inputs_done", "shuffle_id": self.id}
-        )
-        if not self.output_workers.issubset(set(out)):
-            raise ValueError(
-                "Some critical workers have left",
-                set(self.output_workers) - set(out),
-            )
-        # TODO handle errors from workers and scheduler, and cancellation.
+        await self.broadcast(msg={"op": "shuffle_inputs_done", "shuffle_id": self.id})
 
     async def send(self, address: str, shards: list[bytes]) -> None:
         self.raise_if_closed()
@@ -511,7 +500,9 @@ class ShuffleWorkerExtension:
                         nthreads=self.worker.state.nthreads,
                         local_address=self.worker.address,
                         rpc=self.worker.rpc,
-                        broadcast=self.worker.scheduler.broadcast,
+                        broadcast=functools.partial(
+                            self._broadcast_to_participants, shuffle_id
+                        ),
                         memory_limiter_disk=self.memory_limiter_disk,
                         memory_limiter_comms=self.memory_limiter_comms,
                     )
@@ -521,6 +512,14 @@ class ShuffleWorkerExtension:
             if shuffle._exception:
                 raise shuffle._exception
             return shuffle
+
+    async def _broadcast_to_participants(self, id: ShuffleId, msg: dict) -> dict:
+        participating_workers = (
+            await self.worker.scheduler.shuffle_get_participating_workers(id=id)
+        )
+        return await self.worker.scheduler.broadcast(
+            msg=msg, workers=participating_workers
+        )
 
     async def close(self) -> None:
         assert not self.closed
@@ -615,6 +614,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self.scheduler.handlers.update(
             {
                 "shuffle_get": self.get,
+                "shuffle_get_participating_workers": self.get_participating_workers,
                 "shuffle_register_complete": self.register_complete,
             }
         )
@@ -693,6 +693,9 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             "schema": self.schemas[id],
             "output_workers": self.output_workers[id],
         }
+
+    def get_participating_workers(self, id: ShuffleId) -> list[str]:
+        return list(self.participating_workers[id])
 
     async def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
         affected_shuffles = set()
