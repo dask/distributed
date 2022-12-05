@@ -1,15 +1,49 @@
 Changelog
 =========
 
+.. _v2022.12.0:
+
+2022.12.0
+---------
+
+Released on December 2, 2022
+
+Enhancements
+^^^^^^^^^^^^
+- Expose event loop health metrics in Prometheus (:pr:`7360`) `Hendrik Makait`_
+- Allow log propagation by default (:pr:`5669`) `Florian Jetter`_
+- Clean up of ``unpack_remotedata()``  (:pr:`7322`) `Mads R. B. Kristensen`_
+- Upgrade to ``tornado`` 6.2 (:pr:`7286`) `Thomas Grainger`_
+- Introduce ``Server`` level ``comm`` counters (:pr:`7332`) `Florian Jetter`_
+- Prometheus debug log (:pr:`7302`) `Florian Jetter`_
+
+Bug Fixes
+^^^^^^^^^
+- Catch ``BaseException`` s from user tasks (:pr:`5997`) `Gabe Joseph`_
+- Impossible use case of erred deps in transition to waiting (:pr:`7354`) `crusaderky`_
+- Fix a deadlock when queued tasks are resubmitted quickly in succession (:pr:`7348`) `Florian Jetter`_
+
+Documentation
+^^^^^^^^^^^^^
+- Editorial changes to Prometheus documentation (:pr:`7350`) `Hendrik Makait`_
+
+Maintenance
+^^^^^^^^^^^
+- Fetch all artifacts (:pr:`7355`) `Enrico Minack`_
+- Delay ``fsspec`` and ``urllib3`` import time (:pr:`6659`) `Florian Jetter`_
+- Bump ``mypy`` (:pr:`7349`) `crusaderky`_
+- Bump ``mypy`` and remove win specific run (:pr:`7344`) `Florian Jetter`_
+- Finish overhaul of ``SchedulerState`` annotations (:pr:`7333`) `crusaderky`_
+- Fix flaky ``test_pause_while_spilling`` (:pr:`7334`) `Gabe Joseph`_
+- Update gpuCI ``RAPIDS_VER`` to ``23.02`` (:pr:`7337`)
+
+
 .. _v2022.11.1:
 
 2022.11.1
 ---------
 
 Released on November 18, 2022
-
-New Features
-^^^^^^^^^^^^
 
 Enhancements
 ^^^^^^^^^^^^
@@ -4469,3 +4503,4 @@ significantly without many new features.
 .. _`Matthew Plough`: https://github.com/mplough-kobold
 .. _`Tom Hu`: https://github.com/thomasrockhu-codecov
 .. _`Richard Pelgrim`: https://github.com/rrpelgrim
+.. _`Enrico Minack`: https://github.com/EnricoMi

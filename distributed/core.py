@@ -394,9 +394,10 @@ class Server:
         self.periodic_callbacks["monitor"] = pc
 
         self._last_tick = time()
+        self._max_tick_duration = 0
         self._tick_counter = 0
-        self._tick_count = 0
-        self._tick_count_last = time()
+        self._last_tick_counter = 0
+        self._last_tick_cycle = time()
         self._tick_interval = parse_timedelta(
             dask.config.get("distributed.admin.tick.interval"), default="ms"
         )
@@ -416,7 +417,7 @@ class Server:
 
         self.io_loop.add_callback(set_thread_ident)
         self._startup_lock = asyncio.Lock()
-        self.__startup_exc: Exception | None = None
+        self.__startup_exc = None
 
         self.rpc = ConnectionPool(
             limit=connection_limit,
@@ -581,27 +582,32 @@ class Server:
 
     def _measure_tick(self):
         now = time()
-        diff = now - self._last_tick
+        tick_duration = now - self._last_tick
         self._last_tick = now
         self._tick_counter += 1
-        if diff > tick_maximum_delay:
+        # This metric is exposed in Prometheus and is reset there during
+        # collection
+        self._max_tick_duration = max(self._max_tick_duration, tick_duration)
+        if tick_duration > tick_maximum_delay:
             logger.info(
                 "Event loop was unresponsive in %s for %.2fs.  "
                 "This is often caused by long-running GIL-holding "
                 "functions or moving large chunks of data. "
                 "This can cause timeouts and instability.",
                 type(self).__name__,
-                diff,
+                tick_duration,
             )
         if self.digests is not None:
-            self.digests["tick-duration"].add(diff)
+            self.digests["tick-duration"].add(tick_duration)
 
     def _cycle_ticks(self):
         if not self._tick_counter:
             return
-        last, self._tick_count_last = self._tick_count_last, time()
-        count, self._tick_counter = self._tick_counter, 0
-        self._tick_interval_observed = (time() - last) / (count or 1)
+        now = time()
+        last_tick_cycle, self._last_tick_cycle = self._last_tick_cycle, now
+        count = self._tick_counter - self._last_tick_counter
+        self._last_tick_counter = self._tick_counter
+        self._tick_interval_observed = (now - last_tick_cycle) / (count or 1)
 
     @property
     def address(self) -> str:

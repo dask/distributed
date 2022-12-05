@@ -116,6 +116,9 @@ from distributed.utils_comm import (
 from distributed.utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.variable import VariableExtension
 
+# FIXME improve annotations. See also special treatment in setup.cfg.
+# mypy: disable-error-code=annotation-unchecked
+
 if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
     from typing_extensions import TypeAlias
@@ -1976,17 +1979,13 @@ class SchedulerState:
             assert not ts.waiting_on
             assert not ts.who_has
             assert not ts.processing_on
-            assert not any([dts.state == "forgotten" for dts in ts.dependencies])
+            for dts in ts.dependencies:
+                assert dts.state not in {"forgotten", "erred"}
 
         if ts.has_lost_dependencies:
             return {key: "forgotten"}, {}, {}
 
         ts.state = "waiting"
-
-        for dts in ts.dependencies:
-            if dts.exception_blame:
-                ts.exception_blame = dts.exception_blame
-                return {key: "erred"}, {}, {}
 
         recommendations: Recs = {}
 
@@ -4634,7 +4633,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         ws: WorkerState = self.workers[worker]
         ts: TaskState = self.tasks.get(key)
-        if ts is None or ts.state == "released":
+        if ts is None or ts.state in ("released", "queued"):
             logger.debug(
                 "Received already computed task, worker: %s, state: %s"
                 ", key: %s, who_has: %s",

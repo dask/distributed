@@ -6,6 +6,7 @@ import random
 from collections import defaultdict
 from functools import partial
 from itertools import cycle
+from typing import Any
 
 from tlz import concat, drop, groupby, merge
 
@@ -162,7 +163,73 @@ async def scatter_to_workers(nthreads, data, rpc=rpc, report=True):
 collection_types = (tuple, list, set, frozenset)
 
 
-def unpack_remotedata(o, byte_keys=False, myset=None):
+def _unpack_remotedata_inner(
+    o: Any, byte_keys: bool, found_keys: set[WrappedKey]
+) -> Any:
+    """Inner implementation of `unpack_remotedata` that adds found wrapped keys to `found_keys`"""
+
+    typ = type(o)
+    if typ is tuple:
+        if not o:
+            return o
+        if type(o[0]) is SubgraphCallable:
+
+            # Unpack futures within the arguments of the subgraph callable
+            futures: set[WrappedKey] = set()
+            args = tuple(_unpack_remotedata_inner(i, byte_keys, futures) for i in o[1:])
+            found_keys.update(futures)
+
+            # Unpack futures within the subgraph callable itself
+            sc: SubgraphCallable = o[0]
+            futures = set()
+            dsk = {
+                k: _unpack_remotedata_inner(v, byte_keys, futures)
+                for k, v in sc.dsk.items()
+            }
+            future_keys: tuple = ()
+            if futures:  # If no futures is in the subgraph, we just use `sc` as-is
+                found_keys.update(futures)
+                future_keys = (
+                    tuple(stringify(f.key) for f in futures)
+                    if byte_keys
+                    else tuple(f.key for f in futures)
+                )
+                inkeys = tuple(sc.inkeys) + future_keys
+                sc = SubgraphCallable(dsk, sc.outkey, inkeys, sc.name)
+            return (sc,) + args + future_keys
+        else:
+            return tuple(
+                _unpack_remotedata_inner(item, byte_keys, found_keys) for item in o
+            )
+    elif is_namedtuple_instance(o):
+        return typ(
+            *[_unpack_remotedata_inner(item, byte_keys, found_keys) for item in o]
+        )
+
+    if typ in collection_types:
+        if not o:
+            return o
+        outs = [_unpack_remotedata_inner(item, byte_keys, found_keys) for item in o]
+        return typ(outs)
+    elif typ is dict:
+        if o:
+            return {
+                k: _unpack_remotedata_inner(v, byte_keys, found_keys)
+                for k, v in o.items()
+            }
+        else:
+            return o
+    elif issubclass(typ, WrappedKey):  # TODO use type is Future
+        k = o.key
+        if byte_keys:
+            k = stringify(k)
+        found_keys.add(o)
+        return k
+    else:
+        return o
+
+
+def unpack_remotedata(o: Any, byte_keys: bool = False) -> tuple[Any, set]:
     """Unpack WrappedKey objects from collection
 
     Returns original collection and set of all found WrappedKey objects
@@ -189,61 +256,8 @@ def unpack_remotedata(o, byte_keys=False, myset=None):
     >>> unpack_remotedata(rd, byte_keys=True)
     ("('x', 1)", {WrappedKey('('x', 1)')})
     """
-    if myset is None:
-        myset = set()
-        out = unpack_remotedata(o, byte_keys, myset)
-        return out, myset
-
-    typ = type(o)
-
-    if typ is tuple:
-        if not o:
-            return o
-        if type(o[0]) is SubgraphCallable:
-            sc = o[0]
-            futures = set()
-            dsk = {
-                k: unpack_remotedata(v, byte_keys, futures) for k, v in sc.dsk.items()
-            }
-            args = tuple(unpack_remotedata(i, byte_keys, futures) for i in o[1:])
-            if futures:
-                myset.update(futures)
-                futures = (
-                    tuple(stringify(f.key) for f in futures)
-                    if byte_keys
-                    else tuple(f.key for f in futures)
-                )
-                inkeys = sc.inkeys + futures
-                return (
-                    (SubgraphCallable(dsk, sc.outkey, inkeys, sc.name),)
-                    + args
-                    + futures
-                )
-            else:
-                return o
-        else:
-            return tuple(unpack_remotedata(item, byte_keys, myset) for item in o)
-    elif is_namedtuple_instance(o):
-        return typ(*[unpack_remotedata(item, byte_keys, myset) for item in o])
-
-    if typ in collection_types:
-        if not o:
-            return o
-        outs = [unpack_remotedata(item, byte_keys, myset) for item in o]
-        return typ(outs)
-    elif typ is dict:
-        if o:
-            return {k: unpack_remotedata(v, byte_keys, myset) for k, v in o.items()}
-        else:
-            return o
-    elif issubclass(typ, WrappedKey):  # TODO use type is Future
-        k = o.key
-        if byte_keys:
-            k = stringify(k)
-        myset.add(o)
-        return k
-    else:
-        return o
+    found_keys: set[Any] = set()
+    return _unpack_remotedata_inner(o, byte_keys, found_keys), found_keys
 
 
 def pack_data(o, d, key_types=object):

@@ -993,28 +993,25 @@ def ensure_bytes(s):
     return _ensure_bytes(s)
 
 
-def ensure_memoryview(obj):
+def ensure_memoryview(obj: bytes | bytearray | memoryview | PickleBuffer) -> memoryview:
     """Ensure `obj` is a 1-D contiguous `uint8` `memoryview`"""
-    mv: memoryview
-    if type(obj) is memoryview:
-        mv = obj
-    else:
-        mv = memoryview(obj)
+    if not isinstance(obj, memoryview):
+        obj = memoryview(obj)
 
-    if not mv.nbytes:
+    if not obj.nbytes:
         # Drop `obj` reference to permit freeing underlying data
         return memoryview(bytearray())
-    elif not mv.contiguous:
+    elif not obj.contiguous:
         # Copy to contiguous form of expected shape & type
-        return memoryview(bytearray(mv))
-    elif mv.ndim != 1 or mv.format != "B":
+        return memoryview(bytearray(obj))
+    elif obj.ndim != 1 or obj.format != "B":
         # Perform zero-copy reshape & cast
         # Use `PickleBuffer.raw()` as `memoryview.cast()` fails with F-order
         # xref: https://github.com/python/cpython/issues/91484
-        return PickleBuffer(mv).raw()
+        return PickleBuffer(obj).raw()
     else:
         # Return `memoryview` as it already meets requirements
-        return mv
+        return obj
 
 
 def open_port(host: str = "") -> int:

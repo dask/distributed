@@ -7,7 +7,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import IO, Any, Awaitable, Callable, Collection, Literal
 
-import fsspec
 import msgpack
 
 from distributed._stories import scheduler_story as _scheduler_story
@@ -60,6 +59,10 @@ async def write_state(
 
     # Eagerly open the file to catch any errors before doing the full dump
     # NOTE: `compression="infer"` will automatically use gzip via the `.gz` suffix
+    # This module is the only place where fsspec is used and it is a relatively
+    # heavy import. Do lazy import to reduce import time
+    import fsspec
+
     with fsspec.open(url, mode, compression="infer", **storage_options) as f:
         state = await get_state()
         # Write from a thread so we don't block the event loop quite as badly
@@ -95,6 +98,9 @@ def load_cluster_dump(url: str, **kwargs: Any) -> dict:
         raise ValueError(f"url ({url}) must have a .msgpack.gz or .yaml suffix")
 
     kwargs.setdefault("compression", "infer")
+    # This module is the only place where fsspec is used and it is a relatively
+    # heavy import. Do lazy import to reduce import time
+    import fsspec
 
     with fsspec.open(url, mode, **kwargs) as f:
         return reader(f)
