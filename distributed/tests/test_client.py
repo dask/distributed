@@ -4095,6 +4095,7 @@ def test_as_current_is_thread_local(s, loop):
                     # This line runs only when all parties are inside the
                     # context manager
                     assert Client.current(allow_global=False) is c
+                    assert default_client() is c
                 finally:
                     cm_before_exit.wait()
 

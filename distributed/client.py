@@ -123,6 +123,9 @@ DEFAULT_EXTENSIONS = {
 
 
 def _get_global_client() -> Client | None:
+    c = _current_client.get()
+    if c:
+        return c
     L = sorted(list(_global_clients), reverse=True)
     for k in L:
         c = _global_clients[k]
