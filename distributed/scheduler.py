@@ -50,6 +50,7 @@ from tlz import (
 from tornado.ioloop import IOLoop
 
 import dask
+from dask.cogroups import cogroup
 from dask.highlevelgraph import HighLevelGraph
 from dask.utils import (
     format_bytes,
@@ -1307,6 +1308,8 @@ class TaskState:
     #: Whether this task is an Actor
     actor: bool
 
+    cogroup: list[TaskState] | None
+
     #: The group of tasks to which this one belongs
     group: TaskGroup
 
@@ -1359,6 +1362,7 @@ class TaskState:
         self.prefix = None  # type: ignore
         self.type = None  # type: ignore
         self.group_key = key_split_group(key)
+        self.cogroup = None
         self.group = None  # type: ignore
         self.metadata = {}
         self.annotations = {}
@@ -2713,6 +2717,11 @@ class SchedulerState:
         self.unrunnable.discard(ts)
         for cs in ts.who_wants:
             cs.wants_what.remove(ts)
+        # TODO should something handle this earlier?
+        if ts.cogroup:
+            # TODO binary search by priority; `bisect` doesn't accept key func until 3.10
+            ts.cogroup.remove(ts)
+            ts.cogroup = None
         ts.who_wants.clear()
         ts.processing_on = None
         ts.exception_blame = ts.exception = ts.traceback = None
@@ -4579,6 +4588,15 @@ class Scheduler(SchedulerState, ServerNode):
                 if ts is None:
                     continue
                 ts.retries = v
+
+        # Calculate cogroups
+        for keys in cogroup(priority, dependencies):
+            cg: list[TaskState] = []
+            for k in keys:
+                ts = self.tasks[k]
+                assert ts.cogroup is None, (ts, ts.cogroup)
+                cg.append(ts)
+                ts.cogroup = cg
 
         # Compute recommendations
         recommendations: Recs = {}
