@@ -2837,18 +2837,15 @@ class SchedulerState:
         """
         Whether ``ts`` is a root or root-like task.
 
-        Root-ish tasks are part of a group that's much larger than the cluster,
-        and have few or no dependencies.
+        The task has a co-group, but no dependencies come from it.
+        (This also means tasks with 0 dependencies are root-ish.)
         """
         if ts.resource_restrictions or ts.worker_restrictions or ts.host_restrictions:
             return False
-        tg = ts.group
-        # TODO short-circuit to True if `not ts.dependencies`?
-        return (
-            len(tg) > self.total_nthreads * 2
-            and len(tg.dependencies) < 5
-            and sum(map(len, tg.dependencies)) < 5
-        )
+        if not (cg := ts.cogroup):
+            return len(ts.dependencies) == 0
+
+        return not any(dts.cogroup is cg for dts in ts.dependencies)
 
     def check_idle_saturated(self, ws: WorkerState, occ: float = -1.0) -> None:
         """Update the status of the idle and saturated state
