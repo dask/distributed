@@ -531,7 +531,7 @@ async def test_closed_worker_during_final_register_complete(c, s, a, b, kill_bar
     await shuffle_ext_b.in_register_complete.wait()
 
     shuffle_id = await get_shuffle_id(s)
-    barrier_key = s.extensions["shuffle_id"].barrier_key(shuffle_id)
+    barrier_key = s.extensions["shuffle"].barrier_key(shuffle_id)
     # TODO: properly parametrize over kill_barrier
     if barrier_key in b.state.tasks:
         shuffle_ext_a.block_register_complete.set()
