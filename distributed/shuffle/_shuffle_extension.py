@@ -734,10 +734,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
                     if worker not in dt.worker_restrictions:
                         continue
                     dt.worker_restrictions.clear()
-                    if dt.state == "no-worker":
-                        recs.update({dt.key: "waiting"})
-                    else:
-                        recs.update({dt.key: "released"})
+                    recs.update({dt.key: "waiting"})
             # TODO: Do we need to handle other states?
         self.scheduler.transitions(recs, stimulus_id=stimulus_id)
 
