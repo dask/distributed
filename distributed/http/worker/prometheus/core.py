@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from time import time
 from typing import ClassVar
 
 import prometheus_client
-from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
+from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily, Metric
 
 from distributed.http.prometheus import PrometheusCollector
 from distributed.http.utils import RequestHandler
@@ -30,8 +31,7 @@ class WorkerMetricCollector(PrometheusCollector):
                 "Digest-based metrics require crick to be installed."
             )
 
-    def collect(self):
-
+    def collect(self) -> Iterator[Metric]:
         ws = self.server.state
 
         tasks = GaugeMetricFamily(
@@ -65,7 +65,7 @@ class WorkerMetricCollector(PrometheusCollector):
         )
 
         try:
-            spilled_memory, spilled_disk = self.server.data.spilled_total
+            spilled_memory, spilled_disk = self.server.data.spilled_total  # type: ignore
         except AttributeError:
             spilled_memory, spilled_disk = 0, 0  # spilling is disabled
         process_memory = self.server.monitor.get_process_memory()
@@ -121,28 +121,8 @@ class WorkerMetricCollector(PrometheusCollector):
             value=self.server.transfer_outgoing_count_total,
         )
 
-        # all metrics using digests require crick to be installed
-        # the following metrics will export NaN, if the corresponding digests are None
-        if self.crick_available:
-            yield GaugeMetricFamily(
-                self.build_name("tick_duration_median_seconds"),
-                "Median tick duration at worker",
-                value=self.server.digests["tick-duration"].components[1].quantile(50),
-            )
-
-            yield GaugeMetricFamily(
-                self.build_name("task_duration_median_seconds"),
-                "Median task runtime at worker",
-                value=self.server.digests["task-duration"].components[1].quantile(50),
-            )
-
-            yield GaugeMetricFamily(
-                self.build_name("transfer_bandwidth_median_bytes"),
-                "Bandwidth for transfer at worker",
-                value=self.server.digests["transfer-bandwidth"]
-                .components[1]
-                .quantile(50),
-            )
+        yield from self.collect_crick()
+        yield from self.collect_spillbuffer()
 
         now = time()
         max_tick_duration = max(
@@ -160,6 +140,40 @@ class WorkerMetricCollector(PrometheusCollector):
             "Total number of ticks observed since the server started",
             value=self.server._tick_counter,
         )
+
+    def collect_crick(self) -> Iterator[Metric]:
+        # All metrics using digests require crick to be installed.
+        # The following metrics will export NaN, if the corresponding digests are None
+        if not self.crick_available:
+            return
+
+        yield GaugeMetricFamily(
+            self.build_name("tick_duration_median_seconds"),
+            "Median tick duration at worker",
+            value=self.server.digests["tick-duration"].components[1].quantile(50),
+        )
+
+        yield GaugeMetricFamily(
+            self.build_name("task_duration_median_seconds"),
+            "Median task runtime at worker",
+            value=self.server.digests["task-duration"].components[1].quantile(50),
+        )
+
+        yield GaugeMetricFamily(
+            self.build_name("transfer_bandwidth_median_bytes"),
+            "Bandwidth for transfer at worker",
+            value=self.server.digests["transfer-bandwidth"].components[1].quantile(50),
+        )
+
+    def collect_spillbuffer(self) -> Iterator[Metric]:
+        try:
+            get_metrics = self.server.data.get_metrics  # type: ignore
+        except AttributeError:
+            return  # spilling is disabled
+        metrics = get_metrics()
+
+        # TODO
+        yield from []
 
 
 class PrometheusHandler(RequestHandler):
