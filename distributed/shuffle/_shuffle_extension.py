@@ -664,7 +664,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             workers = list(self.scheduler.workers)
             output_workers = set()
 
-            name = "shuffle-barrier-" + id  # TODO single-source task name
+            name = self.barrier_key(id)
             self.barriers[id] = name
             mapping = {}
 
