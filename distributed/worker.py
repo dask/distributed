@@ -1516,6 +1516,9 @@ class Worker(BaseWorker, ServerNode):
             logger.info("Closed worker has not yet started: %s", self.status)
         if not executor_wait:
             logger.info("Not waiting on executor to close")
+        # Make sure we're not colliding with the startup coro when setting the
+        # status to closing
+        await self.started()
         self.status = Status.closing
 
         # Stop callbacks before giving up control in any `await`.
