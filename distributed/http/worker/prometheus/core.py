@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from time import time
 from typing import ClassVar
 
 import prometheus_client
@@ -142,6 +143,23 @@ class WorkerMetricCollector(PrometheusCollector):
                 .components[1]
                 .quantile(50),
             )
+
+        now = time()
+        max_tick_duration = max(
+            self.server._max_tick_duration, now - self.server._last_tick
+        )
+        self.server._max_tick_duration = 0
+        yield GaugeMetricFamily(
+            self.build_name("tick_duration_maximum_seconds"),
+            "Maximum tick duration observed since Prometheus last scraped metrics",
+            value=max_tick_duration,
+        )
+
+        yield CounterMetricFamily(
+            self.build_name("tick_count_total"),
+            "Total number of ticks observed since the server started",
+            value=self.server._tick_counter,
+        )
 
 
 class PrometheusHandler(RequestHandler):
