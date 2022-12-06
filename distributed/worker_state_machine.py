@@ -285,6 +285,7 @@ class TaskState:
     #: the behaviour of transitions out of the ``executing``, ``flight`` etc. states.
     done: bool = False
 
+    attempt: int = 0
     _instances: ClassVar[weakref.WeakSet[TaskState]] = weakref.WeakSet()
 
     # Support for weakrefs to a class with __slots__
@@ -459,6 +460,7 @@ class TaskFinishedMsg(SendMessageToScheduler):
     metadata: dict
     thread: int | None
     startstops: list[StartStop]
+    attempt: int
     __slots__ = tuple(__annotations__)
 
     def to_dict(self) -> dict[str, Any]:
@@ -749,6 +751,8 @@ class ComputeTaskEvent(StateMachineEvent):
     resource_restrictions: dict[str, float]
     actor: bool
     annotations: dict
+    attempt: int
+
     __slots__ = tuple(__annotations__)
 
     def __post_init__(self) -> None:
@@ -794,6 +798,7 @@ class ComputeTaskEvent(StateMachineEvent):
         resource_restrictions: dict[str, float] | None = None,
         actor: bool = False,
         annotations: dict | None = None,
+        attempt: int = 0,
         stimulus_id: str,
     ) -> ComputeTaskEvent:
         """Build a dummy event, with most attributes set to a reasonable default.
@@ -813,6 +818,7 @@ class ComputeTaskEvent(StateMachineEvent):
             actor=actor,
             annotations=annotations or {},
             stimulus_id=stimulus_id,
+            attempt=attempt,
         )
 
 
@@ -1759,7 +1765,7 @@ class WorkerState:
         return None
 
     def _get_task_finished_msg(
-        self, ts: TaskState, stimulus_id: str
+        self, ts: TaskState, stimulus_id: str, attempt: int
     ) -> TaskFinishedMsg:
         if ts.key not in self.data and ts.key not in self.actors:
             raise RuntimeError(f"Task {ts} not ready")
@@ -1786,6 +1792,7 @@ class WorkerState:
             metadata=ts.metadata,
             thread=self.threads.get(ts.key),
             startstops=ts.startstops,
+            attempt=attempt,
             stimulus_id=stimulus_id,
         )
 
@@ -2495,7 +2502,11 @@ class WorkerState:
             instrs.append(AddKeysMsg(keys=[ts.key], stimulus_id=stimulus_id))
         else:
             assert msg_type == "task-finished"
-            instrs.append(self._get_task_finished_msg(ts, stimulus_id=stimulus_id))
+            instrs.append(
+                self._get_task_finished_msg(
+                    ts, stimulus_id=stimulus_id, attempt=ts.attempt
+                )
+            )
         return recs, instrs
 
     def _transition_released_forgotten(
@@ -2869,7 +2880,7 @@ class WorkerState:
         except KeyError:
             self.tasks[ev.key] = ts = TaskState(ev.key)
         self.log.append((ev.key, "compute-task", ts.state, ev.stimulus_id, time()))
-
+        ts.attempt = ev.attempt
         recommendations: Recs = {}
         instructions: Instructions = []
 
@@ -2881,7 +2892,9 @@ class WorkerState:
             pass
         elif ts.state == "memory":
             instructions.append(
-                self._get_task_finished_msg(ts, stimulus_id=ev.stimulus_id)
+                self._get_task_finished_msg(
+                    ts, stimulus_id=ev.stimulus_id, attempt=ev.attempt
+                )
             )
         elif ts.state == "error":
             instructions.append(TaskErredMsg.from_task(ts, stimulus_id=ev.stimulus_id))

@@ -1310,6 +1310,14 @@ class TaskState:
     #: Task annotations
     annotations: dict[str, Any]
 
+    #: A counter that counts how often a task was already assigned to a Worker.
+    #: This counter is used to sign a task such that the assigned Worker is
+    #: expected to return the same counter in the task-finished message. This is
+    #: used to correlate responses.
+    #: Only the most recently assigned worker is trusted. All other results
+    #: will be rejected
+    _attempt: int
+
     #: Cached hash of :attr:`~TaskState.client_key`
     _hash: int
 
@@ -1354,6 +1362,7 @@ class TaskState:
         self.metadata = {}
         self.annotations = {}
         self.erred_on = set()
+        self._attempt = 0
         TaskState._instances.add(self)
 
     def __hash__(self) -> int:
@@ -3257,9 +3266,10 @@ class SchedulerState:
         #        time to compute and submit this
         if duration < 0:
             duration = self.get_task_duration(ts)
-
+        ts._attempt += 1
         msg: dict[str, Any] = {
             "op": "compute-task",
+            "attempt": ts._attempt,
             "key": ts.key,
             "priority": ts.priority,
             "duration": duration,
@@ -4620,7 +4630,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.transitions(recommendations, stimulus_id)
 
-    def stimulus_task_finished(self, key=None, worker=None, stimulus_id=None, **kwargs):
+    def stimulus_task_finished(self, key, worker, stimulus_id, attempt, **kwargs):
         """Mark that a task has finished execution on a particular worker"""
         logger.debug("Stimulus task finished %s, %s", key, worker)
 
@@ -4630,7 +4640,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         ws: WorkerState = self.workers[worker]
         ts: TaskState = self.tasks.get(key)
-        if ts is None or ts.state in ("released", "queued"):
+        if ts is None or ts._attempt != attempt:
             logger.debug(
                 "Received already computed task, worker: %s, state: %s"
                 ", key: %s, who_has: %s",

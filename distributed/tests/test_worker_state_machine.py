@@ -363,6 +363,7 @@ def test_computetask_to_dict():
         function=b"blob",
         args=b"blob",
         kwargs=None,
+        attempt=5,
     )
     assert ev.run_spec == SerializedTask(function=b"blob", args=b"blob")
     ev2 = ev.to_loggable(handled=11.22)
@@ -386,6 +387,7 @@ def test_computetask_to_dict():
         "function": None,
         "args": None,
         "kwargs": None,
+        "attempt": 5,
     }
     ev3 = StateMachineEvent.from_dict(d)
     assert isinstance(ev3, ComputeTaskEvent)
@@ -409,6 +411,7 @@ def test_computetask_dummy():
         function=None,
         args=None,
         kwargs=None,
+        attempt=0,
     )
 
     # nbytes is generated from who_has if omitted
