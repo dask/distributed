@@ -773,6 +773,7 @@ async def test_tail(c, s, a, b):
     await clean_scheduler(s)
 
 
+@pytest.mark.xfail(reason="Tombstone prohibits multiple calls to head")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 4)] * 2)
 async def test_repeat(c, s, a, b):
     df = dask.datasets.timeseries(
@@ -784,21 +785,21 @@ async def test_repeat(c, s, a, b):
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     await c.compute(out.head(compute=False))
 
-    await clean_worker(a)
-    await clean_worker(b)
-    await clean_scheduler(s)
+    await clean_worker(a, timeout=2)
+    await clean_worker(b, timeout=2)
+    await clean_scheduler(s, timeout=2)
 
     await c.compute(out.tail(compute=False))
 
-    await clean_worker(a)
-    await clean_worker(b)
-    await clean_scheduler(s)
+    await clean_worker(a, timeout=2)
+    await clean_worker(b, timeout=2)
+    await clean_scheduler(s, timeout=2)
 
     await c.compute(out.head(compute=False))
 
-    await clean_worker(a)
-    await clean_worker(b)
-    await clean_scheduler(s)
+    await clean_worker(a, timeout=2)
+    await clean_worker(b, timeout=2)
+    await clean_scheduler(s, timeout=2)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -862,7 +863,7 @@ async def test_crashed_worker_after_shuffle_persisted(c, s, a):
         await clean_scheduler(s)
 
 
-@pytest.mark.xfail
+@pytest.mark.xfail(reason="Tombstone prohibits multiple calls to head")
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)
 async def test_closed_worker_between_repeats(c, s, w1, w2, w3):
     df = dask.datasets.timeseries(
