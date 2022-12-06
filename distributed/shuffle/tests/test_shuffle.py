@@ -846,7 +846,7 @@ async def test_crashed_worker_after_shuffle_persisted(c, s, a):
             start="2000-01-01",
             end="2000-03-01",
             dtypes={"x": float, "y": float},
-            freq="100 s",
+            freq="10 s",
             seed=42,
         )
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
