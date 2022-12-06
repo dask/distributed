@@ -2926,7 +2926,9 @@ class SchedulerState:
         if not (cg := ts.cogroup):
             return len(ts.dependencies) == 0
 
-        return not any(dts.cogroup is cg for dts in ts.dependencies)
+        return all(
+            dts.cogroup is not cg and len(dts.dependents) > 1 for dts in ts.dependencies
+        )
 
     def check_idle_saturated(self, ws: WorkerState, occ: float = -1.0) -> None:
         """Update the status of the idle and saturated state
