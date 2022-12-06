@@ -101,7 +101,7 @@ class SchedulerMetricCollector(PrometheusCollector):
         )
 
         yield CounterMetricFamily(
-            self.build_name("tick_count_total"),
+            self.build_name("tick_count"),
             "Total number of ticks observed since the server started",
             value=self.server._tick_counter,
         )
