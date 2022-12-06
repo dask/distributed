@@ -3459,7 +3459,6 @@ class Scheduler(SchedulerState, ServerNode):
         self.synchronize_worker_interval = parse_timedelta(
             synchronize_worker_interval, default="ms"
         )
-        self.digests = None
         self.service_specs = services or {}
         self.service_kwargs = service_kwargs or {}
         self.services = {}
@@ -4618,8 +4617,7 @@ class Scheduler(SchedulerState, ServerNode):
                 self.report_on_key(ts=ts, client=client)
 
         end = time()
-        if self.digests is not None:
-            self.digests["update-graph-duration"].add(end - start)
+        self.digest_metric("update-graph-duration", end - start)
 
         # TODO: balance workers
 

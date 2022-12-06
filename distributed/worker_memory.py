@@ -305,8 +305,18 @@ class WorkerMemoryManager:
             # somewhat of an ugly hack,  DO NOT tweak this without a thorough cycle of
             # stress testing. See: https://github.com/dask/distributed/issues/6110.
             if now - last_yielded > 0.5:
+                # See metrics:
+                # - disk-load-duration
+                # - get-data-load-duration
+                # - disk-write-target-duration
+                # - disk-write-spill-duration
+                worker.digest_metric("disk-write-spill-duration", now - last_yielded)
                 await asyncio.sleep(0)
                 last_yielded = monotonic()
+
+        now = monotonic()
+        if now - last_yielded > 0.005:
+            worker.digest_metric("disk-write-spill-duration", now - last_yielded)
 
         if count:
             self.logger.debug(

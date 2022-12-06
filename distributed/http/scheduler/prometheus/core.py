@@ -91,9 +91,9 @@ class SchedulerMetricCollector(PrometheusCollector):
 
         now = time()
         max_tick_duration = max(
-            self.server._max_tick_duration, now - self.server._last_tick
+            self.server.digests_max["tick_duration"],
+            now - self.server._last_tick,
         )
-        self.server._max_tick_duration = 0
         yield GaugeMetricFamily(
             self.build_name("tick_duration_maximum_seconds"),
             "Maximum tick duration observed since Prometheus last scraped metrics",
@@ -105,6 +105,8 @@ class SchedulerMetricCollector(PrometheusCollector):
             "Total number of ticks observed since the server started",
             value=self.server._tick_counter,
         )
+
+        self.server.digests_max.clear()
 
 
 COLLECTORS = [

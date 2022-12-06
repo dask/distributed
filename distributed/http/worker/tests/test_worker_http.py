@@ -25,19 +25,21 @@ async def test_prometheus(c, s, a):
         a.http_server.port, prefix="dask_worker_"
     )
     expected_metrics = {
-        "dask_worker_tasks",
         "dask_worker_concurrent_fetch_requests",
-        "dask_worker_threads",
+        "dask_worker_event_loop_blocked_time_max",
+        "dask_worker_event_loop_blocked_time_total",
         "dask_worker_latency_seconds",
         "dask_worker_memory_bytes",
+        "dask_worker_tasks",
+        "dask_worker_tick_count_total",
+        "dask_worker_tick_duration_maximum_seconds",
+        "dask_worker_threads",
         "dask_worker_transfer_incoming_bytes",
         "dask_worker_transfer_incoming_count",
         "dask_worker_transfer_incoming_count_total",
         "dask_worker_transfer_outgoing_bytes",
         "dask_worker_transfer_outgoing_count",
         "dask_worker_transfer_outgoing_count_total",
-        "dask_worker_tick_count_total",
-        "dask_worker_tick_duration_maximum_seconds",
     }
 
     try:
@@ -45,7 +47,7 @@ async def test_prometheus(c, s, a):
     except ImportError:
         pass
     else:
-        expected_metrics = expected_metrics.union(
+        expected_metrics.update(
             {
                 "dask_worker_tick_duration_median_seconds",
                 "dask_worker_task_duration_median_seconds",
