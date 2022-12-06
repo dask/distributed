@@ -269,7 +269,7 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
 
 # TODO: Deduplicate instead of failing: distributed#7324
 @pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("", 1)])
+@gen_cluster(client=True, nthreads=[("", 1)], clean_kwargs={"processes": False})
 async def test_crashed_input_only_worker_during_transfer(c, s, a):
     def mock_get_worker_for(
         output_partition: int, workers: list[str], npartitions: int
