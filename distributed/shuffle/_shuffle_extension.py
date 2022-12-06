@@ -341,6 +341,7 @@ class ShuffleWorkerExtension:
         worker.handlers["shuffle_receive"] = self.shuffle_receive
         worker.handlers["shuffle_inputs_done"] = self.shuffle_inputs_done
         worker.handlers["shuffle_fail"] = self.shuffle_fail
+        worker.stream_handlers["shuffle-forget"] = self.shuffle_forget
         worker.extensions["shuffle"] = self
 
         # Initialize
@@ -382,7 +383,7 @@ class ShuffleWorkerExtension:
                 # `get_output_partition` will never be called.
                 # This happens when there are fewer output partitions than workers.
                 assert shuffle._disk_buffer.empty
-                logger.critical(f"Shuffle inputs done {shuffle}")
+                logger.info(f"Shuffle inputs done {shuffle}")
                 await self._register_complete(shuffle)
                 del self.shuffles[shuffle_id]
 
@@ -395,6 +396,9 @@ class ShuffleWorkerExtension:
         shuffle.fail(exception)
         await shuffle.close()
         del self.shuffles[shuffle_id]
+
+    async def shuffle_forget(self, shuffle_id: ShuffleId) -> None:
+        await self.shuffle_fail(shuffle_id, message="Shuffle {shuffle_id} forgotten")
 
     def add_partition(
         self,
@@ -765,6 +769,12 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             return
 
         shuffle_id = ShuffleSchedulerExtension.id_from_key(key)
+        participating_workers = self.participating_workers[shuffle_id]
+        worker_msgs = {
+            worker: [{"op": "shuffle-forget", "shuffle_id": shuffle_id}]
+            for worker in participating_workers
+        }
+        self.scheduler.send_all({}, worker_msgs)
         self._clean_on_scheduler(shuffle_id)
 
     def register_complete(self, id: ShuffleId, worker: str) -> None:
