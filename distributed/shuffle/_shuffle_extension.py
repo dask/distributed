@@ -683,12 +683,12 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             for ts in self.scheduler.tasks[name].dependents:
                 part = ts.annotations["shuffle"]
                 if ts.worker_restrictions:
-                    worker = list(ts.worker_restrictions)[0]
+                    output_worker = list(ts.worker_restrictions)[0]
                 else:
-                    worker = get_worker_for(part, workers, npartitions)
-                mapping[part] = worker
-                output_workers.add(worker)
-                self.scheduler.set_restrictions({ts.key: {worker}})
+                    output_worker = get_worker_for(part, workers, npartitions)
+                mapping[part] = output_worker
+                output_workers.add(output_worker)
+                self.scheduler.set_restrictions({ts.key: {output_worker}})
 
             self.worker_for[id] = mapping
             self.schemas[id] = schema
