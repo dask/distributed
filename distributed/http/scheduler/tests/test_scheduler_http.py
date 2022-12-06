@@ -111,9 +111,11 @@ async def test_prometheus(c, s, a, b):
         "dask_scheduler_tasks_suspicious",
         "dask_scheduler_tasks_forgotten",
         "dask_scheduler_prefix_state",
+        "dask_scheduler_tick_count",
+        "dask_scheduler_tick_duration_maximum_seconds",
     }
 
-    assert active_metrics.keys() == expected_metrics
+    assert set(active_metrics.keys()) == expected_metrics
     assert active_metrics["dask_scheduler_clients"].samples[0].value == 1.0
 
     # request data twice since there once was a case where metrics got registered multiple times resulting in
