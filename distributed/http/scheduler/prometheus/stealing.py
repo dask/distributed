@@ -25,13 +25,13 @@ class WorkStealingMetricCollector(PrometheusCollector):
 
         stealing_request_count_total = CounterMetricFamily(
             self.build_name("request_count"),
-            "Total number of stealing requests per cost multiplier.",
+            "Total number of stealing requests per cost multiplier",
             labels=["cost_multiplier"],
         )
 
         stealing_request_cost_total = CounterMetricFamily(
             self.build_name("request_cost"),
-            "Total cost of stealing requests per cost multiplier.",
+            "Total cost of stealing requests per cost multiplier",
             labels=["cost_multiplier"],
         )
 
