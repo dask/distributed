@@ -77,7 +77,7 @@ class SchedulerMetricCollector(PrometheusCollector):
         yield tasks
 
         prefix_state_counts = CounterMetricFamily(
-            self.build_name("prefix_state_totals"),
+            self.build_name("prefix_state"),
             "Accumulated count of task prefix in each state",
             labels=["task_prefix_name", "state"],
         )

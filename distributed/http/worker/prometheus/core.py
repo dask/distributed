@@ -92,7 +92,7 @@ class WorkerMetricCollector(PrometheusCollector):
         )
 
         yield CounterMetricFamily(
-            self.build_name("transfer_incoming_count_total"),
+            self.build_name("transfer_incoming_count"),
             (
                 "Total number of data transfers from other workers "
                 "since the worker was started"
@@ -112,7 +112,7 @@ class WorkerMetricCollector(PrometheusCollector):
         )
 
         yield CounterMetricFamily(
-            self.build_name("transfer_outgoing_count_total"),
+            self.build_name("transfer_outgoing_count"),
             (
                 "Total number of data transfers to other workers "
                 "since the worker was started"
