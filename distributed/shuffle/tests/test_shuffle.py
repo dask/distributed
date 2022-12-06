@@ -844,19 +844,19 @@ async def test_crashed_worker_after_shuffle_persisted(c, s, a):
     async with Nanny(s.address, nthreads=1) as n:
         df = df = dask.datasets.timeseries(
             start="2000-01-01",
-            end="2000-03-01",
+            end="2000-01-10",
             dtypes={"x": float, "y": float},
             freq="10 s",
             seed=42,
         )
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
         out = out.persist()
-        await c.compute(out)
+        await out
 
         await n.process.process.kill()
 
         with pytest.raises(RuntimeError):
-            await c.compute(out.x.size)
+            await c.compute(out.sum())
 
         await c.close()
         await clean_worker(a)
