@@ -115,7 +115,7 @@ _global_clients: weakref.WeakValueDictionary[
 ] = weakref.WeakValueDictionary()
 _global_client_index = [0]
 
-_current_client = ContextVar("_current_client", default=None)
+_current_client: ContextVar[Client | None] = ContextVar("_current_client", default=None)
 
 DEFAULT_EXTENSIONS = {
     "pubsub": PubSubClientExtension,
