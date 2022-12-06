@@ -18,7 +18,7 @@ async def test_prometheus(c, s, a, b):
         "dask_semaphore_pending_leases",
         "dask_semaphore_acquire",
         "dask_semaphore_release",
-        "dask_semaphore_average_pending_lease_time_s",
+        "dask_semaphore_average_pending_lease_time_seconds",
     }
 
     assert active_metrics.keys() == expected_metrics
