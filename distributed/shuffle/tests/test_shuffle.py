@@ -32,16 +32,21 @@ from distributed.shuffle._shuffle_extension import (
     split_by_partition,
     split_by_worker,
 )
+from distributed.utils import Deadline
 from distributed.utils_test import gen_cluster, gen_test, wait_for_state
 from distributed.worker_state_machine import TaskState as WorkerTaskState
 
 pa = pytest.importorskip("pyarrow")
 
 
-async def clean_worker(worker: Worker, interval: float = 0.01) -> None:
+async def clean_worker(
+    worker: Worker, interval: float = 0.01, timeout: int | None = None
+) -> None:
     """Assert that the worker has no shuffle state"""
+    deadline = Deadline.after(timeout)
     extension = worker.extensions["shuffle"]
-    while extension.shuffles:
+
+    while extension.shuffles and not deadline.expired:
         await asyncio.sleep(interval)
     for dirpath, dirnames, filenames in os.walk(worker.local_directory):
         assert "shuffle" not in dirpath
@@ -49,10 +54,13 @@ async def clean_worker(worker: Worker, interval: float = 0.01) -> None:
             assert "shuffle" not in fn
 
 
-async def clean_scheduler(scheduler: Scheduler, interval: float = 0.01) -> None:
+async def clean_scheduler(
+    scheduler: Scheduler, interval: float = 0.01, timeout: int | None = None
+) -> None:
     """Assert that the scheduler has no shuffle state"""
+    deadline = Deadline.after(timeout)
     extension = scheduler.extensions["shuffle"]
-    while extension.output_workers:
+    while extension.output_workers and not deadline.expired:
         await asyncio.sleep(interval)
     assert not extension.worker_for
     assert not extension.heartbeats
@@ -721,6 +729,24 @@ def test_split_by_worker():
     df["_partitions"] = df.x % npartitions
     worker_for = {i: random.choice(workers) for i in range(npartitions)}
     s = pd.Series(worker_for, name="_worker").astype("category")
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 2)
+async def test_clean_after_forgotten_early(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-03-01",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = out.persist()
+    await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, a)
+    await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
+    del out
+    await clean_worker(a, timeout=2)
+    await clean_worker(b, timeout=2)
+    await clean_scheduler(s, timeout=2)
 
 
 @gen_cluster(client=True)
