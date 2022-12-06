@@ -2131,10 +2131,11 @@ class SchedulerState:
 
         if self.validate:
             assert ws is not None
-            assert not _worker_full(ws, self.WORKER_SATURATION), (
-                ws,
-                _task_slots_available(ws, self.WORKER_SATURATION),
-            )
+            # Oversaturation is ok when scheduling by cogroup
+            # assert not _worker_full(ws, self.WORKER_SATURATION), (
+            #     ws,
+            #     _task_slots_available(ws, self.WORKER_SATURATION),
+            # )
             assert ws in self.running, (ws, self.running)
             assert self.workers.get(ws.address) is ws
 
@@ -2205,16 +2206,12 @@ class SchedulerState:
         for ts in cogroup:
             # Family member in memory
             for ws in ts.who_has:
-                if ws.status == Status.running and not _worker_full(
-                    ws, self.WORKER_SATURATION
-                ):
+                if ws.status == Status.running:
                     candidates[ws] += ts.get_nbytes()
             # Family member processing
             if (
-                (ws := ts.processing_on)  # NOTE: exclusive with `ts.who_has`
-                and ws.status == Status.running
-                and not _worker_full(ws, self.WORKER_SATURATION)
-            ):
+                ws := ts.processing_on
+            ) and ws.status == Status.running:  # NOTE: exclusive with `ts.who_has`
                 # NOTE: siblings processing on different workers is a rare case
                 tg = ts.group
                 nbytes_estimate = (

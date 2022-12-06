@@ -143,6 +143,21 @@ async def test_decide_worker_with_restrictions(client, s, a, b, c):
     assert x.key in a.data or x.key in b.data
 
 
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1), ("", 1)],
+)
+async def test_decide_worker_coschedule_order_binary_op(c, s, a, b):
+    xs = [delayed(i, name=f"x-{i}") for i in range(8)]
+    ys = [delayed(i, name=f"y-{i}") for i in range(8)]
+    zs = [x + y for x, y in zip(xs, ys)]
+
+    await c.gather(c.compute(zs))
+
+    assert not a.transfer_incoming_log, [l["keys"] for l in a.transfer_incoming_log]
+    assert not b.transfer_incoming_log, [l["keys"] for l in b.transfer_incoming_log]
+
+
 @pytest.mark.parametrize("ndeps", [0, 1, 4])
 @pytest.mark.parametrize(
     "nthreads",
