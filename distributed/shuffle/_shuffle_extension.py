@@ -610,6 +610,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     output_workers: dict[ShuffleId, set[str]]
     completed_workers: dict[ShuffleId, set[str]]
     participating_workers: dict[ShuffleId, set[str]]
+    tombstones: set[ShuffleId]
     erred_shuffles: dict[ShuffleId, Exception]
     barriers: dict[ShuffleId, str]
 
@@ -629,6 +630,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self.output_workers = {}
         self.completed_workers = {}
         self.participating_workers = {}
+        self.tombstones = set()
         self.erred_shuffles = {}
         self.barriers = {}
         self.scheduler.add_plugin(self)
@@ -658,6 +660,12 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         npartitions: int | None,
         worker: str,
     ) -> dict:
+
+        if id in self.tombstones:
+            return {
+                "status": "ERROR",
+                "message": f"Shuffle {id} has already been forgotten",
+            }
         if exception := self.erred_shuffles.get(id):
             return {"status": "ERROR", "message": str(exception)}
 
@@ -774,8 +782,8 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             worker: [{"op": "shuffle-forget", "shuffle_id": shuffle_id}]
             for worker in participating_workers
         }
-        self.scheduler.send_all({}, worker_msgs)
         self._clean_on_scheduler(shuffle_id)
+        self.scheduler.send_all({}, worker_msgs)
 
     def register_complete(self, id: ShuffleId, worker: str) -> None:
         """Learn from a worker that it has completed all reads of a shuffle"""
@@ -787,6 +795,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self.completed_workers[id].add(worker)
 
     def _clean_on_scheduler(self, id: ShuffleId) -> None:
+        self.tombstones.add(id)
         del self.worker_for[id]
         del self.schemas[id]
         del self.columns[id]
