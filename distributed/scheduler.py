@@ -2148,7 +2148,10 @@ class SchedulerState:
         if not candidates:
             return None
 
-        ws, nbytes = max(candidates.items(), key=operator.itemgetter(1))
+        ws, nbytes = max(
+            candidates.items(),
+            key=lambda ws_nbytes: (ws_nbytes[1], -len(ws_nbytes[0].processing)),
+        )
         return ws
 
     def _candidates_from_cogroup(
