@@ -3721,7 +3721,6 @@ class BaseWorker(abc.ABC):
             msgpack-serializable message to send to the scheduler.
             Must have a 'op' key which is registered in Scheduler.stream_handlers.
         """
-        ...
 
     @abc.abstractmethod
     async def gather_dep(
@@ -3745,22 +3744,18 @@ class BaseWorker(abc.ABC):
         total_nbytes : int
             Total number of bytes for all the dependencies in to_gather combined
         """
-        ...
 
     @abc.abstractmethod
     async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
         """Execute a task"""
-        ...
 
     @abc.abstractmethod
     async def retry_busy_worker_later(self, worker: str) -> StateMachineEvent:
         """Wait some time, then take a peer worker out of busy state"""
-        ...
 
     @abc.abstractmethod
     def digest_metric(self, name: str, value: float) -> None:
         """Log an arbitrary numerical metric"""
-        ...
 
 
 class DeprecatedWorkerStateAttribute:

@@ -272,11 +272,11 @@ class BaseActorFuture(abc.ABC, Awaitable[_T]):
 
     @abc.abstractmethod
     def result(self, timeout: str | timedelta | float | None = None) -> _T:
-        ...
+        ...  # pragma: nocover
 
     @abc.abstractmethod
     def done(self) -> bool:
-        ...
+        ...  # pragma: nocover
 
     def __repr__(self) -> Literal["<ActorFuture>"]:
         return "<ActorFuture>"
