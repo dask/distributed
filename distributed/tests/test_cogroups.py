@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any, Hashable
+from typing import Any, Hashable, Sequence
 
 import pytest
 
@@ -11,11 +11,11 @@ from dask.base import collections_to_dsk
 from dask.cogroups import cogroup
 from dask.core import flatten, get_dependencies
 from dask.order import order
-from dask.utils import stringify
+from dask.utils import key_split, stringify
 
-from distributed.diagnostics import SchedulerPlugin
-from distributed.scheduler import Scheduler, TaskState, TaskStateState
 from distributed.utils_test import gen_cluster
+from distributed.worker import Worker
+from distributed.worker_state_machine import ComputeTaskEvent
 
 
 @dask.delayed(pure=True)
@@ -48,37 +48,31 @@ def get_cogroups(
     return cogroups
 
 
-class ReplicaTracker(SchedulerPlugin):
-    max_replicas: dict[str, int]
-    who_has_at_max: dict[str, set[str]]
-    scheduler: Scheduler
-
-    def __init__(self) -> None:
-        self.max_replicas: dict[str, int] = {}
-        self.who_has_at_max: dict[str, set[str]] = {}
-
-    async def start(self, scheduler: Scheduler) -> None:
-        self.scheduler = scheduler
-
-    def transition(
-        self,
-        key: str,
-        start: TaskStateState,
-        finish: TaskStateState,
-        *args: Any,
-        **kwargs: Any,
-    ) -> None:
-        if finish == "memory":
-            ts: TaskState = self.scheduler.tasks[key]
-            if len(ts.who_has) > self.max_replicas.get(key, 0):
-                self.max_replicas[key] = len(ts.who_has)
-                self.who_has_at_max[key] = {ws.address for ws in ts.who_has}
+def get_transfers(workers: Sequence[Worker]) -> Counter[str]:
+    return Counter(
+        key for w in workers for l in w.transfer_incoming_log for key in l["keys"]
+    )
 
 
-async def track_replicas(s: Scheduler) -> tuple[dict[str, int], dict[str, set[str]]]:
-    plugin = ReplicaTracker()
-    await s.register_scheduler_plugin(plugin)
-    return plugin.max_replicas, plugin.who_has_at_max
+def get_transfers_by_prefix(workers: Sequence[Worker]) -> Counter[str]:
+    return Counter(
+        key_split(key)
+        for w in workers
+        for l in w.transfer_incoming_log
+        for key in l["keys"]
+    )
+
+
+def get_who_ran(workers: Sequence[Worker]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for w in workers:
+        for event in w.state.stimulus_log:
+            if isinstance(event, ComputeTaskEvent):
+                prev = result.setdefault(event.key, w.address)
+                assert (
+                    prev == w.address
+                ), f"Task {event.key!r} run on multiple workers: {prev}, {w.address}"
+    return result
 
 
 @pytest.mark.parametrize("from_zarr", [False, True])
@@ -95,16 +89,14 @@ async def test_co_assign_tree_reduce_multigroup(c, s, *workers, from_zarr):
 
     result.visualize(color="cogroup-name", collapse_outputs=True)
 
-    max_replicas, who_has_at_max = await track_replicas(s)
     await c.gather(c.compute(result, optimize_graph=False))
 
-    root_keys = set(map(stringify, flatten(arr.__dask_keys__())))
-    assert {k: r for k, r in max_replicas.items() if k in root_keys} == dict.fromkeys(
-        root_keys, 1
-    )
+    transfers = get_transfers_by_prefix(workers)
+    assert transfers.keys() <= {"sum-partial", "checkpoint"}
 
-    worker_counts = Counter(
-        addr for k, addrs in who_has_at_max.items() if k in root_keys for addr in addrs
-    )
+    root_keys: list[str] = list(map(stringify, flatten(arr.__dask_keys__())))
+    who_ran = get_who_ran(workers)
+    worker_counts = Counter(who_ran[k] for k in root_keys)
+
     # Two groups of 4, then one of 2.
     assert set(worker_counts.values()) == {4, 6}, worker_counts
