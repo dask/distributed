@@ -2165,7 +2165,9 @@ class SchedulerState:
         if self.validate:
             seen_ids: set[int] = {id(cogroup)}
 
-        self._update_candidates_for_cogroup(candidates, cogroup)
+        self._update_candidates_for_cogroup(
+            candidates, cogroup, allow_oversaturation=True
+        )
         if candidates:
             return candidates
 
@@ -2203,23 +2205,27 @@ class SchedulerState:
         return candidates
 
     def _update_candidates_for_cogroup(
-        self, candidates: defaultdict[WorkerState, int], cogroup: list[TaskState]
+        self,
+        candidates: defaultdict[WorkerState, int],
+        cogroup: list[TaskState],
+        allow_oversaturation: bool = False,
     ) -> None:
         ws: WorkerState | None
         for ts in cogroup:
             # Family member in memory
             for ws in ts.who_has:
-                if ws.status == Status.running and not _worker_full(
-                    ws, self.WORKER_SATURATION
+                if ws.status == Status.running and (
+                    allow_oversaturation or not _worker_full(ws, self.WORKER_SATURATION)
                 ):
                     candidates[ws] += ts.get_nbytes()
             # Family member processing
             if (
                 (ws := ts.processing_on)  # NOTE: exclusive with `ts.who_has`
                 and ws.status == Status.running
-                and not _worker_full(ws, self.WORKER_SATURATION)
+                and (
+                    allow_oversaturation or not _worker_full(ws, self.WORKER_SATURATION)
+                )
             ):
-                # NOTE: siblings processing on different workers is a rare case
                 tg = ts.group
                 nbytes_estimate = (
                     round(tg.nbytes_total / nmem)
