@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ast import literal_eval
 from collections import Counter
 from typing import Any, Hashable, Sequence
 
@@ -75,6 +76,10 @@ def get_who_ran(workers: Sequence[Worker]) -> dict[str, str]:
     return result
 
 
+def collection_keys(*xs: Any) -> list[str]:
+    return [stringify(k) for x in xs for k in flatten(x.__dask_keys__())]
+
+
 @pytest.mark.parametrize("from_zarr", [False, True])
 @gen_cluster(client=True, nthreads=[("", 2)] * 2)
 async def test_co_assign_tree_reduce_multigroup(c, s, *workers, from_zarr):
@@ -94,9 +99,53 @@ async def test_co_assign_tree_reduce_multigroup(c, s, *workers, from_zarr):
     transfers = get_transfers_by_prefix(workers)
     assert transfers.keys() <= {"sum-partial", "checkpoint"}
 
-    root_keys: list[str] = list(map(stringify, flatten(arr.__dask_keys__())))
+    root_keys = collection_keys(arr)
     who_ran = get_who_ran(workers)
     worker_counts = Counter(who_ran[k] for k in root_keys)
 
     # Two groups of 4, then one of 2.
     assert set(worker_counts.values()) == {4, 6}, worker_counts
+
+
+def unstringify(k):
+    try:
+        return literal_eval(k)
+    except SyntaxError:
+        return k
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 2)] * 4,
+    config={"distributed.scheduler.work-stealing": False},
+)
+async def test_double_diff(c, s, *workers):
+    # Variant of https://github.com/dask/distributed/issues/6597
+    da = pytest.importorskip("dask.array")
+    a = da.ones((30, 30), chunks=(10, 10))
+    b = da.zeros((30, 30), chunks=(10, 10))
+
+    result = a[1:, 1:] - b[:-1, :-1]
+
+    cogroups = get_cogroups(result)
+    print([len(cg) for cg in cogroups])
+
+    cogroups_by_key = {k: i for i, cg in enumerate(cogroups) for k in cg}
+    root_keys = collection_keys(a, b)
+    root_group_counts = Counter(cogroups_by_key[unstringify(k)] for k in root_keys)
+    print(root_group_counts)
+
+    await c.gather(c.compute(result, optimize_graph=False))
+
+    who_ran = get_who_ran(workers)
+    addr_i = {w.address: i for i, w in enumerate(workers)}
+
+    result.visualize(
+        # color={unstringify(k): addr_i[addr] for k, addr in who_ran.items()},
+        color="cogroup",
+        collapse_outputs=True,
+    )
+
+    worker_counts = Counter(who_ran[k] for k in root_keys)
+    print(worker_counts)
+    assert len(worker_counts) == len(workers)

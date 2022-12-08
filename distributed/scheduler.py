@@ -2121,6 +2121,7 @@ class SchedulerState:
 
         ws: WorkerState | None = None
         if ts.cogroup:
+            pass
             ws = self.decide_worker_from_cogroup(ts)
 
         if not ws:
@@ -2178,7 +2179,7 @@ class SchedulerState:
         # We should maybe only look at dependents of the apex task? Or skip dependents of the roots?
         for dg in dependents:
             if self.validate:
-                assert id(dg) not in seen_ids, dg
+                # assert id(dg) not in seen_ids, dg
                 seen_ids.add(id(dg))
             self._update_candidates_for_cogroup(candidates, dg)
         if candidates:
@@ -2189,7 +2190,7 @@ class SchedulerState:
             for sg in _dependency_cogroups(dg):
                 if sg is not cogroup:
                     if self.validate:
-                        assert id(sg) not in seen_ids, sg
+                        # assert id(sg) not in seen_ids, sg
                         seen_ids.add(id(sg))
                     self._update_candidates_for_cogroup(candidates, sg)
         if candidates:
@@ -2198,7 +2199,7 @@ class SchedulerState:
         # No siblings, check dependencies.
         for dg in _dependency_cogroups(cogroup):
             if self.validate:
-                assert id(dg) not in seen_ids, dg
+                # assert id(dg) not in seen_ids, dg
                 seen_ids.add(id(dg))
             self._update_candidates_for_cogroup(candidates, dg)
 
