@@ -302,6 +302,31 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
             await clean_scheduler(s)
 
 
+@pytest.mark.slow
+@gen_cluster(client=True, nthreads=[("", 1)] * 3)
+async def test_closed_bystanding_worker_during_transfer(c, s, w1, w2, w3):
+    with dask.annotate(workers=[w1.address, w2.address], allow_other_workers=False):
+        df = dask.datasets.timeseries(
+            start="2000-01-01",
+            end="2000-02-01",
+            dtypes={"x": float, "y": float},
+            freq="10 s",
+        )
+        out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+        out = out.persist()
+    await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, w1)
+    await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, w2)
+    await w3.close()
+
+    await c.compute(out)
+    del out
+
+    await clean_worker(w1)
+    await clean_worker(w2)
+    await clean_worker(w3)
+    await clean_scheduler(s)
+
+
 class BlockedInputsDoneShuffle(Shuffle):
     def __init__(
         self,
