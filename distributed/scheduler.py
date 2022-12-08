@@ -2940,7 +2940,10 @@ class SchedulerState:
             return len(ts.dependencies) == 0
 
         return all(
-            dts.cogroup is not cg and len(dts.dependents) > 1 for dts in ts.dependencies
+            dts.cogroup is not cg
+            and len(dts.dependents) > 1
+            and dts.nbytes < parse_bytes("1mib")  # FIXME HACK
+            for dts in ts.dependencies
         )
 
     def check_idle_saturated(self, ws: WorkerState, occ: float = -1.0) -> None:
