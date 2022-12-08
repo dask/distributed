@@ -3417,10 +3417,6 @@ class SchedulerState:
             "resource_restrictions": ts.resource_restrictions,
             "actor": ts.actor,
             "annotations": ts.annotations,
-            "deps_could_release": {
-                dts.key: not dts.who_wants and len(dts.waiters) == 1
-                for dts in ts.dependencies
-            },
         }
         if self.validate:
             assert all(msg["who_has"].values())

@@ -284,8 +284,6 @@ class TaskState:
     #: coroutine servicing this task completed; False otherwise. This flag changes
     #: the behaviour of transitions out of the ``executing``, ``flight`` etc. states.
     done: bool = False
-    #: Whether the task should be released, we're just waiting for the scheduler to tell us to do so.
-    releasable: bool = False
 
     _instances: ClassVar[weakref.WeakSet[TaskState]] = weakref.WeakSet()
 
@@ -744,7 +742,6 @@ class ComputeTaskEvent(StateMachineEvent):
     resource_restrictions: dict[str, float]
     actor: bool
     annotations: dict
-    deps_could_release: dict[str, bool]
     __slots__ = tuple(__annotations__)
 
     def __post_init__(self) -> None:
@@ -790,7 +787,6 @@ class ComputeTaskEvent(StateMachineEvent):
         resource_restrictions: dict[str, float] | None = None,
         actor: bool = False,
         annotations: dict | None = None,
-        deps_could_release: dict[str, bool] | None,
         stimulus_id: str,
     ) -> ComputeTaskEvent:
         """Build a dummy event, with most attributes set to a reasonable default.
@@ -809,7 +805,6 @@ class ComputeTaskEvent(StateMachineEvent):
             resource_restrictions=resource_restrictions or {},
             actor=actor,
             annotations=annotations or {},
-            deps_could_release=deps_could_release or {},
             stimulus_id=stimulus_id,
         )
 
@@ -1834,15 +1829,6 @@ class WorkerState:
             dep.waiting_for_data.discard(ts)
             if not dep.waiting_for_data and dep.state == "waiting":
                 recommendations[dep] = "ready"
-
-        for dts in ts.dependencies:
-            if self.validate:
-                assert dts.state == "memory", dts
-            if dts.releasable:
-                if self.validate:
-                    assert len(dts.dependents) == 1, (dts.dependents, dts, ts)
-
-                recommendations[dts] = "released"
 
         self.log.append((ts.key, "put-in-memory", stimulus_id, time()))
         return recommendations
@@ -2935,15 +2921,6 @@ class WorkerState:
                 f"Unexpected task state encountered for {ts}; "
                 f"stimulus_id={ev.stimulus_id}; story={self.story(ts)}"
             )
-
-        for k, releasable in ev.deps_could_release.items():
-            dts = self.tasks[k]
-            if self.validate:
-                assert dts.state in ("memory", "fetch", "flight")
-                if not releasable:
-                    assert not dts.releasable, (dts, ev)
-
-            dts.releasable = releasable
 
         return recommendations, instructions
 
