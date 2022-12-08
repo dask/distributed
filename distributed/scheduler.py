@@ -116,9 +116,6 @@ from distributed.utils_comm import (
 from distributed.utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.variable import VariableExtension
 
-# FIXME improve annotations. See also special treatment in setup.cfg.
-# mypy: disable-error-code=annotation-unchecked
-
 if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
     from typing_extensions import TypeAlias
