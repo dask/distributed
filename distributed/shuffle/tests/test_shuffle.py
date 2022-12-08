@@ -304,7 +304,7 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
 
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)
-async def test_closed_bystanding_worker_during_transfer(c, s, w1, w2, w3):
+async def test_closed_bystanding_worker_during_shuffle(c, s, w1, w2, w3):
     with dask.annotate(workers=[w1.address, w2.address], allow_other_workers=False):
         df = dask.datasets.timeseries(
             start="2000-01-01",
