@@ -54,7 +54,7 @@ Scheduler API
 
 Scheduler methods exposed by the API with an example of the request body they take
 
-- ``/api/v1/retire_workers`` : retire certain workers on the scheduler
+- ``/api/v1/retire_workers`` : retire certain workers on the scheduler (requires auth)
 
 .. code-block:: json
 
@@ -63,7 +63,18 @@ Scheduler methods exposed by the API with an example of the request body they ta
     }
 
 - ``/api/v1/get_workers`` : get all workers on the scheduler
-- ``/api/v1/adaptive_target`` : get the target number of workers based on the scheduler's load 
+- ``/api/v1/adaptive_target`` : get the target number of workers based on the scheduler's load
+
+.. note::
+    API methods that modify the state of the scheduler require an API key to be set in the ``Authorization`` header.
+    This API key can be set via ``distributed.scheduler.http.api-key`` in the Dask config.
+
+    .. code-block:: console
+
+        $ curl -H "Authorization: Bearer {api-key}" http://localhost:8787/api/v1/retire_workers
+
+.. warning::
+    API authentication can be disabled by setting ``distributed.scheduler.http.api-key`` to ``False`` but this is not recommended.
 
 Individual bokeh plots
 ----------------------

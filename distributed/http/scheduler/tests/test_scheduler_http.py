@@ -320,20 +320,7 @@ async def test_eventstream(c, s, a, b):
     ws_client.close()
 
 
-def test_api_disabled_by_default():
-    assert "distributed.http.scheduler.api" not in dask.config.get(
-        "distributed.scheduler.http.routes"
-    )
-
-
-@gen_cluster(
-    client=True,
-    clean_kwargs={"threads": False},
-    config={
-        "distributed.scheduler.http.routes": DEFAULT_ROUTES
-        + ["distributed.http.scheduler.api"]
-    },
-)
+@gen_cluster(client=True, clean_kwargs={"threads": False})
 async def test_api(c, s, a, b):
     async with aiohttp.ClientSession() as session:
         async with session.get(
@@ -344,20 +331,87 @@ async def test_api(c, s, a, b):
             assert (await resp.text()) == "API V1"
 
 
+@gen_cluster(client=True, clean_kwargs={"threads": False})
+async def test_api_auth_defaults(c, s, a, b):
+    async with aiohttp.ClientSession() as session:
+        url = f"http://localhost:{s.http_server.port}/api/v1/retire_workers"
+        params = {"workers": [a.address, b.address]}
+
+        async with session.post(url, json=params) as resp:
+            assert resp.status == 403
+
+
 @gen_cluster(
     client=True,
     clean_kwargs={"threads": False},
     config={
-        "distributed.scheduler.http.routes": DEFAULT_ROUTES
-        + ["distributed.http.scheduler.api"]
+        "distributed.scheduler.http.api-key": "abc123",
     },
 )
-async def test_retire_workers(c, s, a, b):
+async def test_api_auth(c, s, a, b):
     async with aiohttp.ClientSession() as session:
+        url = f"http://localhost:{s.http_server.port}/api/v1/retire_workers"
         params = {"workers": [a.address, b.address]}
+
+        async with session.post(url, json=params) as resp:
+            assert resp.status == 403
+
         async with session.post(
-            "http://localhost:%d/api/v1/retire_workers" % s.http_server.port,
-            json=params,
+            url, json=params, headers={"Authorization": "Bearer foobarbaz"}
+        ) as resp:
+            assert resp.status == 403
+
+        async with session.post(
+            url, json=params, headers={"Authorization": "Bearer abc"}
+        ) as resp:
+            assert resp.status == 403
+
+        async with session.post(
+            url, json=params, headers={"Authorization": "Bearer "}
+        ) as resp:
+            assert resp.status == 403
+
+        async with session.post(
+            url, json=params, headers={"Authorization": "Bearer abc123456"}
+        ) as resp:
+            assert resp.status == 403
+
+        async with session.post(
+            url, json=params, headers={"Authorization": "Bearer abc123"}
+        ) as resp:
+            assert resp.status == 200
+
+
+@gen_cluster(
+    client=True,
+    clean_kwargs={"threads": False},
+    config={
+        "distributed.scheduler.http.api-key": False,
+    },
+)
+async def test_api_auth_disabled(c, s, a, b):
+    async with aiohttp.ClientSession() as session:
+        url = f"http://localhost:{s.http_server.port}/api/v1/retire_workers"
+        params = {"workers": [a.address, b.address]}
+
+        async with session.post(url, json=params) as resp:
+            assert resp.status == 200
+
+
+@gen_cluster(
+    client=True,
+    clean_kwargs={"threads": False},
+    config={
+        "distributed.scheduler.http.api-key": "abc123",
+    },
+)
+async def test_api_retire_workers(c, s, a, b):
+    async with aiohttp.ClientSession() as session:
+        url = f"http://localhost:{s.http_server.port}/api/v1/retire_workers"
+        params = {"workers": [a.address, b.address]}
+
+        async with session.post(
+            url, json=params, headers={"Authorization": "Bearer abc123"}
         ) as resp:
             assert resp.status == 200
             assert resp.headers["Content-Type"] == "application/json"
@@ -365,15 +419,8 @@ async def test_retire_workers(c, s, a, b):
             assert len(retired_workers_info) == 2
 
 
-@gen_cluster(
-    client=True,
-    clean_kwargs={"threads": False},
-    config={
-        "distributed.scheduler.http.routes": DEFAULT_ROUTES
-        + ["distributed.http.scheduler.api"]
-    },
-)
-async def test_get_workers(c, s, a, b):
+@gen_cluster(client=True, clean_kwargs={"threads": False})
+async def test_api_get_workers(c, s, a, b):
     async with aiohttp.ClientSession() as session:
         async with session.get(
             "http://localhost:%d/api/v1/get_workers" % s.http_server.port
@@ -385,15 +432,8 @@ async def test_get_workers(c, s, a, b):
             assert set(workers_address) == {a.address, b.address}
 
 
-@gen_cluster(
-    client=True,
-    clean_kwargs={"threads": False},
-    config={
-        "distributed.scheduler.http.routes": DEFAULT_ROUTES
-        + ["distributed.http.scheduler.api"]
-    },
-)
-async def test_adaptive_target(c, s, a, b):
+@gen_cluster(client=True, clean_kwargs={"threads": False})
+async def test_api_adaptive_target(c, s, a, b):
     async with aiohttp.ClientSession() as session:
         async with session.get(
             "http://localhost:%d/api/v1/adaptive_target" % s.http_server.port
