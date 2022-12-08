@@ -1308,7 +1308,7 @@ class TaskState:
     #: Whether this task is an Actor
     actor: bool
 
-    cogroup: list[TaskState] | None
+    cogroup: set[TaskState] | None
 
     #: The group of tasks to which this one belongs
     group: TaskGroup
@@ -2155,7 +2155,7 @@ class SchedulerState:
         return ws
 
     def _candidates_from_cogroup(
-        self, cogroup: list[TaskState]
+        self, cogroup: set[TaskState]
     ) -> dict[WorkerState, int]:
         assert cogroup
         candidates: defaultdict[WorkerState, int] = defaultdict(lambda: 0)
@@ -2207,7 +2207,7 @@ class SchedulerState:
     def _update_candidates_for_cogroup(
         self,
         candidates: defaultdict[WorkerState, int],
-        cogroup: list[TaskState],
+        cogroup: set[TaskState],
         allow_oversaturation: bool = False,
     ) -> None:
         ws: WorkerState | None
@@ -2813,7 +2813,6 @@ class SchedulerState:
             cs.wants_what.remove(ts)
         # TODO should something handle this earlier?
         if ts.cogroup:
-            # TODO binary search by priority; `bisect` doesn't accept key func until 3.10
             ts.cogroup.remove(ts)
             ts.cogroup = None
         ts.who_wants.clear()
@@ -4684,11 +4683,13 @@ class Scheduler(SchedulerState, ServerNode):
 
         # Calculate cogroups
         for keys in cogroup(priority, dependencies):
-            cg: list[TaskState] = []
+            cg: set[TaskState] = set()
             for k in keys:
                 ts = self.tasks[k]
                 assert ts.cogroup is None, (ts, ts.cogroup)
-                cg.append(ts)
+                if self.validate:
+                    assert ts not in cg, (ts, cg)
+                cg.add(ts)
                 ts.cogroup = cg
 
         # Compute recommendations
@@ -7966,7 +7967,7 @@ def _task_to_client_msgs(ts: TaskState) -> dict[str, list[dict[str, Any]]]:
     return {}
 
 
-def _dependent_cogroups(cogroup: list[TaskState]) -> Iterator[list[TaskState]]:
+def _dependent_cogroups(cogroup: set[TaskState]) -> Iterator[set[TaskState]]:
     ids: set[int] = set()
     for ts in cogroup:
         # TODO don't check root-ish tasks
@@ -7976,7 +7977,7 @@ def _dependent_cogroups(cogroup: list[TaskState]) -> Iterator[list[TaskState]]:
                 yield dcg
 
 
-def _dependency_cogroups(cogroup: list[TaskState]) -> Iterator[list[TaskState]]:
+def _dependency_cogroups(cogroup: set[TaskState]) -> Iterator[set[TaskState]]:
     ids: set[int] = set()
     for ts in cogroup:
         # TODO don't check root-ish tasks
