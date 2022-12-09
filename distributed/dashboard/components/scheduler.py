@@ -1501,7 +1501,7 @@ class ComputePerKey(DashboardComponent):
         self.wedge_fig = fig2
         tab2 = TabPanel(child=fig2, title="Pie Chart")
 
-        self.root = Tabs(tabs=[tab1, tab2])
+        self.root = Tabs(tabs=[tab1, tab2], sizing_mode="stretch_both")
 
     @without_property_validation
     @log_errors
@@ -4253,7 +4253,11 @@ def status_doc(scheduler, extra, doc):
     tab3 = TabPanel(child=occupancy_root, title="Occupancy")
     tab4 = TabPanel(child=workers_transfer_bytes.root, title="Data Transfer")
 
-    proc_tabs = Tabs(tabs=[tab1, tab2, tab3, tab4], name="processing_tabs")
+    proc_tabs = Tabs(
+        tabs=[tab1, tab2, tab3, tab4],
+        name="processing_tabs",
+        sizing_mode="stretch_both",
+    )
     doc.add_root(proc_tabs)
 
     task_stream = TaskStream(

@@ -272,12 +272,6 @@ class Semaphore(SyncMethodMixin):
 
     .. warning::
 
-        This implementation is still in an experimental state and subtle
-        changes in behavior may occur without any change in the major version
-        of this library.
-
-    .. warning::
-
         This implementation is susceptible to lease overbooking in case of
         lease timeouts. It is advised to monitor log information and adjust
         above configuration options to suitable values for the user application.
