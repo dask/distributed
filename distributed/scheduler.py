@@ -3029,7 +3029,9 @@ class SchedulerState:
         Minimize expected start time.  If a tie then break with data storage.
         """
         comm_bytes = sum(
-            dts.get_nbytes() for dts in ts.dependencies if ws not in dts.who_has
+            dts.get_nbytes()
+            for dts in ts.dependencies
+            if ws not in dts.who_has and dts not in ws.needs_what
         )
 
         stack_time = ws.occupancy / ws.nthreads
