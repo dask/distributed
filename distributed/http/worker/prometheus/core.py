@@ -176,22 +176,22 @@ class WorkerMetricCollector(PrometheusCollector):
         Additionally, you can obtain derived metrics as follows:
 
         cache hit ratios:
-          by keys  = spill_count_total.memory_read / (spill_count_total.memory_read + spill_count_total.disk_read)
-          by bytes = spill_bytes_total.memory_read / (spill_bytes_total.memory_read + spill_bytes_total.disk_read)
+          by keys  = spill_count.memory_read / (spill_count.memory_read + spill_count.disk_read)
+          by bytes = spill_bytes.memory_read / (spill_bytes.memory_read + spill_bytes.disk_read)
 
         mean times per key:
-          pickle   = spill_time_total.pickle     / spill_count_total.disk_write
-          write    = spill_time_total.disk_write / spill_count_total.disk_write
-          unpickle = spill_time_total.unpickle   / spill_count_total.disk_read
-          read     = spill_time_total.disk_read  / spill_count_total.disk_read
+          pickle   = spill_time_seconds.pickle     / spill_count.disk_write
+          write    = spill_time_seconds.disk_write / spill_count.disk_write
+          unpickle = spill_time_seconds.unpickle   / spill_count.disk_read
+          read     = spill_time_seconds.disk_read  / spill_count.disk_read
 
         mean bytes per key:
-          write    = spill_bytes_total.disk_write / spill_count_total.disk_write
-          read     = spill_bytes_total.disk_read  / spill_count_total.disk_read
+          write    = spill_bytes.disk_write / spill_count.disk_write
+          read     = spill_bytes.disk_read  / spill_count.disk_read
 
         mean bytes per second:
-          write    = spill_bytes_total.disk_write / spill_time_total.disk_write
-          read     = spill_bytes_total.disk_read  / spill_time_total.disk_read
+          write    = spill_bytes.disk_write / spill_time_seconds.disk_write
+          read     = spill_bytes.disk_read  / spill_time_seconds.disk_read
         """
         try:
             get_metrics = self.server.data.get_metrics  # type: ignore
@@ -200,7 +200,7 @@ class WorkerMetricCollector(PrometheusCollector):
         metrics = get_metrics(reset_max=True)
 
         total_bytes = CounterMetricFamily(
-            self.build_name("spill_bytes_total"),
+            self.build_name("spill_bytes"),
             "Total size of memory and disk accesses caused by managed data "
             "since the latest worker restart",
             labels=["event"],
@@ -208,9 +208,10 @@ class WorkerMetricCollector(PrometheusCollector):
         # Note: memory_read is used to calculate cache hit ratios (see docstring)
         for k in ("memory_read", "disk_read", "disk_write"):
             total_bytes.add_metric([k], metrics[f"{k}_bytes_total"])
+        yield total_bytes
 
         total_counts = CounterMetricFamily(
-            self.build_name("spill_count_total"),
+            self.build_name("spill_count"),
             "Total number of memory and disk accesses caused by managed data "
             "since the latest worker restart",
             labels=["event"],
@@ -218,9 +219,10 @@ class WorkerMetricCollector(PrometheusCollector):
         # Note: memory_read is used to calculate cache hit ratios (see docstring)
         for k in ("memory_read", "disk_read", "disk_write"):
             total_counts.add_metric([k], metrics[f"{k}_count_total"])
+        yield total_counts
 
         total_times = CounterMetricFamily(
-            self.build_name("spill_time_total"),
+            self.build_name("spill_time_seconds"),
             "Total time spent spilling/unspilling since the latest worker restart",
             labels=["event"],
         )
@@ -229,7 +231,7 @@ class WorkerMetricCollector(PrometheusCollector):
         yield total_times
 
         max_times = GaugeMetricFamily(
-            self.build_name("spill_time_per_key_max"),
+            self.build_name("spill_time_seconds_per_key_max"),
             "Maximum time spent spilling/unspilling a single key "
             "since the previous poll",
             labels=["event"],
