@@ -394,7 +394,7 @@ class Worker(BaseWorker, ServerNode):
     transfer_outgoing_log: deque[dict[str, Any]]
     #: Total number of data transfers to other workers since the worker was started
     transfer_outgoing_count_total: int
-    #: Total size of data transferred to other workers (including in-progress transfers)
+    #: Total size of data transfers to other workers (including in-progress and failed transfers)
     transfer_outgoing_bytes_total: int
     #: Current total size of open data transfers to other workers
     transfer_outgoing_bytes: int
