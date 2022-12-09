@@ -341,7 +341,7 @@ class ShuffleWorkerExtension:
         worker.handlers["shuffle_receive"] = self.shuffle_receive
         worker.handlers["shuffle_inputs_done"] = self.shuffle_inputs_done
         worker.handlers["shuffle_fail"] = self.shuffle_fail
-        worker.stream_handlers["shuffle-forget"] = self.shuffle_forget
+        worker.stream_handlers["shuffle-fail"] = self.shuffle_fail
         worker.extensions["shuffle"] = self
 
         # Initialize
@@ -396,9 +396,6 @@ class ShuffleWorkerExtension:
         shuffle.fail(exception)
         await shuffle.close()
         del self.shuffles[shuffle_id]
-
-    async def shuffle_forget(self, shuffle_id: ShuffleId) -> None:
-        await self.shuffle_fail(shuffle_id, message="Shuffle {shuffle_id} forgotten")
 
     def add_partition(
         self,
@@ -779,7 +776,13 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         shuffle_id = ShuffleSchedulerExtension.id_from_key(key)
         participating_workers = self.participating_workers[shuffle_id]
         worker_msgs = {
-            worker: [{"op": "shuffle-forget", "shuffle_id": shuffle_id}]
+            worker: [
+                {
+                    "op": "shuffle-fail",
+                    "shuffle_id": shuffle_id,
+                    "message": f"Shuffle {shuffle_id} forgotten",
+                }
+            ]
             for worker in participating_workers
         }
         self._clean_on_scheduler(shuffle_id)
