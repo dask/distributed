@@ -7587,7 +7587,8 @@ class Scheduler(SchedulerState, ServerNode):
                 scheduler,
                 bandwidth_workers,
                 bandwidth_types,
-            ]
+            ],
+            sizing_mode="stretch_both",
         )
 
         from bokeh.core.templates import get_env
