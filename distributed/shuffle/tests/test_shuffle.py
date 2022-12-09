@@ -993,10 +993,8 @@ async def test_restrictions(c, s, a, b):
     assert all(stringify(key) in a.data for key in y.__dask_keys__())
 
 
-@pytest.mark.skip(reason="Don't clean up forgotten shuffles")
 @gen_cluster(client=True)
 async def test_delete_some_results(c, s, a, b):
-    # FIXME: This works but not reliably. It fails every ~25% of runs
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -1010,10 +1008,10 @@ async def test_delete_some_results(c, s, a, b):
     x = x.partitions[: x.npartitions // 2].persist()
 
     await c.compute(x.size)
-
-    # await clean_worker(a)
-    # await clean_worker(b)
-    # await clean_scheduler(s)
+    del x
+    await clean_worker(a)
+    await clean_worker(b)
+    await clean_scheduler(s)
 
 
 @gen_cluster(client=True)
