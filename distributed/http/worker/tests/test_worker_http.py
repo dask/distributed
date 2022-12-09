@@ -33,7 +33,7 @@ async def test_prometheus(c, s, a):
         "dask_worker_memory_per_key_bytes_max",
         "dask_worker_spill_bytes_total",
         "dask_worker_spill_count_total",
-        "dask_worker_spill_time_seconds_per_key_max",
+        "dask_worker_spill_time_per_key_max_seconds",
         "dask_worker_spill_time_seconds_total",
         "dask_worker_tasks",
         "dask_worker_threads",

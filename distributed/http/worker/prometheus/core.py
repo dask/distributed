@@ -64,8 +64,9 @@ class WorkerMetricCollector(PrometheusCollector):
         )
 
         yield GaugeMetricFamily(
-            self.build_name("latency_seconds"),
+            self.build_name("latency"),
             "Latency of worker connection",
+            unit="seconds",
             value=self.server.latency,
         )
 
@@ -135,13 +136,14 @@ class WorkerMetricCollector(PrometheusCollector):
         )
         self.server._max_tick_duration = 0
         yield GaugeMetricFamily(
-            self.build_name("tick_duration_maximum_seconds"),
+            self.build_name("tick_duration_maximum"),
             "Maximum tick duration observed since Prometheus last scraped metrics",
+            unit="seconds",
             value=max_tick_duration,
         )
 
         yield CounterMetricFamily(
-            self.build_name("tick_count_total"),
+            self.build_name("tick_count"),
             "Total number of ticks observed since the server started",
             value=self.server._tick_counter,
         )
@@ -153,20 +155,23 @@ class WorkerMetricCollector(PrometheusCollector):
             return
 
         yield GaugeMetricFamily(
-            self.build_name("tick_duration_median_seconds"),
+            self.build_name("tick_duration_median"),
             "Median tick duration at worker",
+            unit="seconds",
             value=self.server.digests["tick-duration"].components[1].quantile(50),
         )
 
         yield GaugeMetricFamily(
-            self.build_name("task_duration_median_seconds"),
+            self.build_name("task_duration_median"),
             "Median task runtime at worker",
+            unit="seconds",
             value=self.server.digests["task-duration"].components[1].quantile(50),
         )
 
         yield GaugeMetricFamily(
-            self.build_name("transfer_bandwidth_median_bytes"),
+            self.build_name("transfer_bandwidth_median"),
             "Bandwidth for transfer at worker",
+            unit="bytes",
             value=self.server.digests["transfer-bandwidth"].components[1].quantile(50),
         )
 
@@ -180,18 +185,18 @@ class WorkerMetricCollector(PrometheusCollector):
           by bytes = spill_bytes.memory_read / (spill_bytes.memory_read + spill_bytes.disk_read)
 
         mean times per key:
-          pickle   = spill_time_seconds.pickle     / spill_count.disk_write
-          write    = spill_time_seconds.disk_write / spill_count.disk_write
-          unpickle = spill_time_seconds.unpickle   / spill_count.disk_read
-          read     = spill_time_seconds.disk_read  / spill_count.disk_read
+          pickle   = spill_time.pickle     / spill_count.disk_write
+          write    = spill_time.disk_write / spill_count.disk_write
+          unpickle = spill_time.unpickle   / spill_count.disk_read
+          read     = spill_time.disk_read  / spill_count.disk_read
 
         mean bytes per key:
           write    = spill_bytes.disk_write / spill_count.disk_write
           read     = spill_bytes.disk_read  / spill_count.disk_read
 
         mean bytes per second:
-          write    = spill_bytes.disk_write / spill_time_seconds.disk_write
-          read     = spill_bytes.disk_read  / spill_time_seconds.disk_read
+          write    = spill_bytes.disk_write / spill_time.disk_write
+          read     = spill_bytes.disk_read  / spill_time.disk_read
         """
         try:
             get_metrics = self.server.data.get_metrics  # type: ignore
@@ -222,8 +227,9 @@ class WorkerMetricCollector(PrometheusCollector):
         yield total_counts
 
         total_times = CounterMetricFamily(
-            self.build_name("spill_time_seconds"),
+            self.build_name("spill_time"),
             "Total time spent spilling/unspilling since the latest worker restart",
+            unit="seconds",
             labels=["event"],
         )
         for k in ("pickle", "disk_write", "disk_read", "unpickle"):
@@ -231,9 +237,10 @@ class WorkerMetricCollector(PrometheusCollector):
         yield total_times
 
         max_times = GaugeMetricFamily(
-            self.build_name("spill_time_seconds_per_key_max"),
+            self.build_name("spill_time_per_key_max"),
             "Maximum time spent spilling/unspilling a single key "
             "since the previous poll",
+            unit="seconds",
             labels=["event"],
         )
         for k in ("pickle", "disk_write", "disk_read", "unpickle"):
