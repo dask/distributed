@@ -14,6 +14,7 @@ from dask.core import flatten, get_dependencies
 from dask.order import order
 from dask.utils import key_split, stringify
 
+from distributed import wait
 from distributed.utils_test import gen_cluster
 from distributed.worker import Worker
 from distributed.worker_state_machine import ComputeTaskEvent
@@ -105,6 +106,43 @@ async def test_co_assign_tree_reduce_multigroup(c, s, *workers, from_zarr):
 
     # Two groups of 4, then one of 2.
     assert set(worker_counts.values()) == {4, 6}, worker_counts
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 2)] * 4,
+    config={"distributed.scheduler.work-stealing": False},
+)
+async def test_basic_sum(c, s, *workers):
+    r"""
+          a                a                a                a
+        /    \           /    \           /    \           /    \
+       p       p        p       p        p       p        p       p
+     // \\   // \\    // \\   // \\    // \\   // \\    // \\   // \\
+    z z z z z z z z  z z z z z z z z  z z z z z z z z  z z z z z z z z
+    """
+    da = pytest.importorskip("dask.array")
+
+    roots = da.zeros((len(workers), 8), chunks=(1, 1))
+    result = roots.sum(axis=1, split_every=4)
+
+    result.visualize(color="cogroup-name", collapse_outputs=True)
+
+    await wait(result.persist(optimize_graph=False))
+
+    transfers = get_transfers_by_prefix(workers)
+
+    # Each tree should be split between 2 workers for parallelism,
+    # so a `sum-partial` will move from one worker to another.
+    # We _could_ do a full tree per worker, but that would double the time
+    # to finish any given tree, which seems heuristically worse.
+    assert transfers == {"sum-partial": roots.shape[0]}
+
+    root_keys = collection_keys(roots)
+    who_ran = get_who_ran(workers)
+    worker_counts = Counter(who_ran[k] for k in root_keys)
+
+    assert set(worker_counts.values()) == {len(root_keys) / len(workers)}, worker_counts
 
 
 def unstringify(k):
