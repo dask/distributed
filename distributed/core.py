@@ -109,9 +109,9 @@ def _expects_comm(func: Callable) -> bool:
         return True
     if params and params[0] == "stream":
         warnings.warn(
-            "Calling the first arugment of a RPC handler `stream` is "
+            "Calling the first argument of a RPC handler `stream` is "
             "deprecated. Defining this argument is optional. Either remove the "
-            f"arugment or rename it to `comm` in {func}.",
+            f"argument or rename it to `comm` in {func}.",
             FutureWarning,
         )
         return True
@@ -394,9 +394,10 @@ class Server:
         self.periodic_callbacks["monitor"] = pc
 
         self._last_tick = time()
+        self._max_tick_duration = 0
         self._tick_counter = 0
-        self._tick_count = 0
-        self._tick_count_last = time()
+        self._last_tick_counter = 0
+        self._last_tick_cycle = time()
         self._tick_interval = parse_timedelta(
             dask.config.get("distributed.admin.tick.interval"), default="ms"
         )
@@ -416,7 +417,7 @@ class Server:
 
         self.io_loop.add_callback(set_thread_ident)
         self._startup_lock = asyncio.Lock()
-        self.__startup_exc: Exception | None = None
+        self.__startup_exc = None
 
         self.rpc = ConnectionPool(
             limit=connection_limit,
@@ -442,6 +443,47 @@ class Server:
         if not isinstance(value, Status):
             raise TypeError(f"Expected Status; got {value!r}")
         self._status = value
+
+    @property
+    def incoming_comms_open(self) -> int:
+        """The number of total incoming connections listening to remote RPCs"""
+        return len(self._comms)
+
+    @property
+    def incoming_comms_active(self) -> int:
+        """The number of connections currently handling a remote RPC"""
+        return len([c for c, op in self._comms.items() if op is not None])
+
+    @property
+    def outgoing_comms_open(self) -> int:
+        """The number of connections currently open and waiting for a remote RPC"""
+        return self.rpc.open
+
+    @property
+    def outgoing_comms_active(self) -> int:
+        """The number of outgoing connections that are currently used to
+        execute a RPC"""
+        return self.rpc.active
+
+    def get_connection_counters(self) -> dict[str, int]:
+        """A dict with various connection counters
+
+        See also
+        --------
+        Server.incoming_comms_open
+        Server.incoming_comms_active
+        Server.outgoing_comms_open
+        Server.outgoing_comms_active
+        """
+        return {
+            attr: getattr(self, attr)
+            for attr in [
+                "incoming_comms_open",
+                "incoming_comms_active",
+                "outgoing_comms_open",
+                "outgoing_comms_active",
+            ]
+        }
 
     async def finished(self):
         """Wait until the server has finished"""
@@ -540,27 +582,32 @@ class Server:
 
     def _measure_tick(self):
         now = time()
-        diff = now - self._last_tick
+        tick_duration = now - self._last_tick
         self._last_tick = now
         self._tick_counter += 1
-        if diff > tick_maximum_delay:
+        # This metric is exposed in Prometheus and is reset there during
+        # collection
+        self._max_tick_duration = max(self._max_tick_duration, tick_duration)
+        if tick_duration > tick_maximum_delay:
             logger.info(
                 "Event loop was unresponsive in %s for %.2fs.  "
                 "This is often caused by long-running GIL-holding "
                 "functions or moving large chunks of data. "
                 "This can cause timeouts and instability.",
                 type(self).__name__,
-                diff,
+                tick_duration,
             )
         if self.digests is not None:
-            self.digests["tick-duration"].add(diff)
+            self.digests["tick-duration"].add(tick_duration)
 
     def _cycle_ticks(self):
         if not self._tick_counter:
             return
-        last, self._tick_count_last = self._tick_count_last, time()
-        count, self._tick_counter = self._tick_counter, 0
-        self._tick_interval_observed = (time() - last) / (count or 1)
+        now = time()
+        last_tick_cycle, self._last_tick_cycle = self._last_tick_cycle, now
+        count = self._tick_counter - self._last_tick_counter
+        self._last_tick_counter = self._tick_counter
+        self._tick_interval_observed = (now - last_tick_cycle) / (count or 1)
 
     @property
     def address(self) -> str:

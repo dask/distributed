@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import gc
 import importlib
+import itertools
 import logging
 import os
 import sys
@@ -44,10 +45,15 @@ from distributed.comm.registry import backends
 from distributed.compatibility import LINUX, WINDOWS, to_thread
 from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
-from distributed.diagnostics.plugin import CondaInstall, PackageInstall, PipInstall
+from distributed.diagnostics.plugin import (
+    CondaInstall,
+    ForwardOutput,
+    PackageInstall,
+    PipInstall,
+)
 from distributed.metrics import time
 from distributed.protocol import pickle
-from distributed.scheduler import Scheduler
+from distributed.scheduler import KilledWorker, Scheduler
 from distributed.utils_test import (
     NO_AMM,
     BlockedExecute,
@@ -413,6 +419,44 @@ async def test_chained_error_message(c, s, a, b):
     except Exception as e:
         assert e.__cause__ is not None
         assert "Bar" in str(e.__cause__)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("sync", [True, False])
+@pytest.mark.parametrize(
+    "exc_type", [BaseException, SystemExit, KeyboardInterrupt, asyncio.CancelledError]
+)
+@gen_cluster(
+    nthreads=[("", 1)],
+    client=True,
+    Worker=Nanny,
+    config={"distributed.scheduler.allowed-failures": 0},
+)
+async def test_base_exception_in_task(c, s, a, sync, exc_type):
+    if sync:
+
+        def raiser():
+            raise exc_type(f"this is a {exc_type}")
+
+    else:
+
+        async def raiser():
+            raise exc_type(f"this is a {exc_type}")
+
+    f = c.submit(raiser)
+
+    try:
+        with pytest.raises(
+            KilledWorker if exc_type in (SystemExit, KeyboardInterrupt) else exc_type
+        ):
+            await f
+    except BaseException as e:
+        # Prevent test failure from killing the whole pytest process
+        traceback.print_exc()
+        pytest.fail(f"BaseException propagated back to test: {e!r}. See stdout.")
+
+    # Nanny restarts it
+    await c.wait_for_workers(1)
 
 
 @gen_test()
@@ -1541,7 +1585,7 @@ async def test_close_while_executing(c, s, a, sync):
         task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
     )
     await a.close()
-    assert task.cancelled()
+    assert task.done()
     assert s.tasks["f1"].state in ("queued", "no-worker")
 
 
@@ -1564,7 +1608,7 @@ async def test_close_async_task_handles_cancellation(c, s, a):
     )
     start = time()
     with captured_logger(
-        "distributed.worker_state_machine", level=logging.ERROR
+        "distributed.worker.state_machine", level=logging.ERROR
     ) as logger:
         await a.close(timeout=1)
     assert "Failed to cancel asyncio task" in logger.getvalue()
@@ -2462,7 +2506,7 @@ async def test_worker_state_error_release_error_last(c, s, a, b):
     f.release()
     g.release()
 
-    # We no longer hold any refs to f or g and B didn't have any erros. It
+    # We no longer hold any refs to f or g and B didn't have any errors. It
     # releases everything as expected
     while b.state.tasks:
         await asyncio.sleep(0.01)
@@ -2529,7 +2573,7 @@ async def test_worker_state_error_release_error_first(c, s, a, b):
     # Expected states after we release references to the futures
 
     res.release()
-    # We no longer hold any refs to f or g and B didn't have any erros. It
+    # We no longer hold any refs to f or g and B didn't have any errors. It
     # releases everything as expected
     while res.key in a.state.tasks:
         await asyncio.sleep(0.01)
@@ -2594,7 +2638,7 @@ async def test_worker_state_error_release_error_int(c, s, a, b):
 
     f.release()
     res.release()
-    # We no longer hold any refs to f or g and B didn't have any erros. It
+    # We no longer hold any refs to f or g and B didn't have any errors. It
     # releases everything as expected
     while len(a.state.tasks) > 1:
         await asyncio.sleep(0.01)
@@ -3639,8 +3683,8 @@ async def test_reconnect_argument_deprecated(s):
 @gen_cluster(client=True, nthreads=[])
 async def test_worker_running_before_running_plugins(c, s, caplog):
     class InitWorkerNewThread(WorkerPlugin):
-        name: str = "init_worker_new_thread"
-        setup_status: Status | None = None
+        name = "init_worker_new_thread"
+        setup_status = None
 
         def setup(self, worker):
             self.setup_status = worker.status
@@ -3727,8 +3771,7 @@ async def test_deprecation_of_renamed_worker_attributes(s, a, b):
 
 @gen_cluster(nthreads=[])
 async def test_worker_log_memory_limit_too_high(s):
-    with captured_logger("distributed.worker_memory") as caplog:
-        # caplog.set_level(logging.WARN, logger="distributed.worker")
+    with captured_logger("distributed.worker.memory") as caplog:
         async with Worker(s.address, memory_limit="1PB"):
             pass
 
@@ -3741,3 +3784,107 @@ async def test_worker_log_memory_limit_too_high(s):
         for snippets in expected_snippets:
             # assert any(snip in caplog.text for snip in snippets)
             assert any(snip in caplog.getvalue().lower() for snip in snippets)
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_forward_output(c, s, a, b, capsys):
+    def print_stdout(*args, **kwargs):
+        print(*args, file=sys.stdout, **kwargs)
+
+    def print_stderr(*args, **kwargs):
+        print(*args, file=sys.stderr, **kwargs)
+
+    plugin = ForwardOutput()
+    out, err = capsys.readouterr()
+
+    counter = itertools.count()
+
+    # Without the plugin installed, we should not see any output
+    # Note that we use nannies so workers run in subprocesses
+    await c.submit(print_stdout, "foo", key=next(counter))
+    await c.submit(print_stdout, "bar\n", key=next(counter))
+    await c.submit(print_stdout, "baz", end="", flush=True, key=next(counter))
+    await c.submit(print_stdout, 1, 2, end="\n", sep="\n", key=next(counter))
+    out, err = capsys.readouterr()
+
+    assert "" == out
+    assert "" == err
+
+    await c.submit(print_stderr, "foo", key=next(counter))
+    await c.submit(print_stderr, "bar\n", key=next(counter))
+    await c.submit(print_stderr, "baz", flush=True, key=next(counter))
+    await c.submit(print_stderr, 1, 2, end="\n", sep="\n", key=next(counter))
+    out, err = capsys.readouterr()
+
+    assert "" == out
+    assert "" == err
+
+    # After installing, output should be forwarded
+    await c.register_worker_plugin(plugin, "forward")
+    await asyncio.sleep(0.1)  # Let setup messages come in
+    capsys.readouterr()
+
+    await c.submit(print_stdout, "foo", key=next(counter))
+    out, err = capsys.readouterr()
+
+    assert "foo\n" == out
+    assert "" == err
+
+    await c.submit(print_stdout, "bar\n", key=next(counter))
+    out, err = capsys.readouterr()
+
+    assert "bar\n\n" == out
+    assert "" == err
+
+    await c.submit(print_stdout, "baz", end="", flush=True, key=next(counter))
+    out, err = capsys.readouterr()
+
+    assert "baz" == out
+    assert "" == err
+
+    await c.submit(print_stdout, "first\nsecond", end="", key=next(counter))
+    out, err = capsys.readouterr()
+
+    assert "first\nsecond" == out
+    assert "" == err
+
+    await c.submit(print_stdout, 1, 2, sep=":", key=next(counter))
+    out, err = capsys.readouterr()
+
+    assert "1:2\n" == out
+    assert err == ""
+
+    await c.submit(print_stderr, "fatal", key=next(counter))
+    out, err = capsys.readouterr()
+
+    assert "" == out
+    assert "fatal\n" == err
+
+    # Registering the plugin is idempotent
+    other_plugin = ForwardOutput()
+    await c.register_worker_plugin(other_plugin, "forward")
+    await asyncio.sleep(0.1)  # Let teardown/setup messages come in
+    out, err = capsys.readouterr()
+
+    await c.submit(print_stdout, "foo", key=next(counter))
+    out, err = capsys.readouterr()
+
+    assert "foo\n" == out
+    assert "" == err
+
+    # After unregistering the plugin, we should once again not see any output
+    await c.unregister_worker_plugin("forward")
+    await asyncio.sleep(0.1)  # Let teardown messages come in
+    capsys.readouterr()
+
+    await c.submit(print_stdout, "foo", key=next(counter))
+    out, err = capsys.readouterr()
+
+    assert "" == out
+    assert "" == err
+
+    await c.submit(print_stderr, "fatal", key=next(counter))
+    out, err = capsys.readouterr()
+
+    assert "" == out
+    assert "" == err

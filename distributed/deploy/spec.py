@@ -75,7 +75,7 @@ class ProcessInterface:
         to make the job exist in the future
 
         For the scheduler we will expect the scheduler's ``.address`` attribute
-        to be avaialble after this completes.
+        to be available after this completes.
         """
         self.status = Status.running
 
@@ -513,7 +513,7 @@ class SpecCluster(Cluster):
     def _new_worker_name(self, worker_number):
         """Returns new worker name.
 
-        This can be overriden in SpecCluster derived classes to customise the
+        This can be overridden in SpecCluster derived classes to customise the
         worker names.
         """
         return worker_number

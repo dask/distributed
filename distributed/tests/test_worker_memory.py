@@ -14,6 +14,7 @@ import pytest
 from tlz import merge
 
 import dask.config
+from dask.utils import format_bytes, parse_bytes
 
 import distributed.system
 from distributed import Client, Event, KilledWorker, Nanny, Scheduler, Worker, wait
@@ -48,17 +49,19 @@ def memory_monitor_running(dask_worker: Worker | Nanny) -> bool:
 
 
 def test_parse_memory_limit_zero():
-    assert parse_memory_limit(0, 1) is None
-    assert parse_memory_limit("0", 1) is None
-    assert parse_memory_limit(None, 1) is None
+    logger = logging.getLogger(__name__)
+    assert parse_memory_limit(0, 1, logger=logger) is None
+    assert parse_memory_limit("0", 1, logger=logger) is None
+    assert parse_memory_limit(None, 1, logger=logger) is None
 
 
 def test_resource_limit(monkeypatch):
-    assert parse_memory_limit("250MiB", 1, total_cores=1) == 1024 * 1024 * 250
+    logger = logging.getLogger(__name__)
+    assert parse_memory_limit("250MiB", 1, 1, logger=logger) == 1024 * 1024 * 250
 
     new_limit = 1024 * 1024 * 200
     monkeypatch.setattr(distributed.system, "MEMORY_LIMIT", new_limit)
-    assert parse_memory_limit("250MiB", 1, total_cores=1) == new_limit
+    assert parse_memory_limit("250MiB", 1, 1, logger=logger) == new_limit
 
 
 @gen_cluster(nthreads=[("", 1)], worker_kwargs={"memory_limit": "2e3 MB"})
@@ -591,7 +594,7 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
     while a.state.executing_count != 1:
         await asyncio.sleep(0.01)
 
-    with captured_logger(logging.getLogger("distributed.worker_memory")) as logger:
+    with captured_logger(logging.getLogger("distributed.worker.memory")) as logger:
         # Task that is queued on the worker when the worker pauses
         y = c.submit(inc, 1, key="y")
         while "y" not in a.state.tasks:
@@ -928,11 +931,12 @@ async def test_disk_cleanup_on_terminate(c, s, a, ignore_sigterm):
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,
-    worker_kwargs={"memory_limit": "10 GiB"},
+    worker_kwargs={"memory_limit": "2 GiB"},
+    # ^ must be smaller than system memory limit, otherwise that will take precedence
     config={
         "distributed.worker.memory.target": False,
-        "distributed.worker.memory.spill": 0.7,
-        "distributed.worker.memory.pause": 0.9,
+        "distributed.worker.memory.spill": 0.5,
+        "distributed.worker.memory.pause": 0.8,
         "distributed.worker.memory.monitor-interval": "10ms",
     },
 )
@@ -940,16 +944,21 @@ async def test_pause_while_spilling(c, s, a):
     N_PAUSE = 3
     N_TOTAL = 5
 
+    if a.memory_manager.memory_limit < parse_bytes("2 GiB"):
+        pytest.fail(
+            f"Set 2 GiB memory limit, got {format_bytes(a.memory_manager.memory_limit)}."
+        )
+
     def get_process_memory():
         if len(a.data) < N_PAUSE:
             # Don't trigger spilling until after all tasks have completed
             return 0
         elif a.data.fast and not a.data.slow:
             # Trigger spilling
-            return 8 * 2**30
+            return parse_bytes("1.6 GiB")
         else:
             # Trigger pause, but only after we started spilling
-            return 10 * 2**30
+            return parse_bytes("1.9 GiB")
 
     a.monitor.get_process_memory = get_process_memory
 

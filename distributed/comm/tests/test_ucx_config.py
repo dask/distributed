@@ -108,10 +108,7 @@ async def test_ucx_config(ucx_loop, cleanup):
         assert ucx_environment == {"UCX_MEMTRACK_DEST": "stdout"}
 
 
-@pytest.mark.flaky(
-    reruns=10,
-    reruns_delay=5,
-)
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 def test_ucx_config_w_env_var(ucx_loop, cleanup, loop):
     env = os.environ.copy()
     env["DASK_RMM__POOL_SIZE"] = "1000.00 MB"

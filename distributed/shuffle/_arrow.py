@@ -6,7 +6,7 @@ if TYPE_CHECKING:
     import pyarrow as pa
 
 
-def dump_batch(batch: bytes, file: BinaryIO, schema: pa.Schema) -> None:
+def dump_batch(batch: pa.Buffer, file: BinaryIO, schema: pa.Schema) -> None:
     """
     Dump a batch to file, if we're the first, also write the schema
 
@@ -47,7 +47,7 @@ def load_arrow(file: BinaryIO) -> pa.Table:
         raise EOFError
 
 
-def list_of_buffers_to_table(data: list[pa.Buffer], schema: pa.Schema) -> pa.Table:
+def list_of_buffers_to_table(data: list[bytes], schema: pa.Schema) -> pa.Table:
     """Convert a list of arrow buffers and a schema to an Arrow Table"""
     import io
 

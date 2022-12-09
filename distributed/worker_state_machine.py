@@ -40,7 +40,7 @@ from distributed.protocol.serialize import Serialize
 from distributed.sizeof import safe_sizeof as sizeof
 from distributed.utils import recursive_to_dict
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("distributed.worker.state_machine")
 
 if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
@@ -1477,6 +1477,10 @@ class WorkerState:
         ts.next = None
         ts.done = False
         ts.coming_from = None
+        ts.exception = None
+        ts.traceback = None
+        ts.traceback_text = ""
+        ts.traceback_text = ""
 
         self.missing_dep_flight.discard(ts)
         self.ready.discard(ts)

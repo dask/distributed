@@ -24,7 +24,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.8", "3.9", "3.10"]
-        queuing: [no_queue]
+        queuing: [queue]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
         exclude:
@@ -33,11 +33,11 @@ jobs:
         include:
           - os: ubuntu-latest
             python-version: 3.9
-            queuing: queue
+            queuing: no_queue
             partition: "ci1"
           - os: ubuntu-latest
             python-version: 3.9
-            queuing: queue
+            queuing: no_queue
             partition: "not ci1"
 
         # Uncomment to stress-test the test suite for random failures.
@@ -68,7 +68,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Conda Environment
-        uses: conda-incubator/setup-miniconda@v2
+        uses: conda-incubator/setup-miniconda@v2.2.0
         with:
           miniforge-variant: Mambaforge
           miniforge-version: latest
@@ -144,8 +144,8 @@ jobs:
 
       - name: Set up dask env for job queuing
         shell: bash -l {0}
-        if: ${{ matrix.queuing == 'queue' }}
-        run: echo "DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=1.0" >> $GITHUB_ENV
+        if: ${{ matrix.queuing == 'no_queue' }}
+        run: echo "DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=inf" >> $GITHUB_ENV
 
       - name: Print host info
         shell: bash -l {0}
@@ -185,10 +185,23 @@ jobs:
       #   if: ${{ failure() }}
       #   uses: mxschmitt/action-tmate@v3
 
+      # https://community.codecov.com/t/files-missing-from-report/3902/7
+      # The coverage file being created records filenames at the distributed/ directory
+      # as opposed to root. This is causing filename mismatches in Codecov.
+      # This step edits `coverage.xml` in-file by adding `distributed` to all filenames.
+      - name: Prepare coverage report
+        if: ${{ matrix.os != 'windows-latest' }}
+        shell: bash -l {0}
+        run: sed -i'' -e 's/filename="/filename="distributed\//g' coverage.xml
+
+      # Do not upload coverage reports for cron jobs
       - name: Coverage
+        if: github.event_name != 'schedule'
         uses: codecov/codecov-action@v3
         with:
-          functionalities: network
+          name: ${{ env.TEST_ID }}
+          # See https://community.codecov.com/t/upload-issues-unable-to-locate-build-via-github-actions-api/3954
+          token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload test results
         # ensure this runs even if pytest fails

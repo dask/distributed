@@ -10,8 +10,8 @@ class MissingBokeh(RequestHandler):
     def get(self):
         self.write(
             f"<p>Dask needs bokeh >= {MIN_BOKEH_VERSION}, < 3 for the dashboard.</p>"
-            f"<p>Install with conda: conda install bokeh>={MIN_BOKEH_VERSION},<3</p>"
-            f"<p>Install with pip: pip install bokeh>={MIN_BOKEH_VERSION},<3</p>"
+            f"<p>Install with conda: <code>conda install bokeh>={MIN_BOKEH_VERSION},<3</code></p>"
+            f"<p>Install with pip: <code>pip install bokeh>={MIN_BOKEH_VERSION},<3</code></p>"
         )
 
 

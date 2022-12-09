@@ -281,6 +281,7 @@ async def test_no_more_workers_than_tasks():
 
 
 @pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
+@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
 def test_basic_no_loop(cleanup):
     loop = None
     try:
@@ -409,8 +410,8 @@ async def test_update_adaptive():
         dashboard_address=":0",
         asynchronous=True,
     ) as cluster:
-        first = cluster.adapt(maxmimum=1)
-        second = cluster.adapt(maxmimum=2)
+        first = cluster.adapt(maximum=1)
+        second = cluster.adapt(maximum=2)
         await asyncio.sleep(0.2)
         assert first.periodic_callback is None
         assert second.periodic_callback.is_running()

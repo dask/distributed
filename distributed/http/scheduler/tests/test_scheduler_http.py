@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from unittest import mock
 
 import aiohttp
 import pytest
@@ -15,13 +16,15 @@ from tornado.httpclient import AsyncHTTPClient, HTTPClientError
 import dask.config
 from dask.sizeof import sizeof
 
-from distributed import Lock
+from distributed import Lock, Scheduler
 from distributed.client import wait
 from distributed.utils import is_valid_xml
 from distributed.utils_test import (
     div,
     fetch_metrics,
+    fetch_metrics_body,
     gen_cluster,
+    gen_test,
     inc,
     lock_inc,
     slowinc,
@@ -108,14 +111,32 @@ async def test_prometheus(c, s, a, b):
         "dask_scheduler_tasks_suspicious",
         "dask_scheduler_tasks_forgotten",
         "dask_scheduler_prefix_state_totals",
+        "dask_scheduler_tick_count",
+        "dask_scheduler_tick_duration_maximum_seconds",
     }
 
-    assert active_metrics.keys() == expected_metrics
+    assert set(active_metrics.keys()) == expected_metrics
     assert active_metrics["dask_scheduler_clients"].samples[0].value == 1.0
 
     # request data twice since there once was a case where metrics got registered multiple times resulting in
     # prometheus_client errors
     await fetch_metrics(s.http_server.port, "dask_scheduler_")
+
+
+@pytest.fixture
+def prometheus_not_available():
+    import sys
+
+    with mock.patch.dict("sys.modules", {"prometheus_client": None}):
+        sys.modules.pop("distributed.http.scheduler.prometheus", None)
+        yield
+
+
+@gen_test()
+async def test_metrics_when_prometheus_client_not_installed(prometheus_not_available):
+    async with Scheduler(dashboard_address=":0") as s:
+        body = await fetch_metrics_body(s.http_server.port)
+        assert "Prometheus metrics are not available" in body
 
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})

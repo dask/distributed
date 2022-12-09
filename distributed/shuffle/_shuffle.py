@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from dask.base import tokenize
@@ -8,6 +9,7 @@ from dask.layers import SimpleShuffleLayer
 
 from distributed.shuffle._shuffle_extension import ShuffleId, ShuffleWorkerExtension
 
+logger = logging.getLogger("distributed.shuffle")
 if TYPE_CHECKING:
     import pandas as pd
 
@@ -39,19 +41,28 @@ def shuffle_transfer(
     npartitions: int,
     column: str,
 ) -> None:
-    _get_worker_extension().add_partition(
-        input, id, npartitions=npartitions, column=column
-    )
+    try:
+        _get_worker_extension().add_partition(
+            input, id, npartitions=npartitions, column=column
+        )
+    except Exception:
+        raise RuntimeError(f"shuffle_transfer failed during shuffle {id}")
 
 
 def shuffle_unpack(
     id: ShuffleId, output_partition: int, barrier: object
 ) -> pd.DataFrame:
-    return _get_worker_extension().get_output_partition(id, output_partition)
+    try:
+        return _get_worker_extension().get_output_partition(id, output_partition)
+    except Exception:
+        raise RuntimeError(f"shuffle_unpack failed during shuffle {id}")
 
 
 def shuffle_barrier(id: ShuffleId, transfers: list[None]) -> None:
-    return _get_worker_extension().barrier(id)
+    try:
+        return _get_worker_extension().barrier(id)
+    except Exception:
+        raise RuntimeError(f"shuffle_barrier failed during shuffle {id}")
 
 
 def rearrange_by_column_p2p(
@@ -143,9 +154,9 @@ class P2PShuffleLayer(SimpleShuffleLayer):
         dsk: dict[tuple | str, tuple] = {}
         barrier_key = "shuffle-barrier-" + token
         name = "shuffle-transfer-" + token
-        tranfer_keys = list()
+        transfer_keys = list()
         for i in range(self.npartitions_input):
-            tranfer_keys.append((name, i))
+            transfer_keys.append((name, i))
             dsk[(name, i)] = (
                 shuffle_transfer,
                 (self.name_input, i),
@@ -154,7 +165,7 @@ class P2PShuffleLayer(SimpleShuffleLayer):
                 self.column,
             )
 
-        dsk[barrier_key] = (shuffle_barrier, token, tranfer_keys)
+        dsk[barrier_key] = (shuffle_barrier, token, transfer_keys)
 
         name = self.name
         for part_out in self.parts_out:

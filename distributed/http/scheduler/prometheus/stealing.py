@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from typing import TYPE_CHECKING
+
 from distributed.http.prometheus import PrometheusCollector
 from distributed.stealing import WorkStealing
+
+if TYPE_CHECKING:
+    from prometheus_client.core import CounterMetricFamily
 
 
 class WorkStealingMetricCollector(PrometheusCollector):
@@ -9,7 +15,7 @@ class WorkStealingMetricCollector(PrometheusCollector):
         super().__init__(server)
         self.subsystem = "stealing"
 
-    def collect(self):
+    def collect(self) -> Iterator[CounterMetricFamily]:
         from prometheus_client.core import CounterMetricFamily
 
         try:
