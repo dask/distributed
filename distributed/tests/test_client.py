@@ -7555,6 +7555,20 @@ async def test_forward_logging(c, s, a, b):
         await c.submit(do_error)
         assert "Hello error" in log.getvalue()
 
+    # task that does some error logging with exception traceback info
+    def do_exception():
+        try:
+            raise ValueError("wrong value")
+        except ValueError:
+            logging.getLogger("test.logger").error("oops", exc_info=True)
+
+    with captured_logger(client_side_logger) as log:
+        await c.submit(do_exception)
+        log_out = log.getvalue()
+        assert "oops" in log_out
+        assert "Traceback" in log_out
+        assert "ValueError: wrong value" in log_out
+
     # a task that does some info logging. should NOT be forwarded
     def do_info():
         logging.getLogger("test.logger").info("Hello info")
