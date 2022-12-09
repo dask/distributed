@@ -163,9 +163,10 @@ class WorkerMetricCollector(PrometheusCollector):
 
         # This duplicates spill_time_total; however the breakdown is different
         evloop_blocked_total = CounterMetricFamily(
-            self.build_name("event_loop_blocked_time_total"),
+            self.build_name("event_loop_blocked_time"),
             "Total time during which the worker's event loop was blocked "
             "by spill/unspill activity since the latest worker reset",
+            unit="seconds",
             labels=["cause"],
         )
         # This is typically higher than spill_time_per_key_max, as multiple keys can be
@@ -174,6 +175,7 @@ class WorkerMetricCollector(PrometheusCollector):
             self.build_name("event_loop_blocked_time_max"),
             "Maximum contiguous time during which the worker's event loop was blocked "
             "by spill/unspill activity since the previous Prometheus poll",
+            unit="seconds",
             labels=["cause"],
         )
         for family, digest in (
