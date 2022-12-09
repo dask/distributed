@@ -69,7 +69,6 @@ from distributed.core import (
     rpc,
 )
 from distributed.diagnostics.plugin import (
-    TOPIC_FORWARDED_LOG_RECORD,
     ForwardLoggingPlugin,
     NannyPlugin,
     UploadFile,
@@ -122,6 +121,8 @@ _current_client = ContextVar("_current_client", default=None)
 DEFAULT_EXTENSIONS = {
     "pubsub": PubSubClientExtension,
 }
+
+TOPIC_PREFIX_FORWARDED_LOG_RECORD = "forwarded-log-record"
 
 
 def _get_global_client() -> Client | None:
@@ -4943,17 +4944,18 @@ class Client(SyncMethodMixin):
         84
         """
 
+        plugin_name = f"forward-logging-{logger_name or '<root>'}"
+        topic = f"{TOPIC_PREFIX_FORWARDED_LOG_RECORD}-{plugin_name}"
         # note that subscription is idempotent
         self.subscribe_topic(
-            TOPIC_FORWARDED_LOG_RECORD, self._handle_forwarded_log_record
+            topic, self._handle_forwarded_log_record
         )
-        plugin_name = f"forward-logging-{logger_name or '<root>'}"
         # note that any existing plugin with the same name will automatically be
         # removed and torn down (see distributed.worker.Worker.plugin_add()), so
         # this is effectively idempotent, i.e., forwarding the same logger twice
         # won't cause every LogRecord to be forwarded twice
         return self.register_worker_plugin(
-            ForwardLoggingPlugin(logger_name, level), plugin_name
+            ForwardLoggingPlugin(logger_name, level, topic), plugin_name
         )
 
     def unforward_logging(self, logger_name=None):
@@ -4962,11 +4964,9 @@ class Client(SyncMethodMixin):
         client process.
         """
         plugin_name = f"forward-logging-{logger_name or '<root>'}"
+        topic = f"{TOPIC_PREFIX_FORWARDED_LOG_RECORD}-{plugin_name}"
+        self.unsubscribe_topic(topic)
         return self.unregister_worker_plugin(plugin_name)
-        # Note that we should NOT unsubscribe from the topic because we don't
-        # actually know if we've unregistered *all* ForwardLoggingPlugins.
-        # Even if we do unregister all ForwardLoggingPlugins, it should be
-        # harmless for the handler to remain subscribed.
 
 
 class _WorkerSetupPlugin(WorkerPlugin):
