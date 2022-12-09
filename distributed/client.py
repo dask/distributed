@@ -4947,9 +4947,7 @@ class Client(SyncMethodMixin):
         plugin_name = f"forward-logging-{logger_name or '<root>'}"
         topic = f"{TOPIC_PREFIX_FORWARDED_LOG_RECORD}-{plugin_name}"
         # note that subscription is idempotent
-        self.subscribe_topic(
-            topic, self._handle_forwarded_log_record
-        )
+        self.subscribe_topic(topic, self._handle_forwarded_log_record)
         # note that any existing plugin with the same name will automatically be
         # removed and torn down (see distributed.worker.Worker.plugin_add()), so
         # this is effectively idempotent, i.e., forwarding the same logger twice
