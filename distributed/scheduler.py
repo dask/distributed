@@ -2159,6 +2159,12 @@ class SchedulerState:
         self, cogroup: set[TaskState]
     ) -> dict[WorkerState, int]:
         assert cogroup
+        if not self._cogroup_reasonable(cogroup):
+            logger.info(
+                f"Unreasonable cogroup of length {len(cogroup)} containing {next(iter(cogroup))}"
+            )
+            return {}
+
         candidates: defaultdict[WorkerState, int] = defaultdict(lambda: 0)
 
         # NOTE: because cogroups are disjoint, we _should_ avoid double-counting any tasks,
@@ -2174,7 +2180,9 @@ class SchedulerState:
 
         # No tasks in immediate group are scheduled or in memory.
         # Check dependents.
-        dependents = list(_dependent_cogroups(cogroup))
+        dependents = list(
+            dg for dg in _dependent_cogroups(cogroup) if self._cogroup_reasonable(dg)
+        )
         # TODO if the group contains a widely-shared task, `dependents` could be every cogroup.
         # We should maybe only look at dependents of the apex task? Or skip dependents of the roots?
         for dg in dependents:
@@ -2188,7 +2196,7 @@ class SchedulerState:
         # No dependents scheduled, check siblings.
         for dg in dependents:
             for sg in _dependency_cogroups(dg):
-                if sg is not cogroup:
+                if sg is not cogroup and self._cogroup_reasonable(sg):
                     if self.validate:
                         # assert id(sg) not in seen_ids, sg
                         seen_ids.add(id(sg))
@@ -2198,10 +2206,11 @@ class SchedulerState:
 
         # No siblings, check dependencies.
         for dg in _dependency_cogroups(cogroup):
-            if self.validate:
-                # assert id(dg) not in seen_ids, dg
-                seen_ids.add(id(dg))
-            self._update_candidates_for_cogroup(candidates, dg)
+            if self._cogroup_reasonable(dg):
+                if self.validate:
+                    # assert id(dg) not in seen_ids, dg
+                    seen_ids.add(id(dg))
+                self._update_candidates_for_cogroup(candidates, dg)
 
         return candidates
 
@@ -2211,6 +2220,8 @@ class SchedulerState:
         cogroup: set[TaskState],
         allow_oversaturation: bool = False,
     ) -> None:
+        if self.validate:
+            assert self._cogroup_reasonable(cogroup)
         ws: WorkerState | None
         for ts in cogroup:
             # Family member in memory
@@ -2234,6 +2245,23 @@ class SchedulerState:
                     else DEFAULT_DATA_SIZE
                 )
                 candidates[ws] += nbytes_estimate
+
+    def _cogroup_reasonable(self, cogroup: set[TaskState]) -> bool:
+        """
+        A cogroup is unreasonable if it would take longer to run all its tasks on a
+        single worker than it would take to run all the other tasks on the remaining
+        workers. If this happened, it would leave parallelism on the table.
+
+        This is a very rough estimate; doesn't consider expected task runtime or graph
+        structure. Goal is just to skip big cogroups that:
+
+        1. would take a long time to process
+        2. would lead to worker imbalance if followed
+        """
+        avg_nthreads = self.total_nthreads / len(self.workers)
+        return len(cogroup) / avg_nthreads < (len(self.tasks) - len(cogroup)) / (
+            self.total_nthreads - avg_nthreads
+        )
 
     def decide_worker_non_rootish(self, ts: TaskState) -> WorkerState | None:
         """Pick a worker for a runnable non-root task, considering dependencies and

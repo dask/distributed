@@ -11,6 +11,7 @@ from dask import graph_manipulation
 from dask.base import collections_to_dsk
 from dask.cogroups import cogroup
 from dask.core import flatten, get_dependencies
+from dask.delayed import delayed
 from dask.order import order
 from dask.utils import key_split, stringify
 
@@ -157,14 +158,14 @@ def unstringify(k):
     nthreads=[("", 2)] * 4,
     config={"distributed.scheduler.work-stealing": False},
 )
-async def test_double_diff_store(c, s, *workers):
+async def test_double_diff_finalize(c, s, *workers):
     # Variant of https://github.com/dask/distributed/issues/6597
     da = pytest.importorskip("dask.array")
-    a = da.ones((50, 50), chunks=(10, 10))
-    b = da.zeros((50, 50), chunks=(10, 10))
+    a = da.ones((50, 50), chunks=(8, 8))
+    b = da.zeros((50, 50), chunks=(8, 8))
 
     diff = a[1:, 1:] - b[:-1, :-1]
-    result = diff.store({}, lock=False, compute=False)
+    result = delayed(diff)  # simulate the `finalize` part of a compute graph
 
     cogroups = get_cogroups(result)
     print([len(cg) for cg in cogroups])
@@ -190,4 +191,4 @@ async def test_double_diff_store(c, s, *workers):
     worker_counts = Counter(who_ran[k] for k in root_keys)
     assert len(worker_counts) == len(workers)
     [(_, most)] = worker_counts.most_common(1)
-    assert most < 1.1 * (len(root_keys) / len(workers)), worker_counts
+    assert most < 1.2 * (len(root_keys) / len(workers)), worker_counts
