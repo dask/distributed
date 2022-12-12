@@ -7,7 +7,8 @@ from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import SimpleShuffleLayer
 
-from distributed.shuffle._shuffle_extension import ShuffleId, ShuffleWorkerExtension
+from distributed.shuffle._utils import ShuffleId
+from distributed.shuffle._worker_extension import ShuffleWorkerExtension
 
 logger = logging.getLogger("distributed.shuffle")
 if TYPE_CHECKING:

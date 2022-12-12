@@ -21,12 +21,12 @@ from distributed.core import PooledRPCCall
 from distributed.scheduler import Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._shuffle_extension import (
+from distributed.shuffle._scheduler_extension import get_worker_for
+from distributed.shuffle._utils import ShuffleId
+from distributed.shuffle._worker_extension import (
     Shuffle,
-    ShuffleId,
     ShuffleWorkerExtension,
     dump_batch,
-    get_worker_for,
     list_of_buffers_to_table,
     load_arrow,
     split_by_partition,
@@ -245,7 +245,7 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
         return a.address
 
     with mock.patch(
-        "distributed.shuffle._shuffle_extension.get_worker_for", mock_get_worker_for
+        "distributed.shuffle._scheduler_extension.get_worker_for", mock_get_worker_for
     ):
         df = dask.datasets.timeseries(
             start="2000-01-01",
@@ -277,7 +277,7 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
         return a.address
 
     with mock.patch(
-        "distributed.shuffle._shuffle_extension.get_worker_for", mock_get_worker_for
+        "distributed.shuffle._scheduler_extension.get_worker_for", mock_get_worker_for
     ):
         async with Nanny(s.address, nthreads=1) as n:
             killed_worker_address = n.worker_address
@@ -366,7 +366,7 @@ class BlockedInputsDoneShuffle(Shuffle):
         await super().inputs_done()
 
 
-@mock.patch("distributed.shuffle._shuffle_extension.Shuffle", BlockedInputsDoneShuffle)
+@mock.patch("distributed.shuffle._worker_extension.Shuffle", BlockedInputsDoneShuffle)
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_worker_during_barrier(c, s, a, b):
     df = dask.datasets.timeseries(
@@ -407,7 +407,7 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     await clean_scheduler(s)
 
 
-@mock.patch("distributed.shuffle._shuffle_extension.Shuffle", BlockedInputsDoneShuffle)
+@mock.patch("distributed.shuffle._worker_extension.Shuffle", BlockedInputsDoneShuffle)
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_other_worker_during_barrier(c, s, a, b):
     df = dask.datasets.timeseries(
@@ -451,7 +451,7 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
 
 
 @pytest.mark.slow
-@mock.patch("distributed.shuffle._shuffle_extension.Shuffle", BlockedInputsDoneShuffle)
+@mock.patch("distributed.shuffle._worker_extension.Shuffle", BlockedInputsDoneShuffle)
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_crashed_other_worker_during_barrier(c, s, a):
     async with Nanny(s.address, nthreads=1) as n:
