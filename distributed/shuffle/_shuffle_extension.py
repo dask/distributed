@@ -643,6 +643,10 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         return "shuffle-barrier-" + shuffle_id
 
     @classmethod
+    def _is_barrier_key(cls, key: str) -> bool:
+        return key.startswith("shuffle-barrier-")
+
+    @classmethod
     def id_from_key(cls, key: str) -> ShuffleId:
         assert key.startswith("shuffle-barrier-")
         return ShuffleId(key.replace("shuffle-barrier-", ""))
@@ -766,10 +770,9 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     ) -> None:
         if finish != "forgotten":
             return
-        try:
-            shuffle_id = self.id_from_key(key)
-        except AssertionError:
+        if not self._is_barrier_key(key):
             return
+        shuffle_id = self.id_from_key(key)
         if shuffle_id not in self.worker_for:
             return
 
