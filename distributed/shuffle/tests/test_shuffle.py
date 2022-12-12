@@ -63,7 +63,6 @@ async def clean_scheduler(
     while extension.states and not deadline.expired:
         await asyncio.sleep(interval)
     assert not extension.states
-    assert not extension.barriers
     assert not extension.heartbeats
 
 

@@ -44,7 +44,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     heartbeats: defaultdict[ShuffleId, dict]
     tombstones: set[ShuffleId]
     erred_shuffles: dict[ShuffleId, Exception]
-    barriers: dict[ShuffleId, str]
 
     def __init__(self, scheduler: Scheduler):
         self.scheduler = scheduler
@@ -59,7 +58,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self.states = {}
         self.tombstones = set()
         self.erred_shuffles = {}
-        self.barriers = {}
         self.scheduler.add_plugin(self)
 
     def shuffle_ids(self) -> set[ShuffleId]:
@@ -95,7 +93,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             output_workers = set()
 
             name = barrier_key(id)
-            self.barriers[id] = name
             mapping = {}
 
             for ts in self.scheduler.tasks[name].dependents:
@@ -150,7 +147,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             contact_workers = state.participating_workers.copy()
             contact_workers.discard(worker)
             affected_shuffles.add(shuffle_id)
-            name = self.barriers[shuffle_id]
+            name = barrier_key(shuffle_id)
             barrier_task = self.scheduler.tasks.get(name)
             if barrier_task:
                 barriers.append(barrier_task)
@@ -195,11 +192,11 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     ) -> None:
         if finish != "forgotten":
             return
-        if key not in self.barriers.values():
-
+        if not key.startswith("shuffle-barrier-"):
             return
-
         shuffle_id = id_from_key(key)
+        if shuffle_id not in self.states:
+            return
         participating_workers = self.states[shuffle_id].participating_workers
         worker_msgs = {
             worker: [
@@ -227,7 +224,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self.tombstones.add(id)
         del self.states[id]
         self.erred_shuffles.pop(id, None)
-        del self.barriers[id]
         with contextlib.suppress(KeyError):
             del self.heartbeats[id]
 

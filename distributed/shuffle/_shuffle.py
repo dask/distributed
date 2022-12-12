@@ -184,5 +184,5 @@ def barrier_key(shuffle_id: ShuffleId) -> str:
 
 
 def id_from_key(key: str) -> ShuffleId:
-    assert _BARRIER_PREFIX in key
+    assert key.startswith(_BARRIER_PREFIX)
     return ShuffleId(key.replace(_BARRIER_PREFIX, ""))
