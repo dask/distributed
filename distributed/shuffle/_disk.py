@@ -95,7 +95,7 @@ class DiskShardsBuffer(ShardsBuffer):
     def read(self, id: int | str) -> pa.Table:
         """Read a complete file back into memory"""
         self.raise_on_exception()
-        if not self._done:
+        if not self._inputs_done:
             raise RuntimeError("Tried to read from file before done.")
         parts = []
 

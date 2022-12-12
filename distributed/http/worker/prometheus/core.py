@@ -119,6 +119,15 @@ class WorkerMetricCollector(PrometheusCollector):
         )
 
         yield CounterMetricFamily(
+            self.build_name("transfer_outgoing_bytes_total"),
+            (
+                "Total size of data transfers to other workers "
+                "since the worker was started (including in-progress and failed transfers)"
+            ),
+            value=self.server.transfer_outgoing_bytes_total,
+        )
+
+        yield CounterMetricFamily(
             self.build_name("transfer_outgoing_count_total"),
             (
                 "Total number of data transfers to other workers "
