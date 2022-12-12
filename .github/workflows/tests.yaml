@@ -107,6 +107,11 @@ jobs:
         run: mamba env update -n dask-distributed -f ${{ env.CONDA_FILE }}
         if: steps.skip-caching.outputs.trigger-found == 'true' || steps.cache.outputs.cache-hit != 'true'
 
+      - name: Install Dev Dask
+        shell: bash -l {0}
+        run: |
+          python -m pip install --no-deps git+https://github.com/mrocklin/dask@default-client-scheduler
+
       - name: Install
         shell: bash -l {0}
         run: |
