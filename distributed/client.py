@@ -5566,16 +5566,3 @@ def temp_default_client(c: Client) -> Generator[None, None, None]:
         yield
     finally:
         _set_global_client(old_exec)
-
-
-def __getattr__(name):
-    if name == "ensure_default_get":
-        warnings.warn(
-            "`ensure_default_get` is deprecated and will be removed in a future release. "
-            "Please use `distributed.client.ensure_default_client` instead.",
-            category=FutureWarning,
-            stacklevel=2,
-        )
-        return ensure_default_client
-    else:
-        raise AttributeError(f"module {__name__} has no attribute {name}")
