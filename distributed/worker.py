@@ -394,6 +394,8 @@ class Worker(BaseWorker, ServerNode):
     transfer_outgoing_log: deque[dict[str, Any]]
     #: Total number of data transfers to other workers since the worker was started
     transfer_outgoing_count_total: int
+    #: Total size of data transfers to other workers (including in-progress and failed transfers)
+    transfer_outgoing_bytes_total: int
     #: Current total size of open data transfers to other workers
     transfer_outgoing_bytes: int
     #: Current number of open data transfers to other workers
@@ -556,6 +558,7 @@ class Worker(BaseWorker, ServerNode):
         self.transfer_incoming_log = deque(maxlen=100000)
         self.transfer_outgoing_log = deque(maxlen=100000)
         self.transfer_outgoing_count_total = 0
+        self.transfer_outgoing_bytes_total = 0
         self.transfer_outgoing_bytes = 0
         self.transfer_outgoing_count = 0
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
@@ -1745,6 +1748,7 @@ class Worker(BaseWorker, ServerNode):
         bytes_per_task = {k: self.state.tasks[k].nbytes or 0 for k in data}
         total_bytes = sum(bytes_per_task.values())
         self.transfer_outgoing_bytes += total_bytes
+        self.transfer_outgoing_bytes_total += total_bytes
         stop = time()
 
         # Don't log metrics if all keys are in memory

@@ -7632,15 +7632,13 @@ class Scheduler(SchedulerState, ServerNode):
                     logger.info("Plugin failed with exception", exc_info=True)
 
     def _report_event(self, name, event):
-        for client in self.event_subscriber[name]:
-            self.report(
-                {
-                    "op": "event",
-                    "topic": name,
-                    "event": event,
-                },
-                client=client,
-            )
+        msg = {
+            "op": "event",
+            "topic": name,
+            "event": event,
+        }
+        client_msgs = {client: [msg] for client in self.event_subscriber[name]}
+        self.send_all(client_msgs, worker_msgs={})
 
     def subscribe_topic(self, topic, client):
         self.event_subscriber[topic].add(client)
