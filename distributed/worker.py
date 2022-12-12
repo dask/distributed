@@ -1518,6 +1518,7 @@ class Worker(BaseWorker, ServerNode):
             logger.info("Not waiting on executor to close")
         # Make sure we're not colliding with the startup coro when setting the
         # status to closing
+        await self.cancel_start()
         await self.started()
         self.status = Status.closing
 

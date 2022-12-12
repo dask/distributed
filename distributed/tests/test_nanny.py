@@ -554,16 +554,11 @@ async def test_worker_start_exception(s):
 )
 @gen_cluster(nthreads=[])
 async def test_worker_start_exception_after_restart(s, api):
-    async with Nanny(s.address) as nanny:
-        # A restart should fail
-        nanny.worker_kwargs.update(
-            {
-                "scheduler_port": -1234,
-                "nthreads": -42,
-                "port": -9876,
-                "protocol": "doesnt-exit",
-            }
-        )
+    async with Nanny(s.address, death_timeout="2s") as nanny:
+        # Stop the listener on the scheduler, i.e. do not allow any new incoming
+        # connections. The restarting workers will fail while trying to attempt
+        # connection
+        s.stop()
         if api == "kill":
             # Kill is not immediately restarting the process and is therefore
             # not raising an exception and we need to wait

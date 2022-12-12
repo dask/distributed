@@ -496,6 +496,9 @@ class Server:
     def __await__(self):
         return self.start().__await__()
 
+    async def cancel_start(self):
+        self._startup_task.cancel()
+
     async def start_unsafe(self):
         """Attempt to start the server. This is not idempotent and not protected against concurrent startup attempts.
 
@@ -526,8 +529,11 @@ class Server:
         timeout = getattr(self, "death_timeout", None)
         try:
             async with self._startup_lock:
-                await asyncio.wait_for(self.start_unsafe(), timeout=timeout)
-                self._event_started.set()
+                self._startup_task = asyncio.create_task(self.start_unsafe())
+                self._startup_task.add_done_callback(
+                    lambda _: self._event_started.set()
+                )
+                await asyncio.wait_for(self._startup_task, timeout=timeout)
                 self.status = Status.running
         except asyncio.TimeoutError as exc:
             await _close_on_failure(exc)

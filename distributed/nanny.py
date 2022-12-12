@@ -404,6 +404,15 @@ class Nanny(ServerNode):
         # The lock is required since there are many possible race conditions due
         # to the worker exit callback
         async with self._instantiate_lock:
+            if self.status in (
+                Status.closing,
+                Status.closed,
+                Status.closing_gracefully,
+                Status.failed,
+            ):
+                raise RuntimeError(
+                    "Tried to start a worker on closed Nanny. This can happen if an error occured during restart. Please check logs for more information."
+                )
             if self.process is None:
                 worker_kwargs = dict(
                     scheduler_ip=self.scheduler_addr,
@@ -578,9 +587,11 @@ class Nanny(ServerNode):
 
         # Make sure we're not colliding with the startup coro when setting the
         # status to closing
-        await self.started()
-        self.status = Status.closing
         logger.info("Closing Nanny at %r. Reason: %s", self.address_safe, reason)
+        await self.cancel_start()
+        await self.started()
+
+        self.status = Status.closing
 
         for preload in self.preloads:
             await preload.teardown()
