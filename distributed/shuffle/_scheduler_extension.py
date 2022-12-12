@@ -7,7 +7,7 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
 from distributed.diagnostics.plugin import SchedulerPlugin
-from distributed.shuffle._shuffle import P2PShuffleLayer, ShuffleId
+from distributed.shuffle._shuffle import ShuffleId, barrier_key, id_from_key
 
 if TYPE_CHECKING:
     from distributed.scheduler import Recs, Scheduler, TaskStateState, WorkerState
@@ -92,7 +92,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             workers = list(self.scheduler.workers)
             output_workers = set()
 
-            name = P2PShuffleLayer.barrier_key(id)
+            name = barrier_key(id)
             self.barriers[id] = name
             mapping = {}
 
@@ -192,7 +192,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
 
             return
 
-        shuffle_id = P2PShuffleLayer.id_from_key(key)
+        shuffle_id = id_from_key(key)
         participating_workers = self.participating_workers[shuffle_id]
         worker_msgs = {
             worker: [

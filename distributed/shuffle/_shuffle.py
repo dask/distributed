@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, ClassVar, NewType
+from typing import TYPE_CHECKING, Any, NewType
 
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
@@ -105,9 +105,6 @@ def rearrange_by_column_p2p(
 
 
 class P2PShuffleLayer(SimpleShuffleLayer):
-    _BARRIER_PREFIX: ClassVar[str] = "shuffle-barrier-"
-    _TRANSFER_PREFIX: ClassVar[str] = "shuffle-transfer-"
-
     def __init__(
         self,
         name: str,
@@ -138,15 +135,6 @@ class P2PShuffleLayer(SimpleShuffleLayer):
         # TODO: This is doing some funky stuff to set priorities but we don't need this
         return []
 
-    @classmethod
-    def barrier_key(cls, shuffle_id: ShuffleId) -> str:
-        return cls._BARRIER_PREFIX + shuffle_id
-
-    @classmethod
-    def id_from_key(cls, key: str) -> ShuffleId:
-        assert cls._BARRIER_PREFIX in key
-        return ShuffleId(key.replace(cls._BARRIER_PREFIX, ""))
-
     def __repr__(self) -> str:
         return (
             f"{type(self).__name__}<name='{self.name}', npartitions={self.npartitions}>"
@@ -167,8 +155,8 @@ class P2PShuffleLayer(SimpleShuffleLayer):
     def _construct_graph(self, deserializing: Any = None) -> dict[tuple | str, tuple]:
         token = tokenize(self.name_input, self.column, self.npartitions, self.parts_out)
         dsk: dict[tuple | str, tuple] = {}
-        barrier_key = self._BARRIER_PREFIX + token
-        name = self._TRANSFER_PREFIX + token
+        _barrier_key = barrier_key(ShuffleId(token))
+        name = "shuffle-transfer-" + token
         transfer_keys = list()
         for i in range(self.npartitions_input):
             transfer_keys.append((name, i))
@@ -180,9 +168,21 @@ class P2PShuffleLayer(SimpleShuffleLayer):
                 self.column,
             )
 
-        dsk[barrier_key] = (shuffle_barrier, token, transfer_keys)
+        dsk[_barrier_key] = (shuffle_barrier, token, transfer_keys)
 
         name = self.name
         for part_out in self.parts_out:
-            dsk[(name, part_out)] = (shuffle_unpack, token, part_out, barrier_key)
+            dsk[(name, part_out)] = (shuffle_unpack, token, part_out, _barrier_key)
         return dsk
+
+
+_BARRIER_PREFIX = "shuffle-barrier-"
+
+
+def barrier_key(shuffle_id: ShuffleId) -> str:
+    return _BARRIER_PREFIX + shuffle_id
+
+
+def id_from_key(key: str) -> ShuffleId:
+    assert _BARRIER_PREFIX in key
+    return ShuffleId(key.replace(_BARRIER_PREFIX, ""))

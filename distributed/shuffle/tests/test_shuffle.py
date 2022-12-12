@@ -22,7 +22,7 @@ from distributed.scheduler import Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_extension import get_worker_for
-from distributed.shuffle._shuffle import P2PShuffleLayer, ShuffleId
+from distributed.shuffle._shuffle import ShuffleId, barrier_key
 from distributed.shuffle._worker_extension import (
     Shuffle,
     ShuffleWorkerExtension,
@@ -378,14 +378,14 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = out.persist()
     shuffle_id = await get_shuffle_id(s)
-    barrier_key = P2PShuffleLayer.barrier_key(shuffle_id)
-    await wait_for_state(barrier_key, "processing", s)
+    key = barrier_key(shuffle_id)
+    await wait_for_state(key, "processing", s)
     shuffleA = a.extensions["shuffle"].shuffles[shuffle_id]
     shuffleB = b.extensions["shuffle"].shuffles[shuffle_id]
     await shuffleA.in_inputs_done.wait()
     await shuffleB.in_inputs_done.wait()
 
-    ts = s.tasks[barrier_key]
+    ts = s.tasks[key]
     processing_worker = a if ts.processing_on.address == a.address else b
     if processing_worker == a:
         close_worker = a
@@ -420,15 +420,15 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
     out = out.persist()
     shuffle_id = await get_shuffle_id(s)
 
-    barrier_key = P2PShuffleLayer.barrier_key(shuffle_id)
-    await wait_for_state(barrier_key, "processing", s, interval=0)
+    key = barrier_key(shuffle_id)
+    await wait_for_state(key, "processing", s, interval=0)
 
     shuffleA = a.extensions["shuffle"].shuffles[shuffle_id]
     shuffleB = b.extensions["shuffle"].shuffles[shuffle_id]
     await shuffleA.in_inputs_done.wait()
     await shuffleB.in_inputs_done.wait()
 
-    ts = s.tasks[barrier_key]
+    ts = s.tasks[key]
     processing_worker = a if ts.processing_on.address == a.address else b
     if processing_worker == a:
         close_worker = b
@@ -464,10 +464,10 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
         out = out.persist()
         shuffle_id = await get_shuffle_id(s)
-        barrier_key = P2PShuffleLayer.barrier_key(shuffle_id)
+        key = barrier_key(shuffle_id)
         # Ensure that barrier is not executed on the nanny
-        s.set_restrictions({barrier_key: {a.address}})
-        await wait_for_state(barrier_key, "processing", s, interval=0)
+        s.set_restrictions({key: {a.address}})
+        await wait_for_state(key, "processing", s, interval=0)
         shuffle = a.extensions["shuffle"].shuffles[shuffle_id]
         await shuffle.in_inputs_done.wait()
         await n.process.process.kill()
@@ -564,9 +564,9 @@ async def test_closed_worker_during_final_register_complete(c, s, a, b, kill_bar
     await shuffle_ext_b.in_register_complete.wait()
 
     shuffle_id = await get_shuffle_id(s)
-    barrier_key = P2PShuffleLayer.barrier_key(shuffle_id)
+    key = barrier_key(shuffle_id)
     # TODO: properly parametrize over kill_barrier
-    if barrier_key in b.state.tasks:
+    if key in b.state.tasks:
         shuffle_ext_a.block_register_complete.set()
         while a.state.executing:
             await asyncio.sleep(0.01)
