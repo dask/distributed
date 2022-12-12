@@ -119,7 +119,6 @@ DEFAULT_EXTENSIONS = {
 }
 
 
-
 class _GlobalClientManager:
     def __init__(self):
         self._lock = threading.RLock()
