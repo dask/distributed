@@ -1,20 +1,22 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar, NewType
 
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import SimpleShuffleLayer
-
-from distributed.shuffle._utils import ShuffleId
-from distributed.shuffle._worker_extension import ShuffleWorkerExtension
 
 logger = logging.getLogger("distributed.shuffle")
 if TYPE_CHECKING:
     import pandas as pd
 
     from dask.dataframe import DataFrame
+
+    # circular dependency
+    from distributed.shuffle._worker_extension import ShuffleWorkerExtension
+
+ShuffleId = NewType("ShuffleId", str)
 
 
 def _get_worker_extension() -> ShuffleWorkerExtension:
@@ -103,6 +105,9 @@ def rearrange_by_column_p2p(
 
 
 class P2PShuffleLayer(SimpleShuffleLayer):
+    _BARRIER_PREFIX: ClassVar[str] = "shuffle-barrier-"
+    _TRANSFER_PREFIX: ClassVar[str] = "shuffle-transfer-"
+
     def __init__(
         self,
         name: str,
@@ -133,6 +138,15 @@ class P2PShuffleLayer(SimpleShuffleLayer):
         # TODO: This is doing some funky stuff to set priorities but we don't need this
         return []
 
+    @classmethod
+    def barrier_key(cls, shuffle_id: ShuffleId) -> str:
+        return cls._BARRIER_PREFIX + shuffle_id
+
+    @classmethod
+    def id_from_key(cls, key: str) -> ShuffleId:
+        assert cls._BARRIER_PREFIX in key
+        return ShuffleId(key.replace(cls._BARRIER_PREFIX, ""))
+
     def __repr__(self) -> str:
         return (
             f"{type(self).__name__}<name='{self.name}', npartitions={self.npartitions}>"
@@ -153,8 +167,8 @@ class P2PShuffleLayer(SimpleShuffleLayer):
     def _construct_graph(self, deserializing: Any = None) -> dict[tuple | str, tuple]:
         token = tokenize(self.name_input, self.column, self.npartitions, self.parts_out)
         dsk: dict[tuple | str, tuple] = {}
-        barrier_key = "shuffle-barrier-" + token
-        name = "shuffle-transfer-" + token
+        barrier_key = self._BARRIER_PREFIX + token
+        name = self._TRANSFER_PREFIX + token
         transfer_keys = list()
         for i in range(self.npartitions_input):
             transfer_keys.append((name, i))

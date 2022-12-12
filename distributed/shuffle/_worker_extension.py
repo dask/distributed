@@ -26,7 +26,7 @@ from distributed.shuffle._arrow import (
 from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._utils import ShuffleId
+from distributed.shuffle._shuffle import ShuffleId
 from distributed.utils import log_errors, sync
 
 if TYPE_CHECKING:

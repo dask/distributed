@@ -22,7 +22,7 @@ from distributed.scheduler import Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_extension import get_worker_for
-from distributed.shuffle._utils import ShuffleId
+from distributed.shuffle._shuffle import P2PShuffleLayer, ShuffleId
 from distributed.shuffle._worker_extension import (
     Shuffle,
     ShuffleWorkerExtension,
@@ -378,7 +378,7 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = out.persist()
     shuffle_id = await get_shuffle_id(s)
-    barrier_key = s.extensions["shuffle"].barrier_key(shuffle_id)
+    barrier_key = P2PShuffleLayer.barrier_key(shuffle_id)
     await wait_for_state(barrier_key, "processing", s)
     shuffleA = a.extensions["shuffle"].shuffles[shuffle_id]
     shuffleB = b.extensions["shuffle"].shuffles[shuffle_id]
@@ -420,7 +420,7 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
     out = out.persist()
     shuffle_id = await get_shuffle_id(s)
 
-    barrier_key = s.extensions["shuffle"].barrier_key(shuffle_id)
+    barrier_key = P2PShuffleLayer.barrier_key(shuffle_id)
     await wait_for_state(barrier_key, "processing", s, interval=0)
 
     shuffleA = a.extensions["shuffle"].shuffles[shuffle_id]
@@ -464,7 +464,7 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
         out = out.persist()
         shuffle_id = await get_shuffle_id(s)
-        barrier_key = s.extensions["shuffle"].barrier_key(shuffle_id)
+        barrier_key = P2PShuffleLayer.barrier_key(shuffle_id)
         # Ensure that barrier is not executed on the nanny
         s.set_restrictions({barrier_key: {a.address}})
         await wait_for_state(barrier_key, "processing", s, interval=0)
@@ -564,7 +564,7 @@ async def test_closed_worker_during_final_register_complete(c, s, a, b, kill_bar
     await shuffle_ext_b.in_register_complete.wait()
 
     shuffle_id = await get_shuffle_id(s)
-    barrier_key = s.extensions["shuffle"].barrier_key(shuffle_id)
+    barrier_key = P2PShuffleLayer.barrier_key(shuffle_id)
     # TODO: properly parametrize over kill_barrier
     if barrier_key in b.state.tasks:
         shuffle_ext_a.block_register_complete.set()
