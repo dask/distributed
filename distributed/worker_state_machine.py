@@ -1477,6 +1477,10 @@ class WorkerState:
         ts.next = None
         ts.done = False
         ts.coming_from = None
+        ts.exception = None
+        ts.traceback = None
+        ts.traceback_text = ""
+        ts.traceback_text = ""
 
         self.missing_dep_flight.discard(ts)
         self.ready.discard(ts)

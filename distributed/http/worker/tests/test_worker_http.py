@@ -36,6 +36,7 @@ async def test_prometheus(c, s, a):
         "dask_worker_transfer_outgoing_bytes",
         "dask_worker_transfer_outgoing_count",
         "dask_worker_transfer_outgoing_count_total",
+        "dask_worker_transfer_outgoing_bytes_total",
         "dask_worker_tick_count_total",
         "dask_worker_tick_duration_maximum_seconds",
     }
