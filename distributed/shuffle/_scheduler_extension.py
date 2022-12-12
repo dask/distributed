@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import logging
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from distributed.diagnostics.plugin import SchedulerPlugin
@@ -13,6 +14,17 @@ if TYPE_CHECKING:
     from distributed.scheduler import Recs, Scheduler, TaskStateState, WorkerState
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ShuffleState:
+    id: ShuffleId
+    worker_for: dict[int, str]
+    schema: bytes
+    column: str
+    output_workers: set[str]
+    completed_workers: set[str]
+    participating_workers: set[str]
 
 
 class ShuffleSchedulerExtension(SchedulerPlugin):
@@ -28,13 +40,8 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     """
 
     scheduler: Scheduler
-    worker_for: dict[ShuffleId, dict[int, str]]
+    states: dict[ShuffleId, ShuffleState]
     heartbeats: defaultdict[ShuffleId, dict]
-    schemas: dict[ShuffleId, bytes]
-    columns: dict[ShuffleId, str]
-    output_workers: dict[ShuffleId, set[str]]
-    completed_workers: dict[ShuffleId, set[str]]
-    participating_workers: dict[ShuffleId, set[str]]
     tombstones: set[ShuffleId]
     erred_shuffles: dict[ShuffleId, Exception]
     barriers: dict[ShuffleId, str]
@@ -49,23 +56,18 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             }
         )
         self.heartbeats = defaultdict(lambda: defaultdict(dict))
-        self.worker_for = {}
-        self.schemas = {}
-        self.columns = {}
-        self.output_workers = {}
-        self.completed_workers = {}
-        self.participating_workers = {}
+        self.states = {}
         self.tombstones = set()
         self.erred_shuffles = {}
         self.barriers = {}
         self.scheduler.add_plugin(self)
 
     def shuffle_ids(self) -> set[ShuffleId]:
-        return set(self.worker_for)
+        return set(self.states)
 
     def heartbeat(self, ws: WorkerState, data: dict) -> None:
         for shuffle_id, d in data.items():
-            if shuffle_id in self.output_workers:
+            if shuffle_id in self.shuffle_ids():
                 self.heartbeats[shuffle_id][ws.address].update(d)
 
     def get(
@@ -85,7 +87,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         if exception := self.erred_shuffles.get(id):
             return {"status": "ERROR", "message": str(exception)}
 
-        if id not in self.worker_for:
+        if id not in self.states:
             assert schema is not None
             assert column is not None
             assert npartitions is not None
@@ -106,24 +108,29 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
                 output_workers.add(output_worker)
                 self.scheduler.set_restrictions({ts.key: {output_worker}})
 
-            self.worker_for[id] = mapping
-            self.schemas[id] = schema
-            self.columns[id] = column
-            self.output_workers[id] = output_workers
-            self.completed_workers[id] = set()
-            self.participating_workers[id] = output_workers.copy()
+            state = ShuffleState(
+                id=id,
+                worker_for=mapping,
+                schema=schema,
+                column=column,
+                output_workers=output_workers,
+                completed_workers=set(),
+                participating_workers=output_workers.copy(),
+            )
+            self.states[id] = state
 
-        self.participating_workers[id].add(worker)
+        state = self.states[id]
+        state.participating_workers.add(worker)
         return {
             "status": "OK",
-            "worker_for": self.worker_for[id],
-            "column": self.columns[id],
-            "schema": self.schemas[id],
-            "output_workers": self.output_workers[id],
+            "worker_for": state.worker_for,
+            "column": state.column,
+            "schema": state.schema,
+            "output_workers": state.output_workers,
         }
 
     def get_participating_workers(self, id: ShuffleId) -> list[str]:
-        return list(self.participating_workers[id])
+        return list(self.states[id].participating_workers)
 
     async def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
         affected_shuffles = set()
@@ -133,14 +140,14 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         recs: Recs = {}
         stimulus_id = f"shuffle-failed-worker-left-{time()}"
         barriers = []
-        for shuffle_id, shuffle_workers in self.participating_workers.items():
-            if worker not in shuffle_workers:
+        for shuffle_id, state in self.states.items():
+            if worker not in state.participating_workers:
                 continue
             exception = RuntimeError(
                 f"Worker {worker} left during active shuffle {shuffle_id}"
             )
             self.erred_shuffles[shuffle_id] = exception
-            contact_workers = shuffle_workers.copy()
+            contact_workers = state.participating_workers.copy()
             contact_workers.discard(worker)
             affected_shuffles.add(shuffle_id)
             name = self.barriers[shuffle_id]
@@ -193,7 +200,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             return
 
         shuffle_id = id_from_key(key)
-        participating_workers = self.participating_workers[shuffle_id]
+        participating_workers = self.states[shuffle_id].participating_workers
         worker_msgs = {
             worker: [
                 {
@@ -211,19 +218,14 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         """Learn from a worker that it has completed all reads of a shuffle"""
         if exception := self.erred_shuffles.get(id):
             raise exception
-        if id not in self.completed_workers:
+        if id not in self.states:
             logger.info("Worker shuffle reported complete after shuffle was removed")
             return
-        self.completed_workers[id].add(worker)
+        self.states[id].completed_workers.add(worker)
 
     def _clean_on_scheduler(self, id: ShuffleId) -> None:
         self.tombstones.add(id)
-        del self.worker_for[id]
-        del self.schemas[id]
-        del self.columns[id]
-        del self.output_workers[id]
-        del self.completed_workers[id]
-        del self.participating_workers[id]
+        del self.states[id]
         self.erred_shuffles.pop(id, None)
         del self.barriers[id]
         with contextlib.suppress(KeyError):

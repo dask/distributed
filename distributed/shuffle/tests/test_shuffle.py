@@ -60,15 +60,11 @@ async def clean_scheduler(
     """Assert that the scheduler has no shuffle state"""
     deadline = Deadline.after(timeout)
     extension = scheduler.extensions["shuffle"]
-    while extension.output_workers and not deadline.expired:
+    while extension.states and not deadline.expired:
         await asyncio.sleep(interval)
-    assert not extension.worker_for
+    assert not extension.states
+    assert not extension.barriers
     assert not extension.heartbeats
-    assert not extension.schemas
-    assert not extension.columns
-    assert not extension.output_workers
-    assert not extension.completed_workers
-    assert not extension.participating_workers
 
 
 @gen_cluster(client=True)
@@ -929,7 +925,7 @@ async def test_new_worker(c, s, a, b):
     )
     shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     persisted = shuffled.persist()
-    while not s.extensions["shuffle"].worker_for:
+    while not s.extensions["shuffle"].states:
         await asyncio.sleep(0.001)
 
     async with Worker(s.address) as w:
