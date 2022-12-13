@@ -498,7 +498,9 @@ class Server:
         return self.start().__await__()
 
     async def cancel_start(self):
-        self.__startup_task.cancel()
+        if self.__startup_task:
+            self.__startup_task.cancel()
+            await self.started()
 
     async def start_unsafe(self):
         """Attempt to start the server. This is not idempotent and not protected against concurrent startup attempts.

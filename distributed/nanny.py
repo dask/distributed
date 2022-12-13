@@ -584,7 +584,6 @@ class Nanny(ServerNode):
         # status to closing
         logger.info("Closing Nanny at %r. Reason: %s", self.address_safe, reason)
         await self.cancel_start()
-        await self.started()
 
         self.status = Status.closing
 
