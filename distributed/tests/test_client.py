@@ -7841,6 +7841,20 @@ async def test_wait_for_workers_n_workers_value_check(c, s, a, b, value, excepti
 
 
 @gen_cluster(client=True)
+async def test_unpacks_remotedata_namedtuple(c, s, a, b):
+    class NamedTupleAnnotation(namedtuple("BaseAnnotation", field_names="value")):
+        def unwrap(self):
+            return self.value
+
+    def identity(x):
+        return x
+
+    outer_future = c.submit(identity, NamedTupleAnnotation("some-data"))
+    result = await outer_future
+    assert result == NamedTupleAnnotation(value="some-data")
+
+
+@gen_cluster(client=True)
 async def test_resolves_future_in_namedtuple(c, s, a, b):
     TestTuple = namedtuple("TestTuple", field_names=["x", "y"])
 
