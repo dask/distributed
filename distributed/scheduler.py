@@ -4593,7 +4593,7 @@ class Scheduler(SchedulerState, ServerNode):
         # TODO: balance workers
 
     def stimulus_queue_slots_maybe_opened(self, *, stimulus_id: str) -> None:
-        """Respond to an event which may have opened a spot on the threadpool of a worker
+        """Respond to an event which may have opened spots on worker threadpools
 
         Selects the appropriate number of tasks from the front of the queue according to
         the total number of task slots available on workers (potentially 0), and
