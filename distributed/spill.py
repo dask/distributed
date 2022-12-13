@@ -68,19 +68,10 @@ class ManualEvictProto(Protocol):
 
 @dataclass
 class FastMetrics:
-    # Cumulative metrics since the latest worker restart
+    """Cumulative metrics for SpillBuffer.fast since the latest worker restart"""
+
     read_count_total: int = 0
     read_bytes_total: int = 0
-    # Maximum metrics since the previous Prometheus poll.
-    # If Prometheus is not running, then they're since the latest worker restart.
-    count_max: int = 0
-    bytes_max: int = 0
-    bytes_per_key_max: int = 0
-
-    def log_write(self, key_bytes: int, total_count: int, total_bytes: int) -> None:
-        self.count_max = max(self.count_max, total_count)
-        self.bytes_max = max(self.bytes_max, total_bytes)
-        self.bytes_per_key_max = max(self.bytes_per_key_max, key_bytes)
 
     def log_read(self, key_bytes: int) -> None:
         self.read_count_total += 1
@@ -89,7 +80,8 @@ class FastMetrics:
 
 @dataclass
 class SlowMetrics:
-    # Cumulative metrics since the latest worker restart
+    """Cumulative metrics for SpillBuffer.slow since the latest worker restart"""
+
     read_count_total: int = 0
     read_bytes_total: int = 0
     read_time_total: float = 0
@@ -99,45 +91,22 @@ class SlowMetrics:
     pickle_time_total: float = 0
     unpickle_time_total: float = 0
 
-    # Maximum metrics since the previous Prometheus poll.
-    # If Prometheus is not running, then they're since the latest worker restart.
-    count_max: int = 0
-    bytes_max: int = 0
-    bytes_per_key_max: int = 0
-    read_time_per_key_max: float = 0
-    write_time_per_key_max: float = 0
-    pickle_time_per_key_max: float = 0
-    unpickle_time_per_key_max: float = 0
-
     def log_write(
         self,
         key_bytes: int,
-        total_count: int,
-        total_bytes: int,
         pickle_time: float,
         write_time: float,
     ) -> None:
-        self.count_max = max(self.count_max, total_count)
-        self.bytes_max = max(self.bytes_max, total_bytes)
-        self.bytes_per_key_max = max(self.bytes_per_key_max, key_bytes)
-
         self.write_count_total += 1
         self.write_bytes_total += key_bytes
         self.pickle_time_total += pickle_time
         self.write_time_total += write_time
-        self.pickle_time_per_key_max = max(self.pickle_time_per_key_max, pickle_time)
-        self.write_time_per_key_max = max(self.write_time_per_key_max, write_time)
 
     def log_read(self, key_bytes: int, read_time: float, unpickle_time: float) -> None:
         self.read_count_total += 1
         self.read_bytes_total += key_bytes
-
         self.read_time_total += read_time
         self.unpickle_time_total += unpickle_time
-        self.read_time_per_key_max = max(self.read_time_per_key_max, read_time)
-        self.unpickle_time_per_key_max = max(
-            self.unpickle_time_per_key_max, unpickle_time
-        )
 
 
 # zict.Buffer[str, Any] requires zict >= 2.2.0
@@ -163,11 +132,6 @@ class SpillBuffer(zict.Buffer):
     logged_pickle_errors: set[str]
     fast_metrics: FastMetrics
 
-    # Maximum global metrics since the previous Prometheus poll.
-    # If Prometheus is not running, then they're since the latest worker restart.
-    count_max: int
-    bytes_max: int
-
     def __init__(
         self,
         spill_directory: str,
@@ -191,8 +155,6 @@ class SpillBuffer(zict.Buffer):
         self.logged_pickle_errors = set()  # keys logged with pickle error
 
         self.fast_metrics = FastMetrics()
-        self.count_max = 0
-        self.bytes_max = 0
 
     @contextmanager
     def handle_errors(self, key: str | None) -> Iterator[None]:
@@ -281,19 +243,6 @@ class SpillBuffer(zict.Buffer):
                 logger.error("Key %s lost. Please upgrade to zict >= 2.1.0", key)
             assert key not in self.slow
 
-        # Update metrics
-        # Note: this is false only when the value is individually larger than target
-        if key in self.fast:
-            self.fast_metrics.log_write(
-                key_bytes=cast(int, self.fast.weights[key]),
-                total_count=len(self.fast),
-                total_bytes=cast(int, self.fast.total_weight),
-            )
-        self.count_max = max(self.count_max, len(self))
-        self.bytes_max = max(
-            self.bytes_max, cast(int, self.fast.total_weight) + self.spilled_total.disk
-        )
-
     def evict(self) -> int:
         """Implementation of :meth:`ManualEvictProto.evict`.
 
@@ -355,7 +304,7 @@ class SpillBuffer(zict.Buffer):
         """
         return self._slow_uncached.total_weight
 
-    def get_metrics(self, reset_max: bool = False) -> dict[str, float]:
+    def get_metrics(self) -> dict[str, float]:
         """Metrics to be exported to Prometheus or to be parsed directly.
 
         From these you may generate derived metrics:
@@ -382,25 +331,16 @@ class SpillBuffer(zict.Buffer):
         sm = self._slow_uncached.metrics
 
         out = {
-            "count_max": self.count_max,
-            "bytes_max": self.bytes_max,
             "memory_count": len(self.fast),
             "memory_bytes": self.fast.total_weight,
             "disk_count": len(self.slow),
             "disk_bytes": self._slow_uncached.total_weight.disk,
         }
-        if reset_max:
-            self.count_max = 0
-            self.bytes_max = 0
 
         for k, v in fm.__dict__.items():
             out[f"memory_{k}"] = v
-            if reset_max and k.endswith("_max"):
-                setattr(fm, k, 0)
         for k, v in sm.__dict__.items():
             out[k if "pickle" in k else f"disk_{k}"] = v
-            if reset_max and k.endswith("_max"):
-                setattr(sm, k, 0)
         return out
 
 
@@ -503,8 +443,6 @@ class Slow(zict.Func):
         # For the sake of simplicity, we're not metering failure use cases.
         self.metrics.log_write(
             key_bytes=pickled_size,
-            total_count=len(self),
-            total_bytes=self.total_weight.disk,
             pickle_time=t1 - t0,
             write_time=t2 - t1,
         )

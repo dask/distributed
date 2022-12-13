@@ -389,31 +389,19 @@ def test_weakref_cache(tmp_path, cls, expect_cached, size):
 def test_metrics(tmp_path):
     buf = SpillBuffer(str(tmp_path), target=1000)
     assert buf.get_metrics() == {
-        "bytes_max": 0,
-        "count_max": 0,
         "disk_bytes": 0,
-        "disk_bytes_max": 0,
-        "disk_bytes_per_key_max": 0,
         "disk_count": 0,
-        "disk_count_max": 0,
         "disk_read_bytes_total": 0,
         "disk_read_count_total": 0,
-        "disk_read_time_per_key_max": 0,
         "disk_read_time_total": 0,
         "disk_write_bytes_total": 0,
         "disk_write_count_total": 0,
-        "disk_write_time_per_key_max": 0,
         "disk_write_time_total": 0,
         "memory_bytes": 0,
-        "memory_bytes_max": 0,
-        "memory_bytes_per_key_max": 0,
         "memory_count": 0,
-        "memory_count_max": 0,
         "memory_read_bytes_total": 0,
         "memory_read_count_total": 0,
-        "pickle_time_per_key_max": 0,
         "pickle_time_total": 0,
-        "unpickle_time_per_key_max": 0,
         "unpickle_time_total": 0,
     }
 
@@ -424,13 +412,8 @@ def test_metrics(tmp_path):
     del buf["b"]
 
     metrics = buf.get_metrics()
-    assert 350 < metrics["bytes_max"] < 600
     assert 200 < metrics["memory_bytes"] < 350
-    assert metrics["bytes_max"] == metrics["memory_bytes_max"]
-    assert 200 < metrics["memory_bytes_per_key_max"] < 350
-    assert metrics["count_max"] == 2
     assert metrics["memory_count"] == 1
-    assert metrics["memory_count_max"] == 2
     for k, v in metrics.items():
         if "disk" in k or "pickle" in k:
             assert v == 0, f"{k}={v}"
@@ -447,13 +430,6 @@ def test_metrics(tmp_path):
     buf.evict()
     _ = buf["c"]  # Unspill / cache miss
 
-    metrics = buf.get_metrics(reset_max=True)
-    for k, v in metrics.items():
-        assert v > 0, f"{k}={v}"
-
     metrics = buf.get_metrics()
     for k, v in metrics.items():
-        if k.endswith("_max"):
-            assert v == 0, f"{k}={v}"
-        else:
-            assert v > 0, f"{k}={v}"
+        assert v > 0, f"{k}={v}"

@@ -211,7 +211,7 @@ class WorkerMetricCollector(PrometheusCollector):
             get_metrics = self.server.data.get_metrics  # type: ignore
         except AttributeError:
             return  # spilling is disabled
-        metrics = get_metrics(reset_max=True)
+        metrics = get_metrics()
 
         total_bytes = CounterMetricFamily(
             self.build_name("spill_bytes"),
@@ -244,46 +244,6 @@ class WorkerMetricCollector(PrometheusCollector):
         for k in ("pickle", "disk_write", "disk_read", "unpickle"):
             total_times.add_metric([k], metrics[f"{k}_time_total"])
         yield total_times
-
-        max_times = GaugeMetricFamily(
-            self.build_name("spill_time_per_key_max"),
-            "Maximum time spent spilling/unspilling a single key "
-            "since the previous poll",
-            unit="seconds",
-            labels=["event"],
-        )
-        for k in ("pickle", "disk_write", "disk_read", "unpickle"):
-            max_times.add_metric([k], metrics[f"{k}_time_per_key_max"])
-        yield max_times
-
-        max_counts = GaugeMetricFamily(
-            self.build_name("memory_count_max"),
-            "Maximum number of keys in memory since the previous poll",
-            labels=["where"],
-        )
-        max_counts.add_metric(["memory"], metrics["memory_count_max"])
-        max_counts.add_metric(["disk"], metrics["disk_count_max"])
-        max_counts.add_metric(["total"], metrics["count_max"])
-        yield max_counts
-
-        max_bytes = GaugeMetricFamily(
-            self.build_name("memory_bytes_max"),
-            "Maximum bytes worth of keys in memory since the previous poll",
-            labels=["where"],
-        )
-        max_bytes.add_metric(["memory"], metrics["memory_bytes_max"])
-        max_bytes.add_metric(["disk"], metrics["disk_bytes_max"])
-        max_bytes.add_metric(["total"], metrics["bytes_max"])
-        yield max_bytes
-
-        max_bytes_per_key = GaugeMetricFamily(
-            self.build_name("memory_per_key_bytes_max"),
-            "Maximum bytes used by a single key in memory since the previous poll",
-            labels=["where"],
-        )
-        max_bytes_per_key.add_metric(["memory"], metrics["memory_bytes_per_key_max"])
-        max_bytes_per_key.add_metric(["disk"], metrics["disk_bytes_per_key_max"])
-        yield max_bytes_per_key
 
 
 class PrometheusHandler(RequestHandler):
