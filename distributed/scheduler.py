@@ -4609,23 +4609,22 @@ class Scheduler(SchedulerState, ServerNode):
 
         # TODO: balance workers
 
-    def stimulus_queue_slots_maybe_opened(
-        self, *workers: WorkerState, stimulus_id: str
-    ) -> None:
+    def stimulus_queue_slots_maybe_opened(self, *, stimulus_id: str) -> None:
         """Respond to an event which may have opened a spot on the threadpool of a worker
 
         Selects the appropriate number of tasks from the front of the queue (potentially
         0), and transitions them to ``processing``.
         """
-        # FIXME we'll pick the same tasks for each worker!!! (because this doesn't pop off the queue)
-        recommendations: Recs = {
-            qts.key: "processing"
-            for ws in workers
-            for qts in self._next_queued_tasks_for_worker(ws)
-        }
-        # TODO we already know the worker, pass `ws` as an argument to
-        # `transition_queued_procssing` and bypass `decide_worker`
-        self.transitions(recommendations, stimulus_id)
+        if self.idle_task_count:
+            # FIXME we'll pick the same tasks for each worker!!! (because this doesn't pop off the queue)
+            recommendations: Recs = {
+                qts.key: "processing"
+                for ws in self.idle_task_count
+                for qts in self._next_queued_tasks_for_worker(ws)
+            }
+            # TODO we already know the worker, pass `ws` as an argument to
+            # `transition_queued_procssing` and bypass `decide_worker`
+            self.transitions(recommendations, stimulus_id)
 
     def stimulus_task_finished(self, key=None, worker=None, stimulus_id=None, **kwargs):
         """Mark that a task has finished execution on a particular worker"""
@@ -4951,15 +4950,9 @@ class Scheduler(SchedulerState, ServerNode):
         recommendations: Recs = {}
 
         self._client_releases_keys(keys=keys, cs=cs, recommendations=recommendations)
-        potential_open_workers = {
-            ws for k in recommendations.keys() if (ws := self.tasks[k].processing_on)
-        }
-
         self.transitions(recommendations, stimulus_id)
 
-        self.stimulus_queue_slots_maybe_opened(
-            *potential_open_workers, stimulus_id=stimulus_id
-        )
+        self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
     def client_heartbeat(self, client=None):
         """Handle heartbeats from Client"""
@@ -5307,9 +5300,7 @@ class Scheduler(SchedulerState, ServerNode):
         self._transitions(recommendations, client_msgs, worker_msgs, stimulus_id)
         self.send_all(client_msgs, worker_msgs)
 
-        self.stimulus_queue_slots_maybe_opened(
-            self.workers[worker], stimulus_id=stimulus_id
-        )
+        self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
     def handle_task_erred(self, key: str, worker: str, stimulus_id: str, **msg) -> None:
         r: tuple = self.stimulus_task_erred(
@@ -5319,9 +5310,7 @@ class Scheduler(SchedulerState, ServerNode):
         self._transitions(recommendations, client_msgs, worker_msgs, stimulus_id)
         self.send_all(client_msgs, worker_msgs)
 
-        self.stimulus_queue_slots_maybe_opened(
-            self.workers[worker], stimulus_id=stimulus_id
-        )
+        self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
     def release_worker_data(self, key: str, worker: str, stimulus_id: str) -> None:
         ts = self.tasks.get(key)
@@ -5364,7 +5353,7 @@ class Scheduler(SchedulerState, ServerNode):
         ws.add_to_long_running(ts)
         self.check_idle_saturated(ws)
 
-        self.stimulus_queue_slots_maybe_opened(ws, stimulus_id=stimulus_id)
+        self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
     def handle_worker_status_change(
         self, status: str | Status, worker: str | WorkerState, stimulus_id: str
