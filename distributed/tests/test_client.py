@@ -6981,6 +6981,26 @@ async def test_annotations_loose_restrictions(c, s, a, b):
     )
 
 
+@gen_cluster(
+    client=True,
+    nthreads=[
+        ("127.0.0.1", 1, {"resources": {"foo": 4}}),
+        ("127.0.0.1", 1),
+    ],
+)
+async def test_annotations_submit_map(c, s, a, b):
+
+    with dask.annotate(resources={"foo": 1}):
+        f = c.submit(inc, 0)
+    with dask.annotate(resources={"foo": 1}):
+        fs = c.map(inc, range(10, 13))
+
+    await wait([f, *fs])
+
+    assert all([{"foo": 1} == ts.resource_restrictions for ts in s.tasks.values()])
+    assert all([{"resources": {"foo": 1}} == ts.annotations for ts in s.tasks.values()])
+
+
 @gen_cluster(client=True)
 async def test_workers_collection_restriction(c, s, a, b):
     da = pytest.importorskip("dask.array")
