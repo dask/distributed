@@ -385,43 +385,49 @@ async def test_forget_tasks_while_processing(c, s, a, b):
 
 @gen_cluster(
     client=True,
-    nthreads=[("", 1)],
+    nthreads=[("", 1)] * 3,
     config={"distributed.scheduler.worker-saturation": 1.0},
 )
-async def test_queued_release(c, s, a):
-    event = Event()
+async def test_queued_release_multiple_workers(c, s, *workers):
+    async with Client(s.address, asynchronous=True) as c2:
+        event = Event(client=c2)
 
-    rootish_threshold = s.total_nthreads * 2 + 1
+        rootish_threshold = s.total_nthreads * 2 + 1
 
-    first_batch = c.map(
-        lambda i: event.wait(),
-        range(rootish_threshold),
-        key=[f"first-{i}" for i in range(rootish_threshold)],
-    )
-    await async_wait_for(lambda: s.queued, 5)
+        first_batch = c.map(
+            lambda i: event.wait(),
+            range(rootish_threshold),
+            key=[f"first-{i}" for i in range(rootish_threshold)],
+        )
+        await async_wait_for(lambda: s.queued, 5)
 
-    second_batch = c.map(
-        lambda i: event.wait(),
-        range(rootish_threshold),
-        key=[f"second-{i}" for i in range(rootish_threshold)],
-        fifo_timeout=0,
-    )
-    await async_wait_for(lambda: second_batch[0].key in s.tasks, 5)
+        second_batch = c2.map(
+            lambda i: event.wait(),
+            range(rootish_threshold),
+            key=[f"second-{i}" for i in range(rootish_threshold)],
+            fifo_timeout=0,
+        )
+        await async_wait_for(lambda: second_batch[0].key in s.tasks, 5)
 
-    # All of the second batch should be queued after the first batch
-    assert [ts.key for ts in s.queued.sorted()] == [
-        f.key for f in itertools.chain(first_batch[1:], second_batch)
-    ]
+        # All of the second batch should be queued after the first batch
+        assert [ts.key for ts in s.queued.sorted()] == [
+            f.key for f in itertools.chain(first_batch[3:], second_batch)
+        ]
 
-    # Cancel the first batch
-    del first_batch
-    await async_wait_for(lambda: len(s.tasks) == len(second_batch), 5)
+        # Cancel the first batch.
+        # Use `Client.close` instead of `del first_batch` because deleting futures sends cancellation
+        # messages one at a time. We're testing here that when multiple workers have open slots, we don't
+        # recommend the same queued tasks for every worker, so we need a bulk cancellation operation.
+        await c.close()
+        del c, first_batch
 
-    # Second batch should move up the queue and start processing
-    assert len(s.queued) == len(second_batch) - 1, list(s.queued.sorted())
+        await async_wait_for(lambda: len(s.tasks) == len(second_batch), 5)
 
-    await event.set()
-    await c.gather(second_batch)
+        # Second batch should move up the queue and start processing
+        assert len(s.queued) == len(second_batch) - 3, list(s.queued.sorted())
+
+        await event.set()
+        await c2.gather(second_batch)
 
 
 @gen_cluster(
