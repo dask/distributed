@@ -267,3 +267,37 @@ async def test_prometheus_collect_memory_metrics_bogus_sizeof(c, s, a):
     assert 50 * 2**20 < metrics["managed"] < 100 * 2**30  # capped to process memory
     assert metrics["unmanaged"] == 0  # floored to 0
     assert metrics["spilled"] == 0
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)],
+    worker_kwargs={"memory_limit": "10 MiB"},
+    config={
+        "distributed.worker.memory.target": 1.0,
+        "distributed.worker.memory.spill": False,
+        "distributed.worker.memory.pause": False,
+    },
+)
+async def test_prometheus_resets_max_metrics(c, s, a):
+    pytest.importorskip("prometheus_client")
+    np = pytest.importorskip("numpy")
+
+    # The first GET to /metrics calls collect() twice
+    await fetch_metrics(a.http_server.port)
+
+    # We need substantial data to be sure that spilling it will take more than 5ms.
+    x = c.submit(lambda: "x" * 40_000_000, key="x", workers=[a.address])
+    await wait(x)
+    # Key is individually larger than target threshold, so it was spilled immediately
+    assert "x" in a.data.slow
+
+    nsecs = a.digests_max["disk-write-target-duration"]
+    assert nsecs > 0
+
+    families = await fetch_metrics(a.http_server.port)
+    metric = families["dask_worker_event_loop_blocked_time_max_seconds"]
+    samples = {sample.labels["cause"]: sample.value for sample in metric.samples}
+
+    assert samples["disk-write-target"] == nsecs
+    assert a.digests_max["disk-write-target-duration"] == 0
