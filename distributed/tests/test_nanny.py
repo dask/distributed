@@ -554,7 +554,7 @@ async def test_worker_start_exception(s):
 )
 @gen_cluster(nthreads=[])
 async def test_worker_start_exception_after_restart(s, api):
-    async with Nanny(s.address, death_timeout="2s") as nanny:
+    async with Nanny(s.address, death_timeout="5s") as nanny:
         # Stop the listener on the scheduler, i.e. do not allow any new incoming
         # connections. The restarting workers will fail while trying to attempt
         # connection

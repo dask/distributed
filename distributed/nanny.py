@@ -13,7 +13,6 @@ import threading
 import uuid
 import warnings
 import weakref
-from collections import defaultdict
 from collections.abc import Collection
 from inspect import isawaitable
 from queue import Empty
@@ -119,7 +118,6 @@ class Nanny(ServerNode):
     # Inputs to parse_ports()
     _given_worker_port: int | str | Collection[int] | None
     _start_port: int | str | Collection[int] | None
-    _process_callback_received: defaultdict[WorkerProcess, asyncio.Event]
 
     def __init__(  # type: ignore[no-untyped-def]
         self,
@@ -225,7 +223,6 @@ class Nanny(ServerNode):
         self.resources = resources
 
         self._instantiate_lock = asyncio.Lock()
-        self._process_callback_received = defaultdict(asyncio.Event)
 
         self.Worker = Worker if worker_class is None else worker_class
 
@@ -392,8 +389,7 @@ class Nanny(ServerNode):
         proc = self.process
         await proc.kill(reason=reason, timeout=0.8 * (deadline - time()))
         assert proc.status in (Status.stopped, Status.failed), proc.status
-        assert proc.stopped.is_set()
-        await self._process_callback_received[proc].wait()
+        await proc.stopped.wait()
         assert self.process is not proc
 
     async def instantiate(self) -> Status:
@@ -517,7 +513,6 @@ class Nanny(ServerNode):
     @log_errors
     async def _on_worker_exit(self, exitcode):
         assert self.process
-        self._process_callback_received[self.process].set()
         self.process = None
         if self.status not in (
             Status.init,
@@ -768,7 +763,6 @@ class WorkerProcess:
                 msg = self._death_message(self.process.pid, r)
                 logger.info(msg)
             self.status = Status.stopped
-            self.stopped.set()
             # Release resources
             self.process.close()
             self.init_result_q = None
@@ -781,6 +775,7 @@ class WorkerProcess:
             # User hook
             if self.on_exit is not None:
                 self.on_exit(r)
+            self.stopped.set()
 
     async def kill(
         self,
