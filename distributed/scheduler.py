@@ -2317,18 +2317,13 @@ class SchedulerState:
         ############################
         # Update State Information #
         ############################
-        recommendations: Recs = {}
-        client_msgs: Msgs = {}
-
         if nbytes is not None:
             ts.set_nbytes(nbytes)
 
-        # NOTE: recommendations for queued tasks are added first, so they'll be popped
-        # last, allowing higher-priority downstream tasks to be transitioned first.
-        # FIXME: this would be incorrect if queued tasks are user-annotated as higher
-        #        priority.
-        self._exit_processing_common(ts, recommendations)
+        self._exit_processing_common(ts)
 
+        recommendations: Recs = {}
+        client_msgs: Msgs = {}
         self._add_to_memory(
             ts, ws, recommendations, client_msgs, type=type, typename=typename
         )
@@ -2507,7 +2502,7 @@ class SchedulerState:
             assert not ts.waiting_on
             assert ts.state == "processing"
 
-        ws = self._exit_processing_common(ts, recommendations)
+        ws = self._exit_processing_common(ts)
         if ws:
             worker_msgs[ws.address] = [
                 {
@@ -2574,7 +2569,7 @@ class SchedulerState:
             assert ws
             ws.actors.remove(ts)
 
-        self._exit_processing_common(ts, recommendations)
+        self._exit_processing_common(ts)
 
         ts.erred_on.add(worker)
         if exception is not None:
@@ -3108,9 +3103,7 @@ class SchedulerState:
 
         return {ws.address: [self._task_to_msg(ts)]}
 
-    def _exit_processing_common(
-        self, ts: TaskState, recommendations: Recs
-    ) -> WorkerState | None:
+    def _exit_processing_common(self, ts: TaskState) -> WorkerState | None:
         """Remove *ts* from the set of processing tasks.
 
         Returns
@@ -3132,11 +3125,6 @@ class SchedulerState:
 
         self.check_idle_saturated(ws)
         self.release_resources(ts, ws)
-
-        for qts in self._next_queued_tasks_for_worker(ws):
-            if self.validate:
-                assert qts.key not in recommendations, recommendations[qts.key]
-            recommendations[qts.key] = "processing"
 
         return ws
 
@@ -4944,6 +4932,17 @@ class Scheduler(SchedulerState, ServerNode):
         recommendations: Recs = {}
 
         self._client_releases_keys(keys=keys, cs=cs, recommendations=recommendations)
+        potential_open_workers = {
+            ws for k in recommendations.keys() if (ws := self.tasks[k].processing_on)
+        }
+
+        self.transitions(recommendations, stimulus_id)
+
+        recommendations: Recs = {}
+        for ws in potential_open_workers:
+            for qts in self._next_queued_tasks_for_worker(ws):
+                recommendations[qts.key] = "processing"
+
         self.transitions(recommendations, stimulus_id)
 
     def client_heartbeat(self, client=None):
@@ -5291,12 +5290,31 @@ class Scheduler(SchedulerState, ServerNode):
         recommendations, client_msgs, worker_msgs = r
         self._transitions(recommendations, client_msgs, worker_msgs, stimulus_id)
 
+        ws = self.workers[worker]
+        recommendations = {
+            qts.key: "processing" for qts in self._next_queued_tasks_for_worker(ws)
+        }
+        if self.validate:
+            assert len(recommendations) <= 1, (ws, recommendations)
+        self._transitions(recommendations, client_msgs, worker_msgs, stimulus_id)
+
         self.send_all(client_msgs, worker_msgs)
 
-    def handle_task_erred(self, key: str, stimulus_id: str, **msg) -> None:
-        r: tuple = self.stimulus_task_erred(key=key, stimulus_id=stimulus_id, **msg)
+    def handle_task_erred(self, key: str, worker: str, stimulus_id: str, **msg) -> None:
+        r: tuple = self.stimulus_task_erred(
+            key=key, worker=worker, stimulus_id=stimulus_id, **msg
+        )
         recommendations, client_msgs, worker_msgs = r
         self._transitions(recommendations, client_msgs, worker_msgs, stimulus_id)
+
+        ws = self.workers[worker]
+        recommendations = {
+            qts.key: "processing" for qts in self._next_queued_tasks_for_worker(ws)
+        }
+        if self.validate:
+            assert len(recommendations) <= 1, (ws, recommendations)
+        self._transitions(recommendations, client_msgs, worker_msgs, stimulus_id)
+
         self.send_all(client_msgs, worker_msgs)
 
     def release_worker_data(self, key: str, worker: str, stimulus_id: str) -> None:
