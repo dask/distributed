@@ -5304,10 +5304,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
-    def handle_task_erred(self, key: str, worker: str, stimulus_id: str, **msg) -> None:
-        r: tuple = self.stimulus_task_erred(
-            key=key, worker=worker, stimulus_id=stimulus_id, **msg
-        )
+    def handle_task_erred(self, key: str, stimulus_id: str, **msg) -> None:
+        r: tuple = self.stimulus_task_erred(key=key, stimulus_id=stimulus_id, **msg)
         recommendations, client_msgs, worker_msgs = r
         self._transitions(recommendations, client_msgs, worker_msgs, stimulus_id)
         self.send_all(client_msgs, worker_msgs)
