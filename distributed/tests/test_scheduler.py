@@ -411,7 +411,8 @@ async def test_queued_release_multiple_workers(c, s, *workers):
 
         # All of the second batch should be queued after the first batch
         assert [ts.key for ts in s.queued.sorted()] == [
-            f.key for f in itertools.chain(first_batch[3:], second_batch)
+            f.key
+            for f in itertools.chain(first_batch[s.total_nthreads :], second_batch)
         ]
 
         # Cancel the first batch.
@@ -424,7 +425,9 @@ async def test_queued_release_multiple_workers(c, s, *workers):
         await async_wait_for(lambda: len(s.tasks) == len(second_batch), 5)
 
         # Second batch should move up the queue and start processing
-        assert len(s.queued) == len(second_batch) - 3, list(s.queued.sorted())
+        assert len(s.queued) == len(second_batch) - s.total_nthreads, list(
+            s.queued.sorted()
+        )
 
         await event.set()
         await c2.gather(second_batch)
