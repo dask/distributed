@@ -3054,24 +3054,20 @@ class SchedulerState:
             self.replicated_tasks.remove(ts)
         ts.who_has.clear()
 
-    def bulk_schedule_after_adding_worker(self, ws: WorkerState) -> Recs:
-        """Send ``queued`` or ``no-worker`` tasks to ``processing`` that this worker can
-        handle.
+    def bulk_schedule_unrunnable_after_adding_worker(self, ws: WorkerState) -> Recs:
+        """Send ``no-worker`` tasks to ``processing`` that this worker can handle.
 
         Returns priority-ordered recommendations.
         """
-        maybe_runnable = list(self._next_queued_tasks_for_worker(ws))[::-1]
-
-        # Schedule any restricted tasks onto the new worker, if the worker can run them
+        runnable: list[TaskState] = []
         for ts in self.unrunnable:
             valid = self.valid_workers(ts)
             if valid is None or ws in valid:
-                maybe_runnable.append(ts)
+                runnable.append(ts)
 
         # Recommendations are processed LIFO, hence the reversed order
-        maybe_runnable.sort(key=operator.attrgetter("priority"), reverse=True)
-        # Note not all will necessarily be run; transition->processing will decide
-        return {ts.key: "processing" for ts in maybe_runnable}
+        runnable.sort(key=operator.attrgetter("priority"), reverse=True)
+        return {ts.key: "processing" for ts in runnable}
 
     def _validate_ready(self, ts: TaskState) -> None:
         """Validation for ready states (processing, queued, no-worker)"""
@@ -3127,22 +3123,6 @@ class SchedulerState:
         self.release_resources(ts, ws)
 
         return ws
-
-    def _next_queued_tasks_for_worker(self, ws: WorkerState) -> Iterator[TaskState]:
-        """Queued tasks to run, in priority order, on all open slots on a worker"""
-        if not self.queued or ws.status != Status.running:
-            return
-
-        # NOTE: this is called most frequently because a single task has completed, so
-        # there are <= 1 task slots available on the worker.
-        # `peekn` has fast paths for the cases N<=0 and N==1.
-        for qts in self.queued.peekn(_task_slots_available(ws, self.WORKER_SATURATION)):
-            if self.validate:
-                assert qts.state == "queued", qts.state
-                assert not qts.processing_on, (qts, qts.processing_on)
-                assert not qts.waiting_on, (qts, qts.processing_on)
-                assert qts.who_wants or qts.waiters, qts
-            yield qts
 
     def _add_to_memory(
         self,
@@ -4229,7 +4209,10 @@ class Scheduler(SchedulerState, ServerNode):
                 logger.exception(e)
 
         if ws.status == Status.running:
-            self.transitions(self.bulk_schedule_after_adding_worker(ws), stimulus_id)
+            self.transitions(
+                self.bulk_schedule_unrunnable_after_adding_worker(ws), stimulus_id
+            )
+            self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
         logger.info("Register worker %s", ws)
 
@@ -4612,19 +4595,38 @@ class Scheduler(SchedulerState, ServerNode):
     def stimulus_queue_slots_maybe_opened(self, *, stimulus_id: str) -> None:
         """Respond to an event which may have opened a spot on the threadpool of a worker
 
-        Selects the appropriate number of tasks from the front of the queue (potentially
-        0), and transitions them to ``processing``.
+        Selects the appropriate number of tasks from the front of the queue according to
+        the total number of task slots available on workers (potentially 0), and
+        transitions them to ``processing``.
+
+        Notes
+        -----
+        Other transitions related to this stimulus should be fully processed beforehand,
+        so any tasks that became runnable are already in ``processing``. Otherwise,
+        overproduction can occur if queued tasks get scheduled before downstream tasks.
+
+        Must be called after `check_idle_saturated`; i.e. `idle_task_count` must be up
+        to date.
         """
-        if self.idle_task_count:
-            # FIXME we'll pick the same tasks for each worker!!! (because this doesn't pop off the queue)
-            recommendations: Recs = {
-                qts.key: "processing"
-                for ws in self.idle_task_count
-                for qts in self._next_queued_tasks_for_worker(ws)
-            }
-            # TODO we already know the worker, pass `ws` as an argument to
-            # `transition_queued_procssing` and bypass `decide_worker`
-            self.transitions(recommendations, stimulus_id)
+        if not self.queued:
+            return
+        slots_available = sum(
+            _task_slots_available(ws, self.WORKER_SATURATION)
+            for ws in self.idle_task_count
+        )
+        if slots_available == 0:
+            return
+
+        recommendations: Recs = {}
+        for qts in self.queued.peekn(slots_available):
+            if self.validate:
+                assert qts.state == "queued", qts.state
+                assert not qts.processing_on, (qts, qts.processing_on)
+                assert not qts.waiting_on, (qts, qts.processing_on)
+                assert qts.who_wants or qts.waiters, qts
+            recommendations[qts.key] = "processing"
+
+        self.transitions(recommendations, stimulus_id)
 
     def stimulus_task_finished(self, key=None, worker=None, stimulus_id=None, **kwargs):
         """Mark that a task has finished execution on a particular worker"""
@@ -5379,12 +5381,10 @@ class Scheduler(SchedulerState, ServerNode):
         if ws.status == Status.running:
             self.running.add(ws)
             self.check_idle_saturated(ws)
-            recs = self.bulk_schedule_after_adding_worker(ws)
-            if recs:
-                client_msgs: Msgs = {}
-                worker_msgs: Msgs = {}
-                self._transitions(recs, client_msgs, worker_msgs, stimulus_id)
-                self.send_all(client_msgs, worker_msgs)
+            self.transitions(
+                self.bulk_schedule_unrunnable_after_adding_worker(ws), stimulus_id
+            )
+            self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
         else:
             self.running.discard(ws)
             self.idle.pop(ws.address, None)
