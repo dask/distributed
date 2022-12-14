@@ -3365,16 +3365,20 @@ def test_default_get(loop_in_thread):
         assert dask.base.get_scheduler() == pre_get
 
 
-@gen_cluster(client=True)
-async def test_ensure_default_client(c, s, a, b):
-    assert c is default_client()
-
-    async with Client(s.address, set_as_default=False, asynchronous=True) as c2:
+@gen_cluster()
+async def test_ensure_default_client(s, a, b):
+    c = await Client(s.address, asynchronous=True)
+    try:
         assert c is default_client()
-        assert c2 is not default_client()
-        ensure_default_client(c2)
-        assert c is not default_client()
-        assert c2 is default_client()
+
+        async with Client(s.address, set_as_default=False, asynchronous=True) as c2:
+            assert c is default_client()
+            assert c2 is not default_client()
+            ensure_default_client(c2)
+            assert c is not default_client()
+            assert c2 is default_client()
+    finally:
+        await c.close()
 
 
 @gen_cluster()
@@ -4072,8 +4076,6 @@ async def test_as_current(c, s, a, b):
 
         with temp_default_client(c):
             assert Client.current() is c
-            with pytest.raises(ValueError):
-                Client.current(allow_global=False)
             with c1.as_current():
                 assert Client.current() is c1
                 assert Client.current(allow_global=True) is c1

@@ -138,6 +138,7 @@ def _get_global_client() -> Client | None:
 
 def _set_global_client(c: Client | None) -> None:
     if c is not None:
+        c._set_as_default = True
         _global_clients[_global_client_index[0]] = c
         _global_client_index[0] += 1
 
@@ -867,6 +868,7 @@ class Client(SyncMethodMixin):
             deserializers = serializers
         self._deserializers = deserializers
         self.direct_to_workers = direct_to_workers
+        self._previous_as_current = None
 
         # Communication
         self.scheduler_comm = None
@@ -1061,6 +1063,10 @@ class Client(SyncMethodMixin):
         ------
         ValueError
             If there is no client set, a ValueError is raised
+
+        See also
+        --------
+        default_client
         """
         out = _current_client.get()
         if out:
@@ -1447,12 +1453,14 @@ class Client(SyncMethodMixin):
     def __enter__(self):
         if not self._loop_runner.is_started():
             self.start()
-        self._previous_as_current = _current_client.set(self)
+        if self._set_as_default:
+            self._previous_as_current = _current_client.set(self)
         return self
 
     async def __aenter__(self):
         await self
-        self._previous_as_current = _current_client.set(self)
+        if self._set_as_default:
+            self._previous_as_current = _current_client.set(self)
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
@@ -1462,17 +1470,13 @@ class Client(SyncMethodMixin):
             fast=exc_type
             is not None
         )
-        try:
+        if self._previous_as_current:
             _current_client.reset(self._previous_as_current)
-        except ValueError:
-            raise RuntimeError("Closed Clients in wrong order")
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
-        try:
+        if self._previous_as_current:
             _current_client.reset(self._previous_as_current)
-        except ValueError:
-            raise RuntimeError("Closed Clients in wrong order")
 
     def __del__(self):
         # If the loop never got assigned, we failed early in the constructor,
@@ -4910,7 +4914,7 @@ def wait(fs, timeout=None, return_when=ALL_COMPLETED):
     """
     if timeout is not None and isinstance(timeout, (Number, str)):
         timeout = parse_timedelta(timeout, default="s")
-    client = Client.current()
+    client = default_client()
     result = client.sync(_wait, fs, timeout=timeout, return_when=return_when)
     return result
 
@@ -5007,7 +5011,7 @@ class as_completed:
         self.futures = defaultdict(lambda: 0)
         self.queue = pyQueue()
         self.lock = threading.Lock()
-        self.loop = loop or Client.current().loop
+        self.loop = loop or default_client().loop
         self.thread_condition = threading.Condition()
         self.with_results = with_results
         self.raise_errors = raise_errors
@@ -5207,6 +5211,10 @@ def default_client(c=None):
     -------
     c : Client
         The client, if one has started
+
+    See also
+    --------
+    Client.current (alias)
     """
     c = c or _get_global_client()
     if c:
@@ -5548,10 +5556,11 @@ def temp_default_client(c):
     c : Client
         This is what default_client() will return within the with-block.
     """
-    old_exec = Client.current()
+    old_exec = default_client()
     _set_global_client(c)
     try:
-        yield
+        with c.as_current():
+            yield
     finally:
         _set_global_client(old_exec)
 
