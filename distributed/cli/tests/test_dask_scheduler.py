@@ -573,7 +573,7 @@ def test_signal_handling(loop, sig):
     port = open_port()
     with subprocess.Popen(
         [
-            "python",
+            sys.executable,
             "-m",
             "distributed.cli.dask_scheduler",
             f"--port={port}",

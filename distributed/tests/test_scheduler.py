@@ -2700,7 +2700,7 @@ async def test_task_unique_groups(c, s, a, b):
     x = c.submit(sum, [1, 2])
     y = c.submit(len, [1, 2])
     z = c.submit(sum, [3, 4])
-    await asyncio.wait([x, y, z])
+    await asyncio.gather(x, y, z)
 
     assert s.task_prefixes["len"].states["memory"] == 1
     assert s.task_prefixes["sum"].states["memory"] == 2
