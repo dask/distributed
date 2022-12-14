@@ -40,6 +40,12 @@ dask_scheduler_tasks_forgotten_total
        Task groups on the scheduler which have all tasks in the forgotten state are not
        included.
 
+dask_scheduler_tasks_time_spent_compute_seconds_total
+    Total time spent computing a task
+dask_scheduler_tasks_time_spent_transfer_seconds_total
+    Total time spent transferring a task
+dask_scheduler_tasks_nbytes_bytes_total
+    The total number of bytes that this task prefix has produced
 dask_scheduler_prefix_state_totals_total
     Accumulated count of task prefix in each state
 dask_scheduler_tick_count_total
