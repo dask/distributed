@@ -69,6 +69,7 @@ dask_semaphore_release_total
     .. note::
        If a semaphore is closed while there are still leases active, this count will not
        equal ``dask_semaphore_acquire_total`` after execution.
+
 dask_semaphore_average_pending_lease_time_s
     Exponential moving average of the time it took to acquire a lease per semaphore
 
@@ -126,7 +127,6 @@ dask_worker_tick_duration_maximum_seconds
     Maximum tick duration observed since Prometheus last scraped metrics
 dask_worker_tick_count_total
     Total number of ticks observed since the server started
-
 
 If the crick_ package is installed, the worker additionally exposes:
 
