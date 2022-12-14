@@ -112,11 +112,14 @@ class SerializedTask(NamedTuple):
     task: object = NO_VALUE
 
 
-class StartStop(TypedDict, total=False):
-    action: str
+class _StartStopRequired(TypedDict):
+    action: Literal["compute", "transfer", "disk-read", "disk-write", "deserialize"]
     start: float
     stop: float
-    source: str  # optional
+
+
+class StartStop(_StartStopRequired, total=False):
+    source: str
 
 
 class InvalidTransition(Exception):
