@@ -383,6 +383,17 @@ async def test_forget_tasks_while_processing(c, s, a, b):
     assert not s.tasks
 
 
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_restart_while_processing(c, s, a, b):
+    events = [Event() for _ in range(10)]
+
+    futures = c.map(Event.wait, events)
+    await events[0].set()
+    await futures[0]
+    await c.restart()
+    assert not s.tasks
+
+
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 3,
