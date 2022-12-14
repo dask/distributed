@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from threading import Thread
+from time import sleep
+
 import pytest
 
 import dask
@@ -119,6 +122,44 @@ def test_maybe_compress(lib, compression):
         rc, rd = maybe_compress(f(payload), compression=compression)
         assert rc == compression
         assert compressions[rc]["decompress"](rd) == payload
+
+
+@pytest.mark.parametrize(
+    "lib,compression",
+    [(None, None), ("zlib", "zlib"), ("lz4", "lz4"), ("zstandard", "zstd")],
+)
+def test_compression_thread_safety(lib, compression):
+    if lib:
+        pytest.importorskip(lib)
+
+    try_converters = [bytes, memoryview]
+    start = (
+        False  # signal variable to increase likelihood of hitting thread-safety issues
+    )
+
+    def test_compress_decompress(fn):
+        while not start:
+            sleep(0.001)
+
+        payload = b"123"
+        assert maybe_compress(fn(payload), compression=compression) == (None, payload)
+
+        payload = b"0" * 10000
+        rc, rd = maybe_compress(fn(payload), compression=compression)
+        assert rc == compression
+        assert compressions[rc]["decompress"](rd) == payload
+
+    for f in try_converters:
+        threads = []
+        for _ in range(0, 100):
+            start = False
+            for _ in range(0, 10):
+                thread = Thread(target=test_compress_decompress)
+                thread.start()
+                threads.append(thread)
+            start = True
+            for thr in threads:
+                thr.join()
 
 
 @pytest.mark.parametrize(

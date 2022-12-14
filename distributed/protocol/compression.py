@@ -81,17 +81,15 @@ with suppress(ImportError):
     if parse_version(zstandard.__version__) < parse_version("0.9.0"):
         raise ImportError("Need zstandard >= 0.9.0")
 
-    zstd_compressor = zstandard.ZstdCompressor(
-        level=dask.config.get("distributed.comm.zstd.level"),
-        threads=dask.config.get("distributed.comm.zstd.threads"),
-    )
-
-    zstd_decompressor = zstandard.ZstdDecompressor()
-
     def zstd_compress(data):
+        zstd_compressor = zstandard.ZstdCompressor(
+            level=dask.config.get("distributed.comm.zstd.level"),
+            threads=dask.config.get("distributed.comm.zstd.threads"),
+        )
         return zstd_compressor.compress(data)
 
     def zstd_decompress(data):
+        zstd_decompressor = zstandard.ZstdDecompressor()
         return zstd_decompressor.decompress(data)
 
     compressions["zstd"] = {"compress": zstd_compress, "decompress": zstd_decompress}
