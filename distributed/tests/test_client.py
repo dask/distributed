@@ -6999,6 +6999,7 @@ async def test_annotations_submit_map(c, s, a, b):
 
     assert all([{"foo": 1} == ts.resource_restrictions for ts in s.tasks.values()])
     assert all([{"resources": {"foo": 1}} == ts.annotations for ts in s.tasks.values()])
+    assert not b.state.tasks
 
 
 @gen_cluster(client=True)
