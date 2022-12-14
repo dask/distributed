@@ -115,7 +115,7 @@ _global_clients: weakref.WeakValueDictionary[
 ] = weakref.WeakValueDictionary()
 _global_client_index = [0]
 
-_current_client = ContextVar("_current_client", default=None)
+_current_client: ContextVar[Client | None] = ContextVar("_current_client", default=None)
 
 DEFAULT_EXTENSIONS = {
     "pubsub": PubSubClientExtension,
@@ -123,6 +123,9 @@ DEFAULT_EXTENSIONS = {
 
 
 def _get_global_client() -> Client | None:
+    c = _current_client.get()
+    if c:
+        return c
     L = sorted(list(_global_clients), reverse=True)
     for k in L:
         c = _global_clients[k]
