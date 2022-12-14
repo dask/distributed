@@ -383,6 +383,7 @@ async def test_forget_tasks_while_processing(c, s, a, b):
     assert not s.tasks
 
 
+@pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
 async def test_restart_while_processing(c, s, a, b):
     events = [Event() for _ in range(10)]
@@ -390,6 +391,7 @@ async def test_restart_while_processing(c, s, a, b):
     futures = c.map(Event.wait, events)
     await events[0].set()
     await futures[0]
+    # TODO slow because worker waits a while for the task to finish
     await c.restart()
     assert not s.tasks
 
