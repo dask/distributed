@@ -217,7 +217,7 @@ class WorkerMetricCollector(PrometheusCollector):
             self.build_name("spill_bytes"),
             "Total size of memory and disk accesses caused by managed data "
             "since the latest worker restart",
-            labels=["event"],
+            labels=["activity"],
         )
         # Note: memory_read is used to calculate cache hit ratios (see docstring)
         for k in ("memory_read", "disk_read", "disk_write"):
@@ -228,7 +228,7 @@ class WorkerMetricCollector(PrometheusCollector):
             self.build_name("spill_count"),
             "Total number of memory and disk accesses caused by managed data "
             "since the latest worker restart",
-            labels=["event"],
+            labels=["activity"],
         )
         # Note: memory_read is used to calculate cache hit ratios (see docstring)
         for k in ("memory_read", "disk_read", "disk_write"):
@@ -239,7 +239,7 @@ class WorkerMetricCollector(PrometheusCollector):
             self.build_name("spill_time"),
             "Total time spent spilling/unspilling since the latest worker restart",
             unit="seconds",
-            labels=["event"],
+            labels=["activity"],
         )
         for k in ("pickle", "disk_write", "disk_read", "unpickle"):
             total_times.add_metric([k], metrics[f"{k}_time_total"])
