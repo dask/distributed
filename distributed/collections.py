@@ -121,7 +121,7 @@ class HeapSet(MutableSet[T]):
         """Iterate over the n smallest elements without removing them.
         This is O(1) for n == 1; O(n*logn) otherwise.
         """
-        if n <= 0:
+        if n <= 0 or not self:
             return  # empty iterator
         if n == 1:
             yield self.peek()

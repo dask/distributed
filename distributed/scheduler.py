@@ -2317,18 +2317,13 @@ class SchedulerState:
         ############################
         # Update State Information #
         ############################
-        recommendations: Recs = {}
-        client_msgs: Msgs = {}
-
         if nbytes is not None:
             ts.set_nbytes(nbytes)
 
-        # NOTE: recommendations for queued tasks are added first, so they'll be popped
-        # last, allowing higher-priority downstream tasks to be transitioned first.
-        # FIXME: this would be incorrect if queued tasks are user-annotated as higher
-        #        priority.
-        self._exit_processing_common(ts, recommendations)
+        self._exit_processing_common(ts)
 
+        recommendations: Recs = {}
+        client_msgs: Msgs = {}
         self._add_to_memory(
             ts, ws, recommendations, client_msgs, type=type, typename=typename
         )
@@ -2507,7 +2502,7 @@ class SchedulerState:
             assert not ts.waiting_on
             assert ts.state == "processing"
 
-        ws = self._exit_processing_common(ts, recommendations)
+        ws = self._exit_processing_common(ts)
         if ws:
             worker_msgs[ws.address] = [
                 {
@@ -2574,7 +2569,7 @@ class SchedulerState:
             assert ws
             ws.actors.remove(ts)
 
-        self._exit_processing_common(ts, recommendations)
+        self._exit_processing_common(ts)
 
         ts.erred_on.add(worker)
         if exception is not None:
@@ -3059,24 +3054,20 @@ class SchedulerState:
             self.replicated_tasks.remove(ts)
         ts.who_has.clear()
 
-    def bulk_schedule_after_adding_worker(self, ws: WorkerState) -> Recs:
-        """Send ``queued`` or ``no-worker`` tasks to ``processing`` that this worker can
-        handle.
+    def bulk_schedule_unrunnable_after_adding_worker(self, ws: WorkerState) -> Recs:
+        """Send ``no-worker`` tasks to ``processing`` that this worker can handle.
 
         Returns priority-ordered recommendations.
         """
-        maybe_runnable = list(self._next_queued_tasks_for_worker(ws))[::-1]
-
-        # Schedule any restricted tasks onto the new worker, if the worker can run them
+        runnable: list[TaskState] = []
         for ts in self.unrunnable:
             valid = self.valid_workers(ts)
             if valid is None or ws in valid:
-                maybe_runnable.append(ts)
+                runnable.append(ts)
 
         # Recommendations are processed LIFO, hence the reversed order
-        maybe_runnable.sort(key=operator.attrgetter("priority"), reverse=True)
-        # Note not all will necessarily be run; transition->processing will decide
-        return {ts.key: "processing" for ts in maybe_runnable}
+        runnable.sort(key=operator.attrgetter("priority"), reverse=True)
+        return {ts.key: "processing" for ts in runnable}
 
     def _validate_ready(self, ts: TaskState) -> None:
         """Validation for ready states (processing, queued, no-worker)"""
@@ -3108,9 +3099,7 @@ class SchedulerState:
 
         return {ws.address: [self._task_to_msg(ts)]}
 
-    def _exit_processing_common(
-        self, ts: TaskState, recommendations: Recs
-    ) -> WorkerState | None:
+    def _exit_processing_common(self, ts: TaskState) -> WorkerState | None:
         """Remove *ts* from the set of processing tasks.
 
         Returns
@@ -3133,27 +3122,7 @@ class SchedulerState:
         self.check_idle_saturated(ws)
         self.release_resources(ts, ws)
 
-        for qts in self._next_queued_tasks_for_worker(ws):
-            if self.validate:
-                assert qts.key not in recommendations, recommendations[qts.key]
-            recommendations[qts.key] = "processing"
-
         return ws
-
-    def _next_queued_tasks_for_worker(self, ws: WorkerState) -> Iterator[TaskState]:
-        """Queued tasks to run, in priority order, on all open slots on a worker"""
-        if not self.queued or ws.status != Status.running:
-            return
-
-        # NOTE: this is called most frequently because a single task has completed, so
-        # there are <= 1 task slots available on the worker.
-        # `peekn` has fast paths for the cases N<=0 and N==1.
-        for qts in self.queued.peekn(_task_slots_available(ws, self.WORKER_SATURATION)):
-            if self.validate:
-                assert qts.state == "queued", qts.state
-                assert not qts.processing_on
-                assert not qts.waiting_on
-            yield qts
 
     def _add_to_memory(
         self,
@@ -4240,7 +4209,10 @@ class Scheduler(SchedulerState, ServerNode):
                 logger.exception(e)
 
         if ws.status == Status.running:
-            self.transitions(self.bulk_schedule_after_adding_worker(ws), stimulus_id)
+            self.transitions(
+                self.bulk_schedule_unrunnable_after_adding_worker(ws), stimulus_id
+            )
+            self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
         logger.info("Register worker %s", ws)
 
@@ -4620,6 +4592,42 @@ class Scheduler(SchedulerState, ServerNode):
 
         # TODO: balance workers
 
+    def stimulus_queue_slots_maybe_opened(self, *, stimulus_id: str) -> None:
+        """Respond to an event which may have opened spots on worker threadpools
+
+        Selects the appropriate number of tasks from the front of the queue according to
+        the total number of task slots available on workers (potentially 0), and
+        transitions them to ``processing``.
+
+        Notes
+        -----
+        Other transitions related to this stimulus should be fully processed beforehand,
+        so any tasks that became runnable are already in ``processing``. Otherwise,
+        overproduction can occur if queued tasks get scheduled before downstream tasks.
+
+        Must be called after `check_idle_saturated`; i.e. `idle_task_count` must be up
+        to date.
+        """
+        if not self.queued:
+            return
+        slots_available = sum(
+            _task_slots_available(ws, self.WORKER_SATURATION)
+            for ws in self.idle_task_count
+        )
+        if slots_available == 0:
+            return
+
+        recommendations: Recs = {}
+        for qts in self.queued.peekn(slots_available):
+            if self.validate:
+                assert qts.state == "queued", qts.state
+                assert not qts.processing_on, (qts, qts.processing_on)
+                assert not qts.waiting_on, (qts, qts.processing_on)
+                assert qts.who_wants or qts.waiters, qts
+            recommendations[qts.key] = "processing"
+
+        self.transitions(recommendations, stimulus_id)
+
     def stimulus_task_finished(self, key=None, worker=None, stimulus_id=None, **kwargs):
         """Mark that a task has finished execution on a particular worker"""
         logger.debug("Stimulus task finished %s, %s", key, worker)
@@ -4945,6 +4953,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         self._client_releases_keys(keys=keys, cs=cs, recommendations=recommendations)
         self.transitions(recommendations, stimulus_id)
+
+        self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
     def client_heartbeat(self, client=None):
         """Handle heartbeats from Client"""
@@ -5290,14 +5300,17 @@ class Scheduler(SchedulerState, ServerNode):
         )
         recommendations, client_msgs, worker_msgs = r
         self._transitions(recommendations, client_msgs, worker_msgs, stimulus_id)
-
         self.send_all(client_msgs, worker_msgs)
+
+        self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
     def handle_task_erred(self, key: str, stimulus_id: str, **msg) -> None:
         r: tuple = self.stimulus_task_erred(key=key, stimulus_id=stimulus_id, **msg)
         recommendations, client_msgs, worker_msgs = r
         self._transitions(recommendations, client_msgs, worker_msgs, stimulus_id)
         self.send_all(client_msgs, worker_msgs)
+
+        self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
     def release_worker_data(self, key: str, worker: str, stimulus_id: str) -> None:
         ts = self.tasks.get(key)
@@ -5340,13 +5353,7 @@ class Scheduler(SchedulerState, ServerNode):
         ws.add_to_long_running(ts)
         self.check_idle_saturated(ws)
 
-        recommendations: Recs = {
-            qts.key: "processing" for qts in self._next_queued_tasks_for_worker(ws)
-        }
-        if self.validate:
-            assert len(recommendations) <= 1, (ws, recommendations)
-
-        self.transitions(recommendations, stimulus_id)
+        self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
     def handle_worker_status_change(
         self, status: str | Status, worker: str | WorkerState, stimulus_id: str
@@ -5372,12 +5379,10 @@ class Scheduler(SchedulerState, ServerNode):
         if ws.status == Status.running:
             self.running.add(ws)
             self.check_idle_saturated(ws)
-            recs = self.bulk_schedule_after_adding_worker(ws)
-            if recs:
-                client_msgs: Msgs = {}
-                worker_msgs: Msgs = {}
-                self._transitions(recs, client_msgs, worker_msgs, stimulus_id)
-                self.send_all(client_msgs, worker_msgs)
+            self.transitions(
+                self.bulk_schedule_unrunnable_after_adding_worker(ws), stimulus_id
+            )
+            self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
         else:
             self.running.discard(ws)
             self.idle.pop(ws.address, None)
