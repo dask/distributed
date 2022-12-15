@@ -39,10 +39,13 @@ dask_scheduler_tasks_forgotten_total
 
 dask_scheduler_prefix_state_totals_total
     Accumulated count of task prefix in each state
-dask_scheduler_tick_duration_maximum_seconds
-    Maximum tick duration observed since Prometheus last scraped metrics
 dask_scheduler_tick_count_total
     Total number of ticks observed since the server started
+dask_scheduler_tick_duration_maximum_seconds
+    Maximum tick duration observed since Prometheus last scraped metrics.
+    If this is significantly higher than what's configured in
+    ``distributed.admin.tick.interval`` (default: 20ms), it highlights a blocked event
+    loop, which in turn hampers timely task execution and network comms.
 
 
 Semaphore metrics
@@ -123,10 +126,50 @@ dask_worker_transfer_outgoing_count_total
 dask_worker_concurrent_fetch_requests
     **Deprecated:** This metric has been renamed to
     ``dask_worker_transfer_incoming_count``.
-dask_worker_tick_duration_maximum_seconds
-    Maximum tick duration observed since Prometheus last scraped metrics
 dask_worker_tick_count_total
     Total number of ticks observed since the server started
+dask_worker_tick_duration_maximum_seconds
+    Maximum tick duration observed since Prometheus last scraped metrics.
+    If this is significantly higher than what's configured in
+    ``distributed.admin.tick.interval`` (default: 20ms), it highlights a blocked event
+    loop, which in turn hampers timely task execution and network comms.
+dask_worker_event_loop_blocked_time_max_seconds
+    Maximum number of seconds the event loop was continuously frozen by known causes
+    since Prometheus last scraped metrics. This metric is broken down by cause.
+
+    .. note::
+       This is highly correlated with ``dask_worker_tick_duration_maximum_seconds``,
+       with the difference that the above also includes unknown causes. On the other
+       hand, blockages shorter than the tick interval may not be (fully) captured by
+       ``dask_worker_tick_duration_maximum_seconds``.
+
+dask_worker_event_loop_blocked_time_seconds_total
+    Total number of seconds the event loop was frozen by known causes since the worker
+    was started
+dask_worker_spill_bytes_total
+    Total size of spilled/unspilled data since the worker was started;
+    in other words, cumulative disk I/O that is attributable to spill activity.
+    This includes a ``memory_read`` measure, which allows to derive cache hit ratio::
+
+        cache hit ratio = memory_read / (memory_read + disk_read)
+
+dask_worker_spill_count_total
+    Total number of spilled/unspilled keys since the worker was started;
+    in other words, cumulative disk accesses that are attributable to spill activity.
+    This includes a ``memory_read`` measure, which allows to derive cache hit ratio::
+
+        cache hit ratio = memory_read / (memory_read + disk_read)
+
+dask_worker_spill_time_seconds_total
+    Total amount of time that was spent spilling/unspilling since the worker was
+    started.
+
+    .. note::
+       Total vs. total, this metric matches
+       ``dask_worker_event_loop_blocked_time_seconds_total``. However, it's broken down
+       by activity (pickle, write, read, unpickle), while the above is broken down by
+       cause (target threshold, spill threshold, local task execution, remote task
+       execution).
 
 If the crick_ package is installed, the worker additionally exposes:
 
