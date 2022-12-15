@@ -93,6 +93,8 @@ class DiskShardsBuffer(ShardsBuffer):
                     # os.fsync(f)  # TODO: maybe?
 
     def read(self, id: int | str) -> pa.Table:
+        import pyarrow as pa
+
         """Read a complete file back into memory"""
         self.raise_on_exception()
         if not self._inputs_done:

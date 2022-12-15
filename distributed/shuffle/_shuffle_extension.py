@@ -23,6 +23,7 @@ from distributed.shuffle._arrow import (
     dump_table,
     list_of_buffers_to_table,
     load_arrow,
+    serialize_table,
 )
 from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
@@ -233,10 +234,7 @@ class Shuffle:
                 self.column,
                 self.worker_for,
             )
-            out = {
-                k: [b.serialize().to_pybytes() for b in t.to_batches()]
-                for k, t in out.items()
-            }
+            out = {k: [serialize_table(t)] for k, t in out.items()}
             return out
 
         out = await self.offload(_)
