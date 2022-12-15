@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import logging
-import time
 from collections.abc import Iterator, Mapping, MutableMapping, Sized
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import partial
+from time import perf_counter
 from typing import Any, Literal, NamedTuple, Protocol, cast
 
 from packaging.version import parse as parse_version
 
 import zict
 
-from distributed.metrics import monotonic
 from distributed.protocol import deserialize_bytes, serialize_bytelist
 from distributed.sizeof import safe_sizeof
 
@@ -166,7 +165,7 @@ class SpillBuffer(zict.Buffer):
             (key_e,) = e.args
             assert key_e in self.fast
             assert key_e not in self.slow
-            now = time.time()
+            now = perf_counter()
             if now - self.last_logged >= self.min_log_interval:
                 logger.warning(
                     "Spill file on disk reached capacity; keeping data in memory"
@@ -175,7 +174,7 @@ class SpillBuffer(zict.Buffer):
             raise HandledError()
         except OSError:
             # Typically, this is a disk full error
-            now = time.time()
+            now = perf_counter()
             if now - self.last_logged >= self.min_log_interval:
                 logger.error(
                     "Spill to disk failed; keeping data in memory", exc_info=True
@@ -380,12 +379,12 @@ class Slow(zict.Func):
         self.metrics = SlowMetrics()
 
     def __getitem__(self, key: str) -> Any:
-        t0 = monotonic()
+        t0 = perf_counter()
         pickled = self.d[key]
         assert isinstance(pickled, bytes)
-        t1 = monotonic()
+        t1 = perf_counter()
         out = self.load(pickled)  # type: ignore
-        t2 = monotonic()
+        t2 = perf_counter()
 
         # For the sake of simplicity, we're not metering failure use cases.
         self.metrics.log_read(
@@ -397,7 +396,7 @@ class Slow(zict.Func):
         return out
 
     def __setitem__(self, key: str, value: Any) -> None:
-        t0 = monotonic()
+        t0 = perf_counter()
         try:
             # FIXME https://github.com/python/mypy/issues/708
             pickled = self.dump(value)  # type: ignore
@@ -411,7 +410,7 @@ class Slow(zict.Func):
             frame.nbytes if isinstance(frame, memoryview) else len(frame)
             for frame in pickled
         )
-        t1 = monotonic()
+        t1 = perf_counter()
 
         if has_zict_210:
             # Thanks to Buffer.__setitem__, we never update existing
@@ -434,7 +433,7 @@ class Slow(zict.Func):
         # This may raise OSError, which is caught by SpillBuffer above.
         self.d[key] = pickled
 
-        t2 = monotonic()
+        t2 = perf_counter()
 
         weight = SpilledSize(safe_sizeof(value), pickled_size)
         self.weight_by_key[key] = weight
