@@ -2220,6 +2220,8 @@ class SchedulerState:
                 if not (ws := self.decide_worker_rootish_queuing_disabled(ts)):
                     return {ts.key: "no-worker"}, {}, {}
             else:
+                # All rootish tasks go straight to `queued` first.
+                # `stimulus_queue_slots_maybe_opened` will then maybe pop some off later.
                 return {ts.key: "queued"}, {}, {}
         else:
             if not (ws := self.decide_worker_non_rootish(ts)):
@@ -2696,7 +2698,6 @@ class SchedulerState:
                 ws,
                 _task_slots_available(ws, self.WORKER_SATURATION),
             )
-            # TODO assert `ts` meant for `ws`
 
         self.queued.discard(ts)
         worker_msgs: Msgs = self._add_to_processing(ts, ws)
