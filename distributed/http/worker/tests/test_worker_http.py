@@ -30,10 +30,13 @@ async def test_prometheus(c, s, a):
         "dask_worker_event_loop_blocked_time_seconds_total",
         "dask_worker_latency_seconds",
         "dask_worker_memory_bytes",
+        "dask_worker_spill_bytes_total",
+        "dask_worker_spill_count_total",
+        "dask_worker_spill_time_seconds_total",
         "dask_worker_tasks",
+        "dask_worker_threads",
         "dask_worker_tick_count_total",
         "dask_worker_tick_duration_maximum_seconds",
-        "dask_worker_threads",
         "dask_worker_transfer_incoming_bytes",
         "dask_worker_transfer_incoming_count",
         "dask_worker_transfer_incoming_count_total",
@@ -85,29 +88,32 @@ async def test_metrics_when_prometheus_client_not_installed(
 async def test_prometheus_collect_task_states(c, s, a):
     pytest.importorskip("prometheus_client")
 
-    async def fetch_state_metrics():
+    async def assert_metrics(**kwargs):
+        expect = {
+            "constrained": 0,
+            "executing": 0,
+            "fetch": 0,
+            "flight": 0,
+            "long-running": 0,
+            "memory": 0,
+            "disk": 0,
+            "missing": 0,
+            "other": 0,
+            "ready": 0,
+            "waiting": 0,
+        }
+        expect.update(kwargs)
+
         families = await fetch_metrics(a.http_server.port, prefix="dask_worker_")
-        active_metrics = {
+        actual = {
             sample.labels["state"]: sample.value
             for sample in families["dask_worker_tasks"].samples
         }
-        return active_metrics
+
+        assert actual == expect
 
     assert not a.state.tasks
-    active_metrics = await fetch_state_metrics()
-    assert active_metrics == {
-        "constrained": 0.0,
-        "executing": 0.0,
-        "fetch": 0.0,
-        "flight": 0.0,
-        "long-running": 0.0,
-        "memory": 0.0,
-        "missing": 0.0,
-        "other": 0.0,
-        "ready": 0.0,
-        "waiting": 0.0,
-    }
-
+    await assert_metrics()
     ev = Event()
 
     # submit a task which should show up in the prometheus scraping
@@ -115,41 +121,21 @@ async def test_prometheus_collect_task_states(c, s, a):
     while not a.state.executing:
         await asyncio.sleep(0.001)
 
-    active_metrics = await fetch_state_metrics()
-    assert active_metrics == {
-        "constrained": 0.0,
-        "executing": 1.0,
-        "fetch": 0.0,
-        "flight": 0.0,
-        "long-running": 0.0,
-        "memory": 0.0,
-        "missing": 0.0,
-        "other": 0.0,
-        "ready": 0.0,
-        "waiting": 0.0,
-    }
+    await assert_metrics(executing=1)
 
     await ev.set()
     await c.gather(future)
+
+    await assert_metrics(memory=1)
+    a.data.evict()
+    await assert_metrics(disk=1)
 
     future.release()
 
     while future.key in a.state.tasks:
         await asyncio.sleep(0.001)
 
-    active_metrics = await fetch_state_metrics()
-    assert active_metrics == {
-        "constrained": 0.0,
-        "executing": 0.0,
-        "fetch": 0.0,
-        "flight": 0.0,
-        "long-running": 0.0,
-        "memory": 0.0,
-        "missing": 0.0,
-        "other": 0.0,
-        "ready": 0.0,
-        "waiting": 0.0,
-    }
+    await assert_metrics()
 
 
 @gen_cluster(client=True)
