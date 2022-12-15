@@ -22,6 +22,7 @@ from distributed.utils_test import (
 from distributed.worker_state_machine import (
     AddKeysMsg,
     ComputeTaskEvent,
+    DigestMetric,
     Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
@@ -690,6 +691,7 @@ def test_workerstate_executing_skips_fetch_on_success(ws_with_running_task):
         ExecuteSuccessEvent.dummy("x", 123, stimulus_id="s3"),
     )
     assert instructions == [
+        DigestMetric(name="compute-duration", value=1.0, stimulus_id="s3"),
         AddKeysMsg(keys=["x"], stimulus_id="s3"),
         Execute(key="y", stimulus_id="s3"),
     ]
@@ -779,6 +781,7 @@ def test_workerstate_flight_failure_to_executing(ws, block_queue):
         )
         assert instructions == [
             Execute(key="z", stimulus_id="s4"),
+            DigestMetric(name="compute-duration", value=1.0, stimulus_id="s6"),
             TaskFinishedMsg.match(key="z", stimulus_id="s6"),
             Execute(key="x", stimulus_id="s6"),
         ]

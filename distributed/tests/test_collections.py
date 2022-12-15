@@ -148,8 +148,14 @@ def test_heapset():
     assert list(heap.peekn(1)) == [cx]
     heap.remove(cw)
     assert list(heap.peekn(1)) == [cx]
+    heap.remove(cx)
+    assert list(heap.peekn(-1)) == []
+    assert list(heap.peekn(0)) == []
+    assert list(heap.peekn(1)) == []
+    assert list(heap.peekn(2)) == []
 
     # Test resilience to failure in key()
+    heap.add(cx)
     bad_key = C("bad_key", 0)
     del bad_key.i
     with pytest.raises(AttributeError):

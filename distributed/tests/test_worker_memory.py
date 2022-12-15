@@ -32,6 +32,7 @@ from distributed.utils_test import (
 from distributed.worker_memory import parse_memory_limit
 from distributed.worker_state_machine import (
     ComputeTaskEvent,
+    DigestMetric,
     ExecuteSuccessEvent,
     GatherDep,
     GatherDepSuccessEvent,
@@ -207,7 +208,10 @@ def test_workerstate_fail_to_pickle_execute_1(ws_with_running_task):
     instructions = ws.handle_stimulus(
         ExecuteSuccessEvent.dummy("x", None, stimulus_id="s1")
     )
-    assert instructions == [TaskErredMsg.match(key="x", stimulus_id="s1")]
+    assert instructions == [
+        DigestMetric(name="compute-duration", value=1.0, stimulus_id="s1"),
+        TaskErredMsg.match(key="x", stimulus_id="s1"),
+    ]
     assert ws.tasks["x"].state == "error"
 
 
@@ -1051,6 +1055,61 @@ async def test_release_evloop_while_spilling(c, s, a):
     # Make sure we remain in the first use case.
     assert 1 < sum(v for k, v in c.items() if 0.5 <= k <= 1.9), dict(c)
     assert not any(v for k, v in c.items() if k >= 2.0), dict(c)
+
+
+@gen_cluster(
+    client=True,
+    worker_kwargs={"memory_limit": "100 MiB"},
+    # ^ must be smaller than system memory limit, otherwise that will take precedence
+    config={
+        "distributed.worker.memory.target": 0.5,
+        "distributed.worker.memory.spill": 1.0,
+        "distributed.worker.memory.pause": False,
+        "distributed.worker.memory.monitor-interval": "10ms",
+    },
+)
+async def test_digests(c, s, a, b):
+    trigger_spill = False
+
+    def get_process_memory():
+        return 2**30 if trigger_spill else 0
+
+    a.monitor.get_process_memory = get_process_memory
+
+    x1 = c.submit(inc, 1, key="x1", workers=[a.address])  # store to fast
+    x2 = c.submit(inc, x1, key="x2", workers=[a.address])  # read from fast for execute
+    y1 = c.submit(inc, x2, key="y1", workers=[b.address])  # read from fast for get-data
+    # digest happens only if write/read takes more than 5ms
+    await wait([x2, y1])
+    assert "disk-load-duration" not in a.digests_total
+    assert "get-data-load-duration" not in a.digests_total
+    assert "disk-write-target-duration" not in a.digests_total
+    assert "disk-write-spill-duration" not in a.digests_total
+
+    # Pass target threshold (50 MiB)
+    # We need substantial data to be sure that spilling it will take more than 5ms.
+    x3 = c.submit(lambda: "x" * 40_000_000, key="x3", workers=[a.address])
+    x4 = c.submit(lambda: "x" * 40_000_000, key="x4", workers=[a.address])
+    await wait([x3, x4])
+    x5 = c.submit(lambda: "x" * 40_000_000, key="x5", workers=[a.address])
+    x6 = c.submit(lambda: "x" * 40_000_000, key="x6", workers=[a.address])
+    await wait([x5, x6])
+    assert "x3" in a.data.slow
+    assert "x4" in a.data.slow
+    assert a.digests_total["disk-write-target-duration"] > 0
+    assert "disk-write-spill-duration" not in a.digests_total
+    x7 = c.submit(lambda x: None, x3, key="x7", workers=[a.address])
+    await wait(x7)
+    assert a.digests_total["disk-load-duration"] > 0
+
+    y2 = c.submit(lambda x: None, x4, key="y2", workers=[b.address])
+    await wait(y2)
+    assert a.digests_total["get-data-load-duration"] > 0
+
+    trigger_spill = True
+    while a.data.fast:
+        await asyncio.sleep(0.01)
+    assert a.digests_total["disk-write-spill-duration"] > 0
 
 
 @pytest.mark.parametrize(
