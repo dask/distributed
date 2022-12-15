@@ -155,9 +155,9 @@ class WorkerMetricCollector(PrometheusCollector):
 
         now = time()
         max_tick_duration = max(
-            self.server._max_tick_duration, now - self.server._last_tick
+            self.server.digests_max["tick_duration"],
+            now - self.server._last_tick,
         )
-        self.server._max_tick_duration = 0
         yield GaugeMetricFamily(
             self.build_name("tick_duration_maximum_seconds"),
             "Maximum tick duration observed since Prometheus last scraped metrics",
@@ -169,6 +169,40 @@ class WorkerMetricCollector(PrometheusCollector):
             "Total number of ticks observed since the server started",
             value=self.server._tick_counter,
         )
+
+        # This duplicates spill_time_total; however the breakdown is different
+        evloop_blocked_total = CounterMetricFamily(
+            self.build_name("event_loop_blocked_time"),
+            "Total time during which the worker's event loop was blocked "
+            "by spill/unspill activity since the latest worker reset",
+            unit="seconds",
+            labels=["cause"],
+        )
+        # This is typically higher than spill_time_per_key_max, as multiple keys can be
+        # spilled/unspilled without yielding the event loop
+        evloop_blocked_max = GaugeMetricFamily(
+            self.build_name("event_loop_blocked_time_max"),
+            "Maximum contiguous time during which the worker's event loop was blocked "
+            "by spill/unspill activity since the previous Prometheus poll",
+            unit="seconds",
+            labels=["cause"],
+        )
+        for family, digest in (
+            (evloop_blocked_total, self.server.digests_total),
+            (evloop_blocked_max, self.server.digests_max),
+        ):
+            for family_label, digest_label in (
+                ("disk-write-target", "disk-write-target-duration"),
+                ("disk-write-spill", "disk-write-spill-duration"),
+                ("disk-read-execute", "disk-load-duration"),
+                ("disk-read-get-data", "get-data-load-duration"),
+            ):
+                family.add_metric([family_label], digest[digest_label])
+
+        yield evloop_blocked_total
+        yield evloop_blocked_max
+
+        self.server.digests_max.clear()
 
 
 class PrometheusHandler(RequestHandler):

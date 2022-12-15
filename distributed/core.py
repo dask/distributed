@@ -12,7 +12,6 @@ import warnings
 import weakref
 from collections import defaultdict, deque
 from collections.abc import Container, Coroutine
-from contextlib import suppress
 from enum import Enum
 from functools import partial
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, TypedDict, TypeVar, final
@@ -348,7 +347,6 @@ class Server:
         self.deserialize = deserialize
         self.monitor = SystemMonitor()
         self.counters = None
-        self.digests = None
         self._ongoing_background_tasks = AsyncTaskGroup()
         self._event_finished = asyncio.Event()
 
@@ -373,10 +371,17 @@ class Server:
                 self.io_loop.profile = deque()
 
         # Statistics counters for various events
-        with suppress(ImportError):
+        try:
             from distributed.counter import Digest
 
             self.digests = defaultdict(partial(Digest, loop=self.io_loop))
+        except ImportError:
+            self.digests = None
+
+        # In case crick is not installed, also log cumulative totals (reset at server
+        # restart) and local maximums (reset by prometheus poll)
+        self.digests_total = defaultdict(float)
+        self.digests_max = defaultdict(float)
 
         from distributed.counter import Counter
 
@@ -394,7 +399,6 @@ class Server:
         self.periodic_callbacks["monitor"] = pc
 
         self._last_tick = time()
-        self._max_tick_duration = 0
         self._tick_counter = 0
         self._last_tick_counter = 0
         self._last_tick_cycle = time()
@@ -587,7 +591,6 @@ class Server:
         self._tick_counter += 1
         # This metric is exposed in Prometheus and is reset there during
         # collection
-        self._max_tick_duration = max(self._max_tick_duration, tick_duration)
         if tick_duration > tick_maximum_delay:
             logger.info(
                 "Event loop was unresponsive in %s for %.2fs.  "
@@ -597,8 +600,7 @@ class Server:
                 type(self).__name__,
                 tick_duration,
             )
-        if self.digests is not None:
-            self.digests["tick-duration"].add(tick_duration)
+        self.digest_metric("tick-duration", tick_duration)
 
     def _cycle_ticks(self):
         if not self._tick_counter:
@@ -940,6 +942,15 @@ class Server:
             await asyncio.gather(*[comm.close() for comm in list(self._comms)])
         finally:
             self._event_finished.set()
+
+    def digest_metric(self, name: str, value: float) -> None:
+        # Granular data (requires crick)
+        if self.digests is not None:
+            self.digests[name].add(value)
+        # Cumulative data (reset by server restart)
+        self.digests_total[name] += value
+        # Local maximums (reset by Prometheus poll)
+        self.digests_max[name] = max(self.digests_max[name], value)
 
 
 def pingpong(comm):
