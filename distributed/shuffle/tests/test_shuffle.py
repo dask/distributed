@@ -6,6 +6,7 @@ import os
 import random
 import shutil
 from collections import defaultdict
+from itertools import chain
 from typing import Any, Mapping
 from unittest import mock
 
@@ -661,7 +662,10 @@ def test_processing_chain():
     """
     workers = ["a", "b", "c"]
     npartitions = 5
-    df = pd.DataFrame({"x": range(100), "y": range(100)})
+    df = pd.DataFrame(
+        {"x": range(100), "y": range(100), "z": chain(range(50), range(50))}
+    )
+    df["z"] = df["z"].astype("category")
     df["_partitions"] = df.x % npartitions
     schema = pa.Schema.from_pandas(df)
     worker_for = {i: random.choice(workers) for i in list(range(npartitions))}
