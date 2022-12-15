@@ -20,10 +20,9 @@ from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.protocol import to_serialize
 from distributed.shuffle._arrow import (
     deserialize_schema,
-    dump_batch,
+    dump_table,
     list_of_buffers_to_table,
     load_arrow,
-    serialize_table,
 )
 from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
@@ -124,11 +123,11 @@ class Shuffle:
         self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
         self.closed = False
 
-        def _dump_batch(batch: pa.Buffer, file: BinaryIO) -> None:
-            return dump_batch(batch, file, self.schema)
+        def _dump_table(table: pa.Table, file: BinaryIO) -> None:
+            return dump_table(table, file)
 
         self._disk_buffer = DiskShardsBuffer(
-            dump=_dump_batch,
+            dump=_dump_table,
             load=load_arrow,
             directory=directory,
             memory_limiter=memory_limiter_disk,
@@ -209,9 +208,9 @@ class Shuffle:
         groups = split_by_partition(table, self.column)
         assert len(table) == sum(map(len, groups.values()))
         del data
-        return {k: [serialize_table(v)] for k, v in groups.items()}
+        return {k: [v] for k, v in groups.items()}
 
-    async def _write_to_disk(self, data: dict[str, list[bytes]]) -> None:
+    async def _write_to_disk(self, data: dict[str, list[pa.Table]]) -> None:
         self.raise_if_closed()
         await self._disk_buffer.write(data)
 

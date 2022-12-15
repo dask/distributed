@@ -6,19 +6,21 @@ if TYPE_CHECKING:
     import pyarrow as pa
 
 
-def dump_batch(batch: pa.Buffer, file: BinaryIO, schema: pa.Schema) -> None:
+def dump_table(table: pa.Table, file: BinaryIO) -> None:
     """
-    Dump a batch to file, if we're the first, also write the schema
+    Dump a table to file
 
-    This function is with respect to the open file object
+    Note: This function appends to the file and signals end-of-stream when done.
+    This results in multiple end-of-stream signals in a stream.
 
     See Also
     --------
     load_arrow
     """
-    if file.tell() == 0:
-        file.write(schema.serialize())
-    file.write(batch)
+    import pyarrow as pa
+
+    with pa.ipc.new_stream(file, table.schema) as writer:
+        writer.write_table(table)
 
 
 def load_arrow(file: BinaryIO) -> pa.Table:

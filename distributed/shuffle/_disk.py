@@ -116,8 +116,7 @@ class DiskShardsBuffer(ShardsBuffer):
         # TODO: We could consider deleting the file at this point
         if parts:
             self.bytes_read += size
-            assert len(parts) == 1
-            return parts[0]
+            return pa.concat_tables(parts)
         else:
             raise KeyError(id)
 

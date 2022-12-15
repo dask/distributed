@@ -21,16 +21,16 @@ from dask.utils import stringify
 from distributed.core import PooledRPCCall
 from distributed.scheduler import Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
+from distributed.shuffle._arrow import serialize_table
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._shuffle_extension import (
     Shuffle,
     ShuffleId,
     ShuffleWorkerExtension,
-    dump_batch,
+    dump_table,
     get_worker_for,
     list_of_buffers_to_table,
     load_arrow,
-    serialize_table,
     split_by_partition,
     split_by_worker,
 )
@@ -694,10 +694,7 @@ def test_processing_chain():
     }
 
     splits_by_worker = {
-        worker: {
-            partition: [batch.serialize() for batch in t.to_batches()]
-            for partition, t in d.items()
-        }
+        worker: {partition: [t] for partition, t in d.items()}
         for worker, d in splits_by_worker.items()
     }
 
@@ -714,9 +711,9 @@ def test_processing_chain():
     filesystem = defaultdict(io.BytesIO)
 
     for partitions in splits_by_worker.values():
-        for partition, batches in partitions.items():
-            for batch in batches:
-                dump_batch(batch, filesystem[partition], schema)
+        for partition, tables in partitions.items():
+            for table in tables:
+                dump_table(table, filesystem[partition])
 
     out = {}
     for k, bio in filesystem.items():
