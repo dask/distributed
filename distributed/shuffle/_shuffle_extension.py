@@ -20,9 +20,9 @@ from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.protocol import to_serialize
 from distributed.shuffle._arrow import (
     deserialize_schema,
-    dump_table,
+    dump_table_batch,
     list_of_buffers_to_table,
-    load_arrow,
+    load_into_table,
     serialize_table,
 )
 from distributed.shuffle._comms import CommShardsBuffer
@@ -124,12 +124,12 @@ class Shuffle:
         self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
         self.closed = False
 
-        def _dump_table(table: pa.Table, file: BinaryIO) -> None:
-            return dump_table(table, file)
+        def _dump_table_batch(tables: list[pa.Table], file: BinaryIO) -> None:
+            return dump_table_batch(tables, file)
 
         self._disk_buffer = DiskShardsBuffer(
-            dump=_dump_table,
-            load=load_arrow,
+            dump=_dump_table_batch,
+            load=load_into_table,
             directory=directory,
             memory_limiter=memory_limiter_disk,
         )

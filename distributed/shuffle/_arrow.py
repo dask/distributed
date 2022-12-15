@@ -6,12 +6,12 @@ if TYPE_CHECKING:
     import pyarrow as pa
 
 
-def dump_table(table: pa.Table, file: BinaryIO) -> None:
+def dump_table_batch(tables: list[pa.Table], file: BinaryIO) -> None:
     """
-    Dump a table to file
+    Dump multiple tables to the file
 
-    Note: This function appends to the file and signals end-of-stream when done.
-    This results in multiple end-of-stream signals in a stream.
+    Note: This function appends to the file and dumps each table as an individual stream.
+    This results in multiple end-of-stream signals in the file.
 
     See Also
     --------
@@ -19,34 +19,37 @@ def dump_table(table: pa.Table, file: BinaryIO) -> None:
     """
     import pyarrow as pa
 
-    with pa.ipc.new_stream(file, table.schema) as writer:
-        writer.write_table(table)
+    for table in tables:
+        with pa.ipc.new_stream(file, table.schema) as writer:
+            writer.write_table(table)
 
 
-def load_arrow(file: BinaryIO) -> pa.Table:
-    """Load batched data written to file back out into a table again
+def load_into_table(file: BinaryIO) -> pa.Table:
+    """Load batched data written to file back out into a single table
 
     Example
     -------
-    >>> t = pa.Table.from_pandas(df)  # doctest: +SKIP
+    >>> tables = [pa.Table.from_pandas(df), pa.Table.from_pandas(df2)]  # doctest: +SKIP
     >>> with open("myfile", mode="wb") as f:  # doctest: +SKIP
-    ...     for batch in t.to_batches():  # doctest: +SKIP
-    ...         dump_batch(batch, f, schema=t.schema)  # doctest: +SKIP
+    ...     for table in tables:  # doctest: +SKIP
+    ...         dump_table_batch(tables, f, schema=t.schema)  # doctest: +SKIP
 
     >>> with open("myfile", mode="rb") as f:  # doctest: +SKIP
-    ...     t = load_arrow(f)  # doctest: +SKIP
+    ...     t = load_into_table(f)  # doctest: +SKIP
 
     See Also
     --------
-    dump_batch
+    dump_table_batch
     """
     import pyarrow as pa
 
+    tables = []
     try:
-        sr = pa.RecordBatchStreamReader(file)
-        return sr.read_all()
-    except Exception:
-        raise EOFError
+        while True:
+            sr = pa.RecordBatchStreamReader(file)
+            tables.append(sr.read_all())
+    except pa.ArrowInvalid:
+        return pa.concat_tables(tables)
 
 
 def list_of_buffers_to_table(data: list[bytes], schema: pa.Schema) -> pa.Table:

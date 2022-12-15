@@ -10,6 +10,7 @@ from distributed.utils_test import gen_test
 
 
 def dump(data, f):
+    data = b"".join(data)
     f.write(data)
 
 

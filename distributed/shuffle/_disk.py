@@ -4,12 +4,9 @@ import contextlib
 import os
 import pathlib
 import shutil
-from typing import TYPE_CHECKING, Any, BinaryIO, Callable
+from typing import BinaryIO, Callable
 
-if TYPE_CHECKING:
-    import pyarrow as pa
-
-from distributed.shuffle._buffer import ShardsBuffer
+from distributed.shuffle._buffer import ShardsBuffer, ShardType
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.utils import log_errors
 
@@ -23,7 +20,7 @@ class DiskShardsBuffer(ShardsBuffer):
 
     **State**
 
-    -   shards: dict[str, list[bytes]]
+    -   shards: dict[str, list[ShardType]]
 
         This is our in-memory buffer of data waiting to be written to files.
 
@@ -53,8 +50,8 @@ class DiskShardsBuffer(ShardsBuffer):
     def __init__(
         self,
         directory: str,
-        dump: Callable[[Any, BinaryIO], None],
-        load: Callable[[BinaryIO], Any],
+        dump: Callable[[list[ShardType], BinaryIO], None],
+        load: Callable[[BinaryIO], list[ShardType]],
         memory_limiter: ResourceLimiter | None = None,
     ):
         super().__init__(
@@ -68,7 +65,7 @@ class DiskShardsBuffer(ShardsBuffer):
         self.dump = dump
         self.load = load
 
-    async def _process(self, id: str, shards: list[pa.Buffer]) -> None:
+    async def _process(self, id: str, shards: list[ShardType]) -> None:
         """Write one buffer to file
 
         This function was built to offload the disk IO, but since then we've
@@ -88,13 +85,9 @@ class DiskShardsBuffer(ShardsBuffer):
                 with open(
                     self.directory / str(id), mode="ab", buffering=100_000_000
                 ) as f:
-                    for shard in shards:
-                        self.dump(shard, f)
-                    # os.fsync(f)  # TODO: maybe?
+                    self.dump(shards, f)
 
-    def read(self, id: int | str) -> pa.Table:
-        import pyarrow as pa
-
+    def read(self, id: int | str) -> list[ShardType]:
         """Read a complete file back into memory"""
         self.raise_on_exception()
         if not self._inputs_done:
@@ -106,11 +99,7 @@ class DiskShardsBuffer(ShardsBuffer):
                 with open(
                     self.directory / str(id), mode="rb", buffering=100_000_000
                 ) as f:
-                    while True:
-                        try:
-                            parts.append(self.load(f))
-                        except EOFError:
-                            break
+                    parts = self.load(f)
                     size = f.tell()
         except FileNotFoundError:
             raise KeyError(id)
@@ -118,7 +107,7 @@ class DiskShardsBuffer(ShardsBuffer):
         # TODO: We could consider deleting the file at this point
         if parts:
             self.bytes_read += size
-            return pa.concat_tables(parts)
+            return parts
         else:
             raise KeyError(id)
 

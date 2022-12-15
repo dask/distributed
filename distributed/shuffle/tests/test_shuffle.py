@@ -27,10 +27,10 @@ from distributed.shuffle._shuffle_extension import (
     Shuffle,
     ShuffleId,
     ShuffleWorkerExtension,
-    dump_table,
+    dump_table_batch,
     get_worker_for,
     list_of_buffers_to_table,
-    load_arrow,
+    load_into_table,
     split_by_partition,
     split_by_worker,
 )
@@ -712,13 +712,12 @@ def test_processing_chain():
 
     for partitions in splits_by_worker.values():
         for partition, tables in partitions.items():
-            for table in tables:
-                dump_table(table, filesystem[partition])
+            dump_table_batch(tables, filesystem[partition])
 
     out = {}
     for k, bio in filesystem.items():
         bio.seek(0)
-        out[k] = load_arrow(bio)
+        out[k] = load_into_table(bio)
 
     assert sum(map(len, out.values())) == len(df)
 
