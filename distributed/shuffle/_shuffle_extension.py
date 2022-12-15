@@ -23,6 +23,7 @@ from distributed.shuffle._arrow import (
     dump_batch,
     list_of_buffers_to_table,
     load_arrow,
+    serialize_table,
 )
 from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
@@ -203,15 +204,12 @@ class Shuffle:
             self._exception = e
             raise
 
-    def _repartition_buffers(self, data: list[bytes]) -> dict[str, list[bytes]]:
+    def _repartition_buffers(self, data: list[bytes]) -> dict[str, list[pa.Table]]:
         table = list_of_buffers_to_table(data, self.schema)
         groups = split_by_partition(table, self.column)
         assert len(table) == sum(map(len, groups.values()))
         del data
-        return {
-            k: [batch.serialize() for batch in v.to_batches()]
-            for k, v in groups.items()
-        }
+        return {k: [serialize_table(v)] for k, v in groups.items()}
 
     async def _write_to_disk(self, data: dict[str, list[bytes]]) -> None:
         self.raise_if_closed()

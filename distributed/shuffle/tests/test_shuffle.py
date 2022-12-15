@@ -30,6 +30,7 @@ from distributed.shuffle._shuffle_extension import (
     get_worker_for,
     list_of_buffers_to_table,
     load_arrow,
+    serialize_table,
     split_by_partition,
     split_by_worker,
 )
@@ -675,10 +676,7 @@ def test_processing_chain():
     assert set(data) == set(worker_for.cat.categories)
     assert sum(map(len, data.values())) == len(df)
 
-    batches = {
-        worker: [b.serialize().to_pybytes() for b in t.to_batches()]
-        for worker, t in data.items()
-    }
+    batches = {worker: [serialize_table(t)] for worker, t in data.items()}
 
     # Typically we communicate to different workers at this stage
     # We then receive them back and reconstute them

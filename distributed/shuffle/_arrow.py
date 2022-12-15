@@ -49,19 +49,11 @@ def load_arrow(file: BinaryIO) -> pa.Table:
 
 def list_of_buffers_to_table(data: list[bytes], schema: pa.Schema) -> pa.Table:
     """Convert a list of arrow buffers and a schema to an Arrow Table"""
-    import io
-
     import pyarrow as pa
 
-    bio = io.BytesIO()
-    bio.write(schema.serialize())
-    for batch in data:
-        bio.write(batch)
-    bio.seek(0)
-    sr = pa.RecordBatchStreamReader(bio)
-    data = sr.read_all()
-    bio.close()
-    return data
+    assert len(data) == 1
+    with pa.ipc.open_stream(pa.py_buffer(data[0])) as reader:
+        return reader.read_all()
 
 
 def deserialize_schema(data: bytes) -> pa.Schema:
@@ -87,3 +79,14 @@ def deserialize_schema(data: bytes) -> pa.Schema:
     table = sr.read_all()
     bio.close()
     return table.schema
+
+
+def serialize_table(table: pa.Table) -> bytes:
+    import io
+
+    import pyarrow as pa
+
+    stream = io.BytesIO()
+    with pa.ipc.new_stream(stream, table.schema) as writer:
+        writer.write_table(table)
+    return stream.getvalue()
