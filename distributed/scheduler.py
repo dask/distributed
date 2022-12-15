@@ -26,6 +26,7 @@ from collections.abc import (
     Iterable,
     Iterator,
     Mapping,
+    MutableSet,
     Sequence,
     Set,
 )
@@ -66,7 +67,6 @@ from distributed import versions as version_module
 from distributed._stories import scheduler_story
 from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
 from distributed.batched import BatchedSend
-from distributed.collections import HeapSet
 from distributed.comm import (
     Comm,
     CommClosedError,
@@ -1534,8 +1534,9 @@ class SchedulerState:
     #: All tasks currently known to the scheduler
     tasks: dict[str, TaskState]
 
-    #: Tasks in the "queued" state, ordered by priority
-    queued: HeapSet[TaskState]
+    #: Tasks in the "queued" state, ordered by priority.
+    #: A `SortedSet` (doesn't support annotations https://github.com/python/typeshed/issues/8574)
+    queued: MutableSet[TaskState]
 
     #: Tasks in the "no-worker" state
     unrunnable: set[TaskState]
@@ -1610,7 +1611,7 @@ class SchedulerState:
         resources: dict[str, dict[str, float]],
         tasks: dict[str, TaskState],
         unrunnable: set[TaskState],
-        queued: HeapSet[TaskState],
+        queued: SortedSet,
         validate: bool,
         plugins: Iterable[SchedulerPlugin] = (),
         transition_counter_max: int | Literal[False] = False,
@@ -2219,8 +2220,7 @@ class SchedulerState:
                 if not (ws := self.decide_worker_rootish_queuing_disabled(ts)):
                     return {ts.key: "no-worker"}, {}, {}
             else:
-                if not (ws := self.decide_worker_rootish_queuing_enabled()):
-                    return {ts.key: "queued"}, {}, {}
+                return {ts.key: "queued"}, {}, {}
         else:
             if not (ws := self.decide_worker_non_rootish(ts)):
                 return {ts.key: "no-worker"}, {}, {}
@@ -2651,7 +2651,6 @@ class SchedulerState:
         ts = self.tasks[key]
 
         if self.validate:
-            assert not self.idle_task_count, (ts, self.idle_task_count)
             self._validate_ready(ts)
 
         ts.state = "queued"
@@ -2683,21 +2682,26 @@ class SchedulerState:
         self._propagate_released(ts, recommendations)
         return recommendations, {}, {}
 
-    def transition_queued_processing(self, key: str, stimulus_id: str) -> RecsMsgs:
+    def transition_queued_processing(
+        self, key: str, stimulus_id: str, *, ws: WorkerState
+    ) -> RecsMsgs:
+        # Never called as a recommendation, only directly via `transition("processing", ws)`.
+        # The `ws` argument is required.
         ts = self.tasks[key]
-        recommendations: Recs = {}
-        worker_msgs: Msgs = {}
 
         if self.validate:
             assert not ts.actor, f"Actors can't be queued: {ts}"
             assert ts in self.queued
+            assert not _worker_full(ws, self.WORKER_SATURATION), (
+                ws,
+                _task_slots_available(ws, self.WORKER_SATURATION),
+            )
+            # TODO assert `ts` meant for `ws`
 
-        if ws := self.decide_worker_rootish_queuing_enabled():
-            self.queued.discard(ts)
-            worker_msgs = self._add_to_processing(ts, ws)
-        # If no worker, task just stays `queued`
+        self.queued.discard(ts)
+        worker_msgs: Msgs = self._add_to_processing(ts, ws)
 
-        return recommendations, {}, worker_msgs
+        return {}, {}, worker_msgs
 
     def _remove_key(self, key: str) -> None:
         ts = self.tasks.pop(key)
@@ -3529,7 +3533,7 @@ class Scheduler(SchedulerState, ServerNode):
         self._last_client = None
         self._last_time = 0
         unrunnable = set()
-        queued: HeapSet[TaskState] = HeapSet(key=operator.attrgetter("priority"))
+        queued = SortedSet(key=operator.attrgetter("priority"))
 
         self.datasets = {}
 
@@ -4580,6 +4584,7 @@ class Scheduler(SchedulerState, ServerNode):
                 logger.exception(e)
 
         self.transitions(recommendations, stimulus_id)
+        self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
         for ts in touched_tasks:
             if ts.state in ("memory", "erred"):
@@ -4608,23 +4613,33 @@ class Scheduler(SchedulerState, ServerNode):
         """
         if not self.queued:
             return
-        slots_available = sum(
-            _task_slots_available(ws, self.WORKER_SATURATION)
-            for ws in self.idle_task_count
-        )
-        if slots_available == 0:
-            return
 
-        recommendations: Recs = {}
-        for qts in self.queued.peekn(slots_available):
-            if self.validate:
-                assert qts.state == "queued", qts.state
-                assert not qts.processing_on, (qts, qts.processing_on)
-                assert not qts.waiting_on, (qts, qts.processing_on)
-                assert qts.who_wants or qts.waiters, qts
-            recommendations[qts.key] = "processing"
+        submittable: list[tuple[str, WorkerState]] = []
+        for ws in self.idle_task_count:
+            ws_idx: int
+            ws_idx = self.workers.index(ws.address)  # type: ignore
+            # TODO assumes all workers have the same number of threads
+            tasks_per_worker = math.ceil(len(self.queued) / len(self.workers))
+            q_idx = ws_idx * tasks_per_worker
+            slots = _task_slots_available(ws, self.WORKER_SATURATION)
+            n = min(slots, tasks_per_worker)
 
-        self.transitions(recommendations, stimulus_id)
+            if q_idx >= len(self.queued):
+                # TODO should we always select from the back of the queue when there are
+                # more workers than needed? Will this lead to uneven task selection?
+                q_idx = len(self.queued) - n
+
+            for qts in self.queued[q_idx : q_idx + n]:  # type: ignore
+                if self.validate:
+                    assert qts.state == "queued", qts.state
+                    assert not qts.processing_on, (qts, qts.processing_on)
+                    assert not qts.waiting_on, (qts, qts.processing_on)
+                    assert qts.who_wants or qts.waiters, qts
+                # Store in a list for later to avoid mutating `queued` while iterating
+                submittable.append((qts.key, ws))
+
+        for key, ws in submittable:
+            self.transition(key, "processing", ws=ws, stimulus_id=stimulus_id)
 
     def stimulus_task_finished(self, key=None, worker=None, stimulus_id=None, **kwargs):
         """Mark that a task has finished execution on a particular worker"""

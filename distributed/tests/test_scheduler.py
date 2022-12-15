@@ -158,7 +158,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         nthreads=nthreads,
         config={
             "distributed.scheduler.work-stealing": False,
-            "distributed.scheduler.worker-saturation": float("inf"),
+            # "distributed.scheduler.worker-saturation": float("inf"),
         },
     )
     async def test_decide_worker_coschedule_order_neighbors_(c, s, *workers):
