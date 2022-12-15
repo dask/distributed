@@ -185,17 +185,16 @@ class WorkerMetricCollector(PrometheusCollector):
                 ("disk-read-get-data", "get-data-load-duration"),
             ):
                 family.add_metric([family_label], digest[digest_label])
+
+        yield evloop_blocked_total
+        yield evloop_blocked_max
+        self.server.digests_max.clear()
+
     def collect_crick(self) -> Iterator[Metric]:
         # All metrics using digests require crick to be installed.
         # The following metrics will export NaN, if the corresponding digests are None
         if not self.crick_available:
             return
-
-        yield evloop_blocked_total
-        yield evloop_blocked_max
-
-        self.server.digests_max.clear()
-
 
         yield GaugeMetricFamily(
             self.build_name("tick_duration_median"),
