@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 import logging
 import math
@@ -86,14 +87,14 @@ async def test_administration(s, a, b):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_respect_data_in_memory(c, s, a):
-    x = delayed(inc)(1)
-    y = delayed(inc)(x)
+    x = delayed(inc)(1, dask_key_name="x")
+    y = delayed(inc)(x, dask_key_name="y")
     f = c.persist(y)
     await wait([f])
 
     assert s.tasks[y.key].who_has == {s.workers[a.address]}
 
-    z = delayed(operator.add)(x, y)
+    z = delayed(operator.add)(x, y, dask_key_name="z")
     f2 = c.persist(z)
     while f2.key not in s.tasks or not s.tasks[f2.key]:
         assert s.tasks[y.key].who_has
@@ -369,6 +370,80 @@ async def test_graph_execution_width(c, s, *workers):
     # NOTE: the max should normally equal `total_nthreads`. But some macOS CI machines
     # are slow enough that they aren't able to reach the full parallelism of 8 threads.
     assert max(Refcount.log) <= s.total_nthreads
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_forget_tasks_while_processing(c, s, a, b):
+    events = [Event() for _ in range(10)]
+
+    futures = c.map(Event.wait, events)
+    await events[0].set()
+    await futures[0]
+    await c.close()
+    assert not s.tasks
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_restart_while_processing(c, s, a, b):
+    events = [Event() for _ in range(10)]
+
+    futures = c.map(Event.wait, events)
+    await events[0].set()
+    await futures[0]
+    # TODO slow because worker waits a while for the task to finish
+    await c.restart()
+    assert not s.tasks
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 3,
+    config={"distributed.scheduler.worker-saturation": 1.0},
+)
+async def test_queued_release_multiple_workers(c, s, *workers):
+    async with Client(s.address, asynchronous=True) as c2:
+        event = Event(client=c2)
+
+        rootish_threshold = s.total_nthreads * 2 + 1
+
+        first_batch = c.map(
+            lambda i: event.wait(),
+            range(rootish_threshold),
+            key=[f"first-{i}" for i in range(rootish_threshold)],
+        )
+        await async_wait_for(lambda: s.queued, 5)
+
+        second_batch = c2.map(
+            lambda i: event.wait(),
+            range(rootish_threshold),
+            key=[f"second-{i}" for i in range(rootish_threshold)],
+            fifo_timeout=0,
+        )
+        await async_wait_for(lambda: second_batch[0].key in s.tasks, 5)
+
+        # All of the second batch should be queued after the first batch
+        assert [ts.key for ts in s.queued.sorted()] == [
+            f.key
+            for f in itertools.chain(first_batch[s.total_nthreads :], second_batch)
+        ]
+
+        # Cancel the first batch.
+        # Use `Client.close` instead of `del first_batch` because deleting futures sends cancellation
+        # messages one at a time. We're testing here that when multiple workers have open slots, we don't
+        # recommend the same queued tasks for every worker, so we need a bulk cancellation operation.
+        await c.close()
+        del c, first_batch
+
+        await async_wait_for(lambda: len(s.tasks) == len(second_batch), 5)
+
+        # Second batch should move up the queue and start processing
+        assert len(s.queued) == len(second_batch) - s.total_nthreads, list(
+            s.queued.sorted()
+        )
+
+        await event.set()
+        await c2.gather(second_batch)
 
 
 @gen_cluster(
@@ -2625,7 +2700,7 @@ async def test_task_unique_groups(c, s, a, b):
     x = c.submit(sum, [1, 2])
     y = c.submit(len, [1, 2])
     z = c.submit(sum, [3, 4])
-    await asyncio.wait([x, y, z])
+    await asyncio.gather(x, y, z)
 
     assert s.task_prefixes["len"].states["memory"] == 1
     assert s.task_prefixes["sum"].states["memory"] == 2
@@ -4237,7 +4312,7 @@ async def test_deadlock_resubmit_queued_tasks_fast(c, s, a, rootish):
             await asyncio.sleep(0.005)
         assert_rootish()
         if rootish:
-            assert all(s.tasks[k] in s.queued for k in keys)
+            assert all(s.tasks[k] in s.queued for k in keys), [s.tasks[k] for k in keys]
         await block.set()
         # At this point we need/want to wait for the task-finished message to
         # arrive on the scheduler. There is no proper hook to wait, therefore we

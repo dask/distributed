@@ -5,9 +5,9 @@ import pytest
 pd = pytest.importorskip("pandas")
 dd = pytest.importorskip("dask.dataframe")
 
-from distributed.shuffle._shuffle_extension import (
+from distributed.shuffle._scheduler_extension import get_worker_for
+from distributed.shuffle._worker_extension import (
     ShuffleWorkerExtension,
-    get_worker_for,
     split_by_partition,
     split_by_worker,
 )

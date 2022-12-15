@@ -23,13 +23,15 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.8", "3.9", "3.10"]
+        python-version: ["3.8", "3.9", "3.10", "3.11"]
         queuing: [queue]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
         exclude:
           - os: macos-latest
             python-version: 3.9
+          - os: macos-latest
+            python-version: 3.10
         include:
           - os: ubuntu-latest
             python-version: 3.9

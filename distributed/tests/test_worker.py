@@ -2772,7 +2772,7 @@ async def test_forget_dependents_after_release(c, s, a):
     fut = c.submit(inc, 1, key="f-1")
     fut2 = c.submit(inc, fut, key="f-2")
 
-    await asyncio.wait([fut, fut2])
+    await asyncio.gather(fut, fut2)
 
     assert fut.key in a.state.tasks
     assert fut2.key in a.state.tasks
