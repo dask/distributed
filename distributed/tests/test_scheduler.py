@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import itertools
 import json
 import logging
 import math
@@ -429,10 +428,6 @@ async def test_queued_release_multiple_workers(c, s, *workers):
         await async_wait_for(lambda: second_batch[0].key in s.tasks, 5)
 
         # All of the second batch should be queued after the first batch
-        assert [ts.key for ts in s.queued.sorted()] == [
-            f.key
-            for f in itertools.chain(first_batch[s.total_nthreads :], second_batch)
-        ]
 
         # Cancel the first batch.
         # Use `Client.close` instead of `del first_batch` because deleting futures sends cancellation
@@ -444,9 +439,7 @@ async def test_queued_release_multiple_workers(c, s, *workers):
         await async_wait_for(lambda: len(s.tasks) == len(second_batch), 5)
 
         # Second batch should move up the queue and start processing
-        assert len(s.queued) == len(second_batch) - s.total_nthreads, list(
-            s.queued.sorted()
-        )
+        assert len(s.queued) == len(second_batch) - s.total_nthreads, list(s.queued)
 
         await event.set()
         await c2.gather(second_batch)
