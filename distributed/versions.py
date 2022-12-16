@@ -12,8 +12,9 @@ from itertools import chain
 from types import ModuleType
 from typing import Any
 
-MIN_BOKEH_VERSION = "2.4.2"
-MAX_BOKEH_VERSION = "2.4.3"
+from packaging.requirements import Requirement
+
+BOKEH_REQUIREMENT = Requirement("bokeh>2.4.3,!=3.0.0,!=3.0.1,!=3.0.2")
 
 required_packages = [
     ("dask", lambda p: p.__version__),
