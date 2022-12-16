@@ -666,7 +666,7 @@ def test_processing_chain():
     workers = ["a", "b", "c"]
     npartitions = 5
 
-    # Test the processing chain with a dataframe that contains all possible dtypes
+    # Test the processing chain with a dataframe that contains all supported dtypes
     df = pd.DataFrame(
         {
             f"col{next(counter)}": pd.array([True, False] * 50, dtype="bool"),
