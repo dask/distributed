@@ -58,11 +58,21 @@ def load_partition(file: BinaryIO) -> pa.Table:
 
 def list_of_buffers_to_table(data: list[bytes], schema: pa.Schema) -> pa.Table:
     """Convert a list of arrow buffers and a schema to an Arrow Table"""
+    import io
+
     import pyarrow as pa
 
+    tables = []
     assert len(data) == 1
-    with pa.ipc.open_stream(pa.py_buffer(data[0])) as reader:
-        return reader.read_all()
+    buffer = data[0]
+    with io.BytesIO(buffer) as stream:
+        while True:
+            try:
+                with pa.ipc.open_stream(stream) as reader:
+                    tables.append(reader.read_all())
+            except Exception:
+                break
+    return pa.concat_tables(tables)
 
 
 def deserialize_schema(data: bytes) -> pa.Schema:
