@@ -6,10 +6,11 @@ import os
 import random
 import shutil
 from collections import defaultdict
-from itertools import chain
+from itertools import count
 from typing import Any, Mapping
 from unittest import mock
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -656,13 +657,63 @@ def test_processing_chain():
     In practice this takes place on many different workers.
     Here we verify its accuracy in a single threaded situation.
     """
+    counter = count()
     workers = ["a", "b", "c"]
     npartitions = 5
     df = pd.DataFrame(
-        {"x": range(100), "y": range(100), "z": chain(range(50), range(50))}
+        {
+            f"col{next(counter)}": pd.array([True, False] * 50, dtype="bool"),
+            f"col{next(counter)}": pd.array([True, False] * 50, dtype="boolean"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int8"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int16"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int32"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int64"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint8"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint16"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint32"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint64"),
+            f"col{next(counter)}": pd.array(range(100), dtype="float16"),
+            f"col{next(counter)}": pd.array(range(100), dtype="float32"),
+            f"col{next(counter)}": pd.array(range(100), dtype="float64"),
+            # f"col{next(counter)}": pd.array(range(100), dtype="csingle"),
+            # f"col{next(counter)}": pd.array(range(100), dtype="cdouble"),
+            # f"col{next(counter)}": pd.array(range(100), dtype="clongdouble"),
+            f"col{next(counter)}": pd.array(
+                [np.datetime64("2022-01-01")] * 100, dtype="datetime64"
+            ),
+            f"col{next(counter)}": pd.array(
+                [np.datetime64("2022-01-01")] * 100,
+                dtype=pd.DatetimeTZDtype(tz="UTC"),
+            ),
+            f"col{next(counter)}": pd.array(
+                [np.timedelta64(1, "D")] * 100, dtype="timedelta64"
+            ),
+            f"col{next(counter)}": pd.array(
+                [pd.Period("2022-01-01", freq="D")] * 100, dtype="period[D]"
+            ),
+            f"col{next(counter)}": pd.array(
+                [pd.Interval(left=0, right=5)] * 100, dtype="Interval"
+            ),
+            f"col{next(counter)}": pd.array(range(100), dtype="Int8"),
+            f"col{next(counter)}": pd.array(range(100), dtype="Int16"),
+            f"col{next(counter)}": pd.array(range(100), dtype="Int32"),
+            f"col{next(counter)}": pd.array(range(100), dtype="Int64"),
+            f"col{next(counter)}": pd.array(range(100), dtype="UInt8"),
+            f"col{next(counter)}": pd.array(range(100), dtype="UInt16"),
+            f"col{next(counter)}": pd.array(range(100), dtype="UInt32"),
+            f"col{next(counter)}": pd.array(range(100), dtype="UInt64"),
+            f"col{next(counter)}": pd.array(["x", "y"] * 50, dtype="category"),
+            # f"col{next(counter)}": pd.array(
+            # [np.nan, np.nan, 1.0, np.nan, np.nan] * 20,
+            # dtype="Sparse[float64]",
+            # ),
+            f"col{next(counter)}": pd.array(["lorem ipsum"] * 100, dtype="string"),
+            # f"col{next(counter)}": pd.array(
+            #     [object() for _ in range(100)], dtype="object"
+            # ),
+        }
     )
-    df["z"] = df["z"].astype("category")
-    df["_partitions"] = df.x % npartitions
+    df["_partitions"] = df.col3 % npartitions
     schema = pa.Schema.from_pandas(df)
     worker_for = {i: random.choice(workers) for i in list(range(npartitions))}
     worker_for = pd.Series(worker_for, name="_worker").astype("category")
@@ -715,6 +766,7 @@ def test_processing_chain():
         out[k] = load_into_table(bio)
 
     assert sum(map(len, out.values())) == len(df)
+    assert all(v.to_pandas().dtypes.equals(df.dtypes) for v in out.values())
 
 
 @gen_cluster(client=True)
