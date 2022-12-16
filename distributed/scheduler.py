@@ -2078,61 +2078,6 @@ class SchedulerState:
 
         return ws
 
-    def decide_worker_rootish_queuing_enabled(self) -> WorkerState | None:
-        """Pick a worker for a runnable root-ish task, if not all are busy.
-
-        Picks the least-busy worker out of the ``idle`` workers (idle workers have fewer
-        tasks running than threads, as set by ``distributed.scheduler.worker-saturation``).
-        It does not consider the location of dependencies, since they'll end up on every
-        worker anyway.
-
-        If all workers are full, returns None, meaning the task should transition to
-        ``queued``. The scheduler will wait to send it to a worker until a thread opens
-        up. This ensures that downstream tasks always run before new root tasks are
-        started.
-
-        This does not try to schedule sibling tasks on the same worker; in fact, it
-        usually does the opposite. Even though this increases subsequent data transfer,
-        it typically reduces overall memory use by eliminating root task overproduction.
-
-        Returns
-        -------
-        ws: WorkerState | None
-            The worker to assign the task to. If there are no idle workers, returns
-            None, in which case the task should be transitioned to ``queued``.
-
-        """
-        if self.validate:
-            # We don't `assert self.is_rootish(ts)` here, because that check is
-            # dependent on cluster size. It's possible a task looked root-ish when it
-            # was queued, but the cluster has since scaled up and it no longer does when
-            # coming out of the queue. If `is_rootish` changes to a static definition,
-            # then add that assertion here (and actually pass in the task).
-            assert not math.isinf(self.WORKER_SATURATION)
-
-        if not self.idle_task_count:
-            # All workers busy? Task gets/stays queued.
-            return None
-
-        # Just pick the least busy worker.
-        # NOTE: this will lead to worst-case scheduling with regards to co-assignment.
-        ws = min(
-            self.idle_task_count,
-            key=lambda ws: len(ws.processing) / ws.nthreads,
-        )
-        if self.validate:
-            assert not _worker_full(ws, self.WORKER_SATURATION), (
-                ws,
-                _task_slots_available(ws, self.WORKER_SATURATION),
-            )
-            assert ws in self.running, (ws, self.running)
-
-        if self.validate and ws is not None:
-            assert self.workers.get(ws.address) is ws
-            assert ws in self.running, (ws, self.running)
-
-        return ws
-
     def decide_worker_non_rootish(self, ts: TaskState) -> WorkerState | None:
         """Pick a worker for a runnable non-root task, considering dependencies and
         restrictions.
@@ -2219,8 +2164,9 @@ class SchedulerState:
                 if not (ws := self.decide_worker_rootish_queuing_disabled(ts)):
                     return {ts.key: "no-worker"}, {}, {}
             else:
-                if not (ws := self.decide_worker_rootish_queuing_enabled()):
-                    return {ts.key: "queued"}, {}, {}
+                # All rootish tasks go straight to `queued` first.
+                # `stimulus_queue_slots_maybe_opened` will then maybe pop some off later.
+                return {ts.key: "queued"}, {}, {}
         else:
             if not (ws := self.decide_worker_non_rootish(ts)):
                 return {ts.key: "no-worker"}, {}, {}
@@ -2651,7 +2597,6 @@ class SchedulerState:
         ts = self.tasks[key]
 
         if self.validate:
-            assert not self.idle_task_count, (ts, self.idle_task_count)
             self._validate_ready(ts)
 
         ts.state = "queued"
@@ -2683,21 +2628,23 @@ class SchedulerState:
         self._propagate_released(ts, recommendations)
         return recommendations, {}, {}
 
-    def transition_queued_processing(self, key: str, stimulus_id: str) -> RecsMsgs:
+    def transition_queued_processing(
+        self, key: str, stimulus_id: str, *, ws: WorkerState
+    ) -> RecsMsgs:
+        # Never called as a recommendation, only directly via `transition("processing", ws)`.
+        # The `ws` argument is required.
         ts = self.tasks[key]
-        recommendations: Recs = {}
-        worker_msgs: Msgs = {}
 
         if self.validate:
             assert not ts.actor, f"Actors can't be queued: {ts}"
             assert ts in self.queued
+            # NOTE: `assert not ws.processing` is not valid; that would only be true for
+            # the first task in a batch assignment from the queue.
 
-        if ws := self.decide_worker_rootish_queuing_enabled():
-            self.queued.discard(ts)
-            worker_msgs = self._add_to_processing(ts, ws)
-        # If no worker, task just stays `queued`
+        self.queued.discard(ts)
+        worker_msgs: Msgs = self._add_to_processing(ts, ws)
 
-        return recommendations, {}, worker_msgs
+        return {}, {}, worker_msgs
 
     def _remove_key(self, key: str) -> None:
         ts = self.tasks.pop(key)
@@ -2877,7 +2824,7 @@ class SchedulerState:
                 if 0.4 < pending > 1.9 * (self.total_occupancy / self.total_nthreads):
                     saturated.add(ws)
 
-        if not _worker_full(ws, self.WORKER_SATURATION):
+        if len(ws.processing) - len(ws.long_running) == 0:
             if ws.status == Status.running:
                 self.idle_task_count.add(ws)
         else:
@@ -4580,6 +4527,7 @@ class Scheduler(SchedulerState, ServerNode):
                 logger.exception(e)
 
         self.transitions(recommendations, stimulus_id)
+        self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
         for ts in touched_tasks:
             if ts.state in ("memory", "erred"):
@@ -4589,6 +4537,21 @@ class Scheduler(SchedulerState, ServerNode):
         self.digest_metric("update-graph-duration", end - start)
 
         # TODO: balance workers
+
+    def decide_queued_tasks(self, ws: WorkerState) -> list[TaskState]:
+        """Pick the next queued tasks to run on a worker with open threads."""
+        slots = _task_slots(ws, self.WORKER_SATURATION)
+        assert slots > 0, (slots, ws)
+
+        tasks = list(self.queued.peekn(slots))
+        if self.validate:
+            for qts in tasks:
+                assert qts.state == "queued", qts.state
+                assert not qts.processing_on, (qts, qts.processing_on)
+                assert not qts.waiting_on, (qts, qts.processing_on)
+                assert qts.who_wants or qts.waiters, qts
+
+        return tasks
 
     def stimulus_queue_slots_maybe_opened(self, *, stimulus_id: str) -> None:
         """Respond to an event which may have opened spots on worker threadpools
@@ -4608,23 +4571,10 @@ class Scheduler(SchedulerState, ServerNode):
         """
         if not self.queued:
             return
-        slots_available = sum(
-            _task_slots_available(ws, self.WORKER_SATURATION)
-            for ws in self.idle_task_count
-        )
-        if slots_available == 0:
-            return
 
-        recommendations: Recs = {}
-        for qts in self.queued.peekn(slots_available):
-            if self.validate:
-                assert qts.state == "queued", qts.state
-                assert not qts.processing_on, (qts, qts.processing_on)
-                assert not qts.waiting_on, (qts, qts.processing_on)
-                assert qts.who_wants or qts.waiters, qts
-            recommendations[qts.key] = "processing"
-
-        self.transitions(recommendations, stimulus_id)
+        for ws in list(self.idle_task_count):
+            for qts in self.decide_queued_tasks(ws):
+                self.transition(qts.key, "processing", ws=ws, stimulus_id=stimulus_id)
 
     def stimulus_task_finished(self, key=None, worker=None, stimulus_id=None, **kwargs):
         """Mark that a task has finished execution on a particular worker"""
@@ -8056,18 +8006,10 @@ def heartbeat_interval(n: int) -> float:
         return n / 200 + 1
 
 
-def _task_slots_available(ws: WorkerState, saturation_factor: float) -> int:
-    """Number of tasks that can be sent to this worker without oversaturating it"""
+def _task_slots(ws: WorkerState, saturation_factor: float) -> int:
+    """Worker threads, scaled by worker saturation factor"""
     assert not math.isinf(saturation_factor)
-    return max(math.ceil(saturation_factor * ws.nthreads), 1) - (
-        len(ws.processing) - len(ws.long_running)
-    )
-
-
-def _worker_full(ws: WorkerState, saturation_factor: float) -> bool:
-    if math.isinf(saturation_factor):
-        return False
-    return _task_slots_available(ws, saturation_factor) <= 0
+    return max(math.ceil(saturation_factor * ws.nthreads), 1)
 
 
 class KilledWorker(Exception):

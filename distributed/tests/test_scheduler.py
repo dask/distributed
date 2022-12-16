@@ -17,7 +17,7 @@ from typing import Collection
 import cloudpickle
 import psutil
 import pytest
-from tlz import concat, first, merge, valmap
+from tlz import concat, first, merge, partition, valmap
 from tornado.ioloop import IOLoop
 
 import dask
@@ -533,8 +533,7 @@ async def test_queued_paused_unpaused(c, s, a, b, queue):
         await asyncio.sleep(0.01)
 
     if queue:
-        assert not s.idle  # workers should have been (or already were) filled
-        # If queuing is disabled, all workers might already be saturated when they un-pause.
+        # workers should have been (or already were) filled
         assert not s.idle_task_count
 
     await wait(final)
@@ -559,6 +558,57 @@ async def test_queued_remove_add_worker(c, s, a, b):
 
         await event.set()
         await wait(fs)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 2)] * 2,
+    config={"distributed.scheduler.worker-saturation": 1.0},
+)
+async def test_queued_submits_batches(c, s, *workers):
+    events = [Event() for _ in range(10)]
+    cevents = [Event() for _ in range(5)]
+    fs = c.map(Event.wait, events, key=[f"f-{i}" for i in range(10)])
+    cs = c.map(
+        lambda ab, ev: ev.wait(),
+        list(partition(2, fs)),
+        cevents,
+        key=[f"c-{i}" for i in range(5)],
+    )
+
+    await async_wait_for(lambda: s.queued, timeout=5)
+
+    if fs[0].key in workers[0].state.tasks:
+        w0, w1 = workers
+    else:
+        w1, w0 = workers
+
+    assert w0.state.tasks.keys() == {"f-0", "f-1"}
+    assert w1.state.tasks.keys() == {"f-2", "f-3"}
+
+    await events[0].set()
+    await wait_for_state("f-0", "memory", s)
+
+    # New root task is not submitted until all complete
+    assert len(w0.state.executing) == 1
+
+    # All tasks complete, downstream task submits
+    await events[1].set()
+    await wait_for_state("c-0", "executing", w0)
+
+    # Though one thread is open on w0, new queued tasks *aren't* submitted.
+    # The other thread is in use by the downstream task.
+    assert w0.state.tasks.keys() == {"f-0", "f-1", "c-0"}
+
+    await cevents[0].set()
+    await wait_for_state("c-0", "memory", s)
+
+    # After downstream tasks complete and no threads used, batch of 2 queued tasks submitted
+    assert w0.state.tasks.keys() == {"f-0", "f-1", "c-0", "f-4", "f-5"}
+    assert w1.state.tasks.keys() == {"f-2", "f-3"}
+
+    await asyncio.gather(*[e.set() for e in itertools.chain(events, cevents)])
+    await c.gather(cs)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
