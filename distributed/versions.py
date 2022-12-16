@@ -14,7 +14,7 @@ from typing import Any
 
 from packaging.requirements import Requirement
 
-BOKEH_REQUIREMENT = Requirement("bokeh>2.4.3,!=3.0.0,!=3.0.1,!=3.0.2")
+BOKEH_REQUIREMENT = Requirement("bokeh>=2.4.2,!=3.0.0,!=3.0.1,!=3.0.2")
 
 required_packages = [
     ("dask", lambda p: p.__version__),
