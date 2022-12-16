@@ -67,9 +67,4 @@ class CommShardsBuffer(ShardsBuffer):
 
             # Consider boosting total_size a bit here to account for duplication
             with self.time("send"):
-                await self.send(address, [_join_shards(shards)])
-
-
-def _join_shards(shards: list[bytes]) -> bytes:
-    # This is just there for easier profiling
-    return b"".join(shards)
+                await self.send(address, shards)
