@@ -50,7 +50,6 @@ from distributed.utils_test import (
     slowinc,
 )
 from distributed.worker_state_machine import (
-    DigestMetric,
     ExecuteSuccessEvent,
     FreeKeysEvent,
     StealRequestEvent,
@@ -1341,9 +1340,7 @@ def test_steal_worker_state(ws_with_running_task):
     assert ws.tasks["x"].state == "cancelled"
 
     instructions = ws.handle_stimulus(ExecuteSuccessEvent.dummy("x", stimulus_id="s2"))
-    assert instructions == [
-        DigestMetric(stimulus_id="s2", name="compute-duration", value=1.0)
-    ]
+    assert not instructions
     assert "x" not in ws.tasks
     assert "x" not in ws.data
     assert ws.available_resources == {"R": 1}

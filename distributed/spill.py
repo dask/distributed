@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator, Mapping, MutableMapping, Sized
 from contextlib import contextmanager
-from dataclasses import dataclass
 from functools import partial
 from time import perf_counter
 from typing import Any, Literal, NamedTuple, Protocol, cast
@@ -12,6 +11,7 @@ from packaging.version import parse as parse_version
 
 import zict
 
+from distributed import worker_metrics as metrics
 from distributed.protocol import deserialize_bytes, serialize_bytelist
 from distributed.sizeof import safe_sizeof
 
@@ -65,49 +65,6 @@ class ManualEvictProto(Protocol):
         ...  # pragma: nocover
 
 
-@dataclass
-class FastMetrics:
-    """Cumulative metrics for SpillBuffer.fast since the latest worker restart"""
-
-    read_count_total: int = 0
-    read_bytes_total: int = 0
-
-    def log_read(self, key_bytes: int) -> None:
-        self.read_count_total += 1
-        self.read_bytes_total += key_bytes
-
-
-@dataclass
-class SlowMetrics:
-    """Cumulative metrics for SpillBuffer.slow since the latest worker restart"""
-
-    read_count_total: int = 0
-    read_bytes_total: int = 0
-    read_time_total: float = 0
-    write_count_total: int = 0
-    write_bytes_total: int = 0
-    write_time_total: float = 0
-    pickle_time_total: float = 0
-    unpickle_time_total: float = 0
-
-    def log_write(
-        self,
-        key_bytes: int,
-        pickle_time: float,
-        write_time: float,
-    ) -> None:
-        self.write_count_total += 1
-        self.write_bytes_total += key_bytes
-        self.pickle_time_total += pickle_time
-        self.write_time_total += write_time
-
-    def log_read(self, key_bytes: int, read_time: float, unpickle_time: float) -> None:
-        self.read_count_total += 1
-        self.read_bytes_total += key_bytes
-        self.read_time_total += read_time
-        self.unpickle_time_total += unpickle_time
-
-
 # zict.Buffer[str, Any] requires zict >= 2.2.0
 class SpillBuffer(zict.Buffer):
     """MutableMapping that automatically spills out dask key/value pairs to disk when
@@ -129,7 +86,6 @@ class SpillBuffer(zict.Buffer):
     last_logged: float
     min_log_interval: float
     logged_pickle_errors: set[str]
-    fast_metrics: FastMetrics
 
     def __init__(
         self,
@@ -148,12 +104,17 @@ class SpillBuffer(zict.Buffer):
             # was unspilled, don't duplicate it
             slow = zict.Cache(slow, zict.WeakValueMapping())
 
-        super().__init__(fast={}, slow=slow, n=target, weight=_in_memory_weight)
+        super().__init__(
+            fast={},
+            slow=slow,
+            n=target,
+            weight=_in_memory_weight,
+            fast_to_slow_callbacks=[_meter_spill_cb],
+            slow_to_fast_callbacks=[_meter_unspill_cb],
+        )
         self.last_logged = 0
         self.min_log_interval = min_log_interval
         self.logged_pickle_errors = set()  # keys logged with pickle error
-
-        self.fast_metrics = FastMetrics()
 
     @contextmanager
     def handle_errors(self, key: str | None) -> Iterator[None]:
@@ -261,10 +222,11 @@ class SpillBuffer(zict.Buffer):
 
     def __getitem__(self, key: str) -> Any:
         if key in self.fast:
+            # This is used to calculate cache hit ratios.
             # Note: don't log from self.fast.__getitem__, because that's called every
             # time a key is evicted, and we don't want to count those events here.
             nbytes = cast(int, self.fast.weights[key])
-            self.fast_metrics.log_read(nbytes)
+            metrics.spill_bytes.labels("memory_read").observe(nbytes)
 
         return super().__getitem__(key)
 
@@ -303,48 +265,19 @@ class SpillBuffer(zict.Buffer):
         """
         return self._slow_uncached.total_weight
 
-    def get_metrics(self) -> dict[str, float]:
-        """Metrics to be exported to Prometheus or to be parsed directly.
-
-        From these you may generate derived metrics:
-
-        cache hit ratio:
-          by keys  = memory_read_count_total / (memory_read_count_total + disk_read_count_total)
-          by bytes = memory_read_bytes_total / (memory_read_bytes_total + disk_read_bytes_total)
-
-        mean times per key:
-          pickle   = pickle_time_total     / disk_write_count_total
-          write    = disk_write_time_total / disk_write_count_total
-          unpickle = unpickle_time_total   / disk_read_count_total
-          read     = disk_read_time_total  / disk_read_count_total
-
-        mean bytes per key:
-          write    = disk_write_bytes_total / disk_write_count_total
-          read     = disk_read_bytes_total  / disk_read_count_total
-
-        mean bytes per second:
-          write    = disk_write_bytes_total / disk_write_time_total
-          read     = disk_read_bytes_total  / disk_read_time_total
-        """
-        fm = self.fast_metrics
-        sm = self._slow_uncached.metrics
-
-        out = {
-            "memory_count": len(self.fast),
-            "memory_bytes": self.fast.total_weight,
-            "disk_count": len(self.slow),
-            "disk_bytes": self._slow_uncached.total_weight.disk,
-        }
-
-        for k, v in fm.__dict__.items():
-            out[f"memory_{k}"] = v
-        for k, v in sm.__dict__.items():
-            out[k if "pickle" in k else f"disk_{k}"] = v
-        return out
-
 
 def _in_memory_weight(key: str, value: Any) -> int:
     return safe_sizeof(value)
+
+
+def _meter_spill_cb(key: str, value: Any) -> None:
+    metrics.tasks.labels("memory").dec()
+    metrics.tasks.labels("disk").inc()
+
+
+def _meter_unspill_cb(key: str, value: Any) -> None:
+    metrics.tasks.labels("disk").dec()
+    metrics.tasks.labels("memory").inc()
 
 
 # Internal exceptions. These are never raised by SpillBuffer.
@@ -365,7 +298,6 @@ class Slow(zict.Func):
     max_weight: int | Literal[False]
     weight_by_key: dict[str, SpilledSize]
     total_weight: SpilledSize
-    metrics: SlowMetrics
 
     def __init__(self, spill_directory: str, max_weight: int | Literal[False] = False):
         super().__init__(
@@ -376,7 +308,6 @@ class Slow(zict.Func):
         self.max_weight = max_weight
         self.weight_by_key = {}
         self.total_weight = SpilledSize(0, 0)
-        self.metrics = SlowMetrics()
 
     def __getitem__(self, key: str) -> Any:
         t0 = perf_counter()
@@ -386,12 +317,9 @@ class Slow(zict.Func):
         out = self.load(pickled)  # type: ignore
         t2 = perf_counter()
 
-        # For the sake of simplicity, we're not metering failure use cases.
-        self.metrics.log_read(
-            key_bytes=len(pickled),
-            read_time=t1 - t0,
-            unpickle_time=t2 - t1,
-        )
+        metrics.spill_bytes.labels("disk_read").observe(len(pickled))
+        metrics.spill_time.labels("disk_read").inc(t1 - t0)
+        metrics.spill_time.labels("unpickle").inc(t2 - t1)
 
         return out
 
@@ -440,11 +368,9 @@ class Slow(zict.Func):
         self.total_weight += weight
 
         # For the sake of simplicity, we're not metering failure use cases.
-        self.metrics.log_write(
-            key_bytes=pickled_size,
-            pickle_time=t1 - t0,
-            write_time=t2 - t1,
-        )
+        metrics.spill_bytes.labels("disk_write").observe(pickled_size)
+        metrics.spill_time.labels("pickle").inc(t1 - t0)
+        metrics.spill_time.labels("disk_write").inc(t2 - t1)
 
     def __delitem__(self, key: str) -> None:
         super().__delitem__(key)
