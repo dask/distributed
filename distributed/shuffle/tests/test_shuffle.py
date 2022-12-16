@@ -665,6 +665,8 @@ def test_processing_chain():
     counter = count()
     workers = ["a", "b", "c"]
     npartitions = 5
+
+    # Test the processing chain with a dataframe that contains all possible dtypes
     df = pd.DataFrame(
         {
             f"col{next(counter)}": pd.array([True, False] * 50, dtype="bool"),
@@ -684,20 +686,22 @@ def test_processing_chain():
             # f"col{next(counter)}": pd.array(range(100), dtype="cdouble"),
             # f"col{next(counter)}": pd.array(range(100), dtype="clongdouble"),
             f"col{next(counter)}": pd.array(
-                [np.datetime64("2022-01-01")] * 100, dtype="datetime64"
+                [np.datetime64("2022-01-01") + i for i in range(100)],
+                dtype="datetime64",
             ),
             f"col{next(counter)}": pd.array(
-                [np.datetime64("2022-01-01")] * 100,
+                [np.datetime64("2022-01-01") + i for i in range(100)],
                 dtype=pd.DatetimeTZDtype(tz="UTC"),
             ),
             f"col{next(counter)}": pd.array(
-                [np.timedelta64(1, "D")] * 100, dtype="timedelta64"
+                [np.timedelta64(1, "D") + i for i in range(100)], dtype="timedelta64"
             ),
             f"col{next(counter)}": pd.array(
-                [pd.Period("2022-01-01", freq="D")] * 100, dtype="period[D]"
+                [pd.Period("2022-01-01", freq="D") + i for i in range(100)],
+                dtype="period[D]",
             ),
             f"col{next(counter)}": pd.array(
-                [pd.Interval(left=0, right=5)] * 100, dtype="Interval"
+                [pd.Interval(left=i, right=i + 2) for i in range(100)], dtype="Interval"
             ),
             f"col{next(counter)}": pd.array(range(100), dtype="Int8"),
             f"col{next(counter)}": pd.array(range(100), dtype="Int16"),
