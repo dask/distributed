@@ -1328,7 +1328,7 @@ class TaskState:
 
     def __init__(self, key: str, run_spec: object, state: TaskStateState):
         self.key = key
-        self._hash = hash(key)
+        self._hash = hash(id(self))
         self.run_spec = run_spec
         self._state = state
         self.exception = None
@@ -1366,7 +1366,7 @@ class TaskState:
         return self._hash
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, TaskState) and self.key == other.key
+        return self is other
 
     @property
     def state(self) -> TaskStateState:
