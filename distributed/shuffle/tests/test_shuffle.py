@@ -657,6 +657,11 @@ def test_processing_chain():
     In practice this takes place on many different workers.
     Here we verify its accuracy in a single threaded situation.
     """
+
+    class Stub:
+        def __init__(self, value: int) -> None:
+            self.value = value
+
     counter = count()
     workers = ["a", "b", "c"]
     npartitions = 5
@@ -709,7 +714,7 @@ def test_processing_chain():
             # ),
             f"col{next(counter)}": pd.array(["lorem ipsum"] * 100, dtype="string"),
             # f"col{next(counter)}": pd.array(
-            #     [object() for _ in range(100)], dtype="object"
+            #     [Stub(i) for i in range(100)], dtype="object"
             # ),
         }
     )
