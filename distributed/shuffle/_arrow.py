@@ -48,8 +48,12 @@ def load_partition(file: BinaryIO) -> pa.Table:
         while True:
             sr = pa.RecordBatchStreamReader(file)
             shards.append(sr.read_all())
-    except pa.ArrowInvalid:
-        return pa.concat_tables(shards)
+    # Since we write multiple streams to the same file, we have to read until
+    # there is nothing to read anymore. At that point, pa.ArrowInvalid is raised
+    except pa.ArrowInvalid as e:
+        if str(e) == "Tried reading schema message, was null or length 0":
+            return pa.concat_tables(shards)
+        raise
 
 
 def list_of_buffers_to_table(data: list[bytes], schema: pa.Schema) -> pa.Table:
