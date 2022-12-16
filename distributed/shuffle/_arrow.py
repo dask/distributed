@@ -6,50 +6,50 @@ if TYPE_CHECKING:
     import pyarrow as pa
 
 
-def dump_table_batch(tables: list[pa.Table], file: BinaryIO) -> None:
+def dump_shards(shards: list[pa.Table], file: BinaryIO) -> None:
     """
-    Dump multiple tables to the file
+    Write multiple shard tables to the file
 
     Note: This function appends to the file and dumps each table as an individual stream.
     This results in multiple end-of-stream signals in the file.
 
     See Also
     --------
-    load_arrow
+    load_partition
     """
     import pyarrow as pa
 
-    for table in tables:
+    for table in shards:
         with pa.ipc.new_stream(file, table.schema) as writer:
             writer.write_table(table)
 
 
-def load_into_table(file: BinaryIO) -> pa.Table:
-    """Load batched data written to file back out into a single table
+def load_partition(file: BinaryIO) -> pa.Table:
+    """Load partition data written to file back out into a single table
 
     Example
     -------
     >>> tables = [pa.Table.from_pandas(df), pa.Table.from_pandas(df2)]  # doctest: +SKIP
     >>> with open("myfile", mode="wb") as f:  # doctest: +SKIP
     ...     for table in tables:  # doctest: +SKIP
-    ...         dump_table_batch(tables, f, schema=t.schema)  # doctest: +SKIP
+    ...         dump_shards(tables, f, schema=t.schema)  # doctest: +SKIP
 
     >>> with open("myfile", mode="rb") as f:  # doctest: +SKIP
-    ...     t = load_into_table(f)  # doctest: +SKIP
+    ...     t = load_partition(f)  # doctest: +SKIP
 
     See Also
     --------
-    dump_table_batch
+    dump_shards
     """
     import pyarrow as pa
 
-    tables = []
+    shards = []
     try:
         while True:
             sr = pa.RecordBatchStreamReader(file)
-            tables.append(sr.read_all())
+            shards.append(sr.read_all())
     except pa.ArrowInvalid:
-        return pa.concat_tables(tables)
+        return pa.concat_tables(shards)
 
 
 def list_of_buffers_to_table(data: list[bytes], schema: pa.Schema) -> pa.Table:

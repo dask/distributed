@@ -29,9 +29,9 @@ from distributed.shuffle._shuffle import ShuffleId, barrier_key
 from distributed.shuffle._worker_extension import (
     Shuffle,
     ShuffleWorkerExtension,
-    dump_table_batch,
+    dump_shards,
     list_of_buffers_to_table,
-    load_into_table,
+    load_partition,
     split_by_partition,
     split_by_worker,
 )
@@ -763,12 +763,12 @@ def test_processing_chain():
 
     for partitions in splits_by_worker.values():
         for partition, tables in partitions.items():
-            dump_table_batch(tables, filesystem[partition])
+            dump_shards(tables, filesystem[partition])
 
     out = {}
     for k, bio in filesystem.items():
         bio.seek(0)
-        out[k] = load_into_table(bio)
+        out[k] = load_partition(bio)
 
     assert sum(map(len, out.values())) == len(df)
     assert all(v.to_pandas().dtypes.equals(df.dtypes) for v in out.values())
