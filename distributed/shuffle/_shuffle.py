@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NewType
 
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import SimpleShuffleLayer
-
-from distributed.shuffle._shuffle_extension import ShuffleId, ShuffleWorkerExtension
 
 logger = logging.getLogger("distributed.shuffle")
 if TYPE_CHECKING:
     import pandas as pd
 
     from dask.dataframe import DataFrame
+
+    # circular dependency
+    from distributed.shuffle._worker_extension import ShuffleWorkerExtension
+
+ShuffleId = NewType("ShuffleId", str)
 
 
 def _get_worker_extension() -> ShuffleWorkerExtension:
@@ -152,7 +155,7 @@ class P2PShuffleLayer(SimpleShuffleLayer):
     def _construct_graph(self, deserializing: Any = None) -> dict[tuple | str, tuple]:
         token = tokenize(self.name_input, self.column, self.npartitions, self.parts_out)
         dsk: dict[tuple | str, tuple] = {}
-        barrier_key = "shuffle-barrier-" + token
+        _barrier_key = barrier_key(ShuffleId(token))
         name = "shuffle-transfer-" + token
         transfer_keys = list()
         for i in range(self.npartitions_input):
@@ -165,9 +168,21 @@ class P2PShuffleLayer(SimpleShuffleLayer):
                 self.column,
             )
 
-        dsk[barrier_key] = (shuffle_barrier, token, transfer_keys)
+        dsk[_barrier_key] = (shuffle_barrier, token, transfer_keys)
 
         name = self.name
         for part_out in self.parts_out:
-            dsk[(name, part_out)] = (shuffle_unpack, token, part_out, barrier_key)
+            dsk[(name, part_out)] = (shuffle_unpack, token, part_out, _barrier_key)
         return dsk
+
+
+_BARRIER_PREFIX = "shuffle-barrier-"
+
+
+def barrier_key(shuffle_id: ShuffleId) -> str:
+    return _BARRIER_PREFIX + shuffle_id
+
+
+def id_from_key(key: str) -> ShuffleId:
+    assert key.startswith(_BARRIER_PREFIX)
+    return ShuffleId(key.replace(_BARRIER_PREFIX, ""))
