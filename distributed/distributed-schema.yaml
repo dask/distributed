@@ -299,7 +299,7 @@ properties:
                   - process
                   - optimistic
                   - managed
-                  - managed_in_memory
+                  - managed_total
                 description:
                   One of the attributes of distributed.scheduler.MemoryState
               policies:
@@ -508,7 +508,7 @@ properties:
                       - process
                       - optimistic
                       - managed
-                      - managed_in_memory
+                      - managed_total
                     description: >-
                       Which of the properties of distributed.scheduler.MemoryState
                       should be used for measuring worker memory usage
