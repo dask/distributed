@@ -2960,6 +2960,11 @@ def test_memorystate():
     assert m.unmanaged_recent == 17
     assert m.optimistic == 83
 
+    with pytest.warns(FutureWarning):
+        assert m.managed_spilled == m.spilled
+    with pytest.warns(FutureWarning):
+        assert m.managed_in_memory == m.managed
+
     assert (
         repr(m)
         == dedent(
