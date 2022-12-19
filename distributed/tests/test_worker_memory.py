@@ -1154,3 +1154,22 @@ async def test_deprecated_params(s, name):
     with pytest.warns(FutureWarning, match=name):
         async with Worker(s.address, **{name: 0.789}) as a:
             assert getattr(a.memory_manager, name) == 0.789
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    config={
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.monitor-interval": "100ms",
+    },
+)
+async def test_warn_on_sizeof_overestimate(c, s, a):
+    class C:
+        def __sizeof__(self):
+            return 2**40
+
+    with captured_logger("distributed.worker", level=logging.WARNING) as log:
+        x = c.submit(C)
+        while "Managed memory exceeds process memory" not in log.getvalue():
+            await asyncio.sleep(0.01)
