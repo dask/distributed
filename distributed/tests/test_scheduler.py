@@ -3012,9 +3012,23 @@ def test_memorystate_adds_up(process, unmanaged_old, managed, spilled):
         spilled=spilled,
     )
     assert m.managed + m.unmanaged == m.process
-    assert m.managed + m.spilled == m.managed
+    assert m.managed + m.spilled == m.managed_total
     assert m.unmanaged_old + m.unmanaged_recent == m.unmanaged
     assert m.optimistic + m.unmanaged_recent == m.process
+
+
+def test_memorystate__to_dict():
+    m = MemoryState(process=11, unmanaged_old=2, managed=3, spilled=1)
+    assert m._to_dict() == {
+        "managed": 3,
+        "managed_total": 4,
+        "optimistic": 5,
+        "process": 11,
+        "spilled": 1,
+        "unmanaged": 8,
+        "unmanaged_old": 2,
+        "unmanaged_recent": 6,
+    }
 
 
 _test_leak = []

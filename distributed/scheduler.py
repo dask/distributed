@@ -378,14 +378,18 @@ class MemoryState:
 
     def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
         """Dictionary representation for debugging purposes.
-        Not type stable and not intended for roundtrips.
 
         See also
         --------
         Client.dump_cluster_state
         distributed.utils.recursive_to_dict
         """
-        return recursive_to_dict(self, exclude=exclude, members=True)
+        return {
+            k: getattr(self, k)
+            for k in dir(self)
+            if not k.startswith("_")
+            and k not in {"sum", "managed_in_memory", "managed_spilled"}
+        }
 
 
 class WorkerState:
