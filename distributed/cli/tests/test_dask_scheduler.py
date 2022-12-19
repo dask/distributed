@@ -596,7 +596,7 @@ def test_signal_handling(loop, sig):
 
 
 @pytest.mark.skipif(WINDOWS, reason="POSIX only")
-def test_deprecated_single_executable(loop):
+def test_single_executable_deprecated(loop):
     port = open_port()
     with popen(
         [

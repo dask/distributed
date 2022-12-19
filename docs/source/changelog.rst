@@ -1,6 +1,40 @@
 Changelog
 =========
 
+.. _v2022.12.1:
+
+2022.12.1
+---------
+
+Released on December 16, 2022
+
+Enhancements
+^^^^^^^^^^^^
+- ``SpillBuffer`` metrics (:pr:`7368`) `crusaderky`_
+- Prometheus: measure how much spilling blocks the event loop  (:pr:`7370`) `crusaderky`_
+- Add ``transfer_outgoing_bytes_total`` metric (:pr:`7388`) `Gabe Joseph`_
+- Fail ``P2PShuffle`` gracefully upon worker failure (:pr:`7326`) `Hendrik Makait`_
+
+Bug Fixes
+^^^^^^^^^
+- Select queued tasks in stimuli, not transitions (:pr:`7402`) `Gabe Joseph`_
+- Check ``ContextVar`` in ``default_client`` (:pr:`7369`) `Matthew Rocklin`_
+- Fix sending event messages to non-subscribers (:pr:`7014`) `Laurence Watts`_
+- Set sizing mode on ``Tabs`` to avoid layout collapse (:pr:`7365`) `Mateusz Paprocki`_
+
+Maintenance
+^^^^^^^^^^^
+- Restructure ``P2PShuffle`` extensions (:pr:`7390`) `Hendrik Makait`_
+- Add Python 3.11 classifier (:pr:`7408`) `James Bourbeau`_
+- Add support for Python 3.11 (:pr:`7249`) `Thomas Grainger`_
+- Add test for using annotations with ``client.submit`` and ``client.map`` (:pr:`7399`) `James Bourbeau`_
+- Bump ``actions/checkout`` from 3.1.0 to 3.2.0 (:pr:`7393`)
+- Remove  superfluous ``ShuffleSchedulerExtension.barriers`` (:pr:`7389`) `Hendrik Makait`_
+- Remove ignore annotation-unchecked (:pr:`7379`) `crusaderky`_
+- Remove ``tornado`` max version from nightly recipe (:pr:`7376`) `Charles Blackmon-Luca`_
+- Remove the experimental feature warning for ``Semaphore`` (:pr:`7373`) `Florian Jetter`_
+
+
 .. _v2022.12.0:
 
 2022.12.0
@@ -4504,3 +4538,5 @@ significantly without many new features.
 .. _`Tom Hu`: https://github.com/thomasrockhu-codecov
 .. _`Richard Pelgrim`: https://github.com/rrpelgrim
 .. _`Enrico Minack`: https://github.com/EnricoMi
+.. _`Laurence Watts`: https://github.com/lwatt
+.. _`Mateusz Paprocki`: https://github.com/mattpap
