@@ -384,3 +384,52 @@ def test_weakref_cache(tmp_path, cls, expect_cached, size):
 
     # Test that we update the weakref cache on getitem
     assert (buf["x"] is x2) == expect_cached
+
+
+def test_metrics(tmp_path):
+    buf = SpillBuffer(str(tmp_path), target=1000)
+    assert buf.get_metrics() == {
+        "disk_bytes": 0,
+        "disk_count": 0,
+        "disk_read_bytes_total": 0,
+        "disk_read_count_total": 0,
+        "disk_read_time_total": 0,
+        "disk_write_bytes_total": 0,
+        "disk_write_count_total": 0,
+        "disk_write_time_total": 0,
+        "memory_bytes": 0,
+        "memory_count": 0,
+        "memory_read_bytes_total": 0,
+        "memory_read_count_total": 0,
+        "pickle_time_total": 0,
+        "unpickle_time_total": 0,
+    }
+
+    a, b, c = "a" * 200, "b" * 150, "c" * 100
+
+    buf["a"] = a
+    buf["b"] = b
+    del buf["b"]
+
+    metrics = buf.get_metrics()
+    assert 200 < metrics["memory_bytes"] < 350
+    assert metrics["memory_count"] == 1
+    for k, v in metrics.items():
+        if "disk" in k or "pickle" in k:
+            assert v == 0, f"{k}={v}"
+
+    assert metrics["memory_read_bytes_total"] == 0
+    assert metrics["memory_read_count_total"] == 0
+    _ = buf["a"]  # Cache hit
+    metrics = buf.get_metrics()
+    assert metrics["memory_read_bytes_total"] > 0
+    assert metrics["memory_read_count_total"] == 1
+
+    buf.evict()
+    buf["c"] = c
+    buf.evict()
+    _ = buf["c"]  # Unspill / cache miss
+
+    metrics = buf.get_metrics()
+    for k, v in metrics.items():
+        assert v > 0, f"{k}={v}"

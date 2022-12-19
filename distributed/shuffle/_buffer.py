@@ -51,8 +51,8 @@ class ShardsBuffer(Generic[ShardType]):
     bytes_written: int
     bytes_read: int
 
-    _closed: bool
-    _done: bool
+    _accepts_input: bool
+    _inputs_done: bool
     _exception: None | Exception
     _tasks: list[asyncio.Task]
     _shards_available: asyncio.Condition
@@ -64,12 +64,12 @@ class ShardsBuffer(Generic[ShardType]):
         concurrency_limit: int = 2,
         max_message_size: int = -1,
     ) -> None:
-        self._closed = False
+        self._accepts_input = True
         self.shards = defaultdict(list)
         self.sizes = defaultdict(int)
         self._exception = None
         self.concurrency_limit = concurrency_limit
-        self._done = False
+        self._inputs_done = False
         self.memory_limiter = memory_limiter
         self.diagnostics: dict[str, float] = defaultdict(float)
         self._tasks = [
@@ -105,7 +105,7 @@ class ShardsBuffer(Generic[ShardType]):
 
             except Exception as e:
                 self._exception = e
-                self._done = True
+                self._inputs_done = True
             stop = time()
 
             self.diagnostics["avg_size"] = (
@@ -131,12 +131,12 @@ class ShardsBuffer(Generic[ShardType]):
 
     async def _background_task(self) -> None:
         def _continue() -> bool:
-            return bool(self.shards or self._done)
+            return bool(self.shards or self._inputs_done)
 
         while True:
             async with self._shards_available:
                 await self._shards_available.wait_for(_continue)
-                if self._done and not self.shards:
+                if self._inputs_done and not self.shards:
                     break
                 part_id = max(self.sizes, key=self.sizes.__getitem__)
                 if self.max_message_size > 0:
@@ -175,7 +175,7 @@ class ShardsBuffer(Generic[ShardType]):
 
         if self._exception:
             raise self._exception
-        if self._closed or self._done:
+        if not self._accepts_input or self._inputs_done:
             raise RuntimeError(f"Trying to put data in closed {self}.")
 
         if not data:
@@ -215,13 +215,13 @@ class ShardsBuffer(Generic[ShardType]):
         This closes the buffer such that no new writes are allowed
         """
         async with self._flush_lock:
-            self._closed = True
+            self._accepts_input = False
             async with self._shards_available:
                 self._shards_available.notify_all()
                 await self._shards_available.wait_for(
-                    lambda: not self.shards or self._exception or self._done
+                    lambda: not self.shards or self._exception or self._inputs_done
                 )
-                self._done = True
+                self._inputs_done = True
                 self._shards_available.notify_all()
 
             await asyncio.gather(*self._tasks)
@@ -238,8 +238,8 @@ class ShardsBuffer(Generic[ShardType]):
             assert not self.bytes_memory, (type(self), self.bytes_memory)
         for t in self._tasks:
             t.cancel()
-        self._closed = True
-        self._done = True
+        self._accepts_input = False
+        self._inputs_done = True
         self.shards.clear()
         self.bytes_memory = 0
         async with self._shards_available:

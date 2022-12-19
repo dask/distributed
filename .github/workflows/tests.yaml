@@ -23,13 +23,15 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        environment: ["3.8", "3.9", "3.10", mindeps]
+        environment: [mindeps, "3.8", "3.9", "3.10", "3.11"]
         queuing: [queue]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
         exclude:
           - os: macos-latest
             environment: "3.9"
+          - os: macos-latest
+            environment: "3.10"
           - os: macos-latest
             environment: mindeps
           - os: windows-latest
@@ -67,7 +69,7 @@ jobs:
         shell: bash
 
       - name: Checkout source
-        uses: actions/checkout@v3.1.0
+        uses: actions/checkout@v3.2.0
         with:
           fetch-depth: 0
 
