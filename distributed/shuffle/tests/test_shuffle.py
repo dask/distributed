@@ -666,7 +666,6 @@ def test_processing_chain():
     workers = ["a", "b", "c"]
     npartitions = 5
 
-    # FIXME: csingle, cdouble, clongdouble, sparse and object not supported
     # Test the processing chain with a dataframe that contains all supported dtypes
     df = pd.DataFrame(
         {
@@ -690,6 +689,10 @@ def test_processing_chain():
             f"col{next(counter)}": pd.array(
                 [np.timedelta64(1, "D") + i for i in range(100)], dtype="timedelta64"
             ),
+            # FIXME: PyArrow does not support complex numbers: https://issues.apache.org/jira/browse/ARROW-638
+            # f"col{next(counter)}": pd.array(range(100), dtype="csingle"),
+            # f"col{next(counter)}": pd.array(range(100), dtype="cdouble"),
+            # f"col{next(counter)}": pd.array(range(100), dtype="clongdouble"),
             # Nullable dtypes
             f"col{next(counter)}": pd.array([True, False] * 50, dtype="boolean"),
             f"col{next(counter)}": pd.array(range(100), dtype="Int8"),
@@ -714,6 +717,11 @@ def test_processing_chain():
             ),
             f"col{next(counter)}": pd.array(["x", "y"] * 50, dtype="category"),
             f"col{next(counter)}": pd.array(["lorem ipsum"] * 100, dtype="string"),
+            # FIXME: PyArrow does not support sparse data: https://issues.apache.org/jira/browse/ARROW-8679
+            # f"col{next(counter)}": pd.array(
+            #     [np.nan, np.nan, 1.0, np.nan, np.nan] * 20,
+            #     dtype="Sparse[float64]",
+            # ),
             # PyArrow dtypes
             f"col{next(counter)}": pd.array([True, False] * 50, dtype="bool[pyarrow]"),
             f"col{next(counter)}": pd.array(range(100), dtype="int8[pyarrow]"),
@@ -738,6 +746,11 @@ def test_processing_chain():
             # f"col{next(counter)}": pd.array(
             #     ["lorem ipsum"] * 100,
             #     dtype=pd.StringDtype("pyarrow"),
+            # ),
+            # custom objects
+            # FIXME: Serializing custom objects is not supported in P2P shuffling
+            # f"col{next(counter)}": pd.array(
+            #     [Stub(i) for i in range(100)], dtype="object"
             # ),
         }
     )
