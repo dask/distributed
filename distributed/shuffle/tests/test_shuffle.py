@@ -730,6 +730,15 @@ def test_processing_chain():
                 [pd.Timestamp.fromtimestamp(1641034800 + i) for i in range(100)],
                 dtype=pd.ArrowDtype(pa.timestamp("ms")),
             ),
+            # FIXME: distributed#7420
+            # f"col{next(counter)}": pd.array(
+            #     ["lorem ipsum"] * 100,
+            #     dtype="string[pyarrow]",
+            # ),
+            # f"col{next(counter)}": pd.array(
+            #     ["lorem ipsum"] * 100,
+            #     dtype=pd.StringDtype("pyarrow"),
+            # ),
         }
     )
     df["_partitions"] = df.col4 % npartitions
