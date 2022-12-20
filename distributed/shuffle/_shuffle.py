@@ -77,12 +77,12 @@ def rearrange_by_column_p2p(
 ) -> DataFrame:
     from dask.dataframe import DataFrame
 
+    check_dtype_support(df._meta)
     npartitions = npartitions or df.npartitions
     token = tokenize(df, column, npartitions)
 
     empty = df._meta.copy()
 
-    check_dtype_support(empty)
     name = f"shuffle-p2p-{token}"
     layer = P2PShuffleLayer(
         name,
