@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import weakref
-from statistics import mean
 
 import tlz as toolz
 from bokeh.core.properties import without_property_validation
@@ -559,6 +558,9 @@ class SystemMonitor(DashboardComponent):
     @without_property_validation
     @log_errors
     def update(self):
+        def mean(x):
+            return sum(x) / len(x)
+
         self.source.stream(self.get_data(), 1000)
         self.label_source.data["cpu"] = [
             "{}: {:.1f}%".format(f.__name__, f(self.source.data["cpu"]))
