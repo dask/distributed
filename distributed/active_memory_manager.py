@@ -95,9 +95,7 @@ class ActiveMemoryManagerExtension:
             )
         mem = scheduler.memory
         measure_domain = {
-            name
-            for name in dir(mem)
-            if not name.startswith("_") and isinstance(getattr(mem, name), int)
+            name for name in dir(mem) if not name.startswith("_") and name != "sum"
         }
         if not isinstance(measure, str) or measure not in measure_domain:
             raise ValueError(
