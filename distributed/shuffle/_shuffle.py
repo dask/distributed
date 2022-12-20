@@ -7,6 +7,8 @@ from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import SimpleShuffleLayer
 
+from distributed.shuffle._arrow import check_dtype_support
+
 logger = logging.getLogger("distributed.shuffle")
 if TYPE_CHECKING:
     import pandas as pd
@@ -79,13 +81,14 @@ def rearrange_by_column_p2p(
     token = tokenize(df, column, npartitions)
 
     empty = df._meta.copy()
-    for c, dt in empty.dtypes.items():
-        if dt == object:
-            empty[c] = empty[c].astype(
-                "string"
-            )  # TODO: we fail at non-string object dtypes
-    empty[column] = empty[column].astype("int64")  # TODO: this shouldn't be necesssary
+    # for c, dt in empty.dtypes.items():
+    #     if dt == object:
+    #         empty[c] = empty[c].astype(
+    #             "string"
+    #         )  # TODO: we fail at non-string object dtypes
+    # empty[column] = empty[column].astype("int64")  # TODO: this shouldn't be necesssary
 
+    check_dtype_support(empty)
     name = f"shuffle-p2p-{token}"
     layer = P2PShuffleLayer(
         name,
