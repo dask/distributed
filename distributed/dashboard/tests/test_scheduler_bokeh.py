@@ -1119,6 +1119,7 @@ async def test_shuffling(c, s, a, b):
     ss = Shuffling(s)
 
     df = dask.datasets.timeseries()
+    df["name"] = df["name"].astype("string[python]")
     df2 = dd.shuffle.shuffle(df, "x", shuffle="p2p").persist()
     start = time()
     while not ss.source.data["disk_read"]:
