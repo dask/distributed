@@ -1,15 +1,83 @@
 Changelog
 =========
 
+.. _v2022.12.1:
+
+2022.12.1
+---------
+
+Released on December 16, 2022
+
+Enhancements
+^^^^^^^^^^^^
+- ``SpillBuffer`` metrics (:pr:`7368`) `crusaderky`_
+- Prometheus: measure how much spilling blocks the event loop  (:pr:`7370`) `crusaderky`_
+- Add ``transfer_outgoing_bytes_total`` metric (:pr:`7388`) `Gabe Joseph`_
+- Fail ``P2PShuffle`` gracefully upon worker failure (:pr:`7326`) `Hendrik Makait`_
+
+Bug Fixes
+^^^^^^^^^
+- Select queued tasks in stimuli, not transitions (:pr:`7402`) `Gabe Joseph`_
+- Check ``ContextVar`` in ``default_client`` (:pr:`7369`) `Matthew Rocklin`_
+- Fix sending event messages to non-subscribers (:pr:`7014`) `Laurence Watts`_
+- Set sizing mode on ``Tabs`` to avoid layout collapse (:pr:`7365`) `Mateusz Paprocki`_
+
+Maintenance
+^^^^^^^^^^^
+- Restructure ``P2PShuffle`` extensions (:pr:`7390`) `Hendrik Makait`_
+- Add Python 3.11 classifier (:pr:`7408`) `James Bourbeau`_
+- Add support for Python 3.11 (:pr:`7249`) `Thomas Grainger`_
+- Add test for using annotations with ``client.submit`` and ``client.map`` (:pr:`7399`) `James Bourbeau`_
+- Bump ``actions/checkout`` from 3.1.0 to 3.2.0 (:pr:`7393`)
+- Remove  superfluous ``ShuffleSchedulerExtension.barriers`` (:pr:`7389`) `Hendrik Makait`_
+- Remove ignore annotation-unchecked (:pr:`7379`) `crusaderky`_
+- Remove ``tornado`` max version from nightly recipe (:pr:`7376`) `Charles Blackmon-Luca`_
+- Remove the experimental feature warning for ``Semaphore`` (:pr:`7373`) `Florian Jetter`_
+
+
+.. _v2022.12.0:
+
+2022.12.0
+---------
+
+Released on December 2, 2022
+
+Enhancements
+^^^^^^^^^^^^
+- Expose event loop health metrics in Prometheus (:pr:`7360`) `Hendrik Makait`_
+- Allow log propagation by default (:pr:`5669`) `Florian Jetter`_
+- Clean up of ``unpack_remotedata()``  (:pr:`7322`) `Mads R. B. Kristensen`_
+- Upgrade to ``tornado`` 6.2 (:pr:`7286`) `Thomas Grainger`_
+- Introduce ``Server`` level ``comm`` counters (:pr:`7332`) `Florian Jetter`_
+- Prometheus debug log (:pr:`7302`) `Florian Jetter`_
+
+Bug Fixes
+^^^^^^^^^
+- Catch ``BaseException`` s from user tasks (:pr:`5997`) `Gabe Joseph`_
+- Impossible use case of erred deps in transition to waiting (:pr:`7354`) `crusaderky`_
+- Fix a deadlock when queued tasks are resubmitted quickly in succession (:pr:`7348`) `Florian Jetter`_
+
+Documentation
+^^^^^^^^^^^^^
+- Editorial changes to Prometheus documentation (:pr:`7350`) `Hendrik Makait`_
+
+Maintenance
+^^^^^^^^^^^
+- Fetch all artifacts (:pr:`7355`) `Enrico Minack`_
+- Delay ``fsspec`` and ``urllib3`` import time (:pr:`6659`) `Florian Jetter`_
+- Bump ``mypy`` (:pr:`7349`) `crusaderky`_
+- Bump ``mypy`` and remove win specific run (:pr:`7344`) `Florian Jetter`_
+- Finish overhaul of ``SchedulerState`` annotations (:pr:`7333`) `crusaderky`_
+- Fix flaky ``test_pause_while_spilling`` (:pr:`7334`) `Gabe Joseph`_
+- Update gpuCI ``RAPIDS_VER`` to ``23.02`` (:pr:`7337`)
+
+
 .. _v2022.11.1:
 
 2022.11.1
 ---------
 
 Released on November 18, 2022
-
-New Features
-^^^^^^^^^^^^
 
 Enhancements
 ^^^^^^^^^^^^
@@ -4469,3 +4537,6 @@ significantly without many new features.
 .. _`Matthew Plough`: https://github.com/mplough-kobold
 .. _`Tom Hu`: https://github.com/thomasrockhu-codecov
 .. _`Richard Pelgrim`: https://github.com/rrpelgrim
+.. _`Enrico Minack`: https://github.com/EnricoMi
+.. _`Laurence Watts`: https://github.com/lwatt
+.. _`Mateusz Paprocki`: https://github.com/mattpap

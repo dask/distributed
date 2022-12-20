@@ -53,7 +53,7 @@ from distributed.diagnostics.plugin import (
 )
 from distributed.metrics import time
 from distributed.protocol import pickle
-from distributed.scheduler import Scheduler
+from distributed.scheduler import KilledWorker, Scheduler
 from distributed.utils_test import (
     NO_AMM,
     BlockedExecute,
@@ -419,6 +419,44 @@ async def test_chained_error_message(c, s, a, b):
     except Exception as e:
         assert e.__cause__ is not None
         assert "Bar" in str(e.__cause__)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("sync", [True, False])
+@pytest.mark.parametrize(
+    "exc_type", [BaseException, SystemExit, KeyboardInterrupt, asyncio.CancelledError]
+)
+@gen_cluster(
+    nthreads=[("", 1)],
+    client=True,
+    Worker=Nanny,
+    config={"distributed.scheduler.allowed-failures": 0},
+)
+async def test_base_exception_in_task(c, s, a, sync, exc_type):
+    if sync:
+
+        def raiser():
+            raise exc_type(f"this is a {exc_type}")
+
+    else:
+
+        async def raiser():
+            raise exc_type(f"this is a {exc_type}")
+
+    f = c.submit(raiser)
+
+    try:
+        with pytest.raises(
+            KilledWorker if exc_type in (SystemExit, KeyboardInterrupt) else exc_type
+        ):
+            await f
+    except BaseException as e:
+        # Prevent test failure from killing the whole pytest process
+        traceback.print_exc()
+        pytest.fail(f"BaseException propagated back to test: {e!r}. See stdout.")
+
+    # Nanny restarts it
+    await c.wait_for_workers(1)
 
 
 @gen_test()
@@ -1547,7 +1585,7 @@ async def test_close_while_executing(c, s, a, sync):
         task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
     )
     await a.close()
-    assert task.cancelled()
+    assert task.done()
     assert s.tasks["f1"].state in ("queued", "no-worker")
 
 
@@ -1570,7 +1608,7 @@ async def test_close_async_task_handles_cancellation(c, s, a):
     )
     start = time()
     with captured_logger(
-        "distributed.worker_state_machine", level=logging.ERROR
+        "distributed.worker.state_machine", level=logging.ERROR
     ) as logger:
         await a.close(timeout=1)
     assert "Failed to cancel asyncio task" in logger.getvalue()
@@ -2734,7 +2772,7 @@ async def test_forget_dependents_after_release(c, s, a):
     fut = c.submit(inc, 1, key="f-1")
     fut2 = c.submit(inc, fut, key="f-2")
 
-    await asyncio.wait([fut, fut2])
+    await asyncio.gather(fut, fut2)
 
     assert fut.key in a.state.tasks
     assert fut2.key in a.state.tasks
@@ -3733,8 +3771,7 @@ async def test_deprecation_of_renamed_worker_attributes(s, a, b):
 
 @gen_cluster(nthreads=[])
 async def test_worker_log_memory_limit_too_high(s):
-    with captured_logger("distributed.worker_memory") as caplog:
-        # caplog.set_level(logging.WARN, logger="distributed.worker")
+    with captured_logger("distributed.worker.memory") as caplog:
         async with Worker(s.address, memory_limit="1PB"):
             pass
 

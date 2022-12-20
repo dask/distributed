@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from time import time
+
 import prometheus_client
 import toolz
 from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
@@ -20,19 +22,19 @@ class SchedulerMetricCollector(PrometheusCollector):
 
         yield GaugeMetricFamily(
             self.build_name("clients"),
-            "Number of clients connected.",
+            "Number of clients connected",
             value=len([k for k in self.server.clients if k != "fire-and-forget"]),
         )
 
         yield GaugeMetricFamily(
             self.build_name("desired_workers"),
-            "Number of workers scheduler needs for task graph.",
+            "Number of workers scheduler needs for task graph",
             value=self.server.adaptive_target(),
         )
 
         worker_states = GaugeMetricFamily(
             self.build_name("workers"),
-            "Number of workers known by scheduler.",
+            "Number of workers known by scheduler",
             labels=["state"],
         )
         worker_states.add_metric(["connected"], len(self.server.workers))
@@ -42,7 +44,7 @@ class SchedulerMetricCollector(PrometheusCollector):
 
         tasks = GaugeMetricFamily(
             self.build_name("tasks"),
-            "Number of tasks known by scheduler.",
+            "Number of tasks known by scheduler",
             labels=["state"],
         )
 
@@ -64,8 +66,9 @@ class SchedulerMetricCollector(PrometheusCollector):
             self.build_name("tasks_forgotten"),
             (
                 "Total number of processed tasks no longer in memory and already "
-                "removed from the scheduler job queue. Note task groups on the "
-                "scheduler which have all tasks in the forgotten state are not included."
+                "removed from the scheduler job queue\n"
+                "Note: Task groups on the scheduler which have all tasks "
+                "in the forgotten state are not included."
             ),
             value=task_counter.get("forgotten", 0.0),
         )
@@ -85,6 +88,25 @@ class SchedulerMetricCollector(PrometheusCollector):
             for state, count in tp.state_counts.items():
                 prefix_state_counts.add_metric([tp.name, state], count)
         yield prefix_state_counts
+
+        now = time()
+        max_tick_duration = max(
+            self.server.digests_max["tick_duration"],
+            now - self.server._last_tick,
+        )
+        yield GaugeMetricFamily(
+            self.build_name("tick_duration_maximum_seconds"),
+            "Maximum tick duration observed since Prometheus last scraped metrics",
+            value=max_tick_duration,
+        )
+
+        yield CounterMetricFamily(
+            self.build_name("tick_count_total"),
+            "Total number of ticks observed since the server started",
+            value=self.server._tick_counter,
+        )
+
+        self.server.digests_max.clear()
 
 
 COLLECTORS = [

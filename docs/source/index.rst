@@ -117,6 +117,7 @@ Contents
    task-launch
    tls
    active_memory_manager
+   prometheus
 
 .. toctree::
    :maxdepth: 1

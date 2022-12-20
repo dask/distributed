@@ -132,7 +132,6 @@ from distributed.worker_state_machine import (
     UpdateDataEvent,
     WorkerState,
 )
-from distributed.worker_state_machine import logger as wsm_logger
 
 if TYPE_CHECKING:
     # FIXME import from typing (needs Python >=3.10)
@@ -395,6 +394,8 @@ class Worker(BaseWorker, ServerNode):
     transfer_outgoing_log: deque[dict[str, Any]]
     #: Total number of data transfers to other workers since the worker was started
     transfer_outgoing_count_total: int
+    #: Total size of data transfers to other workers (including in-progress and failed transfers)
+    transfer_outgoing_bytes_total: int
     #: Current total size of open data transfers to other workers
     transfer_outgoing_bytes: int
     #: Current number of open data transfers to other workers
@@ -557,6 +558,7 @@ class Worker(BaseWorker, ServerNode):
         self.transfer_incoming_log = deque(maxlen=100000)
         self.transfer_outgoing_log = deque(maxlen=100000)
         self.transfer_outgoing_count_total = 0
+        self.transfer_outgoing_bytes_total = 0
         self.transfer_outgoing_bytes = 0
         self.transfer_outgoing_count = 0
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
@@ -572,7 +574,7 @@ class Worker(BaseWorker, ServerNode):
         profile_cycle_interval = parse_timedelta(profile_cycle_interval, default="ms")
         assert profile_cycle_interval
 
-        self._setup_logging(logger, wsm_logger)
+        self._setup_logging(logger)
 
         if not local_directory:
             local_directory = (
@@ -1048,6 +1050,14 @@ class Worker(BaseWorker, ServerNode):
             except Exception:  # TODO: log error once
                 pass
 
+        if out["managed_bytes"] > out["memory"]:
+            logger.warning(
+                "Managed memory exceeds process memory; this will cause premature "
+                "spilling as well as malfunctions in several heuristics. Please ensure "
+                "that sizeof() returns accurate outputs for your data. Read more: "
+                "https://distributed.dask.org/en/stable/worker-memory.html"
+            )
+
         return out
 
     async def get_startup_information(self):
@@ -1204,8 +1214,7 @@ class Worker(BaseWorker, ServerNode):
 
     def _update_latency(self, latency: float) -> None:
         self.latency = latency * 0.05 + self.latency * 0.95
-        if self.digests is not None:
-            self.digests["latency"].add(latency)
+        self.digest_metric("latency", latency)
 
     async def heartbeat(self) -> None:
         logger.debug("Heartbeat: %s", self.address)
@@ -1488,7 +1497,7 @@ class Worker(BaseWorker, ServerNode):
         # nanny+worker, the nanny must be notified first. ==> Remove kwarg
         # nanny, see also Scheduler.retire_workers
         if self.status in (Status.closed, Status.closing, Status.failed):
-            logging.debug(
+            logger.debug(
                 "Attempted to close worker that is already %s. Reason: %s",
                 self.status,
                 reason,
@@ -1747,9 +1756,18 @@ class Worker(BaseWorker, ServerNode):
         bytes_per_task = {k: self.state.tasks[k].nbytes or 0 for k in data}
         total_bytes = sum(bytes_per_task.values())
         self.transfer_outgoing_bytes += total_bytes
+        self.transfer_outgoing_bytes_total += total_bytes
         stop = time()
-        if self.digests is not None:
-            self.digests["get-data-load-duration"].add(stop - start)
+
+        # Don't log metrics if all keys are in memory
+        if stop - start > 0.005:
+            # See metrics:
+            # - disk-load-duration
+            # - get-data-load-duration
+            # - disk-write-target-duration
+            # - disk-write-spill-duration
+            self.digest_metric("get-data-load-duration", stop - start)
+
         start = time()
 
         try:
@@ -1768,8 +1786,7 @@ class Worker(BaseWorker, ServerNode):
             self.transfer_outgoing_bytes -= total_bytes
             self.transfer_outgoing_count -= 1
         stop = time()
-        if self.digests is not None:
-            self.digests["get-data-send-duration"].add(stop - start)
+        self.digest_metric("get-data-send-duration", stop - start)
 
         duration = (stop - start) or 0.5  # windows
         self.transfer_outgoing_log.append(
@@ -2010,9 +2027,8 @@ class Worker(BaseWorker, ServerNode):
                 bw, cnt = self.bandwidth_types[typ]
                 self.bandwidth_types[typ] = (bw + bandwidth, cnt + 1)
 
-        if self.digests is not None:
-            self.digests["transfer-bandwidth"].add(total_bytes / duration)
-            self.digests["transfer-duration"].add(duration)
+        self.digest_metric("transfer-bandwidth", total_bytes / duration)
+        self.digest_metric("transfer-duration", duration)
         self.counters["transfer-count"].add(len(data))
 
     @fail_hard
@@ -2118,6 +2134,10 @@ class Worker(BaseWorker, ServerNode):
         return RetryBusyWorkerEvent(
             worker=worker, stimulus_id=f"retry-busy-worker-{time()}"
         )
+
+    def digest_metric(self, name: str, value: float) -> None:
+        """Implement BaseWorker.digest_metric by calling Server.digest_metric"""
+        ServerNode.digest_metric(self, name, value)
 
     @log_errors
     def find_missing(self) -> None:
@@ -2293,8 +2313,24 @@ class Worker(BaseWorker, ServerNode):
                     stimulus_id=f"task-finished-{time()}",
                 )
 
-            if isinstance(result["actual-exception"], Reschedule):
+            task_exc = result["actual-exception"]
+            if isinstance(task_exc, Reschedule):
                 return RescheduleEvent(key=ts.key, stimulus_id=f"reschedule-{time()}")
+            if (
+                self.status == Status.closing
+                and isinstance(task_exc, asyncio.CancelledError)
+                and iscoroutinefunction(function)
+            ):
+                # `Worker.cancel` will cause async user tasks to raise `CancelledError`.
+                # Since we cancelled those tasks, we shouldn't treat them as failures.
+                # This is just a heuristic; it's _possible_ the task happened to
+                # fail independently with `CancelledError`.
+                logger.info(
+                    f"Async task {key!r} cancelled during worker close; rescheduling."
+                )
+                return RescheduleEvent(
+                    key=ts.key, stimulus_id=f"cancelled-by-worker-close-{time()}"
+                )
 
             logger.warning(
                 "Compute Failed\n"
@@ -2343,8 +2379,12 @@ class Worker(BaseWorker, ServerNode):
         stop = time()
         if stop - start > 0.005:
             ts.startstops.append({"action": "disk-read", "start": start, "stop": stop})
-            if self.digests is not None:
-                self.digests["disk-load-duration"].add(stop - start)
+            # See metrics:
+            # - disk-load-duration
+            # - get-data-load-duration
+            # - disk-write-target-duration
+            # - disk-write-spill-duration
+            self.digest_metric("disk-load-duration", stop - start)
         return args2, kwargs2
 
     ##################
@@ -2388,8 +2428,7 @@ class Worker(BaseWorker, ServerNode):
                 )
 
         stop = time()
-        if self.digests is not None:
-            self.digests["profile-duration"].add(stop - start)
+        self.digest_metric("profile-duration", stop - start)
 
     async def get_profile(
         self,
@@ -3014,7 +3053,18 @@ def apply_function_simple(
     start = time()
     try:
         result = function(*args, **kwargs)
-    except Exception as e:
+    except (SystemExit, KeyboardInterrupt):
+        # Special-case these, just like asyncio does all over the place. They will pass
+        # through `fail_hard` and `_handle_stimulus_from_task`, and eventually be caught
+        # by special-case logic in asyncio:
+        # https://github.com/python/cpython/blob/v3.9.4/Lib/asyncio/events.py#L81-L82
+        # Any other `BaseException` types would ultimately be ignored by asyncio if
+        # raised here, after messing up the worker state machine along their way.
+        raise
+    except BaseException as e:
+        # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they
+        # aren't a reason to shut down the whole system (since we allow the
+        # system-shutting-down `SystemExit` and `KeyboardInterrupt` to pass through)
         msg = error_message(e)
         msg["op"] = "task-erred"
         msg["actual-exception"] = e
@@ -3050,7 +3100,20 @@ async def apply_function_async(
     start = time()
     try:
         result = await function(*args, **kwargs)
-    except Exception as e:
+    except (SystemExit, KeyboardInterrupt):
+        # Special-case these, just like asyncio does all over the place. They will pass
+        # through `fail_hard` and `_handle_stimulus_from_task`, and eventually be caught
+        # by special-case logic in asyncio:
+        # https://github.com/python/cpython/blob/v3.9.4/Lib/asyncio/events.py#L81-L82
+        # Any other `BaseException` types would ultimately be ignored by asyncio if
+        # raised here, after messing up the worker state machine along their way.
+        raise
+    except BaseException as e:
+        # NOTE: this includes `CancelledError`! Since it's a user task, that's _not_ a
+        # reason to shut down the worker.
+        # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they
+        # aren't a reason to shut down the whole system (since we allow the
+        # system-shutting-down `SystemExit` and `KeyboardInterrupt` to pass through)
         msg = error_message(e)
         msg["op"] = "task-erred"
         msg["actual-exception"] = e

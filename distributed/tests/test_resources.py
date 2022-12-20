@@ -13,6 +13,7 @@ from distributed.client import wait
 from distributed.utils_test import NO_AMM, gen_cluster, inc, lock_inc, slowadd, slowinc
 from distributed.worker_state_machine import (
     ComputeTaskEvent,
+    DigestMetric,
     Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
@@ -265,6 +266,7 @@ def test_constrained_vs_ready_priority_1(ws, p1, p2, expect_key, swap):
         ExecuteSuccessEvent.dummy("clog", stimulus_id="s3"),
     )
     assert instructions == [
+        DigestMetric(name="compute-duration", value=1.0, stimulus_id="s3"),
         TaskFinishedMsg.match(key="clog", stimulus_id="s3"),
         Execute(key=expect_key, stimulus_id="s3"),
     ]
@@ -299,6 +301,7 @@ def test_constrained_vs_ready_priority_2(ws, p1, p2, expect_key, swap):
         ExecuteSuccessEvent.dummy("clog1", stimulus_id="s3"),
     )
     assert instructions == [
+        DigestMetric(name="compute-duration", value=1.0, stimulus_id="s3"),
         TaskFinishedMsg.match(key="clog1", stimulus_id="s3"),
         Execute(key="x", stimulus_id="s3"),
     ]
@@ -320,10 +323,13 @@ def test_constrained_tasks_respect_priority(ws):
     )
     assert instructions == [
         Execute(key="clog", stimulus_id="clog"),
+        DigestMetric(name="compute-duration", value=1.0, stimulus_id="s4"),
         TaskFinishedMsg.match(key="clog", stimulus_id="s4"),
         Execute(key="x3", stimulus_id="s4"),
+        DigestMetric(name="compute-duration", value=1.0, stimulus_id="s5"),
         TaskFinishedMsg.match(key="x3", stimulus_id="s5"),
         Execute(key="x1", stimulus_id="s5"),
+        DigestMetric(name="compute-duration", value=1.0, stimulus_id="s6"),
         TaskFinishedMsg.match(key="x1", stimulus_id="s6"),
         Execute(key="x2", stimulus_id="s6"),
     ]

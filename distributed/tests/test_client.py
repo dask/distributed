@@ -3647,7 +3647,7 @@ async def test_reconnect():
     port = open_port()
 
     stack = ExitStack()
-    proc = popen(["dask-scheduler", "--no-dashboard", f"--port={port}"])
+    proc = popen(["dask", "scheduler", "--no-dashboard", f"--port={port}"])
     stack.enter_context(proc)
     async with Client(f"127.0.0.1:{port}", asynchronous=True) as c, Worker(
         f"127.0.0.1:{port}"
@@ -3666,7 +3666,7 @@ async def test_reconnect():
         with pytest.raises(CancelledError):
             await x
 
-        with popen(["dask-scheduler", "--no-dashboard", f"--port={port}"]):
+        with popen(["dask", "scheduler", "--no-dashboard", f"--port={port}"]):
             start = time()
             while c.status != "running":
                 await asyncio.sleep(0.1)
@@ -4095,6 +4095,7 @@ def test_as_current_is_thread_local(s, loop):
                     # This line runs only when all parties are inside the
                     # context manager
                     assert Client.current(allow_global=False) is c
+                    assert default_client() is c
                 finally:
                     cm_before_exit.wait()
 
@@ -5735,6 +5736,40 @@ async def test_logs(c, s, a, b):
             assert "distributed.nanny" in msg
 
 
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_logs_from_worker_submodules(c, s, a):
+    def on_worker(dask_worker):
+        from distributed.worker import logger as l1
+        from distributed.worker_state_machine import logger as l2
+
+        l1.info("AAA")
+        l2.info("BBB")
+        dask_worker.memory_manager.logger.info("CCC")
+
+    await c.run(on_worker)
+    logs = await c.get_worker_logs()
+    logs = [row[1].partition(" - ")[2] for row in logs[a.worker_address]]
+    assert logs[-3:] == [
+        "distributed.worker - INFO - AAA",
+        "distributed.worker.state_machine - INFO - BBB",
+        "distributed.worker.memory - INFO - CCC",
+    ]
+
+    def on_nanny(dask_worker):
+        from distributed.nanny import logger as l3
+
+        l3.info("DDD")
+        dask_worker.memory_manager.logger.info("EEE")
+
+    await c.run(on_nanny, nanny=True)
+    logs = await c.get_worker_logs(nanny=True)
+    logs = [row[1].partition(" - ")[2] for row in logs[a.worker_address]]
+    assert logs[-2:] == [
+        "distributed.nanny - INFO - DDD",
+        "distributed.nanny.memory - INFO - EEE",
+    ]
+
+
 @gen_cluster(client=True)
 async def test_avoid_delayed_finalize(c, s, a, b):
     x = delayed(inc)(1)
@@ -6729,6 +6764,36 @@ async def test_log_event(c, s, a):
     assert events[1][1] == ("alice", "bob")
 
 
+@gen_cluster(client=True, nthreads=[])
+async def test_log_event_multiple_clients(c, s):
+    async with Client(s.address, asynchronous=True) as c2, Client(
+        s.address, asynchronous=True
+    ) as c3:
+        received_events = []
+
+        def get_event_handler(handler_id):
+            def handler(event):
+                received_events.append((handler_id, event))
+
+            return handler
+
+        c.subscribe_topic("test-topic", get_event_handler(1))
+        c2.subscribe_topic("test-topic", get_event_handler(2))
+
+        while len(s.event_subscriber["test-topic"]) != 2:
+            await asyncio.sleep(0.01)
+
+        with captured_logger(logging.getLogger("distributed.client")) as logger:
+            await c.log_event("test-topic", {})
+
+        while len(received_events) < 2:
+            await asyncio.sleep(0.01)
+
+        assert len(received_events) == 2
+        assert {handler_id for handler_id, _ in received_events} == {1, 2}
+        assert "ValueError" not in logger.getvalue()
+
+
 @gen_cluster(client=True)
 async def test_annotations_task_state(c, s, a, b):
     da = pytest.importorskip("dask.array")
@@ -6915,6 +6980,27 @@ async def test_annotations_loose_restrictions(c, s, a, b):
             for ts in s.tasks.values()
         ]
     )
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[
+        ("127.0.0.1", 1, {"resources": {"foo": 4}}),
+        ("127.0.0.1", 1),
+    ],
+)
+async def test_annotations_submit_map(c, s, a, b):
+
+    with dask.annotate(resources={"foo": 1}):
+        f = c.submit(inc, 0)
+    with dask.annotate(resources={"foo": 1}):
+        fs = c.map(inc, range(10, 13))
+
+    await wait([f, *fs])
+
+    assert all([{"foo": 1} == ts.resource_restrictions for ts in s.tasks.values()])
+    assert all([{"resources": {"foo": 1}} == ts.annotations for ts in s.tasks.values()])
+    assert not b.state.tasks
 
 
 @gen_cluster(client=True)
@@ -7754,7 +7840,12 @@ if __name__ == "__main__":
 
 
 @pytest.mark.slow
-@pytest.mark.flaky(reruns=5, rerun_delay=10, only_rerun="Found blocklist match")
+# These lines sometimes appear:
+#     Creating scratch directories is taking a surprisingly long time
+#     Future exception was never retrieved
+#     tornado.util.TimeoutError
+#     Batched Comm Closed
+@pytest.mark.flaky(reruns=5, reruns_delay=5)
 @pytest.mark.parametrize("processes", [True, False])
 def test_quiet_close_process(processes, tmp_path):
     with open(tmp_path / "script.py", mode="w") as f:
@@ -7765,18 +7856,7 @@ def test_quiet_close_process(processes, tmp_path):
 
     lines = out.decode("utf-8").split("\n")
     lines = [stripped for line in lines if (stripped := line.strip())]
-
-    # List of frequent spurious messages that are beyond the scope of this test
-    blocklist = [
-        "Creating scratch directories is taking a surprisingly long time",
-        "Future exception was never retrieved",
-        "tornado.util.TimeoutError",
-    ]
-    lines2 = [line for line in lines if not any(ign in line for ign in blocklist)]
-    # Instant failure for messages not in blocklist
-    assert not lines2
-    # Retry up to 5 times if the only messages are in the blocklist
-    assert not lines, "Found blocklist match, retrying: " + str(lines)
+    assert not lines
 
 
 @gen_cluster(client=False, nthreads=[])

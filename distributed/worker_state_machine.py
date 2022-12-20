@@ -40,7 +40,7 @@ from distributed.protocol.serialize import Serialize
 from distributed.sizeof import safe_sizeof as sizeof
 from distributed.utils import recursive_to_dict
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("distributed.worker.state_machine")
 
 if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
@@ -426,6 +426,13 @@ class Execute(Instruction):
 class RetryBusyWorkerLater(Instruction):
     __slots__ = ("worker",)
     worker: str
+
+
+@dataclass
+class DigestMetric(Instruction):
+    __slots__ = ("name", "value")
+    name: str
+    value: float
 
 
 class SendMessageToScheduler(Instruction):
@@ -1477,6 +1484,10 @@ class WorkerState:
         ts.next = None
         ts.done = False
         ts.coming_from = None
+        ts.exception = None
+        ts.traceback = None
+        ts.traceback_text = ""
+        ts.traceback_text = ""
 
         self.missing_dep_flight.discard(ts)
         self.ready.discard(ts)
@@ -1780,7 +1791,7 @@ class WorkerState:
 
     def _put_key_in_memory(
         self, ts: TaskState, value: object, *, stimulus_id: str
-    ) -> Recs:
+    ) -> RecsInstrs:
         """
         Put a key into memory and set data related task state attributes.
         On success, generate recommendations for dependents.
@@ -1804,18 +1815,32 @@ class WorkerState:
         """
         if ts.key in self.data:
             ts.state = "memory"
-            return {}
+            return {}, []
 
         recommendations: Recs = {}
+        instructions: Instructions = []
+
         if ts.key in self.actors:
             self.actors[ts.key] = value
         else:
             start = time()
             self.data[ts.key] = value
             stop = time()
-            if stop - start > 0.020:
+            if stop - start > 0.005:
                 ts.startstops.append(
                     {"action": "disk-write", "start": start, "stop": stop}
+                )
+                instructions.append(
+                    DigestMetric(
+                        # See metrics:
+                        # - disk-load-duration
+                        # - get-data-load-duration
+                        # - disk-write-target-duration
+                        # - disk-write-spill-duration
+                        name="disk-write-target-duration",
+                        value=stop - start,
+                        stimulus_id=stimulus_id,
+                    )
                 )
 
         ts.state = "memory"
@@ -1831,7 +1856,7 @@ class WorkerState:
                 recommendations[dep] = "ready"
 
         self.log.append((ts.key, "put-in-memory", stimulus_id, time()))
-        return recommendations
+        return recommendations, instructions
 
     ###############
     # Transitions #
@@ -2458,21 +2483,20 @@ class WorkerState:
         stimulus_id: str,
     ) -> RecsInstrs:
         try:
-            recs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
+            recs, instrs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
         except Exception as e:
             msg = error_message(e)
-            recs = {ts: tuple(msg.values())}
-            return recs, []
+            return {ts: tuple(msg.values())}, []
 
         # NOTE: The scheduler's reaction to these two messages is fundamentally
         # different. Namely, add-keys is only admissible for tasks that are already in
         # memory on another worker, and won't trigger transitions.
         if msg_type == "add-keys":
-            smsg: Instruction = AddKeysMsg(keys=[ts.key], stimulus_id=stimulus_id)
+            instrs.append(AddKeysMsg(keys=[ts.key], stimulus_id=stimulus_id))
         else:
             assert msg_type == "task-finished"
-            smsg = self._get_task_finished_msg(ts, stimulus_id=stimulus_id)
-        return recs, [smsg]
+            instrs.append(self._get_task_finished_msg(ts, stimulus_id=stimulus_id))
+        return recs, instrs
 
     def _transition_released_forgotten(
         self, ts: TaskState, *, stimulus_id: str
@@ -2728,14 +2752,15 @@ class WorkerState:
                 self.tasks[key] = ts = TaskState(key)
 
                 try:
-                    recs = self._put_key_in_memory(
+                    recs, instrs = self._put_key_in_memory(
                         ts, value, stimulus_id=ev.stimulus_id
                     )
                 except Exception as e:
-                    msg = error_message(e)
-                    recommendations = {ts: tuple(msg.values())}
-                else:
-                    recommendations.update(recs)
+                    recs = {ts: tuple(error_message(e).values())}
+                    instrs = []
+
+                recommendations.update(recs)
+                instructions.extend(instrs)
 
             self.log.append((key, "receive-from-scatter", ev.stimulus_id, time()))
 
@@ -3138,6 +3163,13 @@ class WorkerState:
         """Task completed successfully"""
         ts, recs, instr = self._execute_done_common(ev)
         ts.startstops.append({"action": "compute", "start": ev.start, "stop": ev.stop})
+        instr.append(
+            DigestMetric(
+                name="compute-duration",
+                value=ev.stop - ev.start,
+                stimulus_id=ev.stimulus_id,
+            )
+        )
         ts.nbytes = ev.nbytes
         ts.type = ev.type
         recs[ts] = ("memory", ev.value)
@@ -3632,6 +3664,9 @@ class BaseWorker(abc.ABC):
             if isinstance(inst, SendMessageToScheduler):
                 self.batched_send(inst.to_dict())
 
+            elif isinstance(inst, DigestMetric):
+                self.digest_metric(inst.name, inst.value)
+
             elif isinstance(inst, GatherDep):
                 assert inst.to_gather
                 keys_str = ", ".join(peekn(27, inst.to_gather)[0])
@@ -3690,7 +3725,6 @@ class BaseWorker(abc.ABC):
             msgpack-serializable message to send to the scheduler.
             Must have a 'op' key which is registered in Scheduler.stream_handlers.
         """
-        ...
 
     @abc.abstractmethod
     async def gather_dep(
@@ -3714,17 +3748,18 @@ class BaseWorker(abc.ABC):
         total_nbytes : int
             Total number of bytes for all the dependencies in to_gather combined
         """
-        ...
 
     @abc.abstractmethod
     async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
         """Execute a task"""
-        ...
 
     @abc.abstractmethod
     async def retry_busy_worker_later(self, worker: str) -> StateMachineEvent:
         """Wait some time, then take a peer worker out of busy state"""
-        ...
+
+    @abc.abstractmethod
+    def digest_metric(self, name: str, value: float) -> None:
+        """Log an arbitrary numerical metric"""
 
 
 class DeprecatedWorkerStateAttribute:

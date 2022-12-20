@@ -37,7 +37,6 @@ from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import IOLoop
 
 import dask
-from dask.sizeof import sizeof
 
 from distributed import Event, Scheduler, system
 from distributed import versions as version_module
@@ -1234,9 +1233,7 @@ def popen(
     if sys.platform.startswith("win"):
         args[0] = os.path.join(sys.prefix, "Scripts", args[0])
     else:
-        args[0] = os.path.join(
-            os.environ.get("DESTDIR", "") + sys.prefix, "bin", args[0]
-        )
+        args[0] = os.path.join(sys.prefix, "bin", args[0])
     with subprocess.Popen(args, **kwargs) as proc:
         try:
             yield proc
@@ -2517,6 +2514,17 @@ async def fetch_metrics_sample_names(port: int, prefix: str | None = None) -> se
     return sample_names
 
 
+def _get_gc_overhead():
+    class _CustomObject:
+        def __sizeof__(self):
+            return 0
+
+    return sys.getsizeof(_CustomObject())
+
+
+_size_obj = _get_gc_overhead()
+
+
 class SizeOf:
     """
     An object that returns exactly nbytes when inspected by dask.sizeof.sizeof
@@ -2525,12 +2533,11 @@ class SizeOf:
     def __init__(self, nbytes: int) -> None:
         if not isinstance(nbytes, int):
             raise TypeError(f"Expected integer for nbytes but got {type(nbytes)}")
-        size_obj = sizeof(object())
-        if nbytes < size_obj:
+        if nbytes < _size_obj:
             raise ValueError(
-                f"Expected a value larger than {size_obj} integer but got {nbytes}."
+                f"Expected a value larger than {_size_obj} integer but got {nbytes}."
             )
-        self._nbytes = nbytes - size_obj
+        self._nbytes = nbytes - _size_obj
 
     def __sizeof__(self) -> int:
         return self._nbytes

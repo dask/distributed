@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 import logging
 import math
@@ -70,7 +71,9 @@ from distributed.worker import dumps_function, dumps_task, get_worker, secede
 
 pytestmark = pytest.mark.ci1
 
-
+QUEUING_ON_BY_DEFAULT = math.isfinite(
+    float(dask.config.get("distributed.scheduler.worker-saturation"))
+)
 alice = "alice:1234"
 bob = "bob:1234"
 
@@ -84,14 +87,14 @@ async def test_administration(s, a, b):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_respect_data_in_memory(c, s, a):
-    x = delayed(inc)(1)
-    y = delayed(inc)(x)
+    x = delayed(inc)(1, dask_key_name="x")
+    y = delayed(inc)(x, dask_key_name="y")
     f = c.persist(y)
     await wait([f])
 
     assert s.tasks[y.key].who_has == {s.workers[a.address]}
 
-    z = delayed(operator.add)(x, y)
+    z = delayed(operator.add)(x, y, dask_key_name="z")
     f2 = c.persist(z)
     while f2.key not in s.tasks or not s.tasks[f2.key]:
         assert s.tasks[y.key].who_has
@@ -257,7 +260,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
 
 
 @pytest.mark.skipif(
-    math.isfinite(float(dask.config.get("distributed.scheduler.worker-saturation"))),
+    QUEUING_ON_BY_DEFAULT,
     reason="Not relevant with queuing on; see https://github.com/dask/distributed/issues/7204",
 )
 @gen_cluster(
@@ -367,6 +370,80 @@ async def test_graph_execution_width(c, s, *workers):
     # NOTE: the max should normally equal `total_nthreads`. But some macOS CI machines
     # are slow enough that they aren't able to reach the full parallelism of 8 threads.
     assert max(Refcount.log) <= s.total_nthreads
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_forget_tasks_while_processing(c, s, a, b):
+    events = [Event() for _ in range(10)]
+
+    futures = c.map(Event.wait, events)
+    await events[0].set()
+    await futures[0]
+    await c.close()
+    assert not s.tasks
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_restart_while_processing(c, s, a, b):
+    events = [Event() for _ in range(10)]
+
+    futures = c.map(Event.wait, events)
+    await events[0].set()
+    await futures[0]
+    # TODO slow because worker waits a while for the task to finish
+    await c.restart()
+    assert not s.tasks
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 3,
+    config={"distributed.scheduler.worker-saturation": 1.0},
+)
+async def test_queued_release_multiple_workers(c, s, *workers):
+    async with Client(s.address, asynchronous=True) as c2:
+        event = Event(client=c2)
+
+        rootish_threshold = s.total_nthreads * 2 + 1
+
+        first_batch = c.map(
+            lambda i: event.wait(),
+            range(rootish_threshold),
+            key=[f"first-{i}" for i in range(rootish_threshold)],
+        )
+        await async_wait_for(lambda: s.queued, 5)
+
+        second_batch = c2.map(
+            lambda i: event.wait(),
+            range(rootish_threshold),
+            key=[f"second-{i}" for i in range(rootish_threshold)],
+            fifo_timeout=0,
+        )
+        await async_wait_for(lambda: second_batch[0].key in s.tasks, 5)
+
+        # All of the second batch should be queued after the first batch
+        assert [ts.key for ts in s.queued.sorted()] == [
+            f.key
+            for f in itertools.chain(first_batch[s.total_nthreads :], second_batch)
+        ]
+
+        # Cancel the first batch.
+        # Use `Client.close` instead of `del first_batch` because deleting futures sends cancellation
+        # messages one at a time. We're testing here that when multiple workers have open slots, we don't
+        # recommend the same queued tasks for every worker, so we need a bulk cancellation operation.
+        await c.close()
+        del c, first_batch
+
+        await async_wait_for(lambda: len(s.tasks) == len(second_batch), 5)
+
+        # Second batch should move up the queue and start processing
+        assert len(s.queued) == len(second_batch) - s.total_nthreads, list(
+            s.queued.sorted()
+        )
+
+        await event.set()
+        await c2.gather(second_batch)
 
 
 @gen_cluster(
@@ -2623,7 +2700,7 @@ async def test_task_unique_groups(c, s, a, b):
     x = c.submit(sum, [1, 2])
     y = c.submit(len, [1, 2])
     z = c.submit(sum, [3, 4])
-    await asyncio.wait([x, y, z])
+    await asyncio.gather(x, y, z)
 
     assert s.task_prefixes["len"].states["memory"] == 1
     assert s.task_prefixes["sum"].states["memory"] == 2
@@ -4150,3 +4227,107 @@ async def test_transition_waiting_memory(c, s, a, b):
     assert s.tasks["x"].state == "no-worker"
     assert s.tasks["y"].state == "waiting"
     assert_story(s.story("y"), [("y", "waiting", "waiting", {})])
+
+
+@pytest.mark.parametrize(
+    "rootish",
+    [
+        pytest.param(
+            True,
+            marks=pytest.mark.skipif(
+                not QUEUING_ON_BY_DEFAULT,
+                reason="Nothing will be classified as root-ish",
+            ),
+        ),
+        False,
+    ],
+)
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_deadlock_resubmit_queued_tasks_fast(c, s, a, rootish):
+    # See https://github.com/dask/distributed/issues/7200
+    block = Event()
+    block2 = Event()
+    executing = Event()
+    executing2 = Event()
+
+    def block_on_event(*args, block, executing):
+        executing.set()
+        block.wait()
+
+    if rootish:
+        ntasks = s.total_nthreads * 2 + 1
+    else:
+        ntasks = 1
+    keys = [f"fut-{i}" for i in range(ntasks)]
+
+    def submit_tasks():
+        # Use case would be a client rescheduling the same or a similar graph
+        # multiple times, closely followed
+        # df.head()
+        # df.size.compute()
+        # We're emulating this by submitting the sames *keys*
+        return c.map(
+            block_on_event, range(len(keys)), block=block, executing=executing, key=keys
+        )
+
+    def assert_rootish():
+        # Just to verify our assumptions in case the definition changes. This is
+        # currently a bit brittle
+        if rootish:
+            assert all(s.is_rootish(s.tasks[k]) for k in keys)
+        else:
+            assert not any(s.is_rootish(s.tasks[k]) for k in keys)
+
+    f1 = submit_tasks()
+    # Make sure that the worker is properly saturated
+    nblocking_tasks = 5
+
+    # This set of tasks is there to guarantee that the worker is saturated after
+    # releasing the first set of tasks s.t. a subsequent submission would run
+    # into queuing
+    fut2 = c.map(
+        block_on_event, range(nblocking_tasks), block=block2, executing=executing2
+    )
+
+    # Once the task is on the threadpool, the client/scheduler may start its
+    # release chain
+    await executing.wait()
+
+    assert len(a.state.tasks)
+    # To trigger this condition, the scheduler needs to receive the
+    # `task-finished` message after it performed the client release transitions
+    # Therefore, the worker must not receive the `free-keys`` signal before it
+    # can finish the task since otherwise the worker would recognize it as
+    # cancelled and would forget about it. We emulate this behavior by blocking
+    # the outgoing scheduler stream until that happens, i.e. this introduces
+    # artifical latency
+    with freeze_batched_send(s.stream_comms[a.address]):
+        del f1
+        while any(k in s.tasks for k in keys):
+            await asyncio.sleep(0.005)
+
+        assert len(s.tasks) == nblocking_tasks
+        fut3 = submit_tasks()
+        while len(s.tasks) == nblocking_tasks:
+            await asyncio.sleep(0.005)
+        assert_rootish()
+        if rootish:
+            assert all(s.tasks[k] in s.queued for k in keys), [s.tasks[k] for k in keys]
+        await block.set()
+        # At this point we need/want to wait for the task-finished message to
+        # arrive on the scheduler. There is no proper hook to wait, therefore we
+        # sleep
+        await asyncio.sleep(0.2)
+    # Everything should finish properly after this
+    await block2.set()
+    await c.gather(fut2)
+    await c.gather(fut3)
+
+
+@gen_cluster(client=True)
+async def test_submit_dependency_of_erred_task(c, s, a, b):
+    x = c.submit(lambda: 1 / 0, key="x")
+    await wait(x)
+    y = c.submit(inc, x, key="y")
+    with pytest.raises(ZeroDivisionError):
+        await y
