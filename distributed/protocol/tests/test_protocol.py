@@ -149,12 +149,12 @@ def test_compression_thread_safety(lib, compression):
         assert rc == compression
         assert compressions[rc]["decompress"](rd) == payload
 
-    for f in try_converters:
+    for fn in try_converters:
         threads = []
         for _ in range(0, 100):
             start = False
             for _ in range(0, 10):
-                thread = Thread(target=test_compress_decompress)
+                thread = Thread(target=test_compress_decompress, args=(fn,))
                 thread.start()
                 threads.append(thread)
             start = True
