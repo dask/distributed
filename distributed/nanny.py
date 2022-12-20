@@ -796,8 +796,13 @@ class WorkerProcess:
         if self.status == Status.stopping:
             await self.stopped.wait()
             return
+        # If the process is not properly up it will not watch the closing queue
+        # and we may end up leaking this process
+        # Therefore wait for it to be properly started before killing it
+        if self.status == Status.starting:
+            await self.running.wait()
+
         assert self.status in (
-            Status.starting,
             Status.running,
             Status.failed,  # process failed to start, but hasn't been joined yet
         ), self.status
