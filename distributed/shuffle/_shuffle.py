@@ -81,12 +81,6 @@ def rearrange_by_column_p2p(
     token = tokenize(df, column, npartitions)
 
     empty = df._meta.copy()
-    # for c, dt in empty.dtypes.items():
-    #     if dt == object:
-    #         empty[c] = empty[c].astype(
-    #             "string"
-    #         )  # TODO: we fail at non-string object dtypes
-    # empty[column] = empty[column].astype("int64")  # TODO: this shouldn't be necesssary
 
     check_dtype_support(empty)
     name = f"shuffle-p2p-{token}"
