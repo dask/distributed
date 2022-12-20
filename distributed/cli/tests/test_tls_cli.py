@@ -43,10 +43,13 @@ def test_basic(loop, requires_default_ports):
 
 def test_sni(loop):
     port = open_port()
-    with popen(["dask-scheduler", "--no-dashboard", f"--port={port}"] + tls_args) as s:
+    with popen(
+        ["dask", "scheduler", "--no-dashboard", f"--port={port}"] + tls_args
+    ) as s:
         with popen(
             [
-                "dask-worker",
+                "dask",
+                "worker",
                 "--no-dashboard",
                 "--scheduler-sni",
                 "localhost",

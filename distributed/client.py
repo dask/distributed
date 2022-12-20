@@ -115,7 +115,7 @@ _global_clients: weakref.WeakValueDictionary[
 ] = weakref.WeakValueDictionary()
 _global_client_index = [0]
 
-_current_client = ContextVar("_current_client", default=None)
+_current_client: ContextVar[Client | None] = ContextVar("_current_client", default=None)
 
 DEFAULT_EXTENSIONS = {
     "pubsub": PubSubClientExtension,
@@ -123,6 +123,9 @@ DEFAULT_EXTENSIONS = {
 
 
 def _get_global_client() -> Client | None:
+    c = _current_client.get()
+    if c:
+        return c
     L = sorted(list(_global_clients), reverse=True)
     for k in L:
         c = _global_clients[k]
@@ -2910,7 +2913,7 @@ class Client(SyncMethodMixin):
         )
 
     @staticmethod
-    def _get_computation_code(stacklevel=None) -> str:
+    def _get_computation_code(stacklevel: int | None = None) -> str:
         """Walk up the stack to the user code and extract the code surrounding
         the compute/submit/persist call. All modules encountered which are
         ignored through the option
@@ -2921,7 +2924,6 @@ class Client(SyncMethodMixin):
         ``stacklevel`` may be used to explicitly indicate from which frame on
         the stack to get the source code.
         """
-
         ignore_modules = dask.config.get(
             "distributed.diagnostics.computations.ignore-modules"
         )
@@ -2939,7 +2941,8 @@ class Client(SyncMethodMixin):
         else:
             # stacklevel 0 or less - shows dask internals which likely isn't helpful
             stacklevel = stacklevel if stacklevel > 0 else 1
-        for i, (fr, _) in enumerate(traceback.walk_stack(None), 1):
+
+        for i, (fr, _) in enumerate(traceback.walk_stack(sys._getframe().f_back), 1):
             if stacklevel is not None:
                 if i != stacklevel:
                     continue

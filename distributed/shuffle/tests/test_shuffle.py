@@ -21,12 +21,12 @@ from distributed.core import PooledRPCCall
 from distributed.scheduler import Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._shuffle_extension import (
+from distributed.shuffle._scheduler_extension import get_worker_for
+from distributed.shuffle._shuffle import ShuffleId, barrier_key
+from distributed.shuffle._worker_extension import (
     Shuffle,
-    ShuffleId,
     ShuffleWorkerExtension,
     dump_batch,
-    get_worker_for,
     list_of_buffers_to_table,
     load_arrow,
     split_by_partition,
@@ -60,15 +60,10 @@ async def clean_scheduler(
     """Assert that the scheduler has no shuffle state"""
     deadline = Deadline.after(timeout)
     extension = scheduler.extensions["shuffle"]
-    while extension.output_workers and not deadline.expired:
+    while extension.states and not deadline.expired:
         await asyncio.sleep(interval)
-    assert not extension.worker_for
+    assert not extension.states
     assert not extension.heartbeats
-    assert not extension.schemas
-    assert not extension.columns
-    assert not extension.output_workers
-    assert not extension.completed_workers
-    assert not extension.participating_workers
 
 
 @gen_cluster(client=True)
@@ -245,7 +240,7 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
         return a.address
 
     with mock.patch(
-        "distributed.shuffle._shuffle_extension.get_worker_for", mock_get_worker_for
+        "distributed.shuffle._scheduler_extension.get_worker_for", mock_get_worker_for
     ):
         df = dask.datasets.timeseries(
             start="2000-01-01",
@@ -277,7 +272,7 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
         return a.address
 
     with mock.patch(
-        "distributed.shuffle._shuffle_extension.get_worker_for", mock_get_worker_for
+        "distributed.shuffle._scheduler_extension.get_worker_for", mock_get_worker_for
     ):
         async with Nanny(s.address, nthreads=1) as n:
             killed_worker_address = n.worker_address
@@ -366,7 +361,7 @@ class BlockedInputsDoneShuffle(Shuffle):
         await super().inputs_done()
 
 
-@mock.patch("distributed.shuffle._shuffle_extension.Shuffle", BlockedInputsDoneShuffle)
+@mock.patch("distributed.shuffle._worker_extension.Shuffle", BlockedInputsDoneShuffle)
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_worker_during_barrier(c, s, a, b):
     df = dask.datasets.timeseries(
@@ -378,14 +373,14 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = out.persist()
     shuffle_id = await get_shuffle_id(s)
-    barrier_key = s.extensions["shuffle"].barrier_key(shuffle_id)
-    await wait_for_state(barrier_key, "processing", s)
+    key = barrier_key(shuffle_id)
+    await wait_for_state(key, "processing", s)
     shuffleA = a.extensions["shuffle"].shuffles[shuffle_id]
     shuffleB = b.extensions["shuffle"].shuffles[shuffle_id]
     await shuffleA.in_inputs_done.wait()
     await shuffleB.in_inputs_done.wait()
 
-    ts = s.tasks[barrier_key]
+    ts = s.tasks[key]
     processing_worker = a if ts.processing_on.address == a.address else b
     if processing_worker == a:
         close_worker = a
@@ -407,7 +402,7 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     await clean_scheduler(s)
 
 
-@mock.patch("distributed.shuffle._shuffle_extension.Shuffle", BlockedInputsDoneShuffle)
+@mock.patch("distributed.shuffle._worker_extension.Shuffle", BlockedInputsDoneShuffle)
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_other_worker_during_barrier(c, s, a, b):
     df = dask.datasets.timeseries(
@@ -420,15 +415,15 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
     out = out.persist()
     shuffle_id = await get_shuffle_id(s)
 
-    barrier_key = s.extensions["shuffle"].barrier_key(shuffle_id)
-    await wait_for_state(barrier_key, "processing", s, interval=0)
+    key = barrier_key(shuffle_id)
+    await wait_for_state(key, "processing", s, interval=0)
 
     shuffleA = a.extensions["shuffle"].shuffles[shuffle_id]
     shuffleB = b.extensions["shuffle"].shuffles[shuffle_id]
     await shuffleA.in_inputs_done.wait()
     await shuffleB.in_inputs_done.wait()
 
-    ts = s.tasks[barrier_key]
+    ts = s.tasks[key]
     processing_worker = a if ts.processing_on.address == a.address else b
     if processing_worker == a:
         close_worker = b
@@ -451,7 +446,7 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
 
 
 @pytest.mark.slow
-@mock.patch("distributed.shuffle._shuffle_extension.Shuffle", BlockedInputsDoneShuffle)
+@mock.patch("distributed.shuffle._worker_extension.Shuffle", BlockedInputsDoneShuffle)
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_crashed_other_worker_during_barrier(c, s, a):
     async with Nanny(s.address, nthreads=1) as n:
@@ -464,10 +459,10 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
         out = out.persist()
         shuffle_id = await get_shuffle_id(s)
-        barrier_key = s.extensions["shuffle"].barrier_key(shuffle_id)
+        key = barrier_key(shuffle_id)
         # Ensure that barrier is not executed on the nanny
-        s.set_restrictions({barrier_key: {a.address}})
-        await wait_for_state(barrier_key, "processing", s, interval=0)
+        s.set_restrictions({key: {a.address}})
+        await wait_for_state(key, "processing", s, interval=0)
         shuffle = a.extensions["shuffle"].shuffles[shuffle_id]
         await shuffle.in_inputs_done.wait()
         await n.process.process.kill()
@@ -564,9 +559,9 @@ async def test_closed_worker_during_final_register_complete(c, s, a, b, kill_bar
     await shuffle_ext_b.in_register_complete.wait()
 
     shuffle_id = await get_shuffle_id(s)
-    barrier_key = s.extensions["shuffle"].barrier_key(shuffle_id)
+    key = barrier_key(shuffle_id)
     # TODO: properly parametrize over kill_barrier
-    if barrier_key in b.state.tasks:
+    if key in b.state.tasks:
         shuffle_ext_a.block_register_complete.set()
         while a.state.executing:
             await asyncio.sleep(0.01)
@@ -929,7 +924,7 @@ async def test_new_worker(c, s, a, b):
     )
     shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     persisted = shuffled.persist()
-    while not s.extensions["shuffle"].worker_for:
+    while not s.extensions["shuffle"].states:
         await asyncio.sleep(0.001)
 
     async with Worker(s.address) as w:

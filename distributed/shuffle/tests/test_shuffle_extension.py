@@ -5,9 +5,9 @@ import pytest
 pd = pytest.importorskip("pandas")
 dd = pytest.importorskip("dask.dataframe")
 
-from distributed.shuffle._shuffle_extension import (
+from distributed.shuffle._scheduler_extension import get_worker_for
+from distributed.shuffle._worker_extension import (
     ShuffleWorkerExtension,
-    get_worker_for,
     split_by_partition,
     split_by_worker,
 )
@@ -23,6 +23,8 @@ async def test_installation(s, a):
 
 
 def test_split_by_worker():
+    pytest.importorskip("pyarrow")
+
     df = pd.DataFrame(
         {
             "x": [1, 2, 3, 4, 5],
@@ -44,6 +46,8 @@ def test_split_by_worker():
 
 
 def test_split_by_worker_empty():
+    pytest.importorskip("pyarrow")
+
     df = pd.DataFrame(
         {
             "x": [1, 2, 3, 4, 5],
@@ -56,6 +60,8 @@ def test_split_by_worker_empty():
 
 
 def test_split_by_worker_many_workers():
+    pytest.importorskip("pyarrow")
+
     df = pd.DataFrame(
         {
             "x": [1, 2, 3, 4, 5],

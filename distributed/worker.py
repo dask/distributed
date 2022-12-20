@@ -1050,6 +1050,14 @@ class Worker(BaseWorker, ServerNode):
             except Exception:  # TODO: log error once
                 pass
 
+        if out["managed_bytes"] > out["memory"]:
+            logger.warning(
+                "Managed memory exceeds process memory; this will cause premature "
+                "spilling as well as malfunctions in several heuristics. Please ensure "
+                "that sizeof() returns accurate outputs for your data. Read more: "
+                "https://distributed.dask.org/en/stable/worker-memory.html"
+            )
+
         return out
 
     async def get_startup_information(self):
@@ -1206,8 +1214,7 @@ class Worker(BaseWorker, ServerNode):
 
     def _update_latency(self, latency: float) -> None:
         self.latency = latency * 0.05 + self.latency * 0.95
-        if self.digests is not None:
-            self.digests["latency"].add(latency)
+        self.digest_metric("latency", latency)
 
     async def heartbeat(self) -> None:
         logger.debug("Heartbeat: %s", self.address)
@@ -1751,8 +1758,16 @@ class Worker(BaseWorker, ServerNode):
         self.transfer_outgoing_bytes += total_bytes
         self.transfer_outgoing_bytes_total += total_bytes
         stop = time()
-        if self.digests is not None:
-            self.digests["get-data-load-duration"].add(stop - start)
+
+        # Don't log metrics if all keys are in memory
+        if stop - start > 0.005:
+            # See metrics:
+            # - disk-load-duration
+            # - get-data-load-duration
+            # - disk-write-target-duration
+            # - disk-write-spill-duration
+            self.digest_metric("get-data-load-duration", stop - start)
+
         start = time()
 
         try:
@@ -1771,8 +1786,7 @@ class Worker(BaseWorker, ServerNode):
             self.transfer_outgoing_bytes -= total_bytes
             self.transfer_outgoing_count -= 1
         stop = time()
-        if self.digests is not None:
-            self.digests["get-data-send-duration"].add(stop - start)
+        self.digest_metric("get-data-send-duration", stop - start)
 
         duration = (stop - start) or 0.5  # windows
         self.transfer_outgoing_log.append(
@@ -2013,9 +2027,8 @@ class Worker(BaseWorker, ServerNode):
                 bw, cnt = self.bandwidth_types[typ]
                 self.bandwidth_types[typ] = (bw + bandwidth, cnt + 1)
 
-        if self.digests is not None:
-            self.digests["transfer-bandwidth"].add(total_bytes / duration)
-            self.digests["transfer-duration"].add(duration)
+        self.digest_metric("transfer-bandwidth", total_bytes / duration)
+        self.digest_metric("transfer-duration", duration)
         self.counters["transfer-count"].add(len(data))
 
     @fail_hard
@@ -2121,6 +2134,10 @@ class Worker(BaseWorker, ServerNode):
         return RetryBusyWorkerEvent(
             worker=worker, stimulus_id=f"retry-busy-worker-{time()}"
         )
+
+    def digest_metric(self, name: str, value: float) -> None:
+        """Implement BaseWorker.digest_metric by calling Server.digest_metric"""
+        ServerNode.digest_metric(self, name, value)
 
     @log_errors
     def find_missing(self) -> None:
@@ -2362,8 +2379,12 @@ class Worker(BaseWorker, ServerNode):
         stop = time()
         if stop - start > 0.005:
             ts.startstops.append({"action": "disk-read", "start": start, "stop": stop})
-            if self.digests is not None:
-                self.digests["disk-load-duration"].add(stop - start)
+            # See metrics:
+            # - disk-load-duration
+            # - get-data-load-duration
+            # - disk-write-target-duration
+            # - disk-write-spill-duration
+            self.digest_metric("disk-load-duration", stop - start)
         return args2, kwargs2
 
     ##################
@@ -2407,8 +2428,7 @@ class Worker(BaseWorker, ServerNode):
                 )
 
         stop = time()
-        if self.digests is not None:
-            self.digests["profile-duration"].add(stop - start)
+        self.digest_metric("profile-duration", stop - start)
 
     async def get_profile(
         self,

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from time import time
 from typing import ClassVar
 
 import prometheus_client
-from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
+from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily, Metric
 
 from distributed.http.prometheus import PrometheusCollector
 from distributed.http.utils import RequestHandler
@@ -30,8 +31,7 @@ class WorkerMetricCollector(PrometheusCollector):
                 "Digest-based metrics require crick to be installed."
             )
 
-    def collect(self):
-
+    def collect(self) -> Iterator[Metric]:
         ws = self.server.state
 
         tasks = GaugeMetricFamily(
@@ -40,7 +40,12 @@ class WorkerMetricCollector(PrometheusCollector):
             labels=["state"],
         )
         for k, n in ws.task_counts.items():
-            tasks.add_metric([k], n)
+            if k == "memory" and hasattr(self.server.data, "slow"):
+                n_spilled = len(self.server.data.slow)
+                tasks.add_metric(["memory"], n - n_spilled)
+                tasks.add_metric(["disk"], n_spilled)
+            else:
+                tasks.add_metric([k], n)
         yield tasks
 
         yield GaugeMetricFamily(
@@ -59,13 +64,14 @@ class WorkerMetricCollector(PrometheusCollector):
         )
 
         yield GaugeMetricFamily(
-            self.build_name("latency_seconds"),
+            self.build_name("latency"),
             "Latency of worker connection",
+            unit="seconds",
             value=self.server.latency,
         )
 
         try:
-            spilled_memory, spilled_disk = self.server.data.spilled_total
+            spilled_memory, spilled_disk = self.server.data.spilled_total  # type: ignore
         except AttributeError:
             spilled_memory, spilled_disk = 0, 0  # spilling is disabled
         process_memory = self.server.monitor.get_process_memory()
@@ -130,45 +136,147 @@ class WorkerMetricCollector(PrometheusCollector):
             value=self.server.transfer_outgoing_count_total,
         )
 
-        # all metrics using digests require crick to be installed
-        # the following metrics will export NaN, if the corresponding digests are None
-        if self.crick_available:
-            yield GaugeMetricFamily(
-                self.build_name("tick_duration_median_seconds"),
-                "Median tick duration at worker",
-                value=self.server.digests["tick-duration"].components[1].quantile(50),
-            )
-
-            yield GaugeMetricFamily(
-                self.build_name("task_duration_median_seconds"),
-                "Median task runtime at worker",
-                value=self.server.digests["task-duration"].components[1].quantile(50),
-            )
-
-            yield GaugeMetricFamily(
-                self.build_name("transfer_bandwidth_median_bytes"),
-                "Bandwidth for transfer at worker",
-                value=self.server.digests["transfer-bandwidth"]
-                .components[1]
-                .quantile(50),
-            )
+        yield from self.collect_crick()
+        yield from self.collect_spillbuffer()
 
         now = time()
         max_tick_duration = max(
-            self.server._max_tick_duration, now - self.server._last_tick
+            self.server.digests_max["tick_duration"],
+            now - self.server._last_tick,
         )
-        self.server._max_tick_duration = 0
         yield GaugeMetricFamily(
-            self.build_name("tick_duration_maximum_seconds"),
+            self.build_name("tick_duration_maximum"),
             "Maximum tick duration observed since Prometheus last scraped metrics",
+            unit="seconds",
             value=max_tick_duration,
         )
 
         yield CounterMetricFamily(
-            self.build_name("tick_count_total"),
+            self.build_name("tick_count"),
             "Total number of ticks observed since the server started",
             value=self.server._tick_counter,
         )
+
+        # This duplicates spill_time_total; however the breakdown is different
+        evloop_blocked_total = CounterMetricFamily(
+            self.build_name("event_loop_blocked_time"),
+            "Total time during which the worker's event loop was blocked "
+            "by spill/unspill activity since the latest worker reset",
+            unit="seconds",
+            labels=["cause"],
+        )
+        # This is typically higher than spill_time_per_key_max, as multiple keys can be
+        # spilled/unspilled without yielding the event loop
+        evloop_blocked_max = GaugeMetricFamily(
+            self.build_name("event_loop_blocked_time_max"),
+            "Maximum contiguous time during which the worker's event loop was blocked "
+            "by spill/unspill activity since the previous Prometheus poll",
+            unit="seconds",
+            labels=["cause"],
+        )
+        for family, digest in (
+            (evloop_blocked_total, self.server.digests_total),
+            (evloop_blocked_max, self.server.digests_max),
+        ):
+            for family_label, digest_label in (
+                ("disk-write-target", "disk-write-target-duration"),
+                ("disk-write-spill", "disk-write-spill-duration"),
+                ("disk-read-execute", "disk-load-duration"),
+                ("disk-read-get-data", "get-data-load-duration"),
+            ):
+                family.add_metric([family_label], digest[digest_label])
+
+        yield evloop_blocked_total
+        yield evloop_blocked_max
+        self.server.digests_max.clear()
+
+    def collect_crick(self) -> Iterator[Metric]:
+        # All metrics using digests require crick to be installed.
+        # The following metrics will export NaN, if the corresponding digests are None
+        if not self.crick_available:
+            return
+
+        yield GaugeMetricFamily(
+            self.build_name("tick_duration_median"),
+            "Median tick duration at worker",
+            unit="seconds",
+            value=self.server.digests["tick-duration"].components[1].quantile(50),
+        )
+
+        yield GaugeMetricFamily(
+            self.build_name("task_duration_median"),
+            "Median task runtime at worker",
+            unit="seconds",
+            value=self.server.digests["task-duration"].components[1].quantile(50),
+        )
+
+        yield GaugeMetricFamily(
+            self.build_name("transfer_bandwidth_median"),
+            "Bandwidth for transfer at worker",
+            unit="bytes",
+            value=self.server.digests["transfer-bandwidth"].components[1].quantile(50),
+        )
+
+    def collect_spillbuffer(self) -> Iterator[Metric]:
+        """SpillBuffer-specific metrics.
+
+        Additionally, you can obtain derived metrics as follows:
+
+        cache hit ratios:
+          by keys  = spill_count.memory_read / (spill_count.memory_read + spill_count.disk_read)
+          by bytes = spill_bytes.memory_read / (spill_bytes.memory_read + spill_bytes.disk_read)
+
+        mean times per key:
+          pickle   = spill_time.pickle     / spill_count.disk_write
+          write    = spill_time.disk_write / spill_count.disk_write
+          unpickle = spill_time.unpickle   / spill_count.disk_read
+          read     = spill_time.disk_read  / spill_count.disk_read
+
+        mean bytes per key:
+          write    = spill_bytes.disk_write / spill_count.disk_write
+          read     = spill_bytes.disk_read  / spill_count.disk_read
+
+        mean bytes per second:
+          write    = spill_bytes.disk_write / spill_time.disk_write
+          read     = spill_bytes.disk_read  / spill_time.disk_read
+        """
+        try:
+            get_metrics = self.server.data.get_metrics  # type: ignore
+        except AttributeError:
+            return  # spilling is disabled
+        metrics = get_metrics()
+
+        total_bytes = CounterMetricFamily(
+            self.build_name("spill_bytes"),
+            "Total size of memory and disk accesses caused by managed data "
+            "since the latest worker restart",
+            labels=["activity"],
+        )
+        # Note: memory_read is used to calculate cache hit ratios (see docstring)
+        for k in ("memory_read", "disk_read", "disk_write"):
+            total_bytes.add_metric([k], metrics[f"{k}_bytes_total"])
+        yield total_bytes
+
+        total_counts = CounterMetricFamily(
+            self.build_name("spill_count"),
+            "Total number of memory and disk accesses caused by managed data "
+            "since the latest worker restart",
+            labels=["activity"],
+        )
+        # Note: memory_read is used to calculate cache hit ratios (see docstring)
+        for k in ("memory_read", "disk_read", "disk_write"):
+            total_counts.add_metric([k], metrics[f"{k}_count_total"])
+        yield total_counts
+
+        total_times = CounterMetricFamily(
+            self.build_name("spill_time"),
+            "Total time spent spilling/unspilling since the latest worker restart",
+            unit="seconds",
+            labels=["activity"],
+        )
+        for k in ("pickle", "disk_write", "disk_read", "unpickle"):
+            total_times.add_metric([k], metrics[f"{k}_time_total"])
+        yield total_times
 
 
 class PrometheusHandler(RequestHandler):

@@ -3647,7 +3647,7 @@ async def test_reconnect():
     port = open_port()
 
     stack = ExitStack()
-    proc = popen(["dask-scheduler", "--no-dashboard", f"--port={port}"])
+    proc = popen(["dask", "scheduler", "--no-dashboard", f"--port={port}"])
     stack.enter_context(proc)
     async with Client(f"127.0.0.1:{port}", asynchronous=True) as c, Worker(
         f"127.0.0.1:{port}"
@@ -3666,7 +3666,7 @@ async def test_reconnect():
         with pytest.raises(CancelledError):
             await x
 
-        with popen(["dask-scheduler", "--no-dashboard", f"--port={port}"]):
+        with popen(["dask", "scheduler", "--no-dashboard", f"--port={port}"]):
             start = time()
             while c.status != "running":
                 await asyncio.sleep(0.1)
@@ -4095,6 +4095,7 @@ def test_as_current_is_thread_local(s, loop):
                     # This line runs only when all parties are inside the
                     # context manager
                     assert Client.current(allow_global=False) is c
+                    assert default_client() is c
                 finally:
                     cm_before_exit.wait()
 
@@ -6979,6 +6980,27 @@ async def test_annotations_loose_restrictions(c, s, a, b):
             for ts in s.tasks.values()
         ]
     )
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[
+        ("127.0.0.1", 1, {"resources": {"foo": 4}}),
+        ("127.0.0.1", 1),
+    ],
+)
+async def test_annotations_submit_map(c, s, a, b):
+
+    with dask.annotate(resources={"foo": 1}):
+        f = c.submit(inc, 0)
+    with dask.annotate(resources={"foo": 1}):
+        fs = c.map(inc, range(10, 13))
+
+    await wait([f, *fs])
+
+    assert all([{"foo": 1} == ts.resource_restrictions for ts in s.tasks.values()])
+    assert all([{"resources": {"foo": 1}} == ts.annotations for ts in s.tasks.values()])
+    assert not b.state.tasks
 
 
 @gen_cluster(client=True)

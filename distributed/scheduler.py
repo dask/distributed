@@ -252,26 +252,26 @@ class MemoryState:
 
     Attributes / properties:
 
-    managed
+    managed_total
         Sum of the output of sizeof() for all dask keys held by the worker in memory,
         plus number of bytes spilled to disk
 
-    managed_in_memory
+    managed
         Sum of the output of sizeof() for the dask keys held in RAM. Note that this may
         be inaccurate, which may cause inaccurate unmanaged memory (see below).
 
-    managed_spilled
+    spilled
         Number of bytes  for the dask keys spilled to the hard drive.
         Note that this is the size on disk; size in memory may be different due to
         compression and inaccuracies in sizeof(). In other words, given the same keys,
-        'managed' will change depending if the keys are in memory or spilled.
+        'managed' will change depending on the keys being in memory or spilled.
 
     process
         Total RSS memory measured by the OS on the worker process.
-        This is always exactly equal to managed_in_memory + unmanaged.
+        This is always exactly equal to managed + unmanaged.
 
     unmanaged
-        process - managed_in_memory. This is the sum of
+        process - managed. This is the sum of
 
         - Python interpreter and modules
         - global variables
@@ -291,33 +291,15 @@ class MemoryState:
         spike.
 
     optimistic
-        managed_in_memory + unmanaged_old; in other words the memory held long-term by
+        managed + unmanaged_old; in other words the memory held long-term by
         the process under the hopeful assumption that all unmanaged_recent memory is a
         temporary spike
-
-    .. note::
-        There is an intentional misalignment in terminology between this class (which is
-        meant for internal / programmatic use) and the memory readings on the GUI (which
-        is aimed at the general public:
-
-        ================= =====================
-        MemoryState       GUI
-        ================= =====================
-        managed           n/a
-        managed_in_memory managed
-        managed_spilled   spilled
-        process           process (RSS); memory
-        unmanaged         n/a
-        unmanaged_old     unmanaged (old)
-        unmanaged_recent  unmanaged (recent)
-        optimistic        n/a
-        ================= =====================
     """
 
     process: int
     unmanaged_old: int
-    managed_in_memory: int
-    managed_spilled: int
+    managed: int
+    spilled: int
 
     __slots__ = tuple(__annotations__)
 
@@ -326,74 +308,88 @@ class MemoryState:
         *,
         process: int,
         unmanaged_old: int,
-        managed_in_memory: int,
-        managed_spilled: int,
+        managed: int,
+        spilled: int,
     ):
         # Some data arrives with the heartbeat, some other arrives in realtime as the
         # tasks progress. Also, sizeof() is not guaranteed to return correct results.
         # This can cause glitches where a partial measure is larger than the whole, so
         # we need to force all numbers to add up exactly by definition.
         self.process = process
-        self.managed_in_memory = min(self.process, managed_in_memory)
-        self.managed_spilled = managed_spilled
+        self.managed = min(self.process, managed)
+        self.spilled = spilled
         # Subtractions between unsigned ints guaranteed by construction to be >= 0
-        self.unmanaged_old = min(unmanaged_old, process - self.managed_in_memory)
+        self.unmanaged_old = min(unmanaged_old, process - self.managed)
 
     @staticmethod
     def sum(*infos: MemoryState) -> MemoryState:
         process = 0
         unmanaged_old = 0
-        managed_in_memory = 0
-        managed_spilled = 0
+        managed = 0
+        spilled = 0
         for ms in infos:
             process += ms.process
             unmanaged_old += ms.unmanaged_old
-            managed_spilled += ms.managed_spilled
-            managed_in_memory += ms.managed_in_memory
+            spilled += ms.spilled
+            managed += ms.managed
         return MemoryState(
             process=process,
             unmanaged_old=unmanaged_old,
-            managed_in_memory=managed_in_memory,
-            managed_spilled=managed_spilled,
+            managed=managed,
+            spilled=spilled,
         )
 
     @property
-    def managed(self) -> int:
-        return self.managed_in_memory + self.managed_spilled
+    def managed_total(self) -> int:
+        return self.managed + self.spilled
 
     @property
     def unmanaged(self) -> int:
         # This is never negative thanks to __init__
-        return self.process - self.managed_in_memory
+        return self.process - self.managed
 
     @property
     def unmanaged_recent(self) -> int:
         # This is never negative thanks to __init__
-        return self.process - self.managed_in_memory - self.unmanaged_old
+        return self.process - self.managed - self.unmanaged_old
 
     @property
     def optimistic(self) -> int:
-        return self.managed_in_memory + self.unmanaged_old
+        return self.managed + self.unmanaged_old
+
+    @property
+    def managed_in_memory(self) -> int:
+        warnings.warn("managed_in_memory has been renamed to managed", FutureWarning)
+        return self.managed
+
+    @property
+    def managed_spilled(self) -> int:
+        warnings.warn("managed_spilled has been renamed to spilled", FutureWarning)
+        return self.spilled
 
     def __repr__(self) -> str:
         return (
             f"Process memory (RSS)  : {format_bytes(self.process)}\n"
-            f"  - managed by Dask   : {format_bytes(self.managed_in_memory)}\n"
+            f"  - managed by Dask   : {format_bytes(self.managed)}\n"
             f"  - unmanaged (old)   : {format_bytes(self.unmanaged_old)}\n"
             f"  - unmanaged (recent): {format_bytes(self.unmanaged_recent)}\n"
-            f"Spilled to disk       : {format_bytes(self.managed_spilled)}\n"
+            f"Spilled to disk       : {format_bytes(self.spilled)}\n"
         )
 
     def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
         """Dictionary representation for debugging purposes.
-        Not type stable and not intended for roundtrips.
 
         See also
         --------
         Client.dump_cluster_state
         distributed.utils.recursive_to_dict
         """
-        return recursive_to_dict(self, exclude=exclude, members=True)
+        return {
+            k: getattr(self, k)
+            for k in dir(self)
+            if not k.startswith("_")
+            and k not in {"sum", "managed_in_memory", "managed_spilled"}
+        }
 
 
 class WorkerState:
@@ -622,25 +618,23 @@ class WorkerState:
         from optimistic memory, which is used for heuristics.
 
         Something that is less OK, but also less frequent, is that the sudden deletion
-        of spilled keys will cause a negative blip of managed_in_memory:
+        of spilled keys will cause a negative blip in managed memory:
 
         1. Delete 100MB of spilled data
         2. The updated managed memory *total* reaches the scheduler faster than the
            updated spilled portion
-        3. This causes managed_in_memory to temporarily plummet and be replaced by
-           unmanaged_recent, while managed_spilled remains unaltered
-        4. When the heartbeat arrives, managed_in_memory goes back up, unmanaged_recent
-           goes back down, and managed_spilled goes down by 100MB as it should have to
+        3. This causes the managed memory to temporarily plummet and be replaced by
+           unmanaged_recent, while spilled memory remains unaltered
+        4. When the heartbeat arrives, managed goes back up, unmanaged_recent
+           goes back down, and spilled goes down by 100MB as it should have to
            begin with.
 
         https://github.com/dask/distributed/issues/6002 will let us solve this.
         """
         return MemoryState(
             process=self.metrics["memory"],
-            managed_in_memory=max(
-                0, self.nbytes - self.metrics["spilled_bytes"]["memory"]
-            ),
-            managed_spilled=self.metrics["spilled_bytes"]["disk"],
+            managed=max(0, self.nbytes - self.metrics["spilled_bytes"]["memory"]),
+            spilled=self.metrics["spilled_bytes"]["disk"],
             unmanaged_old=self._memory_unmanaged_old,
         )
 
@@ -2317,18 +2311,13 @@ class SchedulerState:
         ############################
         # Update State Information #
         ############################
-        recommendations: Recs = {}
-        client_msgs: Msgs = {}
-
         if nbytes is not None:
             ts.set_nbytes(nbytes)
 
-        # NOTE: recommendations for queued tasks are added first, so they'll be popped
-        # last, allowing higher-priority downstream tasks to be transitioned first.
-        # FIXME: this would be incorrect if queued tasks are user-annotated as higher
-        #        priority.
-        self._exit_processing_common(ts, recommendations)
+        self._exit_processing_common(ts)
 
+        recommendations: Recs = {}
+        client_msgs: Msgs = {}
         self._add_to_memory(
             ts, ws, recommendations, client_msgs, type=type, typename=typename
         )
@@ -2507,7 +2496,7 @@ class SchedulerState:
             assert not ts.waiting_on
             assert ts.state == "processing"
 
-        ws = self._exit_processing_common(ts, recommendations)
+        ws = self._exit_processing_common(ts)
         if ws:
             worker_msgs[ws.address] = [
                 {
@@ -2574,7 +2563,7 @@ class SchedulerState:
             assert ws
             ws.actors.remove(ts)
 
-        self._exit_processing_common(ts, recommendations)
+        self._exit_processing_common(ts)
 
         ts.erred_on.add(worker)
         if exception is not None:
@@ -3059,24 +3048,20 @@ class SchedulerState:
             self.replicated_tasks.remove(ts)
         ts.who_has.clear()
 
-    def bulk_schedule_after_adding_worker(self, ws: WorkerState) -> Recs:
-        """Send ``queued`` or ``no-worker`` tasks to ``processing`` that this worker can
-        handle.
+    def bulk_schedule_unrunnable_after_adding_worker(self, ws: WorkerState) -> Recs:
+        """Send ``no-worker`` tasks to ``processing`` that this worker can handle.
 
         Returns priority-ordered recommendations.
         """
-        maybe_runnable = list(self._next_queued_tasks_for_worker(ws))[::-1]
-
-        # Schedule any restricted tasks onto the new worker, if the worker can run them
+        runnable: list[TaskState] = []
         for ts in self.unrunnable:
             valid = self.valid_workers(ts)
             if valid is None or ws in valid:
-                maybe_runnable.append(ts)
+                runnable.append(ts)
 
         # Recommendations are processed LIFO, hence the reversed order
-        maybe_runnable.sort(key=operator.attrgetter("priority"), reverse=True)
-        # Note not all will necessarily be run; transition->processing will decide
-        return {ts.key: "processing" for ts in maybe_runnable}
+        runnable.sort(key=operator.attrgetter("priority"), reverse=True)
+        return {ts.key: "processing" for ts in runnable}
 
     def _validate_ready(self, ts: TaskState) -> None:
         """Validation for ready states (processing, queued, no-worker)"""
@@ -3108,9 +3093,7 @@ class SchedulerState:
 
         return {ws.address: [self._task_to_msg(ts)]}
 
-    def _exit_processing_common(
-        self, ts: TaskState, recommendations: Recs
-    ) -> WorkerState | None:
+    def _exit_processing_common(self, ts: TaskState) -> WorkerState | None:
         """Remove *ts* from the set of processing tasks.
 
         Returns
@@ -3133,27 +3116,7 @@ class SchedulerState:
         self.check_idle_saturated(ws)
         self.release_resources(ts, ws)
 
-        for qts in self._next_queued_tasks_for_worker(ws):
-            if self.validate:
-                assert qts.key not in recommendations, recommendations[qts.key]
-            recommendations[qts.key] = "processing"
-
         return ws
-
-    def _next_queued_tasks_for_worker(self, ws: WorkerState) -> Iterator[TaskState]:
-        """Queued tasks to run, in priority order, on all open slots on a worker"""
-        if not self.queued or ws.status != Status.running:
-            return
-
-        # NOTE: this is called most frequently because a single task has completed, so
-        # there are <= 1 task slots available on the worker.
-        # `peekn` has fast paths for the cases N<=0 and N==1.
-        for qts in self.queued.peekn(_task_slots_available(ws, self.WORKER_SATURATION)):
-            if self.validate:
-                assert qts.state == "queued", qts.state
-                assert not qts.processing_on
-                assert not qts.waiting_on
-            yield qts
 
     def _add_to_memory(
         self,
@@ -3456,7 +3419,6 @@ class Scheduler(SchedulerState, ServerNode):
         self.synchronize_worker_interval = parse_timedelta(
             synchronize_worker_interval, default="ms"
         )
-        self.digests = None
         self.service_specs = services or {}
         self.service_kwargs = service_kwargs or {}
         self.services = {}
@@ -4240,7 +4202,10 @@ class Scheduler(SchedulerState, ServerNode):
                 logger.exception(e)
 
         if ws.status == Status.running:
-            self.transitions(self.bulk_schedule_after_adding_worker(ws), stimulus_id)
+            self.transitions(
+                self.bulk_schedule_unrunnable_after_adding_worker(ws), stimulus_id
+            )
+            self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
         logger.info("Register worker %s", ws)
 
@@ -4615,10 +4580,45 @@ class Scheduler(SchedulerState, ServerNode):
                 self.report_on_key(ts=ts, client=client)
 
         end = time()
-        if self.digests is not None:
-            self.digests["update-graph-duration"].add(end - start)
+        self.digest_metric("update-graph-duration", end - start)
 
         # TODO: balance workers
+
+    def stimulus_queue_slots_maybe_opened(self, *, stimulus_id: str) -> None:
+        """Respond to an event which may have opened spots on worker threadpools
+
+        Selects the appropriate number of tasks from the front of the queue according to
+        the total number of task slots available on workers (potentially 0), and
+        transitions them to ``processing``.
+
+        Notes
+        -----
+        Other transitions related to this stimulus should be fully processed beforehand,
+        so any tasks that became runnable are already in ``processing``. Otherwise,
+        overproduction can occur if queued tasks get scheduled before downstream tasks.
+
+        Must be called after `check_idle_saturated`; i.e. `idle_task_count` must be up
+        to date.
+        """
+        if not self.queued:
+            return
+        slots_available = sum(
+            _task_slots_available(ws, self.WORKER_SATURATION)
+            for ws in self.idle_task_count
+        )
+        if slots_available == 0:
+            return
+
+        recommendations: Recs = {}
+        for qts in self.queued.peekn(slots_available):
+            if self.validate:
+                assert qts.state == "queued", qts.state
+                assert not qts.processing_on, (qts, qts.processing_on)
+                assert not qts.waiting_on, (qts, qts.processing_on)
+                assert qts.who_wants or qts.waiters, qts
+            recommendations[qts.key] = "processing"
+
+        self.transitions(recommendations, stimulus_id)
 
     def stimulus_task_finished(self, key=None, worker=None, stimulus_id=None, **kwargs):
         """Mark that a task has finished execution on a particular worker"""
@@ -4945,6 +4945,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         self._client_releases_keys(keys=keys, cs=cs, recommendations=recommendations)
         self.transitions(recommendations, stimulus_id)
+
+        self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
     def client_heartbeat(self, client=None):
         """Handle heartbeats from Client"""
@@ -5290,14 +5292,17 @@ class Scheduler(SchedulerState, ServerNode):
         )
         recommendations, client_msgs, worker_msgs = r
         self._transitions(recommendations, client_msgs, worker_msgs, stimulus_id)
-
         self.send_all(client_msgs, worker_msgs)
+
+        self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
     def handle_task_erred(self, key: str, stimulus_id: str, **msg) -> None:
         r: tuple = self.stimulus_task_erred(key=key, stimulus_id=stimulus_id, **msg)
         recommendations, client_msgs, worker_msgs = r
         self._transitions(recommendations, client_msgs, worker_msgs, stimulus_id)
         self.send_all(client_msgs, worker_msgs)
+
+        self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
     def release_worker_data(self, key: str, worker: str, stimulus_id: str) -> None:
         ts = self.tasks.get(key)
@@ -5340,13 +5345,7 @@ class Scheduler(SchedulerState, ServerNode):
         ws.add_to_long_running(ts)
         self.check_idle_saturated(ws)
 
-        recommendations: Recs = {
-            qts.key: "processing" for qts in self._next_queued_tasks_for_worker(ws)
-        }
-        if self.validate:
-            assert len(recommendations) <= 1, (ws, recommendations)
-
-        self.transitions(recommendations, stimulus_id)
+        self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
     def handle_worker_status_change(
         self, status: str | Status, worker: str | WorkerState, stimulus_id: str
@@ -5372,12 +5371,10 @@ class Scheduler(SchedulerState, ServerNode):
         if ws.status == Status.running:
             self.running.add(ws)
             self.check_idle_saturated(ws)
-            recs = self.bulk_schedule_after_adding_worker(ws)
-            if recs:
-                client_msgs: Msgs = {}
-                worker_msgs: Msgs = {}
-                self._transitions(recs, client_msgs, worker_msgs, stimulus_id)
-                self.send_all(client_msgs, worker_msgs)
+            self.transitions(
+                self.bulk_schedule_unrunnable_after_adding_worker(ws), stimulus_id
+            )
+            self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
         else:
             self.running.discard(ws)
             self.idle.pop(ws.address, None)

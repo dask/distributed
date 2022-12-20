@@ -400,10 +400,10 @@ class ClusterMemory(DashboardComponent, MemoryColor):
         color = self._cluster_memory_color()
 
         width = [
-            meminfo.managed_in_memory,
+            meminfo.managed,
             meminfo.unmanaged_old,
             meminfo.unmanaged_recent,
-            meminfo.managed_spilled,
+            meminfo.spilled,
         ]
 
         result = {
@@ -411,18 +411,18 @@ class ClusterMemory(DashboardComponent, MemoryColor):
             "x": [sum(width[:i]) + w / 2 for i, w in enumerate(width)],
             "color": [color, color, color, "grey"],
             "proc_memory": [meminfo.process] * 4,
-            "managed": [meminfo.managed_in_memory] * 4,
+            "managed": [meminfo.managed] * 4,
             "unmanaged_old": [meminfo.unmanaged_old] * 4,
             "unmanaged_recent": [meminfo.unmanaged_recent] * 4,
-            "spilled": [meminfo.managed_spilled] * 4,
+            "spilled": [meminfo.spilled] * 4,
         }
 
-        x_end = max(limit, meminfo.process + meminfo.managed_spilled)
+        x_end = max(limit, meminfo.process + meminfo.spilled)
         self.root.x_range.end = x_end
 
         title = f"Bytes stored: {format_bytes(meminfo.process)}"
-        if meminfo.managed_spilled:
-            title += f" + {format_bytes(meminfo.managed_spilled)} spilled to disk"
+        if meminfo.spilled:
+            title += f" + {format_bytes(meminfo.spilled)} spilled to disk"
         self.root.title.text = title
 
         update(self.source, result)
@@ -541,24 +541,24 @@ class WorkersMemory(DashboardComponent, MemoryColor):
         for ws in workers:
             meminfo = ws.memory
             limit = getattr(ws, "memory_limit", 0)
-            max_limit = max(max_limit, limit, meminfo.process + meminfo.managed_spilled)
+            max_limit = max(max_limit, limit, meminfo.process + meminfo.spilled)
             color_i = self._memory_color(meminfo.process, limit, ws.status)
 
             width += [
-                meminfo.managed_in_memory,
+                meminfo.managed,
                 meminfo.unmanaged_old,
                 meminfo.unmanaged_recent,
-                meminfo.managed_spilled,
+                meminfo.spilled,
             ]
             x += [sum(width[-4:i]) + width[i] / 2 for i in range(-4, 0)]
             color += [color_i, color_i, color_i, "grey"]
 
             # memory info
             procmemory.append(meminfo.process)
-            managed.append(meminfo.managed_in_memory)
+            managed.append(meminfo.managed)
             unmanaged_old.append(meminfo.unmanaged_old)
             unmanaged_recent.append(meminfo.unmanaged_recent)
-            spilled.append(meminfo.managed_spilled)
+            spilled.append(meminfo.spilled)
 
         result = {
             "width": width,
@@ -3539,7 +3539,7 @@ class WorkerTable(DashboardComponent):
             "memory",
             "memory_limit",
             "memory_percent",
-            "memory_managed_in_memory",
+            "memory_managed",
             "memory_unmanaged_old",
             "memory_unmanaged_recent",
             "memory_spilled",
@@ -3569,7 +3569,7 @@ class WorkerTable(DashboardComponent):
             "memory",
             "memory_limit",
             "memory_percent",
-            "memory_managed_in_memory",
+            "memory_managed",
             "memory_unmanaged_old",
             "memory_unmanaged_recent",
             "memory_spilled",
@@ -3582,7 +3582,7 @@ class WorkerTable(DashboardComponent):
         column_title_renames = {
             "memory_limit": "limit",
             "memory_percent": "memory %",
-            "memory_managed_in_memory": "managed",
+            "memory_managed": "managed",
             "memory_unmanaged_old": "unmanaged old",
             "memory_unmanaged_recent": "unmanaged recent",
             "memory_spilled": "spilled",
@@ -3605,7 +3605,7 @@ class WorkerTable(DashboardComponent):
             "memory_percent": NumberFormatter(format="0.0 %"),
             "memory": NumberFormatter(format="0.0 b"),
             "memory_limit": NumberFormatter(format="0.0 b"),
-            "memory_managed_in_memory": NumberFormatter(format="0.0 b"),
+            "memory_managed": NumberFormatter(format="0.0 b"),
             "memory_unmanaged_old": NumberFormatter(format="0.0 b"),
             "memory_unmanaged_recent": NumberFormatter(format="0.0 b"),
             "memory_spilled": NumberFormatter(format="0.0 b"),
@@ -3748,11 +3748,11 @@ class WorkerTable(DashboardComponent):
             else:
                 data["memory_percent"][-1] = ""
             data["memory_limit"][-1] = ws.memory_limit
-            data["memory_managed_in_memory"][-1] = minfo.managed_in_memory
+            data["memory_managed"][-1] = minfo.managed
             data["memory_unmanaged_old"][-1] = minfo.unmanaged_old
             data["memory_unmanaged_recent"][-1] = minfo.unmanaged_recent
             data["memory_unmanaged_recent"][-1] = minfo.unmanaged_recent
-            data["memory_spilled"][-1] = minfo.managed_spilled
+            data["memory_spilled"][-1] = minfo.spilled
             data["cpu"][-1] = ws.metrics["cpu"] / 100.0
             data["cpu_fraction"][-1] = ws.metrics["cpu"] / 100.0 / ws.nthreads
             data["nthreads"][-1] = ws.nthreads
