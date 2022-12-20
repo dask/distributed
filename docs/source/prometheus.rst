@@ -1,3 +1,6 @@
+.. When modifying the contents of the first two sections of this page, please adjust the corresponding page in the dask.dask documentation accordingly.
+
+
 Prometheus monitoring
 =====================
 
