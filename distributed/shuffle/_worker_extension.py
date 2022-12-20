@@ -203,7 +203,7 @@ class Shuffle:
             raise
 
     def _repartition_buffers(self, data: list[bytes]) -> dict[str, list[pa.Table]]:
-        table = list_of_buffers_to_table(data, self.schema)
+        table = list_of_buffers_to_table(data)
         groups = split_by_partition(table, self.column)
         assert len(table) == sum(map(len, groups.values()))
         del data

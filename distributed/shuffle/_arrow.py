@@ -32,7 +32,7 @@ def load_partition(file: BinaryIO) -> pa.Table:
     >>> tables = [pa.Table.from_pandas(df), pa.Table.from_pandas(df2)]  # doctest: +SKIP
     >>> with open("myfile", mode="wb") as f:  # doctest: +SKIP
     ...     for table in tables:  # doctest: +SKIP
-    ...         dump_shards(tables, f, schema=t.schema)  # doctest: +SKIP
+    ...         dump_shards(tables, f)  # doctest: +SKIP
 
     >>> with open("myfile", mode="rb") as f:  # doctest: +SKIP
     ...     t = load_partition(f)  # doctest: +SKIP
@@ -56,7 +56,7 @@ def load_partition(file: BinaryIO) -> pa.Table:
         raise
 
 
-def list_of_buffers_to_table(data: list[bytes], schema: pa.Schema) -> pa.Table:
+def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
     """Convert a list of arrow buffers and a schema to an Arrow Table"""
     import pyarrow as pa
 
