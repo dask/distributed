@@ -1749,12 +1749,14 @@ class Client(SyncMethodMixin):
         for pc in self._periodic_callbacks.values():
             pc.stop()
 
-        async with self._wait_for_handle_report_task(fast=True):
+        async with self._wait_for_handle_report_task():
             if self.cluster:
                 await self.cluster.close()
             else:
                 with suppress(CommClosedError):
                     await self.scheduler.terminate()
+
+        await self._close()
 
     def shutdown(self):
         """Shut down the connected scheduler and workers
