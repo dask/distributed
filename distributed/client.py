@@ -1606,18 +1606,18 @@ class Client(SyncMethodMixin):
         handle_report_task = self._handle_report_task
         # Give the scheduler 'stream-closed' message 100ms to come through
         # This makes the shutdown slightly smoother and quieter
-        if handle_report_task is not None and handle_report_task is not current_task:
+        should_wait = (
+            handle_report_task is not None and handle_report_task is not current_task
+        )
+        if should_wait:
             with suppress(asyncio.CancelledError, TimeoutError):
                 await asyncio.wait_for(asyncio.shield(handle_report_task), 0.1)
 
-            yield
+        yield
 
-            if (
-                handle_report_task is not None
-                and handle_report_task is not current_task
-            ):
-                with suppress(TimeoutError, asyncio.CancelledError):
-                    await asyncio.wait_for(handle_report_task, 0 if fast else 2)
+        if should_wait:
+            with suppress(TimeoutError, asyncio.CancelledError):
+                await asyncio.wait_for(handle_report_task, 0 if fast else 2)
 
     async def _close(self, fast=False):
         """
