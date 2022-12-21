@@ -806,8 +806,13 @@ def test_processing_chain():
         bio.seek(0)
         out[k] = load_partition(bio)
 
-    assert sum(map(len, out.values())) == len(df)
-    assert all(v.to_pandas().dtypes.equals(df.dtypes) for v in out.values())
+    shuffled_df = pd.concat(table.to_pandas() for table in out.values())
+    pd.testing.assert_frame_equal(
+        df,
+        shuffled_df,
+        check_like=True,
+        check_exact=True,
+    )
 
 
 @gen_cluster(client=True)
