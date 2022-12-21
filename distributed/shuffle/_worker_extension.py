@@ -9,7 +9,7 @@ import time
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any, BinaryIO, TypeVar, overload
+from typing import TYPE_CHECKING, Any, TypeVar, overload
 
 import toolz
 
@@ -122,9 +122,8 @@ class Shuffle:
         self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
         self.closed = False
 
-
         self._disk_buffer = DiskShardsBuffer(
-            dump=_dump_shards,
+            dump=dump_shards,
             load=load_partition,
             directory=directory,
             memory_limiter=memory_limiter_disk,

@@ -41,19 +41,19 @@ def load_partition(file: BinaryIO) -> pa.Table:
     --------
     dump_shards
     """
+    import os
+
     import pyarrow as pa
 
+    pos = file.tell()
+    file.seek(0, os.SEEK_END)
+    end = file.tell()
+    file.seek(pos)
     shards = []
-    try:
-        while True:
-            sr = pa.RecordBatchStreamReader(file)
-            shards.append(sr.read_all())
-    # Since we write multiple streams to the same file, we have to read until
-    # there is nothing to read anymore. At that point, pa.ArrowInvalid is raised
-    except pa.ArrowInvalid as e:
-        if str(e) == "Tried reading schema message, was null or length 0":
-            return pa.concat_tables(shards)
-        raise
+    while file.tell() < end:
+        sr = pa.RecordBatchStreamReader(file)
+        shards.append(sr.read_all())
+    return pa.concat_tables(shards)
 
 
 def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
