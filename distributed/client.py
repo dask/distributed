@@ -1286,9 +1286,6 @@ class Client(SyncMethodMixin):
     @log_errors
     async def _reconnect(self):
         assert self.scheduler_comm.comm.closed()
-        # Don't attempt to reconnect if cluster is already closed
-        if self.cluster and self.cluster.status in (Status.closed, Status.closing):
-            return
 
         self.status = "connecting"
         self.scheduler_comm = None
@@ -1511,11 +1508,13 @@ class Client(SyncMethodMixin):
                     if is_python_shutting_down():
                         return
                     if self.status == "running":
-                        # Don't attempt to reconnect if cluster are already closed
                         if self.cluster and self.cluster.status in (
                             Status.closed,
                             Status.closing,
                         ):
+                            # Don't attempt to reconnect if cluster are already closed.
+                            # Instead close down the client.
+                            await self._close()
                             return
                         logger.info("Client report stream closed to scheduler")
                         logger.info("Reconnecting...")
