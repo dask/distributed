@@ -16,6 +16,7 @@ from distributed.deploy.spec import run_spec
 @click.option("--spec-file", type=str, default=None, help="")
 @click.version_option()
 def main(args: list, spec: str, spec_file: str) -> None:
+    """Launch a Dask process defined by a JSON/YAML specification"""
 
     if spec and spec_file or not spec and not spec_file:
         print("Must specify exactly one of --spec and --spec-file")
