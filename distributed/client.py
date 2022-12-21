@@ -1511,10 +1511,10 @@ class Client(SyncMethodMixin):
                     if is_python_shutting_down():
                         return
                     if self.status == "running":
-                        # Don't attempt to reconnect if scheduler comm or cluster are already closed
-                        if self.scheduler_comm.comm.closed() or (
-                            self.cluster
-                            and self.cluster.status in (Status.closed, Status.closing)
+                        # Don't attempt to reconnect if cluster are already closed
+                        if self.cluster and self.cluster.status in (
+                            Status.closed,
+                            Status.closing,
                         ):
                             return
                         logger.info("Client report stream closed to scheduler")
