@@ -134,7 +134,7 @@ def main(
     jupyter,
     **kwargs,
 ):
-    """Launch a distributed scheduler."""
+    """Launch a Dask scheduler."""
 
     if "dask-scheduler" in sys.argv[0]:
         warnings.warn(

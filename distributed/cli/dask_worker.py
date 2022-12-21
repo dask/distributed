@@ -260,7 +260,7 @@ def main(  # type: ignore[no-untyped-def]
     preload_nanny,
     **kwargs,
 ):
-    """Launch a distributed worker attached to an existing SCHEDULER."""
+    """Launch a Dask worker attached to an existing scheduler"""
 
     if "dask-worker" in sys.argv[0]:
         warnings.warn(
