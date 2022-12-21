@@ -122,8 +122,6 @@ class Shuffle:
         self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
         self.closed = False
 
-        def _dump_shards(shards: list[pa.Table], file: BinaryIO) -> None:
-            return dump_shards(shards, file)
 
         self._disk_buffer = DiskShardsBuffer(
             dump=_dump_shards,

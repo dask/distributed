@@ -60,10 +60,7 @@ def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
     """Convert a list of arrow buffers and a schema to an Arrow Table"""
     import pyarrow as pa
 
-    tables = []
-    for buffer in data:
-        tables.append(deserialize_table(buffer))
-    return pa.concat_tables(tables)
+    return pa.concat_tables(deserialize_table(buffer) for buffer in data)
 
 
 def deserialize_schema(data: bytes) -> pa.Schema:
