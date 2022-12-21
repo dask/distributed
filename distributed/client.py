@@ -1731,6 +1731,9 @@ class Client(SyncMethodMixin):
 
     async def _shutdown(self):
         logger.info("Shutting down scheduler from Client")
+
+        for pc in self._periodic_callbacks.values():
+            pc.stop()
         if self.cluster:
             await self.cluster.close()
         else:
