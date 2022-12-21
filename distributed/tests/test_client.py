@@ -6311,6 +6311,15 @@ async def test_shutdown_localcluster():
 
 
 @gen_test()
+async def test_shutdown_is_clean():
+    async with Scheduler(dashboard_address=":0") as s:
+        async with Worker(s.address) as w:
+            async with Client(s.address, asynchronous=True) as c:
+                await c.shutdown()
+                assert not any(pc.is_running() for pc in c._periodic_callbacks.values())
+
+
+@gen_test()
 async def test_config_inherited_by_subprocess():
     with dask.config.set(foo=100):
         async with LocalCluster(
