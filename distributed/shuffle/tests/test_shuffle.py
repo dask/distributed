@@ -6,9 +6,11 @@ import os
 import random
 import shutil
 from collections import defaultdict
+from itertools import count
 from typing import Any, Mapping
 from unittest import mock
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -20,15 +22,16 @@ from dask.utils import stringify
 from distributed.core import PooledRPCCall
 from distributed.scheduler import Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
+from distributed.shuffle._arrow import serialize_table
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_extension import get_worker_for
 from distributed.shuffle._shuffle import ShuffleId, barrier_key
 from distributed.shuffle._worker_extension import (
     Shuffle,
     ShuffleWorkerExtension,
-    dump_batch,
+    dump_shards,
     list_of_buffers_to_table,
-    load_arrow,
+    load_partition,
     split_by_partition,
     split_by_worker,
 )
@@ -654,10 +657,104 @@ def test_processing_chain():
     In practice this takes place on many different workers.
     Here we verify its accuracy in a single threaded situation.
     """
+
+    class Stub:
+        def __init__(self, value: int) -> None:
+            self.value = value
+
+    counter = count()
     workers = ["a", "b", "c"]
     npartitions = 5
-    df = pd.DataFrame({"x": range(100), "y": range(100)})
-    df["_partitions"] = df.x % npartitions
+
+    # Test the processing chain with a dataframe that contains all supported dtypes
+    df = pd.DataFrame(
+        {
+            # numpy dtypes
+            f"col{next(counter)}": pd.array([True, False] * 50, dtype="bool"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int8"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int16"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int32"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int64"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint8"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint16"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint32"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint64"),
+            f"col{next(counter)}": pd.array(range(100), dtype="float16"),
+            f"col{next(counter)}": pd.array(range(100), dtype="float32"),
+            f"col{next(counter)}": pd.array(range(100), dtype="float64"),
+            f"col{next(counter)}": pd.array(
+                [np.datetime64("2022-01-01") + i for i in range(100)],
+                dtype="datetime64",
+            ),
+            f"col{next(counter)}": pd.array(
+                [np.timedelta64(1, "D") + i for i in range(100)], dtype="timedelta64"
+            ),
+            # FIXME: PyArrow does not support complex numbers: https://issues.apache.org/jira/browse/ARROW-638
+            # f"col{next(counter)}": pd.array(range(100), dtype="csingle"),
+            # f"col{next(counter)}": pd.array(range(100), dtype="cdouble"),
+            # f"col{next(counter)}": pd.array(range(100), dtype="clongdouble"),
+            # Nullable dtypes
+            f"col{next(counter)}": pd.array([True, False] * 50, dtype="boolean"),
+            f"col{next(counter)}": pd.array(range(100), dtype="Int8"),
+            f"col{next(counter)}": pd.array(range(100), dtype="Int16"),
+            f"col{next(counter)}": pd.array(range(100), dtype="Int32"),
+            f"col{next(counter)}": pd.array(range(100), dtype="Int64"),
+            f"col{next(counter)}": pd.array(range(100), dtype="UInt8"),
+            f"col{next(counter)}": pd.array(range(100), dtype="UInt16"),
+            f"col{next(counter)}": pd.array(range(100), dtype="UInt32"),
+            f"col{next(counter)}": pd.array(range(100), dtype="UInt64"),
+            # pandas dtypes
+            f"col{next(counter)}": pd.array(
+                [np.datetime64("2022-01-01") + i for i in range(100)],
+                dtype=pd.DatetimeTZDtype(tz="Europe/Berlin"),
+            ),
+            f"col{next(counter)}": pd.array(
+                [pd.Period("2022-01-01", freq="D") + i for i in range(100)],
+                dtype="period[D]",
+            ),
+            f"col{next(counter)}": pd.array(
+                [pd.Interval(left=i, right=i + 2) for i in range(100)], dtype="Interval"
+            ),
+            f"col{next(counter)}": pd.array(["x", "y"] * 50, dtype="category"),
+            f"col{next(counter)}": pd.array(["lorem ipsum"] * 100, dtype="string"),
+            # FIXME: PyArrow does not support sparse data: https://issues.apache.org/jira/browse/ARROW-8679
+            # f"col{next(counter)}": pd.array(
+            #     [np.nan, np.nan, 1.0, np.nan, np.nan] * 20,
+            #     dtype="Sparse[float64]",
+            # ),
+            # PyArrow dtypes
+            f"col{next(counter)}": pd.array([True, False] * 50, dtype="bool[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int8[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int16[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int32[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int64[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint8[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint16[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint32[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint64[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="float32[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="float64[pyarrow]"),
+            f"col{next(counter)}": pd.array(
+                [pd.Timestamp.fromtimestamp(1641034800 + i) for i in range(100)],
+                dtype=pd.ArrowDtype(pa.timestamp("ms")),
+            ),
+            # FIXME: distributed#7420
+            # f"col{next(counter)}": pd.array(
+            #     ["lorem ipsum"] * 100,
+            #     dtype="string[pyarrow]",
+            # ),
+            # f"col{next(counter)}": pd.array(
+            #     ["lorem ipsum"] * 100,
+            #     dtype=pd.StringDtype("pyarrow"),
+            # ),
+            # custom objects
+            # FIXME: Serializing custom objects is not supported in P2P shuffling
+            # f"col{next(counter)}": pd.array(
+            #     [Stub(i) for i in range(100)], dtype="object"
+            # ),
+        }
+    )
+    df["_partitions"] = df.col4 % npartitions
     schema = pa.Schema.from_pandas(df)
     worker_for = {i: random.choice(workers) for i in list(range(npartitions))}
     worker_for = pd.Series(worker_for, name="_worker").astype("category")
@@ -666,16 +763,13 @@ def test_processing_chain():
     assert set(data) == set(worker_for.cat.categories)
     assert sum(map(len, data.values())) == len(df)
 
-    batches = {
-        worker: [b.serialize().to_pybytes() for b in t.to_batches()]
-        for worker, t in data.items()
-    }
+    batches = {worker: [serialize_table(t)] for worker, t in data.items()}
 
     # Typically we communicate to different workers at this stage
     # We then receive them back and reconstute them
 
     by_worker = {
-        worker: list_of_buffers_to_table(list_of_batches, schema)
+        worker: list_of_buffers_to_table(list_of_batches)
         for worker, list_of_batches in batches.items()
     }
     assert sum(map(len, by_worker.values())) == len(df)
@@ -687,10 +781,7 @@ def test_processing_chain():
     }
 
     splits_by_worker = {
-        worker: {
-            partition: [batch.serialize() for batch in t.to_batches()]
-            for partition, t in d.items()
-        }
+        worker: {partition: [t] for partition, t in d.items()}
         for worker, d in splits_by_worker.items()
     }
 
@@ -707,16 +798,21 @@ def test_processing_chain():
     filesystem = defaultdict(io.BytesIO)
 
     for partitions in splits_by_worker.values():
-        for partition, batches in partitions.items():
-            for batch in batches:
-                dump_batch(batch, filesystem[partition], schema)
+        for partition, tables in partitions.items():
+            dump_shards(tables, filesystem[partition])
 
     out = {}
     for k, bio in filesystem.items():
         bio.seek(0)
-        out[k] = load_arrow(bio)
+        out[k] = load_partition(bio)
 
-    assert sum(map(len, out.values())) == len(df)
+    shuffled_df = pd.concat(table.to_pandas() for table in out.values())
+    pd.testing.assert_frame_equal(
+        df,
+        shuffled_df,
+        check_like=True,
+        check_exact=True,
+    )
 
 
 @gen_cluster(client=True)

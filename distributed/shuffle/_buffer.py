@@ -5,13 +5,10 @@ import contextlib
 import logging
 from collections import defaultdict
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any, Generic, Sized, TypeVar
+from typing import Any, Generic, Sized, TypeVar
 
 from distributed.metrics import time
 from distributed.shuffle._limiter import ResourceLimiter
-
-if TYPE_CHECKING:
-    import pyarrow as pa
 
 logger = logging.getLogger("distributed.shuffle")
 
@@ -96,7 +93,7 @@ class ShardsBuffer(Generic[ShardType]):
             "memory_limit": self.memory_limiter._maxvalue if self.memory_limiter else 0,
         }
 
-    async def process(self, id: str, shards: list[pa.Table], size: int) -> None:
+    async def process(self, id: str, shards: list[ShardType], size: int) -> None:
         try:
             start = time()
             try:
