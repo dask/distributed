@@ -53,9 +53,10 @@ class SubprocessWorker(ProcessInterface):
         await super().start()
 
     async def close(self) -> None:
-        if self.process:
+        if self.process and self.process.returncode is None:
             self.process.kill()
-            await self.process.communicate()
+            await self.process.wait()
+        self.process = None
         await super().close()
 
 
@@ -69,12 +70,14 @@ def SubprocessCluster(
     threads_per_worker: int | None = None,
     worker_dashboard_address: str | None = None,
     worker_options: dict | None = None,
+    silence_logs: int = logging.WARN,
     **kwargs: Any,
 ) -> SpecCluster:
     if not host:
         host = "127.0.0.1"
     worker_options = worker_options or {}
     scheduler_options = scheduler_options or {}
+
     if n_workers is None and threads_per_worker is None:
         n_workers, threads_per_worker = nprocesses_nthreads()
     if n_workers is None and threads_per_worker is not None:
@@ -102,6 +105,7 @@ def SubprocessCluster(
             "nthreads": threads_per_worker,
             "dashboard": worker_dashboard_address is not None,
             "dashboard_address": worker_dashboard_address,
+            "silence_logs": silence_logs,
         }
     )
 
@@ -111,4 +115,10 @@ def SubprocessCluster(
         "options": {"worker_class": worker_class, "worker_options": worker_options},
     }
     workers = {i: worker for i in range(n_workers)}
-    return SpecCluster(workers, scheduler, name="SubprocessCluster", **kwargs)
+    return SpecCluster(
+        workers,
+        scheduler,
+        name="SubprocessCluster",
+        silence_logs=silence_logs,
+        **kwargs,
+    )
