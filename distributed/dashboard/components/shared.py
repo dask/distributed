@@ -289,7 +289,7 @@ class ProfileTimePlot(DashboardComponent):
         if metadata is not None and metadata["counts"]:
             self.task_names = ["All"] + sorted(metadata["keys"])
             self.select.options = self.task_names
-            if self.key:
+            if self.key and self.key in metadata["keys"]:
                 ts = metadata["keys"][self.key]
             else:
                 ts = metadata["counts"]
