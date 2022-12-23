@@ -62,7 +62,9 @@ async def test_scale_up_and_down():
             assert len(cluster.workers) == 1
 
 
-@pytest.mark.skipif(not WINDOWS, reason="Windows-specific error testing")
+@pytest.mark.skipif(
+    not WINDOWS, reason="Windows-specific error testing (distributed#7434)"
+)
 def test_raise_on_windows():
     with pytest.raises(RuntimeError, match="not support Windows"):
         SubprocessCluster()
