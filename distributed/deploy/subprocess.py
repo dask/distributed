@@ -7,6 +7,7 @@ import logging
 import math
 from typing import Any
 
+import psutil
 import toolz
 
 from dask.system import CPU_COUNT
@@ -70,6 +71,8 @@ class SubprocessWorker(ProcessInterface):
 
     async def close(self) -> None:
         if self.process and self.process.returncode is None:
+            for child in psutil.Process(self.process.pid).children(recursive=True):
+                child.kill()
             self.process.kill()
             await self.process.wait()
         self.process = None
