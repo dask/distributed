@@ -14,8 +14,8 @@ async def test_basic():
     async with SubprocessCluster(
         asynchronous=True,
         dashboard_address=":0",
-        scheduler_options={"idle_timeout": "5s"},
-        worker_options={"death_timeout": "5s"},
+        scheduler_kwargs={"idle_timeout": "5s"},
+        worker_kwargs={"death_timeout": "5s"},
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             result = await client.submit(lambda x: x + 1, 10)

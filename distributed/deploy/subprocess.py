@@ -67,12 +67,12 @@ class SubprocessWorker(ProcessInterface):
 def SubprocessCluster(
     host: str | None = None,
     scheduler_port: int = 0,
-    scheduler_options: dict | None = None,
+    scheduler_kwargs: dict | None = None,
     dashboard_address: str = ":8787",
     worker_class: str = "distributed.Nanny",
     n_workers: int | None = None,
     threads_per_worker: int | None = None,
-    worker_options: dict | None = None,
+    worker_kwargs: dict | None = None,
     silence_logs: int = logging.WARN,
     **kwargs: Any,
 ) -> SpecCluster:
@@ -87,7 +87,7 @@ def SubprocessCluster(
         Host address on which the scheduler will listen, defaults to localhost
     scheduler_port:
         Port fo the scheduler, defaults to 0 to choose a random port
-    scheduler_options:
+    scheduler_kwargs:
             Keywords to pass on to scheduler
     dashboard_address:
         Address on which to listen for the Bokeh diagnostics server like
@@ -101,7 +101,7 @@ def SubprocessCluster(
         Number of workers to start
     threads:
         Number of threads per each worker
-    worker_options:
+    worker_kwargs:
         Keywords to pass on to the ``Worker`` class constructor
     silence_logs:
         Level of logs to print out to stdout, defaults to ``logging.WARN``
@@ -125,8 +125,8 @@ def SubprocessCluster(
         raise RuntimeError("SubprocessCluster does not support Windows.")
     if not host:
         host = "127.0.0.1"
-    worker_options = worker_options or {}
-    scheduler_options = scheduler_options or {}
+    worker_kwargs = worker_kwargs or {}
+    scheduler_kwargs = scheduler_kwargs or {}
 
     if n_workers is None and threads_per_worker is None:
         n_workers, threads_per_worker = nprocesses_nthreads()
@@ -135,13 +135,13 @@ def SubprocessCluster(
     if n_workers and threads_per_worker is None:
         # Overcommit threads per worker, rather than undercommit
         threads_per_worker = max(1, int(math.ceil(CPU_COUNT / n_workers)))
-    if n_workers and "memory_limit" not in worker_options:
-        worker_options["memory_limit"] = parse_memory_limit(
+    if n_workers and "memory_limit" not in worker_kwargs:
+        worker_kwargs["memory_limit"] = parse_memory_limit(
             "auto", 1, n_workers, logger=logger
         )
     assert n_workers is not None
 
-    scheduler_options.update(
+    scheduler_kwargs.update(
         {
             "host": host,
             "port": scheduler_port,
@@ -149,7 +149,7 @@ def SubprocessCluster(
             "dashboard_address": dashboard_address,
         }
     )
-    worker_options.update(
+    worker_kwargs.update(
         {
             "host": host,
             "nthreads": threads_per_worker,
@@ -157,10 +157,10 @@ def SubprocessCluster(
         }
     )
 
-    scheduler = {"cls": Scheduler, "options": scheduler_options}
+    scheduler = {"cls": Scheduler, "options": scheduler_kwargs}
     worker = {
         "cls": SubprocessWorker,
-        "options": {"worker_class": worker_class, "worker_options": worker_options},
+        "options": {"worker_class": worker_class, "worker_options": worker_kwargs},
     }
     workers = {i: worker for i in range(n_workers)}
     return SpecCluster(
