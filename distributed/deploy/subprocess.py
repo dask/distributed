@@ -81,6 +81,10 @@ def SubprocessCluster(
     This creates a "cluster" of a scheduler running in the current process and
     workers running in dedicated subprocesses.
 
+    .. warning::
+
+       This function is experimental
+
     Parameters
     ----------
     host:
