@@ -27,7 +27,13 @@ from distributed.client import (
     wait,
 )
 from distributed.core import Status, connect, rpc
-from distributed.deploy import Adaptive, LocalCluster, SpecCluster, SSHCluster
+from distributed.deploy import (
+    Adaptive,
+    LocalCluster,
+    SpecCluster,
+    SSHCluster,
+    SubprocessCluster,
+)
 from distributed.diagnostics.plugin import (
     CondaInstall,
     Environ,
@@ -134,6 +140,7 @@ __all__ = [
     "SpecCluster",
     "Status",
     "Sub",
+    "SubprocessCluster",
     "TimeoutError",
     "UploadDirectory",
     "UploadFile",

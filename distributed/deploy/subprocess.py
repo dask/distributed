@@ -9,10 +9,10 @@ from typing import Any
 
 from dask.system import CPU_COUNT
 
-from distributed import Scheduler
 from distributed.compatibility import WINDOWS
 from distributed.deploy.spec import ProcessInterface, SpecCluster
 from distributed.deploy.utils import nprocesses_nthreads
+from distributed.scheduler import Scheduler
 from distributed.worker_memory import parse_memory_limit
 
 logger = logging.getLogger(__name__)
