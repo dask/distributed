@@ -72,11 +72,54 @@ def SubprocessCluster(
     worker_class: str = "distributed.Nanny",
     n_workers: int | None = None,
     threads_per_worker: int | None = None,
-    worker_dashboard_address: str | None = None,
     worker_options: dict | None = None,
     silence_logs: int = logging.WARN,
     **kwargs: Any,
 ) -> SpecCluster:
+    """Create in-process scheduler and workers in dedicated subprocesses
+
+    This creates a "cluster" of a scheduler running in the current process and
+    workers running in dedicated subprocesses.
+
+    Parameters
+    ----------
+    host:
+        Host address on which the scheduler will listen, defaults to localhost
+    scheduler_port:
+        Port fo the scheduler, defaults to 0 to choose a random port
+    scheduler_options:
+            Keywords to pass on to scheduler
+    dashboard_address:
+        Address on which to listen for the Bokeh diagnostics server like
+        'localhost:8787' or '0.0.0.0:8787', defaults to ':8787'
+
+        Set to ``None`` to disable the dashboard.
+        Use ':0' for a random port.
+    worker_class:
+        Worker class to instantiate workers from, defaults to 'distributed.Nanny'
+    n_workers:
+        Number of workers to start
+    threads:
+        Number of threads per each worker
+    worker_options:
+        Keywords to pass on to the ``Worker`` class constructor
+    silence_logs:
+        Level of logs to print out to stdout, defaults to ``logging.WARN``
+
+        Use a falsy value like False or None to disable log silencing.
+
+    Examples
+    --------
+    >>> cluster = SubprocessCluster()  # Create a subprocess cluster  #doctest: +SKIP
+    >>> cluster  # doctest: +SKIP
+    SubprocessCluster(SubprocessCluster, 'tcp://127.0.0.1:61207', workers=5, threads=10, memory=16.00 GiB)
+
+    >>> c = Client(cluster)  # connect to subprocess cluster  # doctest: +SKIP
+
+    Scale the cluster to three workers
+
+    >>> cluster.scale(3)  # doctest: +SKIP
+    """
     if WINDOWS:
         # FIXME: distributed#7434
         raise RuntimeError("SubprocessCluster does not support Windows.")
@@ -110,8 +153,6 @@ def SubprocessCluster(
         {
             "host": host,
             "nthreads": threads_per_worker,
-            "dashboard": worker_dashboard_address is not None,
-            "dashboard_address": worker_dashboard_address,
             "silence_logs": silence_logs,
         }
     )
