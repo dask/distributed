@@ -7,6 +7,8 @@ import logging
 import math
 from typing import Any
 
+import toolz
+
 from dask.system import CPU_COUNT
 
 from distributed.compatibility import WINDOWS
@@ -155,20 +157,22 @@ def SubprocessCluster(
         )
     assert n_workers is not None
 
-    scheduler_kwargs.update(
+    scheduler_kwargs = toolz.merge(
         {
             "host": host,
             "port": scheduler_port,
             "dashboard": dashboard_address is not None,
             "dashboard_address": dashboard_address,
-        }
+        },
+        scheduler_kwargs,
     )
-    worker_kwargs.update(
+    worker_kwargs = toolz.merge(
         {
             "host": host,
             "nthreads": threads_per_worker,
             "silence_logs": silence_logs,
-        }
+        },
+        worker_kwargs,
     )
 
     scheduler = {"cls": Scheduler, "options": scheduler_kwargs}
