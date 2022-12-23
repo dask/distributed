@@ -10,6 +10,7 @@ from typing import Any
 from dask.system import CPU_COUNT
 
 from distributed import Scheduler
+from distributed.compatibility import WINDOWS
 from distributed.deploy.spec import ProcessInterface, SpecCluster
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.worker_memory import parse_memory_limit
@@ -32,6 +33,9 @@ class SubprocessWorker(ProcessInterface):
         worker_options: dict | None = None,
         **kwargs: Any,
     ) -> None:
+        if WINDOWS:
+            # FIXME: distributed#7434
+            raise RuntimeError("SubprocessWorker does not support Windows.")
         self.scheduler = scheduler
         self.worker_class = worker_class
         self.name = name
@@ -73,6 +77,9 @@ def SubprocessCluster(
     silence_logs: int = logging.WARN,
     **kwargs: Any,
 ) -> SpecCluster:
+    if WINDOWS:
+        # FIXME: distributed#7434
+        raise RuntimeError("SubprocessCluster does not support Windows.")
     if not host:
         host = "127.0.0.1"
     worker_options = worker_options or {}

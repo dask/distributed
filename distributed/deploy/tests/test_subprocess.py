@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import pytest
+
 from distributed import Client
-from distributed.deploy.subprocess import SubprocessCluster
+from distributed.compatibility import WINDOWS
+from distributed.deploy.subprocess import SubprocessCluster, SubprocessWorker
 from distributed.utils_test import gen_test
 
 
+@pytest.mark.skipif(WINDOWS, reason="distributed#7434")
 @gen_test()
 async def test_basic():
     async with SubprocessCluster(
@@ -20,6 +24,7 @@ async def test_basic():
         assert "Subprocess" in repr(cluster)
 
 
+@pytest.mark.skipif(WINDOWS, reason="distributed#7434")
 @gen_test()
 async def test_n_workers():
     async with SubprocessCluster(
@@ -33,6 +38,7 @@ async def test_n_workers():
         assert "Subprocess" in repr(cluster)
 
 
+@pytest.mark.skipif(WINDOWS, reason="distributed#7434")
 @gen_test()
 async def test_scale_up_and_down():
     async with SubprocessCluster(
@@ -54,3 +60,12 @@ async def test_scale_up_and_down():
             await cluster
 
             assert len(cluster.workers) == 1
+
+
+@pytest.mark.skipif(not WINDOWS, reason="Windows-specific error testing")
+def test_raise_on_windows():
+    with pytest.raises(RuntimeError, match="not support Windows"):
+        SubprocessCluster()
+
+    with pytest.raises(RuntimeError, match="not support Windows"):
+        SubprocessWorker(scheduler="tcp://127.0.0.1:8786")
