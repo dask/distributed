@@ -19,9 +19,23 @@ logger = logging.getLogger(__name__)
 
 
 class SubprocessWorker(ProcessInterface):
+    """A local Dask worker running in a dedicated subprocess
+
+    Parameters
+    ----------
+    scheduler:
+        Address of the scheduler
+    worker_class:
+        Python class to use to create the worker, defaults to 'distributed.Nanny'
+    name:
+        Name of the worker
+    worker_kwargs:
+        Keywords to pass on to the ``Worker`` class constructor
+    """
+
     scheduler: str
     worker_class: str
-    worker_options: dict
+    worker_kwargs: dict
     name: str | None
     process: asyncio.subprocess.Process | None
 
@@ -30,8 +44,7 @@ class SubprocessWorker(ProcessInterface):
         scheduler: str,
         worker_class: str = "distributed.Nanny",
         name: str | None = None,
-        worker_options: dict | None = None,
-        **kwargs: Any,
+        worker_kwargs: dict | None = None,
     ) -> None:
         if WINDOWS:
             # FIXME: distributed#7434
@@ -39,10 +52,9 @@ class SubprocessWorker(ProcessInterface):
         self.scheduler = scheduler
         self.worker_class = worker_class
         self.name = name
-        self.worker_options = copy.copy(worker_options or {})
+        self.worker_kwargs = copy.copy(worker_kwargs or {})
         self.process = None
-        logger.info(kwargs)
-        super().__init__(**kwargs)
+        super().__init__()
 
     async def start(self) -> None:
         self.process = await asyncio.create_subprocess_exec(
@@ -50,9 +62,7 @@ class SubprocessWorker(ProcessInterface):
             "spec",
             self.scheduler,
             "--spec",
-            json.dumps(
-                {0: {"cls": self.worker_class, "opts": {**self.worker_options}}}
-            ),
+            json.dumps({0: {"cls": self.worker_class, "opts": {**self.worker_kwargs}}}),
         )
         await super().start()
 
@@ -164,7 +174,7 @@ def SubprocessCluster(
     scheduler = {"cls": Scheduler, "options": scheduler_kwargs}
     worker = {
         "cls": SubprocessWorker,
-        "options": {"worker_class": worker_class, "worker_options": worker_kwargs},
+        "options": {"worker_class": worker_class, "worker_kwargs": worker_kwargs},
     }
     workers = {i: worker for i in range(n_workers)}
     return SpecCluster(
