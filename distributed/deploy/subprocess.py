@@ -89,7 +89,7 @@ def SubprocessCluster(
         worker_options["memory_limit"] = parse_memory_limit(
             "auto", 1, n_workers, logger=logger
         )
-    assert n_workers
+    assert n_workers is not None
 
     scheduler_options.update(
         {
@@ -116,8 +116,9 @@ def SubprocessCluster(
     }
     workers = {i: worker for i in range(n_workers)}
     return SpecCluster(
-        workers,
-        scheduler,
+        workers=workers,
+        scheduler=scheduler,
+        worker=worker,
         name="SubprocessCluster",
         silence_logs=silence_logs,
         **kwargs,

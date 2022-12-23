@@ -31,3 +31,26 @@ async def test_n_workers():
             assert result == 11
         assert not cluster._supports_scaling
         assert "Subprocess" in repr(cluster)
+
+
+@gen_test()
+async def test_scale_up_and_down():
+    async with SubprocessCluster(
+        n_workers=0,
+        silence_logs=False,
+        dashboard_address=":0",
+        asynchronous=True,
+    ) as cluster:
+        async with Client(cluster, asynchronous=True) as c:
+
+            assert not cluster.workers
+
+            cluster.scale(2)
+            await c.wait_for_workers(2)
+            assert len(cluster.workers) == 2
+            assert len(cluster.scheduler.workers) == 2
+
+            cluster.scale(1)
+            await cluster
+
+            assert len(cluster.workers) == 1
