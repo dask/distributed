@@ -18,6 +18,7 @@ from distributed.sizeof import safe_sizeof
 logger = logging.getLogger(__name__)
 has_zict_210 = parse_version(zict.__version__) >= parse_version("2.1.0")
 has_zict_220 = parse_version(zict.__version__) >= parse_version("2.2.0")
+has_zict_230 = parse_version(zict.__version__) >= parse_version("2.3.0")
 
 
 class SpilledSize(NamedTuple):
@@ -381,7 +382,7 @@ class Slow(zict.Func):
     def __getitem__(self, key: str) -> Any:
         t0 = perf_counter()
         pickled = self.d[key]
-        assert isinstance(pickled, bytes)
+        assert isinstance(pickled, bytearray if has_zict_230 else bytes)
         t1 = perf_counter()
         out = self.load(pickled)  # type: ignore
         t2 = perf_counter()

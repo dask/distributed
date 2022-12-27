@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import logging
 import math
 
 import numpy as np
 
 from distributed.protocol import pickle
 from distributed.protocol.serialize import dask_deserialize, dask_serialize
+from distributed.spill import has_zict_230
 from distributed.utils import log_errors
+
+logger = logging.getLogger(__name__)
 
 
 def itemsize(dt):
@@ -134,7 +138,14 @@ def deserialize_numpy_ndarray(header, frames):
     x = np.ndarray(shape, dtype=dt, buffer=frame, strides=header["strides"])
     if not writeable:
         x.flags.writeable = False
-    else:
+    elif not x.flags.writeable:
+        if has_zict_230:
+            # This should never happen, short of third-party extensions tampering with
+            # serialization or I/O
+            logger.warning(  # pragma: nocover
+                "Writeable numpy array has become read-only after serialization "
+                "round-trip; performing expensive deep copy"
+            )
         x = np.require(x, requirements=["W"])
 
     return x
