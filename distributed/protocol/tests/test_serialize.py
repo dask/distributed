@@ -281,7 +281,6 @@ def test_serialize_bytes(kwargs):
 
 @pytest.mark.skipif(np is None, reason="Test needs numpy")
 def test_serialize_list_compress():
-    pytest.importorskip("lz4")
     x = np.ones(1000000)
     L = serialize_bytelist(x)
     assert sum(map(nbytes, L)) < x.nbytes / 2

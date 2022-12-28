@@ -217,7 +217,6 @@ def test_itemsize(dt, size):
 
 
 def test_compress_numpy():
-    pytest.importorskip("lz4")
     x = np.ones(10000000, dtype="i4")
     frames = dumps({"x": to_serialize(x)})
     assert sum(map(nbytes, frames)) < x.nbytes
