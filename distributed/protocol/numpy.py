@@ -134,7 +134,12 @@ def deserialize_numpy_ndarray(header, frames):
     x = np.ndarray(shape, dtype=dt, buffer=frame, strides=header["strides"])
     if not writeable:
         x.flags.writeable = False
-    else:
+    elif not x.flags.writeable:
+        # This should exclusively happen when the underlying buffer is read-only, e.g.
+        # a read-only mmap.mmap or a bytes object.
+        # Specifically, these are the known use cases:
+        # 1. decompressed output of a buffer that was not sharded
+        # 2. unspill with zict <2.3.0 (https://github.com/dask/zict/pull/74)
         x = np.require(x, requirements=["W"])
 
     return x
