@@ -1,16 +1,12 @@
 from __future__ import annotations
 
-import logging
 import math
 
 import numpy as np
 
 from distributed.protocol import pickle
 from distributed.protocol.serialize import dask_deserialize, dask_serialize
-from distributed.spill import has_zict_230
 from distributed.utils import log_errors
-
-logger = logging.getLogger(__name__)
 
 
 def itemsize(dt):
@@ -139,13 +135,11 @@ def deserialize_numpy_ndarray(header, frames):
     if not writeable:
         x.flags.writeable = False
     elif not x.flags.writeable:
-        if has_zict_230:
-            # This should never happen, short of third-party extensions tampering with
-            # serialization or I/O
-            logger.warning(  # pragma: nocover
-                "Writeable numpy array has become read-only after serialization "
-                "round-trip; performing expensive deep copy"
-            )
+        # This should exclusively happen when the underlying buffer is read-only, e.g.
+        # a read-only mmap.mmap or a bytes object.
+        # Specifically, these are the known use cases:
+        # 1. decompressed output of a buffer that was not sharded
+        # 2. unspill with zict <2.3.0 (https://github.com/dask/zict/pull/74)
         x = np.require(x, requirements=["W"])
 
     return x
