@@ -33,6 +33,7 @@ from distributed.protocol import (
     serialize_bytes,
     to_serialize,
 )
+from distributed.protocol.compression import default_compression
 from distributed.protocol.serialize import check_dask_serializable
 from distributed.utils import ensure_memoryview, nbytes
 from distributed.utils_test import NO_AMM, gen_test, inc
@@ -279,9 +280,9 @@ def test_serialize_bytes(kwargs):
         assert str(x) == str(y)
 
 
+@pytest.mark.skipif(default_compression is None, reason="requires lz4 or snappy")
 @pytest.mark.skipif(np is None, reason="Test needs numpy")
 def test_serialize_list_compress():
-    pytest.importorskip("lz4")
     x = np.ones(1000000)
     L = serialize_bytelist(x)
     assert sum(map(nbytes, L)) < x.nbytes / 2
