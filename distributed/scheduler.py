@@ -252,26 +252,26 @@ class MemoryState:
 
     Attributes / properties:
 
-    managed
+    managed_total
         Sum of the output of sizeof() for all dask keys held by the worker in memory,
         plus number of bytes spilled to disk
 
-    managed_in_memory
+    managed
         Sum of the output of sizeof() for the dask keys held in RAM. Note that this may
         be inaccurate, which may cause inaccurate unmanaged memory (see below).
 
-    managed_spilled
+    spilled
         Number of bytes  for the dask keys spilled to the hard drive.
         Note that this is the size on disk; size in memory may be different due to
         compression and inaccuracies in sizeof(). In other words, given the same keys,
-        'managed' will change depending if the keys are in memory or spilled.
+        'managed' will change depending on the keys being in memory or spilled.
 
     process
         Total RSS memory measured by the OS on the worker process.
-        This is always exactly equal to managed_in_memory + unmanaged.
+        This is always exactly equal to managed + unmanaged.
 
     unmanaged
-        process - managed_in_memory. This is the sum of
+        process - managed. This is the sum of
 
         - Python interpreter and modules
         - global variables
@@ -291,33 +291,15 @@ class MemoryState:
         spike.
 
     optimistic
-        managed_in_memory + unmanaged_old; in other words the memory held long-term by
+        managed + unmanaged_old; in other words the memory held long-term by
         the process under the hopeful assumption that all unmanaged_recent memory is a
         temporary spike
-
-    .. note::
-        There is an intentional misalignment in terminology between this class (which is
-        meant for internal / programmatic use) and the memory readings on the GUI (which
-        is aimed at the general public:
-
-        ================= =====================
-        MemoryState       GUI
-        ================= =====================
-        managed           n/a
-        managed_in_memory managed
-        managed_spilled   spilled
-        process           process (RSS); memory
-        unmanaged         n/a
-        unmanaged_old     unmanaged (old)
-        unmanaged_recent  unmanaged (recent)
-        optimistic        n/a
-        ================= =====================
     """
 
     process: int
     unmanaged_old: int
-    managed_in_memory: int
-    managed_spilled: int
+    managed: int
+    spilled: int
 
     __slots__ = tuple(__annotations__)
 
@@ -326,74 +308,88 @@ class MemoryState:
         *,
         process: int,
         unmanaged_old: int,
-        managed_in_memory: int,
-        managed_spilled: int,
+        managed: int,
+        spilled: int,
     ):
         # Some data arrives with the heartbeat, some other arrives in realtime as the
         # tasks progress. Also, sizeof() is not guaranteed to return correct results.
         # This can cause glitches where a partial measure is larger than the whole, so
         # we need to force all numbers to add up exactly by definition.
         self.process = process
-        self.managed_in_memory = min(self.process, managed_in_memory)
-        self.managed_spilled = managed_spilled
+        self.managed = min(self.process, managed)
+        self.spilled = spilled
         # Subtractions between unsigned ints guaranteed by construction to be >= 0
-        self.unmanaged_old = min(unmanaged_old, process - self.managed_in_memory)
+        self.unmanaged_old = min(unmanaged_old, process - self.managed)
 
     @staticmethod
     def sum(*infos: MemoryState) -> MemoryState:
         process = 0
         unmanaged_old = 0
-        managed_in_memory = 0
-        managed_spilled = 0
+        managed = 0
+        spilled = 0
         for ms in infos:
             process += ms.process
             unmanaged_old += ms.unmanaged_old
-            managed_spilled += ms.managed_spilled
-            managed_in_memory += ms.managed_in_memory
+            spilled += ms.spilled
+            managed += ms.managed
         return MemoryState(
             process=process,
             unmanaged_old=unmanaged_old,
-            managed_in_memory=managed_in_memory,
-            managed_spilled=managed_spilled,
+            managed=managed,
+            spilled=spilled,
         )
 
     @property
-    def managed(self) -> int:
-        return self.managed_in_memory + self.managed_spilled
+    def managed_total(self) -> int:
+        return self.managed + self.spilled
 
     @property
     def unmanaged(self) -> int:
         # This is never negative thanks to __init__
-        return self.process - self.managed_in_memory
+        return self.process - self.managed
 
     @property
     def unmanaged_recent(self) -> int:
         # This is never negative thanks to __init__
-        return self.process - self.managed_in_memory - self.unmanaged_old
+        return self.process - self.managed - self.unmanaged_old
 
     @property
     def optimistic(self) -> int:
-        return self.managed_in_memory + self.unmanaged_old
+        return self.managed + self.unmanaged_old
+
+    @property
+    def managed_in_memory(self) -> int:
+        warnings.warn("managed_in_memory has been renamed to managed", FutureWarning)
+        return self.managed
+
+    @property
+    def managed_spilled(self) -> int:
+        warnings.warn("managed_spilled has been renamed to spilled", FutureWarning)
+        return self.spilled
 
     def __repr__(self) -> str:
         return (
             f"Process memory (RSS)  : {format_bytes(self.process)}\n"
-            f"  - managed by Dask   : {format_bytes(self.managed_in_memory)}\n"
+            f"  - managed by Dask   : {format_bytes(self.managed)}\n"
             f"  - unmanaged (old)   : {format_bytes(self.unmanaged_old)}\n"
             f"  - unmanaged (recent): {format_bytes(self.unmanaged_recent)}\n"
-            f"Spilled to disk       : {format_bytes(self.managed_spilled)}\n"
+            f"Spilled to disk       : {format_bytes(self.spilled)}\n"
         )
 
     def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
         """Dictionary representation for debugging purposes.
-        Not type stable and not intended for roundtrips.
 
         See also
         --------
         Client.dump_cluster_state
         distributed.utils.recursive_to_dict
         """
-        return recursive_to_dict(self, exclude=exclude, members=True)
+        return {
+            k: getattr(self, k)
+            for k in dir(self)
+            if not k.startswith("_")
+            and k not in {"sum", "managed_in_memory", "managed_spilled"}
+        }
 
 
 class WorkerState:
@@ -622,25 +618,23 @@ class WorkerState:
         from optimistic memory, which is used for heuristics.
 
         Something that is less OK, but also less frequent, is that the sudden deletion
-        of spilled keys will cause a negative blip of managed_in_memory:
+        of spilled keys will cause a negative blip in managed memory:
 
         1. Delete 100MB of spilled data
         2. The updated managed memory *total* reaches the scheduler faster than the
            updated spilled portion
-        3. This causes managed_in_memory to temporarily plummet and be replaced by
-           unmanaged_recent, while managed_spilled remains unaltered
-        4. When the heartbeat arrives, managed_in_memory goes back up, unmanaged_recent
-           goes back down, and managed_spilled goes down by 100MB as it should have to
+        3. This causes the managed memory to temporarily plummet and be replaced by
+           unmanaged_recent, while spilled memory remains unaltered
+        4. When the heartbeat arrives, managed goes back up, unmanaged_recent
+           goes back down, and spilled goes down by 100MB as it should have to
            begin with.
 
         https://github.com/dask/distributed/issues/6002 will let us solve this.
         """
         return MemoryState(
             process=self.metrics["memory"],
-            managed_in_memory=max(
-                0, self.nbytes - self.metrics["spilled_bytes"]["memory"]
-            ),
-            managed_spilled=self.metrics["spilled_bytes"]["disk"],
+            managed=max(0, self.nbytes - self.metrics["spilled_bytes"]["memory"]),
+            spilled=self.metrics["spilled_bytes"]["disk"],
             unmanaged_old=self._memory_unmanaged_old,
         )
 

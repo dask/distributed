@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from threading import Thread
+from time import sleep
+
 import pytest
 
 import dask
@@ -28,6 +31,25 @@ def test_protocol():
         assert loads(dumps(msg)) == msg
 
 
+def test_default_compression():
+    """Test that the default compression algorithm is lz4 -> snappy -> None.
+    If neither is installed, test that we don't fall back to the very slow zlib.
+    """
+    try:
+        import lz4  # noqa: F401
+
+        assert default_compression == "lz4"
+        return
+    except ImportError:
+        pass
+    try:
+        import snappy  # noqa: F401
+
+        assert default_compression == "snappy"
+    except ImportError:
+        assert default_compression is None
+
+
 @pytest.mark.parametrize(
     "config,default",
     [
@@ -46,8 +68,8 @@ def test_compression_config(config, default):
             assert get_default_compression() == default
 
 
+@pytest.mark.skipif(default_compression is None, reason="requires lz4 or snappy")
 def test_compression_1():
-    pytest.importorskip("lz4")
     np = pytest.importorskip("numpy")
     x = np.ones(1000000)
     b = x.tobytes()
@@ -57,8 +79,8 @@ def test_compression_1():
     assert {"x": b} == y
 
 
+@pytest.mark.skipif(default_compression is None, reason="requires lz4 or snappy")
 def test_compression_2():
-    pytest.importorskip("lz4")
     np = pytest.importorskip("numpy")
     x = np.random.random(10000)
     msg = dumps(to_serialize(x.data))
@@ -66,8 +88,8 @@ def test_compression_2():
     assert all(c is None for c in compression)
 
 
+@pytest.mark.skipif(default_compression is None, reason="requires lz4 or snappy")
 def test_compression_3():
-    pytest.importorskip("lz4")
     np = pytest.importorskip("numpy")
     x = np.ones(1000000)
     frames = dumps({"x": Serialize(x.data)})
@@ -76,8 +98,8 @@ def test_compression_3():
     assert {"x": x.data} == y
 
 
+@pytest.mark.skipif(default_compression is None, reason="requires lz4 or snappy")
 def test_compression_without_deserialization():
-    pytest.importorskip("lz4")
     np = pytest.importorskip("numpy")
     x = np.ones(1000000)
 
@@ -86,6 +108,18 @@ def test_compression_without_deserialization():
 
     msg = loads(frames, deserialize=False)
     assert all(len(frame) < 1000000 for frame in msg["x"].frames)
+
+
+def test_lz4_decompression_avoids_deep_copy():
+    """Test that lz4 output is a bytearray, not bytes, so that numpy deserialization is
+    not forced to perform a deep copy to obtain a writeable array.
+    Note that zlib, zstandard, and snappy don't have this option.
+    """
+    pytest.importorskip("lz4")
+    a = bytearray(1_000_000)
+    b = compressions["lz4"]["compress"](a)
+    c = compressions["lz4"]["decompress"](b)
+    assert isinstance(c, bytearray)
 
 
 def test_small():
@@ -103,7 +137,13 @@ def test_small_and_big():
 
 @pytest.mark.parametrize(
     "lib,compression",
-    [(None, None), ("zlib", "zlib"), ("lz4", "lz4"), ("zstandard", "zstd")],
+    [
+        (None, None),
+        ("zlib", "zlib"),
+        ("lz4", "lz4"),
+        ("snappy", "snappy"),
+        ("zstandard", "zstd"),
+    ],
 )
 def test_maybe_compress(lib, compression):
     if lib:
@@ -123,7 +163,57 @@ def test_maybe_compress(lib, compression):
 
 @pytest.mark.parametrize(
     "lib,compression",
-    [(None, None), ("zlib", "zlib"), ("lz4", "lz4"), ("zstandard", "zstd")],
+    [
+        (None, None),
+        ("zlib", "zlib"),
+        ("lz4", "lz4"),
+        ("snappy", "snappy"),
+        ("zstandard", "zstd"),
+    ],
+)
+def test_compression_thread_safety(lib, compression):
+    if lib:
+        pytest.importorskip(lib)
+
+    try_converters = [bytes, memoryview]
+    start = (
+        False  # signal variable to increase likelihood of hitting thread-safety issues
+    )
+
+    def test_compress_decompress(fn):
+        while not start:
+            sleep(0.001)
+
+        payload = b"123"
+        assert maybe_compress(fn(payload), compression=compression) == (None, payload)
+
+        payload = b"0" * 10000
+        rc, rd = maybe_compress(fn(payload), compression=compression)
+        assert rc == compression
+        assert compressions[rc]["decompress"](rd) == payload
+
+    for fn in try_converters:
+        threads = []
+        for _ in range(0, 100):
+            start = False
+            for _ in range(0, 10):
+                thread = Thread(target=test_compress_decompress, args=(fn,))
+                thread.start()
+                threads.append(thread)
+            start = True
+            for thr in threads:
+                thr.join()
+
+
+@pytest.mark.parametrize(
+    "lib,compression",
+    [
+        (None, None),
+        ("zlib", "zlib"),
+        ("lz4", "lz4"),
+        ("snappy", "snappy"),
+        ("zstandard", "zstd"),
+    ],
 )
 def test_maybe_compress_config_default(lib, compression):
     if lib:
@@ -142,9 +232,9 @@ def test_maybe_compress_config_default(lib, compression):
             assert compressions[rc]["decompress"](rd) == payload
 
 
+@pytest.mark.skipif(default_compression is None, reason="requires lz4 or snappy")
 def test_maybe_compress_sample():
     np = pytest.importorskip("numpy")
-    lz4 = pytest.importorskip("lz4")
     payload = np.random.randint(0, 255, size=10000).astype("u1").tobytes()
     fmt, compressed = maybe_compress(payload)
     assert fmt is None
@@ -161,10 +251,9 @@ def test_large_bytes():
         assert len(frames[1]) < 1000
 
 
-@pytest.mark.slow
+@pytest.mark.skipif(default_compression is None, reason="requires lz4 or snappy")
 def test_large_messages():
     np = pytest.importorskip("numpy")
-    pytest.importorskip("lz4")
     if MEMORY_LIMIT < 8e9:
         pytest.skip("insufficient memory")
 
@@ -207,8 +296,8 @@ def test_loads_deserialize_False():
     assert result == 123
 
 
+@pytest.mark.skipif(default_compression is None, reason="requires lz4 or snappy")
 def test_loads_without_deserialization_avoids_compression():
-    pytest.importorskip("lz4")
     b = b"0" * 100000
 
     msg = {"x": 1, "data": to_serialize(b)}
@@ -270,12 +359,12 @@ def test_dumps_loads_Serialized():
     assert result == result3
 
 
+@pytest.mark.skipif(default_compression is None, reason="requires lz4 or snappy")
 def test_maybe_compress_memoryviews():
     np = pytest.importorskip("numpy")
-    pytest.importorskip("lz4")
     x = np.arange(1000000, dtype="int64")
     compression, payload = maybe_compress(x.data)
-    assert compression == "lz4"
+    assert compression == default_compression
     assert len(payload) < x.nbytes * 0.75
 
 

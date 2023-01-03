@@ -15,7 +15,7 @@ logger = logging.getLogger("distributed.dask_ssh")
 @click.command(
     name="ssh",
     help=dedent(
-        """Launch a distributed cluster over SSH. A 'dask scheduler' process will run on the
+        """Launch a Dask cluster over SSH. A 'dask scheduler' process will run on the
         first host specified in [HOSTNAMES] or in the hostfile, unless --scheduler is specified
         explicitly. One or more 'dask worker' processes will be run on each host. Use the flag
         --nworkers to adjust how many dask worker process are run on each host and the flag

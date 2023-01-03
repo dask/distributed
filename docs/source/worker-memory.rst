@@ -121,10 +121,10 @@ unmanaged recent
     the ``~/.config/dask/distributed.yaml`` file. If your tasks typically run for longer
     than 30 seconds, it's recommended that you increase this setting accordingly.
 
-    By default, :meth:`distributed.Client.rebalance` and
-    :meth:`distributed.scheduler.Scheduler.rebalance` ignore unmanaged recent memory.
-    This behaviour can also be tweaked using the Dask config - see the methods'
-    documentation.
+    By default, :meth:`distributed.Client.rebalance`,
+    :meth:`distributed.scheduler.Scheduler.rebalance`, and the
+    :doc:`active_memory_manager` ignore unmanaged recent memory. This behaviour can also
+    be tweaked using the Dask config - see the specific components' documentation.
 
 spilled
     managed memory that has been spilled to disk. This is not included in the 'managed'
@@ -158,10 +158,11 @@ Dask — it's actually normal behavior for all processes on Linux and MacOS, and
 consequence of how the low-level memory allocator works (see below for details).
 
 Because Dask makes decisions (spill-to-disk, pause, terminate,
-:meth:`~distributed.Client.rebalance`) based on the worker's memory usage as reported by
-the OS, and is unaware of how much of this memory is actually in use versus empty and
-"hoarded", it can overestimate — sometimes significantly — how much memory the process
-is using and think the worker is running out of memory when in fact it isn't.
+:doc:`active_memory_manager`, :meth:`~distributed.Client.rebalance`) based on the
+worker's memory usage as reported by the OS, and is unaware of how much of this memory
+is actually in use versus empty and "hoarded", it can overestimate — sometimes
+significantly — how much memory the process is using and think the worker is running out
+of memory when in fact it isn't.
 
 More in detail: both the Linux and MacOS memory allocators try to avoid performing a
 `brk`_ kernel call every time the application calls `free`_ by implementing a user-space
@@ -259,10 +260,14 @@ in its decision-making:
 .. code-block:: yaml
 
    distributed:
+     scheduler:
+       active-memory-manager:
+         measure: managed
+
      worker:
        memory:
          rebalance:
-           measure: managed_in_memory
+           measure: managed
          spill: false
          pause: false
          terminate: false

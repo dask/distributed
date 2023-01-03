@@ -1050,6 +1050,20 @@ class Worker(BaseWorker, ServerNode):
             except Exception:  # TODO: log error once
                 pass
 
+        managed = out["managed_bytes"] - out["spilled_bytes"]["memory"]
+        if managed > out["memory"]:
+            # Maybe the new managed memory was added after the latest monitor run
+            out["memory"] = self.monitor.get_process_memory()
+        if managed > out["memory"]:
+            logger.warning(
+                "Managed memory (%s) exceeds process memory (%s); this will cause "
+                "premature spilling as well as malfunctions in several heuristics. "
+                "Please ensure that sizeof() returns accurate outputs for your data. "
+                "Read more: https://distributed.dask.org/en/stable/worker-memory.html",
+                format_bytes(managed),
+                format_bytes(out["memory"]),
+            )
+
         return out
 
     async def get_startup_information(self):
