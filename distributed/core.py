@@ -349,7 +349,6 @@ class Server:
         self.counters = None
         self._ongoing_background_tasks = AsyncTaskGroup()
         self._event_finished = asyncio.Event()
-        self._event_started = asyncio.Event()
 
         self.listeners = []
         self.io_loop = self.loop = IOLoop.current()
@@ -494,9 +493,6 @@ class Server:
         """Wait until the server has finished"""
         await self._event_finished.wait()
 
-    async def started(self):
-        await self._event_started.wait()
-
     def __await__(self):
         return self.start().__await__()
 
@@ -515,32 +511,30 @@ class Server:
 
     @final
     async def start(self):
-        if self.status == Status.failed:
-            assert self.__startup_exc is not None
-            raise self.__startup_exc
-        elif self.status != Status.init:
-            return self
+        async with self._startup_lock:
+            if self.status == Status.failed:
+                assert self.__startup_exc is not None
+                raise self.__startup_exc
+            elif self.status != Status.init:
+                return self
+            timeout = getattr(self, "death_timeout", None)
 
-        async def _close_on_failure(exc: Exception) -> None:
-            self._event_started.set()
-            await self.close()
-            self.status = Status.failed
-            self.__startup_exc = exc
+            async def _close_on_failure(exc: Exception) -> None:
+                await self.close()
+                self.status = Status.failed
+                self.__startup_exc = exc
 
-        timeout = getattr(self, "death_timeout", None)
-        try:
-            async with self._startup_lock:
+            try:
                 await asyncio.wait_for(self.start_unsafe(), timeout=timeout)
-                self._event_started.set()
-                self.status = Status.running
-        except asyncio.TimeoutError as exc:
-            await _close_on_failure(exc)
-            raise asyncio.TimeoutError(
-                f"{type(self).__name__} start timed out after {timeout}s."
-            ) from exc
-        except Exception as exc:
-            await _close_on_failure(exc)
-            raise RuntimeError(f"{type(self).__name__} failed to start.") from exc
+            except asyncio.TimeoutError as exc:
+                await _close_on_failure(exc)
+                raise asyncio.TimeoutError(
+                    f"{type(self).__name__} start timed out after {timeout}s."
+                ) from exc
+            except Exception as exc:
+                await _close_on_failure(exc)
+                raise RuntimeError(f"{type(self).__name__} failed to start.") from exc
+            self.status = Status.running
         return self
 
     async def __aenter__(self):
@@ -749,7 +743,7 @@ class Server:
         logger.debug("Connection from %r to %s", address, type(self).__name__)
         self._comms[comm] = op
 
-        await self.started()
+        await self
         try:
             while not self.__stopped:
                 try:
@@ -948,9 +942,6 @@ class Server:
             await asyncio.gather(*[comm.close() for comm in list(self._comms)])
         finally:
             self._event_finished.set()
-            logger.debug(
-                f"Closed {type(self).__name__} - {self.address_safe} - {self.id}"
-            )
 
     def digest_metric(self, name: str, value: float) -> None:
         # Granular data (requires crick)
