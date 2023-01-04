@@ -1022,12 +1022,18 @@ async def test_restart_cluster_between_repeats(c, s, a):
         seed=42,
     )
 
+    await c.compute(dd.shuffle.shuffle(df, "y", shuffle="p2p"))
+    await clean_scheduler(s)
+
+    assert scheduler_extension.tombstones
+
+    # Cannot rerun forgotten shuffle due to tombstone
+    with pytest.raises(RuntimeError, match="shuffle_transfer"):
+        await c.compute(dd.shuffle.shuffle(df, "y", shuffle="p2p"))
+
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     await c.compute(out)
     assert scheduler_extension.shuffle_ids()
-
-    await c.compute(dd.shuffle.shuffle(df, "y", shuffle="p2p"))
-    assert scheduler_extension.tombstones
 
     await c.restart()
     await clean_scheduler(s)
@@ -1035,6 +1041,7 @@ async def test_restart_cluster_between_repeats(c, s, a):
 
     await c.compute(out)
     await c.compute(dd.shuffle.shuffle(df, "y", shuffle="p2p"))
+    del out
     await clean_scheduler(s)
 
 
