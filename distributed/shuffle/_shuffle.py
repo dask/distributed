@@ -79,6 +79,11 @@ def rearrange_by_column_p2p(
     token = tokenize(df, column, npartitions)
 
     empty = df._meta.copy()
+    if any(not isinstance(c, str) for c in empty.columns):
+        unsupported = {c: type(c) for c in empty.columns if not isinstance(c, str)}
+        raise TypeError(
+            f"p2p requires all column names to be str, found: {unsupported}",
+        )
     for c, dt in empty.dtypes.items():
         if dt == object:
             empty[c] = empty[c].astype(
