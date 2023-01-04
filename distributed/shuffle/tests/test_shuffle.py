@@ -1010,6 +1010,34 @@ async def test_closed_worker_between_repeats(c, s, w1, w2, w3):
     await clean_scheduler(s)
 
 
+@pytest.mark.slow
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_restart_cluster_between_repeats(c, s, a):
+    scheduler_extension = s.extensions["shuffle"]
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="100 s",
+        seed=42,
+    )
+
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    await c.compute(out)
+    assert scheduler_extension.shuffle_ids()
+
+    await c.compute(dd.shuffle.shuffle(df, "y", shuffle="p2p"))
+    assert scheduler_extension.tombstones
+
+    await c.restart()
+    await clean_scheduler(s)
+    assert not scheduler_extension.tombstones
+
+    await c.compute(out)
+    await c.compute(dd.shuffle.shuffle(df, "y", shuffle="p2p"))
+    await clean_scheduler(s)
+
+
 @gen_cluster(client=True)
 async def test_new_worker(c, s, a, b):
     df = dask.datasets.timeseries(
