@@ -23,7 +23,16 @@ from copy import copy
 from dataclasses import dataclass, field
 from functools import lru_cache, partial, singledispatchmethod
 from itertools import chain
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypedDict, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Literal,
+    NamedTuple,
+    Sequence,
+    TypedDict,
+    cast,
+)
 
 from tlz import peekn
 
@@ -838,6 +847,7 @@ class ExecuteSuccessEvent(ExecuteDoneEvent):
     start: float
     stop: float
     nbytes: int
+    attempt: int
     type: type | None
     __slots__ = tuple(__annotations__)
 
@@ -862,6 +872,7 @@ class ExecuteSuccessEvent(ExecuteDoneEvent):
     def dummy(
         key: str,
         value: object = None,
+        attempt: int | None = None,
         *,
         nbytes: int = 1,
         stimulus_id: str,
@@ -875,6 +886,7 @@ class ExecuteSuccessEvent(ExecuteDoneEvent):
             start=0.0,
             stop=1.0,
             nbytes=nbytes,
+            attempt=1,
             type=None,
             stimulus_id=stimulus_id,
         )
@@ -995,7 +1007,12 @@ class RemoveReplicasEvent(StateMachineEvent):
 @dataclass
 class FreeKeysEvent(StateMachineEvent):
     __slots__ = ("keys",)
-    keys: Collection[str]
+    keys: Sequence[str]
+
+
+@dataclass
+class FreeKeyByAttemptEvent(FreeKeysEvent):
+    attempts: Sequence[int]
 
 
 @dataclass
@@ -2429,13 +2446,13 @@ class WorkerState:
         return self._ensure_computing()
 
     def _transition_executing_memory(
-        self, ts: TaskState, value: object, *, stimulus_id: str
+        self, ts: TaskState, value: object, attempt: int, *, stimulus_id: str
     ) -> RecsInstrs:
         """This transition is *normally* triggered by ExecuteSuccessEvent.
         However, beware that it can also be triggered by scatter().
         """
         return self._transition_to_memory(
-            ts, value, "task-finished", stimulus_id=stimulus_id
+            ts, value, "task-finished", attempt=attempt, stimulus_id=stimulus_id
         )
 
     def _transition_released_memory(
@@ -2443,7 +2460,7 @@ class WorkerState:
     ) -> RecsInstrs:
         """This transition is triggered by scatter()"""
         return self._transition_to_memory(
-            ts, value, "add-keys", stimulus_id=stimulus_id
+            ts, value, "add-keys", attempt=-1, stimulus_id=stimulus_id
         )
 
     def _transition_flight_memory(
@@ -2453,11 +2470,11 @@ class WorkerState:
         However, beware that it can also be triggered by scatter().
         """
         return self._transition_to_memory(
-            ts, value, "add-keys", stimulus_id=stimulus_id
+            ts, value, "add-keys", attempt=-1, stimulus_id=stimulus_id
         )
 
     def _transition_resumed_memory(
-        self, ts: TaskState, value: object, *, stimulus_id: str
+        self, ts: TaskState, value: object, attempt: int, *, stimulus_id: str
     ) -> RecsInstrs:
         """Normally, we send to the scheduler a 'task-finished' message for a completed
         execution and 'add-data' for a completed replication from another worker. The
@@ -2479,13 +2496,16 @@ class WorkerState:
 
         ts.previous = None
         ts.next = None
-        return self._transition_to_memory(ts, value, msg_type, stimulus_id=stimulus_id)
+        return self._transition_to_memory(
+            ts, value, msg_type, attempt=attempt, stimulus_id=stimulus_id
+        )
 
     def _transition_to_memory(
         self,
         ts: TaskState,
         value: object,
         msg_type: Literal["add-keys", "task-finished"],
+        attempt: int,
         *,
         stimulus_id: str,
     ) -> RecsInstrs:
@@ -2504,7 +2524,7 @@ class WorkerState:
             assert msg_type == "task-finished"
             instrs.append(
                 self._get_task_finished_msg(
-                    ts, stimulus_id=stimulus_id, attempt=ts.attempt
+                    ts, stimulus_id=stimulus_id, attempt=attempt
                 )
             )
         return recs, instrs
@@ -2802,6 +2822,22 @@ class WorkerState:
         return recommendations, []
 
     @_handle_event.register
+    def _handle_free_keys_attempt(self, ev: FreeKeyByAttemptEvent) -> RecsInstrs:
+        """Handler to be called by the scheduler.
+
+        Similar to _handle_free_keys but will only act if the provided attempt counter matches the known one
+        """
+        self.log.append(
+            ("free-keys-by-attempt", ev.keys, ev.attempts, ev.stimulus_id, time())
+        )
+        recommendations: Recs = {}
+        for key, attempt in zip(ev.keys, ev.attempts):
+            ts = self.tasks.get(key)
+            if ts and ts.attempt == attempt:
+                recommendations[ts] = "released"
+        return recommendations, []
+
+    @_handle_event.register
     def _handle_remove_replicas(self, ev: RemoveReplicasEvent) -> RecsInstrs:
         """Stream handler notifying the worker that it might be holding unreferenced,
         superfluous data.
@@ -2990,7 +3026,7 @@ class WorkerState:
         recommendations: Recs = {}
         for ts in self._gather_dep_done_common(ev):
             if ts.key in ev.data:
-                recommendations[ts] = ("memory", ev.data[ts.key])
+                recommendations[ts] = ("memory", ev.data[ts.key], ts.attempt)
             else:
                 self.log.append((ts.key, "missing-dep", ev.stimulus_id, time()))
                 if self.validate:
@@ -3185,7 +3221,7 @@ class WorkerState:
         )
         ts.nbytes = ev.nbytes
         ts.type = ev.type
-        recs[ts] = ("memory", ev.value)
+        recs[ts] = ("memory", ev.value, ev.attempt)
         return recs, instr
 
     @_handle_event.register

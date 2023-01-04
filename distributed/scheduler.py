@@ -4654,6 +4654,7 @@ class Scheduler(SchedulerState, ServerNode):
                     "op": "free-keys",
                     "keys": [key],
                     "stimulus_id": stimulus_id,
+                    "attempts": [attempt],
                 }
             ]
         elif ts.state == "memory":
