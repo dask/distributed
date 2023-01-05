@@ -620,7 +620,7 @@ async def test_set_lifetime_stagger_via_env_var(c, s):
     with popen(["dask", "worker", s.address], env=env), popen(
         ["dask", "worker", s.address], env=env
     ):
-        await c.wait_for_workers(1)
+        await c.wait_for_workers(2)
         [lifetime1, lifetime2] = (
             await c.run(lambda dask_worker: dask_worker.lifetime)
         ).values()
