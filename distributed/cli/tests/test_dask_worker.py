@@ -611,6 +611,39 @@ def dask_setup(worker):
 
 
 @pytest.mark.slow
+@gen_cluster(nthreads=[], client=True)
+async def test_set_lifetime_stagger_via_env_var(c, s):
+    # Ensure that lifetime stagger can be set via an environment variable
+    env = os.environ.copy()
+    env["DASK_DISTRIBUTED__WORKER__LIFETIME__DURATION"] = "10 seconds"
+    env["DASK_DISTRIBUTED__WORKER__LIFETIME__STAGGER"] = "2 seconds"
+    with popen(["dask", "worker", s.address], env=env), popen(
+        ["dask", "worker", s.address], env=env
+    ):
+        await c.wait_for_workers(1)
+        [lifetime1, lifetime2] = (
+            await c.run(lambda dask_worker: dask_worker.lifetime)
+        ).values()
+        assert lifetime1 != lifetime2
+        assert 8 <= lifetime1 <= 12
+        assert 8 <= lifetime2 <= 12
+
+
+@pytest.mark.slow
+@gen_cluster(nthreads=[], client=True)
+async def test_set_lifetime_restart_via_env_var(c, s):
+    # Ensure that lifetime restart can be set via an environment variable
+    env = os.environ.copy()
+    env["DASK_DISTRIBUTED__WORKER__LIFETIME__RESTART"] = "True"
+    with popen(["dask", "worker", s.address], env=env):
+        await c.wait_for_workers(1)
+        [lifetime_restart] = (
+            await c.run(lambda dask_worker: dask_worker.lifetime_restart)
+        ).values()
+        assert lifetime_restart
+
+
+@pytest.mark.slow
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 def test_timeout(nanny):
     worker = subprocess.run(
