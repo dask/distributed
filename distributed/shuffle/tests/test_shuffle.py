@@ -10,9 +10,9 @@ from itertools import count
 from typing import Any, Mapping
 from unittest import mock
 
-import numpy as np
-import pandas as pd
 import pytest
+
+pd = pytest.importorskip("pandas")
 
 import dask
 import dask.dataframe as dd
@@ -38,8 +38,6 @@ from distributed.shuffle._worker_extension import (
 from distributed.utils import Deadline
 from distributed.utils_test import gen_cluster, gen_test, wait_for_state
 from distributed.worker_state_machine import TaskState as WorkerTaskState
-
-pa = pytest.importorskip("pyarrow")
 
 
 async def clean_worker(
@@ -657,6 +655,8 @@ def test_processing_chain():
     In practice this takes place on many different workers.
     Here we verify its accuracy in a single threaded situation.
     """
+    np = pytest.importorskip("numpy")
+    pa = pytest.importorskip("pyarrow")
 
     class Stub:
         def __init__(self, value: int) -> None:
@@ -1257,6 +1257,8 @@ async def test_basic_lowlevel_shuffle(
     npartitions,
     barrier_first_worker,
 ):
+    pa = pytest.importorskip("pyarrow")
+
     dfs = []
     rows_per_df = 10
     for ix in range(n_input_partitions):
@@ -1331,6 +1333,8 @@ async def test_basic_lowlevel_shuffle(
 
 @gen_test()
 async def test_error_offload(tmpdir, loop_in_thread):
+    pa = pytest.importorskip("pyarrow")
+
     dfs = []
     rows_per_df = 10
     n_input_partitions = 2
@@ -1382,6 +1386,8 @@ async def test_error_offload(tmpdir, loop_in_thread):
 
 @gen_test()
 async def test_error_send(tmpdir, loop_in_thread):
+    pa = pytest.importorskip("pyarrow")
+
     dfs = []
     rows_per_df = 10
     n_input_partitions = 1
@@ -1432,6 +1438,8 @@ async def test_error_send(tmpdir, loop_in_thread):
 
 @gen_test()
 async def test_error_receive(tmpdir, loop_in_thread):
+    pa = pytest.importorskip("pyarrow")
+
     dfs = []
     rows_per_df = 10
     n_input_partitions = 1
