@@ -56,6 +56,7 @@ import psutil
 import pytest
 
 from distributed.metrics import time
+from distributed.system import process_memory
 
 
 def pytest_addoption(parser):
@@ -172,7 +173,7 @@ class RSSMemoryChecker(ResourceChecker, name="memory"):
     LEAK_THRESHOLD = 10 * 2**20
 
     def measure(self) -> int:
-        return psutil.Process().memory_info().rss
+        return process_memory()
 
     def has_leak(self, before: int, after: int) -> bool:
         return after > before + self.LEAK_THRESHOLD

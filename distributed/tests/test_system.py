@@ -7,7 +7,7 @@ import sys
 import psutil
 import pytest
 
-from distributed.system import memory_limit
+from distributed.system import memory_limit, process_memory
 
 
 def test_memory_limit():
@@ -97,3 +97,7 @@ def test_rlimit():
         assert memory_limit() == new_limit
     except OSError:
         pytest.skip("resource could not set the RSS limit")
+
+
+def test_process_memory():
+    assert 2**20 < process_memory() < 2**40

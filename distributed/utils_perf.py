@@ -5,9 +5,12 @@ import logging
 import threading
 from collections import deque
 
+import psutil
+
 from dask.utils import format_bytes
 
 from distributed.metrics import thread_time
+from distributed.system import process_memory
 
 logger = _logger = logging.getLogger(__name__)
 
@@ -147,12 +150,7 @@ class GCDiagnosis:
     def enable(self):
         assert not self._enabled
         self._fractional_timer = FractionalTimer(n_samples=self.N_SAMPLES)
-        try:
-            import psutil
-        except ImportError:
-            self._proc = None
-        else:
-            self._proc = psutil.Process()
+        self._proc = psutil.Process()
 
         cb = self._gc_callback
         assert cb not in gc.callbacks
@@ -181,10 +179,7 @@ class GCDiagnosis:
         # don't waste time measuring them
         if info["generation"] != 2:
             return
-        if self._proc is not None:
-            rss = self._proc.memory_info().rss
-        else:
-            rss = 0
+        rss = process_memory(self._proc)
         if phase == "start":
             self._fractional_timer.start_timing()
             self._gc_rss_before = rss

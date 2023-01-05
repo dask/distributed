@@ -11,6 +11,7 @@ import dask
 from distributed.compatibility import WINDOWS
 from distributed.diagnostics import nvml
 from distributed.metrics import monotonic, time
+from distributed.system import process_memory
 
 
 class SystemMonitor:
@@ -112,7 +113,7 @@ class SystemMonitor:
         as the OS allocating and releasing memory is highly volatile and a constant
         source of flakiness.
         """
-        return self.proc.memory_info().rss
+        return process_memory(self.proc)
 
     def update(self) -> dict[str, Any]:
         now = time()

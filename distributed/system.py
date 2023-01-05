@@ -5,6 +5,8 @@ import sys
 
 import psutil
 
+from distributed.compatibility import LINUX
+
 __all__ = ("memory_limit", "MEMORY_LIMIT")
 
 
@@ -61,6 +63,27 @@ def memory_limit() -> int:
             pass
 
     return limit
+
+
+def process_memory(proc: psutil.Process | int | None = None) -> int:
+    """Return total memory used by a process
+
+    Parameters
+    ----------
+    proc: psutil.Process | int, optional
+        Process or PID to measure. Default: current process
+    """
+    if proc is None:
+        proc = psutil.Process()
+    elif isinstance(proc, int):
+        proc = psutil.Process(proc)
+
+    if LINUX:
+        minfo = proc.memory_full_info()
+        return minfo.rss + minfo.swap
+    else:
+        minfo = proc.memory_info()
+        return minfo.rss
 
 
 MEMORY_LIMIT = memory_limit()

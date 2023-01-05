@@ -377,11 +377,13 @@ class NannyMemoryManager:
 
         process = nanny.process.process
         try:
-            memory = psutil.Process(process.pid).memory_info().rss
+            memory = system.process_memory(process.pid)
         except (ProcessLookupError, psutil.NoSuchProcess, psutil.AccessDenied):
             return  # pragma: nocover
 
-        if memory / self.memory_limit <= self.memory_terminate_fraction:
+        assert self.memory_limit is not None
+        assert self.memory_terminate_fraction is not False
+        if memory <= self.memory_limit * self.memory_terminate_fraction:
             return
 
         if self._last_terminated_pid != process.pid:
