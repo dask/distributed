@@ -21,7 +21,6 @@ from distributed import Client, Event, KilledWorker, Nanny, Scheduler, Worker, w
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import Status
 from distributed.metrics import monotonic
-from distributed.spill import has_zict_210
 from distributed.utils_test import (
     NO_AMM,
     captured_logger,
@@ -37,11 +36,6 @@ from distributed.worker_state_machine import (
     GatherDep,
     GatherDepSuccessEvent,
     TaskErredMsg,
-)
-
-requires_zict_210 = pytest.mark.skipif(
-    not has_zict_210,
-    reason="requires zict version >= 2.1.0",
 )
 
 
@@ -282,17 +276,11 @@ async def test_fail_to_pickle_execute_2(c, s, a):
 
     y = c.submit(lambda: "y" * 256, key="y")
     await wait(y)
-    if has_zict_210:
-        assert set(a.data.memory) == {"x", "y"}
-    else:
-        assert set(a.data.memory) == {"y"}
-
+    assert set(a.data.memory) == {"x", "y"}
     assert not a.data.disk
-
     await assert_basic_futures(c)
 
 
-@requires_zict_210
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
@@ -373,7 +361,6 @@ async def test_spill_target_threshold(c, s, a):
     assert set(a.data.disk) == {"y"}
 
 
-@requires_zict_210
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
