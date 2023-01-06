@@ -1154,36 +1154,3 @@ async def test_deprecated_params(s, name):
     with pytest.warns(FutureWarning, match=name):
         async with Worker(s.address, **{name: 0.789}) as a:
             assert getattr(a.memory_manager, name) == 0.789
-
-
-@gen_cluster(
-    client=True,
-    config={"distributed.worker.memory.target": False},
-    worker_kwargs={"heartbeat_interval": "10ms"},
-)
-async def test_warn_on_sizeof_overestimate(c, s, a, b):
-    class C:
-        def __sizeof__(self):
-            return 2**40
-
-    with captured_logger("distributed.worker") as log:
-        x = c.submit(C)
-        # Wait for heartbeat
-        while "exceeds process memory" not in log.getvalue():
-            await asyncio.sleep(0.01)
-
-
-@gen_cluster(client=True, worker_kwargs={"heartbeat_interval": "10ms"})
-async def test_warn_on_sizeof_overestimate_spill(c, s, a, b):
-    class C:
-        def __sizeof__(self):
-            return 2**40
-
-    with captured_logger("distributed.worker") as log:
-        x = c.submit(C)
-        # Wait for heartbeat
-        while not s.memory.spilled:
-            await asyncio.sleep(0.01)
-
-    # Measure managed, not managed+spilled
-    assert "exceeds process memory" not in log.getvalue()
