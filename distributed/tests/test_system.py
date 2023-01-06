@@ -87,11 +87,23 @@ def test_soft_memory_limit_cgroups2(monkeypatch):
     assert limit == 10
 
 
-def test_rlimit():
+# DNM
+@pytest.mark.parametrize("f", [
+    lambda l: l - 1,
+    lambda l: l - 2**20,
+    lambda l: l // 2,
+])
+def test_rlimit(f):
     resource = pytest.importorskip("resource")
 
+    # DNM
+    print("rlimit=", resource.getrlimit(resource.RLIMIT_RSS))
+    print("memory_limit=", memory_limit())
+
     # decrease memory limit by one byte
-    new_limit = memory_limit() - 1
+    # DNM
+    #new_limit = memory_limit() - 1
+    new_limit = f(memory_limit())
     try:
         resource.setrlimit(resource.RLIMIT_RSS, (new_limit, new_limit))
         assert memory_limit() == new_limit
