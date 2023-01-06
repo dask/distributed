@@ -29,6 +29,17 @@ def test_basic(client):
     # ^ NOTE: this works because `assert_eq` sorts the rows before comparing
 
 
+def test_raise_on_non_string_column_name():
+    df = dd.from_pandas(pd.DataFrame({"a": range(10), 1: range(10)}), npartitions=5)
+    with pytest.raises(TypeError, match="p2p requires all column names to be str"):
+        df.shuffle("a", shuffle="p2p")
+
+
+def test_does_not_raise_on_stringified_numeric_column_name():
+    df = dd.from_pandas(pd.DataFrame({"a": range(10), "1": range(10)}), npartitions=5)
+    df.shuffle("a", shuffle="p2p")
+
+
 @gen_cluster([("", 2)] * 4, client=True)
 async def test_basic_state(c, s, *workers):
     df = dd.demo.make_timeseries(freq="15D", partition_freq="30D")

@@ -291,6 +291,8 @@ def pack_data(o, d, key_types=object):
         return typ([pack_data(x, d, key_types=key_types) for x in o])
     elif typ is dict:
         return {k: pack_data(v, d, key_types=key_types) for k, v in o.items()}
+    elif is_namedtuple_instance(o):
+        return typ(*[pack_data(x, d, key_types=key_types) for x in o])
     else:
         return o
 

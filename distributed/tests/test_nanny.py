@@ -212,6 +212,10 @@ async def test_scheduler_file():
         s.stop()
 
 
+@pytest.mark.xfail(
+    os.environ.get("MINDEPS") == "true",
+    reason="Timeout errors with mindeps environment",
+)
 @gen_cluster(client=True, Worker=Nanny, nthreads=[("127.0.0.1", 2)])
 async def test_nanny_timeout(c, s, a):
     x = await c.scatter(123)

@@ -227,6 +227,12 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         with contextlib.suppress(KeyError):
             del self.heartbeats[id]
 
+    def restart(self, scheduler: Scheduler) -> None:
+        self.states.clear()
+        self.heartbeats.clear()
+        self.tombstones.clear()
+        self.erred_shuffles.clear()
+
 
 def get_worker_for(output_partition: int, workers: list[str], npartitions: int) -> str:
     "Get the address of the worker which should hold this output partition number"

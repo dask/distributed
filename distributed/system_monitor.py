@@ -65,7 +65,8 @@ class SystemMonitor:
             try:
                 disk_ioc = psutil.disk_io_counters()
             except Exception:
-                # FIXME is this possible?
+                # FIXME occurs when psutil version doesn't have handling for given platform / kernel;
+                # should we explicitly error in this case?
                 monitor_disk_io = False  # pragma: nocover
             else:
                 if disk_ioc is None:  # pragma: nocover

@@ -1062,8 +1062,10 @@ async def test_release_evloop_while_spilling(c, s, a):
     worker_kwargs={"memory_limit": "100 MiB"},
     # ^ must be smaller than system memory limit, otherwise that will take precedence
     config={
-        "distributed.worker.memory.target": 0.5,
-        "distributed.worker.memory.spill": 1.0,
+        "distributed.worker.memory.target": 0.5,  # 50 MiB
+        # 97 GiB. It must be extremely high otherwise there's a risk we'll spend time
+        # trying to gc before get_process_memory gets patched below
+        "distributed.worker.memory.spill": 1000,
         "distributed.worker.memory.pause": False,
         "distributed.worker.memory.monitor-interval": "10ms",
     },
@@ -1072,7 +1074,7 @@ async def test_digests(c, s, a, b):
     trigger_spill = False
 
     def get_process_memory():
-        return 2**30 if trigger_spill else 0
+        return 1001 * 100 * 2**20 if trigger_spill else 0
 
     a.monitor.get_process_memory = get_process_memory
 
