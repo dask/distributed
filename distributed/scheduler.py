@@ -4651,7 +4651,7 @@ class Scheduler(SchedulerState, ServerNode):
             )
             worker_msgs[worker] = [
                 {
-                    "op": "free-keys",
+                    "op": "free_keys_attempt",
                     "keys": [key],
                     "stimulus_id": stimulus_id,
                     "attempts": [attempt],

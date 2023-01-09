@@ -1012,6 +1012,7 @@ class FreeKeysEvent(StateMachineEvent):
 
 @dataclass
 class FreeKeyByAttemptEvent(FreeKeysEvent):
+    __slots__ = ("keys", "attempts")
     attempts: Sequence[int]
 
 
@@ -2464,7 +2465,7 @@ class WorkerState:
         )
 
     def _transition_flight_memory(
-        self, ts: TaskState, value: object, *, stimulus_id: str
+        self, ts: TaskState, value: object, attempt: int, *, stimulus_id: str
     ) -> RecsInstrs:
         """This transition is *normally* triggered by GatherDepSuccessEvent.
         However, beware that it can also be triggered by scatter().
@@ -2778,7 +2779,7 @@ class WorkerState:
         for key, value in ev.data.items():
             try:
                 ts = self.tasks[key]
-                recommendations[ts] = ("memory", value)
+                recommendations[ts] = ("memory", value, -1)
             except KeyError:
                 self.tasks[key] = ts = TaskState(key)
 

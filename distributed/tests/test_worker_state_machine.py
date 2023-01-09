@@ -447,6 +447,7 @@ def test_executesuccess_to_dict():
     ev = ExecuteSuccessEvent(
         stimulus_id="test",
         key="x",
+        attempt=1,
         value=123,
         start=123.4,
         stop=456.7,
@@ -462,6 +463,7 @@ def test_executesuccess_to_dict():
         "stimulus_id": "test",
         "handled": 11.22,
         "key": "x",
+        "attempt": 1,
         "value": None,
         "nbytes": 890,
         "start": 123.4,
@@ -473,6 +475,7 @@ def test_executesuccess_to_dict():
     assert ev3.stimulus_id == "test"
     assert ev3.handled == 11.22
     assert ev3.key == "x"
+    assert ev3.attempt == 1
     assert ev3.value is None
     assert ev3.start == 123.4
     assert ev3.stop == 456.7
@@ -484,6 +487,7 @@ def test_executesuccess_dummy():
     ev = ExecuteSuccessEvent.dummy("x", stimulus_id="s")
     assert ev == ExecuteSuccessEvent(
         key="x",
+        attempt=1,
         value=None,
         start=0.0,
         stop=1.0,
