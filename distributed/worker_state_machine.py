@@ -107,6 +107,8 @@ WAITING_FOR_DATA: set[TaskStateState] = {
 
 NO_VALUE = "--no-value-sentinel--"
 
+ATTEMPT_SENTINEL = -1
+
 
 class SerializedTask(NamedTuple):
     """Info from distributed.scheduler.TaskState.run_spec
@@ -2452,6 +2454,7 @@ class WorkerState:
         """This transition is *normally* triggered by ExecuteSuccessEvent.
         However, beware that it can also be triggered by scatter().
         """
+        assert attempt != ATTEMPT_SENTINEL
         return self._transition_to_memory(
             ts, value, "task-finished", attempt=attempt, stimulus_id=stimulus_id
         )
@@ -2461,7 +2464,7 @@ class WorkerState:
     ) -> RecsInstrs:
         """This transition is triggered by scatter()"""
         return self._transition_to_memory(
-            ts, value, "add-keys", attempt=-1, stimulus_id=stimulus_id
+            ts, value, "add-keys", attempt=ATTEMPT_SENTINEL, stimulus_id=stimulus_id
         )
 
     def _transition_flight_memory(
@@ -2471,7 +2474,7 @@ class WorkerState:
         However, beware that it can also be triggered by scatter().
         """
         return self._transition_to_memory(
-            ts, value, "add-keys", attempt=-1, stimulus_id=stimulus_id
+            ts, value, "add-keys", attempt=ATTEMPT_SENTINEL, stimulus_id=stimulus_id
         )
 
     def _transition_resumed_memory(
@@ -2497,6 +2500,7 @@ class WorkerState:
 
         ts.previous = None
         ts.next = None
+        assert attempt != ATTEMPT_SENTINEL
         return self._transition_to_memory(
             ts, value, msg_type, attempt=attempt, stimulus_id=stimulus_id
         )
@@ -2779,7 +2783,7 @@ class WorkerState:
         for key, value in ev.data.items():
             try:
                 ts = self.tasks[key]
-                recommendations[ts] = ("memory", value, -1)
+                recommendations[ts] = ("memory", value, ATTEMPT_SENTINEL)
             except KeyError:
                 self.tasks[key] = ts = TaskState(key)
 
