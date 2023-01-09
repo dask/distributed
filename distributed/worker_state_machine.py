@@ -802,8 +802,8 @@ class ComputeTaskEvent(StateMachineEvent):
     @staticmethod
     def dummy(
         key: str,
-        run_id: int = 0,
         *,
+        run_id: int = 0,
         who_has: dict[str, Collection[str]] | None = None,
         nbytes: dict[str, int] | None = None,
         priority: tuple[int, ...] = (0,),
@@ -874,9 +874,9 @@ class ExecuteSuccessEvent(ExecuteDoneEvent):
     @staticmethod
     def dummy(
         key: str,
-        run_id: int = 0,
         value: object = None,
         *,
+        run_id: int = 1,
         nbytes: int = 1,
         stimulus_id: str,
     ) -> ExecuteSuccessEvent:
