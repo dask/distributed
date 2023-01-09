@@ -2454,7 +2454,6 @@ class WorkerState:
         """This transition is *normally* triggered by ExecuteSuccessEvent.
         However, beware that it can also be triggered by scatter().
         """
-        assert attempt != ATTEMPT_SENTINEL
         return self._transition_to_memory(
             ts, value, "task-finished", attempt=attempt, stimulus_id=stimulus_id
         )
@@ -2500,7 +2499,6 @@ class WorkerState:
 
         ts.previous = None
         ts.next = None
-        assert attempt != ATTEMPT_SENTINEL
         return self._transition_to_memory(
             ts, value, msg_type, attempt=attempt, stimulus_id=stimulus_id
         )
@@ -2527,6 +2525,7 @@ class WorkerState:
             instrs.append(AddKeysMsg(keys=[ts.key], stimulus_id=stimulus_id))
         else:
             assert msg_type == "task-finished"
+            assert attempt != ATTEMPT_SENTINEL
             instrs.append(
                 self._get_task_finished_msg(
                     ts, stimulus_id=stimulus_id, attempt=attempt
