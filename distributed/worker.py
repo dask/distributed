@@ -114,7 +114,7 @@ from distributed.worker_state_machine import (
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
     FindMissingEvent,
-    FreeKeyByAttemptEvent,
+    FreeKeyRunsEvent,
     FreeKeysEvent,
     GatherDepBusyEvent,
     GatherDepFailureEvent,
@@ -736,7 +736,7 @@ class Worker(BaseWorker, ServerNode):
             "acquire-replicas": self._handle_remote_stimulus(AcquireReplicasEvent),
             "compute-task": self._handle_remote_stimulus(ComputeTaskEvent),
             "free-keys": self._handle_remote_stimulus(FreeKeysEvent),
-            "free_keys_attempt": self._handle_remote_stimulus(FreeKeyByAttemptEvent),
+            "free-key-runs": self._handle_remote_stimulus(FreeKeyRunsEvent),
             "remove-replicas": self._handle_remote_stimulus(RemoveReplicasEvent),
             "steal-request": self._handle_remote_stimulus(StealRequestEvent),
             "refresh-who-has": self._handle_remote_stimulus(RefreshWhoHasEvent),
@@ -2242,7 +2242,7 @@ class Worker(BaseWorker, ServerNode):
 
         # The key *must* be in the worker state thanks to the cancelled state
         ts = self.state.tasks[key]
-        execution_attempt = ts.attempt
+        run_id = ts.run_id
 
         try:
             function, args, kwargs = await self._maybe_deserialize_task(ts)
@@ -2314,12 +2314,12 @@ class Worker(BaseWorker, ServerNode):
                     self.digests["task-duration"].add(result["stop"] - result["start"])
                 return ExecuteSuccessEvent(
                     key=key,
+                    run_id=run_id,
                     value=result["result"],
                     start=result["start"],
                     stop=result["stop"],
                     nbytes=result["nbytes"],
                     type=result["type"],
-                    attempt=execution_attempt,
                     stimulus_id=f"task-finished-{time()}",
                 )
 

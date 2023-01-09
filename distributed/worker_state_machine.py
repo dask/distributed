@@ -107,7 +107,7 @@ WAITING_FOR_DATA: set[TaskStateState] = {
 
 NO_VALUE = "--no-value-sentinel--"
 
-ATTEMPT_SENTINEL = -1
+RUN_ID_SENTINEL = -1
 
 
 class SerializedTask(NamedTuple):
@@ -233,6 +233,8 @@ class TaskState:
 
     #: Task key. Mandatory.
     key: str
+    #: Task run ID.
+    run_id: int = 0  # FIXME
     #: A named tuple containing the ``function``, ``args``, ``kwargs`` and ``task``
     #: associated with this `TaskState` instance. This defaults to ``None`` and can
     #: remain empty if it is a dependency that this worker will receive from another
@@ -296,7 +298,6 @@ class TaskState:
     #: the behaviour of transitions out of the ``executing``, ``flight`` etc. states.
     done: bool = False
 
-    attempt: int = 0
     _instances: ClassVar[weakref.WeakSet[TaskState]] = weakref.WeakSet()
 
     # Support for weakrefs to a class with __slots__
@@ -465,13 +466,13 @@ class TaskFinishedMsg(SendMessageToScheduler):
     op = "task-finished"
 
     key: str
+    run_id: int
     nbytes: int | None
     type: bytes  # serialized class
     typename: str
     metadata: dict
     thread: int | None
     startstops: list[StartStop]
-    attempt: int
     __slots__ = tuple(__annotations__)
 
     def to_dict(self) -> dict[str, Any]:
@@ -751,6 +752,7 @@ class GatherDepFailureEvent(GatherDepDoneEvent):
 @dataclass
 class ComputeTaskEvent(StateMachineEvent):
     key: str
+    run_id: int
     who_has: dict[str, Collection[str]]
     nbytes: dict[str, int]
     priority: tuple[int, ...]
@@ -762,7 +764,6 @@ class ComputeTaskEvent(StateMachineEvent):
     resource_restrictions: dict[str, float]
     actor: bool
     annotations: dict
-    attempt: int
 
     __slots__ = tuple(__annotations__)
 
@@ -801,6 +802,7 @@ class ComputeTaskEvent(StateMachineEvent):
     @staticmethod
     def dummy(
         key: str,
+        run_id: int = 0,
         *,
         who_has: dict[str, Collection[str]] | None = None,
         nbytes: dict[str, int] | None = None,
@@ -809,7 +811,6 @@ class ComputeTaskEvent(StateMachineEvent):
         resource_restrictions: dict[str, float] | None = None,
         actor: bool = False,
         annotations: dict | None = None,
-        attempt: int = 0,
         stimulus_id: str,
     ) -> ComputeTaskEvent:
         """Build a dummy event, with most attributes set to a reasonable default.
@@ -817,6 +818,7 @@ class ComputeTaskEvent(StateMachineEvent):
         """
         return ComputeTaskEvent(
             key=key,
+            run_id=run_id,
             who_has=who_has or {},
             nbytes=nbytes or {k: 1 for k in who_has or ()},
             priority=priority,
@@ -829,7 +831,6 @@ class ComputeTaskEvent(StateMachineEvent):
             actor=actor,
             annotations=annotations or {},
             stimulus_id=stimulus_id,
-            attempt=attempt,
         )
 
 
@@ -845,11 +846,11 @@ class ExecuteDoneEvent(StateMachineEvent):
 
 @dataclass
 class ExecuteSuccessEvent(ExecuteDoneEvent):
+    run_id: int  # FIXME: Utilize the run ID in all ExecuteDoneEvents
     value: object
     start: float
     stop: float
     nbytes: int
-    attempt: int
     type: type | None
     __slots__ = tuple(__annotations__)
 
@@ -873,8 +874,8 @@ class ExecuteSuccessEvent(ExecuteDoneEvent):
     @staticmethod
     def dummy(
         key: str,
+        run_id: int = 0,
         value: object = None,
-        attempt: int | None = None,
         *,
         nbytes: int = 1,
         stimulus_id: str,
@@ -884,11 +885,11 @@ class ExecuteSuccessEvent(ExecuteDoneEvent):
         """
         return ExecuteSuccessEvent(
             key=key,
+            run_id=run_id,
             value=value,
             start=0.0,
             stop=1.0,
             nbytes=nbytes,
-            attempt=1,
             type=None,
             stimulus_id=stimulus_id,
         )
@@ -1013,9 +1014,9 @@ class FreeKeysEvent(StateMachineEvent):
 
 
 @dataclass
-class FreeKeyByAttemptEvent(FreeKeysEvent):
-    __slots__ = ("keys", "attempts")
-    attempts: Sequence[int]
+class FreeKeyRunsEvent(FreeKeysEvent):
+    __slots__ = ("keys", "run_ids")
+    run_ids: Sequence[int]
 
 
 @dataclass
@@ -1785,7 +1786,10 @@ class WorkerState:
         return None
 
     def _get_task_finished_msg(
-        self, ts: TaskState, stimulus_id: str, attempt: int
+        self,
+        ts: TaskState,
+        run_id: int,
+        stimulus_id: str,
     ) -> TaskFinishedMsg:
         if ts.key not in self.data and ts.key not in self.actors:
             raise RuntimeError(f"Task {ts} not ready")
@@ -1806,13 +1810,13 @@ class WorkerState:
             typ_serialized = pickle.dumps(typ.__name__)
         return TaskFinishedMsg(
             key=ts.key,
+            run_id=run_id,
             nbytes=ts.nbytes,
             type=typ_serialized,
             typename=typename(typ),
             metadata=ts.metadata,
             thread=self.threads.get(ts.key),
             startstops=ts.startstops,
-            attempt=attempt,
             stimulus_id=stimulus_id,
         )
 
@@ -2449,13 +2453,13 @@ class WorkerState:
         return self._ensure_computing()
 
     def _transition_executing_memory(
-        self, ts: TaskState, value: object, attempt: int, *, stimulus_id: str
+        self, ts: TaskState, value: object, run_id: int, *, stimulus_id: str
     ) -> RecsInstrs:
         """This transition is *normally* triggered by ExecuteSuccessEvent.
         However, beware that it can also be triggered by scatter().
         """
         return self._transition_to_memory(
-            ts, value, "task-finished", attempt=attempt, stimulus_id=stimulus_id
+            ts, value, "task-finished", run_id=run_id, stimulus_id=stimulus_id
         )
 
     def _transition_released_memory(
@@ -2463,21 +2467,21 @@ class WorkerState:
     ) -> RecsInstrs:
         """This transition is triggered by scatter()"""
         return self._transition_to_memory(
-            ts, value, "add-keys", attempt=ATTEMPT_SENTINEL, stimulus_id=stimulus_id
+            ts, value, "add-keys", run_id=RUN_ID_SENTINEL, stimulus_id=stimulus_id
         )
 
     def _transition_flight_memory(
-        self, ts: TaskState, value: object, attempt: int, *, stimulus_id: str
+        self, ts: TaskState, value: object, run_id: int, *, stimulus_id: str
     ) -> RecsInstrs:
         """This transition is *normally* triggered by GatherDepSuccessEvent.
         However, beware that it can also be triggered by scatter().
         """
         return self._transition_to_memory(
-            ts, value, "add-keys", attempt=ATTEMPT_SENTINEL, stimulus_id=stimulus_id
+            ts, value, "add-keys", run_id=RUN_ID_SENTINEL, stimulus_id=stimulus_id
         )
 
     def _transition_resumed_memory(
-        self, ts: TaskState, value: object, attempt: int, *, stimulus_id: str
+        self, ts: TaskState, value: object, run_id: int, *, stimulus_id: str
     ) -> RecsInstrs:
         """Normally, we send to the scheduler a 'task-finished' message for a completed
         execution and 'add-data' for a completed replication from another worker. The
@@ -2500,7 +2504,7 @@ class WorkerState:
         ts.previous = None
         ts.next = None
         return self._transition_to_memory(
-            ts, value, msg_type, attempt=attempt, stimulus_id=stimulus_id
+            ts, value, msg_type, run_id=run_id, stimulus_id=stimulus_id
         )
 
     def _transition_to_memory(
@@ -2508,7 +2512,7 @@ class WorkerState:
         ts: TaskState,
         value: object,
         msg_type: Literal["add-keys", "task-finished"],
-        attempt: int,
+        run_id: int,
         *,
         stimulus_id: str,
     ) -> RecsInstrs:
@@ -2525,10 +2529,12 @@ class WorkerState:
             instrs.append(AddKeysMsg(keys=[ts.key], stimulus_id=stimulus_id))
         else:
             assert msg_type == "task-finished"
-            assert attempt != ATTEMPT_SENTINEL
+            assert run_id != RUN_ID_SENTINEL
             instrs.append(
                 self._get_task_finished_msg(
-                    ts, stimulus_id=stimulus_id, attempt=attempt
+                    ts,
+                    run_id=run_id,
+                    stimulus_id=stimulus_id,
                 )
             )
         return recs, instrs
@@ -2782,7 +2788,7 @@ class WorkerState:
         for key, value in ev.data.items():
             try:
                 ts = self.tasks[key]
-                recommendations[ts] = ("memory", value, ATTEMPT_SENTINEL)
+                recommendations[ts] = ("memory", value, RUN_ID_SENTINEL)
             except KeyError:
                 self.tasks[key] = ts = TaskState(key)
 
@@ -2826,18 +2832,16 @@ class WorkerState:
         return recommendations, []
 
     @_handle_event.register
-    def _handle_free_keys_attempt(self, ev: FreeKeyByAttemptEvent) -> RecsInstrs:
+    def _handle_free_key_runs(self, ev: FreeKeyRunsEvent) -> RecsInstrs:
         """Handler to be called by the scheduler.
 
-        Similar to _handle_free_keys but will only act if the provided attempt counter matches the known one
+        Similar to _handle_free_keys but will only act if the provided run ID counter matches the known one
         """
-        self.log.append(
-            ("free-keys-by-attempt", ev.keys, ev.attempts, ev.stimulus_id, time())
-        )
+        self.log.append(("free-key-runs", ev.keys, ev.run_ids, ev.stimulus_id, time()))
         recommendations: Recs = {}
-        for key, attempt in zip(ev.keys, ev.attempts):
+        for key, run_id in zip(ev.keys, ev.run_ids):
             ts = self.tasks.get(key)
-            if ts and ts.attempt == attempt:
+            if ts and ts.run_id == run_id:
                 recommendations[ts] = "released"
         return recommendations, []
 
@@ -2920,7 +2924,7 @@ class WorkerState:
         except KeyError:
             self.tasks[ev.key] = ts = TaskState(ev.key)
         self.log.append((ev.key, "compute-task", ts.state, ev.stimulus_id, time()))
-        ts.attempt = ev.attempt
+        ts.run_id = ev.run_id
         recommendations: Recs = {}
         instructions: Instructions = []
 
@@ -2933,7 +2937,7 @@ class WorkerState:
         elif ts.state == "memory":
             instructions.append(
                 self._get_task_finished_msg(
-                    ts, stimulus_id=ev.stimulus_id, attempt=ev.attempt
+                    ts, run_id=ev.run_id, stimulus_id=ev.stimulus_id
                 )
             )
         elif ts.state == "error":
@@ -3030,7 +3034,7 @@ class WorkerState:
         recommendations: Recs = {}
         for ts in self._gather_dep_done_common(ev):
             if ts.key in ev.data:
-                recommendations[ts] = ("memory", ev.data[ts.key], ts.attempt)
+                recommendations[ts] = ("memory", ev.data[ts.key], ts.run_id)
             else:
                 self.log.append((ts.key, "missing-dep", ev.stimulus_id, time()))
                 if self.validate:
@@ -3225,7 +3229,7 @@ class WorkerState:
         )
         ts.nbytes = ev.nbytes
         ts.type = ev.type
-        recs[ts] = ("memory", ev.value, ev.attempt)
+        recs[ts] = ("memory", ev.value, ev.run_id)
         return recs, instr
 
     @_handle_event.register

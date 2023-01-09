@@ -1310,13 +1310,17 @@ class TaskState:
     #: Task annotations
     annotations: dict[str, Any]
 
-    #: A counter that counts how often a task was already assigned to a Worker.
-    #: This counter is used to sign a task such that the assigned Worker is
-    #: expected to return the same counter in the task-finished message. This is
-    #: used to correlate responses.
-    #: Only the most recently assigned worker is trusted. All other results
-    #: will be rejected
-    _attempt: int
+    #: The unique identifier of a specific execution of a task. This identifier
+    #: is used to sign a task such that the assigned worker is expected to return
+    #: the same identifier in the task-finished message. This is used to correlate
+    #: responses.
+    #: Only the most recently assigned worker is trusted. All other results will
+    #: be rejected.
+    run_id: int
+
+    #: Whether the task has already been attempted. This value is used to refresh
+    #: refresh the run ID on following attempts.
+    _attempted: bool
 
     #: Cached hash of :attr:`~TaskState.client_key`
     _hash: int
@@ -1325,10 +1329,18 @@ class TaskState:
     __weakref__: Any = None
     __slots__ = tuple(__annotations__)
 
+    # Global counter for task IDs
+    _run_id_counter: ClassVar[itertools.count] = itertools.count()
+
     # Instances not part of slots since class variable
     _instances: ClassVar[weakref.WeakSet[TaskState]] = weakref.WeakSet()
 
-    def __init__(self, key: str, run_spec: object, state: TaskStateState):
+    def __init__(
+        self,
+        key: str,
+        run_spec: object,
+        state: TaskStateState,
+    ):
         self.key = key
         self._hash = hash(key)
         self.run_spec = run_spec
@@ -1362,7 +1374,8 @@ class TaskState:
         self.metadata = {}
         self.annotations = {}
         self.erred_on = set()
-        self._attempt = 0
+        self.run_id = next(TaskState._run_id_counter)
+        self._attempted = False
         TaskState._instances.add(self)
 
     def __hash__(self) -> int:
@@ -1436,6 +1449,12 @@ class TaskState:
 
     def get_nbytes_deps(self) -> int:
         return sum(ts.get_nbytes() for ts in self.dependencies)
+
+    def next_run(self) -> None:
+        """Update the task state for a new run"""
+        if self._attempted:
+            self.run_id = next(TaskState._run_id_counter)
+        self._attempted = True
 
     def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict[str, Any]:
         """Dictionary representation for debugging purposes.
@@ -3266,11 +3285,12 @@ class SchedulerState:
         #        time to compute and submit this
         if duration < 0:
             duration = self.get_task_duration(ts)
-        ts._attempt += 1
+        ts.next_run()
+
         msg: dict[str, Any] = {
             "op": "compute-task",
-            "attempt": ts._attempt,
             "key": ts.key,
+            "run_id": ts.run_id,
             "priority": ts.priority,
             "duration": duration,
             "stimulus_id": f"compute-task-{time()}",
@@ -4630,9 +4650,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.transitions(recommendations, stimulus_id)
 
-    def stimulus_task_finished(self, key, worker, stimulus_id, attempt, **kwargs):
+    def stimulus_task_finished(self, key, worker, stimulus_id, run_id, **kwargs):
         """Mark that a task has finished execution on a particular worker"""
-        logger.debug("Stimulus task finished %s, %s", key, worker)
+        logger.debug("Stimulus task finished %s[%d] %s", key, run_id, worker)
 
         recommendations: Recs = {}
         client_msgs: Msgs = {}
@@ -4640,7 +4660,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         ws: WorkerState = self.workers[worker]
         ts: TaskState = self.tasks.get(key)
-        if ts is None or ts._attempt != attempt:
+        if ts is None or ts.run_id != run_id:
             logger.debug(
                 "Received already computed task, worker: %s, state: %s"
                 ", key: %s, who_has: %s",
@@ -4651,10 +4671,10 @@ class Scheduler(SchedulerState, ServerNode):
             )
             worker_msgs[worker] = [
                 {
-                    "op": "free_keys_attempt",
+                    "op": "free-key-runs",
                     "keys": [key],
                     "stimulus_id": stimulus_id,
-                    "attempts": [attempt],
+                    "run_ids": [run_id],
                 }
             ]
         elif ts.state == "memory":
