@@ -5,6 +5,8 @@ import time as timemod
 from collections.abc import Callable
 from functools import wraps
 
+import psutil
+
 from distributed.compatibility import WINDOWS
 
 _empty_namedtuple = collections.namedtuple("_empty_namedtuple", ())
@@ -13,14 +15,8 @@ _empty_namedtuple = collections.namedtuple("_empty_namedtuple", ())
 def _psutil_caller(method_name, default=_empty_namedtuple):
     """
     Return a function calling the given psutil *method_name*,
-    or returning *default* if psutil is not present.
+    or returning *default* if psutil fails.
     """
-    # Import only once to avoid the cost of a failing import at each wrapper() call
-    try:
-        import psutil
-    except ImportError:  # pragma: no cover
-        return default
-
     meth = getattr(psutil, method_name)
 
     @wraps(meth)
