@@ -4660,19 +4660,15 @@ class Scheduler(SchedulerState, ServerNode):
 
         ws: WorkerState = self.workers[worker]
         ts: TaskState = self.tasks.get(key)
-        if ts is None:
+        if ts is None or ts.state in ("released", "queued"):
             logger.debug(
-                "Received already forgotten task, worker: %s, key: %s",
+                "Received already computed task, worker: %s, state: %s"
+                ", key: %s, who_has: %s",
                 worker,
+                ts.state if ts else "forgotten",
                 key,
+                ts.who_has if ts else {},
             )
-            worker_msgs[worker] = [
-                {
-                    "op": "free-keys",
-                    "keys": [key],
-                    "stimulus_id": stimulus_id,
-                }
-            ]
         elif ts.run_id != run_id:
             if not ts.processing_on or ts.processing_on.address != worker:
                 logger.debug(
