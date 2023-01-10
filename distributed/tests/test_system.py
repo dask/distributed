@@ -7,6 +7,7 @@ import sys
 import psutil
 import pytest
 
+from distributed.compatibility import MACOS
 from distributed.system import memory_limit
 
 
@@ -87,13 +88,15 @@ def test_soft_memory_limit_cgroups2(monkeypatch):
     assert limit == 10
 
 
+@pytest.mark.xfail(
+    MACOS,
+    reason="Mac OS raises 'ValueError: current limit exceeds maximum limit' "
+    "when calling setrlimit with as little as 7 GiB (getrlimit returns 2**63)",
+)
 def test_rlimit():
     resource = pytest.importorskip("resource")
 
     # decrease memory limit by one byte
     new_limit = memory_limit() - 1
-    try:
-        resource.setrlimit(resource.RLIMIT_RSS, (new_limit, new_limit))
-        assert memory_limit() == new_limit
-    except OSError:
-        pytest.skip("resource could not set the RSS limit")
+    resource.setrlimit(resource.RLIMIT_RSS, (new_limit, new_limit))
+    assert memory_limit() == new_limit
