@@ -90,7 +90,7 @@ def test_soft_memory_limit_cgroups2(monkeypatch):
 
 @pytest.mark.xfail(
     MACOS,
-    reason="MacOSX github CI raises 'ValueError: current limit exceeds maximum limit' "
+    reason="Mac OS raises 'ValueError: current limit exceeds maximum limit' "
     "when calling setrlimit with as little as 7 GiB (getrlimit returns 2**63)",
 )
 def test_rlimit():
