@@ -4660,25 +4660,45 @@ class Scheduler(SchedulerState, ServerNode):
 
         ws: WorkerState = self.workers[worker]
         ts: TaskState = self.tasks.get(key)
-        if ts is None or ts.run_id != run_id:
+        if ts is None:
             logger.debug(
-                "Received already computed task, worker: %s, state: %s"
-                ", key: %s, who_has: %s",
+                "Received already forgotten task, worker: %s, key: %s",
                 worker,
-                ts.state if ts else "forgotten",
                 key,
-                ts.who_has if ts else {},
             )
-            if ts.processing_on and ts.processing_on.address == worker:
-                recommendations[ts.key] = "released"
-            else:
-                worker_msgs[worker] = [
-                    {
-                        "op": "free-keys",
-                        "keys": [key],
-                        "stimulus_id": stimulus_id,
-                    }
-                ]
+            worker_msgs[worker] = [
+                {
+                    "op": "free-keys",
+                    "keys": [key],
+                    "stimulus_id": stimulus_id,
+                }
+            ]
+        elif (
+            ts.run_id != run_id
+            and ts.processing_on
+            and ts.processing_on.address == worker
+        ):
+            recommendations[ts.key] = "released"
+        elif (
+            ts.run_id != run_id
+            and ts.processing_on
+            and ts.processing_on.address != worker
+        ):
+            logger.debug(
+                "Received stale task, worker: %s, key: %s, run_id: %d (%d), state: %s",
+                worker,
+                key,
+                run_id,
+                ts.run_id,
+                ts.state,
+            )
+            worker_msgs[worker] = [
+                {
+                    "op": "free-keys",
+                    "keys": [key],
+                    "stimulus_id": stimulus_id,
+                }
+            ]
         elif ts.state == "memory":
             self.add_keys(worker=worker, keys=[key])
         else:
