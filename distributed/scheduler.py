@@ -4673,32 +4673,25 @@ class Scheduler(SchedulerState, ServerNode):
                     "stimulus_id": stimulus_id,
                 }
             ]
-        elif (
-            ts.run_id != run_id
-            and ts.processing_on
-            and ts.processing_on.address == worker
-        ):
-            recommendations[ts.key] = "released"
-        elif (
-            ts.run_id != run_id
-            and ts.processing_on
-            and ts.processing_on.address != worker
-        ):
-            logger.debug(
-                "Received stale task, worker: %s, key: %s, run_id: %d (%d), state: %s",
-                worker,
-                key,
-                run_id,
-                ts.run_id,
-                ts.state,
-            )
-            worker_msgs[worker] = [
-                {
-                    "op": "free-keys",
-                    "keys": [key],
-                    "stimulus_id": stimulus_id,
-                }
-            ]
+        elif ts.run_id != run_id:
+            if not ts.processing_on or ts.processing_on.address != worker:
+                logger.debug(
+                    "Received stale task, worker: %s, key: %s, run_id: %d (%d), state: %s",
+                    worker,
+                    key,
+                    run_id,
+                    ts.run_id,
+                    ts.state,
+                )
+                worker_msgs[worker] = [
+                    {
+                        "op": "free-keys",
+                        "keys": [key],
+                        "stimulus_id": stimulus_id,
+                    }
+                ]
+            else:
+                recommendations[ts.key] = "released"
         elif ts.state == "memory":
             self.add_keys(worker=worker, keys=[key])
         else:
