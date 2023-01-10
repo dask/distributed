@@ -3971,7 +3971,9 @@ async def test_TaskState__to_dict(c, s):
 
 
 def _verify_cluster_state(
-    state: dict, workers: Collection[Worker], allow_missing: bool = False
+    state: dict,
+    workers: Collection[Worker],
+    allow_missing: bool = False,
 ) -> None:
     addrs = {w.address for w in workers}
     assert state.keys() == {"scheduler", "workers", "versions"}

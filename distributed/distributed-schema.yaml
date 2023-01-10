@@ -541,7 +541,7 @@ properties:
 
               transfer:
                 oneOf:
-                  - {type: number, minimum: 0, maximum: 1}
+                  - {type: number, exclusiveMinimum: 0, maximum: 1}
                   - {enum: [false]}
                 description: >-
                   When the total size of incoming data transfers gets above this amount,
@@ -549,7 +549,7 @@ properties:
 
               target:
                 oneOf:
-                  - {type: number, minimum: 0, maximum: 1}
+                  - {type: number, exclusiveMinimum: 0, maximum: 1}
                   - {enum: [false]}
                 description: >-
                   When the process memory (as observed by the operating system) gets
@@ -558,7 +558,7 @@ properties:
 
               spill:
                 oneOf:
-                  - {type: number, minimum: 0, maximum: 1}
+                  - {type: number, exclusiveMinimum: 0, maximum: 1}
                   - {enum: [false]}
                 description: >-
                   When the process memory (as observed by the operating system) gets
@@ -568,7 +568,7 @@ properties:
 
               pause:
                 oneOf:
-                  - {type: number, minimum: 0, maximum: 1}
+                  - {type: number, exclusiveMinimum: 0, maximum: 1}
                   - {enum: [false]}
                 description: >-
                   When the process memory (as observed by the operating system) gets
@@ -577,7 +577,7 @@ properties:
 
               terminate:
                 oneOf:
-                  - {type: number, minimum: 0, maximum: 1}
+                  - {type: number, exclusiveMinimum: 0, maximum: 1}
                   - {enum: [false]}
                 description: >-
                   When the process memory reaches this level the nanny process will kill

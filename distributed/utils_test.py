@@ -1572,7 +1572,7 @@ def bump_rlimit(limit, desired):
     try:
         soft, hard = resource.getrlimit(limit)
         if soft < desired:
-            resource.setrlimit(limit, (desired, max(hard, desired)))
+            resource.setrlimit(limit, (desired, min(hard, desired)))
     except Exception as e:
         pytest.skip(f"rlimit too low ({soft}) and can't be increased: {e}")
 

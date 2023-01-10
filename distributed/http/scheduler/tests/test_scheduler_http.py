@@ -5,11 +5,7 @@ import json
 import re
 from unittest import mock
 
-import aiohttp
 import pytest
-
-pytest.importorskip("bokeh")
-
 from tornado.escape import url_escape
 from tornado.httpclient import AsyncHTTPClient, HTTPClientError
 
@@ -84,6 +80,8 @@ async def test_worker_404(c, s):
 
 @gen_cluster(client=True, scheduler_kwargs={"http_prefix": "/foo", "dashboard": True})
 async def test_prefix(c, s, a, b):
+    pytest.importorskip("bokeh")
+
     http_client = AsyncHTTPClient()
     for suffix in ["foo/info/main/workers.html", "foo/json/index.html", "foo/system"]:
         response = await http_client.fetch(
@@ -295,6 +293,8 @@ async def test_task_page(c, s, a, b):
     },
 )
 async def test_allow_websocket_origin(c, s, a, b):
+    pytest.importorskip("bokeh")
+
     from tornado.httpclient import HTTPRequest
     from tornado.websocket import websocket_connect
 
@@ -335,6 +335,8 @@ def test_api_disabled_by_default():
     },
 )
 async def test_api(c, s, a, b):
+    aiohttp = pytest.importorskip("aiohttp")
+
     async with aiohttp.ClientSession() as session:
         async with session.get(
             "http://localhost:%d/api/v1" % s.http_server.port
@@ -353,6 +355,8 @@ async def test_api(c, s, a, b):
     },
 )
 async def test_retire_workers(c, s, a, b):
+    aiohttp = pytest.importorskip("aiohttp")
+
     async with aiohttp.ClientSession() as session:
         params = {"workers": [a.address, b.address]}
         async with session.post(
@@ -374,6 +378,8 @@ async def test_retire_workers(c, s, a, b):
     },
 )
 async def test_get_workers(c, s, a, b):
+    aiohttp = pytest.importorskip("aiohttp")
+
     async with aiohttp.ClientSession() as session:
         async with session.get(
             "http://localhost:%d/api/v1/get_workers" % s.http_server.port
@@ -394,6 +400,8 @@ async def test_get_workers(c, s, a, b):
     },
 )
 async def test_adaptive_target(c, s, a, b):
+    aiohttp = pytest.importorskip("aiohttp")
+
     async with aiohttp.ClientSession() as session:
         async with session.get(
             "http://localhost:%d/api/v1/adaptive_target" % s.http_server.port

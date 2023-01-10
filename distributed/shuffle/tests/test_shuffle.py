@@ -10,9 +10,9 @@ from itertools import count
 from typing import Any, Mapping
 from unittest import mock
 
-import numpy as np
-import pandas as pd
 import pytest
+
+pd = pytest.importorskip("pandas")
 
 import dask
 import dask.dataframe as dd
@@ -38,8 +38,6 @@ from distributed.shuffle._worker_extension import (
 from distributed.utils import Deadline
 from distributed.utils_test import gen_cluster, gen_test, wait_for_state
 from distributed.worker_state_machine import TaskState as WorkerTaskState
-
-pa = pytest.importorskip("pyarrow")
 
 
 async def clean_worker(
@@ -657,6 +655,8 @@ def test_processing_chain():
     In practice this takes place on many different workers.
     Here we verify its accuracy in a single threaded situation.
     """
+    np = pytest.importorskip("numpy")
+    pa = pytest.importorskip("pyarrow")
 
     class Stub:
         def __init__(self, value: int) -> None:
@@ -1010,6 +1010,41 @@ async def test_closed_worker_between_repeats(c, s, w1, w2, w3):
     await clean_scheduler(s)
 
 
+@pytest.mark.slow
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_restart_cluster_between_repeats(c, s, a):
+    scheduler_extension = s.extensions["shuffle"]
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="100 s",
+        seed=42,
+    )
+
+    await c.compute(dd.shuffle.shuffle(df, "y", shuffle="p2p"))
+    await clean_scheduler(s)
+
+    assert scheduler_extension.tombstones
+
+    # Cannot rerun forgotten shuffle due to tombstone
+    with pytest.raises(RuntimeError, match="shuffle_transfer"):
+        await c.compute(dd.shuffle.shuffle(df, "y", shuffle="p2p"))
+
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    await c.compute(out)
+    assert scheduler_extension.shuffle_ids()
+
+    await c.restart()
+    await clean_scheduler(s)
+    assert not scheduler_extension.tombstones
+
+    await c.compute(out)
+    await c.compute(dd.shuffle.shuffle(df, "y", shuffle="p2p"))
+    del out
+    await clean_scheduler(s)
+
+
 @gen_cluster(client=True)
 async def test_new_worker(c, s, a, b):
     df = dask.datasets.timeseries(
@@ -1222,6 +1257,8 @@ async def test_basic_lowlevel_shuffle(
     npartitions,
     barrier_first_worker,
 ):
+    pa = pytest.importorskip("pyarrow")
+
     dfs = []
     rows_per_df = 10
     for ix in range(n_input_partitions):
@@ -1296,6 +1333,8 @@ async def test_basic_lowlevel_shuffle(
 
 @gen_test()
 async def test_error_offload(tmpdir, loop_in_thread):
+    pa = pytest.importorskip("pyarrow")
+
     dfs = []
     rows_per_df = 10
     n_input_partitions = 2
@@ -1347,6 +1386,8 @@ async def test_error_offload(tmpdir, loop_in_thread):
 
 @gen_test()
 async def test_error_send(tmpdir, loop_in_thread):
+    pa = pytest.importorskip("pyarrow")
+
     dfs = []
     rows_per_df = 10
     n_input_partitions = 1
@@ -1397,6 +1438,8 @@ async def test_error_send(tmpdir, loop_in_thread):
 
 @gen_test()
 async def test_error_receive(tmpdir, loop_in_thread):
+    pa = pytest.importorskip("pyarrow")
+
     dfs = []
     rows_per_df = 10
     n_input_partitions = 1
