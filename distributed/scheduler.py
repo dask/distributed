@@ -4660,24 +4660,29 @@ class Scheduler(SchedulerState, ServerNode):
 
         ws: WorkerState = self.workers[worker]
         ts: TaskState = self.tasks.get(key)
-        if ts is None or ts.state in ("released", "queued"):
+        if ts is None or ts.state != "processing":
             logger.debug(
-                "Received already computed task, worker: %s, state: %s"
-                ", key: %s, who_has: %s",
+                "Received stale task, worker: %s, state: %s" ", key: %s, who_has: %s",
                 worker,
                 ts.state if ts else "forgotten",
                 key,
                 ts.who_has if ts else {},
             )
+            worker_msgs[worker] = [
+                {
+                    "op": "free-keys",
+                    "keys": [key],
+                    "stimulus_id": stimulus_id,
+                }
+            ]
         elif ts.run_id != run_id:
             if not ts.processing_on or ts.processing_on.address != worker:
                 logger.debug(
-                    "Received stale task, worker: %s, key: %s, run_id: %d (%d), state: %s",
+                    "Received stale task run, worker: %s, key: %s, run_id: %d (%d)",
                     worker,
                     key,
                     run_id,
                     ts.run_id,
-                    ts.state,
                 )
                 worker_msgs[worker] = [
                     {
@@ -4688,8 +4693,6 @@ class Scheduler(SchedulerState, ServerNode):
                 ]
             else:
                 recommendations[ts.key] = "released"
-        elif ts.state == "memory":
-            self.add_keys(worker=worker, keys=[key])
         else:
             ts.metadata.update(kwargs["metadata"])
             r: tuple = self._transition(
