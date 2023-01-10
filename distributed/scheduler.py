@@ -4669,14 +4669,16 @@ class Scheduler(SchedulerState, ServerNode):
                 key,
                 ts.who_has if ts else {},
             )
-            worker_msgs[worker] = [
-                {
-                    "op": "free-key-runs",
-                    "keys": [key],
-                    "stimulus_id": stimulus_id,
-                    "run_ids": [run_id],
-                }
-            ]
+            if ts.processing_on and ts.processing_on.address == worker:
+                recommendations[ts.key] = "released"
+            else:
+                worker_msgs[worker] = [
+                    {
+                        "op": "free-keys",
+                        "keys": [key],
+                        "stimulus_id": stimulus_id,
+                    }
+                ]
         elif ts.state == "memory":
             self.add_keys(worker=worker, keys=[key])
         else:

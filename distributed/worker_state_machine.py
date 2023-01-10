@@ -1014,12 +1014,6 @@ class FreeKeysEvent(StateMachineEvent):
 
 
 @dataclass
-class FreeKeyRunsEvent(FreeKeysEvent):
-    __slots__ = ("keys", "run_ids")
-    run_ids: Sequence[int]
-
-
-@dataclass
 class StealRequestEvent(StateMachineEvent):
     """Event that requests a worker to release a key because it's now being computed
     somewhere else.
@@ -2828,20 +2822,6 @@ class WorkerState:
         for key in ev.keys:
             ts = self.tasks.get(key)
             if ts:
-                recommendations[ts] = "released"
-        return recommendations, []
-
-    @_handle_event.register
-    def _handle_free_key_runs(self, ev: FreeKeyRunsEvent) -> RecsInstrs:
-        """Handler to be called by the scheduler.
-
-        Similar to _handle_free_keys but will only act if the provided run ID counter matches the known one
-        """
-        self.log.append(("free-key-runs", ev.keys, ev.run_ids, ev.stimulus_id, time()))
-        recommendations: Recs = {}
-        for key, run_id in zip(ev.keys, ev.run_ids):
-            ts = self.tasks.get(key)
-            if ts and ts.run_id == run_id:
                 recommendations[ts] = "released"
         return recommendations, []
 

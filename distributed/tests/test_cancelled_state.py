@@ -1059,5 +1059,5 @@ async def test_secede_cancelled_or_resumed_scheduler(c, s, a):
     assert ws.processing
 
     await ev4.set()
-    assert await x == 123
+    assert await x == 2
     assert not ws.processing
