@@ -51,7 +51,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             {
                 "shuffle_get": self.get,
                 "shuffle_get_participating_workers": self.get_participating_workers,
-                "shuffle_register_complete": self.register_complete,
             }
         )
         self.heartbeats = defaultdict(lambda: defaultdict(dict))
@@ -190,11 +189,15 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         *args: Any,
         **kwargs: Any,
     ) -> None:
-        if finish != "forgotten":
+        # if not finish == "forgotten" or not (
+        # start in ("processing", "memory", "erred") and finish == "released"
+        # ):
+        if finish not in ("released", "forgotten"):
             return
         if not key.startswith("shuffle-barrier-"):
             return
         shuffle_id = id_from_key(key)
+        self.tombstones.add(shuffle_id)
         if shuffle_id not in self.states:
             return
         participating_workers = self.states[shuffle_id].participating_workers
@@ -211,17 +214,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self._clean_on_scheduler(shuffle_id)
         self.scheduler.send_all({}, worker_msgs)
 
-    def register_complete(self, id: ShuffleId, worker: str) -> None:
-        """Learn from a worker that it has completed all reads of a shuffle"""
-        if exception := self.erred_shuffles.get(id):
-            raise exception
-        if id not in self.states:
-            logger.info("Worker shuffle reported complete after shuffle was removed")
-            return
-        self.states[id].completed_workers.add(worker)
-
     def _clean_on_scheduler(self, id: ShuffleId) -> None:
-        self.tombstones.add(id)
         del self.states[id]
         self.erred_shuffles.pop(id, None)
         with contextlib.suppress(KeyError):

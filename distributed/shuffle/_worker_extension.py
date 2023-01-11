@@ -136,7 +136,6 @@ class Shuffle:
         # MultiComm.max_connections = min(10, n_workers)
 
         self.diagnostics: dict[str, float] = defaultdict(float)
-        self.output_partitions_left = len(self.partitions_of.get(local_address, ()))
         self.transferred = False
         self.total_recvd = 0
         self.start_time = time.time()
@@ -250,9 +249,6 @@ class Shuffle:
         # ^ NOTE: this check isn't necessary, just a nice validation to prevent incorrect
         # data in the case something has gone very wrong
 
-        assert (
-            self.output_partitions_left > 0
-        ), f"No outputs remaining, but requested output partition {i} on {self.local_address}."
         await self.flush_receive()
         try:
             df = self._read_from_disk(i)
@@ -260,7 +256,6 @@ class Shuffle:
                 out = df.to_pandas()
         except KeyError:
             out = self.schema.empty_table().to_pandas()
-        self.output_partitions_left -= 1
         return out
 
     def _read_from_disk(self, id: int | str) -> pa.Table:
@@ -281,9 +276,6 @@ class Shuffle:
     async def _flush_comm(self) -> None:
         self.raise_if_closed()
         await self._comm_buffer.flush()
-
-    def done(self) -> bool:
-        return self.transferred and self.output_partitions_left == 0
 
     async def flush_receive(self) -> None:
         self.raise_if_closed()
@@ -368,14 +360,6 @@ class ShuffleWorkerExtension:
         with log_errors():
             shuffle = await self._get_shuffle(shuffle_id)
             await shuffle.inputs_done()
-            if shuffle.done():
-                # If the shuffle has no output partitions, remove it now;
-                # `get_output_partition` will never be called.
-                # This happens when there are fewer output partitions than workers.
-                assert shuffle._disk_buffer.empty
-                logger.info(f"Shuffle inputs done {shuffle}")
-                await self._register_complete(shuffle)
-                del self.shuffles[shuffle_id]
 
     async def shuffle_fail(self, shuffle_id: ShuffleId, message: str) -> None:
         try:
@@ -385,7 +369,7 @@ class ShuffleWorkerExtension:
         exception = RuntimeError(message)
         shuffle.fail(exception)
         await shuffle.close()
-        del self.shuffles[shuffle_id]
+        self.shuffles.pop(shuffle_id, None)
 
     def add_partition(
         self,
@@ -410,15 +394,6 @@ class ShuffleWorkerExtension:
         # Note that this will call `shuffle_inputs_done` on our own worker as well
         shuffle = await self._get_shuffle(shuffle_id)
         await shuffle.barrier()
-
-    async def _register_complete(self, shuffle: Shuffle) -> None:
-        await shuffle.close()
-        # All the relevant work has already succeeded if we reached this point,
-        # so we do not need to check if the extension is closed.
-        await self.worker.scheduler.shuffle_register_complete(
-            id=shuffle.id,
-            worker=self.worker.address,
-        )
 
     @overload
     async def _get_shuffle(
@@ -569,12 +544,7 @@ class ShuffleWorkerExtension:
         Calling this for a ``shuffle_id`` which is unknown or incomplete is an error.
         """
         shuffle = self.get_shuffle(shuffle_id)
-        output = sync(self.worker.loop, shuffle.get_output_partition, output_partition)
-        # key missing if another thread got to it first
-        if shuffle.done() and shuffle_id in self.shuffles:
-            shuffle = self.shuffles.pop(shuffle_id)
-            sync(self.worker.loop, self._register_complete, shuffle)
-        return output
+        return sync(self.worker.loop, shuffle.get_output_partition, output_partition)
 
 
 def split_by_worker(
