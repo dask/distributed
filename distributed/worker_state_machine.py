@@ -234,7 +234,7 @@ class TaskState:
     #: Task key. Mandatory.
     key: str
     #: Task run ID.
-    run_id: int = 0  # FIXME
+    run_id: int = RUN_ID_SENTINEL
     #: A named tuple containing the ``function``, ``args``, ``kwargs`` and ``task``
     #: associated with this `TaskState` instance. This defaults to ``None`` and can
     #: remain empty if it is a dependency that this worker will receive from another
