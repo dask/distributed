@@ -5,6 +5,7 @@ import datetime
 import logging
 import uuid
 import warnings
+from collections.abc import Awaitable
 from contextlib import suppress
 from inspect import isawaitable
 from typing import Any
@@ -205,16 +206,17 @@ class Cluster(SyncMethodMixin):
 
         self.status = Status.closed
 
-    def close(self, timeout=None):
+    def close(self, timeout: float | None = None) -> Awaitable[None] | None:
         # If the cluster is already closed, we're already done
         if self.status == Status.closed:
             if self.asynchronous:
                 return NoOpAwaitable()
-            else:
-                return
+            return None
 
-        with suppress(RuntimeError):  # loop closed during process shutdown
+        try:
             return self.sync(self._close, callback_timeout=timeout)
+        except RuntimeError:  # loop closed during process shutdown
+            return None
 
     def __del__(self, _warn=warnings.warn):
         if getattr(self, "status", Status.closed) != Status.closed:
@@ -521,7 +523,8 @@ class Cluster(SyncMethodMixin):
         return self.sync(self.__aenter__)
 
     def __exit__(self, exc_type, exc_value, traceback):
-        return self.sync(self.__aexit__, exc_type, exc_value, traceback)
+        aw = self.close()
+        assert aw is None
 
     def __await__(self):
         return self
