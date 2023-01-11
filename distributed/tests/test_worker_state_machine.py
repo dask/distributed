@@ -110,12 +110,14 @@ def test_TaskState__to_dict():
     assert actual == [
         {
             "key": "x",
+            "run_id": -1,
             "state": "memory",
             "done": True,
             "dependents": ["<TaskState 'y' released>"],
         },
         {
             "key": "y",
+            "run_id": -1,
             "state": "released",
             "dependencies": ["<TaskState 'x' memory>"],
             "priority": [0],
@@ -192,6 +194,7 @@ def test_WorkerState__to_dict(ws):
             "x": {
                 "coming_from": "127.0.0.1:1235",
                 "key": "x",
+                "run_id": -1,
                 "nbytes": 123,
                 "priority": [1],
                 "state": "flight",
@@ -199,6 +202,7 @@ def test_WorkerState__to_dict(ws):
             },
             "y": {
                 "key": "y",
+                "run_id": -1,
                 "nbytes": sizeof(object()),
                 "state": "memory",
             },
