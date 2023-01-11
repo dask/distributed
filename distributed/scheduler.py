@@ -1329,8 +1329,8 @@ class TaskState:
     __weakref__: Any = None
     __slots__ = tuple(__annotations__)
 
-    # Global counter for task IDs
-    _run_id_counter: ClassVar[itertools.count] = itertools.count()
+    #: Global iterator used to create unique task run IDs
+    _run_id_iterator: ClassVar[itertools.count] = itertools.count()
 
     # Instances not part of slots since class variable
     _instances: ClassVar[weakref.WeakSet[TaskState]] = weakref.WeakSet()
@@ -1374,7 +1374,7 @@ class TaskState:
         self.metadata = {}
         self.annotations = {}
         self.erred_on = set()
-        self.run_id = next(TaskState._run_id_counter)
+        self.run_id = next(TaskState._run_id_iterator)
         self._attempted = False
         TaskState._instances.add(self)
 
@@ -1453,7 +1453,7 @@ class TaskState:
     def next_run(self) -> None:
         """Update the task state for a new run"""
         if self._attempted:
-            self.run_id = next(TaskState._run_id_counter)
+            self.run_id = next(TaskState._run_id_iterator)
         self._attempted = True
 
     def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict[str, Any]:
