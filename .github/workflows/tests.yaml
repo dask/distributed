@@ -69,12 +69,14 @@ jobs:
         shell: bash
 
       - name: Checkout source
-        uses: actions/checkout@v3.3.0
+        uses: actions/checkout@v3
         with:
-          fetch-depth: 0
+          # Needed by versioneer.
+          # Must be higher than the number of commits since the latest release.
+          fetch-depth: 200
 
       - name: Setup Conda Environment
-        uses: conda-incubator/setup-miniconda@v2.2.0
+        uses: conda-incubator/setup-miniconda@v2
         with:
           miniforge-variant: Mambaforge
           miniforge-version: latest
