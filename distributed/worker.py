@@ -954,6 +954,20 @@ class Worker(BaseWorker, ServerNode):
         return self._deque_handler.deque
 
     def log_event(self, topic: str | Collection[str], msg: Any) -> None:
+        """Log an event under a given topic
+
+        Parameters
+        ----------
+        topic : str, list[str]
+            Name of the topic under which to log an event. To log the same
+            event under multiple topics, pass a list of topic names.
+        msg
+            Event message to log. Note this must be msgpack serializable.
+
+        See also
+        --------
+        Client.log_event
+        """
         full_msg = {
             "op": "log-event",
             "topic": topic,

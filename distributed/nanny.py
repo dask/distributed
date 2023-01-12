@@ -616,6 +616,20 @@ class Nanny(ServerNode):
         )
 
     def log_event(self, topic, msg):
+        """Log an event under a given topic
+
+        Parameters
+        ----------
+        topic : str, list[str]
+            Name of the topic under which to log an event. To log the same
+            event under multiple topics, pass a list of topic names.
+        msg
+            Event message to log. Note this must be msgpack serializable.
+
+        See also
+        --------
+        Client.log_event
+        """
         self._ongoing_background_tasks.call_soon(self._log_event, topic, msg)
 
 
