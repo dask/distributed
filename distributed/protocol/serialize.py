@@ -822,7 +822,7 @@ def _is_msgpack_serializable(v):
         or typ is float
         or isinstance(v, dict)
         and all(map(_is_msgpack_serializable, v.values()))
-        and all(isinstance(x, str) for x in v.keys())
+        and all(type(x) is str for x in v.keys())
         or isinstance(v, (list, tuple))
         and all(map(_is_msgpack_serializable, v))
     )
