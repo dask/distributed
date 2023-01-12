@@ -911,7 +911,6 @@ async def test_closed_worker_between_repeats(c, s, w1, w2, w3):
     await clean_scheduler(s)
 
 
-@pytest.mark.skip(reason="FIXME: We need to fix this or allow reruns")
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
 async def test_restart_cluster_between_repeats(c, s, a):
@@ -927,9 +926,12 @@ async def test_restart_cluster_between_repeats(c, s, a):
     await c.compute(dd.shuffle.shuffle(df, "y", shuffle="p2p"))
     await clean_scheduler(s)
 
+    # Ensure the shuffles has been forgotten
+    while s.tasks:
+        await asyncio.sleep(0.1)
+
     assert scheduler_extension.tombstones
 
-    # Cannot rerun forgotten shuffle due to tombstone
     with pytest.raises(RuntimeError, match="shuffle_transfer"):
         await c.compute(dd.shuffle.shuffle(df, "y", shuffle="p2p"))
 
