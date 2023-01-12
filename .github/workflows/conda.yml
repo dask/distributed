@@ -29,9 +29,9 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v3
         with:
-          # Needed by versioneer.
-          # Must be higher than the number of commits since the latest release.
-          fetch-depth: 200
+          # Fetch the whole git history.
+          # Needed by GIT_DESCRIBE_NUMBER in the conda recipes.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: conda-incubator/setup-miniconda@v2
