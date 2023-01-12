@@ -19,7 +19,7 @@ from collections import defaultdict
 from collections.abc import Collection, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
-from contextlib import contextmanager, suppress
+from contextlib import asynccontextmanager, contextmanager, suppress
 from contextvars import ContextVar
 from functools import partial
 from importlib.metadata import PackageNotFoundError, version
@@ -1441,7 +1441,10 @@ class Client(SyncMethodMixin):
         return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
 
     def _heartbeat(self):
-        if self.scheduler_comm:
+        # Don't send heartbeat if scheduler comm or cluster are already closed
+        if (self.scheduler_comm and not self.scheduler_comm.comm.closed()) or (
+            self.cluster and self.cluster.status not in (Status.closed, Status.closing)
+        ):
             self.scheduler_comm.send({"op": "heartbeat-client"})
 
     def __enter__(self):
@@ -1505,6 +1508,14 @@ class Client(SyncMethodMixin):
                     if is_python_shutting_down():
                         return
                     if self.status == "running":
+                        if self.cluster and self.cluster.status in (
+                            Status.closed,
+                            Status.closing,
+                        ):
+                            # Don't attempt to reconnect if cluster are already closed.
+                            # Instead close down the client.
+                            await self._close()
+                            return
                         logger.info("Client report stream closed to scheduler")
                         logger.info("Reconnecting...")
                         self.status = "connecting"
@@ -1538,7 +1549,7 @@ class Client(SyncMethodMixin):
                         logger.exception(e)
                 if breakout:
                     break
-        except CancelledError:
+        except (CancelledError, asyncio.CancelledError):
             pass
 
     def _handle_key_in_memory(self, key=None, type=None, workers=None):
@@ -1588,6 +1599,25 @@ class Client(SyncMethodMixin):
         logger.warning("Scheduler exception:")
         logger.exception(exception)
 
+    @asynccontextmanager
+    async def _wait_for_handle_report_task(self, fast=False):
+        current_task = asyncio.current_task()
+        handle_report_task = self._handle_report_task
+        # Give the scheduler 'stream-closed' message 100ms to come through
+        # This makes the shutdown slightly smoother and quieter
+        should_wait = (
+            handle_report_task is not None and handle_report_task is not current_task
+        )
+        if should_wait:
+            with suppress(asyncio.CancelledError, TimeoutError):
+                await asyncio.wait_for(asyncio.shield(handle_report_task), 0.1)
+
+        yield
+
+        if should_wait:
+            with suppress(TimeoutError, asyncio.CancelledError):
+                await asyncio.wait_for(handle_report_task, 0 if fast else 2)
+
     async def _close(self, fast=False):
         """
         Send close signal and wait until scheduler completes
@@ -1627,45 +1657,27 @@ class Client(SyncMethodMixin):
             ):
                 self._send_to_scheduler({"op": "close-client"})
                 self._send_to_scheduler({"op": "close-stream"})
+            async with self._wait_for_handle_report_task(fast=fast):
+                if (
+                    self.scheduler_comm
+                    and self.scheduler_comm.comm
+                    and not self.scheduler_comm.comm.closed()
+                ):
+                    await self.scheduler_comm.close()
 
-            current_task = asyncio.current_task()
-            handle_report_task = self._handle_report_task
-            # Give the scheduler 'stream-closed' message 100ms to come through
-            # This makes the shutdown slightly smoother and quieter
-            if (
-                handle_report_task is not None
-                and handle_report_task is not current_task
-            ):
-                with suppress(asyncio.CancelledError, TimeoutError):
-                    await asyncio.wait_for(asyncio.shield(handle_report_task), 0.1)
+                for key in list(self.futures):
+                    self._release_key(key=key)
 
-            if (
-                self.scheduler_comm
-                and self.scheduler_comm.comm
-                and not self.scheduler_comm.comm.closed()
-            ):
-                await self.scheduler_comm.close()
+                if self._start_arg is None:
+                    with suppress(AttributeError):
+                        await self.cluster.close()
 
-            for key in list(self.futures):
-                self._release_key(key=key)
+                await self.rpc.close()
 
-            if self._start_arg is None:
-                with suppress(AttributeError):
-                    await self.cluster.close()
+                self.status = "closed"
 
-            await self.rpc.close()
-
-            self.status = "closed"
-
-            if _get_global_client() is self:
-                _set_global_client(None)
-
-            if (
-                handle_report_task is not None
-                and handle_report_task is not current_task
-            ):
-                with suppress(TimeoutError, asyncio.CancelledError):
-                    await asyncio.wait_for(handle_report_task, 0 if fast else 2)
+                if _get_global_client() is self:
+                    _set_global_client(None)
 
             with suppress(AttributeError):
                 await self.scheduler.close_rpc()
@@ -1732,14 +1744,18 @@ class Client(SyncMethodMixin):
     async def _shutdown(self):
         logger.info("Shutting down scheduler from Client")
 
+        self.status = "closing"
         for pc in self._periodic_callbacks.values():
             pc.stop()
-        if self.cluster:
-            await self.cluster.close()
-        else:
-            with suppress(CommClosedError):
-                self.status = "closing"
-                await self.scheduler.terminate()
+
+        async with self._wait_for_handle_report_task():
+            if self.cluster:
+                await self.cluster.close()
+            else:
+                with suppress(CommClosedError):
+                    await self.scheduler.terminate()
+
+        await self._close()
 
     def shutdown(self):
         """Shut down the connected scheduler and workers
