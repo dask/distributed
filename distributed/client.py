@@ -46,6 +46,8 @@ from dask.utils import (
 )
 from dask.widgets import get_template
 
+from distributed.protocol.serialize import _is_msgpack_serializable
+
 try:
     from dask.delayed import single_key
 except ImportError:
@@ -4274,6 +4276,10 @@ class Client(SyncMethodMixin):
         >>> from time import time
         >>> client.log_event("current-time", time())
         """
+        if not _is_msgpack_serializable(msg):
+            raise TypeError(
+                f"Message must be msgpack serializable. Got {type(msg)=} instead."
+            )
         return self.sync(self.scheduler.log_event, topic=topic, msg=msg)
 
     def get_events(self, topic: str | None = None):

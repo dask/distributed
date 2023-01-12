@@ -764,3 +764,21 @@ async def test_worker_inherits_temp_config(c, s):
         async with Nanny(s.address):
             out = await c.submit(lambda: dask.config.get("test123"))
             assert out == 123
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_log_event(c, s):
+    async with Nanny(s.address) as n:
+        n.log_event("test-topic", "foo")
+
+        class C:
+            pass
+
+        with pytest.raises(TypeError, match="msgpack"):
+            n.log_event("test-topic", C())
+        n.log_event("test-topic", "bar")
+
+        # Worker unaffected
+        assert await c.submit(lambda x: x + 1, 1) == 2
+
+    assert [msg[1] for msg in s.get_events("test-topic")] == ["foo", "bar"]

@@ -7446,6 +7446,19 @@ async def test_log_event_warn(c, s, a, b):
         await c.submit(no_category)
 
 
+@gen_cluster(client=True, nthreads=[])
+async def test_log_event_msgpack(c, s, a, b):
+    await c.log_event("test-topic", "foo")
+    with pytest.raises(TypeError, match="msgpack"):
+
+        class C:
+            pass
+
+        await c.log_event("test-topic", C())
+    await c.log_event("test-topic", "bar")
+    assert [msg[1] for msg in s.get_events("test-topic")] == ["foo", "bar"]
+
+
 @gen_cluster(client=True)
 async def test_log_event_warn_dask_warns(c, s, a, b):
     from dask.distributed import warn

@@ -72,6 +72,7 @@ from distributed.metrics import time
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
 from distributed.protocol import pickle, to_serialize
+from distributed.protocol.serialize import _is_msgpack_serializable
 from distributed.pubsub import PubSubWorkerExtension
 from distributed.security import Security
 from distributed.shuffle import ShuffleWorkerExtension
@@ -968,6 +969,10 @@ class Worker(BaseWorker, ServerNode):
         --------
         Client.log_event
         """
+        if not _is_msgpack_serializable(msg):
+            raise TypeError(
+                f"Message must be msgpack serializable. Got {type(msg)=} instead."
+            )
         full_msg = {
             "op": "log-event",
             "topic": topic,
