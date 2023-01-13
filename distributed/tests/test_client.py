@@ -6297,6 +6297,7 @@ async def test_shutdown():
 
                 assert s.status == Status.closed
                 assert w.status in {Status.closed, Status.closing}
+                assert c.status == "closed"
 
 
 @gen_test()
@@ -6308,15 +6309,44 @@ async def test_shutdown_localcluster():
             await c.shutdown()
 
         assert lc.scheduler.status == Status.closed
+        assert lc.status == Status.closed
+        assert c.status == "closed"
 
 
 @gen_test()
-async def test_shutdown_is_clean():
+async def test_shutdown_stops_callbacks():
     async with Scheduler(dashboard_address=":0") as s:
         async with Worker(s.address) as w:
             async with Client(s.address, asynchronous=True) as c:
                 await c.shutdown()
                 assert not any(pc.is_running() for pc in c._periodic_callbacks.values())
+
+
+@gen_test()
+async def test_shutdown_is_quiet_with_cluster():
+    async with LocalCluster(
+        n_workers=1, asynchronous=True, processes=False, dashboard_address=":0"
+    ) as cluster:
+        with captured_logger(logging.getLogger("distributed.client")) as logger:
+            timeout = 0.1
+            async with Client(cluster, asynchronous=True, timeout=timeout) as c:
+                await c.shutdown()
+                await asyncio.sleep(timeout)
+            msg = logger.getvalue().strip()
+            assert msg == "Shutting down scheduler from Client", msg
+
+
+@gen_test()
+async def test_client_is_quiet_cluster_close():
+    async with LocalCluster(
+        n_workers=1, asynchronous=True, processes=False, dashboard_address=":0"
+    ) as cluster:
+        with captured_logger(logging.getLogger("distributed.client")) as logger:
+            timeout = 0.1
+            async with Client(cluster, asynchronous=True, timeout=timeout) as c:
+                await cluster.close()
+                await asyncio.sleep(timeout)
+            assert not logger.getvalue().strip()
 
 
 @gen_test()

@@ -190,8 +190,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option(
     "--lifetime-stagger",
     type=str,
-    default="0 seconds",
-    show_default=True,
+    default=None,
     help="Random amount by which to stagger lifetime values",
 )
 @click.option(
@@ -204,8 +203,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option(
     "--lifetime-restart/--no-lifetime-restart",
     "lifetime_restart",
-    default=False,
-    show_default=True,
+    default=None,
     required=False,
     help="Whether or not to restart the worker after the lifetime lapses. "
     "This assumes that you are using the --lifetime and --nanny keywords",
