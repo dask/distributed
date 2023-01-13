@@ -41,14 +41,14 @@ class SchedulerMetricCollector(PrometheusCollector):
         )
         worker_states.add_metric(["idle"], len(self.server.idle))
         worker_states.add_metric(
-            ["partially saturated"],
+            ["partially_saturated"],
             len(self.server.running)
             - len(self.server.idle)
             - len(self.server.saturated),
         )
         worker_states.add_metric(["saturated"], len(self.server.saturated))
         worker_states.add_metric(
-            ["paused/retiring"], len(self.server.workers) - len(self.server.running)
+            ["paused_or_retiring"], len(self.server.workers) - len(self.server.running)
         )
         yield worker_states
 
