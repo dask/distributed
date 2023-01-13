@@ -109,12 +109,12 @@ class ServerNode(Server):
 
         Returns
         -------
-        List of tuples containing the log level, message, and (optional) timestamp for each filtered entry
+        List of tuples containing the log level, message, and (optional) timestamp for each filtered entry, newest first
         """
         deque_handler = self._deque_handler
 
         L = []
-        for count, msg in enumerate(deque_handler.deque):
+        for count, msg in enumerate(reversed(deque_handler.deque)):
             if n and count >= n or msg.created < start:
                 break
             if timestamps:
