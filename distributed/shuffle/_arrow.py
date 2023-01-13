@@ -6,62 +6,61 @@ if TYPE_CHECKING:
     import pyarrow as pa
 
 
-def dump_batch(batch: pa.Buffer, file: BinaryIO, schema: pa.Schema) -> None:
+def dump_shards(shards: list[pa.Table], file: BinaryIO) -> None:
     """
-    Dump a batch to file, if we're the first, also write the schema
+    Write multiple shard tables to the file
 
-    This function is with respect to the open file object
+    Note: This function appends to the file and dumps each table as an individual stream.
+    This results in multiple end-of-stream signals in the file.
 
     See Also
     --------
-    load_arrow
+    load_partition
     """
-    if file.tell() == 0:
-        file.write(schema.serialize())
-    file.write(batch)
+    import pyarrow as pa
+
+    for table in shards:
+        with pa.ipc.new_stream(file, table.schema) as writer:
+            writer.write_table(table)
 
 
-def load_arrow(file: BinaryIO) -> pa.Table:
-    """Load batched data written to file back out into a table again
+def load_partition(file: BinaryIO) -> pa.Table:
+    """Load partition data written to file back out into a single table
 
     Example
     -------
-    >>> t = pa.Table.from_pandas(df)  # doctest: +SKIP
+    >>> tables = [pa.Table.from_pandas(df), pa.Table.from_pandas(df2)]  # doctest: +SKIP
     >>> with open("myfile", mode="wb") as f:  # doctest: +SKIP
-    ...     for batch in t.to_batches():  # doctest: +SKIP
-    ...         dump_batch(batch, f, schema=t.schema)  # doctest: +SKIP
+    ...     for table in tables:  # doctest: +SKIP
+    ...         dump_shards(tables, f)  # doctest: +SKIP
 
     >>> with open("myfile", mode="rb") as f:  # doctest: +SKIP
-    ...     t = load_arrow(f)  # doctest: +SKIP
+    ...     t = load_partition(f)  # doctest: +SKIP
 
     See Also
     --------
-    dump_batch
+    dump_shards
     """
+    import os
+
     import pyarrow as pa
 
-    try:
+    pos = file.tell()
+    file.seek(0, os.SEEK_END)
+    end = file.tell()
+    file.seek(pos)
+    shards = []
+    while file.tell() < end:
         sr = pa.RecordBatchStreamReader(file)
-        return sr.read_all()
-    except Exception:
-        raise EOFError
+        shards.append(sr.read_all())
+    return pa.concat_tables(shards)
 
 
-def list_of_buffers_to_table(data: list[bytes], schema: pa.Schema) -> pa.Table:
+def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
     """Convert a list of arrow buffers and a schema to an Arrow Table"""
-    import io
-
     import pyarrow as pa
 
-    bio = io.BytesIO()
-    bio.write(schema.serialize())
-    for batch in data:
-        bio.write(batch)
-    bio.seek(0)
-    sr = pa.RecordBatchStreamReader(bio)
-    data = sr.read_all()
-    bio.close()
-    return data
+    return pa.concat_tables(deserialize_table(buffer) for buffer in data)
 
 
 def deserialize_schema(data: bytes) -> pa.Schema:
@@ -87,3 +86,21 @@ def deserialize_schema(data: bytes) -> pa.Schema:
     table = sr.read_all()
     bio.close()
     return table.schema
+
+
+def serialize_table(table: pa.Table) -> bytes:
+    import io
+
+    import pyarrow as pa
+
+    stream = io.BytesIO()
+    with pa.ipc.new_stream(stream, table.schema) as writer:
+        writer.write_table(table)
+    return stream.getvalue()
+
+
+def deserialize_table(buffer: bytes) -> pa.Table:
+    import pyarrow as pa
+
+    with pa.ipc.open_stream(pa.py_buffer(buffer)) as reader:
+        return reader.read_all()

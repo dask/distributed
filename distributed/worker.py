@@ -1050,14 +1050,6 @@ class Worker(BaseWorker, ServerNode):
             except Exception:  # TODO: log error once
                 pass
 
-        if out["managed_bytes"] > out["memory"]:
-            logger.warning(
-                "Managed memory exceeds process memory; this will cause premature "
-                "spilling as well as malfunctions in several heuristics. Please ensure "
-                "that sizeof() returns accurate outputs for your data. Read more: "
-                "https://distributed.dask.org/en/stable/worker-memory.html"
-            )
-
         return out
 
     async def get_startup_information(self):

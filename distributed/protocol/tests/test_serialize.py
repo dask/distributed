@@ -33,7 +33,11 @@ from distributed.protocol import (
     serialize_bytes,
     to_serialize,
 )
-from distributed.protocol.serialize import check_dask_serializable
+from distributed.protocol.compression import default_compression
+from distributed.protocol.serialize import (
+    _is_msgpack_serializable,
+    check_dask_serializable,
+)
 from distributed.utils import ensure_memoryview, nbytes
 from distributed.utils_test import NO_AMM, gen_test, inc
 
@@ -279,9 +283,9 @@ def test_serialize_bytes(kwargs):
         assert str(x) == str(y)
 
 
+@pytest.mark.skipif(default_compression is None, reason="requires lz4 or snappy")
 @pytest.mark.skipif(np is None, reason="Test needs numpy")
 def test_serialize_list_compress():
-    pytest.importorskip("lz4")
     x = np.ones(1000000)
     L = serialize_bytelist(x)
     assert sum(map(nbytes, L)) < x.nbytes / 2
@@ -625,3 +629,24 @@ async def test_large_pickled_object(c, s, a, b):
     y = await c.scatter(x, workers=[a.worker_address])
     z = c.submit(lambda x: x, y, workers=[b.worker_address])
     await z
+
+
+def test__is_msgpack_serializable():
+    assert _is_msgpack_serializable(None)
+    assert _is_msgpack_serializable("a")
+    assert _is_msgpack_serializable(1)
+    assert _is_msgpack_serializable(1.0)
+    assert _is_msgpack_serializable(b"0")
+    assert _is_msgpack_serializable({"a": "b"})
+    assert _is_msgpack_serializable(["a"])
+    assert _is_msgpack_serializable(("a",))
+
+    class C:
+        def __hash__(self):
+            return 5
+
+    assert not _is_msgpack_serializable(["a", C()])
+    assert not _is_msgpack_serializable(("a", C()))
+    assert not _is_msgpack_serializable(C())
+    assert not _is_msgpack_serializable({C(): "foo"})
+    assert not _is_msgpack_serializable({"foo": C()})

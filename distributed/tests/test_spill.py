@@ -13,13 +13,9 @@ from dask.sizeof import sizeof
 
 from distributed import profile
 from distributed.compatibility import WINDOWS
-from distributed.spill import SpillBuffer, has_zict_210, has_zict_220
+from distributed.spill import SpillBuffer, has_zict_220
 from distributed.utils_test import captured_logger
 
-requires_zict_210 = pytest.mark.skipif(
-    not has_zict_210,
-    reason="requires zict version >= 2.1.0",
-)
 requires_zict_220 = pytest.mark.skipif(
     not has_zict_220,
     reason="requires zict version >= 2.2.0",
@@ -130,7 +126,6 @@ def test_disk_size_calculation(tmp_path):
     assert_buf(buf, tmp_path, {}, {"a": a, "b": b})
 
 
-@requires_zict_210
 def test_spillbuffer_maxlim(tmp_path_factory):
     buf_dir = tmp_path_factory.mktemp("buf")
     buf = SpillBuffer(str(buf_dir), target=200, max_spill=600, min_log_interval=0)
@@ -213,7 +208,6 @@ class Bad:
         return self.size
 
 
-@requires_zict_210
 def test_spillbuffer_fail_to_serialize(tmp_path):
     buf = SpillBuffer(str(tmp_path), target=200, max_spill=600, min_log_interval=0)
 
@@ -247,7 +241,6 @@ def test_spillbuffer_fail_to_serialize(tmp_path):
     assert_buf(buf, tmp_path, {"b": b, "c": c}, {})
 
 
-@requires_zict_210
 @pytest.mark.skipif(WINDOWS, reason="Needs chmod")
 def test_spillbuffer_oserror(tmp_path):
     buf = SpillBuffer(str(tmp_path), target=200, max_spill=800, min_log_interval=0)
@@ -287,7 +280,6 @@ def test_spillbuffer_oserror(tmp_path):
     assert_buf(buf, tmp_path, {"b": b, "d": d}, {"a": a})
 
 
-@requires_zict_210
 def test_spillbuffer_evict(tmp_path):
     buf = SpillBuffer(str(tmp_path), target=300, min_log_interval=0)
 

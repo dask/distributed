@@ -9,7 +9,7 @@ import time
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any, BinaryIO, TypeVar, overload
+from typing import TYPE_CHECKING, Any, TypeVar, overload
 
 import toolz
 
@@ -19,9 +19,10 @@ from distributed.core import PooledRPCCall
 from distributed.protocol import to_serialize
 from distributed.shuffle._arrow import (
     deserialize_schema,
-    dump_batch,
+    dump_shards,
     list_of_buffers_to_table,
-    load_arrow,
+    load_partition,
+    serialize_table,
 )
 from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
@@ -121,12 +122,9 @@ class Shuffle:
         self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
         self.closed = False
 
-        def _dump_batch(batch: pa.Buffer, file: BinaryIO) -> None:
-            return dump_batch(batch, file, self.schema)
-
         self._disk_buffer = DiskShardsBuffer(
-            dump=_dump_batch,
-            load=load_arrow,
+            dump=dump_shards,
+            load=load_partition,
             directory=directory,
             memory_limiter=memory_limiter_disk,
         )
@@ -201,17 +199,14 @@ class Shuffle:
             self._exception = e
             raise
 
-    def _repartition_buffers(self, data: list[bytes]) -> dict[str, list[bytes]]:
-        table = list_of_buffers_to_table(data, self.schema)
+    def _repartition_buffers(self, data: list[bytes]) -> dict[str, list[pa.Table]]:
+        table = list_of_buffers_to_table(data)
         groups = split_by_partition(table, self.column)
         assert len(table) == sum(map(len, groups.values()))
         del data
-        return {
-            k: [batch.serialize() for batch in v.to_batches()]
-            for k, v in groups.items()
-        }
+        return {k: [v] for k, v in groups.items()}
 
-    async def _write_to_disk(self, data: dict[str, list[bytes]]) -> None:
+    async def _write_to_disk(self, data: dict[str, list[pa.Table]]) -> None:
         self.raise_if_closed()
         await self._disk_buffer.write(data)
 
@@ -234,10 +229,7 @@ class Shuffle:
                 self.column,
                 self.worker_for,
             )
-            out = {
-                k: [b.serialize().to_pybytes() for b in t.to_batches()]
-                for k, t in out.items()
-            }
+            out = {k: [serialize_table(t)] for k, t in out.items()}
             return out
 
         out = await self.offload(_)
