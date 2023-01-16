@@ -130,25 +130,14 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
 
         stimulus_id = f"shuffle-failed-worker-left-{time()}"
 
-        for shuffle_id, state in self.states.items():
-            if worker not in state.participating_workers:
+        for shuffle_id, shuffle in self.states.items():
+            if worker not in shuffle.participating_workers:
                 continue
             exception = RuntimeError(
                 f"Worker {worker} left during active shuffle {shuffle_id}"
             )
             self.erred_shuffles[shuffle_id] = exception
-            worker_msgs = {
-                worker: [
-                    {
-                        "op": "shuffle-fail",
-                        "shuffle_id": shuffle_id,
-                        "run_id": state.run_id,
-                        "message": str(exception),
-                    }
-                ]
-                for worker in state.participating_workers
-            }
-            self.scheduler.send_all({}, worker_msgs)
+            self._fail_on_workers(shuffle, str(exception))
 
             barrier_task = self.scheduler.tasks[barrier_key(shuffle_id)]
             recs: Recs = {}
@@ -160,7 +149,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
                     recs.update({dt.key: "waiting"})
                 # TODO: Do we need to handle other states?
 
-                self.scheduler.transitions(recs, stimulus_id=stimulus_id)
+            self.scheduler.transitions(recs, stimulus_id=stimulus_id)
 
     def transition(
         self,
@@ -179,19 +168,21 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             shuffle = self.states[shuffle_id]
         except KeyError:
             return
-        participating_workers = shuffle.participating_workers
+        self._fail_on_workers(shuffle, message=f"Shuffle {shuffle_id} forgotten")
+        self._clean_on_scheduler(shuffle_id)
+
+    def _fail_on_workers(self, shuffle: ShuffleState, message: str) -> None:
         worker_msgs = {
             worker: [
                 {
                     "op": "shuffle-fail",
-                    "shuffle_id": shuffle_id,
+                    "shuffle_id": shuffle.id,
                     "run_id": shuffle.run_id,
-                    "message": f"Shuffle {shuffle_id} forgotten",
+                    "message": message,
                 }
             ]
-            for worker in participating_workers
+            for worker in shuffle.participating_workers
         }
-        self._clean_on_scheduler(shuffle_id)
         self.scheduler.send_all({}, worker_msgs)
 
     def _clean_on_scheduler(self, id: ShuffleId) -> None:
