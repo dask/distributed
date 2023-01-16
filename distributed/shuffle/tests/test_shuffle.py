@@ -800,11 +800,14 @@ async def test_repeat(c, s, a, b):
     )
     await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
 
+    while s.tasks:
+        await asyncio.sleep(0)
+
+    await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
+
     await clean_worker(a, timeout=2)
     await clean_worker(b, timeout=2)
     await clean_scheduler(s, timeout=2)
-
-    await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
