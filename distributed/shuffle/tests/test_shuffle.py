@@ -790,7 +790,6 @@ async def test_tail(c, s, a, b):
     await clean_scheduler(s)
 
 
-@pytest.mark.xfail(reason="Tombstone prohibits multiple calls to head")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 4)] * 2)
 async def test_repeat(c, s, a, b):
     df = dask.datasets.timeseries(
@@ -880,7 +879,6 @@ async def test_crashed_worker_after_shuffle_persisted(c, s, a):
         await clean_scheduler(s)
 
 
-@pytest.mark.xfail(reason="Tombstone prohibits multiple calls to head")
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)
 async def test_closed_worker_between_repeats(c, s, w1, w2, w3):
     df = dask.datasets.timeseries(
@@ -908,43 +906,6 @@ async def test_closed_worker_between_repeats(c, s, w1, w2, w3):
     await w2.close()
     await c.compute(out.head(compute=False))
     await clean_worker(w1)
-    await clean_scheduler(s)
-
-
-@pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
-async def test_restart_cluster_between_repeats(c, s, a):
-    scheduler_extension = s.extensions["shuffle"]
-    df = dask.datasets.timeseries(
-        start="2000-01-01",
-        end="2000-01-10",
-        dtypes={"x": float, "y": float},
-        freq="100 s",
-        seed=42,
-    )
-
-    await c.compute(dd.shuffle.shuffle(df, "y", shuffle="p2p"))
-    await clean_scheduler(s)
-
-    # Ensure the shuffles has been forgotten
-    while s.tasks:
-        await asyncio.sleep(0.1)
-
-    assert scheduler_extension.tombstones
-
-    with pytest.raises(RuntimeError, match="shuffle_transfer"):
-        await c.compute(dd.shuffle.shuffle(df, "y", shuffle="p2p"))
-
-    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    await c.compute(out)
-
-    await c.restart()
-    await clean_scheduler(s)
-    assert not scheduler_extension.tombstones
-
-    await c.compute(out)
-    await c.compute(dd.shuffle.shuffle(df, "y", shuffle="p2p"))
-    del out
     await clean_scheduler(s)
 
 

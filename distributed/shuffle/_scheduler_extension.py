@@ -42,7 +42,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     scheduler: Scheduler
     states: dict[ShuffleId, ShuffleState]
     heartbeats: defaultdict[ShuffleId, dict]
-    tombstones: set[ShuffleId]
     erred_shuffles: dict[ShuffleId, Exception]
 
     def __init__(self, scheduler: Scheduler):
@@ -55,7 +54,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         )
         self.heartbeats = defaultdict(lambda: defaultdict(dict))
         self.states = {}
-        self.tombstones = set()
         self.erred_shuffles = {}
         self.scheduler.add_plugin(self)
 
@@ -75,12 +73,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         npartitions: int | None,
         worker: str,
     ) -> dict:
-
-        if id in self.tombstones:
-            return {
-                "status": "ERROR",
-                "message": f"Shuffle {id} has already been forgotten",
-            }
         if exception := self.erred_shuffles.get(id):
             return {"status": "ERROR", "message": str(exception)}
 
@@ -189,15 +181,11 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         *args: Any,
         **kwargs: Any,
     ) -> None:
-        # if not finish == "forgotten" or not (
-        # start in ("processing", "memory", "erred") and finish == "released"
-        # ):
         if finish not in ("released", "forgotten"):
             return
         if not key.startswith("shuffle-barrier-"):
             return
         shuffle_id = id_from_key(key)
-        self.tombstones.add(shuffle_id)
         if shuffle_id not in self.states:
             return
         participating_workers = self.states[shuffle_id].participating_workers
@@ -223,7 +211,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     def restart(self, scheduler: Scheduler) -> None:
         self.states.clear()
         self.heartbeats.clear()
-        self.tombstones.clear()
         self.erred_shuffles.clear()
 
 
