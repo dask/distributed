@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import itertools
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.shuffle._shuffle import ShuffleId, barrier_key, id_from_key
@@ -18,7 +19,10 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ShuffleState:
+    _run_id_iterator: ClassVar[itertools.count] = itertools.count()
+
     id: ShuffleId
+    run_id: int
     worker_for: dict[int, str]
     schema: bytes
     column: str
@@ -98,6 +102,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
 
             state = ShuffleState(
                 id=id,
+                run_id=next(ShuffleState._run_id_iterator),
                 worker_for=mapping,
                 schema=schema,
                 column=column,
@@ -111,6 +116,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         state.participating_workers.add(worker)
         return {
             "status": "OK",
+            "run_id": state.run_id,
             "worker_for": state.worker_for,
             "column": state.column,
             "schema": state.schema,

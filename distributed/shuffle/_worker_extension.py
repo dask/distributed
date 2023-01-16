@@ -45,8 +45,8 @@ class ShuffleClosedError(RuntimeError):
     pass
 
 
-class Shuffle:
-    """State for a single active shuffle
+class ShuffleRun:
+    """State for a single active shuffle execution
 
     This object is responsible for splitting, sending, receiving and combining
     data shards.
@@ -69,6 +69,8 @@ class Shuffle:
         The schema of the payload data.
     id:
         A unique `ShuffleID` this belongs to.
+    run_id:
+        A unique identifier of the specific execution of the shuffle this belongs to.
     local_address:
         The local address this Shuffle can be contacted by using `rpc`.
     directory:
@@ -96,6 +98,7 @@ class Shuffle:
         column: str,
         schema: pa.Schema,
         id: ShuffleId,
+        run_id: int,
         local_address: str,
         directory: str,
         nthreads: int,
@@ -111,6 +114,7 @@ class Shuffle:
         self.rpc = rpc
         self.column = column
         self.id = id
+        self.run_id = run_id
         self.schema = schema
         self.output_workers = output_workers
         self.executor = ThreadPoolExecutor(nthreads)
@@ -143,7 +147,15 @@ class Shuffle:
         self._closed_event = asyncio.Event()
 
     def __repr__(self) -> str:
-        return f"<Shuffle id: {self.id} on {self.local_address}>"
+        return f"<Shuffle {self.id}[{self.run_id}] on {self.local_address}>"
+
+    def __eq__(self, other: object) -> bool:
+        if type(other) is not ShuffleRun:
+            return False
+        return self.run_id == other.run_id
+
+    def __hash__(self) -> int:
+        return self.run_id
 
     @contextlib.contextmanager
     def time(self, name: str) -> Iterator[None]:
@@ -313,7 +325,8 @@ class ShuffleWorkerExtension:
     """
 
     worker: Worker
-    shuffles: dict[ShuffleId, Shuffle]
+    shuffles: dict[ShuffleId, ShuffleRun]
+    _runs: set[ShuffleRun]
     memory_limiter_comms: ResourceLimiter
     memory_limiter_disk: ResourceLimiter
     closed: bool
@@ -329,6 +342,7 @@ class ShuffleWorkerExtension:
         # Initialize
         self.worker = worker
         self.shuffles = {}
+        self._runs = set()
         self.memory_limiter_comms = ResourceLimiter(parse_bytes("100 MiB"))
         self.memory_limiter_disk = ResourceLimiter(parse_bytes("1 GiB"))
         self.closed = False
@@ -362,14 +376,13 @@ class ShuffleWorkerExtension:
             await shuffle.inputs_done()
 
     async def shuffle_fail(self, shuffle_id: ShuffleId, message: str) -> None:
-        try:
-            shuffle = self.shuffles[shuffle_id]
-        except KeyError:
+        shuffle = self.shuffles.pop(shuffle_id, None)
+        if shuffle is None:
             return
         exception = RuntimeError(message)
         shuffle.fail(exception)
         await shuffle.close()
-        self.shuffles.pop(shuffle_id, None)
+        self._runs.remove(shuffle)
 
     def add_partition(
         self,
@@ -399,7 +412,7 @@ class ShuffleWorkerExtension:
     async def _get_shuffle(
         self,
         shuffle_id: ShuffleId,
-    ) -> Shuffle:
+    ) -> ShuffleRun:
         ...
 
     @overload
@@ -409,7 +422,7 @@ class ShuffleWorkerExtension:
         empty: pd.DataFrame,
         column: str,
         npartitions: int,
-    ) -> Shuffle:
+    ) -> ShuffleRun:
         ...
 
     async def _get_shuffle(
@@ -418,7 +431,7 @@ class ShuffleWorkerExtension:
         empty: pd.DataFrame | None = None,
         column: str | None = None,
         npartitions: int | None = None,
-    ) -> Shuffle:
+    ) -> ShuffleRun:
         "Get a shuffle by ID; raise ValueError if it's not registered."
         import pyarrow as pa
 
@@ -454,12 +467,13 @@ class ShuffleWorkerExtension:
                         f"{self.__class__.__name__} already closed on {self.worker.address}"
                     )
                 if shuffle_id not in self.shuffles:
-                    shuffle = Shuffle(
+                    shuffle = ShuffleRun(
                         column=result["column"],
                         worker_for=result["worker_for"],
                         output_workers=result["output_workers"],
                         schema=deserialize_schema(result["schema"]),
                         id=shuffle_id,
+                        run_id=result["run_id"],
                         directory=os.path.join(
                             self.worker.local_directory, f"shuffle-{shuffle_id}"
                         ),
@@ -473,6 +487,7 @@ class ShuffleWorkerExtension:
                         memory_limiter_comms=self.memory_limiter_comms,
                     )
                     self.shuffles[shuffle_id] = shuffle
+                    self._runs.add(shuffle)
                 return self.shuffles[shuffle_id]
         else:
             if shuffle._exception:
@@ -494,6 +509,7 @@ class ShuffleWorkerExtension:
         while self.shuffles:
             _, shuffle = self.shuffles.popitem()
             await shuffle.close()
+            self._runs.remove(shuffle)
 
     #############################
     # Methods for worker thread #
@@ -509,14 +525,14 @@ class ShuffleWorkerExtension:
         empty: pd.DataFrame,
         column: str,
         npartitions: int,
-    ) -> Shuffle:
+    ) -> ShuffleRun:
         ...
 
     @overload
     def get_shuffle(
         self,
         shuffle_id: ShuffleId,
-    ) -> Shuffle:
+    ) -> ShuffleRun:
         ...
 
     def get_shuffle(
@@ -525,7 +541,7 @@ class ShuffleWorkerExtension:
         empty: pd.DataFrame | None = None,
         column: str | None = None,
         npartitions: int | None = None,
-    ) -> Shuffle:
+    ) -> ShuffleRun:
         return sync(
             self.worker.loop,
             self._get_shuffle,

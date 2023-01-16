@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import itertools
 import os
 import random
 import shutil
@@ -27,7 +28,7 @@ from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_extension import get_worker_for
 from distributed.shuffle._shuffle import ShuffleId, barrier_key
 from distributed.shuffle._worker_extension import (
-    Shuffle,
+    ShuffleRun,
     dump_shards,
     list_of_buffers_to_table,
     load_partition,
@@ -46,7 +47,7 @@ async def clean_worker(
     deadline = Deadline.after(timeout)
     extension = worker.extensions["shuffle"]
 
-    while extension.shuffles and not deadline.expired:
+    while extension._runs and not deadline.expired:
         await asyncio.sleep(interval)
     for dirpath, dirnames, filenames in os.walk(worker.local_directory):
         assert "shuffle" not in dirpath
@@ -322,7 +323,7 @@ async def test_closed_bystanding_worker_during_shuffle(c, s, w1, w2, w3):
     await clean_scheduler(s)
 
 
-class BlockedInputsDoneShuffle(Shuffle):
+class BlockedInputsDoneShuffle(ShuffleRun):
     def __init__(
         self,
         worker_for,
@@ -330,6 +331,7 @@ class BlockedInputsDoneShuffle(Shuffle):
         column,
         schema,
         id,
+        run_id,
         local_address,
         directory,
         nthreads,
@@ -344,6 +346,7 @@ class BlockedInputsDoneShuffle(Shuffle):
             column,
             schema,
             id,
+            run_id,
             local_address,
             directory,
             nthreads,
@@ -361,7 +364,9 @@ class BlockedInputsDoneShuffle(Shuffle):
         await super().inputs_done()
 
 
-@mock.patch("distributed.shuffle._worker_extension.Shuffle", BlockedInputsDoneShuffle)
+@mock.patch(
+    "distributed.shuffle._worker_extension.ShuffleRun", BlockedInputsDoneShuffle
+)
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_worker_during_barrier(c, s, a, b):
     df = dask.datasets.timeseries(
@@ -402,7 +407,9 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     await clean_scheduler(s)
 
 
-@mock.patch("distributed.shuffle._worker_extension.Shuffle", BlockedInputsDoneShuffle)
+@mock.patch(
+    "distributed.shuffle._worker_extension.ShuffleRun", BlockedInputsDoneShuffle
+)
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_other_worker_during_barrier(c, s, a, b):
     df = dask.datasets.timeseries(
@@ -446,7 +453,9 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
 
 
 @pytest.mark.slow
-@mock.patch("distributed.shuffle._worker_extension.Shuffle", BlockedInputsDoneShuffle)
+@mock.patch(
+    "distributed.shuffle._worker_extension.ShuffleRun", BlockedInputsDoneShuffle
+)
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_crashed_other_worker_during_barrier(c, s, a):
     async with Nanny(s.address, nthreads=1) as n:
@@ -1041,7 +1050,7 @@ async def test_clean_after_close(c, s, a, b):
 
 
 class PooledRPCShuffle(PooledRPCCall):
-    def __init__(self, shuffle: Shuffle):
+    def __init__(self, shuffle: ShuffleRun):
         self.shuffle = shuffle
 
     def __getattr__(self, key):
@@ -1061,6 +1070,8 @@ class PooledRPCShuffle(PooledRPCCall):
 
 
 class ShuffleTestPool:
+    _shuffle_run_id_iterator = itertools.count()
+
     def __init__(self, *args, **kwargs):
         self.shuffles = {}
         super().__init__(*args, **kwargs)
@@ -1077,7 +1088,7 @@ class ShuffleTestPool:
         return out
 
     def new_shuffle(
-        self, name, worker_for_mapping, schema, directory, loop, Shuffle=Shuffle
+        self, name, worker_for_mapping, schema, directory, loop, Shuffle=ShuffleRun
     ):
         s = Shuffle(
             column="_partition",
@@ -1087,6 +1098,7 @@ class ShuffleTestPool:
             schema=schema,
             directory=directory / name,
             id=ShuffleId(name),
+            run_id=next(ShuffleTestPool._shuffle_run_id_iterator),
             local_address=name,
             nthreads=2,
             rpc=self,
@@ -1206,7 +1218,7 @@ async def test_error_offload(tmpdir, loop_in_thread):
 
     local_shuffle_pool = ShuffleTestPool()
 
-    class ErrorOffload(Shuffle):
+    class ErrorOffload(ShuffleRun):
         async def offload(self, func, *args):
             raise RuntimeError("Error during deserialization")
 
@@ -1259,7 +1271,7 @@ async def test_error_send(tmpdir, loop_in_thread):
 
     local_shuffle_pool = ShuffleTestPool()
 
-    class ErrorSend(Shuffle):
+    class ErrorSend(ShuffleRun):
         async def send(self, address: str, shards: list[bytes]) -> None:
             raise RuntimeError("Error during send")
 
@@ -1311,7 +1323,7 @@ async def test_error_receive(tmpdir, loop_in_thread):
 
     local_shuffle_pool = ShuffleTestPool()
 
-    class ErrorReceive(Shuffle):
+    class ErrorReceive(ShuffleRun):
         async def receive(self, data: list[bytes]) -> None:
             raise RuntimeError("Error during receive")
 
