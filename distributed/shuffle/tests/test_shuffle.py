@@ -790,7 +790,7 @@ async def test_tail(c, s, a, b):
     await clean_scheduler(s)
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 4)] * 2)
+@gen_cluster(client=True)
 async def test_repeat(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -798,24 +798,13 @@ async def test_repeat(c, s, a, b):
         dtypes={"x": float, "y": float},
         freq="100 s",
     )
-    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    await c.compute(out.head(compute=False))
+    await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
 
     await clean_worker(a, timeout=2)
     await clean_worker(b, timeout=2)
     await clean_scheduler(s, timeout=2)
 
-    await c.compute(out.tail(compute=False))
-
-    await clean_worker(a, timeout=2)
-    await clean_worker(b, timeout=2)
-    await clean_scheduler(s, timeout=2)
-
-    await c.compute(out.head(compute=False))
-
-    await clean_worker(a, timeout=2)
-    await clean_worker(b, timeout=2)
-    await clean_scheduler(s, timeout=2)
+    await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
