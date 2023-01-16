@@ -154,6 +154,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
                             "op": "shuffle_fail",
                             "message": str(exception),
                             "shuffle_id": shuffle_id,
+                            "run_id": state.run_id,
                         },
                         workers=list(contact_workers),
                     )
@@ -172,7 +173,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
 
         # Assumption: No new shuffle tasks scheduled on the worker
         # + no existing tasks anymore
-        # All task-finished/task-errer are queued up in batched stream
+        # All task-finished/task-erred are queued up in batched stream
 
         exceptions = [result for result in results if isinstance(result, Exception)]
         if exceptions:
@@ -192,14 +193,17 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         if not key.startswith("shuffle-barrier-"):
             return
         shuffle_id = id_from_key(key)
-        if shuffle_id not in self.states:
+        try:
+            shuffle = self.states[shuffle_id]
+        except KeyError:
             return
-        participating_workers = self.states[shuffle_id].participating_workers
+        participating_workers = shuffle.participating_workers
         worker_msgs = {
             worker: [
                 {
                     "op": "shuffle-fail",
                     "shuffle_id": shuffle_id,
+                    "run_id": shuffle.run_id,
                     "message": f"Shuffle {shuffle_id} forgotten",
                 }
             ]

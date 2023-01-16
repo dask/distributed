@@ -375,10 +375,13 @@ class ShuffleWorkerExtension:
             shuffle = await self._get_shuffle(shuffle_id)
             await shuffle.inputs_done()
 
-    async def shuffle_fail(self, shuffle_id: ShuffleId, message: str) -> None:
-        shuffle = self.shuffles.pop(shuffle_id, None)
-        if shuffle is None:
+    async def shuffle_fail(
+        self, shuffle_id: ShuffleId, run_id: int, message: str
+    ) -> None:
+        shuffle = self.shuffles.get(shuffle_id, None)
+        if shuffle is None or shuffle.run_id != run_id:
             return
+        self.shuffles.pop(shuffle_id)
         exception = RuntimeError(message)
         shuffle.fail(exception)
         await shuffle.close()
