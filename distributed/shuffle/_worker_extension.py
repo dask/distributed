@@ -335,7 +335,6 @@ class ShuffleWorkerExtension:
         # Attach to worker
         worker.handlers["shuffle_receive"] = self.shuffle_receive
         worker.handlers["shuffle_inputs_done"] = self.shuffle_inputs_done
-        worker.handlers["shuffle_fail"] = self.shuffle_fail
         worker.stream_handlers["shuffle-fail"] = self.shuffle_fail
         worker.extensions["shuffle"] = self
 

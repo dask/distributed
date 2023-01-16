@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import itertools
 import logging
@@ -126,14 +125,11 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     def get_participating_workers(self, id: ShuffleId) -> list[str]:
         return list(self.states[id].participating_workers)
 
-    async def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
-        affected_shuffles = set()
-        broadcasts = []
+    def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
         from time import time
 
-        recs: Recs = {}
         stimulus_id = f"shuffle-failed-worker-left-{time()}"
-        barriers = []
+
         for shuffle_id, state in self.states.items():
             if worker not in state.participating_workers:
                 continue
@@ -141,44 +137,30 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
                 f"Worker {worker} left during active shuffle {shuffle_id}"
             )
             self.erred_shuffles[shuffle_id] = exception
-            contact_workers = state.participating_workers.copy()
-            contact_workers.discard(worker)
-            affected_shuffles.add(shuffle_id)
-            name = barrier_key(shuffle_id)
-            barrier_task = self.scheduler.tasks.get(name)
-            if barrier_task:
-                barriers.append(barrier_task)
-                broadcasts.append(
-                    scheduler.broadcast(
-                        msg={
-                            "op": "shuffle_fail",
-                            "message": str(exception),
-                            "shuffle_id": shuffle_id,
-                            "run_id": state.run_id,
-                        },
-                        workers=list(contact_workers),
-                    )
-                )
+            worker_msgs = {
+                worker: [
+                    {
+                        "op": "shuffle-fail",
+                        "shuffle_id": shuffle_id,
+                        "run_id": state.run_id,
+                        "message": str(exception),
+                    }
+                ]
+                for worker in state.participating_workers
+            }
+            self.scheduler.send_all({}, worker_msgs)
 
-        results = await asyncio.gather(*broadcasts, return_exceptions=True)
-        for barrier_task in barriers:
+            barrier_task = self.scheduler.tasks[barrier_key(shuffle_id)]
+            recs: Recs = {}
             if barrier_task.state == "memory":
                 for dt in barrier_task.dependents:
                     if worker not in dt.worker_restrictions:
                         continue
                     dt.worker_restrictions.clear()
                     recs.update({dt.key: "waiting"})
-            # TODO: Do we need to handle other states?
-        self.scheduler.transitions(recs, stimulus_id=stimulus_id)
+                # TODO: Do we need to handle other states?
 
-        # Assumption: No new shuffle tasks scheduled on the worker
-        # + no existing tasks anymore
-        # All task-finished/task-erred are queued up in batched stream
-
-        exceptions = [result for result in results if isinstance(result, Exception)]
-        if exceptions:
-            # TODO: Do we need to handle errors here?
-            raise RuntimeError(exceptions)
+                self.scheduler.transitions(recs, stimulus_id=stimulus_id)
 
     def transition(
         self,
