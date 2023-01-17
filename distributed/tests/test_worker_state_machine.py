@@ -110,12 +110,14 @@ def test_TaskState__to_dict():
     assert actual == [
         {
             "key": "x",
+            "run_id": -1,
             "state": "memory",
             "done": True,
             "dependents": ["<TaskState 'y' released>"],
         },
         {
             "key": "y",
+            "run_id": -1,
             "state": "released",
             "dependencies": ["<TaskState 'x' memory>"],
             "priority": [0],
@@ -192,6 +194,7 @@ def test_WorkerState__to_dict(ws):
             "x": {
                 "coming_from": "127.0.0.1:1235",
                 "key": "x",
+                "run_id": -1,
                 "nbytes": 123,
                 "priority": [1],
                 "state": "flight",
@@ -199,6 +202,7 @@ def test_WorkerState__to_dict(ws):
             },
             "y": {
                 "key": "y",
+                "run_id": -1,
                 "nbytes": sizeof(object()),
                 "state": "memory",
             },
@@ -363,6 +367,7 @@ def test_computetask_to_dict():
         function=b"blob",
         args=b"blob",
         kwargs=None,
+        run_id=5,
     )
     assert ev.run_spec == SerializedTask(function=b"blob", args=b"blob")
     ev2 = ev.to_loggable(handled=11.22)
@@ -386,6 +391,7 @@ def test_computetask_to_dict():
         "function": None,
         "args": None,
         "kwargs": None,
+        "run_id": 5,
     }
     ev3 = StateMachineEvent.from_dict(d)
     assert isinstance(ev3, ComputeTaskEvent)
@@ -409,6 +415,7 @@ def test_computetask_dummy():
         function=None,
         args=None,
         kwargs=None,
+        run_id=0,
     )
 
     # nbytes is generated from who_has if omitted
@@ -444,6 +451,7 @@ def test_executesuccess_to_dict():
     ev = ExecuteSuccessEvent(
         stimulus_id="test",
         key="x",
+        run_id=1,
         value=123,
         start=123.4,
         stop=456.7,
@@ -459,6 +467,7 @@ def test_executesuccess_to_dict():
         "stimulus_id": "test",
         "handled": 11.22,
         "key": "x",
+        "run_id": 1,
         "value": None,
         "nbytes": 890,
         "start": 123.4,
@@ -470,6 +479,7 @@ def test_executesuccess_to_dict():
     assert ev3.stimulus_id == "test"
     assert ev3.handled == 11.22
     assert ev3.key == "x"
+    assert ev3.run_id == 1
     assert ev3.value is None
     assert ev3.start == 123.4
     assert ev3.stop == 456.7
@@ -481,6 +491,7 @@ def test_executesuccess_dummy():
     ev = ExecuteSuccessEvent.dummy("x", stimulus_id="s")
     assert ev == ExecuteSuccessEvent(
         key="x",
+        run_id=1,
         value=None,
         start=0.0,
         stop=1.0,

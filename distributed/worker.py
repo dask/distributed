@@ -2226,6 +2226,7 @@ class Worker(BaseWorker, ServerNode):
 
         # The key *must* be in the worker state thanks to the cancelled state
         ts = self.state.tasks[key]
+        run_id = ts.run_id
 
         try:
             function, args, kwargs = await self._maybe_deserialize_task(ts)
@@ -2297,6 +2298,7 @@ class Worker(BaseWorker, ServerNode):
                     self.digests["task-duration"].add(result["stop"] - result["start"])
                 return ExecuteSuccessEvent(
                     key=key,
+                    run_id=run_id,
                     value=result["result"],
                     start=result["start"],
                     stop=result["stop"],

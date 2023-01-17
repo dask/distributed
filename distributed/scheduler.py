@@ -1310,6 +1310,14 @@ class TaskState:
     #: Task annotations
     annotations: dict[str, Any]
 
+    #: The unique identifier of a specific execution of a task. This identifier
+    #: is used to sign a task such that the assigned worker is expected to return
+    #: the same identifier in the task-finished message. This is used to correlate
+    #: responses.
+    #: Only the most recently assigned worker is trusted. All other results will
+    #: be rejected.
+    run_id: int | None
+
     #: Cached hash of :attr:`~TaskState.client_key`
     _hash: int
 
@@ -1317,10 +1325,18 @@ class TaskState:
     __weakref__: Any = None
     __slots__ = tuple(__annotations__)
 
+    #: Global iterator used to create unique task run IDs
+    _run_id_iterator: ClassVar[itertools.count] = itertools.count()
+
     # Instances not part of slots since class variable
     _instances: ClassVar[weakref.WeakSet[TaskState]] = weakref.WeakSet()
 
-    def __init__(self, key: str, run_spec: object, state: TaskStateState):
+    def __init__(
+        self,
+        key: str,
+        run_spec: object,
+        state: TaskStateState,
+    ):
         self.key = key
         self._hash = hash(key)
         self.run_spec = run_spec
@@ -1354,6 +1370,7 @@ class TaskState:
         self.metadata = {}
         self.annotations = {}
         self.erred_on = set()
+        self.run_id = None
         TaskState._instances.add(self)
 
     def __hash__(self) -> int:
@@ -3257,10 +3274,12 @@ class SchedulerState:
         #        time to compute and submit this
         if duration < 0:
             duration = self.get_task_duration(ts)
+        ts.run_id = next(TaskState._run_id_iterator)
 
         msg: dict[str, Any] = {
             "op": "compute-task",
             "key": ts.key,
+            "run_id": ts.run_id,
             "priority": ts.priority,
             "duration": duration,
             "stimulus_id": f"compute-task-{time()}",
@@ -4620,9 +4639,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.transitions(recommendations, stimulus_id)
 
-    def stimulus_task_finished(self, key=None, worker=None, stimulus_id=None, **kwargs):
+    def stimulus_task_finished(self, key, worker, stimulus_id, run_id, **kwargs):
         """Mark that a task has finished execution on a particular worker"""
-        logger.debug("Stimulus task finished %s, %s", key, worker)
+        logger.debug("Stimulus task finished %s[%d] %s", key, run_id, worker)
 
         recommendations: Recs = {}
         client_msgs: Msgs = {}
@@ -4646,6 +4665,24 @@ class Scheduler(SchedulerState, ServerNode):
                     "stimulus_id": stimulus_id,
                 }
             ]
+        elif ts.run_id != run_id:
+            if not ts.processing_on or ts.processing_on.address != worker:
+                logger.debug(
+                    "Received stale task run, worker: %s, key: %s, run_id: %d (%d)",
+                    worker,
+                    key,
+                    run_id,
+                    ts.run_id,
+                )
+                worker_msgs[worker] = [
+                    {
+                        "op": "free-keys",
+                        "keys": [key],
+                        "stimulus_id": stimulus_id,
+                    }
+                ]
+            else:
+                recommendations[ts.key] = "released"
         elif ts.state == "memory":
             self.add_keys(worker=worker, keys=[key])
         else:
