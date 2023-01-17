@@ -6932,8 +6932,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         def _key(group):
             is_idle = not any([wws.processing for wws in groups[group]])
+            n_long_running = sum(len(wws.long_running) for wws in groups[group])
             bytes = -group_bytes[group]
-            return is_idle, bytes
+            return is_idle, -n_long_running, bytes
 
         idle = sorted(groups, key=_key)
 
