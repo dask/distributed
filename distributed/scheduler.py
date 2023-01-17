@@ -932,7 +932,7 @@ class TaskPrefix:
     groups: list[TaskGroup]
 
     #: Accumulate count of number of tasks in each state
-    state_counts: defaultdict[str, int]
+    state_counts: defaultdict[TaskStateState, int]
 
     __slots__ = tuple(__annotations__)
 
@@ -2874,23 +2874,21 @@ class SchedulerState:
 
         p = len(ws.processing)
 
-        idle = self.idle
-        saturated = self.saturated
-        saturated.discard(ws)
-        if self.is_unoccupied(ws, occ, p):
-            if ws.status == Status.running:
-                idle[ws.address] = ws
+        self.saturated.discard(ws)
+        if ws.status != Status.running:
+            self.idle.pop(ws.address, None)
+        elif self.is_unoccupied(ws, occ, p):
+            self.idle[ws.address] = ws
         else:
-            idle.pop(ws.address, None)
+            self.idle.pop(ws.address, None)
             nc = ws.nthreads
             if p > nc:
                 pending = occ * (p - nc) / (p * nc)
                 if 0.4 < pending > 1.9 * (self.total_occupancy / self.total_nthreads):
-                    saturated.add(ws)
+                    self.saturated.add(ws)
 
-        if not _worker_full(ws, self.WORKER_SATURATION):
-            if ws.status == Status.running:
-                self.idle_task_count.add(ws)
+        if not _worker_full(ws, self.WORKER_SATURATION) and ws.status == Status.running:
+            self.idle_task_count.add(ws)
         else:
             self.idle_task_count.discard(ws)
 
@@ -5107,16 +5105,35 @@ class Scheduler(SchedulerState, ServerNode):
             raise ValueError("Workers not the same in all collections")
 
         assert self.running.issuperset(self.idle.values()), (
-            self.running,
-            list(self.idle.values()),
+            self.running.copy(),
+            set(self.idle.values()),
         )
+        assert self.running.issuperset(self.idle_task_count), (
+            self.running.copy(),
+            self.idle_task_count.copy(),
+        )
+        assert self.running.issuperset(self.saturated), (
+            self.running.copy(),
+            self.saturated.copy(),
+        )
+        assert self.saturated.isdisjoint(self.idle.values()), (
+            self.saturated.copy(),
+            set(self.idle.values()),
+        )
+
         task_prefix_counts: defaultdict[str, int] = defaultdict(int)
         for w, ws in self.workers.items():
             assert isinstance(w, str), (type(w), w)
             assert isinstance(ws, WorkerState), (type(ws), ws)
             assert ws.address == w
-            if ws.status != Status.running:
+
+            if ws.status == Status.running:
+                assert ws in self.running
+            else:
+                assert ws not in self.running
                 assert ws.address not in self.idle
+                assert ws not in self.saturated
+
             assert ws.long_running.issubset(ws.processing)
             if not ws.processing:
                 assert not ws.occupancy
@@ -5416,6 +5433,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.running.discard(ws)
             self.idle.pop(ws.address, None)
             self.idle_task_count.discard(ws)
+            self.saturated.discard(ws)
 
     async def handle_request_refresh_who_has(
         self, keys: Iterable[str], worker: str, stimulus_id: str

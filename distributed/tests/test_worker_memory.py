@@ -23,6 +23,7 @@ from distributed.core import Status
 from distributed.metrics import monotonic
 from distributed.utils_test import (
     NO_AMM,
+    async_wait_for,
     captured_logger,
     gen_cluster,
     inc,
@@ -1143,3 +1144,42 @@ async def test_deprecated_params(s, name):
     with pytest.warns(FutureWarning, match=name):
         async with Worker(s.address, **{name: 0.789}) as a:
             assert getattr(a.memory_manager, name) == 0.789
+
+
+@gen_cluster(config={"distributed.worker.memory.monitor-interval": "10ms"})
+async def test_pause_while_idle(s, a, b):
+    sa = s.workers[a.address]
+    assert a.address in s.idle
+    assert sa in s.running
+
+    a.monitor.get_process_memory = lambda: 2**40
+    await async_wait_for(lambda: sa.status == Status.paused, timeout=2)
+    assert a.address not in s.idle
+    assert sa not in s.running
+
+    a.monitor.get_process_memory = lambda: 0
+    await async_wait_for(lambda: sa.status == Status.running, timeout=2)
+    assert a.address in s.idle
+    assert sa in s.running
+
+
+@gen_cluster(client=True, config={"distributed.worker.memory.monitor-interval": "10ms"})
+async def test_pause_while_saturated(c, s, a, b):
+    sa = s.workers[a.address]
+    ev = Event()
+    futs = c.map(lambda i, ev: ev.wait(), range(3), ev=ev, workers=[a.address])
+    await async_wait_for(lambda: len(a.state.tasks) == 3, timeout=2)
+    assert sa in s.saturated
+    assert sa in s.running
+
+    a.monitor.get_process_memory = lambda: 2**40
+    await async_wait_for(lambda: sa.status == Status.paused, timeout=2)
+    assert sa not in s.saturated
+    assert sa not in s.running
+
+    a.monitor.get_process_memory = lambda: 0
+    await async_wait_for(lambda: sa.status == Status.running, timeout=2)
+    assert sa in s.saturated
+    assert sa in s.running
+
+    await ev.set()
