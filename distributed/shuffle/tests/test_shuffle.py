@@ -1164,7 +1164,7 @@ async def test_basic_lowlevel_shuffle(
     try:
         for ix, df in enumerate(dfs):
             s = shuffles[ix % len(shuffles)]
-            await s.add_partition(df)
+            await s.add_partition(df, ix)
 
         await barrier_worker.barrier()
 
@@ -1238,9 +1238,9 @@ async def test_error_offload(tmpdir, loop_in_thread):
         loop=loop_in_thread,
     )
     try:
-        await sB.add_partition(dfs[0])
+        await sB.add_partition(dfs[0], 0)
         with pytest.raises(RuntimeError, match="Error during deserialization"):
-            await sB.add_partition(dfs[1])
+            await sB.add_partition(dfs[1], 1)
             await sB.barrier()
     finally:
         await asyncio.gather(*[s.close() for s in [sA, sB]])
@@ -1272,7 +1272,7 @@ async def test_error_send(tmpdir, loop_in_thread):
     local_shuffle_pool = ShuffleTestPool()
 
     class ErrorSend(ShuffleRun):
-        async def send(self, address: str, shards: list[bytes]) -> None:
+        async def send(self, address: str, shards: list[tuple[int, bytes]]) -> None:
             raise RuntimeError("Error during send")
 
     sA = local_shuffle_pool.new_shuffle(
@@ -1291,7 +1291,7 @@ async def test_error_send(tmpdir, loop_in_thread):
         loop=loop_in_thread,
     )
     try:
-        await sA.add_partition(dfs[0])
+        await sA.add_partition(dfs[0], 0)
         with pytest.raises(RuntimeError, match="Error during send"):
             await sA.barrier()
     finally:
@@ -1324,7 +1324,7 @@ async def test_error_receive(tmpdir, loop_in_thread):
     local_shuffle_pool = ShuffleTestPool()
 
     class ErrorReceive(ShuffleRun):
-        async def receive(self, data: list[bytes]) -> None:
+        async def receive(self, data: list[tuple[int, bytes]]) -> None:
             raise RuntimeError("Error during receive")
 
     sA = local_shuffle_pool.new_shuffle(
@@ -1343,7 +1343,7 @@ async def test_error_receive(tmpdir, loop_in_thread):
         loop=loop_in_thread,
     )
     try:
-        await sB.add_partition(dfs[0])
+        await sB.add_partition(dfs[0], 0)
         with pytest.raises(RuntimeError, match="Error during receive"):
             await sB.barrier()
     finally:

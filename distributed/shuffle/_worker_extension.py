@@ -28,6 +28,7 @@ from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._shuffle import ShuffleId
+from distributed.sizeof import sizeof
 from distributed.utils import log_errors, sync
 
 if TYPE_CHECKING:
@@ -141,6 +142,7 @@ class ShuffleRun:
 
         self.diagnostics: dict[str, float] = defaultdict(float)
         self.transferred = False
+        self.received: set[int] = set()
         self.total_recvd = 0
         self.start_time = time.time()
         self._exception: Exception | None = None
@@ -170,7 +172,7 @@ class ShuffleRun:
         # up the comm pool on scheduler side
         await self.broadcast(msg={"op": "shuffle_inputs_done", "shuffle_id": self.id})
 
-    async def send(self, address: str, shards: list[bytes]) -> None:
+    async def send(self, address: str, shards: list[tuple[int, bytes]]) -> None:
         self.raise_if_closed()
         return await self.rpc(address).shuffle_receive(
             data=to_serialize(shards),
@@ -196,15 +198,20 @@ class ShuffleRun:
             "start": self.start_time,
         }
 
-    async def receive(self, data: list[bytes]) -> None:
+    async def receive(self, data: list[tuple[int, bytes]]) -> None:
         await self._receive(data)
 
-    async def _receive(self, data: list[bytes]) -> None:
+    async def _receive(self, data: list[tuple[int, bytes]]) -> None:
         self.raise_if_closed()
 
+        filtered = []
+        for d in data:
+            if d[0] not in self.received:
+                filtered.append(d[1])
+                self.received.add(d[0])
+                self.total_recvd += sizeof(d)
         try:
-            self.total_recvd += sum(map(len, data))
-            groups = await self.offload(self._repartition_buffers, data)
+            groups = await self.offload(self._repartition_buffers, filtered)
             await self._write_to_disk(groups)
         except Exception as e:
             self._exception = e
@@ -229,24 +236,24 @@ class ShuffleRun:
                 f"Shuffle {self.id} has been closed on {self.local_address}"
             )
 
-    async def add_partition(self, data: pd.DataFrame) -> None:
+    async def add_partition(self, data: pd.DataFrame, input_partition: int) -> None:
         self.raise_if_closed()
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to shuffle {self}")
 
-        def _() -> dict[str, list[bytes]]:
+        def _() -> dict[str, list[tuple[int, bytes]]]:
             out = split_by_worker(
                 data,
                 self.column,
                 self.worker_for,
             )
-            out = {k: [serialize_table(t)] for k, t in out.items()}
+            out = {k: [(input_partition, serialize_table(t))] for k, t in out.items()}
             return out
 
         out = await self.offload(_)
         await self._write_to_comm(out)
 
-    async def _write_to_comm(self, data: dict[str, list[bytes]]) -> None:
+    async def _write_to_comm(self, data: dict[str, list[tuple[int, bytes]]]) -> None:
         self.raise_if_closed()
         await self._comm_buffer.write(data)
 
@@ -356,7 +363,7 @@ class ShuffleWorkerExtension:
     async def shuffle_receive(
         self,
         shuffle_id: ShuffleId,
-        data: list[bytes],
+        data: list[tuple[int, bytes]],
     ) -> None:
         """
         Handler: Receive an incoming shard of data from a peer worker.
@@ -390,13 +397,19 @@ class ShuffleWorkerExtension:
         self,
         data: pd.DataFrame,
         shuffle_id: ShuffleId,
+        input_partition: int,
         npartitions: int,
         column: str,
     ) -> None:
         shuffle = self.get_shuffle(
             shuffle_id, empty=data, npartitions=npartitions, column=column
         )
-        sync(self.worker.loop, shuffle.add_partition, data=data)
+        sync(
+            self.worker.loop,
+            shuffle.add_partition,
+            data=data,
+            input_partition=input_partition,
+        )
 
     async def _barrier(self, shuffle_id: ShuffleId) -> None:
         """

@@ -41,12 +41,17 @@ def _get_worker_extension() -> ShuffleWorkerExtension:
 def shuffle_transfer(
     input: pd.DataFrame,
     id: ShuffleId,
+    input_partition: int,
     npartitions: int,
     column: str,
 ) -> None:
     try:
         _get_worker_extension().add_partition(
-            input, id, npartitions=npartitions, column=column
+            input,
+            id,
+            input_partition=input_partition,
+            npartitions=npartitions,
+            column=column,
         )
     except Exception:
         msg = f"shuffle_transfer failed during shuffle {id}"
@@ -181,6 +186,7 @@ class P2PShuffleLayer(SimpleShuffleLayer):
                 shuffle_transfer,
                 (self.name_input, i),
                 token,
+                i,
                 self.npartitions,
                 self.column,
             )
