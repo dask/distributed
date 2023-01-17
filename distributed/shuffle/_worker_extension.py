@@ -210,6 +210,8 @@ class ShuffleRun:
                 filtered.append(d[1])
                 self.received.add(d[0])
                 self.total_recvd += sizeof(d)
+        if not filtered:
+            return
         try:
             groups = await self.offload(self._repartition_buffers, filtered)
             await self._write_to_disk(groups)
@@ -490,7 +492,8 @@ class ShuffleWorkerExtension:
                         id=shuffle_id,
                         run_id=result["run_id"],
                         directory=os.path.join(
-                            self.worker.local_directory, f"shuffle-{shuffle_id}"
+                            self.worker.local_directory,
+                            f"shuffle-{shuffle_id}-{result['run_id']}",
                         ),
                         nthreads=self.worker.state.nthreads,
                         local_address=self.worker.address,

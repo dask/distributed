@@ -29,6 +29,7 @@ from distributed.shuffle._scheduler_extension import get_worker_for
 from distributed.shuffle._shuffle import ShuffleId, barrier_key
 from distributed.shuffle._worker_extension import (
     ShuffleRun,
+    ShuffleWorkerExtension,
     dump_shards,
     list_of_buffers_to_table,
     load_partition,
@@ -1348,3 +1349,60 @@ async def test_error_receive(tmpdir, loop_in_thread):
             await sB.barrier()
     finally:
         await asyncio.gather(*[s.close() for s in [sA, sB]])
+
+
+from distributed.worker import DEFAULT_EXTENSIONS
+
+
+class BlockedShuffleReceiveShuffleWorkerExtension(ShuffleWorkerExtension):
+    def __init__(self, worker: Worker) -> None:
+        super().__init__(worker)
+        self.in_shuffle_receive = asyncio.Event()
+        self.block_shuffle_receive = asyncio.Event()
+
+    async def shuffle_receive(
+        self, shuffle_id: ShuffleId, data: list[tuple[int, bytes]]
+    ) -> None:
+        self.in_shuffle_receive.set()
+        await self.block_shuffle_receive.wait()
+        return await super().shuffle_receive(shuffle_id, data)
+
+
+@mock.patch.dict(
+    DEFAULT_EXTENSIONS,
+    {"shuffle": BlockedShuffleReceiveShuffleWorkerExtension},
+)
+@gen_cluster(client=True, nthreads=[("", 1)] * 2)
+async def test_deduplicate_stale_transfer(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="100 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = out.persist()
+
+    shuffle_extA = a.extensions["shuffle"]
+    shuffle_extB = b.extensions["shuffle"]
+    await asyncio.gather(
+        shuffle_extA.in_shuffle_receive.wait(), shuffle_extB.in_shuffle_receive.wait()
+    )
+    del out
+
+    while s.tasks or shuffle_extA.shuffles or shuffle_extB.shuffles:
+        await asyncio.sleep(0)
+
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    x, y = c.compute([df.x.size, out.x.size])
+    await get_shuffle_id(s)
+    shuffle_extA.block_shuffle_receive.set()
+    shuffle_extB.block_shuffle_receive.set()
+
+    x = await x
+    y = await y
+    assert x == y
+
+    await clean_worker(a, timeout=2)
+    await clean_worker(b, timeout=2)
+    await clean_scheduler(s, timeout=2)
