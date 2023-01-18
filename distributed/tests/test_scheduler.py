@@ -1582,7 +1582,7 @@ async def test_workers_to_close_grouped(c, s, *workers):
 
 @pytest.mark.parametrize("reverse", [True, False])
 @gen_cluster(client=True)
-async def test_workers_to_close_long_running(c, s, a, b, reverse):
+async def test_workers_to_close_never_close_long_running(c, s, a, b, reverse):
     if reverse:
         a, b = b, a
     wait_evt = Event()
@@ -1601,14 +1601,14 @@ async def test_workers_to_close_long_running(c, s, a, b, reverse):
         wsA = s.workers[a.address]
         while not wsA.long_running:
             await asyncio.sleep(0.1)
-        assert (r := s.workers_to_close()) == [b.address]
+        assert s.workers_to_close() == [b.address]
         futs = [c.submit(executing, wait_evt, workers=[b.address]) for _ in range(10)]
-        assert len(r := s.workers_to_close(n=2)) == 2
+        assert a.address not in s.workers_to_close(n=2)
         while not b.state.tasks:
             await asyncio.sleep(0.1)
         assert (r := s.workers_to_close()) == []
         assert (r := s.workers_to_close(n=1)) == [b.address]
-        assert len(r := s.workers_to_close(n=2)) == 2
+        assert a.address not in s.workers_to_close(n=2)
     finally:
         await wait_evt.set()
 
