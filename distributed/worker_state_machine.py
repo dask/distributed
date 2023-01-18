@@ -88,8 +88,6 @@ PROCESSING: set[TaskStateState] = {
     "constrained",
     "executing",
     "long-running",
-    "cancelled",
-    "resumed",
 }
 READY: set[TaskStateState] = {"ready", "constrained"}
 # Valid states for a task that is found in TaskState.waiting_for_data
