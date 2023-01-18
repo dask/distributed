@@ -1406,3 +1406,60 @@ async def test_deduplicate_stale_transfer(c, s, a, b):
     await clean_worker(a, timeout=2)
     await clean_worker(b, timeout=2)
     await clean_scheduler(s, timeout=2)
+
+
+class BlockedBarrierShuffleWorkerExtension(ShuffleWorkerExtension):
+    def __init__(self, worker: Worker) -> None:
+        super().__init__(worker)
+        self.in_barrier = asyncio.Event()
+        self.block_barrier = asyncio.Event()
+
+    async def _barrier(self, shuffle_id: ShuffleId, run_ids: list[int]) -> int:
+        self.in_barrier.set()
+        await self.block_barrier.wait()
+        return await super()._barrier(shuffle_id, run_ids)
+
+
+@mock.patch.dict(
+    DEFAULT_EXTENSIONS,
+    {"shuffle": BlockedBarrierShuffleWorkerExtension},
+)
+@gen_cluster(client=True, nthreads=[("", 1)] * 2)
+async def test_handle_stale_barrier(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="100 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = out.persist()
+
+    shuffle_extA = a.extensions["shuffle"]
+    shuffle_extB = b.extensions["shuffle"]
+
+    wait_for_barrier_on_A_task = asyncio.create_task(shuffle_extA.in_barrier.wait())
+    wait_for_barrier_on_B_task = asyncio.create_task(shuffle_extB.in_barrier.wait())
+
+    await asyncio.wait(
+        [wait_for_barrier_on_A_task, wait_for_barrier_on_B_task],
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    del out
+
+    while s.tasks or shuffle_extA.shuffles or shuffle_extB.shuffles:
+        await asyncio.sleep(0)
+
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    x, y = c.compute([df.x.size, out.x.size])
+    await get_shuffle_id(s)
+    shuffle_extA.block_barrier.set()
+    shuffle_extB.block_barrier.set()
+
+    x = await x
+    y = await y
+    assert x == y
+
+    await clean_worker(a, timeout=2)
+    await clean_worker(b, timeout=2)
+    await clean_scheduler(s, timeout=2)
