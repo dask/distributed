@@ -27,6 +27,7 @@ from bokeh.models import (
     DataRange1d,
     FactorRange,
     GroupFilter,
+    HelpTool,
     HoverTool,
     HTMLTemplateFormatter,
     NumberFormatter,
@@ -2213,7 +2214,10 @@ def task_stream_figure(clear_interval="20s", **kwargs):
     )
 
     tap = TapTool(callback=OpenURL(url="./profile?key=@name"))
-
+    help_ = HelpTool(
+        redirect="https://docs.dask.org/en/stable/dashboard.html#task-stream",
+        description="A description of the TaskStream and its color palette.",
+    )
     root.add_tools(
         hover,
         tap,
@@ -2221,6 +2225,7 @@ def task_stream_figure(clear_interval="20s", **kwargs):
         ResetTool(),
         PanTool(dimensions="width"),
         WheelZoomTool(dimensions="width"),
+        help_,
     )
     if ExportTool:  # type: ignore
         export = ExportTool()
