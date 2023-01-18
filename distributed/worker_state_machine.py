@@ -355,11 +355,6 @@ class TaskState:
         # Remove all Nones and empty containers
         return {k: v for k, v in out.items() if v}
 
-    def is_protected(self) -> bool:
-        return self.state in PROCESSING or any(
-            dep_ts.state in PROCESSING for dep_ts in self.dependents
-        )
-
 
 @dataclass
 class Instruction:
@@ -2835,35 +2830,28 @@ class WorkerState:
         holding this unnecessary data, if the worker hasn't released the data itself,
         already.
 
-        This handler does not guarantee the task nor the data to be actually
-        released but only asks the worker to release the data on a best effort
-        guarantee. This protects from race conditions where the given keys may
-        already have been rescheduled for compute in which case the compute
-        would win and this handler is ignored.
+        This handler only releases tasks that are indeed in state memory.
 
         For stronger guarantees, see handler free_keys
         """
         recommendations: Recs = {}
         instructions: Instructions = []
 
-        rejected = []
         for key in ev.keys:
             ts = self.tasks.get(key)
             if ts is None or ts.state != "memory":
                 continue
-            if not ts.is_protected():
-                self.log.append(
-                    (ts.key, "remove-replica-confirmed", ev.stimulus_id, time())
-                )
-                recommendations[ts] = "released"
-            else:
-                rejected.append(key)
-
-        if rejected:
-            self.log.append(
-                ("remove-replica-rejected", rejected, ev.stimulus_id, time())
-            )
-            instructions.append(AddKeysMsg(keys=rejected, stimulus_id=ev.stimulus_id))
+            # If the task is still in executing, the scheduler should never have
+            # asked the worker to drop this key.
+            # We cannot simply forget it because there is a time window between
+            # setting the state to executing and preparing/collecting the data
+            # for the task.
+            # If a dependency was released during this time, this would pop up
+            # as a KeyError during execute which is hard to understand
+            if any(dep.state == "executing" for dep in ts.dependents):
+                raise RuntimeError("Encountered invalid state")
+            self.log.append((ts.key, "remove-replica", ev.stimulus_id, time()))
+            recommendations[ts] = "released"
 
         return recommendations, instructions
 
