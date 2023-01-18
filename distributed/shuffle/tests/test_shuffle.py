@@ -1033,21 +1033,27 @@ async def test_add_some_results(c, s, a, b):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True)
+@gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_clean_after_close(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
-        end="2000-01-10",
+        end="2001-01-01",
         dtypes={"x": float, "y": float},
-        freq="10 s",
+        freq="100 s",
     )
-    x = dd.shuffle.shuffle(df, "x", shuffle="p2p").persist()
 
-    while not s.tasks or not any(ts.state == "memory" for ts in s.tasks.values()):
-        await asyncio.sleep(0.01)
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = out.persist()
+
+    await wait_for_tasks_in_state("shuffle-transfer", "executing", 1, a)
+    await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
 
     await a.close()
     await clean_worker(a)
+
+    del out
+    await clean_worker(b)
+    await clean_scheduler(s)
 
 
 class PooledRPCShuffle(PooledRPCCall):
