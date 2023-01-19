@@ -457,7 +457,7 @@ async def test_resumed_cancelled_handle_compute(
     Given the history of a task
     executing -> cancelled -> resumed(fetch)
 
-    A handle_compute should properly restore executing.
+    the scheduler should reject the result upon completion and reschedule the task.
     """
     # This test is heavily using set_restrictions to simulate certain scheduler
     # decisions of placing keys
@@ -535,11 +535,11 @@ async def test_resumed_cancelled_handle_compute(
                 (f3.key, "ready", "executing", "executing", {}),
                 (f3.key, "executing", "released", "cancelled", {}),
                 (f3.key, "cancelled", "fetch", "resumed", {}),
-                (f3.key, "resumed", "memory", "memory", {}),
+                (f3.key, "resumed", "released", "cancelled", {}),
                 (
                     f3.key,
+                    "cancelled",
                     "memory",
-                    "released",
                     "released",
                     {f2.key: "released", f3.key: "forgotten"},
                 ),
@@ -558,11 +558,15 @@ async def test_resumed_cancelled_handle_compute(
                 (f3.key, "ready", "executing", "executing", {}),
                 (f3.key, "executing", "released", "cancelled", {}),
                 (f3.key, "cancelled", "fetch", "resumed", {}),
-                (f3.key, "resumed", "error", "released", {f3.key: "fetch"}),
-                (f3.key, "fetch", "flight", "flight", {}),
-                (f3.key, "flight", "missing", "missing", {}),
-                (f3.key, "missing", "waiting", "waiting", {f2.key: "fetch"}),
-                (f3.key, "waiting", "ready", "ready", {f3.key: "executing"}),
+                (f3.key, "resumed", "released", "cancelled", {}),
+                (
+                    f3.key,
+                    "cancelled",
+                    "error",
+                    "released",
+                    {f2.key: "released", f3.key: "forgotten"},
+                ),
+                (f3.key, "released", "forgotten", "forgotten", {f2.key: "forgotten"}),
                 (f3.key, "ready", "executing", "executing", {}),
                 (f3.key, "executing", "memory", "memory", {}),
             ],
@@ -577,7 +581,8 @@ async def test_resumed_cancelled_handle_compute(
                 (f3.key, "ready", "executing", "executing", {}),
                 (f3.key, "executing", "released", "cancelled", {}),
                 (f3.key, "cancelled", "fetch", "resumed", {}),
-                (f3.key, "resumed", "waiting", "executing", {}),
+                (f3.key, "resumed", "released", "cancelled", {}),
+                (f3.key, "cancelled", "waiting", "executing", {}),
                 (f3.key, "executing", "memory", "memory", {}),
                 (
                     f3.key,
@@ -602,8 +607,10 @@ async def test_resumed_cancelled_handle_compute(
                 (f3.key, "ready", "executing", "executing", {}),
                 (f3.key, "executing", "released", "cancelled", {}),
                 (f3.key, "cancelled", "fetch", "resumed", {}),
-                (f3.key, "resumed", "waiting", "executing", {}),
+                (f3.key, "resumed", "released", "cancelled", {}),
+                (f3.key, "cancelled", "waiting", "executing", {}),
                 (f3.key, "executing", "error", "error", {}),
+                # FIXME: (distributed#7489)
             ],
         )
     else:
