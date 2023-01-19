@@ -130,9 +130,9 @@ async def test_bad_disk(c, s, a, b):
         out = await c.compute(out)
 
     await c.close()
-    # await clean_worker(a)
-    # await clean_worker(b)
-    # await clean_scheduler(s)
+    await clean_worker(a)
+    await clean_worker(b)
+    await clean_scheduler(s)
 
 
 async def wait_until_worker_has_tasks(
