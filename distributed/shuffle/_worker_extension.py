@@ -170,13 +170,20 @@ class ShuffleRun:
         self.raise_if_closed()
         # TODO: Consider broadcast pinging once when the shuffle starts to warm
         # up the comm pool on scheduler side
-        await self.broadcast(msg={"op": "shuffle_inputs_done", "shuffle_id": self.id})
+        await self.broadcast(
+            msg={
+                "op": "shuffle_inputs_done",
+                "shuffle_id": self.id,
+                "run_id": self.run_id,
+            }
+        )
 
     async def send(self, address: str, shards: list[tuple[int, bytes]]) -> None:
         self.raise_if_closed()
         return await self.rpc(address).shuffle_receive(
             data=to_serialize(shards),
             shuffle_id=self.id,
+            run_id=self.run_id,
         )
 
     async def offload(self, func: Callable[..., T], *args: Any) -> T:
@@ -366,22 +373,23 @@ class ShuffleWorkerExtension:
     async def shuffle_receive(
         self,
         shuffle_id: ShuffleId,
+        run_id: int,
         data: list[tuple[int, bytes]],
     ) -> None:
         """
         Handler: Receive an incoming shard of data from a peer worker.
         Using an unknown ``shuffle_id`` is an error.
         """
-        shuffle = await self._get_shuffle(shuffle_id)
+        shuffle = await self._get_shuffle_run(shuffle_id, run_id)
         await shuffle.receive(data)
 
-    async def shuffle_inputs_done(self, shuffle_id: ShuffleId) -> None:
+    async def shuffle_inputs_done(self, shuffle_id: ShuffleId, run_id: int) -> None:
         """
         Handler: Inform the extension that all input partitions have been handed off to extensions.
         Using an unknown ``shuffle_id`` is an error.
         """
         with log_errors():
-            shuffle = await self._get_shuffle(shuffle_id)
+            shuffle = await self._get_shuffle_run(shuffle_id, run_id)
             await shuffle.inputs_done()
 
     def shuffle_fail(self, shuffle_id: ShuffleId, run_id: int, message: str) -> None:
@@ -406,8 +414,8 @@ class ShuffleWorkerExtension:
         npartitions: int,
         column: str,
     ) -> int:
-        shuffle = self.get_shuffle(
-            shuffle_id, run_id=None, empty=data, npartitions=npartitions, column=column
+        shuffle = self.get_or_create_shuffle(
+            shuffle_id, empty=data, npartitions=npartitions, column=column
         )
         return sync(
             self.worker.loop,
@@ -428,86 +436,96 @@ class ShuffleWorkerExtension:
         assert all(run_id == id for id in run_ids)
         # Tell all peers that we've reached the barrier
         # Note that this will call `shuffle_inputs_done` on our own worker as well
-        shuffle = await self._get_shuffle(shuffle_id, run_id)
+        shuffle = await self._get_shuffle_run(shuffle_id, run_id)
         await shuffle.barrier()
         return run_id
 
-    @overload
-    async def _get_shuffle(
-        self,
-        shuffle_id: ShuffleId,
-    ) -> ShuffleRun:
-        ...
-
-    @overload
-    async def _get_shuffle(
+    async def _get_shuffle_run(
         self,
         shuffle_id: ShuffleId,
         run_id: int,
     ) -> ShuffleRun:
-        ...
+        """Get or create the shuffle matching the ID and run ID.
 
-    @overload
-    async def _get_shuffle(
+        Parameters
+        ----------
+        shuffle_id
+            Unique identifier of the shuffle
+        run_id
+            Unique identifier of the shuffle run
+
+        Raises
+        ------
+        KeyError
+            If the shuffle does not exist
+        RuntimeError
+            If the run_id is stale
+        """
+        shuffle = self.shuffles.get(shuffle_id, None)
+        if shuffle is None:
+            shuffle = await self._refresh_shuffle(
+                shuffle_id=shuffle_id,
+            )
+        if run_id < shuffle.run_id:
+            raise RuntimeError("Stale shuffle")
+
+        if shuffle._exception:
+            raise shuffle._exception
+        return shuffle
+
+    async def _get_or_create_shuffle(
         self,
         shuffle_id: ShuffleId,
-        run_id: int | None,
         empty: pd.DataFrame,
         column: str,
         npartitions: int,
     ) -> ShuffleRun:
-        ...
+        """Get or create a shuffle matching the ID and data spec.
 
-    async def _get_shuffle(
-        self,
-        shuffle_id: ShuffleId,
-        run_id: int | None = None,
-        empty: pd.DataFrame | None = None,
-        column: str | None = None,
-        npartitions: int | None = None,
-    ) -> ShuffleRun:
-        "Get a shuffle by ID; raise ValueError if it's not registered."
-
-        # Request an existing shuffle run
-        # XOR
-        # get-or-create a shuffle run matching the specs
-        if run_id is not None:
-            assert empty is None
-            assert column is None
-            assert npartitions is None
-
+        Parameters
+        ----------
+        shuffle_id
+            Unique identifier of the shuffle
+        empty
+            Empty metadata of input collection
+        column
+            Column to be used to map rows to output partitions (by hashing)
+        npartitions
+            Number of output partitions
+        """
         shuffle = self.shuffles.get(shuffle_id, None)
-        if shuffle is None or (run_id is not None and run_id > shuffle.run_id):
-            try:
-                shuffle = await self._refresh_shuffle(
-                    shuffle_id=shuffle_id,
-                    empty=empty,
-                    column=column,
-                    npartitions=npartitions,
-                )
-            except KeyError:
-                # Even the scheduler doesn't know about this shuffle
-                # Let's hand this back to the scheduler and let it figure
-                # things out
-                logger.info(
-                    "Worker Shuffle unable to get information from scheduler, rescheduling"
-                )
-                from distributed.worker import Reschedule
-
-                raise Reschedule()
+        if shuffle is None:
+            shuffle = await self._refresh_shuffle(
+                shuffle_id=shuffle_id,
+                empty=empty,
+                column=column,
+                npartitions=npartitions,
+            )
 
         if self.closed:
             raise ShuffleClosedError(
                 f"{self.__class__.__name__} already closed on {self.worker.address}"
             )
-        assert shuffle
-        if run_id is not None and run_id < shuffle.run_id:
-            raise RuntimeError("Stale shuffle")
-        assert run_id is None or run_id == shuffle.run_id
-
         if shuffle._exception:
             raise shuffle._exception
         return shuffle
+
+    @overload
+    async def _refresh_shuffle(
+        self,
+        shuffle_id: ShuffleId,
+    ) -> ShuffleRun:
+        ...
+
+    @overload
+    async def _refresh_shuffle(
+        self,
+        shuffle_id: ShuffleId,
+        empty: pd.DataFrame,
+        column: str,
+        npartitions: int,
+    ) -> ShuffleRun:
+        ...
 
     async def _refresh_shuffle(
         self,
@@ -598,45 +616,29 @@ class ShuffleWorkerExtension:
         result = sync(self.worker.loop, self._barrier, shuffle_id, run_ids)
         return result
 
-    @overload
-    def get_shuffle(
-        self,
-        shuffle_id: ShuffleId,
-        run_id: int | None,
-        empty: pd.DataFrame,
-        column: str,
-        npartitions: int,
-    ) -> ShuffleRun:
-        ...
-
-    @overload
-    def get_shuffle(
-        self,
-        shuffle_id: ShuffleId,
-    ) -> ShuffleRun:
-        ...
-
-    @overload
-    def get_shuffle(
+    def get_shuffle_run(
         self,
         shuffle_id: ShuffleId,
         run_id: int,
     ) -> ShuffleRun:
-        ...
+        return sync(
+            self.worker.loop,
+            self._get_shuffle_run,
+            shuffle_id,
+            run_id,
+        )
 
-    def get_shuffle(
+    def get_or_create_shuffle(
         self,
         shuffle_id: ShuffleId,
-        run_id: int | None = None,
         empty: pd.DataFrame | None = None,
         column: str | None = None,
         npartitions: int | None = None,
     ) -> ShuffleRun:
         return sync(
             self.worker.loop,
-            self._get_shuffle,
+            self._get_or_create_shuffle,
             shuffle_id,
-            run_id,
             empty,
             column,
             npartitions,
@@ -650,7 +652,7 @@ class ShuffleWorkerExtension:
 
         Calling this for a ``shuffle_id`` which is unknown or incomplete is an error.
         """
-        shuffle = self.get_shuffle(shuffle_id, run_id)
+        shuffle = self.get_shuffle_run(shuffle_id, run_id)
         return sync(self.worker.loop, shuffle.get_output_partition, output_partition)
 
 

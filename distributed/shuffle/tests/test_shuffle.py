@@ -1066,6 +1066,7 @@ class PooledRPCShuffle(PooledRPCCall):
 
             method_name = key.replace("shuffle_", "")
             kwargs.pop("shuffle_id", None)
+            kwargs.pop("run_id", None)
             # TODO: This is a bit awkward. At some point the arguments are
             # already getting wrapped with a `Serialize`. We only want to unwrap
             # here.
@@ -1367,11 +1368,11 @@ class BlockedShuffleReceiveShuffleWorkerExtension(ShuffleWorkerExtension):
         self.block_shuffle_receive = asyncio.Event()
 
     async def shuffle_receive(
-        self, shuffle_id: ShuffleId, data: list[tuple[int, bytes]]
+        self, shuffle_id: ShuffleId, run_id: int, data: list[tuple[int, bytes]]
     ) -> None:
         self.in_shuffle_receive.set()
         await self.block_shuffle_receive.wait()
-        return await super().shuffle_receive(shuffle_id, data)
+        return await super().shuffle_receive(shuffle_id, run_id, data)
 
 
 @mock.patch.dict(
