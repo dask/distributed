@@ -118,7 +118,7 @@ Historically this has been used in a few kinds of applications:
 2.  For computations that change or update state very rapidly, such as is
     common in some advanced machine learning workloads.
 
-3.  To develop the internals of Dask's distributed infrastucture, which is
+3.  To develop the internals of Dask's distributed infrastructure, which is
     written entirely in this style.
 
 4.  For complex control and data structures in advanced applications.

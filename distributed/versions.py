@@ -12,6 +12,9 @@ from itertools import chain
 from types import ModuleType
 from typing import Any
 
+MIN_BOKEH_VERSION = "2.4.2"
+MAX_BOKEH_VERSION = "2.4.3"
+
 required_packages = [
     ("dask", lambda p: p.__version__),
     ("distributed", lambda p: p.__version__),
@@ -29,7 +32,7 @@ optional_packages = [
 
 
 # only these scheduler packages will be checked for version mismatch
-scheduler_relevant_packages = {pkg for pkg, _ in required_packages} | {"lz4"}
+scheduler_relevant_packages = {pkg for pkg, _ in required_packages} | {"lz4", "python"}
 
 
 # notes to be displayed for mismatch packages

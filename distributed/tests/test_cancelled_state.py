@@ -22,6 +22,7 @@ from distributed.utils_test import (
 from distributed.worker_state_machine import (
     AddKeysMsg,
     ComputeTaskEvent,
+    DigestMetric,
     Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
@@ -535,6 +536,16 @@ async def test_resumed_cancelled_handle_compute(
                 (f3.key, "executing", "released", "cancelled", {}),
                 (f3.key, "cancelled", "fetch", "resumed", {}),
                 (f3.key, "resumed", "memory", "memory", {}),
+                (
+                    f3.key,
+                    "memory",
+                    "released",
+                    "released",
+                    {f2.key: "released", f3.key: "forgotten"},
+                ),
+                (f3.key, "released", "forgotten", "forgotten", {f2.key: "forgotten"}),
+                (f3.key, "ready", "executing", "executing", {}),
+                (f3.key, "executing", "memory", "memory", {}),
             ],
         )
 
@@ -568,6 +579,16 @@ async def test_resumed_cancelled_handle_compute(
                 (f3.key, "cancelled", "fetch", "resumed", {}),
                 (f3.key, "resumed", "waiting", "executing", {}),
                 (f3.key, "executing", "memory", "memory", {}),
+                (
+                    f3.key,
+                    "memory",
+                    "released",
+                    "released",
+                    {f2.key: "released", f3.key: "forgotten"},
+                ),
+                (f3.key, "released", "forgotten", "forgotten", {f2.key: "forgotten"}),
+                (f3.key, "ready", "executing", "executing", {}),
+                (f3.key, "executing", "memory", "memory", {}),
             ],
         )
 
@@ -587,6 +608,90 @@ async def test_resumed_cancelled_handle_compute(
         )
     else:
         assert False, "unreachable"
+
+
+@gen_cluster(client=True)
+async def test_cancelled_handle_compute(c, s, a, b):
+    """
+    Given the history of a task
+    executing -> cancelled
+
+    A handle_compute should properly restore executing.
+
+    See Also
+    --------
+    test_resumed_cancelled_handle_compute
+    """
+    # This test is heavily using set_restrictions to simulate certain scheduler
+    # decisions of placing keys
+
+    lock_compute = Lock()
+    await lock_compute.acquire()
+    enter_compute = Event()
+    exit_compute = Event()
+
+    def block(x, lock, enter_event, exit_event):
+        enter_event.set()
+        with lock:
+            return x + 1
+
+    f1 = c.submit(inc, 1, key="f1", workers=[a.address])
+    f2 = c.submit(inc, f1, key="f2", workers=[a.address])
+    f3 = c.submit(
+        block,
+        f2,
+        lock=lock_compute,
+        enter_event=enter_compute,
+        exit_event=exit_compute,
+        key="f3",
+        workers=[b.address],
+    )
+
+    f4 = c.submit(sum, [f1, f3], key="f4", workers=[b.address])
+
+    await enter_compute.wait()
+
+    async def release_all_futures():
+        futs = [f1, f2, f3, f4]
+        for fut in futs:
+            fut.release()
+
+        while any(fut.key in s.tasks for fut in futs):
+            await asyncio.sleep(0.05)
+
+    await release_all_futures()
+    await wait_for_state(f3.key, "cancelled", b)
+
+    f1 = c.submit(inc, 1, key="f1", workers=[a.address])
+    f2 = c.submit(inc, f1, key="f2", workers=[a.address])
+    f3 = c.submit(inc, f2, key="f3", workers=[b.address])
+    f4 = c.submit(sum, [f1, f3], key="f4", workers=[b.address])
+
+    await wait_for_state(f3.key, "processing", s)
+    await lock_compute.release()
+
+    assert await f4 == 4 + 2
+
+    story = b.state.story(f3.key)
+    assert_story(
+        b.state.story(f3.key),
+        expect=[
+            (f3.key, "ready", "executing", "executing", {}),
+            (f3.key, "executing", "released", "cancelled", {}),
+            (f3.key, "cancelled", "waiting", "executing", {}),
+            (f3.key, "executing", "memory", "memory", {}),
+            (
+                f3.key,
+                "memory",
+                "released",
+                "released",
+                {f2.key: "released", f3.key: "forgotten"},
+            ),
+            (f3.key, "released", "forgotten", "forgotten", {f2.key: "forgotten"}),
+            (f3.key, "ready", "executing", "executing", {}),
+            (f3.key, "executing", "memory", "memory", {}),
+        ],
+    )
 
 
 @pytest.mark.parametrize("intermediate_state", ["resumed", "cancelled"])
@@ -690,6 +795,7 @@ def test_workerstate_executing_skips_fetch_on_success(ws_with_running_task):
         ExecuteSuccessEvent.dummy("x", 123, stimulus_id="s3"),
     )
     assert instructions == [
+        DigestMetric(name="compute-duration", value=1.0, stimulus_id="s3"),
         AddKeysMsg(keys=["x"], stimulus_id="s3"),
         Execute(key="y", stimulus_id="s3"),
     ]
@@ -779,6 +885,7 @@ def test_workerstate_flight_failure_to_executing(ws, block_queue):
         )
         assert instructions == [
             Execute(key="z", stimulus_id="s4"),
+            DigestMetric(name="compute-duration", value=1.0, stimulus_id="s6"),
             TaskFinishedMsg.match(key="z", stimulus_id="s6"),
             Execute(key="x", stimulus_id="s6"),
         ]
@@ -1034,7 +1141,8 @@ async def test_secede_cancelled_or_resumed_scheduler(c, s, a):
     await ev1.wait()
     ts = a.state.tasks["x"]
     assert ts.state == "executing"
-    assert sum(ws.processing.values()) > 0
+    assert ws.processing
+    assert not ws.long_running
 
     x.release()
     await wait_for_state("x", "cancelled", a)
@@ -1050,10 +1158,10 @@ async def test_secede_cancelled_or_resumed_scheduler(c, s, a):
 
     # Test that the scheduler receives a delayed {op: long-running}
     assert ws.processing
-    while sum(ws.processing.values()):
-        await asyncio.sleep(0.1)
+    while not ws.long_running:
+        await asyncio.sleep(0)
     assert ws.processing
 
     await ev4.set()
-    assert await x == 123
+    assert await x == 2
     assert not ws.processing

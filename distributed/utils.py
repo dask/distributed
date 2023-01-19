@@ -36,6 +36,7 @@ from typing import Any as AnyType
 from typing import ClassVar, Iterator, TypeVar, overload
 
 import click
+import psutil
 import tblib.pickling_support
 
 try:
@@ -200,8 +201,6 @@ def get_ip_interface(ifname):
     ValueError is raised if the interface does no have an IPv4 address
     associated with it.
     """
-    import psutil
-
     net_if_addrs = psutil.net_if_addrs()
 
     if ifname not in net_if_addrs:
@@ -993,28 +992,25 @@ def ensure_bytes(s):
     return _ensure_bytes(s)
 
 
-def ensure_memoryview(obj):
+def ensure_memoryview(obj: bytes | bytearray | memoryview | PickleBuffer) -> memoryview:
     """Ensure `obj` is a 1-D contiguous `uint8` `memoryview`"""
-    mv: memoryview
-    if type(obj) is memoryview:
-        mv = obj
-    else:
-        mv = memoryview(obj)
+    if not isinstance(obj, memoryview):
+        obj = memoryview(obj)
 
-    if not mv.nbytes:
+    if not obj.nbytes:
         # Drop `obj` reference to permit freeing underlying data
         return memoryview(bytearray())
-    elif not mv.contiguous:
+    elif not obj.contiguous:
         # Copy to contiguous form of expected shape & type
-        return memoryview(bytearray(mv))
-    elif mv.ndim != 1 or mv.format != "B":
+        return memoryview(bytearray(obj))
+    elif obj.ndim != 1 or obj.format != "B":
         # Perform zero-copy reshape & cast
         # Use `PickleBuffer.raw()` as `memoryview.cast()` fails with F-order
         # xref: https://github.com/python/cpython/issues/91484
-        return PickleBuffer(mv).raw()
+        return PickleBuffer(obj).raw()
     else:
         # Return `memoryview` as it already meets requirements
-        return mv
+        return obj
 
 
 def open_port(host: str = "") -> int:
@@ -1101,19 +1097,21 @@ def nbytes(frame, _bytes_like=(bytes, bytearray)):
             return len(frame)
 
 
-def json_load_robust(fn, load=json.load):
+def json_load_robust(fn, load=json.load, timeout=None):
     """Reads a JSON file from disk that may be being written as we read"""
-    while not os.path.exists(fn):
-        sleep(0.01)
-    for _ in range(10):
-        try:
-            with open(fn) as f:
-                cfg = load(f)
-            if cfg:
-                return cfg
-        except (ValueError, KeyError):  # race with writing process
-            pass
+    deadline = Deadline.after(timeout)
+    while not deadline.expires or deadline.remaining:
+        if os.path.exists(fn):
+            try:
+                with open(fn) as f:
+                    cfg = load(f)
+                if cfg:
+                    return cfg
+            except (ValueError, KeyError):  # race with writing process
+                pass
         sleep(0.1)
+    else:
+        raise TimeoutError(f"Could not load file after {timeout}s.")
 
 
 class DequeHandler(logging.Handler):
@@ -1343,7 +1341,7 @@ def cli_keywords(
         A string with the name of a module, or the module containing a
         click-generated command with a "main" function, or the function itself.
         It may be used to parse a module's custom arguments (that is, arguments that
-        are not part of Worker class), such as nworkers from dask-worker CLI or
+        are not part of Worker class), such as nworkers from dask worker CLI or
         enable_nvlink from dask-cuda-worker CLI.
 
     Examples
@@ -1703,3 +1701,59 @@ def is_python_shutting_down() -> bool:
     from distributed import _python_shutting_down
 
     return _python_shutting_down
+
+
+class Deadline:
+    """Utility class tracking a deadline and the progress toward it"""
+
+    #: Expiry time of the deadline in seconds since the epoch
+    #: or None if the deadline never expires
+    expires_at: float | None
+    #: Seconds since the epoch when the deadline was created
+    started_at: float
+
+    def __init__(self, expires_at: float | None = None):
+        self.expires_at = expires_at
+        self.started_at = time()
+
+    @classmethod
+    def after(cls, duration: float | None = None) -> Deadline:
+        """Create a new ``Deadline`` that expires in ``duration`` seconds
+        or never if ``duration`` is None"""
+        started_at = time()
+        expires_at = duration + started_at if duration is not None else duration
+        deadline = cls(expires_at)
+        deadline.started_at = started_at
+        return deadline
+
+    @property
+    def duration(self) -> float | None:
+        """Seconds between the creation and expiration time of the deadline
+        if the deadline expires, None otherwise"""
+        if self.expires_at is None:
+            return None
+        return self.expires_at - self.started_at
+
+    @property
+    def expires(self) -> bool:
+        """Whether the deadline ever expires"""
+        return self.expires_at is not None
+
+    @property
+    def elapsed(self) -> float:
+        """Seconds that elapsed since the deadline was created"""
+        return time() - self.started_at
+
+    @property
+    def remaining(self) -> float | None:
+        """Seconds remaining until the deadline expires if an expiry time is set,
+        None otherwise"""
+        if self.expires_at is None:
+            return None
+        else:
+            return max(0, self.expires_at - time())
+
+    @property
+    def expired(self) -> bool:
+        """Whether the deadline has already expired"""
+        return self.remaining == 0

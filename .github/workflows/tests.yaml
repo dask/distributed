@@ -9,7 +9,7 @@ on:
 # When this workflow is queued, automatically cancel any previous running
 # or pending jobs from the same branch
 concurrency:
-  group: ${{ github.ref }}
+  group: tests-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -23,21 +23,27 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.8", "3.9", "3.10"]
-        queuing: [no_queue]
+        environment: [mindeps, "3.8", "3.9", "3.10", "3.11"]
+        queuing: [queue]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
         exclude:
           - os: macos-latest
-            python-version: 3.9
+            environment: "3.9"
+          - os: macos-latest
+            environment: "3.10"
+          - os: macos-latest
+            environment: mindeps
+          - os: windows-latest
+            environment: mindeps
         include:
           - os: ubuntu-latest
-            python-version: 3.9
-            queuing: queue
+            environment: "3.9"
+            queuing: no_queue
             partition: "ci1"
           - os: ubuntu-latest
-            python-version: 3.9
-            queuing: queue
+            environment: "3.9"
+            queuing: no_queue
             partition: "not ci1"
 
         # Uncomment to stress-test the test suite for random failures.
@@ -49,26 +55,26 @@ jobs:
         # run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
     env:
-      CONDA_FILE: continuous_integration/environment-${{ matrix.python-version }}.yaml
+      CONDA_FILE: continuous_integration/environment-${{ matrix.environment }}.yaml
 
     steps:
       - name: Set $TEST_ID
         run: |
           export PARTITION_LABEL=$( echo "${{ matrix.partition }}" | sed "s/ //" )
-          export TEST_ID="${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.queuing }}-$PARTITION_LABEL"
+          export TEST_ID="${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.queuing }}-$PARTITION_LABEL"
           # Switch to this version for stress-test:
-          # export TEST_ID="${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.queuing }}-$PARTITION_LABEL-${{ matrix.run }}"
+          # export TEST_ID="${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.queuing }}-$PARTITION_LABEL-${{ matrix.run }}"
           echo "TEST_ID: $TEST_ID"
           echo "TEST_ID=$TEST_ID" >> $GITHUB_ENV
         shell: bash
 
       - name: Checkout source
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3.3.0
         with:
           fetch-depth: 0
 
       - name: Setup Conda Environment
-        uses: conda-incubator/setup-miniconda@v2
+        uses: conda-incubator/setup-miniconda@v2.2.0
         with:
           miniforge-variant: Mambaforge
           miniforge-version: latest
@@ -81,7 +87,7 @@ jobs:
         run: conda config --show
 
       - name: Check if caching is enabled
-        uses: xarray-contrib/ci-trigger@v1.1
+        uses: xarray-contrib/ci-trigger@v1.2
         id: skip-caching
         with:
           keyword: "[skip-caching]"
@@ -94,12 +100,12 @@ jobs:
 
       - name: Cache Conda env
         if: steps.skip-caching.outputs.trigger-found != 'true'
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: ${{ env.CONDA }}/envs
           key: conda-${{ matrix.os }}-${{ steps.get-date.outputs.today }}-${{ hashFiles(env.CONDA_FILE) }}-${{ env.CACHE_NUMBER }}
         env:
-          # Increase this value to reset cache if continuous_integration/environment-${{ matrix.python-version }}.yaml has not changed
+          # Increase this value to reset cache if continuous_integration/environment-${{ matrix.environment }}.yaml has not changed
           CACHE_NUMBER: 0
         id: cache
 
@@ -144,10 +150,12 @@ jobs:
 
       - name: Set up dask env for job queuing
         shell: bash -l {0}
-        if: ${{ matrix.queuing == 'queue' }}
-        run: echo "DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=1.0" >> $GITHUB_ENV
+        if: ${{ matrix.queuing == 'no_queue' }}
+        run: echo "DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=inf" >> $GITHUB_ENV
 
       - name: Print host info
+        # host_info.py imports numpy, which isn't a direct dependency of distributed
+        if: matrix.environment != 'mindeps'
         shell: bash -l {0}
         run: |
           python continuous_integration/scripts/host_info.py
@@ -157,6 +165,7 @@ jobs:
         shell: bash -l {0}
         env:
           PYTHONFAULTHANDLER: 1
+          MINDEPS: ${{ matrix.environment == 'mindeps' }}
         run: |
           source continuous_integration/scripts/set_ulimit.sh
           set -o pipefail
@@ -185,15 +194,30 @@ jobs:
       #   if: ${{ failure() }}
       #   uses: mxschmitt/action-tmate@v3
 
+      # https://community.codecov.com/t/files-missing-from-report/3902/7
+      # The coverage file being created records filenames at the distributed/ directory
+      # as opposed to root. This is causing filename mismatches in Codecov.
+      # This step edits `coverage.xml` in-file by adding `distributed` to all filenames.
+      - name: Prepare coverage report
+        if: ${{ matrix.os != 'windows-latest' }}
+        shell: bash -l {0}
+        run: sed -i'' -e 's/filename="/filename="distributed\//g' coverage.xml
+
+      # Do not upload coverage reports for cron jobs
       - name: Coverage
-        uses: codecov/codecov-action@v1
+        if: github.event_name != 'schedule'
+        uses: codecov/codecov-action@v3
+        with:
+          name: ${{ env.TEST_ID }}
+          # See https://community.codecov.com/t/upload-issues-unable-to-locate-build-via-github-actions-api/3954
+          token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload test results
         # ensure this runs even if pytest fails
         if: >
           always() &&
           (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure')
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ env.TEST_ID }}
           path: reports
@@ -203,7 +227,7 @@ jobs:
         if: >
           always() &&
           (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure')
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ env.TEST_ID }}_cluster_dumps
           path: test_cluster_dump
@@ -217,7 +241,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Upload
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: Event File
           path: ${{ github.event_path }}

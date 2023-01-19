@@ -7,7 +7,8 @@ dependencies:
   - packaging
   - pip
   - asyncssh
-  - bokeh
+  # Temporary restriction until https://github.com/dask/distributed/issues/7173 is resolved
+  - bokeh<3
   - click
   - cloudpickle
   - coverage
@@ -16,7 +17,7 @@ dependencies:
   - h5py
   - ipykernel
   - ipywidgets
-  - jinja2
+  - jinja2 >=2.10.3
   - locket >=1.0
   - msgpack-python
   - netcdf4
@@ -38,7 +39,7 @@ dependencies:
   - sortedcollections
   - tblib
   - toolz
-  - tornado<6.2
+  - tornado >=6.2
   - zict  # overridden by git tip below
   - zstandard >=0.9.0
   - pip:

@@ -37,8 +37,8 @@ Architecture
 ------------
 
 Dask.distributed is a centrally managed, distributed, dynamic task scheduler.
-The central ``dask-scheduler`` process coordinates the actions of several
-``dask-worker`` processes spread across multiple machines and the concurrent
+The central ``dask scheduler`` process coordinates the actions of several
+``dask worker`` processes spread across multiple machines and the concurrent
 requests of several clients.
 
 The scheduler is asynchronous and event driven, simultaneously responding to
@@ -117,6 +117,7 @@ Contents
    task-launch
    tls
    active_memory_manager
+   prometheus
 
 .. toctree::
    :maxdepth: 1

@@ -11,28 +11,32 @@ from time import sleep
 
 import psutil
 import pytest
+from tlz import merge
 
 import dask.config
+from dask.utils import format_bytes, parse_bytes
 
 import distributed.system
 from distributed import Client, Event, KilledWorker, Nanny, Scheduler, Worker, wait
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import Status
 from distributed.metrics import monotonic
-from distributed.spill import has_zict_210
-from distributed.utils_test import captured_logger, gen_cluster, inc
+from distributed.utils_test import (
+    NO_AMM,
+    async_wait_for,
+    captured_logger,
+    gen_cluster,
+    inc,
+    wait_for_state,
+)
 from distributed.worker_memory import parse_memory_limit
 from distributed.worker_state_machine import (
     ComputeTaskEvent,
+    DigestMetric,
     ExecuteSuccessEvent,
     GatherDep,
     GatherDepSuccessEvent,
     TaskErredMsg,
-)
-
-requires_zict_210 = pytest.mark.skipif(
-    not has_zict_210,
-    reason="requires zict version >= 2.1.0",
 )
 
 
@@ -41,17 +45,19 @@ def memory_monitor_running(dask_worker: Worker | Nanny) -> bool:
 
 
 def test_parse_memory_limit_zero():
-    assert parse_memory_limit(0, 1) is None
-    assert parse_memory_limit("0", 1) is None
-    assert parse_memory_limit(None, 1) is None
+    logger = logging.getLogger(__name__)
+    assert parse_memory_limit(0, 1, logger=logger) is None
+    assert parse_memory_limit("0", 1, logger=logger) is None
+    assert parse_memory_limit(None, 1, logger=logger) is None
 
 
 def test_resource_limit(monkeypatch):
-    assert parse_memory_limit("250MiB", 1, total_cores=1) == 1024 * 1024 * 250
+    logger = logging.getLogger(__name__)
+    assert parse_memory_limit("250MiB", 1, 1, logger=logger) == 1024 * 1024 * 250
 
     new_limit = 1024 * 1024 * 200
     monkeypatch.setattr(distributed.system, "MEMORY_LIMIT", new_limit)
-    assert parse_memory_limit("250MiB", 1, total_cores=1) == new_limit
+    assert parse_memory_limit("250MiB", 1, 1, logger=logger) == new_limit
 
 
 @gen_cluster(nthreads=[("", 1)], worker_kwargs={"memory_limit": "2e3 MB"})
@@ -88,6 +94,46 @@ async def test_parse_memory_limit_nanny(c, s, n):
 )
 async def test_dict_data_if_no_spill_to_disk(s, w):
     assert type(w.data) is dict
+
+
+class WorkerData(dict):
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.kwargs = kwargs
+
+
+class WorkerDataLocalDirectory(dict):
+    def __init__(self, worker_local_directory, **kwargs):
+        super().__init__()
+        self.local_directory = worker_local_directory
+        self.kwargs = kwargs
+
+
+@gen_cluster(
+    nthreads=[("", 1)], Worker=Worker, worker_kwargs={"data": WorkerDataLocalDirectory}
+)
+async def test_worker_data_callable_local_directory(s, w):
+    assert type(w.memory_manager.data) is WorkerDataLocalDirectory
+    assert w.memory_manager.data.local_directory == w.local_directory
+
+
+@gen_cluster(
+    nthreads=[("", 1)],
+    Worker=Worker,
+    worker_kwargs={"data": (WorkerDataLocalDirectory, {"a": "b"})},
+)
+async def test_worker_data_callable_local_directory_kwargs(s, w):
+    assert type(w.memory_manager.data) is WorkerDataLocalDirectory
+    assert w.memory_manager.data.local_directory == w.local_directory
+    assert w.memory_manager.data.kwargs == {"a": "b"}
+
+
+@gen_cluster(
+    nthreads=[("", 1)], Worker=Worker, worker_kwargs={"data": (WorkerData, {"a": "b"})}
+)
+async def test_worker_data_callable_kwargs(s, w):
+    assert type(w.memory_manager.data) is WorkerData
+    assert w.memory_manager.data.kwargs == {"a": "b"}
 
 
 class CustomError(Exception):
@@ -157,7 +203,10 @@ def test_workerstate_fail_to_pickle_execute_1(ws_with_running_task):
     instructions = ws.handle_stimulus(
         ExecuteSuccessEvent.dummy("x", None, stimulus_id="s1")
     )
-    assert instructions == [TaskErredMsg.match(key="x", stimulus_id="s1")]
+    assert instructions == [
+        DigestMetric(name="compute-duration", value=1.0, stimulus_id="s1"),
+        TaskErredMsg.match(key="x", stimulus_id="s1"),
+    ]
     assert ws.tasks["x"].state == "error"
 
 
@@ -228,17 +277,11 @@ async def test_fail_to_pickle_execute_2(c, s, a):
 
     y = c.submit(lambda: "y" * 256, key="y")
     await wait(y)
-    if has_zict_210:
-        assert set(a.data.memory) == {"x", "y"}
-    else:
-        assert set(a.data.memory) == {"y"}
-
+    assert set(a.data.memory) == {"x", "y"}
     assert not a.data.disk
-
     await assert_basic_futures(c)
 
 
-@requires_zict_210
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
@@ -319,7 +362,6 @@ async def test_spill_target_threshold(c, s, a):
     assert set(a.data.disk) == {"y"}
 
 
-@requires_zict_210
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
@@ -544,7 +586,7 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
     while a.state.executing_count != 1:
         await asyncio.sleep(0.01)
 
-    with captured_logger(logging.getLogger("distributed.worker_memory")) as logger:
+    with captured_logger(logging.getLogger("distributed.worker.memory")) as logger:
         # Task that is queued on the worker when the worker pauses
         y = c.submit(inc, 1, key="y")
         while "y" not in a.state.tasks:
@@ -589,11 +631,14 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
 @gen_cluster(
     client=True,
     nthreads=[("", 1), ("", 1)],
-    config={
-        "distributed.worker.memory.target": False,
-        "distributed.worker.memory.spill": False,
-        "distributed.worker.memory.pause": False,
-    },
+    config=merge(
+        NO_AMM,
+        {
+            "distributed.worker.memory.target": False,
+            "distributed.worker.memory.spill": False,
+            "distributed.worker.memory.pause": False,
+        },
+    ),
 )
 async def test_pause_prevents_deps_fetch(c, s, a, b):
     """A worker is paused while there are dependencies ready to fetch, but all other
@@ -639,8 +684,7 @@ async def test_pause_prevents_deps_fetch(c, s, a, b):
     # - ensure_communicating is triggered again
     # - ensure_communicating refuses to fetch y because the worker is paused
 
-    while "y" not in a.state.tasks or a.state.tasks["y"].state != "fetch":
-        await asyncio.sleep(0.01)
+    await wait_for_state("y", "fetch", a)
     await asyncio.sleep(0.1)
     assert a.state.tasks["y"].state == "fetch"
     assert "y" not in a.data
@@ -694,10 +738,9 @@ async def test_override_data_worker(s):
     async with Worker(s.address, data=UserDict) as w:
         assert type(w.data) is UserDict
 
-    data = UserDict({"x": 1})
+    data = UserDict()
     async with Worker(s.address, data=data) as w:
         assert w.data is data
-        assert w.data == {"x": 1}
 
 
 @gen_cluster(
@@ -880,11 +923,12 @@ async def test_disk_cleanup_on_terminate(c, s, a, ignore_sigterm):
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,
-    worker_kwargs={"memory_limit": "10 GiB"},
+    worker_kwargs={"memory_limit": "2 GiB"},
+    # ^ must be smaller than system memory limit, otherwise that will take precedence
     config={
         "distributed.worker.memory.target": False,
-        "distributed.worker.memory.spill": 0.7,
-        "distributed.worker.memory.pause": 0.9,
+        "distributed.worker.memory.spill": 0.5,
+        "distributed.worker.memory.pause": 0.8,
         "distributed.worker.memory.monitor-interval": "10ms",
     },
 )
@@ -892,16 +936,21 @@ async def test_pause_while_spilling(c, s, a):
     N_PAUSE = 3
     N_TOTAL = 5
 
+    if a.memory_manager.memory_limit < parse_bytes("2 GiB"):
+        pytest.fail(
+            f"Set 2 GiB memory limit, got {format_bytes(a.memory_manager.memory_limit)}."
+        )
+
     def get_process_memory():
         if len(a.data) < N_PAUSE:
             # Don't trigger spilling until after all tasks have completed
             return 0
         elif a.data.fast and not a.data.slow:
             # Trigger spilling
-            return 8 * 2**30
+            return parse_bytes("1.6 GiB")
         else:
             # Trigger pause, but only after we started spilling
-            return 10 * 2**30
+            return parse_bytes("1.9 GiB")
 
     a.monitor.get_process_memory = get_process_memory
 
@@ -996,6 +1045,63 @@ async def test_release_evloop_while_spilling(c, s, a):
     assert not any(v for k, v in c.items() if k >= 2.0), dict(c)
 
 
+@gen_cluster(
+    client=True,
+    worker_kwargs={"memory_limit": "100 MiB"},
+    # ^ must be smaller than system memory limit, otherwise that will take precedence
+    config={
+        "distributed.worker.memory.target": 0.5,  # 50 MiB
+        # 97 GiB. It must be extremely high otherwise there's a risk we'll spend time
+        # trying to gc before get_process_memory gets patched below
+        "distributed.worker.memory.spill": 1000,
+        "distributed.worker.memory.pause": False,
+        "distributed.worker.memory.monitor-interval": "10ms",
+    },
+)
+async def test_digests(c, s, a, b):
+    trigger_spill = False
+
+    def get_process_memory():
+        return 1001 * 100 * 2**20 if trigger_spill else 0
+
+    a.monitor.get_process_memory = get_process_memory
+
+    x1 = c.submit(inc, 1, key="x1", workers=[a.address])  # store to fast
+    x2 = c.submit(inc, x1, key="x2", workers=[a.address])  # read from fast for execute
+    y1 = c.submit(inc, x2, key="y1", workers=[b.address])  # read from fast for get-data
+    # digest happens only if write/read takes more than 5ms
+    await wait([x2, y1])
+    assert "disk-load-duration" not in a.digests_total
+    assert "get-data-load-duration" not in a.digests_total
+    assert "disk-write-target-duration" not in a.digests_total
+    assert "disk-write-spill-duration" not in a.digests_total
+
+    # Pass target threshold (50 MiB)
+    # We need substantial data to be sure that spilling it will take more than 5ms.
+    x3 = c.submit(lambda: "x" * 40_000_000, key="x3", workers=[a.address])
+    x4 = c.submit(lambda: "x" * 40_000_000, key="x4", workers=[a.address])
+    await wait([x3, x4])
+    x5 = c.submit(lambda: "x" * 40_000_000, key="x5", workers=[a.address])
+    x6 = c.submit(lambda: "x" * 40_000_000, key="x6", workers=[a.address])
+    await wait([x5, x6])
+    assert "x3" in a.data.slow
+    assert "x4" in a.data.slow
+    assert a.digests_total["disk-write-target-duration"] > 0
+    assert "disk-write-spill-duration" not in a.digests_total
+    x7 = c.submit(lambda x: None, x3, key="x7", workers=[a.address])
+    await wait(x7)
+    assert a.digests_total["disk-load-duration"] > 0
+
+    y2 = c.submit(lambda x: None, x4, key="y2", workers=[b.address])
+    await wait(y2)
+    assert a.digests_total["get-data-load-duration"] > 0
+
+    trigger_spill = True
+    while a.data.fast:
+        await asyncio.sleep(0.01)
+    assert a.digests_total["disk-write-spill-duration"] > 0
+
+
 @pytest.mark.parametrize(
     "cls,name,value",
     [
@@ -1038,3 +1144,42 @@ async def test_deprecated_params(s, name):
     with pytest.warns(FutureWarning, match=name):
         async with Worker(s.address, **{name: 0.789}) as a:
             assert getattr(a.memory_manager, name) == 0.789
+
+
+@gen_cluster(config={"distributed.worker.memory.monitor-interval": "10ms"})
+async def test_pause_while_idle(s, a, b):
+    sa = s.workers[a.address]
+    assert a.address in s.idle
+    assert sa in s.running
+
+    a.monitor.get_process_memory = lambda: 2**40
+    await async_wait_for(lambda: sa.status == Status.paused, timeout=2)
+    assert a.address not in s.idle
+    assert sa not in s.running
+
+    a.monitor.get_process_memory = lambda: 0
+    await async_wait_for(lambda: sa.status == Status.running, timeout=2)
+    assert a.address in s.idle
+    assert sa in s.running
+
+
+@gen_cluster(client=True, config={"distributed.worker.memory.monitor-interval": "10ms"})
+async def test_pause_while_saturated(c, s, a, b):
+    sa = s.workers[a.address]
+    ev = Event()
+    futs = c.map(lambda i, ev: ev.wait(), range(3), ev=ev, workers=[a.address])
+    await async_wait_for(lambda: len(a.state.tasks) == 3, timeout=2)
+    assert sa in s.saturated
+    assert sa in s.running
+
+    a.monitor.get_process_memory = lambda: 2**40
+    await async_wait_for(lambda: sa.status == Status.paused, timeout=2)
+    assert sa not in s.saturated
+    assert sa not in s.running
+
+    a.monitor.get_process_memory = lambda: 0
+    await async_wait_for(lambda: sa.status == Status.running, timeout=2)
+    assert sa in s.saturated
+    assert sa in s.running
+
+    await ev.set()

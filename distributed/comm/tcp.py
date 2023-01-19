@@ -111,8 +111,8 @@ def set_tcp_timeout(comm):
             logger.debug("Setting TCP user timeout: %d ms", timeout * 1000)
             TCP_USER_TIMEOUT = 18  # since Linux 2.6.37
             sock.setsockopt(socket.SOL_TCP, TCP_USER_TIMEOUT, timeout * 1000)
-    except OSError as e:
-        logger.warning("Could not set timeout on TCP stream: %s", e)
+    except OSError:
+        logger.exception("Could not set timeout on TCP stream.")
 
 
 def get_stream_address(comm):
@@ -488,10 +488,18 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
         kwargs = self._get_connect_args(**connection_args)
 
         try:
-            stream = await self.client.connect(
-                ip, port, max_buffer_size=MAX_BUFFER_SIZE, **kwargs
-            )
-            # Under certain circumstances tornado will have a closed connnection with an
+            # server_hostname option (for SNI) only works with tornado.iostream.IOStream
+            if "server_hostname" in kwargs:
+                stream = await self.client.connect(
+                    ip, port, max_buffer_size=MAX_BUFFER_SIZE
+                )
+                stream = await stream.start_tls(False, **kwargs)
+            else:
+                stream = await self.client.connect(
+                    ip, port, max_buffer_size=MAX_BUFFER_SIZE, **kwargs
+                )
+
+            # Under certain circumstances tornado will have a closed connection with an
             # error and not raise a StreamClosedError.
             #
             # This occurs with tornado 5.x and openssl 1.1+
@@ -532,8 +540,10 @@ class TLSConnector(BaseTCPConnector):
     encrypted = True
 
     def _get_connect_args(self, **connection_args):
-        ctx = _expect_tls_context(connection_args)
-        return {"ssl_options": ctx}
+        tls_args = {"ssl_options": _expect_tls_context(connection_args)}
+        if connection_args.get("server_hostname"):
+            tls_args["server_hostname"] = connection_args["server_hostname"]
+        return tls_args
 
 
 class BaseTCPListener(Listener, RequireEncryptionMixin):

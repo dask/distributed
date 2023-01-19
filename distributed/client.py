@@ -7,6 +7,7 @@ import inspect
 import json
 import logging
 import os
+import pickle
 import re
 import sys
 import threading
@@ -18,13 +19,15 @@ from collections import defaultdict
 from collections.abc import Collection, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
-from contextlib import contextmanager, suppress
+from contextlib import asynccontextmanager, contextmanager, suppress
 from contextvars import ContextVar
 from functools import partial
+from importlib.metadata import PackageNotFoundError, version
 from numbers import Number
 from queue import Queue as pyQueue
 from typing import Any, ClassVar, Coroutine, Literal, Sequence, TypedDict
 
+from packaging.version import parse as parse_version
 from tlz import first, groupby, keymap, merge, partition_all, valmap
 
 import dask
@@ -48,13 +51,14 @@ try:
 except ImportError:
     single_key = first
 from tornado import gen
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import IOLoop
 
 import distributed.utils
 from distributed import cluster_dump, preloading
 from distributed import versions as version_module
 from distributed.batched import BatchedSend
 from distributed.cfexecutor import ClientExecutor
+from distributed.compatibility import PeriodicCallback
 from distributed.core import (
     CommClosedError,
     ConnectionPool,
@@ -111,7 +115,7 @@ _global_clients: weakref.WeakValueDictionary[
 ] = weakref.WeakValueDictionary()
 _global_client_index = [0]
 
-_current_client = ContextVar("_current_client", default=None)
+_current_client: ContextVar[Client | None] = ContextVar("_current_client", default=None)
 
 DEFAULT_EXTENSIONS = {
     "pubsub": PubSubClientExtension,
@@ -119,6 +123,9 @@ DEFAULT_EXTENSIONS = {
 
 
 def _get_global_client() -> Client | None:
+    c = _current_client.get()
+    if c:
+        return c
     L = sorted(list(_global_clients), reverse=True)
     for k in L:
         c = _global_clients[k]
@@ -474,7 +481,7 @@ class Future(WrappedKey):
         try:
             self.release()
         except AttributeError:
-            # Ocassionally we see this error when shutting down the client
+            # Occasionally we see this error when shutting down the client
             # https://github.com/dask/distributed/issues/4305
             if not sys.is_finalizing():
                 raise
@@ -629,18 +636,59 @@ class AllExit(Exception):
 
 def _handle_print(event):
     _, msg = event
-    if isinstance(msg, dict) and "args" in msg and "kwargs" in msg:
-        print(*msg["args"], **msg["kwargs"])
-    else:
+    if not isinstance(msg, dict):
+        # someone must have manually logged a print event with a hand-crafted
+        # payload, rather than by calling worker.print(). In that case simply
+        # print the payload and hope it works.
         print(msg)
+        return
+
+    args = msg.get("args")
+    if not isinstance(args, tuple):
+        # worker.print() will always send us a tuple of args, even if it's an
+        # empty tuple.
+        raise TypeError(
+            f"_handle_print: client received non-tuple print args: {args!r}"
+        )
+
+    file = msg.get("file")
+    if file == 1:
+        file = sys.stdout
+    elif file == 2:
+        file = sys.stderr
+    elif file is not None:
+        raise TypeError(
+            f"_handle_print: client received unsupported file kwarg: {file!r}"
+        )
+
+    print(
+        *args, sep=msg.get("sep"), end=msg.get("end"), file=file, flush=msg.get("flush")
+    )
 
 
 def _handle_warn(event):
     _, msg = event
-    if isinstance(msg, dict) and "args" in msg and "kwargs" in msg:
-        warnings.warn(*msg["args"], **msg["kwargs"])
-    else:
+    if not isinstance(msg, dict):
+        # someone must have manually logged a warn event with a hand-crafted
+        # payload, rather than by calling worker.warn(). In that case simply
+        # warn the payload and hope it works.
         warnings.warn(msg)
+    else:
+        if "message" not in msg:
+            # TypeError makes sense here because it's analogous to calling a
+            # function without a required positional argument
+            raise TypeError(
+                "_handle_warn: client received a warn event missing the required "
+                '"message" argument.'
+            )
+        if "category" in msg:
+            category = pickle.loads(msg["category"])
+        else:
+            category = None
+        warnings.warn(
+            pickle.loads(msg["message"]),
+            category=category,
+        )
 
 
 def _maybe_call_security_loader(address):
@@ -1107,6 +1155,12 @@ class Client(SyncMethodMixin):
             return f"<{self.__class__.__name__}: No scheduler connected>"
 
     def _repr_html_(self):
+        try:
+            dle_version = parse_version(version("dask-labextension"))
+            JUPYTERLAB = False if dle_version < parse_version("6.0.0") else True
+        except PackageNotFoundError:
+            JUPYTERLAB = False
+
         scheduler, info = self._get_scheduler_info()
 
         return get_template("client.html.j2").render(
@@ -1116,6 +1170,7 @@ class Client(SyncMethodMixin):
             cluster=self.cluster,
             scheduler_file=self.scheduler_file,
             dashboard_link=self.dashboard_link,
+            jupyterlab=JUPYTERLAB,
         )
 
     def start(self, **kwargs):
@@ -1322,7 +1377,7 @@ class Client(SyncMethodMixin):
         logger.debug("Started scheduling coroutines. Synchronized")
 
     async def _update_scheduler_info(self):
-        if self.status not in ("running", "connecting"):
+        if self.status not in ("running", "connecting") or self.scheduler is None:
             return
         try:
             self._scheduler_identity = SchedulerInfo(await self.scheduler.identity())
@@ -1391,7 +1446,10 @@ class Client(SyncMethodMixin):
             return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
 
     def _heartbeat(self):
-        if self.scheduler_comm:
+        # Don't send heartbeat if scheduler comm or cluster are already closed
+        if (self.scheduler_comm and not self.scheduler_comm.comm.closed()) or (
+            self.cluster and self.cluster.status not in (Status.closed, Status.closing)
+        ):
             self.scheduler_comm.send({"op": "heartbeat-client"})
 
     def __enter__(self):
@@ -1404,7 +1462,12 @@ class Client(SyncMethodMixin):
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        await self._close()
+        await self._close(
+            # if we're handling an exception, we assume that it's more
+            # important to deliver that exception than shutdown gracefully.
+            fast=exc_type
+            is not None
+        )
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
@@ -1450,6 +1513,14 @@ class Client(SyncMethodMixin):
                     if is_python_shutting_down():
                         return
                     if self.status == "running":
+                        if self.cluster and self.cluster.status in (
+                            Status.closed,
+                            Status.closing,
+                        ):
+                            # Don't attempt to reconnect if cluster are already closed.
+                            # Instead close down the client.
+                            await self._close()
+                            return
                         logger.info("Client report stream closed to scheduler")
                         logger.info("Reconnecting...")
                         self.status = "connecting"
@@ -1483,7 +1554,7 @@ class Client(SyncMethodMixin):
                         logger.exception(e)
                 if breakout:
                     break
-        except CancelledError:
+        except (CancelledError, asyncio.CancelledError):
             pass
 
     def _handle_key_in_memory(self, key=None, type=None, workers=None):
@@ -1533,8 +1604,35 @@ class Client(SyncMethodMixin):
         logger.warning("Scheduler exception:")
         logger.exception(exception)
 
+    @asynccontextmanager
+    async def _wait_for_handle_report_task(self, fast=False):
+        current_task = asyncio.current_task()
+        handle_report_task = self._handle_report_task
+        # Give the scheduler 'stream-closed' message 100ms to come through
+        # This makes the shutdown slightly smoother and quieter
+        should_wait = (
+            handle_report_task is not None and handle_report_task is not current_task
+        )
+        if should_wait:
+            with suppress(asyncio.CancelledError, TimeoutError):
+                await asyncio.wait_for(asyncio.shield(handle_report_task), 0.1)
+
+        yield
+
+        if should_wait:
+            with suppress(TimeoutError, asyncio.CancelledError):
+                await asyncio.wait_for(handle_report_task, 0 if fast else 2)
+
     async def _close(self, fast=False):
-        """Send close signal and wait until scheduler completes"""
+        """
+        Send close signal and wait until scheduler completes
+
+        If fast is True, the client will close forcefully, by cancelling tasks
+        the background _handle_report_task.
+        """
+        # TODO: aclose more forcefully by aborting the RPC and cancelling all
+        # background tasks.
+        # see https://trio.readthedocs.io/en/stable/reference-io.html#trio.aclose_forcefully
         if self.status == "closed":
             return
 
@@ -1564,45 +1662,27 @@ class Client(SyncMethodMixin):
             ):
                 self._send_to_scheduler({"op": "close-client"})
                 self._send_to_scheduler({"op": "close-stream"})
+            async with self._wait_for_handle_report_task(fast=fast):
+                if (
+                    self.scheduler_comm
+                    and self.scheduler_comm.comm
+                    and not self.scheduler_comm.comm.closed()
+                ):
+                    await self.scheduler_comm.close()
 
-            current_task = asyncio.current_task()
-            handle_report_task = self._handle_report_task
-            # Give the scheduler 'stream-closed' message 100ms to come through
-            # This makes the shutdown slightly smoother and quieter
-            if (
-                handle_report_task is not None
-                and handle_report_task is not current_task
-            ):
-                with suppress(asyncio.CancelledError, TimeoutError):
-                    await asyncio.wait_for(asyncio.shield(handle_report_task), 0.1)
+                for key in list(self.futures):
+                    self._release_key(key=key)
 
-            if (
-                self.scheduler_comm
-                and self.scheduler_comm.comm
-                and not self.scheduler_comm.comm.closed()
-            ):
-                await self.scheduler_comm.close()
+                if self._start_arg is None:
+                    with suppress(AttributeError):
+                        await self.cluster.close()
 
-            for key in list(self.futures):
-                self._release_key(key=key)
+                await self.rpc.close()
 
-            if self._start_arg is None:
-                with suppress(AttributeError):
-                    await self.cluster.close()
+                self.status = "closed"
 
-            await self.rpc.close()
-
-            self.status = "closed"
-
-            if _get_global_client() is self:
-                _set_global_client(None)
-
-            if (
-                handle_report_task is not None
-                and handle_report_task is not current_task
-            ):
-                with suppress(TimeoutError, asyncio.CancelledError):
-                    await asyncio.wait_for(handle_report_task, 0 if fast else 2)
+                if _get_global_client() is self:
+                    _set_global_client(None)
 
             with suppress(AttributeError):
                 await self.scheduler.close_rpc()
@@ -1668,12 +1748,19 @@ class Client(SyncMethodMixin):
 
     async def _shutdown(self):
         logger.info("Shutting down scheduler from Client")
-        if self.cluster:
-            await self.cluster.close()
-        else:
-            with suppress(CommClosedError):
-                self.status = "closing"
-                await self.scheduler.terminate()
+
+        self.status = "closing"
+        for pc in self._periodic_callbacks.values():
+            pc.stop()
+
+        async with self._wait_for_handle_report_task():
+            if self.cluster:
+                await self.cluster.close()
+            else:
+                with suppress(CommClosedError):
+                    await self.scheduler.terminate()
+
+        await self._close()
 
     def shutdown(self):
         """Shut down the connected scheduler and workers
@@ -2375,6 +2462,11 @@ class Client(SyncMethodMixin):
         broadcast : bool (defaults to False)
             Whether to send each data element to all workers.
             By default we round-robin based on number of cores.
+
+            .. note::
+               Setting this flag to True is incompatible with the Active Memory
+               Manager's :ref:`ReduceReplicas` policy. If you wish to use it, you must
+               first disable the policy or disable the AMM entirely.
         direct : bool (defaults to automatically check)
             Whether or not to connect directly to the workers, or to ask
             the scheduler to serve as intermediary.  This can also be set when
@@ -2650,9 +2742,9 @@ class Client(SyncMethodMixin):
 
     async def _run_on_scheduler(self, function, *args, wait=True, **kwargs):
         response = await self.scheduler.run_function(
-            function=dumps(function, protocol=4),
-            args=dumps(args, protocol=4),
-            kwargs=dumps(kwargs, protocol=4),
+            function=dumps(function),
+            args=dumps(args),
+            kwargs=dumps(kwargs),
             wait=wait,
         )
         if response["status"] == "error":
@@ -2713,10 +2805,10 @@ class Client(SyncMethodMixin):
         responses = await self.scheduler.broadcast(
             msg=dict(
                 op="run",
-                function=dumps(function, protocol=4),
-                args=dumps(args, protocol=4),
+                function=dumps(function),
+                args=dumps(args),
                 wait=wait,
-                kwargs=dumps(kwargs, protocol=4),
+                kwargs=dumps(kwargs),
             ),
             workers=workers,
             nanny=nanny,
@@ -2786,7 +2878,7 @@ class Client(SyncMethodMixin):
         wait : boolean (optional)
             If the function is asynchronous whether or not to wait until that
             function finishes.
-        nanny : bool, defualt False
+        nanny : bool, default False
             Whether to run ``function`` on the nanny. By default, the function
             is run on the worker process.  If specified, the addresses in
             ``workers`` should still be the worker addresses, not the nanny addresses.
@@ -2820,7 +2912,7 @@ class Client(SyncMethodMixin):
         >>> def get_status(dask_worker):
         ...     return dask_worker.status
 
-        >>> c.run(get_hostname)  # doctest: +SKIP
+        >>> c.run(get_status)  # doctest: +SKIP
         {'192.168.0.100:9000': 'running',
          '192.168.0.101:9000': 'running}
 
@@ -2845,7 +2937,7 @@ class Client(SyncMethodMixin):
         )
 
     @staticmethod
-    def _get_computation_code(stacklevel=None) -> str:
+    def _get_computation_code(stacklevel: int | None = None) -> str:
         """Walk up the stack to the user code and extract the code surrounding
         the compute/submit/persist call. All modules encountered which are
         ignored through the option
@@ -2856,7 +2948,6 @@ class Client(SyncMethodMixin):
         ``stacklevel`` may be used to explicitly indicate from which frame on
         the stack to get the source code.
         """
-
         ignore_modules = dask.config.get(
             "distributed.diagnostics.computations.ignore-modules"
         )
@@ -2874,7 +2965,8 @@ class Client(SyncMethodMixin):
         else:
             # stacklevel 0 or less - shows dask internals which likely isn't helpful
             stacklevel = stacklevel if stacklevel > 0 else 1
-        for i, (fr, _) in enumerate(traceback.walk_stack(None), 1):
+
+        for i, (fr, _) in enumerate(traceback.walk_stack(sys._getframe().f_back), 1):
             if stacklevel is not None:
                 if i != stacklevel:
                     continue
@@ -3394,27 +3486,96 @@ class Client(SyncMethodMixin):
         does not automatically restart workers, ``restart`` will just shut down all
         workers, then time out!
 
-        After `restart`, all connected workers are new, regardless of whether `TimeoutError`
+        After ``restart``, all connected workers are new, regardless of whether ``TimeoutError``
         was raised. Any workers that failed to shut down in time are removed, and
         may or may not shut down on their own in the future.
 
         Parameters
         ----------
         timeout:
-            How long to wait for workers to shut down and come back, if `wait_for_workers`
+            How long to wait for workers to shut down and come back, if ``wait_for_workers``
             is True, otherwise just how long to wait for workers to shut down.
-            Raises `asyncio.TimeoutError` if this is exceeded.
+            Raises ``asyncio.TimeoutError`` if this is exceeded.
         wait_for_workers:
             Whether to wait for all workers to reconnect, or just for them to shut down
             (default True). Use ``restart(wait_for_workers=False)`` combined with
-            `Client.wait_for_workers` for granular control over how many workers to
+            :meth:`Client.wait_for_workers` for granular control over how many workers to
             wait for.
+
         See also
-        ----------
+        --------
         Scheduler.restart
+        Client.restart_workers
         """
         return self.sync(
             self._restart, timeout=timeout, wait_for_workers=wait_for_workers
+        )
+
+    async def _restart_workers(
+        self, workers: list[str], timeout: int | float | None = None
+    ):
+        results = await self.scheduler.broadcast(
+            msg={"op": "restart", "timeout": timeout}, workers=workers, nanny=True
+        )
+        timeout_workers = {
+            key: value for key, value in results.items() if value == "timed out"
+        }
+        if timeout_workers:
+            raise TimeoutError(
+                f"The following workers failed to restart with {timeout} seconds: {list(timeout_workers.keys())}"
+            )
+
+    def restart_workers(self, workers: list[str], timeout: int | float | None = None):
+        """Restart a specified set of workers
+
+        .. note::
+
+            Only workers being monitored by a :class:`distributed.Nanny` can be restarted.
+
+        See ``Nanny.restart`` for more details.
+
+        Parameters
+        ----------
+        workers : list[str]
+            Workers to restart.
+        timeout : int | float | None
+            Number of seconds to wait
+
+        Notes
+        -----
+        This method differs from :meth:`Client.restart` in that this method
+        simply restarts the specified set of workers, while ``Client.restart``
+        will restart all workers and also reset local state on the cluster
+        (e.g. all keys are released).
+
+        Additionally, this method does not gracefully handle tasks that are
+        being executed when a worker is restarted. These tasks may fail or have
+        their suspicious count incremented.
+
+        Examples
+        --------
+        You can get information about active workers using the following:
+
+        >>> workers = client.scheduler_info()['workers']
+
+        From that list you may want to select some workers to restart
+
+        >>> client.restart_workers(workers=['tcp://address:port', ...])
+
+        See Also
+        --------
+        Client.restart
+        """
+        info = self.scheduler_info()
+        for worker in workers:
+            if info["workers"][worker]["nanny"] is None:
+                raise ValueError(
+                    f"Restarting workers requires a nanny to be used. Worker {worker} has type {info['workers'][worker]['type']}."
+                )
+        return self.sync(
+            self._restart_workers,
+            workers=workers,
+            timeout=timeout,
         )
 
     async def _upload_large_file(self, local_filename, remote_filename=None):
@@ -3446,8 +3607,11 @@ class Client(SyncMethodMixin):
         """Upload local package to workers
 
         This sends a local file up to all worker nodes.  This file is placed
-        into a temporary directory on Python's system path so any .py,  .egg
-        or .zip  files will be importable.
+        into the working directory of the running worker, see config option
+        ``temporary-directory`` (defaults to :py:func:`tempfile.gettempdir`).
+
+        This directory will be added to the Python's system path so any .py,
+        .egg or .zip  files will be importable.
 
         Parameters
         ----------
@@ -3515,11 +3679,16 @@ class Client(SyncMethodMixin):
         """Set replication of futures within network
 
         Copy data onto many workers.  This helps to broadcast frequently
-        accessed data and it helps to improve resilience.
+        accessed data and can improve resilience.
 
         This performs a tree copy of the data throughout the network
         individually on each piece of data.  This operation blocks until
         complete.  It does not guarantee replication of data to future workers.
+
+        .. note::
+           This method is incompatible with the Active Memory Manager's
+           :ref:`ReduceReplicas` policy. If you wish to use it, you must first disable
+           the policy or disable the AMM entirely.
 
         Parameters
         ----------
@@ -4064,7 +4233,7 @@ class Client(SyncMethodMixin):
         Parameters
         ----------
         n : int
-            Number of logs to retrive.  Maxes out at 10000 by default,
+            Number of logs to retrieve.  Maxes out at 10000 by default,
             configurable via the ``distributed.admin.log-length``
             configuration value.
 
@@ -4080,7 +4249,7 @@ class Client(SyncMethodMixin):
         Parameters
         ----------
         n : int
-            Number of logs to retrive.  Maxes out at 10000 by default,
+            Number of logs to retrieve.  Maxes out at 10000 by default,
             configurable via the ``distributed.admin.log-length``
             configuration value.
         workers : iterable
@@ -4160,8 +4329,8 @@ class Client(SyncMethodMixin):
             single argument `event` which is a tuple `(timestamp, msg)` where
             timestamp refers to the clock on the scheduler.
 
-        Example
-        -------
+        Examples
+        --------
 
         >>> import logging
         >>> logger = logging.getLogger("myLogger")  # Log config not shown
@@ -4485,7 +4654,7 @@ class Client(SyncMethodMixin):
 
     async def _register_scheduler_plugin(self, plugin, name, idempotent=False):
         return await self.scheduler.register_scheduler_plugin(
-            plugin=dumps(plugin, protocol=4),
+            plugin=dumps(plugin),
             name=name,
             idempotent=idempotent,
         )
@@ -4541,7 +4710,7 @@ class Client(SyncMethodMixin):
         else:
             method = self.scheduler.register_worker_plugin
 
-        responses = await method(plugin=dumps(plugin, protocol=4), name=name)
+        responses = await method(plugin=dumps(plugin), name=name)
         for response in responses.values():
             if response["status"] == "error":
                 _, exc, tb = clean_exception(
@@ -4743,9 +4912,9 @@ def wait(fs, timeout=None, return_when=ALL_COMPLETED):
     Parameters
     ----------
     fs : List[Future]
-    timeout : number, optional
-        Time in seconds after which to raise a
-        ``dask.distributed.TimeoutError``
+    timeout : number, string, optional
+        Time after which to raise a ``dask.distributed.TimeoutError``.
+        Can be a string like ``"10 minutes"`` or a number of seconds to wait.
     return_when : str, optional
         One of `ALL_COMPLETED` or `FIRST_COMPLETED`
 
@@ -4753,6 +4922,8 @@ def wait(fs, timeout=None, return_when=ALL_COMPLETED):
     -------
     Named tuple of completed, not completed
     """
+    if timeout is not None and isinstance(timeout, (Number, str)):
+        timeout = parse_timedelta(timeout, default="s")
     client = default_client()
     result = client.sync(_wait, fs, timeout=timeout, return_when=return_when)
     return result

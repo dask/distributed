@@ -12,14 +12,13 @@ import warnings
 import weakref
 from collections import defaultdict, deque
 from collections.abc import Container, Coroutine
-from contextlib import suppress
 from enum import Enum
 from functools import partial
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, TypedDict, TypeVar, final
 
 import tblib
 from tlz import merge
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import IOLoop
 
 import dask
 from dask.utils import parse_timedelta
@@ -34,6 +33,7 @@ from distributed.comm import (
     normalize_address,
     unparse_host_port,
 )
+from distributed.compatibility import PeriodicCallback
 from distributed.metrics import time
 from distributed.system_monitor import SystemMonitor
 from distributed.utils import (
@@ -108,9 +108,9 @@ def _expects_comm(func: Callable) -> bool:
         return True
     if params and params[0] == "stream":
         warnings.warn(
-            "Calling the first arugment of a RPC handler `stream` is "
+            "Calling the first argument of a RPC handler `stream` is "
             "deprecated. Defining this argument is optional. Either remove the "
-            f"arugment or rename it to `comm` in {func}.",
+            f"argument or rename it to `comm` in {func}.",
             FutureWarning,
         )
         return True
@@ -347,7 +347,6 @@ class Server:
         self.deserialize = deserialize
         self.monitor = SystemMonitor()
         self.counters = None
-        self.digests = None
         self._ongoing_background_tasks = AsyncTaskGroup()
         self._event_finished = asyncio.Event()
 
@@ -372,10 +371,17 @@ class Server:
                 self.io_loop.profile = deque()
 
         # Statistics counters for various events
-        with suppress(ImportError):
+        try:
             from distributed.counter import Digest
 
             self.digests = defaultdict(partial(Digest, loop=self.io_loop))
+        except ImportError:
+            self.digests = None
+
+        # In case crick is not installed, also log cumulative totals (reset at server
+        # restart) and local maximums (reset by prometheus poll)
+        self.digests_total = defaultdict(float)
+        self.digests_max = defaultdict(float)
 
         from distributed.counter import Counter
 
@@ -394,8 +400,8 @@ class Server:
 
         self._last_tick = time()
         self._tick_counter = 0
-        self._tick_count = 0
-        self._tick_count_last = time()
+        self._last_tick_counter = 0
+        self._last_tick_cycle = time()
         self._tick_interval = parse_timedelta(
             dask.config.get("distributed.admin.tick.interval"), default="ms"
         )
@@ -415,7 +421,7 @@ class Server:
 
         self.io_loop.add_callback(set_thread_ident)
         self._startup_lock = asyncio.Lock()
-        self.__startup_exc: Exception | None = None
+        self.__startup_exc = None
 
         self.rpc = ConnectionPool(
             limit=connection_limit,
@@ -441,6 +447,47 @@ class Server:
         if not isinstance(value, Status):
             raise TypeError(f"Expected Status; got {value!r}")
         self._status = value
+
+    @property
+    def incoming_comms_open(self) -> int:
+        """The number of total incoming connections listening to remote RPCs"""
+        return len(self._comms)
+
+    @property
+    def incoming_comms_active(self) -> int:
+        """The number of connections currently handling a remote RPC"""
+        return len([c for c, op in self._comms.items() if op is not None])
+
+    @property
+    def outgoing_comms_open(self) -> int:
+        """The number of connections currently open and waiting for a remote RPC"""
+        return self.rpc.open
+
+    @property
+    def outgoing_comms_active(self) -> int:
+        """The number of outgoing connections that are currently used to
+        execute a RPC"""
+        return self.rpc.active
+
+    def get_connection_counters(self) -> dict[str, int]:
+        """A dict with various connection counters
+
+        See also
+        --------
+        Server.incoming_comms_open
+        Server.incoming_comms_active
+        Server.outgoing_comms_open
+        Server.outgoing_comms_active
+        """
+        return {
+            attr: getattr(self, attr)
+            for attr in [
+                "incoming_comms_open",
+                "incoming_comms_active",
+                "outgoing_comms_open",
+                "outgoing_comms_active",
+            ]
+        }
 
     async def finished(self):
         """Wait until the server has finished"""
@@ -539,27 +586,30 @@ class Server:
 
     def _measure_tick(self):
         now = time()
-        diff = now - self._last_tick
+        tick_duration = now - self._last_tick
         self._last_tick = now
         self._tick_counter += 1
-        if diff > tick_maximum_delay:
+        # This metric is exposed in Prometheus and is reset there during
+        # collection
+        if tick_duration > tick_maximum_delay:
             logger.info(
                 "Event loop was unresponsive in %s for %.2fs.  "
                 "This is often caused by long-running GIL-holding "
                 "functions or moving large chunks of data. "
                 "This can cause timeouts and instability.",
                 type(self).__name__,
-                diff,
+                tick_duration,
             )
-        if self.digests is not None:
-            self.digests["tick-duration"].add(diff)
+        self.digest_metric("tick-duration", tick_duration)
 
     def _cycle_ticks(self):
         if not self._tick_counter:
             return
-        last, self._tick_count_last = self._tick_count_last, time()
-        count, self._tick_counter = self._tick_counter, 0
-        self._tick_interval_observed = (time() - last) / (count or 1)
+        now = time()
+        last_tick_cycle, self._last_tick_cycle = self._last_tick_cycle, now
+        count = self._tick_counter - self._last_tick_counter
+        self._last_tick_counter = self._tick_counter
+        self._tick_interval_observed = (now - last_tick_cycle) / (count or 1)
 
     @property
     def address(self) -> str:
@@ -814,40 +864,48 @@ class Server:
 
     async def handle_stream(self, comm, extra=None):
         extra = extra or {}
-        logger.info("Starting established connection")
+        logger.info("Starting established connection to %s", comm.peer_address)
 
         closed = False
         try:
             while not closed:
-                msgs = await comm.read()
+                try:
+                    msgs = await comm.read()
+                # If another coroutine has closed the comm, stop handling the stream.
+                except CommClosedError:
+                    closed = True
+                    logger.info(
+                        "Connection to %s has been closed.",
+                        comm.peer_address,
+                    )
+                    break
                 if not isinstance(msgs, (tuple, list)):
                     msgs = (msgs,)
 
-                if not comm.closed():
-                    for msg in msgs:
-                        if msg == "OK":  # from close
+                for msg in msgs:
+                    if msg == "OK":
+                        break
+                    op = msg.pop("op")
+                    if op:
+                        if op == "close-stream":
+                            closed = True
+                            logger.info(
+                                "Received 'close-stream' from %s; closing.",
+                                comm.peer_address,
+                            )
                             break
-                        op = msg.pop("op")
-                        if op:
-                            if op == "close-stream":
-                                closed = True
-                                break
-                            handler = self.stream_handlers[op]
-                            if iscoroutinefunction(handler):
-                                self._ongoing_background_tasks.call_soon(
-                                    handler, **merge(extra, msg)
-                                )
-                                await asyncio.sleep(0)
-                            else:
-                                handler(**merge(extra, msg))
+                        handler = self.stream_handlers[op]
+                        if iscoroutinefunction(handler):
+                            self._ongoing_background_tasks.call_soon(
+                                handler, **merge(extra, msg)
+                            )
+                            await asyncio.sleep(0)
                         else:
-                            logger.error("odd message %s", msg)
-                    await asyncio.sleep(0)
-
-        except OSError:
-            pass
-        except Exception as e:
-            logger.exception(e)
+                            handler(**merge(extra, msg))
+                    else:
+                        logger.error("odd message %s", msg)
+                await asyncio.sleep(0)
+        except Exception:
             if LOG_PDB:
                 import pdb
 
@@ -884,6 +942,15 @@ class Server:
             await asyncio.gather(*[comm.close() for comm in list(self._comms)])
         finally:
             self._event_finished.set()
+
+    def digest_metric(self, name: str, value: float) -> None:
+        # Granular data (requires crick)
+        if self.digests is not None:
+            self.digests[name].add(value)
+        # Cumulative data (reset by server restart)
+        self.digests_total[name] += value
+        # Local maximums (reset by Prometheus poll)
+        self.digests_max[name] = max(self.digests_max[name], value)
 
 
 def pingpong(comm):

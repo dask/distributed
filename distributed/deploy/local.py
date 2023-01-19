@@ -210,7 +210,9 @@ class LocalCluster(SpecCluster):
             # Overcommit threads per worker, rather than undercommit
             threads_per_worker = max(1, int(math.ceil(CPU_COUNT / n_workers)))
         if n_workers and "memory_limit" not in worker_kwargs:
-            worker_kwargs["memory_limit"] = parse_memory_limit("auto", 1, n_workers)
+            worker_kwargs["memory_limit"] = parse_memory_limit(
+                "auto", 1, n_workers, logger=logger
+            )
 
         worker_kwargs.update(
             {

@@ -3,21 +3,31 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from unittest import mock
 
-import aiohttp
 import pytest
-
-pytest.importorskip("bokeh")
-
 from tornado.escape import url_escape
 from tornado.httpclient import AsyncHTTPClient, HTTPClientError
 
 import dask.config
 from dask.sizeof import sizeof
 
-from distributed import Lock
+from distributed import Event, Lock, Scheduler
+from distributed.client import wait
+from distributed.core import Status
 from distributed.utils import is_valid_xml
-from distributed.utils_test import fetch_metrics, gen_cluster, inc, lock_inc, slowinc
+from distributed.utils_test import (
+    async_wait_for,
+    div,
+    fetch_metrics,
+    fetch_metrics_body,
+    gen_cluster,
+    gen_test,
+    inc,
+    lock_inc,
+    slowinc,
+    wait_for_state,
+)
 
 DEFAULT_ROUTES = dask.config.get("distributed.scheduler.http.routes")
 
@@ -73,6 +83,8 @@ async def test_worker_404(c, s):
 
 @gen_cluster(client=True, scheduler_kwargs={"http_prefix": "/foo", "dashboard": True})
 async def test_prefix(c, s, a, b):
+    pytest.importorskip("bokeh")
+
     http_client = AsyncHTTPClient()
     for suffix in ["foo/info/main/workers.html", "foo/json/index.html", "foo/system"]:
         response = await http_client.fetch(
@@ -99,14 +111,33 @@ async def test_prometheus(c, s, a, b):
         "dask_scheduler_tasks",
         "dask_scheduler_tasks_suspicious",
         "dask_scheduler_tasks_forgotten",
+        "dask_scheduler_prefix_state_totals",
+        "dask_scheduler_tick_count",
+        "dask_scheduler_tick_duration_maximum_seconds",
     }
 
-    assert active_metrics.keys() == expected_metrics
+    assert set(active_metrics.keys()) == expected_metrics
     assert active_metrics["dask_scheduler_clients"].samples[0].value == 1.0
 
     # request data twice since there once was a case where metrics got registered multiple times resulting in
     # prometheus_client errors
     await fetch_metrics(s.http_server.port, "dask_scheduler_")
+
+
+@pytest.fixture
+def prometheus_not_available():
+    import sys
+
+    with mock.patch.dict("sys.modules", {"prometheus_client": None}):
+        sys.modules.pop("distributed.http.scheduler.prometheus", None)
+        yield
+
+
+@gen_test()
+async def test_metrics_when_prometheus_client_not_installed(prometheus_not_available):
+    async with Scheduler(dashboard_address=":0") as s:
+        body = await fetch_metrics_body(s.http_server.port)
+        assert "Prometheus metrics are not available" in body
 
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})
@@ -169,6 +200,108 @@ async def test_prometheus_collect_task_states(c, s, a, b):
 
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})
+async def test_prometheus_collect_task_prefix_counts(c, s, a, b):
+    pytest.importorskip("prometheus_client")
+    from prometheus_client.parser import text_string_to_metric_families
+
+    http_client = AsyncHTTPClient()
+
+    async def fetch_metrics():
+        port = s.http_server.port
+        response = await http_client.fetch(f"http://localhost:{port}/metrics")
+        txt = response.body.decode("utf8")
+        families = {
+            family.name: family for family in text_string_to_metric_families(txt)
+        }
+
+        prefix_state_counts = {
+            (sample.labels["task_prefix_name"], sample.labels["state"]): sample.value
+            for sample in families["dask_scheduler_prefix_state_totals"].samples
+        }
+
+        return prefix_state_counts
+
+    # do some compute and check the counts for each prefix and state
+    futures = c.map(inc, range(10))
+    await c.gather(futures)
+
+    prefix_state_counts = await fetch_metrics()
+    assert prefix_state_counts.get(("inc", "memory")) == 10
+    assert prefix_state_counts.get(("inc", "erred"), 0) == 0
+
+    f = c.submit(div, 1, 0)
+    await wait(f)
+
+    prefix_state_counts = await fetch_metrics()
+    assert prefix_state_counts.get(("div", "erred")) == 1
+
+
+@gen_cluster(
+    client=True,
+    config={"distributed.worker.memory.monitor-interval": "10ms"},
+    timeout=3,
+)
+async def test_prometheus_collect_worker_states(c, s, a, b):
+    pytest.importorskip("prometheus_client")
+    from prometheus_client.parser import text_string_to_metric_families
+
+    http_client = AsyncHTTPClient()
+
+    async def fetch_metrics():
+        port = s.http_server.port
+        response = await http_client.fetch(f"http://localhost:{port}/metrics")
+        txt = response.body.decode("utf8")
+        families = {
+            family.name: family for family in text_string_to_metric_families(txt)
+        }
+        return {
+            sample.labels["state"]: sample.value
+            for sample in families["dask_scheduler_workers"].samples
+        }
+
+    assert await fetch_metrics() == {
+        "idle": 2,
+        "partially_saturated": 0,
+        "saturated": 0,
+        "paused_or_retiring": 0,
+    }
+
+    ev = Event()
+    x = c.submit(lambda ev: ev.wait(), ev, key="x", workers=[a.address])
+    await wait_for_state("x", "processing", s)
+    assert await fetch_metrics() == {
+        "idle": 1,
+        "partially_saturated": 1,
+        "saturated": 0,
+        "paused_or_retiring": 0,
+    }
+
+    y = c.submit(lambda ev: ev.wait(), ev, key="y", workers=[a.address])
+    z = c.submit(lambda ev: ev.wait(), ev, key="z", workers=[a.address])
+    await wait_for_state("y", "processing", s)
+    await wait_for_state("z", "processing", s)
+
+    assert await fetch_metrics() == {
+        "idle": 1,
+        "partially_saturated": 0,
+        "saturated": 1,
+        "paused_or_retiring": 0,
+    }
+
+    a.monitor.get_process_memory = lambda: 2**40
+    sa = s.workers[a.address]
+    await async_wait_for(lambda: sa.status == Status.paused, timeout=2)
+    assert await fetch_metrics() == {
+        "idle": 1,
+        "partially_saturated": 0,
+        "saturated": 0,
+        "paused_or_retiring": 1,
+    }
+
+    await ev.set()
+
+
+@gen_cluster(client=True, clean_kwargs={"threads": False})
 async def test_health(c, s, a, b):
     http_client = AsyncHTTPClient()
 
@@ -228,6 +361,8 @@ async def test_task_page(c, s, a, b):
     },
 )
 async def test_allow_websocket_origin(c, s, a, b):
+    pytest.importorskip("bokeh")
+
     from tornado.httpclient import HTTPRequest
     from tornado.websocket import websocket_connect
 
@@ -268,6 +403,8 @@ def test_api_disabled_by_default():
     },
 )
 async def test_api(c, s, a, b):
+    aiohttp = pytest.importorskip("aiohttp")
+
     async with aiohttp.ClientSession() as session:
         async with session.get(
             "http://localhost:%d/api/v1" % s.http_server.port
@@ -286,6 +423,8 @@ async def test_api(c, s, a, b):
     },
 )
 async def test_retire_workers(c, s, a, b):
+    aiohttp = pytest.importorskip("aiohttp")
+
     async with aiohttp.ClientSession() as session:
         params = {"workers": [a.address, b.address]}
         async with session.post(
@@ -307,6 +446,8 @@ async def test_retire_workers(c, s, a, b):
     },
 )
 async def test_get_workers(c, s, a, b):
+    aiohttp = pytest.importorskip("aiohttp")
+
     async with aiohttp.ClientSession() as session:
         async with session.get(
             "http://localhost:%d/api/v1/get_workers" % s.http_server.port
@@ -327,6 +468,8 @@ async def test_get_workers(c, s, a, b):
     },
 )
 async def test_adaptive_target(c, s, a, b):
+    aiohttp = pytest.importorskip("aiohttp")
+
     async with aiohttp.ClientSession() as session:
         async with session.get(
             "http://localhost:%d/api/v1/adaptive_target" % s.http_server.port

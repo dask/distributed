@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from contextlib import suppress
+from functools import partial
 from random import randint
 from typing import Literal
 
@@ -64,12 +65,16 @@ with suppress(ImportError):
     if parse_version(lz4.__version__) < parse_version("0.23.1"):
         raise ImportError("Need lz4 >= 0.23.1")
 
-    from lz4.block import compress as lz4_compress
-    from lz4.block import decompress as lz4_decompress
+    import lz4.block
 
     compressions["lz4"] = {
-        "compress": lz4_compress,
-        "decompress": lz4_decompress,
+        "compress": lz4.block.compress,
+        # Avoid expensive deep copies when deserializing writeable numpy arrays
+        # See distributed.protocol.numpy.deserialize_numpy_ndarray
+        # Note that this is only useful for buffers smaller than distributed.comm.shard;
+        # larger ones are deep-copied between decompression and serialization anyway in
+        # order to merge them.
+        "decompress": partial(lz4.block.decompress, return_bytearray=True),
     }
     default_compression = "lz4"
 
@@ -81,17 +86,15 @@ with suppress(ImportError):
     if parse_version(zstandard.__version__) < parse_version("0.9.0"):
         raise ImportError("Need zstandard >= 0.9.0")
 
-    zstd_compressor = zstandard.ZstdCompressor(
-        level=dask.config.get("distributed.comm.zstd.level"),
-        threads=dask.config.get("distributed.comm.zstd.threads"),
-    )
-
-    zstd_decompressor = zstandard.ZstdDecompressor()
-
     def zstd_compress(data):
+        zstd_compressor = zstandard.ZstdCompressor(
+            level=dask.config.get("distributed.comm.zstd.level"),
+            threads=dask.config.get("distributed.comm.zstd.threads"),
+        )
         return zstd_compressor.compress(data)
 
     def zstd_decompress(data):
+        zstd_decompressor = zstandard.ZstdDecompressor()
         return zstd_decompressor.decompress(data)
 
     compressions["zstd"] = {"compress": zstd_compress, "decompress": zstd_decompress}

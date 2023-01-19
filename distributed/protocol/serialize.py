@@ -47,7 +47,7 @@ def dask_dumps(x, context=None):
     header = {
         "sub-header": sub_header,
         "type": type_name,
-        "type-serialized": pickle.dumps(type(x), protocol=4),
+        "type-serialized": pickle.dumps(type(x)),
         "serializer": "dask",
     }
     return header, frames
@@ -429,7 +429,7 @@ def deserialize(header, frames, deserializers=None):
 def serialize_and_split(
     x, serializers=None, on_error="message", context=None, size=None
 ):
-    """Serialize and split compressable frames
+    """Serialize and split compressible frames
 
     This function is a drop-in replacement of `serialize()` that calls `serialize()`
     followed by `frame_split_size()` on frames that should be compressed.
@@ -462,7 +462,7 @@ def serialize_and_split(
             out_compression.append(compression)
     assert len(out_compression) == len(out_frames)
 
-    # Notice, in order to match msgpack's implicit convertion to tuples,
+    # Notice, in order to match msgpack's implicit conversion to tuples,
     # we convert to tuples here as well.
     header["split-num-sub-frames"] = tuple(num_sub_frames)
     header["split-offsets"] = tuple(offsets)
@@ -817,11 +817,12 @@ def _is_msgpack_serializable(v):
         v is None
         or typ is str
         or typ is bool
+        or typ is bytes
         or typ is int
         or typ is float
         or isinstance(v, dict)
         and all(map(_is_msgpack_serializable, v.values()))
-        and all(typ is str for x in v.keys())
+        and all(type(x) is str for x in v.keys())
         or isinstance(v, (list, tuple))
         and all(map(_is_msgpack_serializable, v))
     )
@@ -834,7 +835,7 @@ class ObjectDictSerializer:
     def serialize(self, est):
         header = {
             "serializer": self.serializer,
-            "type-serialized": pickle.dumps(type(est), protocol=4),
+            "type-serialized": pickle.dumps(type(est)),
             "simple": {},
             "complex": {},
         }

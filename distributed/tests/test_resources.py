@@ -10,9 +10,10 @@ from dask.utils import stringify
 
 from distributed import Lock, Worker
 from distributed.client import wait
-from distributed.utils_test import gen_cluster, inc, lock_inc, slowadd, slowinc
+from distributed.utils_test import NO_AMM, gen_cluster, inc, lock_inc, slowadd, slowinc
 from distributed.worker_state_machine import (
     ComputeTaskEvent,
+    DigestMetric,
     Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
@@ -133,23 +134,20 @@ async def test_map(c, s, a, b):
 
 @gen_cluster(
     client=True,
-    nthreads=[
-        ("127.0.0.1", 1, {"resources": {"A": 1}}),
-        ("127.0.0.1", 1, {"resources": {"B": 1}}),
-    ],
+    nthreads=[("", 1, {"resources": {"A": 1}}), ("", 1, {"resources": {"B": 1}})],
+    config=NO_AMM,
 )
 async def test_persist(c, s, a, b):
     with dask.annotate(resources={"A": 1}):
-        x = delayed(inc)(1)
+        x = delayed(inc)(1, dask_key_name="x")
     with dask.annotate(resources={"B": 1}):
-        y = delayed(inc)(x)
+        y = delayed(inc)(x, dask_key_name="y")
 
     xx, yy = c.persist([x, y], optimize_graph=False)
-
     await wait([xx, yy])
 
-    assert x.key in a.data
-    assert y.key in b.data
+    assert set(a.data) == {"x"}
+    assert set(b.data) == {"x", "y"}
 
 
 @gen_cluster(
@@ -268,6 +266,7 @@ def test_constrained_vs_ready_priority_1(ws, p1, p2, expect_key, swap):
         ExecuteSuccessEvent.dummy("clog", stimulus_id="s3"),
     )
     assert instructions == [
+        DigestMetric(name="compute-duration", value=1.0, stimulus_id="s3"),
         TaskFinishedMsg.match(key="clog", stimulus_id="s3"),
         Execute(key=expect_key, stimulus_id="s3"),
     ]
@@ -302,6 +301,7 @@ def test_constrained_vs_ready_priority_2(ws, p1, p2, expect_key, swap):
         ExecuteSuccessEvent.dummy("clog1", stimulus_id="s3"),
     )
     assert instructions == [
+        DigestMetric(name="compute-duration", value=1.0, stimulus_id="s3"),
         TaskFinishedMsg.match(key="clog1", stimulus_id="s3"),
         Execute(key="x", stimulus_id="s3"),
     ]
@@ -323,10 +323,13 @@ def test_constrained_tasks_respect_priority(ws):
     )
     assert instructions == [
         Execute(key="clog", stimulus_id="clog"),
+        DigestMetric(name="compute-duration", value=1.0, stimulus_id="s4"),
         TaskFinishedMsg.match(key="clog", stimulus_id="s4"),
         Execute(key="x3", stimulus_id="s4"),
+        DigestMetric(name="compute-duration", value=1.0, stimulus_id="s5"),
         TaskFinishedMsg.match(key="x3", stimulus_id="s5"),
         Execute(key="x1", stimulus_id="s5"),
+        DigestMetric(name="compute-duration", value=1.0, stimulus_id="s6"),
         TaskFinishedMsg.match(key="x1", stimulus_id="s6"),
         Execute(key="x2", stimulus_id="s6"),
     ]

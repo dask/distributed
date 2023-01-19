@@ -287,11 +287,8 @@ async def test_failed_worker(c, s, a, b):
 
     await a.close()
 
-    with pytest.raises(Exception) as info:
+    with pytest.raises(ValueError, match="Worker holding Actor was lost"):
         await counter.increment()
-
-    assert "actor" in str(info.value).lower()
-    assert "worker" in str(info.value).lower()
 
 
 @gen_cluster(client=True)
@@ -477,9 +474,7 @@ async def bench_param_server(c, s, *workers):
     print(format_time(end - start))
 
 
-@pytest.mark.slow
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
-@gen_cluster(client=True, timeout=120)
+@gen_cluster(client=True)
 async def test_compute(c, s, a, b):
     @dask.delayed
     def f(n, counter):

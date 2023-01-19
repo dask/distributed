@@ -6,10 +6,13 @@ from __future__ import annotations
 
 import asyncio
 
+from tlz import merge
+
 from distributed import Client, Nanny, Queue, Scheduler, Worker, wait, worker_client
 from distributed.core import Status
 from distributed.metrics import time
 from distributed.utils_test import (
+    NO_AMM,
     double,
     gen_test,
     gen_tls_cluster,
@@ -101,11 +104,14 @@ async def test_nanny(c, s, a, b):
 
 @gen_tls_cluster(
     client=True,
-    config={
-        "distributed.worker.memory.rebalance.measure": "managed",
-        "distributed.worker.memory.rebalance.sender-min": 0,
-        "distributed.worker.memory.rebalance.sender-recipient-gap": 0,
-    },
+    config=merge(
+        NO_AMM,
+        {
+            "distributed.worker.memory.rebalance.measure": "managed",
+            "distributed.worker.memory.rebalance.sender-min": 0,
+            "distributed.worker.memory.rebalance.sender-recipient-gap": 0,
+        },
+    ),
 )
 async def test_rebalance(c, s, a, b):
     """Test Client.rebalance(). This test is just to test the TLS Client wrapper around

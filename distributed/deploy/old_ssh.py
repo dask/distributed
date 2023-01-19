@@ -60,7 +60,7 @@ def async_ssh(cmd_dict):
         except (SSHException, PasswordRequiredException) as e:
 
             print(
-                "[ dask-ssh ] : "
+                "[ dask ssh ] : "
                 + bcolors.FAIL
                 + "SSH connection error when connecting to {addr}:{port} "
                 "to run '{cmd}'".format(
@@ -87,7 +87,7 @@ def async_ssh(cmd_dict):
             retries += 1
             if retries >= 3:
                 print(
-                    "[ dask-ssh ] : "
+                    "[ dask ssh ] : "
                     + bcolors.FAIL
                     + "SSH connection failed after 3 retries. Exiting."
                     + bcolors.ENDC

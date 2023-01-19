@@ -6,6 +6,7 @@ import builtins
 import errno
 import functools
 import logging
+import math
 import os
 import pathlib
 import random
@@ -27,10 +28,10 @@ from concurrent.futures import Executor
 from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TextIO, TypeVar, cast
 
 from tlz import first, keymap, pluck
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import IOLoop
 
 import dask
 from dask.core import istask
@@ -42,7 +43,6 @@ from dask.utils import (
     key_split,
     parse_bytes,
     parse_timedelta,
-    stringify,
     tmpdir,
     typename,
 )
@@ -54,9 +54,8 @@ from distributed.comm import Comm, connect, get_address_host, parse_address
 from distributed.comm import resolve_address as comm_resolve_address
 from distributed.comm.addressing import address_from_user_args
 from distributed.comm.utils import OFFLOAD_THRESHOLD
-from distributed.compatibility import randbytes, to_thread
+from distributed.compatibility import PeriodicCallback, randbytes, to_thread
 from distributed.core import (
-    CommClosedError,
     ConnectionPool,
     Status,
     coerce_to_address,
@@ -133,7 +132,6 @@ from distributed.worker_state_machine import (
     UpdateDataEvent,
     WorkerState,
 )
-from distributed.worker_state_machine import logger as wsm_logger
 
 if TYPE_CHECKING:
     # FIXME import from typing (needs Python >=3.10)
@@ -171,6 +169,7 @@ def fail_hard(method: Callable[P, T]) -> Callable[P, T]:
     """
     Decorator to close the worker if this method encounters an exception.
     """
+    reason = f"worker-{method.__name__}-fail-hard"
     if iscoroutinefunction(method):
 
         @functools.wraps(method)
@@ -181,7 +180,7 @@ def fail_hard(method: Callable[P, T]) -> Callable[P, T]:
                 if self.status not in (Status.closed, Status.closing):
                     self.log_event("worker-fail-hard", error_message(e))
                     logger.exception(e)
-                await _force_close(self)
+                await _force_close(self, reason)
                 raise
 
     else:
@@ -194,13 +193,13 @@ def fail_hard(method: Callable[P, T]) -> Callable[P, T]:
                 if self.status not in (Status.closed, Status.closing):
                     self.log_event("worker-fail-hard", error_message(e))
                     logger.exception(e)
-                self.loop.add_callback(_force_close, self)
+                self.loop.add_callback(_force_close, self, reason)
                 raise
 
     return wrapper  # type: ignore
 
 
-async def _force_close(self):
+async def _force_close(self, reason: str):
     """
     Used with the fail_hard decorator defined above
 
@@ -208,7 +207,10 @@ async def _force_close(self):
     2.  If it doesn't, log and kill the process
     """
     try:
-        await asyncio.wait_for(self.close(nanny=False, executor_wait=False), 30)
+        await asyncio.wait_for(
+            self.close(nanny=False, executor_wait=False, reason=reason),
+            30,
+        )
     except (KeyboardInterrupt, SystemExit):  # pragma: nocover
         raise
     except BaseException:  # pragma: nocover
@@ -240,13 +242,13 @@ class Worker(BaseWorker, ServerNode):
     Workers keep the scheduler informed of their data and use that scheduler to
     gather data from other workers when necessary to perform a computation.
 
-    You can start a worker with the ``dask-worker`` command line application::
+    You can start a worker with the ``dask worker`` command line application::
 
-        $ dask-worker scheduler-ip:port
+        $ dask worker scheduler-ip:port
 
     Use the ``--help`` flag to see more options::
 
-        $ dask-worker --help
+        $ dask worker --help
 
     The rest of this docstring is about the internal state that the worker uses
     to manage and track internal computations.
@@ -303,7 +305,12 @@ class Worker(BaseWorker, ServerNode):
     scheduler_file: str, optional
     host: str, optional
     data: MutableMapping, type, None
-        The object to use for storage, builds a disk-backed LRU dict by default
+        The object to use for storage, builds a disk-backed LRU dict by default.
+
+        If a callable to construct the storage object is provided, it
+        will receive the worker's attr:``local_directory`` as an
+        argument if the calling signature has an argument named
+        ``worker_local_directory``.
     nthreads: int, optional
     local_directory: str, optional
         Directory where we place local resources
@@ -356,10 +363,10 @@ class Worker(BaseWorker, ServerNode):
 
     Use the command line to start a worker::
 
-        $ dask-scheduler
+        $ dask scheduler
         Start scheduler at 127.0.0.1:8786
 
-        $ dask-worker 127.0.0.1:8786
+        $ dask worker 127.0.0.1:8786
         Start worker at:               127.0.0.1:1234
         Registered with scheduler at:  127.0.0.1:8786
 
@@ -387,6 +394,8 @@ class Worker(BaseWorker, ServerNode):
     transfer_outgoing_log: deque[dict[str, Any]]
     #: Total number of data transfers to other workers since the worker was started
     transfer_outgoing_count_total: int
+    #: Total size of data transfers to other workers (including in-progress and failed transfers)
+    transfer_outgoing_bytes_total: int
     #: Current total size of open data transfers to other workers
     transfer_outgoing_bytes: int
     #: Current number of open data transfers to other workers
@@ -423,7 +432,6 @@ class Worker(BaseWorker, ServerNode):
     scheduler_delay: float
     stream_comms: dict[str, BatchedSend]
     heartbeat_interval: float
-    heartbeat_active: bool
     services: dict[str, Any] = {}
     service_specs: dict[str, Any]
     metrics: dict[str, Callable[[Worker], Any]]
@@ -484,6 +492,8 @@ class Worker(BaseWorker, ServerNode):
         data: (
             MutableMapping[str, Any]  # pre-initialised
             | Callable[[], MutableMapping[str, Any]]  # constructor
+            # constructor receiving self.local_directory
+            | Callable[[str], MutableMapping[str, Any]]
             | tuple[
                 Callable[..., MutableMapping[str, Any]], dict[str, Any]
             ]  # (constructor, kwargs to constructor)
@@ -495,6 +505,7 @@ class Worker(BaseWorker, ServerNode):
         memory_pause_fraction: float | Literal[False] | None = None,
         ###################################
         # Parameters to Server
+        scheduler_sni: str | None = None,
         **kwargs,
     ):
         if reconnect is not None:
@@ -528,7 +539,9 @@ class Worker(BaseWorker, ServerNode):
         self.transfer_outgoing_count_limit = dask.config.get(
             "distributed.worker.connections.incoming"
         )
-
+        transfer_message_bytes_limit = parse_bytes(
+            dask.config.get("distributed.worker.transfer.message-bytes-limit")
+        )
         self.threads = {}
 
         self.active_threads_lock = threading.Lock()
@@ -545,6 +558,7 @@ class Worker(BaseWorker, ServerNode):
         self.transfer_incoming_log = deque(maxlen=100000)
         self.transfer_outgoing_log = deque(maxlen=100000)
         self.transfer_outgoing_count_total = 0
+        self.transfer_outgoing_bytes_total = 0
         self.transfer_outgoing_bytes = 0
         self.transfer_outgoing_count = 0
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
@@ -560,14 +574,12 @@ class Worker(BaseWorker, ServerNode):
         profile_cycle_interval = parse_timedelta(profile_cycle_interval, default="ms")
         assert profile_cycle_interval
 
-        self._setup_logging(logger, wsm_logger)
+        self._setup_logging(logger)
 
         if not local_directory:
             local_directory = (
                 dask.config.get("temporary-directory") or tempfile.gettempdir()
             )
-
-        os.makedirs(local_directory, exist_ok=True)
         local_directory = os.path.join(local_directory, "dask-worker-space")
 
         with warn_on_duration(
@@ -577,7 +589,7 @@ class Worker(BaseWorker, ServerNode):
             "Consider specifying a local-directory to point workers to write "
             "scratch data to a local disk.",
         ):
-            self._workspace = WorkSpace(os.path.abspath(local_directory))
+            self._workspace = WorkSpace(local_directory)
             self._workdir = self._workspace.new_work_dir(prefix="worker-")
             self.local_directory = self._workdir.dir_path
 
@@ -591,8 +603,9 @@ class Worker(BaseWorker, ServerNode):
             self, preload, preload_argv, file_dir=self.local_directory
         )
 
+        self.death_timeout = parse_timedelta(death_timeout)
         if scheduler_file:
-            cfg = json_load_robust(scheduler_file)
+            cfg = json_load_robust(scheduler_file, timeout=self.death_timeout)
             scheduler_addr = cfg["address"]
         elif scheduler_ip is None and dask.config.get("scheduler-address", None):
             scheduler_addr = dask.config.get("scheduler-address")
@@ -626,8 +639,6 @@ class Worker(BaseWorker, ServerNode):
             resources = dask.config.get("distributed.worker.resources")
             assert isinstance(resources, dict)
 
-        self.death_timeout = parse_timedelta(death_timeout)
-
         self.extensions = {}
         if silence_logs:
             silence_logging(level=silence_logs)
@@ -639,6 +650,8 @@ class Worker(BaseWorker, ServerNode):
         self.connection_args = self.security.get_connection_args("worker")
 
         self.loop = self.io_loop = IOLoop.current()
+        if scheduler_sni:
+            self.connection_args["server_hostname"] = scheduler_sni
 
         # Common executors always available
         self.executors = {
@@ -666,7 +679,6 @@ class Worker(BaseWorker, ServerNode):
         self.name = name
         self.scheduler_delay = 0
         self.stream_comms = {}
-        self.heartbeat_active = False
 
         if self.local_directory not in sys.path:
             sys.path.insert(0, self.local_directory)
@@ -746,7 +758,7 @@ class Worker(BaseWorker, ServerNode):
             memory_pause_fraction=memory_pause_fraction,
         )
 
-        transfer_incoming_bytes_limit = None
+        transfer_incoming_bytes_limit = math.inf
         transfer_incoming_bytes_fraction = dask.config.get(
             "distributed.worker.memory.transfer"
         )
@@ -767,6 +779,7 @@ class Worker(BaseWorker, ServerNode):
             validate=validate,
             transition_counter_max=transition_counter_max,
             transfer_incoming_bytes_limit=transfer_incoming_bytes_limit,
+            transfer_message_bytes_limit=transfer_message_bytes_limit,
         )
         BaseWorker.__init__(self, state)
 
@@ -795,7 +808,7 @@ class Worker(BaseWorker, ServerNode):
             name: extension(self) for name, extension in extensions.items()
         }
 
-        setproctitle("dask-worker [not started]")
+        setproctitle("dask worker [not started]")
 
         if dask.config.get("distributed.worker.profile.enabled"):
             profile_trigger_interval = parse_timedelta(
@@ -821,7 +834,9 @@ class Worker(BaseWorker, ServerNode):
 
         if lifetime:
             lifetime += (random.random() * 2 - 1) * lifetime_stagger
-            self.io_loop.call_later(lifetime, self.close_gracefully)
+            self.io_loop.call_later(
+                lifetime, self.close_gracefully, reason="worker-lifetime-reached"
+            )
         self.lifetime = lifetime
 
         Worker._instances.add(self)
@@ -889,7 +904,7 @@ class Worker(BaseWorker, ServerNode):
     ready = DeprecatedWorkerStateAttribute()
     tasks = DeprecatedWorkerStateAttribute()
     target_message_size = DeprecatedWorkerStateAttribute(
-        target="transfer_message_target_bytes"
+        target="transfer_message_bytes_limit"
     )
     total_out_connections = DeprecatedWorkerStateAttribute(
         target="transfer_incoming_count_limit"
@@ -899,7 +914,6 @@ class Worker(BaseWorker, ServerNode):
     transition_counter_max = DeprecatedWorkerStateAttribute()
     validate = DeprecatedWorkerStateAttribute()
     validate_task = DeprecatedWorkerStateAttribute()
-    waiting_for_data_count = DeprecatedWorkerStateAttribute()
 
     @property
     def data_needed(self) -> set[TaskState]:
@@ -910,11 +924,20 @@ class Worker(BaseWorker, ServerNode):
         )
         return {ts for tss in self.state.data_needed.values() for ts in tss}
 
+    @property
+    def waiting_for_data_count(self) -> int:
+        warnings.warn(
+            "The `Worker.waiting_for_data_count` attribute has been removed; "
+            "use `len(Worker.state.waiting)`",
+            FutureWarning,
+        )
+        return len(self.state.waiting)
+
     ##################
     # Administrative #
     ##################
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         name = f", name: {self.name}" if self.name != self.address_safe else ""
         return (
             f"<{self.__class__.__name__} {self.address_safe!r}{name}, "
@@ -923,7 +946,7 @@ class Worker(BaseWorker, ServerNode):
             f"running: {self.state.executing_count}/{self.state.nthreads}, "
             f"ready: {len(self.state.ready)}, "
             f"comm: {self.state.in_flight_tasks_count}, "
-            f"waiting: {self.state.waiting_for_data_count}>"
+            f"waiting: {len(self.state.waiting)}>"
         )
 
     @property
@@ -986,16 +1009,14 @@ class Worker(BaseWorker, ServerNode):
             spilled_memory, spilled_disk = 0, 0
 
         out = dict(
-            executing=self.state.executing_count,
-            in_memory=len(self.data),
-            ready=len(self.state.ready),
-            in_flight=self.state.in_flight_tasks_count,
+            task_counts=self.state.task_counts,
             bandwidth={
                 "total": self.bandwidth,
                 "workers": dict(self.bandwidth_workers),
                 "types": keymap(typename, self.bandwidth_types),
             },
-            spilled_nbytes={
+            managed_bytes=self.state.nbytes,
+            spilled_bytes={
                 "memory": spilled_memory,
                 "disk": spilled_disk,
             },
@@ -1009,7 +1030,15 @@ class Worker(BaseWorker, ServerNode):
             },
             event_loop_interval=self._tick_interval_observed,
         )
-        out.update(self.monitor.recent())
+
+        monitor_recent = self.monitor.recent()
+        # Convert {foo.bar: 123} to {foo: {bar: 123}}
+        for k, v in monitor_recent.items():
+            if "." in k:
+                k0, _, k1 = k.partition(".")
+                out.setdefault(k0, {})[k1] = v
+            else:
+                out[k] = v
 
         for k, metric in self.metrics.items():
             try:
@@ -1177,14 +1206,9 @@ class Worker(BaseWorker, ServerNode):
 
     def _update_latency(self, latency: float) -> None:
         self.latency = latency * 0.05 + self.latency * 0.95
-        if self.digests is not None:
-            self.digests["latency"].add(latency)
+        self.digest_metric("latency", latency)
 
     async def heartbeat(self) -> None:
-        if self.heartbeat_active:
-            logger.debug("Heartbeat skipped: channel busy")
-            return
-        self.heartbeat_active = True
         logger.debug("Heartbeat: %s", self.address)
         try:
             start = time()
@@ -1224,30 +1248,19 @@ class Worker(BaseWorker, ServerNode):
             )
             self.bandwidth_workers.clear()
             self.bandwidth_types.clear()
-        except CommClosedError:
-            logger.warning("Heartbeat to scheduler failed", exc_info=True)
+        except OSError:
+            logger.exception("Failed to communicate with scheduler during heartbeat.")
+        except Exception:
+            logger.exception("Unexpected exception during heartbeat. Closing worker.")
             await self.close()
-        except OSError as e:
-            # Scheduler is gone. Respect distributed.comm.timeouts.connect
-            if "Timed out trying to connect" in str(e):
-                logger.info("Timed out while trying to connect during heartbeat")
-                await self.close()
-            else:
-                logger.exception(e)
-                raise e
-        finally:
-            self.heartbeat_active = False
+            raise
 
     @fail_hard
     async def handle_scheduler(self, comm: Comm) -> None:
-        await self.handle_stream(comm)
-        logger.info(
-            "Connection to scheduler broken. Closing without reporting. ID: %s Address %s Status: %s",
-            self.id,
-            self.address,
-            self.status,
-        )
-        await self.close()
+        try:
+            await self.handle_stream(comm)
+        finally:
+            await self.close(reason="worker-handle-scheduler-connection-broken")
 
     async def upload_file(
         self, filename: str, data: str | bytes, load: bool = True
@@ -1303,8 +1316,8 @@ class Worker(BaseWorker, ServerNode):
             return {"status": "OK"}
 
     def get_monitor_info(
-        self, recent: bool = False, start: float = 0
-    ) -> dict[str, Any]:
+        self, recent: bool = False, start: int = 0
+    ) -> dict[str, float]:
         result = dict(
             range_query=(
                 self.monitor.recent()
@@ -1417,7 +1430,7 @@ class Worker(BaseWorker, ServerNode):
             )
         logger.info("      Local Directory: %26s", self.local_directory)
 
-        setproctitle("dask-worker [%s]" % self.address)
+        setproctitle("dask worker [%s]" % self.address)
 
         plugins_msgs = await asyncio.gather(
             *(
@@ -1448,6 +1461,7 @@ class Worker(BaseWorker, ServerNode):
         timeout: float = 30,
         executor_wait: bool = True,
         nanny: bool = True,
+        reason: str = "worker-close",
     ) -> str | None:
         """Close the worker
 
@@ -1456,12 +1470,14 @@ class Worker(BaseWorker, ServerNode):
 
         Parameters
         ----------
-        timeout : float, default 30
+        timeout
             Timeout in seconds for shutting down individual instructions
-        executor_wait : bool, default True
+        executor_wait
             If True, shut down executors synchronously, otherwise asynchronously
-        nanny : bool, default True
+        nanny
             If True, close the nanny
+        reason
+            Reason for closing the worker
 
         Returns
         -------
@@ -1473,6 +1489,11 @@ class Worker(BaseWorker, ServerNode):
         # nanny+worker, the nanny must be notified first. ==> Remove kwarg
         # nanny, see also Scheduler.retire_workers
         if self.status in (Status.closed, Status.closing, Status.failed):
+            logger.debug(
+                "Attempted to close worker that is already %s. Reason: %s",
+                self.status,
+                reason,
+            )
             await self.finished()
             return None
 
@@ -1490,9 +1511,9 @@ class Worker(BaseWorker, ServerNode):
         disable_gc_diagnosis()
 
         try:
-            logger.info("Stopping worker at %s", self.address)
+            logger.info("Stopping worker at %s. Reason: %s", self.address, reason)
         except ValueError:  # address not available if already closed
-            logger.info("Stopping worker")
+            logger.info("Stopping worker. Reason: %s", reason)
         if self.status not in WORKER_ANY_RUNNING:
             logger.info("Closed worker has not yet started: %s", self.status)
         if not executor_wait:
@@ -1521,9 +1542,9 @@ class Worker(BaseWorker, ServerNode):
 
         if nanny and self.nanny:
             with self.rpc(self.nanny) as r:
-                await r.close_gracefully()
+                await r.close_gracefully(reason=reason)
 
-        setproctitle("dask-worker [closing]")
+        setproctitle("dask worker [closing]")
 
         teardowns = [
             plugin.teardown(self)
@@ -1611,10 +1632,12 @@ class Worker(BaseWorker, ServerNode):
         self.status = Status.closed
         await ServerNode.close(self)
 
-        setproctitle("dask-worker [closed]")
+        setproctitle("dask worker [closed]")
         return "OK"
 
-    async def close_gracefully(self, restart=None):
+    async def close_gracefully(
+        self, restart=None, reason: str = "worker-close-gracefully"
+    ):
         """Gracefully shut down a worker
 
         This first informs the scheduler that we're shutting down, and asks it
@@ -1626,10 +1649,7 @@ class Worker(BaseWorker, ServerNode):
         if self.status == Status.closed:
             return
 
-        if restart is None:
-            restart = self.lifetime_restart
-
-        logger.info("Closing worker gracefully: %s", self.address)
+        logger.info("Closing worker gracefully: %s. Reason: %s", self.address, reason)
         # Wait for all tasks to leave the worker and don't accept any new ones.
         # Scheduler.retire_workers will set the status to closing_gracefully and push it
         # back to this worker.
@@ -1639,7 +1659,9 @@ class Worker(BaseWorker, ServerNode):
             remove=False,
             stimulus_id=f"worker-close-gracefully-{time()}",
         )
-        await self.close(nanny=not restart)
+        if restart is None:
+            restart = self.lifetime_restart
+        await self.close(nanny=not restart, reason=reason)
 
     async def wait_until_closed(self):
         warnings.warn("wait_until_closed has moved to finished()")
@@ -1726,9 +1748,18 @@ class Worker(BaseWorker, ServerNode):
         bytes_per_task = {k: self.state.tasks[k].nbytes or 0 for k in data}
         total_bytes = sum(bytes_per_task.values())
         self.transfer_outgoing_bytes += total_bytes
+        self.transfer_outgoing_bytes_total += total_bytes
         stop = time()
-        if self.digests is not None:
-            self.digests["get-data-load-duration"].add(stop - start)
+
+        # Don't log metrics if all keys are in memory
+        if stop - start > 0.005:
+            # See metrics:
+            # - disk-load-duration
+            # - get-data-load-duration
+            # - disk-write-target-duration
+            # - disk-write-spill-duration
+            self.digest_metric("get-data-load-duration", stop - start)
+
         start = time()
 
         try:
@@ -1747,8 +1778,7 @@ class Worker(BaseWorker, ServerNode):
             self.transfer_outgoing_bytes -= total_bytes
             self.transfer_outgoing_count -= 1
         stop = time()
-        if self.digests is not None:
-            self.digests["get-data-send-duration"].add(stop - start)
+        self.digest_metric("get-data-send-duration", stop - start)
 
         duration = (stop - start) or 0.5  # windows
         self.transfer_outgoing_log.append(
@@ -1906,7 +1936,7 @@ class Worker(BaseWorker, ServerNode):
             super().handle_stimulus(*stims)
         except Exception as e:
             if hasattr(e, "to_event"):
-                topic, msg = e.to_event()  # type: ignore
+                topic, msg = e.to_event()
                 self.log_event(topic, msg)
             raise
 
@@ -1989,9 +2019,8 @@ class Worker(BaseWorker, ServerNode):
                 bw, cnt = self.bandwidth_types[typ]
                 self.bandwidth_types[typ] = (bw + bandwidth, cnt + 1)
 
-        if self.digests is not None:
-            self.digests["transfer-bandwidth"].add(total_bytes / duration)
-            self.digests["transfer-duration"].add(duration)
+        self.digest_metric("transfer-bandwidth", total_bytes / duration)
+        self.digest_metric("transfer-duration", duration)
         self.counters["transfer-count"].add(len(data))
 
     @fail_hard
@@ -2098,6 +2127,10 @@ class Worker(BaseWorker, ServerNode):
             worker=worker, stimulus_id=f"retry-busy-worker-{time()}"
         )
 
+    def digest_metric(self, name: str, value: float) -> None:
+        """Implement BaseWorker.digest_metric by calling Server.digest_metric"""
+        ServerNode.digest_metric(self, name, value)
+
     @log_errors
     def find_missing(self) -> None:
         self.handle_stimulus(FindMissingEvent(stimulus_id=f"find-missing-{time()}"))
@@ -2193,6 +2226,7 @@ class Worker(BaseWorker, ServerNode):
 
         # The key *must* be in the worker state thanks to the cancelled state
         ts = self.state.tasks[key]
+        run_id = ts.run_id
 
         try:
             function, args, kwargs = await self._maybe_deserialize_task(ts)
@@ -2264,6 +2298,7 @@ class Worker(BaseWorker, ServerNode):
                     self.digests["task-duration"].add(result["stop"] - result["start"])
                 return ExecuteSuccessEvent(
                     key=key,
+                    run_id=run_id,
                     value=result["result"],
                     start=result["start"],
                     stop=result["stop"],
@@ -2272,8 +2307,24 @@ class Worker(BaseWorker, ServerNode):
                     stimulus_id=f"task-finished-{time()}",
                 )
 
-            if isinstance(result["actual-exception"], Reschedule):
+            task_exc = result["actual-exception"]
+            if isinstance(task_exc, Reschedule):
                 return RescheduleEvent(key=ts.key, stimulus_id=f"reschedule-{time()}")
+            if (
+                self.status == Status.closing
+                and isinstance(task_exc, asyncio.CancelledError)
+                and iscoroutinefunction(function)
+            ):
+                # `Worker.cancel` will cause async user tasks to raise `CancelledError`.
+                # Since we cancelled those tasks, we shouldn't treat them as failures.
+                # This is just a heuristic; it's _possible_ the task happened to
+                # fail independently with `CancelledError`.
+                logger.info(
+                    f"Async task {key!r} cancelled during worker close; rescheduling."
+                )
+                return RescheduleEvent(
+                    key=ts.key, stimulus_id=f"cancelled-by-worker-close-{time()}"
+                )
 
             logger.warning(
                 "Compute Failed\n"
@@ -2322,8 +2373,12 @@ class Worker(BaseWorker, ServerNode):
         stop = time()
         if stop - start > 0.005:
             ts.startstops.append({"action": "disk-read", "start": start, "stop": stop})
-            if self.digests is not None:
-                self.digests["disk-load-duration"].add(stop - start)
+            # See metrics:
+            # - disk-load-duration
+            # - get-data-load-duration
+            # - disk-write-target-duration
+            # - disk-write-spill-duration
+            self.digest_metric("disk-load-duration", stop - start)
         return args2, kwargs2
 
     ##################
@@ -2367,8 +2422,7 @@ class Worker(BaseWorker, ServerNode):
                 )
 
         stop = time()
-        if self.digests is not None:
-            self.digests["profile-duration"].add(stop - start)
+        self.digest_metric("profile-duration", stop - start)
 
     async def get_profile(
         self,
@@ -2565,7 +2619,7 @@ class Worker(BaseWorker, ServerNode):
                 pdb.set_trace()
 
             if hasattr(e, "to_event"):
-                topic, msg = e.to_event()  # type: ignore
+                topic, msg = e.to_event()
                 self.log_event(topic, msg)
 
             raise
@@ -2882,12 +2936,12 @@ def dumps_function(func) -> bytes:
         with _cache_lock:
             result = cache_dumps[func]
     except KeyError:
-        result = pickle.dumps(func, protocol=4)
+        result = pickle.dumps(func)
         if len(result) < 100000:
             with _cache_lock:
                 cache_dumps[func] = result
     except TypeError:  # Unhashable function
-        result = pickle.dumps(func, protocol=4)
+        result = pickle.dumps(func)
     return result
 
 
@@ -2927,7 +2981,7 @@ _warn_dumps_warned = [False]
 
 def warn_dumps(obj, dumps=pickle.dumps, limit=1e6):
     """Dump an object to bytes, warn if those bytes are large"""
-    b = dumps(obj, protocol=4)
+    b = dumps(obj)
     if not _warn_dumps_warned[0] and len(b) > limit:
         _warn_dumps_warned[0] = True
         s = str(obj)
@@ -2993,7 +3047,18 @@ def apply_function_simple(
     start = time()
     try:
         result = function(*args, **kwargs)
-    except Exception as e:
+    except (SystemExit, KeyboardInterrupt):
+        # Special-case these, just like asyncio does all over the place. They will pass
+        # through `fail_hard` and `_handle_stimulus_from_task`, and eventually be caught
+        # by special-case logic in asyncio:
+        # https://github.com/python/cpython/blob/v3.9.4/Lib/asyncio/events.py#L81-L82
+        # Any other `BaseException` types would ultimately be ignored by asyncio if
+        # raised here, after messing up the worker state machine along their way.
+        raise
+    except BaseException as e:
+        # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they
+        # aren't a reason to shut down the whole system (since we allow the
+        # system-shutting-down `SystemExit` and `KeyboardInterrupt` to pass through)
         msg = error_message(e)
         msg["op"] = "task-erred"
         msg["actual-exception"] = e
@@ -3029,7 +3094,20 @@ async def apply_function_async(
     start = time()
     try:
         result = await function(*args, **kwargs)
-    except Exception as e:
+    except (SystemExit, KeyboardInterrupt):
+        # Special-case these, just like asyncio does all over the place. They will pass
+        # through `fail_hard` and `_handle_stimulus_from_task`, and eventually be caught
+        # by special-case logic in asyncio:
+        # https://github.com/python/cpython/blob/v3.9.4/Lib/asyncio/events.py#L81-L82
+        # Any other `BaseException` types would ultimately be ignored by asyncio if
+        # raised here, after messing up the worker state machine along their way.
+        raise
+    except BaseException as e:
+        # NOTE: this includes `CancelledError`! Since it's a user task, that's _not_ a
+        # reason to shut down the worker.
+        # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they
+        # aren't a reason to shut down the whole system (since we allow the
+        # system-shutting-down `SystemExit` and `KeyboardInterrupt` to pass through)
         msg = error_message(e)
         msg["op"] = "task-erred"
         msg["actual-exception"] = e
@@ -3191,38 +3269,143 @@ def add_gpu_metrics():
     DEFAULT_STARTUP_INFORMATION["gpu"] = gpu_startup
 
 
-def print(*args, **kwargs):
-    """Dask print function
-    This prints both wherever this function is run, and also in the user's
-    client session
+def print(
+    *args,
+    sep: str | None = " ",
+    end: str | None = "\n",
+    file: TextIO | None = None,
+    flush: bool = False,
+) -> None:
+    """
+    A drop-in replacement of the built-in ``print`` function for remote printing
+    from workers to clients. If called from outside a dask worker, its arguments
+    are passed directly to ``builtins.print()``. If called by code running on a
+    worker, then in addition to printing locally, any clients connected
+    (possibly remotely) to the scheduler managing this worker will receive an
+    event instructing them to print the same output to their own standard output
+    or standard error streams. For example, the user can perform simple
+    debugging of remote computations by including calls to this ``print``
+    function in the submitted code and inspecting the output in a local Jupyter
+    notebook or interpreter session.
+
+    All arguments behave the same as those of ``builtins.print()``, with the
+    exception that the ``file`` keyword argument, if specified, must either be
+    ``sys.stdout`` or ``sys.stderr``; arbitrary file-like objects are not
+    allowed.
+
+    All non-keyword arguments are converted to strings using ``str()`` and
+    written to the stream, separated by ``sep`` and followed by ``end``. Both
+    ``sep`` and ``end`` must be strings; they can also be ``None``, which means
+    to use the default values. If no objects are given, ``print()`` will just
+    write ``end``.
+
+    Parameters
+    ----------
+    sep : str, optional
+        String inserted between values, default a space.
+    end : str, optional
+        String appended after the last value, default a newline.
+    file : ``sys.stdout`` or ``sys.stderr``, optional
+        Defaults to the current sys.stdout.
+    flush : bool, default False
+        Whether to forcibly flush the stream.
+
+    Examples
+    --------
+    >>> from dask.distributed import Client, print
+    >>> client = distributed.Client(...)
+    >>> def worker_function():
+    ...     print("Hello from worker!")
+    >>> client.submit(worker_function)
+    <Future: finished, type: NoneType, key: worker_function-...>
+    Hello from worker!
     """
     try:
         worker = get_worker()
     except ValueError:
         pass
     else:
+        # We are in a worker: prepare all of the print args and kwargs to be
+        # serialized over the wire to the client.
         msg = {
-            "args": tuple(stringify(arg) for arg in args),
-            "kwargs": {k: stringify(v) for k, v in kwargs.items()},
+            # According to the Python stdlib docs, builtin print() simply calls
+            # str() on each positional argument, so we do the same here.
+            "args": tuple(map(str, args)),
+            "sep": sep,
+            "end": end,
+            "flush": flush,
         }
+        if file == sys.stdout:
+            msg["file"] = 1  # type: ignore
+        elif file == sys.stderr:
+            msg["file"] = 2  # type: ignore
+        elif file is not None:
+            raise TypeError(
+                f"Remote printing to arbitrary file objects is not supported. file "
+                f"kwarg must be one of None, sys.stdout, or sys.stderr; got: {file!r}"
+            )
         worker.log_event("print", msg)
 
-    builtins.print(*args, **kwargs)
+    builtins.print(*args, sep=sep, end=end, file=file, flush=flush)
 
 
-def warn(*args, **kwargs):
-    """Dask warn function
-    This raises a warning both wherever this function is run, and also
-    in the user's client session
+def warn(
+    message: str | Warning,
+    category: type[Warning] | None = UserWarning,
+    stacklevel: int = 1,
+    source: Any = None,
+) -> None:
+    """
+    A drop-in replacement of the built-in ``warnings.warn()`` function for
+    issuing warnings remotely from workers to clients.
+
+    If called from outside a dask worker, its arguments are passed directly to
+    ``warnings.warn()``. If called by code running on a worker, then in addition
+    to emitting a warning locally, any clients connected (possibly remotely) to
+    the scheduler managing this worker will receive an event instructing them to
+    emit the same warning (subject to their own local filters, etc.). When
+    implementing computations that may run on a worker, the user can call this
+    ``warn`` function to ensure that any remote client sessions will see their
+    warnings, for example in a Jupyter output cell.
+
+    While all of the arguments are respected by the locally emitted warning
+    (with same meanings as in ``warnings.warn()``), ``stacklevel`` and
+    ``source`` are ignored by clients because they would not be meaningful in
+    the client's thread.
+
+    Examples
+    --------
+    >>> from dask.distributed import Client, warn
+    >>> client = Client()
+    >>> def do_warn():
+    ...    warn("A warning from a worker.")
+    >>> client.submit(do_warn).result()
+    /path/to/distributed/client.py:678: UserWarning: A warning from a worker.
     """
     try:
         worker = get_worker()
     except ValueError:  # pragma: no cover
         pass
     else:
-        worker.log_event("warn", {"args": args, "kwargs": kwargs})
+        # We are in a worker: log a warn event with args serialized to the
+        # client. We have to pickle message and category into bytes ourselves
+        # because msgpack cannot handle them. The expectations is that these are
+        # always small objects.
+        worker.log_event(
+            "warn",
+            {
+                "message": pickle.dumps(message),
+                "category": pickle.dumps(category),
+                # We ignore stacklevel because it will be meaningless in the
+                # client's thread/process.
+                # We ignore source because we don't want to serialize arbitrary
+                # objects.
+            },
+        )
 
-    warnings.warn(*args, **kwargs)
+    # add 1 to stacklevel so that, at least in the worker's local stderr, we'll
+    # see the source line that called us
+    warnings.warn(message, category, stacklevel + 1, source)
 
 
 def benchmark_disk(

@@ -4,6 +4,7 @@ import asyncio
 import logging
 from collections import defaultdict
 from timeit import default_timer
+from typing import ClassVar
 
 from tlz import groupby, valmap
 
@@ -298,7 +299,10 @@ class AllProgress(SchedulerPlugin):
 class GroupTiming(SchedulerPlugin):
     """Keep track of high-level timing information for task group progress"""
 
-    name = "group-timing"
+    name: ClassVar[str] = "group-timing"
+    time: list[float]
+    compute: dict[str, list[float]]
+    nthreads: list[float]
 
     def __init__(self, scheduler):
         self.scheduler = scheduler
@@ -309,17 +313,17 @@ class GroupTiming(SchedulerPlugin):
         # Initialize our data structures.
         self._init()
 
-    def _init(self):
+    def _init(self) -> None:
         """Shared initializatoin code between __init__ and restart"""
         now = time()
 
         # Timestamps for tracking compute durations by task group.
         # Start with length 2 so that we always can compute a valid dt later.
-        self.time: list[float] = [now] * 2
+        self.time = [now] * 2
         # The amount of compute since the last timestamp
-        self.compute: dict[str, list[float]] = {}
+        self.compute = {}
         # The number of threads at the time
-        self.nthreads: list[float] = [self.scheduler.total_nthreads] * 2
+        self.nthreads = [self.scheduler.total_nthreads] * 2
 
     def transition(self, key, start, finish, *args, **kwargs):
         # We are mostly interested in when tasks complete for now, so just look

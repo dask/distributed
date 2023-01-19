@@ -17,6 +17,7 @@ from distributed.protocol.serialize import Serialize
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.utils import recursive_to_dict
 from distributed.utils_test import (
+    NO_AMM,
     _LockedCommPool,
     assert_story,
     freeze_data_fetching,
@@ -42,6 +43,7 @@ from distributed.worker_state_machine import (
     RecommendationsConflict,
     RefreshWhoHasEvent,
     ReleaseWorkerDataMsg,
+    RemoveReplicasEvent,
     RescheduleEvent,
     RescheduleMsg,
     SecedeEvent,
@@ -108,12 +110,14 @@ def test_TaskState__to_dict():
     assert actual == [
         {
             "key": "x",
+            "run_id": -1,
             "state": "memory",
             "done": True,
             "dependents": ["<TaskState 'y' released>"],
         },
         {
             "key": "y",
+            "run_id": -1,
             "state": "released",
             "dependencies": ["<TaskState 'x' memory>"],
             "priority": [0],
@@ -190,6 +194,7 @@ def test_WorkerState__to_dict(ws):
             "x": {
                 "coming_from": "127.0.0.1:1235",
                 "key": "x",
+                "run_id": -1,
                 "nbytes": 123,
                 "priority": [1],
                 "state": "flight",
@@ -197,6 +202,7 @@ def test_WorkerState__to_dict(ws):
             },
             "y": {
                 "key": "y",
+                "run_id": -1,
                 "nbytes": sizeof(object()),
                 "state": "memory",
             },
@@ -361,6 +367,7 @@ def test_computetask_to_dict():
         function=b"blob",
         args=b"blob",
         kwargs=None,
+        run_id=5,
     )
     assert ev.run_spec == SerializedTask(function=b"blob", args=b"blob")
     ev2 = ev.to_loggable(handled=11.22)
@@ -384,6 +391,7 @@ def test_computetask_to_dict():
         "function": None,
         "args": None,
         "kwargs": None,
+        "run_id": 5,
     }
     ev3 = StateMachineEvent.from_dict(d)
     assert isinstance(ev3, ComputeTaskEvent)
@@ -407,6 +415,7 @@ def test_computetask_dummy():
         function=None,
         args=None,
         kwargs=None,
+        run_id=0,
     )
 
     # nbytes is generated from who_has if omitted
@@ -442,6 +451,7 @@ def test_executesuccess_to_dict():
     ev = ExecuteSuccessEvent(
         stimulus_id="test",
         key="x",
+        run_id=1,
         value=123,
         start=123.4,
         stop=456.7,
@@ -457,6 +467,7 @@ def test_executesuccess_to_dict():
         "stimulus_id": "test",
         "handled": 11.22,
         "key": "x",
+        "run_id": 1,
         "value": None,
         "nbytes": 890,
         "start": 123.4,
@@ -468,6 +479,7 @@ def test_executesuccess_to_dict():
     assert ev3.stimulus_id == "test"
     assert ev3.handled == 11.22
     assert ev3.key == "x"
+    assert ev3.run_id == 1
     assert ev3.value is None
     assert ev3.start == 123.4
     assert ev3.stop == 456.7
@@ -479,6 +491,7 @@ def test_executesuccess_dummy():
     ev = ExecuteSuccessEvent.dummy("x", stimulus_id="s")
     assert ev == ExecuteSuccessEvent(
         key="x",
+        run_id=1,
         value=None,
         start=0.0,
         stop=1.0,
@@ -598,7 +611,11 @@ async def test_fetch_via_amm_to_compute(c, s, a, b):
 
 
 @pytest.mark.parametrize("as_deps", [False, True])
-@gen_cluster(client=True, nthreads=[("", 1)] * 3)
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 3,
+    config=NO_AMM,
+)
 async def test_lose_replica_during_fetch(c, s, w1, w2, w3, as_deps):
     """
     as_deps=True
@@ -779,7 +796,7 @@ async def test_cancelled_while_in_flight(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_in_memory_while_in_flight(c, s, a, b):
     """
     1. A client scatters x to a
@@ -1008,32 +1025,44 @@ async def test_deprecated_worker_attributes(s, a, b):
 
     with pytest.warns(FutureWarning, match="attribute has been removed"):
         assert a.data_needed == set()
+    with pytest.warns(FutureWarning, match="attribute has been removed"):
+        assert a.waiting_for_data_count == 0
 
 
+@pytest.mark.parametrize("n_remote_workers", [1, 2])
 @pytest.mark.parametrize(
-    "nbytes,n_in_flight",
+    "nbytes,n_in_flight_per_worker",
     [
-        # Note: transfer_message_target_bytes = 50e6 bytes
         (int(10e6), 3),
         (int(20e6), 2),
         (int(30e6), 1),
+        (int(60e6), 1),
     ],
 )
-def test_aggregate_gather_deps(ws, nbytes, n_in_flight):
-    ws2 = "127.0.0.1:2"
+def test_aggregate_gather_deps(ws, nbytes, n_in_flight_per_worker, n_remote_workers):
+    ws.transfer_message_bytes_limit = int(50e6)
+    wss = [f"127.0.0.1:{2 + i}" for i in range(n_remote_workers)]
+    who_has = {f"x{i}": [wss[i // 3]] for i in range(3 * n_remote_workers)}
     instructions = ws.handle_stimulus(
         AcquireReplicasEvent(
-            who_has={"x1": [ws2], "x2": [ws2], "x3": [ws2]},
-            nbytes={"x1": nbytes, "x2": nbytes, "x3": nbytes},
+            who_has=who_has,
+            nbytes={task: nbytes for task in who_has.keys()},
             stimulus_id="s1",
         )
     )
-    assert instructions == [GatherDep.match(worker=ws2, stimulus_id="s1")]
-    assert len(instructions[0].to_gather) == n_in_flight
-    assert len(ws.in_flight_tasks) == n_in_flight
-    assert ws.transfer_incoming_bytes == nbytes * n_in_flight
-    assert ws.transfer_incoming_count == 1
-    assert ws.transfer_incoming_count_total == 1
+    assert instructions == [
+        GatherDep.match(worker=remote, stimulus_id="s1") for remote in wss
+    ]
+    assert all(
+        len(instruction.to_gather) == n_in_flight_per_worker
+        for instruction in instructions
+    )
+    assert len(ws.in_flight_tasks) == n_in_flight_per_worker * n_remote_workers
+    assert (
+        ws.transfer_incoming_bytes == nbytes * n_in_flight_per_worker * n_remote_workers
+    )
+    assert ws.transfer_incoming_count == n_remote_workers
+    assert ws.transfer_incoming_count_total == n_remote_workers
 
 
 def test_gather_priority(ws):
@@ -1066,7 +1095,7 @@ def test_gather_priority(ws):
             },
             # Substantial nbytes prevents transfer_incoming_count_limit to be
             # overridden by transfer_incoming_bytes_throttle_threshold,
-            # but it's less than transfer_message_target_bytes
+            # but it's less than transfer_message_bytes_limit
             nbytes={f"x{i}": 4 * 2**20 for i in range(1, 9)},
             stimulus_id="compute1",
         ),
@@ -1358,6 +1387,7 @@ def test_throttling_does_not_affect_first_transfer(ws):
     ws.transfer_incoming_count_limit = 100
     ws.transfer_incoming_bytes_limit = 100
     ws.transfer_incoming_bytes_throttle_threshold = 1
+    ws.transfer_message_bytes_limit = 100
     ws2 = "127.0.0.1:2"
     ws.handle_stimulus(
         ComputeTaskEvent.dummy(
@@ -1368,6 +1398,25 @@ def test_throttling_does_not_affect_first_transfer(ws):
         )
     )
     assert ws.tasks["a"].state == "flight"
+
+
+def test_message_target_does_not_affect_first_transfer_on_different_worker(ws):
+    ws.transfer_incoming_count_limit = 100
+    ws.transfer_incoming_bytes_limit = 600
+    ws.transfer_message_bytes_limit = 100
+    ws.transfer_incoming_bytes_throttle_threshold = 1
+    ws2 = "127.0.0.1:2"
+    ws3 = "127.0.0.1:3"
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "c",
+            who_has={"a": [ws2], "b": [ws3]},
+            nbytes={"a": 200, "b": 200},
+            stimulus_id="s1",
+        )
+    )
+    assert ws.tasks["a"].state == "flight"
+    assert ws.tasks["b"].state == "flight"
 
 
 def test_throttle_incoming_transfers_on_count_limit(ws):
@@ -1538,3 +1587,147 @@ def test_throttle_on_transfer_bytes_regardless_of_threshold(ws):
     )
     assert ws.tasks["c"].state == "fetch"
     assert ws.transfer_incoming_bytes == 1
+
+
+def test_worker_nbytes(ws_with_running_task):
+    ws = ws_with_running_task
+    ws2 = "127.0.0.1:2"
+    assert ws.nbytes == 0
+
+    # executing->memory
+    ws.handle_stimulus(ExecuteSuccessEvent.dummy("x", nbytes=12, stimulus_id="s1"))
+    assert ws.nbytes == 12
+
+    # flight->memory
+    ws.handle_stimulus(
+        AcquireReplicasEvent(who_has={"y": [ws2]}, nbytes={"y": 13}, stimulus_id="s2")
+    )
+    assert ws.nbytes == 12
+    ws.handle_stimulus(
+        GatherDepSuccessEvent(
+            worker=ws2,
+            data={"y": "foo"},
+            total_nbytes=13,
+            stimulus_id="s3",
+        )
+    )
+    assert ws.nbytes == 12 + 13
+
+    # released -> memory (scatter)
+    ws.handle_stimulus(
+        UpdateDataEvent(data={"z": "bar"}, report=False, stimulus_id="s3")
+    )
+    assert ws.nbytes == 12 + 13 + sizeof("bar")
+
+    # actors
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy("w", actor=True, stimulus_id="s4"),
+        ExecuteSuccessEvent.dummy("w", nbytes=14, stimulus_id="s5"),
+    )
+    assert ws.nbytes == 12 + 13 + sizeof("bar") + 14
+
+    # memory -> released by FreeKeysEvent
+    ws.handle_stimulus(FreeKeysEvent(keys=["z"], stimulus_id="s6"))
+    assert ws.nbytes == 12 + 13 + 14
+
+    # memory -> released by RemoveReplicasEvent
+    ws.handle_stimulus(RemoveReplicasEvent(keys=["x", "y", "w"], stimulus_id="s7"))
+    assert ws.nbytes == 0
+
+
+def test_fetch_count(ws):
+    ws.transfer_incoming_count_limit = 0
+    ws2 = "127.0.0.1:2"
+    ws3 = "127.0.0.1:3"
+    assert ws.fetch_count == 0
+    # Saturate comms
+    # released->fetch->flight
+    ws.handle_stimulus(
+        AcquireReplicasEvent(who_has={"a": [ws2]}, nbytes={"a": 1}, stimulus_id="s1"),
+        AcquireReplicasEvent(
+            who_has={"b": [ws2, ws3]}, nbytes={"b": 1}, stimulus_id="s2"
+        ),
+    )
+    assert ws.tasks["b"].coming_from == ws3
+    assert ws.fetch_count == 0
+
+    # released->fetch
+    # d is in two data_needed heaps
+    ws.handle_stimulus(
+        AcquireReplicasEvent(
+            who_has={"c": [ws2], "d": [ws2, ws3]},
+            nbytes={"c": 1, "d": 1},
+            stimulus_id="s3",
+        )
+    )
+    assert ws.fetch_count == 2
+
+    # fetch->released
+    ws.handle_stimulus(FreeKeysEvent(keys={"c", "d"}, stimulus_id="s4"))
+    assert ws.fetch_count == 0
+
+    # flight->missing
+    ws.handle_stimulus(
+        GatherDepSuccessEvent(worker=ws2, data={}, total_nbytes=0, stimulus_id="s5")
+    )
+    assert ws.tasks["a"].state == "missing"
+    print(ws.tasks)
+    assert ws.fetch_count == 0
+    assert len(ws.missing_dep_flight) == 1
+
+    # flight->fetch
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "clog", who_has={"clog_dep": [ws2]}, priority=(-1,), stimulus_id="s6"
+        ),
+        GatherDepSuccessEvent(worker=ws3, data={}, total_nbytes=0, stimulus_id="s7"),
+    )
+    assert ws.tasks["b"].state == "fetch"
+    assert ws.fetch_count == 1
+    assert len(ws.missing_dep_flight) == 1
+
+
+def test_task_counts(ws):
+    assert ws.task_counts == {
+        "constrained": 0,
+        "executing": 0,
+        "fetch": 0,
+        "flight": 0,
+        "long-running": 0,
+        "memory": 0,
+        "missing": 0,
+        "other": 0,
+        "ready": 0,
+        "waiting": 0,
+    }
+
+
+def test_task_counts_with_actors(ws):
+    ws.handle_stimulus(ComputeTaskEvent.dummy("x", actor=True, stimulus_id="s1"))
+    assert ws.actors == {"x": None}
+    assert ws.task_counts == {
+        "constrained": 0,
+        "executing": 1,
+        "fetch": 0,
+        "flight": 0,
+        "long-running": 0,
+        "memory": 0,
+        "missing": 0,
+        "other": 0,
+        "ready": 0,
+        "waiting": 0,
+    }
+    ws.handle_stimulus(ExecuteSuccessEvent.dummy("x", value=123, stimulus_id="s2"))
+    assert ws.actors == {"x": 123}
+    assert ws.task_counts == {
+        "constrained": 0,
+        "executing": 0,
+        "fetch": 0,
+        "flight": 0,
+        "long-running": 0,
+        "memory": 1,
+        "missing": 0,
+        "other": 0,
+        "ready": 0,
+        "waiting": 0,
+    }
