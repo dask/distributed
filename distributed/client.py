@@ -1441,7 +1441,7 @@ class Client(SyncMethodMixin):
 
         if self.cluster is None:
             return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
-        
+
         return self.cluster.wait_for_workers(n_workers, timeout)
 
     def _heartbeat(self):
