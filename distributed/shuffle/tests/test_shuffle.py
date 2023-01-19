@@ -1454,7 +1454,7 @@ async def test_handle_stale_barrier(c, s, a, b):
     )
     del out
 
-    while s.tasks or shuffle_extA.shuffles or shuffle_extB.shuffles:
+    while s.tasks:
         await asyncio.sleep(0)
 
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
