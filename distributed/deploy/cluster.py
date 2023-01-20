@@ -77,7 +77,6 @@ class Cluster(SyncMethodMixin):
         self.periodic_callbacks = {}
         self._watch_worker_status_comm = None
         self._watch_worker_status_task = None
-        self._scheduler_info_comm = None
         self._cluster_manager_logs = []
         self.quiet = quiet
         self.scheduler_comm = None
@@ -125,16 +124,14 @@ class Cluster(SyncMethodMixin):
         self._cluster_info["name"] = name
 
     async def _start(self):
-        self._watch_worker_status_comm = await self.scheduler_comm.live_comm()
-        self._watch_worker_status_comm.name = "Cluster worker status"
-        await self._watch_worker_status_comm.write({"op": "subscribe_worker_status"})
-        self.scheduler_info = SchedulerInfo(await self._watch_worker_status_comm.read())
+        comm = await self.scheduler_comm.live_comm()
+        comm.name = "Cluster worker status"
+        await comm.write({"op": "subscribe_worker_status"})
+        self.scheduler_info = SchedulerInfo(await comm.read())
+        self._watch_worker_status_comm = comm
         self._watch_worker_status_task = asyncio.ensure_future(
-            self._watch_worker_status(self._watch_worker_status_comm)
+            self._watch_worker_status(comm)
         )
-
-        self._scheduler_info_comm = await self.scheduler_comm.live_comm()
-        self._scheduler_info_comm.name = "Scheduler info"
 
         info = await self.scheduler_comm.get_metadata(
             keys=["cluster-manager-info"], default={}
@@ -194,8 +191,6 @@ class Cluster(SyncMethodMixin):
         with suppress(AttributeError):
             self._adaptive.stop()
 
-        if self._scheduler_info_comm:
-            await self._scheduler_info_comm.close()
         if self._watch_worker_status_comm:
             await self._watch_worker_status_comm.close()
         if self._watch_worker_status_task:
@@ -618,8 +613,7 @@ class Cluster(SyncMethodMixin):
 
     async def update_scheduler_info(self) -> None:
         """Send comm to scheduler requesting information and update scheduler_info accordingly"""
-        await self._scheduler_info_comm.write({"op": "identity"})
-        self.scheduler_info = SchedulerInfo(await self._scheduler_info_comm.read())
+        self.scheduler_info = SchedulerInfo(await self.scheduler_comm.identity())
 
     def wait_for_workers(
         self, n_workers: int | str = no_default, timeout: float | None = None
