@@ -926,11 +926,11 @@ def test_workerstate_flight_failure_to_executing(ws, block_queue):
     assert ws.tasks["x"].state == "executing"
 
 
-def test_workerstate_resumed_fetch_to_executing(ws_with_running_task):
+def test_workerstate_resumed_fetch_to_cancelled_to_executing(ws_with_running_task):
     """Test state loops:
 
     - executing -> cancelled -> resumed(fetch) -> cancelled -> executing
-    - executing -> long-running -> cancelled -> resumed(fetch) -> long-running
+    - executing -> long-running -> cancelled -> resumed(fetch) -> cancelled -> long-running
 
     See also: test_workerstate_resumed_waiting_to_flight
     """
@@ -950,6 +950,31 @@ def test_workerstate_resumed_fetch_to_executing(ws_with_running_task):
         assert instructions == [
             LongRunningMsg(key="x", compute_duration=None, stimulus_id="s4")
         ]
+    assert ws.tasks["x"].state == prev_state
+
+
+def test_workerstate_resumed_fetch_to_executing(ws_with_running_task):
+    ws = ws_with_running_task
+    ws2 = "127.0.0.1:2"
+
+    prev_state = ws.tasks["x"].state
+
+    instructions = ws.handle_stimulus(
+        # x is released for whatever reason (e.g. client cancellation)
+        FreeKeysEvent(keys=["x"], stimulus_id="s1"),
+        # x was computed somewhere else
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s2"),
+        # x was lost / no known replicas, therefore y is cancelled
+        FreeKeysEvent(keys=["y"], stimulus_id="s3"),
+        ComputeTaskEvent.dummy("x", stimulus_id="s4"),
+    )
+    if prev_state == "executing":
+        assert not instructions
+    else:
+        assert instructions == [
+            LongRunningMsg(key="x", compute_duration=None, stimulus_id="s4")
+        ]
+    assert len(ws.tasks) == 1
     assert ws.tasks["x"].state == prev_state
 
 
