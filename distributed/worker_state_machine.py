@@ -2841,14 +2841,14 @@ class WorkerState:
             ts = self.tasks.get(key)
             if ts is None or ts.state != "memory":
                 continue
-            # If the task is still in executing, the scheduler should never have
-            # asked the worker to drop this key.
+            # If the task is still in executing or long-running, the scheduler
+            # should never have asked the worker to drop this key.
             # We cannot simply forget it because there is a time window between
-            # setting the state to executing and preparing/collecting the data
-            # for the task.
+            # setting the state to executing/long-running and
+            # preparing/collecting the data for the task.
             # If a dependency was released during this time, this would pop up
             # as a KeyError during execute which is hard to understand
-            if any(dep.state == "executing" for dep in ts.dependents):
+            if any(dep.state in ("executing", "long-running") for dep in ts.dependents):
                 raise RuntimeError("Encountered invalid state")
             self.log.append((ts.key, "remove-replica", ev.stimulus_id, time()))
             recommendations[ts] = "released"
