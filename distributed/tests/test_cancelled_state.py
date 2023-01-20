@@ -32,6 +32,8 @@ from distributed.worker_state_machine import (
     GatherDepNetworkFailureEvent,
     GatherDepSuccessEvent,
     LongRunningMsg,
+    ReleaseWorkerDataMsg,
+    RemoveReplicasEvent,
     RescheduleEvent,
     SecedeEvent,
     TaskFinishedMsg,
@@ -1172,3 +1174,26 @@ async def test_secede_cancelled_or_resumed_scheduler(c, s, a):
     await ev4.set()
     assert await x == 2
     assert not ws.processing
+
+
+def test_workerstate_remove_replica_of_cancelled_task_dependency(ws):
+    """If a dependency was fetched, but the task gets freed by the scheduler
+    before the add-keys message arrives, the scheduler sends a remove-replica
+    message to the worker, which should then release the dependency.
+
+    See distributed#7487"""
+    ws2 = "127.0.0.1:2"
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s1"),
+        GatherDepSuccessEvent(
+            worker=ws2, total_nbytes=1, data={"x": 123}, stimulus_id="s2"
+        ),
+        FreeKeysEvent(keys=["y"], stimulus_id="s3"),
+    )
+    assert ws.tasks["x"].state == "memory"
+    assert ws.tasks["y"].state == "cancelled"
+    instructions = ws.handle_stimulus(
+        RemoveReplicasEvent(keys=["x"], stimulus_id="s4"),
+    )
+    assert ws.tasks["x"].state == "released"
+    assert instructions == [ReleaseWorkerDataMsg(stimulus_id="s4", key="x")]
