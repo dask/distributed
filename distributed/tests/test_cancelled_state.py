@@ -1181,7 +1181,8 @@ def test_workerstate_remove_replica_of_cancelled_task_dependency(ws):
     before the add-keys message arrives, the scheduler sends a remove-replica
     message to the worker, which should then release the dependency.
 
-    See distributed#7487"""
+    Read: https://github.com/dask/distributed/pull/7487#issuecomment-1387277900
+    """
     ws2 = "127.0.0.1:2"
     instructions = ws.handle_stimulus(
         ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s1"),
@@ -1192,6 +1193,9 @@ def test_workerstate_remove_replica_of_cancelled_task_dependency(ws):
     )
     assert ws.tasks["x"].state == "memory"
     assert ws.tasks["y"].state == "cancelled"
+
+    # Test that the worker does accepts the RemoveReplicasEvent and
+    # subsequently releases the data
     instructions = ws.handle_stimulus(
         RemoveReplicasEvent(keys=["x"], stimulus_id="s4"),
     )
