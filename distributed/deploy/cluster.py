@@ -586,7 +586,7 @@ class Cluster(SyncMethodMixin):
         return id(self)
 
     async def _wait_for_workers(self, n_workers=0, timeout=None):
-        await self.update_scheduler_info()
+        self.scheduler_info = SchedulerInfo(await self.scheduler_comm.identity())
         if timeout:
             deadline = time() + parse_timedelta(timeout)
         else:
@@ -609,11 +609,7 @@ class Cluster(SyncMethodMixin):
                 )
             await asyncio.sleep(0.1)
 
-            await self.update_scheduler_info()
-
-    async def update_scheduler_info(self) -> None:
-        """Send comm to scheduler requesting information and update scheduler_info accordingly"""
-        self.scheduler_info = SchedulerInfo(await self.scheduler_comm.identity())
+            self.scheduler_info = SchedulerInfo(await self.scheduler_comm.identity())
 
     def wait_for_workers(
         self, n_workers: int | str = no_default, timeout: float | None = None
