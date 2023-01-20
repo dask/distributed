@@ -2156,7 +2156,6 @@ class WorkerState:
         --------
         _transition_cancelled_fetch
         _transition_cancelled_waiting
-        _transition_resumed_waiting
         _transition_flight_fetch
         """
         if ts.previous == "flight":
@@ -2203,47 +2202,6 @@ class WorkerState:
         ts.next = None
         return {}, []
 
-    def _transition_resumed_waiting(
-        self, ts: TaskState, *, stimulus_id: str
-    ) -> RecsInstrs:
-        """
-        See also
-        --------
-        _transition_cancelled_fetch
-        _transition_cancelled_or_resumed_long_running
-        _transition_cancelled_waiting
-        _transition_resumed_fetch
-        """
-        # None of the exit events of execute or gather_dep recommend a transition to
-        # waiting
-        assert not ts.done
-        if ts.previous == "executing":
-            assert ts.next == "fetch"
-            # We're back where we started. We should forget about the entire
-            # cancellation attempt
-            ts.state = "executing"
-            ts.next = None
-            ts.previous = None
-            return {}, []
-
-        elif ts.previous == "long-running":
-            assert ts.next == "fetch"
-            # Same as executing, and in addition send the LongRunningMsg in arrears
-            # Note that, if the task seceded before it was cancelled, this will cause
-            # the message to be sent twice.
-            ts.state = "long-running"
-            ts.next = None
-            ts.previous = None
-            smsg = LongRunningMsg(
-                key=ts.key, compute_duration=None, stimulus_id=stimulus_id
-            )
-            return {}, [smsg]
-
-        else:
-            assert ts.previous == "flight"
-            assert ts.next == "waiting"
-            return {}, []
-
     def _transition_cancelled_fetch(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
@@ -2252,7 +2210,6 @@ class WorkerState:
         --------
         _transition_cancelled_waiting
         _transition_resumed_fetch
-        _transition_resumed_waiting
         """
         if ts.previous == "flight":
             if ts.done:
@@ -2281,7 +2238,6 @@ class WorkerState:
         _transition_cancelled_fetch
         _transition_cancelled_or_resumed_long_running
         _transition_resumed_fetch
-        _transition_resumed_waiting
         """
         # None of the exit events of gather_dep or execute recommend a transition to
         # waiting
@@ -2431,7 +2387,6 @@ class WorkerState:
         --------
         _transition_executing_long_running
         _transition_cancelled_waiting
-        _transition_resumed_waiting
         """
         assert ts.previous in ("executing", "long-running")
         ts.previous = "long-running"
@@ -2566,7 +2521,6 @@ class WorkerState:
         ("resumed", "memory"): _transition_resumed_memory,
         ("resumed", "released"): _transition_resumed_released,
         ("resumed", "rescheduled"): _transition_resumed_rescheduled,
-        ("resumed", "waiting"): _transition_resumed_waiting,
         ("constrained", "executing"): _transition_constrained_executing,
         ("constrained", "released"): _transition_generic_released,
         ("error", "released"): _transition_generic_released,
