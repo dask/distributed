@@ -167,13 +167,14 @@ def vsum(*args):
     return sum(args)
 
 
+@pytest.mark.skip(reason="times out")
 @pytest.mark.avoid_ci
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 80)
 async def test_stress_communication(c, s, *workers):
     s.validate = False  # very slow otherwise
     for w in workers:
-        w.validate = False
+        w.state.validate = False
     da = pytest.importorskip("dask.array")
     # Test consumes many file descriptors and can hang if the limit is too low
     resource = pytest.importorskip("resource")

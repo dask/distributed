@@ -21,9 +21,9 @@ from distributed import Client, Event, KilledWorker, Nanny, Scheduler, Worker, w
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import Status
 from distributed.metrics import monotonic
-from distributed.spill import has_zict_210
 from distributed.utils_test import (
     NO_AMM,
+    async_wait_for,
     captured_logger,
     gen_cluster,
     inc,
@@ -37,11 +37,6 @@ from distributed.worker_state_machine import (
     GatherDep,
     GatherDepSuccessEvent,
     TaskErredMsg,
-)
-
-requires_zict_210 = pytest.mark.skipif(
-    not has_zict_210,
-    reason="requires zict version >= 2.1.0",
 )
 
 
@@ -282,17 +277,11 @@ async def test_fail_to_pickle_execute_2(c, s, a):
 
     y = c.submit(lambda: "y" * 256, key="y")
     await wait(y)
-    if has_zict_210:
-        assert set(a.data.memory) == {"x", "y"}
-    else:
-        assert set(a.data.memory) == {"y"}
-
+    assert set(a.data.memory) == {"x", "y"}
     assert not a.data.disk
-
     await assert_basic_futures(c)
 
 
-@requires_zict_210
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
@@ -373,7 +362,6 @@ async def test_spill_target_threshold(c, s, a):
     assert set(a.data.disk) == {"y"}
 
 
-@requires_zict_210
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
@@ -1062,8 +1050,10 @@ async def test_release_evloop_while_spilling(c, s, a):
     worker_kwargs={"memory_limit": "100 MiB"},
     # ^ must be smaller than system memory limit, otherwise that will take precedence
     config={
-        "distributed.worker.memory.target": 0.5,
-        "distributed.worker.memory.spill": 1.0,
+        "distributed.worker.memory.target": 0.5,  # 50 MiB
+        # 97 GiB. It must be extremely high otherwise there's a risk we'll spend time
+        # trying to gc before get_process_memory gets patched below
+        "distributed.worker.memory.spill": 1000,
         "distributed.worker.memory.pause": False,
         "distributed.worker.memory.monitor-interval": "10ms",
     },
@@ -1072,7 +1062,7 @@ async def test_digests(c, s, a, b):
     trigger_spill = False
 
     def get_process_memory():
-        return 2**30 if trigger_spill else 0
+        return 1001 * 100 * 2**20 if trigger_spill else 0
 
     a.monitor.get_process_memory = get_process_memory
 
@@ -1156,34 +1146,40 @@ async def test_deprecated_params(s, name):
             assert getattr(a.memory_manager, name) == 0.789
 
 
-@gen_cluster(
-    client=True,
-    config={"distributed.worker.memory.target": False},
-    worker_kwargs={"heartbeat_interval": "10ms"},
-)
-async def test_warn_on_sizeof_overestimate(c, s, a, b):
-    class C:
-        def __sizeof__(self):
-            return 2**40
+@gen_cluster(config={"distributed.worker.memory.monitor-interval": "10ms"})
+async def test_pause_while_idle(s, a, b):
+    sa = s.workers[a.address]
+    assert a.address in s.idle
+    assert sa in s.running
 
-    with captured_logger("distributed.worker") as log:
-        x = c.submit(C)
-        # Wait for heartbeat
-        while "exceeds process memory" not in log.getvalue():
-            await asyncio.sleep(0.01)
+    a.monitor.get_process_memory = lambda: 2**40
+    await async_wait_for(lambda: sa.status == Status.paused, timeout=2)
+    assert a.address not in s.idle
+    assert sa not in s.running
+
+    a.monitor.get_process_memory = lambda: 0
+    await async_wait_for(lambda: sa.status == Status.running, timeout=2)
+    assert a.address in s.idle
+    assert sa in s.running
 
 
-@gen_cluster(client=True, worker_kwargs={"heartbeat_interval": "10ms"})
-async def test_warn_on_sizeof_overestimate_spill(c, s, a, b):
-    class C:
-        def __sizeof__(self):
-            return 2**40
+@gen_cluster(client=True, config={"distributed.worker.memory.monitor-interval": "10ms"})
+async def test_pause_while_saturated(c, s, a, b):
+    sa = s.workers[a.address]
+    ev = Event()
+    futs = c.map(lambda i, ev: ev.wait(), range(3), ev=ev, workers=[a.address])
+    await async_wait_for(lambda: len(a.state.tasks) == 3, timeout=2)
+    assert sa in s.saturated
+    assert sa in s.running
 
-    with captured_logger("distributed.worker") as log:
-        x = c.submit(C)
-        # Wait for heartbeat
-        while not s.memory.spilled:
-            await asyncio.sleep(0.01)
+    a.monitor.get_process_memory = lambda: 2**40
+    await async_wait_for(lambda: sa.status == Status.paused, timeout=2)
+    assert sa not in s.saturated
+    assert sa not in s.running
 
-    # Measure managed, not managed+spilled
-    assert "exceeds process memory" not in log.getvalue()
+    a.monitor.get_process_memory = lambda: 0
+    await async_wait_for(lambda: sa.status == Status.running, timeout=2)
+    assert sa in s.saturated
+    assert sa in s.running
+
+    await ev.set()

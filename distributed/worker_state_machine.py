@@ -23,7 +23,16 @@ from copy import copy
 from dataclasses import dataclass, field
 from functools import lru_cache, partial, singledispatchmethod
 from itertools import chain
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypedDict, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Literal,
+    NamedTuple,
+    Sequence,
+    TypedDict,
+    cast,
+)
 
 from tlz import peekn
 
@@ -95,6 +104,8 @@ WAITING_FOR_DATA: set[TaskStateState] = {
 }
 
 NO_VALUE = "--no-value-sentinel--"
+
+RUN_ID_SENTINEL = -1
 
 
 class SerializedTask(NamedTuple):
@@ -220,6 +231,8 @@ class TaskState:
 
     #: Task key. Mandatory.
     key: str
+    #: Task run ID.
+    run_id: int = RUN_ID_SENTINEL
     #: A named tuple containing the ``function``, ``args``, ``kwargs`` and ``task``
     #: associated with this `TaskState` instance. This defaults to ``None`` and can
     #: remain empty if it is a dependency that this worker will receive from another
@@ -451,6 +464,7 @@ class TaskFinishedMsg(SendMessageToScheduler):
     op = "task-finished"
 
     key: str
+    run_id: int
     nbytes: int | None
     type: bytes  # serialized class
     typename: str
@@ -736,6 +750,7 @@ class GatherDepFailureEvent(GatherDepDoneEvent):
 @dataclass
 class ComputeTaskEvent(StateMachineEvent):
     key: str
+    run_id: int
     who_has: dict[str, Collection[str]]
     nbytes: dict[str, int]
     priority: tuple[int, ...]
@@ -747,6 +762,7 @@ class ComputeTaskEvent(StateMachineEvent):
     resource_restrictions: dict[str, float]
     actor: bool
     annotations: dict
+
     __slots__ = tuple(__annotations__)
 
     def __post_init__(self) -> None:
@@ -785,6 +801,7 @@ class ComputeTaskEvent(StateMachineEvent):
     def dummy(
         key: str,
         *,
+        run_id: int = 0,
         who_has: dict[str, Collection[str]] | None = None,
         nbytes: dict[str, int] | None = None,
         priority: tuple[int, ...] = (0,),
@@ -799,6 +816,7 @@ class ComputeTaskEvent(StateMachineEvent):
         """
         return ComputeTaskEvent(
             key=key,
+            run_id=run_id,
             who_has=who_has or {},
             nbytes=nbytes or {k: 1 for k in who_has or ()},
             priority=priority,
@@ -826,6 +844,7 @@ class ExecuteDoneEvent(StateMachineEvent):
 
 @dataclass
 class ExecuteSuccessEvent(ExecuteDoneEvent):
+    run_id: int  # FIXME: Utilize the run ID in all ExecuteDoneEvents
     value: object
     start: float
     stop: float
@@ -855,6 +874,7 @@ class ExecuteSuccessEvent(ExecuteDoneEvent):
         key: str,
         value: object = None,
         *,
+        run_id: int = 1,
         nbytes: int = 1,
         stimulus_id: str,
     ) -> ExecuteSuccessEvent:
@@ -863,6 +883,7 @@ class ExecuteSuccessEvent(ExecuteDoneEvent):
         """
         return ExecuteSuccessEvent(
             key=key,
+            run_id=run_id,
             value=value,
             start=0.0,
             stop=1.0,
@@ -987,7 +1008,7 @@ class RemoveReplicasEvent(StateMachineEvent):
 @dataclass
 class FreeKeysEvent(StateMachineEvent):
     __slots__ = ("keys",)
-    keys: Collection[str]
+    keys: Sequence[str]
 
 
 @dataclass
@@ -1751,7 +1772,10 @@ class WorkerState:
         return None
 
     def _get_task_finished_msg(
-        self, ts: TaskState, stimulus_id: str
+        self,
+        ts: TaskState,
+        run_id: int,
+        stimulus_id: str,
     ) -> TaskFinishedMsg:
         if ts.key not in self.data and ts.key not in self.actors:
             raise RuntimeError(f"Task {ts} not ready")
@@ -1772,6 +1796,7 @@ class WorkerState:
             typ_serialized = pickle.dumps(typ.__name__)
         return TaskFinishedMsg(
             key=ts.key,
+            run_id=run_id,
             nbytes=ts.nbytes,
             type=typ_serialized,
             typename=typename(typ),
@@ -2414,13 +2439,13 @@ class WorkerState:
         return self._ensure_computing()
 
     def _transition_executing_memory(
-        self, ts: TaskState, value: object, *, stimulus_id: str
+        self, ts: TaskState, value: object, run_id: int, *, stimulus_id: str
     ) -> RecsInstrs:
         """This transition is *normally* triggered by ExecuteSuccessEvent.
         However, beware that it can also be triggered by scatter().
         """
         return self._transition_to_memory(
-            ts, value, "task-finished", stimulus_id=stimulus_id
+            ts, value, "task-finished", run_id=run_id, stimulus_id=stimulus_id
         )
 
     def _transition_released_memory(
@@ -2428,21 +2453,21 @@ class WorkerState:
     ) -> RecsInstrs:
         """This transition is triggered by scatter()"""
         return self._transition_to_memory(
-            ts, value, "add-keys", stimulus_id=stimulus_id
+            ts, value, "add-keys", run_id=RUN_ID_SENTINEL, stimulus_id=stimulus_id
         )
 
     def _transition_flight_memory(
-        self, ts: TaskState, value: object, *, stimulus_id: str
+        self, ts: TaskState, value: object, run_id: int, *, stimulus_id: str
     ) -> RecsInstrs:
         """This transition is *normally* triggered by GatherDepSuccessEvent.
         However, beware that it can also be triggered by scatter().
         """
         return self._transition_to_memory(
-            ts, value, "add-keys", stimulus_id=stimulus_id
+            ts, value, "add-keys", run_id=RUN_ID_SENTINEL, stimulus_id=stimulus_id
         )
 
     def _transition_resumed_memory(
-        self, ts: TaskState, value: object, *, stimulus_id: str
+        self, ts: TaskState, value: object, run_id: int, *, stimulus_id: str
     ) -> RecsInstrs:
         """Normally, we send to the scheduler a 'task-finished' message for a completed
         execution and 'add-data' for a completed replication from another worker. The
@@ -2464,13 +2489,16 @@ class WorkerState:
 
         ts.previous = None
         ts.next = None
-        return self._transition_to_memory(ts, value, msg_type, stimulus_id=stimulus_id)
+        return self._transition_to_memory(
+            ts, value, msg_type, run_id=run_id, stimulus_id=stimulus_id
+        )
 
     def _transition_to_memory(
         self,
         ts: TaskState,
         value: object,
         msg_type: Literal["add-keys", "task-finished"],
+        run_id: int,
         *,
         stimulus_id: str,
     ) -> RecsInstrs:
@@ -2487,7 +2515,14 @@ class WorkerState:
             instrs.append(AddKeysMsg(keys=[ts.key], stimulus_id=stimulus_id))
         else:
             assert msg_type == "task-finished"
-            instrs.append(self._get_task_finished_msg(ts, stimulus_id=stimulus_id))
+            assert run_id != RUN_ID_SENTINEL
+            instrs.append(
+                self._get_task_finished_msg(
+                    ts,
+                    run_id=run_id,
+                    stimulus_id=stimulus_id,
+                )
+            )
         return recs, instrs
 
     def _transition_released_forgotten(
@@ -2739,7 +2774,7 @@ class WorkerState:
         for key, value in ev.data.items():
             try:
                 ts = self.tasks[key]
-                recommendations[ts] = ("memory", value)
+                recommendations[ts] = ("memory", value, RUN_ID_SENTINEL)
             except KeyError:
                 self.tasks[key] = ts = TaskState(key)
 
@@ -2861,7 +2896,7 @@ class WorkerState:
         except KeyError:
             self.tasks[ev.key] = ts = TaskState(ev.key)
         self.log.append((ev.key, "compute-task", ts.state, ev.stimulus_id, time()))
-
+        ts.run_id = ev.run_id
         recommendations: Recs = {}
         instructions: Instructions = []
 
@@ -2873,7 +2908,9 @@ class WorkerState:
             pass
         elif ts.state == "memory":
             instructions.append(
-                self._get_task_finished_msg(ts, stimulus_id=ev.stimulus_id)
+                self._get_task_finished_msg(
+                    ts, run_id=ev.run_id, stimulus_id=ev.stimulus_id
+                )
             )
         elif ts.state == "error":
             instructions.append(TaskErredMsg.from_task(ts, stimulus_id=ev.stimulus_id))
@@ -2969,7 +3006,7 @@ class WorkerState:
         recommendations: Recs = {}
         for ts in self._gather_dep_done_common(ev):
             if ts.key in ev.data:
-                recommendations[ts] = ("memory", ev.data[ts.key])
+                recommendations[ts] = ("memory", ev.data[ts.key], ts.run_id)
             else:
                 self.log.append((ts.key, "missing-dep", ev.stimulus_id, time()))
                 if self.validate:
@@ -3164,7 +3201,7 @@ class WorkerState:
         )
         ts.nbytes = ev.nbytes
         ts.type = ev.type
-        recs[ts] = ("memory", ev.value)
+        recs[ts] = ("memory", ev.value, ev.run_id)
         return recs, instr
 
     @_handle_event.register

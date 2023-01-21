@@ -15,12 +15,13 @@ from distributed.scheduler import ALL_TASK_STATES, Scheduler
 
 
 class SchedulerMetricCollector(PrometheusCollector):
+    server: Scheduler
+
     def __init__(self, server: Scheduler):
         super().__init__(server)
         self.subsystem = "scheduler"
 
-    def collect(self) -> Iterator[CounterMetricFamily | GaugeMetricFamily]:
-
+    def collect(self) -> Iterator[GaugeMetricFamily | CounterMetricFamily]:
         yield GaugeMetricFamily(
             self.build_name("clients"),
             "Number of clients connected",
@@ -38,9 +39,17 @@ class SchedulerMetricCollector(PrometheusCollector):
             "Number of workers known by scheduler",
             labels=["state"],
         )
-        worker_states.add_metric(["connected"], len(self.server.workers))
-        worker_states.add_metric(["saturated"], len(self.server.saturated))
         worker_states.add_metric(["idle"], len(self.server.idle))
+        worker_states.add_metric(
+            ["partially_saturated"],
+            len(self.server.running)
+            - len(self.server.idle)
+            - len(self.server.saturated),
+        )
+        worker_states.add_metric(["saturated"], len(self.server.saturated))
+        worker_states.add_metric(
+            ["paused_or_retiring"], len(self.server.workers) - len(self.server.running)
+        )
         yield worker_states
 
         tasks = GaugeMetricFamily(

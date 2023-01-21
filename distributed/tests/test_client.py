@@ -6297,6 +6297,7 @@ async def test_shutdown():
 
                 assert s.status == Status.closed
                 assert w.status in {Status.closed, Status.closing}
+                assert c.status == "closed"
 
 
 @gen_test()
@@ -6308,15 +6309,44 @@ async def test_shutdown_localcluster():
             await c.shutdown()
 
         assert lc.scheduler.status == Status.closed
+        assert lc.status == Status.closed
+        assert c.status == "closed"
 
 
 @gen_test()
-async def test_shutdown_is_clean():
+async def test_shutdown_stops_callbacks():
     async with Scheduler(dashboard_address=":0") as s:
         async with Worker(s.address) as w:
             async with Client(s.address, asynchronous=True) as c:
                 await c.shutdown()
                 assert not any(pc.is_running() for pc in c._periodic_callbacks.values())
+
+
+@gen_test()
+async def test_shutdown_is_quiet_with_cluster():
+    async with LocalCluster(
+        n_workers=1, asynchronous=True, processes=False, dashboard_address=":0"
+    ) as cluster:
+        with captured_logger(logging.getLogger("distributed.client")) as logger:
+            timeout = 0.1
+            async with Client(cluster, asynchronous=True, timeout=timeout) as c:
+                await c.shutdown()
+                await asyncio.sleep(timeout)
+            msg = logger.getvalue().strip()
+            assert msg == "Shutting down scheduler from Client", msg
+
+
+@gen_test()
+async def test_client_is_quiet_cluster_close():
+    async with LocalCluster(
+        n_workers=1, asynchronous=True, processes=False, dashboard_address=":0"
+    ) as cluster:
+        with captured_logger(logging.getLogger("distributed.client")) as logger:
+            timeout = 0.1
+            async with Client(cluster, asynchronous=True, timeout=timeout) as c:
+                await cluster.close()
+                await asyncio.sleep(timeout)
+            assert not logger.getvalue().strip()
 
 
 @gen_test()
@@ -7933,31 +7963,69 @@ async def test_wait_for_workers_n_workers_value_check(c, s, a, b, value, excepti
         await c.wait_for_workers(value)
 
 
-@gen_cluster(client=True)
-async def test_unpacks_remotedata_namedtuple(c, s, a, b):
-    class NamedTupleAnnotation(namedtuple("BaseAnnotation", field_names="value")):
-        def unwrap(self):
-            return self.value
+class PlainNamedTuple(namedtuple("PlainNamedTuple", "value")):
+    """Namedtuple with a default constructor."""
 
+
+class NewArgsNamedTuple(namedtuple("NewArgsNamedTuple", "ab, c")):
+    """Namedtuple with a custom constructor."""
+
+    def __new__(cls, a, b, c):
+        return super().__new__(cls, f"{a}-{b}", c)
+
+    def __getnewargs__(self):
+        return *self.ab.split("-"), self.c
+
+
+class NewArgsExNamedTuple(namedtuple("NewArgsExNamedTuple", "ab, c, k, v")):
+    """Namedtuple with a custom constructor including keywords-only arguments."""
+
+    def __new__(cls, a, b, c, **kw):
+        return super().__new__(cls, f"{a}-{b}", c, tuple(kw.keys()), tuple(kw.values()))
+
+    def __getnewargs_ex__(self):
+        return (*self.ab.split("-"), self.c), dict(zip(self.k, self.v))
+
+
+@pytest.mark.parametrize(
+    "typ, args, kwargs",
+    [
+        (PlainNamedTuple, ["some-data"], {}),
+        (NewArgsNamedTuple, ["some", "data", "more"], {}),
+        (NewArgsExNamedTuple, ["some", "data", "more"], {"another": "data"}),
+    ],
+)
+@gen_cluster(client=True)
+async def test_unpacks_remotedata_namedtuple(c, s, a, b, typ, args, kwargs):
     def identity(x):
         return x
 
-    outer_future = c.submit(identity, NamedTupleAnnotation("some-data"))
+    outer_future = c.submit(identity, typ(*args, **kwargs))
     result = await outer_future
-    assert result == NamedTupleAnnotation(value="some-data")
+    assert result == typ(*args, **kwargs)
 
 
+@pytest.mark.parametrize(
+    "typ, args, kwargs",
+    [
+        (PlainNamedTuple, [], {}),
+        (NewArgsNamedTuple, ["some", "data"], {}),
+        (NewArgsExNamedTuple, ["some", "data"], {"another": "data"}),
+    ],
+)
 @gen_cluster(client=True)
-async def test_resolves_future_in_namedtuple(c, s, a, b):
-    TestTuple = namedtuple("TestTuple", field_names=["x", "y"])
-
+async def test_resolves_future_in_namedtuple(c, s, a, b, typ, args, kwargs):
     def identity(x):
         return x
 
-    inner_future = c.submit(identity, 1)
-    outer_future = c.submit(identity, TestTuple(x=inner_future, y=2))
+    inner_result = 1
+    inner_future = c.submit(identity, inner_result)
+    kwin, kwout = dict(kwargs), dict(kwargs)
+    if kwargs:
+        kwin["inner"], kwout["inner"] = inner_future, inner_result
+    outer_future = c.submit(identity, typ(*args, inner_future, **kwin))
     result = await outer_future
-    assert result == TestTuple(x=1, y=2)
+    assert result == typ(*args, inner_result, **kwout)
 
 
 @gen_cluster(client=True)

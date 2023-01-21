@@ -1,6 +1,6 @@
 click >= 7.0
 cloudpickle >= 1.5.0
-dask == 2022.12.1
+dask == 2023.1.0
 jinja2 >= 2.10.3
 locket >= 1.0.0
 msgpack >= 1.0.0

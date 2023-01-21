@@ -36,6 +36,7 @@ from typing import Any as AnyType
 from typing import ClassVar, Iterator, TypeVar, overload
 
 import click
+import psutil
 import tblib.pickling_support
 
 try:
@@ -200,8 +201,6 @@ def get_ip_interface(ifname):
     ValueError is raised if the interface does no have an IPv4 address
     associated with it.
     """
-    import psutil
-
     net_if_addrs = psutil.net_if_addrs()
 
     if ifname not in net_if_addrs:
