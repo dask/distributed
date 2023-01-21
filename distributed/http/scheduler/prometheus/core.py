@@ -89,7 +89,7 @@ class SchedulerMetricCollector(PrometheusCollector):
         yield tasks
 
         time_spent_compute_tasks = CounterMetricFamily(
-            self.build_name("tasks_time_spent_compute"),
+            self.build_name("tasks_compute"),
             "Total amount of compute time spent in each prefix",
             labels=["task_prefix_name"],
             unit="seconds",
@@ -100,7 +100,7 @@ class SchedulerMetricCollector(PrometheusCollector):
         yield time_spent_compute_tasks
 
         time_spent_transfer_tasks = CounterMetricFamily(
-            self.build_name("tasks_time_spent_transfer"),
+            self.build_name("tasks_transfer"),
             "Total amount of transfer time spent in each prefix",
             labels=["task_prefix_name"],
             unit="seconds",
@@ -113,7 +113,7 @@ class SchedulerMetricCollector(PrometheusCollector):
         yield time_spent_transfer_tasks
 
         nbytes_tasks = CounterMetricFamily(
-            self.build_name("tasks_nbytes"),
+            self.build_name("tasks"),
             "The total number of bytes that this task prefix has produced",
             labels=["task_prefix_name"],
             unit="bytes",
