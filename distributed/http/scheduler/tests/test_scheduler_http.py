@@ -111,7 +111,7 @@ async def test_prometheus(c, s, a, b):
         "dask_scheduler_tasks",
         "dask_scheduler_tasks_suspicious",
         "dask_scheduler_tasks_forgotten",
-        "dask_scheduler_tasks_bytes",
+        "dask_scheduler_tasks_output_bytes",
         "dask_scheduler_tasks_compute_seconds",
         "dask_scheduler_tasks_transfer_seconds",
         "dask_scheduler_prefix_state_totals",
