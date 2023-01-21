@@ -120,34 +120,8 @@ if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
     from typing_extensions import TypeAlias
 
-    # TODO move out of TYPE_CHECKING (requires Python >=3.10)
-    # Not to be confused with distributed.worker_state_machine.TaskStateState
-    TaskStateState: TypeAlias = Literal[
-        "released",
-        "waiting",
-        "no-worker",
-        "queued",
-        "processing",
-        "memory",
-        "erred",
-        "forgotten",
-    ]
-
-    # TODO remove quotes (requires Python >=3.9)
-    # {task key -> finish state}
-    # Not to be confused with distributed.worker_state_machine.Recs
-    Recs: TypeAlias = "dict[str, TaskStateState]"
-    # {client or worker address: [{op: <key>, ...}, ...]}
-    Msgs: TypeAlias = "dict[str, list[dict[str, Any]]]"
-    # (recommendations, client messages, worker messages)
-    RecsMsgs: TypeAlias = "tuple[Recs, Msgs, Msgs]"
-else:
-    TaskStateState = str
-    Recs = dict
-    Msgs = dict
-    RecsMsgs = tuple
-
-ALL_TASK_STATES: set[TaskStateState] = {
+# Not to be confused with distributed.worker_state_machine.TaskStateState
+TaskStateState: TypeAlias = Literal[
     "released",
     "waiting",
     "no-worker",
@@ -156,7 +130,18 @@ ALL_TASK_STATES: set[TaskStateState] = {
     "memory",
     "erred",
     "forgotten",
-}
+]
+
+ALL_TASK_STATES: Set[TaskStateState] = set(TaskStateState.__args__)  # type: ignore
+
+# TODO remove quotes (requires Python >=3.9)
+# {task key -> finish state}
+# Not to be confused with distributed.worker_state_machine.Recs
+Recs: TypeAlias = "dict[str, TaskStateState]"
+# {client or worker address: [{op: <key>, ...}, ...]}
+Msgs: TypeAlias = "dict[str, list[dict[str, Any]]]"
+# (recommendations, client messages, worker messages)
+RecsMsgs: TypeAlias = "tuple[Recs, Msgs, Msgs]"
 
 logger = logging.getLogger(__name__)
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
