@@ -44,9 +44,11 @@ dask_scheduler_tasks_compute_seconds_total
     Total time (per prefix) spent computing tasks
 dask_scheduler_tasks_transfer_seconds_total
     Total time (per prefix) spent transferring
-dask_scheduler_tasks_output_bytes_total
-    The total number of bytes that this task prefix has produced over time.
-    Not to be confused with the current memory usage (``dask_worker_memory_bytes``).
+dask_scheduler_tasks_output_bytes
+    Current size of in memory tasks, broken down by task prefix, without duplicates.
+    Note that when a task output is transferred between worker, you'll typically end up
+    with a duplicate, so this measure is going to be lower than the actual cluster-wide
+    managed memory. See also ``dask_worker_memory_bytes``, which does count duplicates.
 dask_scheduler_prefix_state_totals_total
     Accumulated count of task prefix in each state
 dask_scheduler_tick_count_total

@@ -112,9 +112,9 @@ class SchedulerMetricCollector(PrometheusCollector):
             )
         yield time_spent_transfer_tasks
 
-        nbytes_tasks = CounterMetricFamily(
+        nbytes_tasks = GaugeMetricFamily(
             self.build_name("tasks_output"),
-            "The total number of bytes that this task prefix has produced",
+            "Current number of bytes in memory (without duplicates) for each prefix",
             labels=["task_prefix_name"],
             unit="bytes",
         )
