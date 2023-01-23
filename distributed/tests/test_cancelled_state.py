@@ -32,6 +32,8 @@ from distributed.worker_state_machine import (
     GatherDepNetworkFailureEvent,
     GatherDepSuccessEvent,
     LongRunningMsg,
+    ReleaseWorkerDataMsg,
+    RemoveReplicasEvent,
     RescheduleEvent,
     SecedeEvent,
     TaskFinishedMsg,
@@ -457,7 +459,7 @@ async def test_resumed_cancelled_handle_compute(
     Given the history of a task
     executing -> cancelled -> resumed(fetch)
 
-    A handle_compute should properly restore executing.
+    the scheduler should reject the result upon completion and reschedule the task.
     """
     # This test is heavily using set_restrictions to simulate certain scheduler
     # decisions of placing keys
@@ -535,11 +537,11 @@ async def test_resumed_cancelled_handle_compute(
                 (f3.key, "ready", "executing", "executing", {}),
                 (f3.key, "executing", "released", "cancelled", {}),
                 (f3.key, "cancelled", "fetch", "resumed", {}),
-                (f3.key, "resumed", "memory", "memory", {}),
+                (f3.key, "resumed", "released", "cancelled", {}),
                 (
                     f3.key,
+                    "cancelled",
                     "memory",
-                    "released",
                     "released",
                     {f2.key: "released", f3.key: "forgotten"},
                 ),
@@ -558,11 +560,15 @@ async def test_resumed_cancelled_handle_compute(
                 (f3.key, "ready", "executing", "executing", {}),
                 (f3.key, "executing", "released", "cancelled", {}),
                 (f3.key, "cancelled", "fetch", "resumed", {}),
-                (f3.key, "resumed", "error", "released", {f3.key: "fetch"}),
-                (f3.key, "fetch", "flight", "flight", {}),
-                (f3.key, "flight", "missing", "missing", {}),
-                (f3.key, "missing", "waiting", "waiting", {f2.key: "fetch"}),
-                (f3.key, "waiting", "ready", "ready", {f3.key: "executing"}),
+                (f3.key, "resumed", "released", "cancelled", {}),
+                (
+                    f3.key,
+                    "cancelled",
+                    "error",
+                    "released",
+                    {f2.key: "released", f3.key: "forgotten"},
+                ),
+                (f3.key, "released", "forgotten", "forgotten", {f2.key: "forgotten"}),
                 (f3.key, "ready", "executing", "executing", {}),
                 (f3.key, "executing", "memory", "memory", {}),
             ],
@@ -577,7 +583,8 @@ async def test_resumed_cancelled_handle_compute(
                 (f3.key, "ready", "executing", "executing", {}),
                 (f3.key, "executing", "released", "cancelled", {}),
                 (f3.key, "cancelled", "fetch", "resumed", {}),
-                (f3.key, "resumed", "waiting", "executing", {}),
+                (f3.key, "resumed", "released", "cancelled", {}),
+                (f3.key, "cancelled", "waiting", "executing", {}),
                 (f3.key, "executing", "memory", "memory", {}),
                 (
                     f3.key,
@@ -602,8 +609,10 @@ async def test_resumed_cancelled_handle_compute(
                 (f3.key, "ready", "executing", "executing", {}),
                 (f3.key, "executing", "released", "cancelled", {}),
                 (f3.key, "cancelled", "fetch", "resumed", {}),
-                (f3.key, "resumed", "waiting", "executing", {}),
+                (f3.key, "resumed", "released", "cancelled", {}),
+                (f3.key, "cancelled", "waiting", "executing", {}),
                 (f3.key, "executing", "error", "error", {}),
+                # FIXME: (distributed#7489)
             ],
         )
     else:
@@ -917,11 +926,11 @@ def test_workerstate_flight_failure_to_executing(ws, block_queue):
     assert ws.tasks["x"].state == "executing"
 
 
-def test_workerstate_resumed_fetch_to_executing(ws_with_running_task):
+def test_workerstate_resumed_fetch_to_cancelled_to_executing(ws_with_running_task):
     """Test state loops:
 
     - executing -> cancelled -> resumed(fetch) -> cancelled -> executing
-    - executing -> long-running -> cancelled -> resumed(fetch) -> long-running
+    - executing -> long-running -> cancelled -> resumed(fetch) -> cancelled -> long-running
 
     See also: test_workerstate_resumed_waiting_to_flight
     """
@@ -941,6 +950,32 @@ def test_workerstate_resumed_fetch_to_executing(ws_with_running_task):
         assert instructions == [
             LongRunningMsg(key="x", compute_duration=None, stimulus_id="s4")
         ]
+    assert ws.tasks["x"].state == prev_state
+
+
+def test_workerstate_resumed_fetch_to_executing(ws_with_running_task):
+    """See test_resumed_cancelled_handle_compute for end-to-end version"""
+    ws = ws_with_running_task
+    ws2 = "127.0.0.1:2"
+
+    prev_state = ws.tasks["x"].state
+
+    instructions = ws.handle_stimulus(
+        # x is released for whatever reason (e.g. client cancellation)
+        FreeKeysEvent(keys=["x"], stimulus_id="s1"),
+        # x was computed somewhere else
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s2"),
+        # x was lost / no known replicas, therefore y is cancelled
+        FreeKeysEvent(keys=["y"], stimulus_id="s3"),
+        ComputeTaskEvent.dummy("x", stimulus_id="s4"),
+    )
+    if prev_state == "executing":
+        assert not instructions
+    else:
+        assert instructions == [
+            LongRunningMsg(key="x", compute_duration=None, stimulus_id="s4")
+        ]
+    assert len(ws.tasks) == 1
     assert ws.tasks["x"].state == prev_state
 
 
@@ -1165,3 +1200,32 @@ async def test_secede_cancelled_or_resumed_scheduler(c, s, a):
     await ev4.set()
     assert await x == 2
     assert not ws.processing
+
+
+def test_workerstate_remove_replica_of_cancelled_task_dependency(ws):
+    """If a dependency was fetched, but the task gets freed by the scheduler
+    before the add-keys message arrives, the scheduler sends a remove-replica
+    message to the worker, which should then release the dependency.
+
+    Read: https://github.com/dask/distributed/pull/7487#issuecomment-1387277900
+
+        See test_resumed_cancelled_handle_compute for end-to-end version
+    """
+    ws2 = "127.0.0.1:2"
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s1"),
+        GatherDepSuccessEvent(
+            worker=ws2, total_nbytes=1, data={"x": 123}, stimulus_id="s2"
+        ),
+        FreeKeysEvent(keys=["y"], stimulus_id="s3"),
+    )
+    assert ws.tasks["x"].state == "memory"
+    assert ws.tasks["y"].state == "cancelled"
+
+    # Test that the worker does accepts the RemoveReplicasEvent and
+    # subsequently releases the data
+    instructions = ws.handle_stimulus(
+        RemoveReplicasEvent(keys=["x"], stimulus_id="s4"),
+    )
+    assert ws.tasks["x"].state == "released"
+    assert instructions == [ReleaseWorkerDataMsg(stimulus_id="s4", key="x")]
