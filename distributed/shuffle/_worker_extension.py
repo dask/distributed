@@ -151,11 +151,6 @@ class ShuffleRun:
     def __repr__(self) -> str:
         return f"<Shuffle {self.id}[{self.run_id}] on {self.local_address}>"
 
-    def __eq__(self, other: object) -> bool:
-        if type(other) is not ShuffleRun:
-            return False
-        return self.run_id == other.run_id
-
     def __hash__(self) -> int:
         return self.run_id
 
