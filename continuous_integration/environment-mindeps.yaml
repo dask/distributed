@@ -22,7 +22,7 @@ dependencies:
   # Distributed depends on the latest version of Dask
   - pip
   - pip:
-    - git+https://github.com/fjetter/dask@b1e3ccc7683665e6af54c4b2645268ec28fd9884
+    - git+https://github.com/dask/dask
   # test dependencies
   - pytest
   - pytest-cov
