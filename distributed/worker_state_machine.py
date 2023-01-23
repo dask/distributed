@@ -2803,7 +2803,7 @@ class WorkerState:
             # If a dependency was released during this time, this would pop up
             # as a KeyError during execute which is hard to understand
             if any(dep.state in ("executing", "long-running") for dep in ts.dependents):
-                raise RuntimeError("Encountered invalid state")
+                raise RuntimeError("Encountered invalid state")  # pragma: no cover
             self.log.append((ts.key, "remove-replica", ev.stimulus_id, time()))
             recommendations[ts] = "released"
 

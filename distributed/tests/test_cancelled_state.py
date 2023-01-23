@@ -954,6 +954,7 @@ def test_workerstate_resumed_fetch_to_cancelled_to_executing(ws_with_running_tas
 
 
 def test_workerstate_resumed_fetch_to_executing(ws_with_running_task):
+    """See test_resumed_cancelled_handle_compute for end-to-end version"""
     ws = ws_with_running_task
     ws2 = "127.0.0.1:2"
 
@@ -1207,6 +1208,8 @@ def test_workerstate_remove_replica_of_cancelled_task_dependency(ws):
     message to the worker, which should then release the dependency.
 
     Read: https://github.com/dask/distributed/pull/7487#issuecomment-1387277900
+
+        See test_resumed_cancelled_handle_compute for end-to-end version
     """
     ws2 = "127.0.0.1:2"
     instructions = ws.handle_stimulus(
