@@ -52,34 +52,32 @@ from distributed.utils import recursive_to_dict
 logger = logging.getLogger("distributed.worker.state_machine")
 
 if TYPE_CHECKING:
-    # TODO import from typing (requires Python >=3.10)
-    from typing_extensions import TypeAlias
+    # TODO import from typing (TypeAlias requires Python >=3.10)
+    # TODO import from typing (NotRequired requires Python >=3.11)
+    from typing_extensions import NotRequired, TypeAlias
 
     # Circular imports
     from distributed.diagnostics.plugin import WorkerPlugin
     from distributed.worker import Worker
 
-    # TODO move out of TYPE_CHECKING (requires Python >=3.10)
-    # Not to be confused with distributed.scheduler.TaskStateState
-    TaskStateState: TypeAlias = Literal[
-        "cancelled",
-        "constrained",
-        "error",
-        "executing",
-        "fetch",
-        "flight",
-        "forgotten",
-        "long-running",
-        "memory",
-        "missing",
-        "ready",
-        "released",
-        "rescheduled",
-        "resumed",
-        "waiting",
-    ]
-else:
-    TaskStateState = str
+# Not to be confused with distributed.scheduler.TaskStateState
+TaskStateState: TypeAlias = Literal[
+    "cancelled",
+    "constrained",
+    "error",
+    "executing",
+    "fetch",
+    "flight",
+    "forgotten",
+    "long-running",
+    "memory",
+    "missing",
+    "ready",
+    "released",
+    "rescheduled",
+    "resumed",
+    "waiting",
+]
 
 # TaskState.state subsets
 PROCESSING: set[TaskStateState] = {
@@ -88,8 +86,6 @@ PROCESSING: set[TaskStateState] = {
     "constrained",
     "executing",
     "long-running",
-    "cancelled",
-    "resumed",
 }
 READY: set[TaskStateState] = {"ready", "constrained"}
 # Valid states for a task that is found in TaskState.waiting_for_data
@@ -123,11 +119,11 @@ class SerializedTask(NamedTuple):
     task: object = NO_VALUE
 
 
-class StartStop(TypedDict, total=False):
-    action: str
+class StartStop(TypedDict):
+    action: Literal["compute", "transfer", "disk-read", "disk-write", "deserialize"]
     start: float
     stop: float
-    source: str  # optional
+    source: NotRequired[str]
 
 
 class InvalidTransition(Exception):
@@ -356,11 +352,6 @@ class TaskState:
         out = recursive_to_dict(self, exclude=exclude, members=True)
         # Remove all Nones and empty containers
         return {k: v for k, v in out.items() if v}
-
-    def is_protected(self) -> bool:
-        return self.state in PROCESSING or any(
-            dep_ts.state in PROCESSING for dep_ts in self.dependents
-        )
 
 
 @dataclass
@@ -1047,18 +1038,12 @@ class SecedeEvent(StateMachineEvent):
     compute_duration: float
 
 
-if TYPE_CHECKING:
-    # TODO remove quotes (requires Python >=3.9)
-    # TODO get out of TYPE_CHECKING (requires Python >=3.10)
-    # {TaskState -> finish: TaskStateState | (finish: TaskStateState, transition *args)}
-    # Not to be confused with distributed.scheduler.Recs
-    Recs: TypeAlias = "dict[TaskState, TaskStateState | tuple]"
-    Instructions: TypeAlias = "list[Instruction]"
-    RecsInstrs: TypeAlias = "tuple[Recs, Instructions]"
-else:
-    Recs = dict
-    Instructions = list
-    RecsInstrs = tuple
+# TODO remove quotes (requires Python >=3.9)
+# {TaskState -> finish: TaskStateState | (finish: TaskStateState, transition *args)}
+# Not to be confused with distributed.scheduler.Recs
+Recs: TypeAlias = "dict[TaskState, TaskStateState | tuple]"
+Instructions: TypeAlias = "list[Instruction]"
+RecsInstrs: TypeAlias = "tuple[Recs, Instructions]"
 
 
 def merge_recs_instructions(*args: RecsInstrs) -> RecsInstrs:
@@ -2163,7 +2148,6 @@ class WorkerState:
         --------
         _transition_cancelled_fetch
         _transition_cancelled_waiting
-        _transition_resumed_waiting
         _transition_flight_fetch
         """
         if ts.previous == "flight":
@@ -2210,47 +2194,6 @@ class WorkerState:
         ts.next = None
         return {}, []
 
-    def _transition_resumed_waiting(
-        self, ts: TaskState, *, stimulus_id: str
-    ) -> RecsInstrs:
-        """
-        See also
-        --------
-        _transition_cancelled_fetch
-        _transition_cancelled_or_resumed_long_running
-        _transition_cancelled_waiting
-        _transition_resumed_fetch
-        """
-        # None of the exit events of execute or gather_dep recommend a transition to
-        # waiting
-        assert not ts.done
-        if ts.previous == "executing":
-            assert ts.next == "fetch"
-            # We're back where we started. We should forget about the entire
-            # cancellation attempt
-            ts.state = "executing"
-            ts.next = None
-            ts.previous = None
-            return {}, []
-
-        elif ts.previous == "long-running":
-            assert ts.next == "fetch"
-            # Same as executing, and in addition send the LongRunningMsg in arrears
-            # Note that, if the task seceded before it was cancelled, this will cause
-            # the message to be sent twice.
-            ts.state = "long-running"
-            ts.next = None
-            ts.previous = None
-            smsg = LongRunningMsg(
-                key=ts.key, compute_duration=None, stimulus_id=stimulus_id
-            )
-            return {}, [smsg]
-
-        else:
-            assert ts.previous == "flight"
-            assert ts.next == "waiting"
-            return {}, []
-
     def _transition_cancelled_fetch(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
@@ -2259,7 +2202,6 @@ class WorkerState:
         --------
         _transition_cancelled_waiting
         _transition_resumed_fetch
-        _transition_resumed_waiting
         """
         if ts.previous == "flight":
             if ts.done:
@@ -2288,7 +2230,6 @@ class WorkerState:
         _transition_cancelled_fetch
         _transition_cancelled_or_resumed_long_running
         _transition_resumed_fetch
-        _transition_resumed_waiting
         """
         # None of the exit events of gather_dep or execute recommend a transition to
         # waiting
@@ -2438,7 +2379,6 @@ class WorkerState:
         --------
         _transition_executing_long_running
         _transition_cancelled_waiting
-        _transition_resumed_waiting
         """
         assert ts.previous in ("executing", "long-running")
         ts.previous = "long-running"
@@ -2573,7 +2513,6 @@ class WorkerState:
         ("resumed", "memory"): _transition_resumed_memory,
         ("resumed", "released"): _transition_resumed_released,
         ("resumed", "rescheduled"): _transition_resumed_rescheduled,
-        ("resumed", "waiting"): _transition_resumed_waiting,
         ("constrained", "executing"): _transition_constrained_executing,
         ("constrained", "released"): _transition_generic_released,
         ("error", "released"): _transition_generic_released,
@@ -2837,35 +2776,28 @@ class WorkerState:
         holding this unnecessary data, if the worker hasn't released the data itself,
         already.
 
-        This handler does not guarantee the task nor the data to be actually
-        released but only asks the worker to release the data on a best effort
-        guarantee. This protects from race conditions where the given keys may
-        already have been rescheduled for compute in which case the compute
-        would win and this handler is ignored.
+        This handler only releases tasks that are indeed in state memory.
 
         For stronger guarantees, see handler free_keys
         """
         recommendations: Recs = {}
         instructions: Instructions = []
 
-        rejected = []
         for key in ev.keys:
             ts = self.tasks.get(key)
             if ts is None or ts.state != "memory":
                 continue
-            if not ts.is_protected():
-                self.log.append(
-                    (ts.key, "remove-replica-confirmed", ev.stimulus_id, time())
-                )
-                recommendations[ts] = "released"
-            else:
-                rejected.append(key)
-
-        if rejected:
-            self.log.append(
-                ("remove-replica-rejected", rejected, ev.stimulus_id, time())
-            )
-            instructions.append(AddKeysMsg(keys=rejected, stimulus_id=ev.stimulus_id))
+            # If the task is still in executing or long-running, the scheduler
+            # should never have asked the worker to drop this key.
+            # We cannot simply forget it because there is a time window between
+            # setting the state to executing/long-running and
+            # preparing/collecting the data for the task.
+            # If a dependency was released during this time, this would pop up
+            # as a KeyError during execute which is hard to understand
+            if any(dep.state in ("executing", "long-running") for dep in ts.dependents):
+                raise RuntimeError("Encountered invalid state")  # pragma: no cover
+            self.log.append((ts.key, "remove-replica", ev.stimulus_id, time()))
+            recommendations[ts] = "released"
 
         return recommendations, instructions
 
