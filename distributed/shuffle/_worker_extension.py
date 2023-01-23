@@ -457,7 +457,7 @@ class ShuffleWorkerExtension:
             If the run_id is stale
         """
         shuffle = self.shuffles.get(shuffle_id, None)
-        if shuffle is None:
+        if shuffle is None or shuffle.run_id < run_id:
             shuffle = await self._refresh_shuffle(
                 shuffle_id=shuffle_id,
             )
