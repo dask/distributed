@@ -23,7 +23,7 @@ async def test_installation_on_worker(s, a):
     assert isinstance(ext, ShuffleWorkerExtension)
     assert a.handlers["shuffle_receive"] == ext.shuffle_receive
     assert a.handlers["shuffle_inputs_done"] == ext.shuffle_inputs_done
-    assert a.stream_handlers["suffle-fail"] == ext.shuffle_fail
+    assert a.stream_handlers["shuffle-fail"] == ext.shuffle_fail
 
 
 @gen_cluster([("", 1)])
