@@ -1470,3 +1470,55 @@ async def test_handle_stale_barrier(c, s, a, b):
     await clean_worker(a, timeout=2)
     await clean_worker(b, timeout=2)
     await clean_scheduler(s, timeout=2)
+
+
+@mock.patch.dict(
+    DEFAULT_EXTENSIONS,
+    {"shuffle": BlockedBarrierShuffleWorkerExtension},
+)
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_shuffle_lifecycle(c, s, a):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="100 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = out.persist()
+
+    worker_ext = a.extensions["shuffle"]
+    scheduler_ext = s.extensions["shuffle"]
+
+    shuffle_id = await get_shuffle_id(s)
+    shuffle_dict = scheduler_ext.get(shuffle_id, None, None, None, a.worker_address)
+    assert await worker_ext._get_shuffle_run(shuffle_id, shuffle_dict["run_id"])
+    with pytest.raises(RuntimeError, match="Invalid shuffle state"):
+        await worker_ext._get_shuffle_run(shuffle_id, shuffle_dict["run_id"] + 1)
+    worker_ext.block_barrier.set()
+    await out
+    del out
+
+    while s.tasks:
+        await asyncio.sleep(0)
+
+    worker_ext.block_barrier.clear()
+
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = out.persist()
+
+    new_shuffle_id = await get_shuffle_id(s)
+    assert shuffle_id == new_shuffle_id
+    new_shuffle_dict = scheduler_ext.get(shuffle_id, None, None, None, a.worker_address)
+    assert shuffle_dict["run_id"] < new_shuffle_dict["run_id"]
+    assert await worker_ext._get_shuffle_run(shuffle_id, new_shuffle_dict["run_id"])
+
+    with pytest.raises(RuntimeError, match="Stale shuffle"):
+        await worker_ext._get_shuffle_run(shuffle_id, shuffle_dict["run_id"])
+
+    worker_ext.block_barrier.set()
+    await out
+    del out
+
+    await clean_worker(a, timeout=2)
+    await clean_scheduler(s, timeout=2)
