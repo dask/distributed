@@ -31,7 +31,7 @@ def worker_client(timeout=None, separate_thread=True):
     Examples
     --------
     >>> def func(x):
-    ...     with worker_client(timeout="10s") as c:  # connect from worker back to scheduler
+    ...     with worker_client() as c:  # connect from worker back to scheduler
     ...         a = c.submit(inc, x)     # this task can submit more tasks
     ...         b = c.submit(dec, x)
     ...         result = c.gather([a, b])  # and gather results
