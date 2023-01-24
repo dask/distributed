@@ -1280,7 +1280,7 @@ async def test_error_send(tmpdir, loop_in_thread):
     local_shuffle_pool = ShuffleTestPool()
 
     class ErrorSend(ShuffleRun):
-        async def send(self, address: str, shards: list[tuple[int, bytes]]) -> None:
+        async def send(self, *args: Any, **kwargs: Any) -> None:
             raise RuntimeError("Error during send")
 
     sA = local_shuffle_pool.new_shuffle(
@@ -1367,12 +1367,10 @@ class BlockedShuffleReceiveShuffleWorkerExtension(ShuffleWorkerExtension):
         self.in_shuffle_receive = asyncio.Event()
         self.block_shuffle_receive = asyncio.Event()
 
-    async def shuffle_receive(
-        self, shuffle_id: ShuffleId, run_id: int, data: list[tuple[int, bytes]]
-    ) -> None:
+    async def shuffle_receive(self, *args: Any, **kwargs: Any) -> None:
         self.in_shuffle_receive.set()
         await self.block_shuffle_receive.wait()
-        return await super().shuffle_receive(shuffle_id, run_id, data)
+        return await super().shuffle_receive(*args, **kwargs)
 
 
 @mock.patch.dict(
@@ -1421,10 +1419,10 @@ class BlockedBarrierShuffleWorkerExtension(ShuffleWorkerExtension):
         self.in_barrier = asyncio.Event()
         self.block_barrier = asyncio.Event()
 
-    async def _barrier(self, shuffle_id: ShuffleId, run_ids: list[int]) -> int:
+    async def _barrier(self, *args: Any, **kwargs: Any) -> int:
         self.in_barrier.set()
         await self.block_barrier.wait()
-        return await super()._barrier(shuffle_id, run_ids)
+        return await super()._barrier(*args, **kwargs)
 
 
 @mock.patch.dict(
@@ -1523,3 +1521,104 @@ async def test_shuffle_lifecycle(c, s, a):
 
     await clean_worker(a, timeout=2)
     await clean_scheduler(s, timeout=2)
+
+
+class BlockedShuffleAccessAndFailWorkerExtension(ShuffleWorkerExtension):
+    def __init__(self, worker: Worker) -> None:
+        super().__init__(worker)
+        self.in_get_or_create_shuffle = asyncio.Event()
+        self.block_get_or_create_shuffle = asyncio.Event()
+        self.in_get_shuffle_run = asyncio.Event()
+        self.block_get_shuffle_run = asyncio.Event()
+        self.finished_get_shuffle_run = asyncio.Event()
+        self.allow_fail = False
+
+    async def _get_or_create_shuffle(self, *args: Any, **kwargs: Any) -> ShuffleRun:
+        self.in_get_or_create_shuffle.set()
+        await self.block_get_or_create_shuffle.wait()
+        return await super()._get_or_create_shuffle(*args, **kwargs)
+
+    async def _get_shuffle_run(self, *args: Any, **kwargs: Any) -> ShuffleRun:
+        self.in_get_shuffle_run.set()
+        await self.block_get_shuffle_run.wait()
+        result = await super()._get_shuffle_run(*args, **kwargs)
+        self.finished_get_shuffle_run.set()
+        return result
+
+    def shuffle_fail(self, *args: Any, **kwargs: Any) -> None:
+        if self.allow_fail:
+            return super().shuffle_fail(*args, **kwargs)
+
+
+@mock.patch.dict(
+    DEFAULT_EXTENSIONS,
+    {"shuffle": BlockedShuffleAccessAndFailWorkerExtension},
+)
+@gen_cluster(client=True, nthreads=[("", 1)] * 2)
+async def test_replace_stale_shuffle(c, s, a, b):
+    ext_A = a.extensions["shuffle"]
+    ext_B = b.extensions["shuffle"]
+
+    # Let A behave normal
+    ext_A.allow_fail = True
+    ext_A.block_get_shuffle_run.set()
+    ext_A.block_get_or_create_shuffle.set()
+
+    # B can accept shuffle transfers
+    ext_B.block_get_shuffle_run.set()
+
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="100 s",
+    )
+    # Initialize first shuffle execution
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = out.persist()
+
+    shuffle_id = await get_shuffle_id(s)
+
+    await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, a)
+    await ext_B.finished_get_shuffle_run.wait()
+    assert shuffle_id in ext_A.shuffles
+    assert shuffle_id in ext_B.shuffles
+    stale_shuffle_run = ext_B.shuffles[shuffle_id]
+
+    del out
+    while s.tasks:
+        await asyncio.sleep(0)
+
+    # A is cleaned
+    await clean_worker(a)
+
+    # B is not cleaned
+    assert shuffle_id in ext_B.shuffles
+    assert not stale_shuffle_run.closed
+    ext_B.finished_get_shuffle_run.clear()
+
+    # Initialize second shuffle execution
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = out.persist()
+
+    await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, a)
+    await ext_B.finished_get_shuffle_run.wait()
+
+    # Stale shuffle run has been replaced
+    shuffle_run = ext_B.shuffles[shuffle_id]
+    assert shuffle_run != stale_shuffle_run
+    assert shuffle_run.run_id > stale_shuffle_run.run_id
+
+    # Stale shuffle gets cleaned up
+    await stale_shuffle_run._closed_event.wait()
+
+    # Finish shuffle run
+    ext_B.block_get_shuffle_run.set()
+    ext_B.block_get_or_create_shuffle.set()
+    ext_B.allow_fail = True
+    await out
+    del out
+
+    await clean_worker(a)
+    await clean_worker(b)
+    await clean_scheduler(s)
