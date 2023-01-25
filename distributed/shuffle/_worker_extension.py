@@ -212,10 +212,12 @@ class ShuffleRun:
                 filtered.append(d[1])
                 self.received.add(d[0])
                 self.total_recvd += sizeof(d)
+        del data
         if not filtered:
             return
         try:
             groups = await self.offload(self._repartition_buffers, filtered)
+            del filtered
             await self._write_to_disk(groups)
         except Exception as e:
             self._exception = e
