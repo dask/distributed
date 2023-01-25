@@ -5749,10 +5749,10 @@ async def test_logs_from_worker_submodules(c, s, a):
     await c.run(on_worker)
     logs = await c.get_worker_logs()
     logs = [row[1].partition(" - ")[2] for row in logs[a.worker_address]]
-    assert logs[-3:] == [
-        "distributed.worker - INFO - AAA",
-        "distributed.worker.state_machine - INFO - BBB",
+    assert logs[:3] == [
         "distributed.worker.memory - INFO - CCC",
+        "distributed.worker.state_machine - INFO - BBB",
+        "distributed.worker - INFO - AAA",
     ]
 
     def on_nanny(dask_worker):
@@ -5764,9 +5764,9 @@ async def test_logs_from_worker_submodules(c, s, a):
     await c.run(on_nanny, nanny=True)
     logs = await c.get_worker_logs(nanny=True)
     logs = [row[1].partition(" - ")[2] for row in logs[a.worker_address]]
-    assert logs[-2:] == [
-        "distributed.nanny - INFO - DDD",
+    assert logs[:2] == [
         "distributed.nanny.memory - INFO - EEE",
+        "distributed.nanny - INFO - DDD",
     ]
 
 
