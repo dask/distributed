@@ -74,8 +74,8 @@ class SchedulerPlugin:
     def update_graph(
         self,
         scheduler: Scheduler,
+        *,
         keys: set[str],
-        restrictions: dict[str, float],
         **kwargs: Any,
     ) -> None:
         """Run when a new graph / tasks enter the scheduler"""

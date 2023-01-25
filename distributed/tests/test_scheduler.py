@@ -18,7 +18,7 @@ from unittest import mock
 import cloudpickle
 import psutil
 import pytest
-from tlz import concat, first, merge, valmap
+from tlz import concat, first, merge
 from tornado.ioloop import IOLoop
 
 import dask
@@ -718,19 +718,20 @@ async def test_server_listens_to_other_ops(s, a, b):
         assert ident["id"].lower().startswith("scheduler")
 
 
-@gen_cluster()
-async def test_remove_worker_from_scheduler(s, a, b):
-    dsk = {("x-%d" % i): (inc, i) for i in range(20)}
-    s.update_graph(
-        tasks=valmap(dumps_task, dsk),
-        keys=list(dsk),
-        dependencies={k: set() for k in dsk},
-    )
+@gen_cluster(client=True)
+async def test_remove_worker_from_scheduler(c, s, a, b):
+    """see also test_ready_remove_worker"""
+    ev = Event()
+    futs = c.map(lambda x, ev: ev.wait(), range(20), ev=ev)
+    while len(s.tasks) != len(futs):
+        await asyncio.sleep(0.01)
 
     assert a.address in s.stream_comms
     await s.remove_worker(address=a.address, stimulus_id="test")
     assert a.address not in s.workers
-    assert len(s.workers[b.address].processing) + len(s.queued) == len(dsk)
+    assert len(s.workers[b.address].processing) + len(s.queued) == len(futs)
+    await ev.set()
+    await c.gather(futs)
 
 
 @gen_cluster()
@@ -926,47 +927,6 @@ async def test_delete(c, s, a):
     s.report_on_key(key=x.key)
 
 
-@gen_cluster()
-async def test_filtered_communication(s, a, b):
-    c = await connect(s.address)
-    f = await connect(s.address)
-    await c.write({"op": "register-client", "client": "c", "versions": {}})
-    await f.write({"op": "register-client", "client": "f", "versions": {}})
-    await c.read()
-    await f.read()
-
-    assert set(s.client_comms) == {"c", "f"}
-
-    await c.write(
-        {
-            "op": "update-graph",
-            "tasks": {"x": dumps_task((inc, 1)), "y": dumps_task((inc, "x"))},
-            "dependencies": {"x": [], "y": ["x"]},
-            "client": "c",
-            "keys": ["y"],
-        }
-    )
-
-    await f.write(
-        {
-            "op": "update-graph",
-            "tasks": {
-                "x": dumps_task((inc, 1)),
-                "z": dumps_task((operator.add, "x", 10)),
-            },
-            "dependencies": {"x": [], "z": ["x"]},
-            "client": "f",
-            "keys": ["z"],
-        }
-    )
-    (msg,) = await c.read()
-    assert msg["op"] == "key-in-memory"
-    assert msg["key"] == "y"
-    (msg,) = await f.read()
-    assert msg["op"] == "key-in-memory"
-    assert msg["key"] == "z"
-
-
 def test_dumps_function():
     a = dumps_function(inc)
     assert cloudpickle.loads(a)(10) == 11
@@ -997,23 +957,21 @@ def test_dumps_task():
 
 
 @pytest.mark.parametrize("worker_saturation", [1.0, float("inf")])
-@gen_cluster()
-async def test_ready_remove_worker(s, a, b, worker_saturation):
+@gen_cluster(client=True)
+async def test_ready_remove_worker(c, s, a, b, worker_saturation):
+    """see also test_remove_worker_from_scheduler"""
     s.WORKER_SATURATION = worker_saturation
-    s.update_graph(
-        tasks={"x-%d" % i: dumps_task((inc, i)) for i in range(20)},
-        keys=["x-%d" % i for i in range(20)],
-        client="client",
-        dependencies={"x-%d" % i: [] for i in range(20)},
-    )
 
+    ev = Event()
+    futs = c.map(lambda x, ev: ev.wait(), range(20), ev=ev)
+    while len(s.tasks) != len(futs):
+        await asyncio.sleep(0.01)
     if s.WORKER_SATURATION == 1:
         cmp = operator.eq
     elif math.isinf(s.WORKER_SATURATION):
         cmp = operator.gt
     else:
         pytest.fail(f"{s.WORKER_SATURATION=}, must be 1 or inf")
-
     assert all(cmp(len(w.processing), w.nthreads) for w in s.workers.values()), (
         list(s.workers.values()),
         s.WORKER_SATURATION,
@@ -1021,9 +979,7 @@ async def test_ready_remove_worker(s, a, b, worker_saturation):
     assert sum(len(w.processing) for w in s.workers.values()) + len(s.queued) == len(
         s.tasks
     )
-
     await s.remove_worker(address=a.address, stimulus_id="test")
-
     assert set(s.workers) == {b.address}
     assert all(cmp(len(w.processing), w.nthreads) for w in s.workers.values()), (
         list(s.workers.values()),
@@ -1032,6 +988,7 @@ async def test_ready_remove_worker(s, a, b, worker_saturation):
     assert sum(len(w.processing) for w in s.workers.values()) + len(s.queued) == len(
         s.tasks
     )
+    await ev.set()
 
 
 @pytest.mark.slow
@@ -1369,9 +1326,10 @@ async def test_file_descriptors_dont_leak(s):
         await asyncio.sleep(0.01)
 
 
+@pytest.mark.xfail(reason="API no longer exists.")
 @gen_cluster()
 async def test_update_graph_culls(s, a, b):
-    s.update_graph(
+    s._update_graph(
         tasks={
             "x": dumps_task((inc, 1)),
             "y": dumps_task((inc, "x")),
