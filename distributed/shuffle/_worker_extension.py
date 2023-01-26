@@ -288,7 +288,9 @@ class ShuffleRun:
 
     def _read_from_disk(self, id: int | str) -> bytes:
         self.raise_if_closed()
-        return self._disk_buffer.read(id)[0]
+        data = self._disk_buffer.read(id)
+        assert len(data) == 1
+        return data[0]
 
     async def inputs_done(self) -> None:
         self.raise_if_closed()
