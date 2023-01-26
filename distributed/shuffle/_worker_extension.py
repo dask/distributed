@@ -224,7 +224,7 @@ class ShuffleRun:
             self._exception = e
             raise
 
-    def _repartition_buffers(self, data: list[bytes]) -> dict[str, list[pa.Table]]:
+    def _repartition_buffers(self, data: list[bytes]) -> dict[str, list[bytes]]:
         table = list_of_buffers_to_table(data)
         groups = split_by_partition(table, self.column)
         assert len(table) == sum(map(len, groups.values()))
@@ -288,7 +288,7 @@ class ShuffleRun:
 
     def _read_from_disk(self, id: int | str) -> bytes:
         self.raise_if_closed()
-        data = self._disk_buffer.read(id)
+        data: list[bytes] = self._disk_buffer.read(id)
         assert len(data) == 1
         return data[0]
 
