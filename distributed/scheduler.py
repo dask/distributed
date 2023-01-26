@@ -31,7 +31,6 @@ from collections.abc import (
 )
 from contextlib import suppress
 from functools import partial
-from numbers import Number
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, cast, overload
 
 import psutil
@@ -710,6 +709,7 @@ class WorkerState:
             assert ts not in self.processing
 
         tp = ts.prefix
+        assert tp
         self.task_prefix_count[tp.name] += 1
         self.scheduler._task_prefix_count_global[tp.name] += 1
         self.processing.add(ts)
@@ -1131,7 +1131,7 @@ class TaskState:
     #: within a large graph that may be important, such as if they are on the critical
     #: path, or good to run in order to release many dependencies.  This is explained
     #: further in :doc:`Scheduling Policy <scheduling-policies>`.
-    priority: tuple[int, ...]
+    priority: tuple[int | float, ...] | None
 
     # Attribute underlying the state property
     _state: TaskStateState
@@ -1219,7 +1219,7 @@ class TaskState:
 
     #: The type of the object as a string. Only present for tasks that have been
     #: computed.
-    type: str
+    type: str | None
 
     #: If this task failed executing, the exception object is stored here.
     exception: Serialized | None
@@ -1321,6 +1321,8 @@ class TaskState:
         key: str,
         run_spec: object,
         state: TaskStateState,
+        tp: TaskPrefix,
+        tg: TaskGroup,
     ):
         self.key = key
         self._hash = hash(key)
@@ -1334,7 +1336,7 @@ class TaskState:
         self.suspicious = 0
         self.retries = 0
         self.nbytes = -1
-        self.priority = None  # type: ignore
+        self.priority = None
         self.who_wants = set()
         self.dependencies = set()
         self.dependents = set()
@@ -1343,15 +1345,16 @@ class TaskState:
         self.who_has = set()
         self.processing_on = None
         self.has_lost_dependencies = False
-        self.host_restrictions = None  # type: ignore
-        self.worker_restrictions = None  # type: ignore
+        self.host_restrictions = set()
+        self.worker_restrictions = set()
         self.resource_restrictions = {}
         self.loose_restrictions = False
         self.actor = False
-        self.prefix = None  # type: ignore
-        self.type = None  # type: ignore
+        self.prefix = tp
+        self.type = None
         self.group_key = key_split_group(key)
-        self.group = None  # type: ignore
+        self.group = tg
+        tg.add(self)
         self.metadata = {}
         self.annotations = {}
         self.erred_on = set()
@@ -1730,15 +1733,13 @@ class SchedulerState:
         computation: Computation | None = None,
     ) -> TaskState:
         """Create a new task, and associated states"""
-        ts = TaskState(key, spec, state)
 
         prefix_key = key_split(key)
         tp = self.task_prefixes.get(prefix_key)
         if tp is None:
             self.task_prefixes[prefix_key] = tp = TaskPrefix(prefix_key)
-        ts.prefix = tp
 
-        group_key = ts.group_key
+        group_key = key_split_group(key)
         tg = self.task_groups.get(group_key)
         if tg is None:
             self.task_groups[group_key] = tg = TaskGroup(group_key)
@@ -1746,9 +1747,8 @@ class SchedulerState:
                 computation.groups.add(tg)
             tg.prefix = tp
             tp.groups.append(tg)
-        tg.add(ts)
 
-        self.tasks[key] = ts
+        self.tasks[key] = ts = TaskState(key, spec, state, tp, tg)
 
         return ts
 
@@ -3160,7 +3160,7 @@ class SchedulerState:
                 client_msgs[cs.client_key] = [report_msg]
 
         ts.state = "memory"
-        ts.type = typename  # type: ignore
+        ts.type = typename
         ts.group.types.add(typename)  # type: ignore
 
         cs = self.clients["fire-and-forget"]
@@ -3572,8 +3572,7 @@ class Scheduler(SchedulerState, ServerNode):
         }
 
         client_handlers = {
-            "update-graph": self.update_graph,
-            "update-graph-hlg": self.update_graph_hlg,
+            "update-graph": self._update_graph,
             "client-desires-keys": self.client_desires_keys,
             "update-data": self.update_data,
             "report-key": self.report_on_key,
@@ -4237,24 +4236,19 @@ class Scheduler(SchedulerState, ServerNode):
         }
         return msg
 
-    def update_graph_hlg(
+    def _update_graph(
         self,
-        client=None,
-        hlg=None,
-        keys=None,
-        dependencies=None,
-        restrictions=None,
-        priority=None,
-        loose_restrictions=None,
-        resources=None,
-        submitting_task=None,
-        retries=None,
-        user_priority=0,
-        actors=None,
-        fifo_timeout=0,
-        code=None,
+        client: str,
+        hlg: HighLevelGraph,
+        keys: Iterable[str],
+        actors: list[str] | bool,
+        user_priority: int | float | dict = 0,
+        priority: dict | None = None,
+        submitting_task: str | None = None,
+        fifo_timeout: int | float = 0.0,
+        code: str | None = None,
     ):
-        unpacked_graph = HighLevelGraph.__dask_distributed_unpack__(hlg)
+        unpacked_graph = HighLevelGraph.__dask_distributed_unpack__(hlg)  # type: ignore
         dsk = unpacked_graph["dsk"]
         dependencies = unpacked_graph["deps"]
         annotations = unpacked_graph["annotations"]
@@ -4275,51 +4269,44 @@ class Scheduler(SchedulerState, ServerNode):
                 if k in dsk_keys
             }
             priority = dask.order.order(dsk, dependencies=stripped_deps)
-
-        return self.update_graph(
-            client,
-            dsk,
-            keys,
-            dependencies,
-            restrictions,
-            priority,
-            loose_restrictions,
-            resources,
-            submitting_task,
-            retries,
-            user_priority,
-            actors,
-            fifo_timeout,
-            annotations,
+        # Note: this can actually be an empty dict if dsk is empty. This happens
+        # during recreate error to create handles on the dependency futures.
+        assert priority is not None
+        return self._update_graph_plain_tasks(
+            client=client,
+            tasks=dsk,
+            keys=keys,
+            dependencies=dependencies,
+            priority=priority,
+            user_priority=user_priority,
+            submitting_task=submitting_task,
+            actors=actors,
+            fifo_timeout=fifo_timeout,
+            annotations=annotations,
             code=code,
             stimulus_id=f"update-graph-{time()}",
         )
 
-    def update_graph(
+    def _update_graph_plain_tasks(
         self,
-        client=None,
-        tasks=None,
-        keys=None,
-        dependencies=None,
-        restrictions=None,
-        priority=None,
-        loose_restrictions=None,
-        resources=None,
-        submitting_task=None,
-        retries=None,
-        user_priority=0,
-        actors=None,
-        fifo_timeout=0,
-        annotations=None,
-        code=None,
-        stimulus_id=None,
+        client: str,
+        tasks: dict,
+        keys: Iterable[str],
+        dependencies: dict,
+        priority: dict,
+        submitting_task: str | None,
+        actors: list[str] | bool,
+        fifo_timeout: float,
+        annotations: dict,
+        code: str | None,
+        stimulus_id: str,
+        user_priority: int | float | dict,
     ):
         """
         Add new computations to the internal dask graph
 
         This happens whenever the Client calls submit, map, get, or compute.
         """
-        stimulus_id = stimulus_id or f"update-graph-{time()}"
         start = time()
         fifo_timeout = parse_timedelta(fifo_timeout)
         keys = set(keys)
@@ -4396,6 +4383,7 @@ class Scheduler(SchedulerState, ServerNode):
                 tasks.pop(d, None)
                 dependencies.pop(d, None)
 
+        # Note: this is also culling tasks
         # Get or create task states
         stack = list(keys)
         touched_keys = set()
@@ -4405,11 +4393,12 @@ class Scheduler(SchedulerState, ServerNode):
             if k in touched_keys:
                 continue
             # XXX Have a method get_task_state(self, k) ?
-            ts = self.tasks.get(k)
-            if ts is None:
+            if k not in self.tasks:
                 ts = self.new_task(k, tasks.get(k), "released", computation=computation)
-            elif not ts.run_spec:
-                ts.run_spec = tasks.get(k)
+            else:
+                ts = self.tasks[k]
+                if not ts.run_spec:
+                    ts.run_spec = tasks.get(k)
 
             touched_keys.add(k)
             touched_tasks.append(ts)
@@ -4419,22 +4408,24 @@ class Scheduler(SchedulerState, ServerNode):
 
         # Add dependencies
         for key, deps in dependencies.items():
-            ts = self.tasks.get(key)
-            if ts is None or ts.dependencies:
+            if key not in self.tasks:
+                continue
+            ts = self.tasks[key]
+            if ts.dependencies:
                 continue
             for dep in deps:
                 dts = self.tasks[dep]
                 ts.add_dependency(dts)
 
         # Compute priorities
-        if isinstance(user_priority, Number):
+        if isinstance(user_priority, (int, float)):
             user_priority = {k: user_priority for k in tasks}
 
         annotations = annotations or {}
-        restrictions = restrictions or {}
-        loose_restrictions = loose_restrictions or []
-        resources = resources or {}
-        retries = retries or {}
+        restrictions = {}
+        loose_restrictions: list[str] = []
+        resources = {}
+        retries = {}
 
         # Override existing taxonomy with per task annotations
         if annotations:
@@ -4459,9 +4450,8 @@ class Scheduler(SchedulerState, ServerNode):
                 for k, v in kv.items():
                     # Tasks might have been culled, in which case
                     # we have nothing to annotate.
-                    ts = self.tasks.get(k)
-                    if ts is not None:
-                        ts.annotations[a] = v
+                    if k in self.tasks:
+                        self.tasks[k].annotations[a] = v
 
         # Add actors
         if actors is True:
@@ -4475,10 +4465,13 @@ class Scheduler(SchedulerState, ServerNode):
         )  # TODO: define order wrt old graph
 
         if submitting_task:  # sub-tasks get better priority than parent tasks
-            ts = self.tasks.get(submitting_task)
-            if ts is not None:
+            if submitting_task in self.tasks:
+                ts = self.tasks[submitting_task]
+                # FIXME: below there are code paths that suggest it could be possible for ts.priority to still not be set here.
+                assert ts.priority
                 generation = ts.priority[0] - 0.01
-            else:  # super-task already cleaned up
+            else:
+                # super-task already cleaned up
                 generation = self.generation
         elif self._last_time + fifo_timeout < start:
             self.generation += 1  # older graph generations take precedence
@@ -4504,9 +4497,9 @@ class Scheduler(SchedulerState, ServerNode):
             for k, v in restrictions.items():
                 if v is None:
                     continue
-                ts = self.tasks.get(k)
-                if ts is None:
+                if k not in self.tasks:
                     continue
+                ts = self.tasks[k]
                 ts.host_restrictions = set()
                 ts.worker_restrictions = set()
                 # Make sure `v` is a collection and not a single worker name / address
@@ -4531,17 +4524,17 @@ class Scheduler(SchedulerState, ServerNode):
                 if v is None:
                     continue
                 assert isinstance(v, dict)
-                ts = self.tasks.get(k)
-                if ts is None:
+                if k not in self.tasks:
                     continue
+                ts = self.tasks[k]
                 ts.resource_restrictions = v
 
         if retries:
             for k, v in retries.items():
                 assert isinstance(v, int)
-                ts = self.tasks.get(k)
-                if ts is None:
+                if k not in self.tasks:
                     continue
+                ts = self.tasks[k]
                 ts.retries = v
 
         # Compute recommendations

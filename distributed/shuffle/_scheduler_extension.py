@@ -166,6 +166,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         for barrier_task in barriers:
             if barrier_task.state == "memory":
                 for dt in barrier_task.dependents:
+                    assert dt.worker_restrictions is not None
                     if worker not in dt.worker_restrictions:
                         continue
                     dt.worker_restrictions.clear()

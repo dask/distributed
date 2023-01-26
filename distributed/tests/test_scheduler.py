@@ -17,7 +17,7 @@ from typing import Collection
 import cloudpickle
 import psutil
 import pytest
-from tlz import concat, first, merge, valmap
+from tlz import concat, first, merge
 from tornado.ioloop import IOLoop
 
 import dask
@@ -717,19 +717,20 @@ async def test_server_listens_to_other_ops(s, a, b):
         assert ident["id"].lower().startswith("scheduler")
 
 
-@gen_cluster()
-async def test_remove_worker_from_scheduler(s, a, b):
-    dsk = {("x-%d" % i): (inc, i) for i in range(20)}
-    s.update_graph(
-        tasks=valmap(dumps_task, dsk),
-        keys=list(dsk),
-        dependencies={k: set() for k in dsk},
-    )
+@gen_cluster(client=True)
+async def test_remove_worker_from_scheduler(c, s, a, b):
+    """see also test_ready_remove_worker"""
+    ev = Event()
+    futs = c.map(lambda x, ev: ev.wait(), range(20), ev=ev)
+    while len(s.tasks) != len(futs):
+        await asyncio.sleep(0.01)
 
     assert a.address in s.stream_comms
     await s.remove_worker(address=a.address, stimulus_id="test")
     assert a.address not in s.workers
-    assert len(s.workers[b.address].processing) + len(s.queued) == len(dsk)
+    assert len(s.workers[b.address].processing) + len(s.queued) == len(futs)
+    await ev.set()
+    await c.gather(futs)
 
 
 @gen_cluster()
@@ -996,16 +997,15 @@ def test_dumps_task():
 
 
 @pytest.mark.parametrize("worker_saturation", [1.0, float("inf")])
-@gen_cluster()
-async def test_ready_remove_worker(s, a, b, worker_saturation):
+@gen_cluster(client=True)
+async def test_ready_remove_worker(c, s, a, b, worker_saturation):
+    """see also test_remove_worker_from_scheduler"""
     s.WORKER_SATURATION = worker_saturation
-    s.update_graph(
-        tasks={"x-%d" % i: dumps_task((inc, i)) for i in range(20)},
-        keys=["x-%d" % i for i in range(20)],
-        client="client",
-        dependencies={"x-%d" % i: [] for i in range(20)},
-    )
 
+    ev = Event()
+    futs = c.map(lambda x, ev: ev.wait(), range(20), ev=ev)
+    while len(s.tasks) != len(futs):
+        await asyncio.sleep(0.01)
     if s.WORKER_SATURATION == 1:
         cmp = operator.eq
     elif math.isinf(s.WORKER_SATURATION):
@@ -1367,7 +1367,8 @@ async def test_file_descriptors_dont_leak(s):
 
 @gen_cluster()
 async def test_update_graph_culls(s, a, b):
-    s.update_graph(
+    # FIXME: Migrate to new API
+    s._update_graph_plain_tasks(
         tasks={
             "x": dumps_task((inc, 1)),
             "y": dumps_task((inc, "x")),
@@ -1376,6 +1377,15 @@ async def test_update_graph_culls(s, a, b):
         keys=["y"],
         dependencies={"y": "x", "x": [], "z": []},
         client="client",
+        # Below are irrelevant for this test
+        priority=0,
+        submitting_task=None,
+        actors=False,
+        fifo_timeout=0,
+        annotations={},
+        code=None,
+        stimulus_id="foo",
+        user_priority=0,
     )
     assert "z" not in s.tasks
 

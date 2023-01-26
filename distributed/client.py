@@ -468,14 +468,6 @@ class Future(WrappedKey):
         except ValueError:
             c = get_client(address)
         self.__init__(key, c)
-        c._send_to_scheduler(
-            {
-                "op": "update-graph",
-                "tasks": {},
-                "keys": [stringify(self.key)],
-                "client": c.id,
-            }
-        )
 
     def __del__(self):
         try:
@@ -3036,7 +3028,7 @@ class Client(SyncMethodMixin):
 
             self._send_to_scheduler(
                 {
-                    "op": "update-graph-hlg",
+                    "op": "update-graph",
                     "hlg": dsk,
                     "keys": list(map(stringify, keys)),
                     "priority": priority,
