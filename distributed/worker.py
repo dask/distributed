@@ -79,6 +79,7 @@ from distributed.sizeof import safe_sizeof as sizeof
 from distributed.threadpoolexecutor import ThreadPoolExecutor
 from distributed.threadpoolexecutor import secede as tpe_secede
 from distributed.utils import (
+    NoCurrentClient,
     TimeoutError,
     _maybe_complex,
     get_ip,
@@ -2198,10 +2199,17 @@ class Worker(BaseWorker, ServerNode):
         assert ts.run_spec is not None
         start = time()
         # Offload deserializing large tasks
-        if sizeof(ts.run_spec) > OFFLOAD_THRESHOLD:
-            function, args, kwargs = await offload(_deserialize, *ts.run_spec)
-        else:
-            function, args, kwargs = _deserialize(*ts.run_spec)
+        try:
+            if sizeof(ts.run_spec) > OFFLOAD_THRESHOLD:
+                function, args, kwargs = await offload(_deserialize, *ts.run_spec)
+            else:
+                function, args, kwargs = _deserialize(*ts.run_spec)
+        except NoCurrentClient:
+            raise NoCurrentClient(
+                f"Task {ts.key} included `Future` objects as arguments. This is"
+                "likely caused by passing a persisted collection as an "
+                "argument. Instead use `Client.{{publish|get}}_dataset`."
+            )
         stop = time()
 
         if stop - start > 0.010:

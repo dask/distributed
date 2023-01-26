@@ -2896,7 +2896,6 @@ async def test_unknown_task_duration_config_2(s, a, b):
 async def test_retire_state_change(c, s, a, b):
     np = pytest.importorskip("numpy")
     y = c.map(lambda x: x**2, range(10))
-    await c.scatter(y)
     coros = []
     for _ in range(2):
         v = c.map(lambda i: i * np.random.randint(1000), y)

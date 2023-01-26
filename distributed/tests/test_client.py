@@ -59,6 +59,7 @@ from distributed import (
 from distributed.client import (
     Client,
     Future,
+    NoCurrentClient,
     _get_global_client,
     as_completed,
     default_client,
@@ -4038,15 +4039,14 @@ async def test_serialize_future(s, a, b):
         result = await future
 
         for ci in (c1, c2):
-            for ctxman in lambda ci: ci.as_current(), lambda ci: temp_default_client(
-                ci
-            ):
-                with ctxman(ci):
-                    future2 = pickle.loads(pickle.dumps(future))
-                    assert future2.client is ci
-                    assert stringify(future2.key) in ci.futures
-                    result2 = await future2
-                    assert result == result2
+            with ci.as_current():
+                future2 = pickle.loads(pickle.dumps(future))
+                assert future2.client is ci
+                assert stringify(future2.key) in ci.futures
+                result2 = await future2
+                assert result == result2
+            with temp_default_client(ci), pytest.raises(NoCurrentClient):
+                future2 = pickle.loads(pickle.dumps(future))
 
 
 @gen_cluster()
@@ -5166,9 +5166,9 @@ async def test_serialize_collections(c, s, a, b):
         assert isinstance(x, da.Array)
         return x.sum().compute()
 
-    future = c.submit(f, x)
-    result = await future
-    assert result == sum(range(10))
+    with pytest.raises(NoCurrentClient, match=r"Future.*argument.*persist"):
+        future = c.submit(f, x)
+        result = await future
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 1)
@@ -5325,38 +5325,6 @@ def test_get_client_sync(c, s, a, b):
 
     results = c.run(lambda: get_client().scheduler.address)
     assert results == {w["address"]: s["address"] for w in [a, b]}
-
-
-@gen_cluster(client=True)
-async def test_serialize_collections_of_futures(c, s, a, b):
-    pd = pytest.importorskip("pandas")
-    dd = pytest.importorskip("dask.dataframe")
-    from dask.dataframe.utils import assert_eq
-
-    df = pd.DataFrame({"x": [1, 2, 3]})
-    ddf = dd.from_pandas(df, npartitions=2).persist()
-    future = await c.scatter(ddf)
-
-    ddf2 = await future
-    df2 = await c.compute(ddf2)
-
-    assert_eq(df, df2)
-
-
-def test_serialize_collections_of_futures_sync(c):
-    pd = pytest.importorskip("pandas")
-    dd = pytest.importorskip("dask.dataframe")
-    from dask.dataframe.utils import assert_eq
-
-    df = pd.DataFrame({"x": [1, 2, 3]})
-    ddf = dd.from_pandas(df, npartitions=2).persist()
-    future = c.scatter(ddf)
-
-    result = future.result()
-    assert_eq(result.compute(), df)
-
-    assert future.type == dd.DataFrame
-    assert c.submit(lambda x, y: assert_eq(x.compute(), y), future, df).result()
 
 
 def _dynamic_workload(x, delay=0.01):
@@ -6690,29 +6658,30 @@ async def test_mixed_compression(s):
                 await c.compute(y.sum())
 
 
-@gen_cluster(client=True)
-async def test_futures_in_subgraphs(c, s, a, b):
+def test_futures_in_subgraphs(loop_in_thread):
     """Regression test of <https://github.com/dask/distributed/issues/4145>"""
 
     dd = pytest.importorskip("dask.dataframe")
-    import pandas as pd
+    with cluster() as (s, [a, b]), Client(s["address"], loop=loop_in_thread) as c:
+        import pandas as pd
 
-    ddf = dd.from_pandas(
-        pd.DataFrame(
-            dict(
-                uid=range(50),
-                enter_time=pd.date_range(
-                    start="2020-01-01", end="2020-09-01", periods=50, tz="UTC"
-                ),
-            )
-        ),
-        npartitions=5,
-    )
+        ddf = dd.from_pandas(
+            pd.DataFrame(
+                dict(
+                    uid=range(50),
+                    enter_time=pd.date_range(
+                        start="2020-01-01", end="2020-09-01", periods=50, tz="UTC"
+                    ),
+                )
+            ),
+            npartitions=5,
+        )
 
-    ddf = ddf[ddf.uid.isin(range(29))].persist()
-    ddf["local_time"] = ddf.enter_time.dt.tz_convert("US/Central")
-    ddf["day"] = ddf.enter_time.dt.day_name()
-    ddf = await c.submit(dd.categorical.categorize, ddf, columns=["day"], index=False)
+        ddf = ddf[ddf.uid.isin(range(29))].persist()
+        ddf["local_time"] = ddf.enter_time.dt.tz_convert("US/Central")
+        ddf["day"] = ddf.enter_time.dt.day_name()
+        ddf = dd.categorical.categorize(ddf, columns=["day"], index=False)
+        ddf.compute()
 
 
 @gen_cluster(client=True)

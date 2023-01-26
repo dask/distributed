@@ -46,6 +46,8 @@ from dask.utils import (
 )
 from dask.widgets import get_template
 
+from distributed.utils import NoCurrentClient
+
 try:
     from dask.delayed import single_key
 except ImportError:
@@ -459,32 +461,19 @@ class Future(WrappedKey):
                 pass  # Shutting down, add_callback may be None
 
     def __getstate__(self):
-        return self.key, self.client.scheduler.address
+        return self.key
 
-    def __setstate__(self, state):
-        key, address = state
-        try:
-            c = Client.current(allow_global=False)
-        except ValueError:
-            c = get_client(address)
+    def __setstate__(self, key):
+        c = Client.current(allow_global=False)
         self.__init__(key, c)
-        c._send_to_scheduler(
-            {
-                "op": "update-graph",
-                "tasks": {},
-                "keys": [stringify(self.key)],
-                "client": c.id,
-            }
-        )
 
     def __del__(self):
         try:
             self.release()
         except AttributeError:
-            # Occasionally we see this error when shutting down the client
-            # https://github.com/dask/distributed/issues/4305
-            if not sys.is_finalizing():
-                raise
+            # A serialization error would leave a Future instance that was never
+            # initialized, raising an AttributeError during release
+            pass
         except RuntimeError:  # closed event loop
             pass
 
@@ -1059,15 +1048,15 @@ class Client(SyncMethodMixin):
 
         Raises
         ------
-        ValueError
-            If there is no client set, a ValueError is raised
+        NoCurrentClient(ValueError)
+            Not running inside the `as_current` context manager.
         """
         out = _current_client.get()
         if out:
             return out
         if allow_global:
             return default_client()
-        raise ValueError("Not running inside the `as_current` context manager")
+        raise NoCurrentClient("Not running inside the `as_current` context manager")
 
     @property
     def dashboard_link(self):

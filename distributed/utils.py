@@ -84,6 +84,12 @@ no_default = "__no_default__"
 _forkserver_preload_set = False
 
 
+# FIXME: This is needed in worker.py and client.py but that creates a cyclic
+# import. We likely want to factor out custom exception to a dedicated module.
+class NoCurrentClient(ValueError):
+    """The operation is only valid if a Client is available"""
+
+
 def get_mp_context():
     """Create a multiprocessing context
 
