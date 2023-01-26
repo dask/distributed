@@ -18,6 +18,7 @@ from dask.utils import parse_bytes
 from distributed.core import PooledRPCCall
 from distributed.protocol import to_serialize
 from distributed.shuffle._arrow import (
+    convert_partition,
     deserialize_schema,
     dump_shards,
     list_of_buffers_to_table,
@@ -228,9 +229,9 @@ class ShuffleRun:
         groups = split_by_partition(table, self.column)
         assert len(table) == sum(map(len, groups.values()))
         del data
-        return {k: [v] for k, v in groups.items()}
+        return {k: [serialize_table(v)] for k, v in groups.items()}
 
-    async def _write_to_disk(self, data: dict[str, list[pa.Table]]) -> None:
+    async def _write_to_disk(self, data: dict[str, list[bytes]]) -> None:
         self.raise_if_closed()
         await self._disk_buffer.write(data)
 
@@ -277,16 +278,17 @@ class ShuffleRun:
 
         await self.flush_receive()
         try:
-            df = self._read_from_disk(i)
+            data = self._read_from_disk(i)
+            df = convert_partition(data)
             with self.time("cpu"):
                 out = df.to_pandas()
         except KeyError:
             out = self.schema.empty_table().to_pandas()
         return out
 
-    def _read_from_disk(self, id: int | str) -> pa.Table:
+    def _read_from_disk(self, id: int | str) -> bytes:
         self.raise_if_closed()
-        return self._disk_buffer.read(id)
+        return self._disk_buffer.read(id)[0]
 
     async def inputs_done(self) -> None:
         self.raise_if_closed()
