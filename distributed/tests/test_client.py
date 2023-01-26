@@ -1755,27 +1755,24 @@ async def test_upload_file_new_worker(c, s):
         assert x == 123
 
 
-@pytest.mark.skip
 @gen_cluster()
 async def test_multiple_clients(s, a, b):
-    a = await Client(s.address, asynchronous=True)
-    b = await Client(s.address, asynchronous=True)
+    async with Client(s.address, asynchronous=True) as a, Client(
+        s.address, asynchronous=True
+    ) as b:
 
-    x = a.submit(inc, 1)
-    y = b.submit(inc, 2)
-    assert x.client is a
-    assert y.client is b
-    xx = await x
-    yy = await y
-    assert xx == 2
-    assert yy == 3
-    z = a.submit(add, x, y)
-    assert z.client is a
-    zz = await z
-    assert zz == 5
-
-    await a.close()
-    await b.close()
+        x = a.submit(inc, 1)
+        y = b.submit(inc, 2)
+        assert x.client is a
+        assert y.client is b
+        xx = await x
+        yy = await y
+        assert xx == 2
+        assert yy == 3
+        with pytest.raises(ValueError, match="another client"):
+            a.submit(add, x, y)
+        with pytest.raises(ValueError, match="another client"):
+            b.submit(add, x, y)
 
 
 @gen_cluster(client=True)
@@ -2188,8 +2185,13 @@ async def test_multi_client(s, a, b):
             y2 = c.submit(inc, 2)
 
             assert y.key == y2.key
+            with pytest.raises(ValueError, match="another client"):
+                await c.gather([x, y])
+            with pytest.raises(ValueError, match="another client"):
+                await f.gather([x, y])
 
             await wait([x, y])
+            assert await c.gather([y2]) == await f.gather([y])
 
             assert {ts.key for ts in s.clients[c.id].wants_what} == {x.key, y.key}
             assert {ts.key for ts in s.clients[f.id].wants_what} == {y.key}

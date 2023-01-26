@@ -926,47 +926,6 @@ async def test_delete(c, s, a):
     s.report_on_key(key=x.key)
 
 
-@gen_cluster()
-async def test_filtered_communication(s, a, b):
-    c = await connect(s.address)
-    f = await connect(s.address)
-    await c.write({"op": "register-client", "client": "c", "versions": {}})
-    await f.write({"op": "register-client", "client": "f", "versions": {}})
-    await c.read()
-    await f.read()
-
-    assert set(s.client_comms) == {"c", "f"}
-
-    await c.write(
-        {
-            "op": "update-graph",
-            "tasks": {"x": dumps_task((inc, 1)), "y": dumps_task((inc, "x"))},
-            "dependencies": {"x": [], "y": ["x"]},
-            "client": "c",
-            "keys": ["y"],
-        }
-    )
-
-    await f.write(
-        {
-            "op": "update-graph",
-            "tasks": {
-                "x": dumps_task((inc, 1)),
-                "z": dumps_task((operator.add, "x", 10)),
-            },
-            "dependencies": {"x": [], "z": ["x"]},
-            "client": "f",
-            "keys": ["z"],
-        }
-    )
-    (msg,) = await c.read()
-    assert msg["op"] == "key-in-memory"
-    assert msg["key"] == "y"
-    (msg,) = await f.read()
-    assert msg["op"] == "key-in-memory"
-    assert msg["key"] == "z"
-
-
 def test_dumps_function():
     a = dumps_function(inc)
     assert cloudpickle.loads(a)(10) == 11
