@@ -990,6 +990,7 @@ async def test_ready_remove_worker(c, s, a, b, worker_saturation):
     assert sum(len(w.processing) for w in s.workers.values()) + len(s.queued) == len(
         s.tasks
     )
+    await ev.set()
 
 
 @gen_cluster(client=True, Worker=Nanny, timeout=60)
