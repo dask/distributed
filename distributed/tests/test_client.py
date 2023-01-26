@@ -55,6 +55,7 @@ from distributed import (
     performance_report,
     profile,
     secede,
+    worker_client,
 )
 from distributed.client import (
     Client,
@@ -5602,16 +5603,18 @@ def test_client_async_before_loop_starts(cleanup):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, Worker=Nanny, timeout=60, nthreads=[("127.0.0.1", 3)] * 2)
-async def test_nested_compute(c, s, a, b):
+@pytest.mark.parametrize("secede", [True, False])
+@gen_cluster(client=True, Worker=Nanny, nthreads=[("127.0.0.1", 3)] * 2)
+async def test_nested_compute(c, s, a, b, secede):
     def fib(x):
-        assert get_worker().get_current_task()
-        if x < 2:
-            return x
-        a = delayed(fib)(x - 1)
-        b = delayed(fib)(x - 2)
-        c = a + b
-        return c.compute()
+        with worker_client(separate_thread=secede):
+            assert get_worker().get_current_task()
+            if x < 2:
+                return x
+            a = delayed(fib)(x - 1)
+            b = delayed(fib)(x - 2)
+            c = a + b
+            return c.compute()
 
     future = c.submit(fib, 8)
     result = await future
