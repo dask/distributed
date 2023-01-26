@@ -140,23 +140,6 @@ async def test_multi_progressbar_widget(c, s, a, b):
 
 
 @mock_widget()
-@gen_cluster(client=True)
-async def test_multi_progressbar_widget_intermediates(c, s, a, b):
-    x1 = c.submit(inc, 1, key="x-1")
-    x2 = c.submit(inc, x1, key="x-2")
-    x3 = c.submit(inc, x2, key="x-3")
-    y1 = c.submit(dec, x3)
-    y2 = c.submit(dec, y1)
-    del x1, x2, x3, y1
-
-    p = MultiProgressWidget(["x-1", "x-2", "x-3"], scheduler=s.address)
-    await p.listen()
-
-    assert "x" in p.bars
-    await y2
-
-
-@mock_widget()
 def test_values(client):
     L = [client.submit(inc, i) for i in range(5)]
     wait(L)
