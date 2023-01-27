@@ -119,7 +119,7 @@ async def test_bad_disk(c, s, a, b):
     )
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = out.persist()
-    shuffle_id = await get_shuffle_id(s)
+    shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     while not a.extensions["shuffle"].shuffles:
         await asyncio.sleep(0.01)
     shutil.rmtree(a.local_directory)
@@ -176,10 +176,13 @@ async def wait_for_tasks_in_state(
         await asyncio.sleep(interval)
 
 
-async def get_shuffle_id(scheduler: Scheduler) -> ShuffleId:
+async def wait_until_new_shuffle_is_initialized(
+    scheduler: Scheduler, interval: float = 0.01, timeout: int | None = None
+) -> ShuffleId:
+    deadline = Deadline.after(timeout)
     scheduler_extension = scheduler.extensions["shuffle"]
-    while not scheduler_extension.shuffle_ids():
-        await asyncio.sleep(0.01)
+    while not scheduler_extension.shuffle_ids() and not deadline.expired:
+        await asyncio.sleep(interval)
     shuffle_ids = scheduler_extension.shuffle_ids()
     assert len(shuffle_ids) == 1
     return next(iter(shuffle_ids))
@@ -379,7 +382,7 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     )
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = out.persist()
-    shuffle_id = await get_shuffle_id(s)
+    shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     key = barrier_key(shuffle_id)
     await wait_for_state(key, "processing", s)
     shuffleA = a.extensions["shuffle"].shuffles[shuffle_id]
@@ -422,7 +425,7 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
     )
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = out.persist()
-    shuffle_id = await get_shuffle_id(s)
+    shuffle_id = await wait_until_new_shuffle_is_initialized(s)
 
     key = barrier_key(shuffle_id)
     await wait_for_state(key, "processing", s, interval=0)
@@ -469,7 +472,7 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
         )
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
         out = out.persist()
-        shuffle_id = await get_shuffle_id(s)
+        shuffle_id = await wait_until_new_shuffle_is_initialized(s)
         key = barrier_key(shuffle_id)
         # Ensure that barrier is not executed on the nanny
         s.set_restrictions({key: {a.address}})
@@ -803,8 +806,9 @@ async def test_tail(c, s, a, b):
     await clean_scheduler(s)
 
 
+@pytest.mark.parametrize("wait_until_forgotten", [True, False])
 @gen_cluster(client=True)
-async def test_repeat(c, s, a, b):
+async def test_repeat(c, s, a, b, wait_until_forgotten):
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -813,8 +817,9 @@ async def test_repeat(c, s, a, b):
     )
     await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
 
-    while s.tasks:
-        await asyncio.sleep(0)
+    if wait_until_forgotten:
+        while s.tasks:
+            await asyncio.sleep(0)
 
     await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
 
@@ -1376,12 +1381,13 @@ class BlockedShuffleReceiveShuffleWorkerExtension(ShuffleWorkerExtension):
         return await super().shuffle_receive(*args, **kwargs)
 
 
+@pytest.mark.parametrize("wait_until_forgotten", [True, False])
 @mock.patch.dict(
     DEFAULT_EXTENSIONS,
     {"shuffle": BlockedShuffleReceiveShuffleWorkerExtension},
 )
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
-async def test_deduplicate_stale_transfer(c, s, a, b):
+async def test_deduplicate_stale_transfer(c, s, a, b, wait_until_forgotten):
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -1398,17 +1404,18 @@ async def test_deduplicate_stale_transfer(c, s, a, b):
     )
     del out
 
-    while s.tasks or shuffle_extA.shuffles or shuffle_extB.shuffles:
-        await asyncio.sleep(0)
+    if wait_until_forgotten:
+        while s.tasks or shuffle_extA.shuffles or shuffle_extB.shuffles:
+            await asyncio.sleep(0)
 
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    x, y = c.compute([df.x.size, out.x.size])
-    await get_shuffle_id(s)
+    x = c.compute(out.x.size)
+    await wait_until_new_shuffle_is_initialized(s)
     shuffle_extA.block_shuffle_receive.set()
     shuffle_extB.block_shuffle_receive.set()
 
     x = await x
-    y = await y
+    y = await c.compute(df.x.size)
     assert x == y
 
     await clean_worker(a, timeout=2)
@@ -1428,12 +1435,13 @@ class BlockedBarrierShuffleWorkerExtension(ShuffleWorkerExtension):
         return await super()._barrier(*args, **kwargs)
 
 
+@pytest.mark.parametrize("wait_until_forgotten", [True, False])
 @mock.patch.dict(
     DEFAULT_EXTENSIONS,
     {"shuffle": BlockedBarrierShuffleWorkerExtension},
 )
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
-async def test_handle_stale_barrier(c, s, a, b):
+async def test_handle_stale_barrier(c, s, a, b, wait_until_forgotten):
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -1455,12 +1463,13 @@ async def test_handle_stale_barrier(c, s, a, b):
     )
     del out
 
-    while s.tasks:
-        await asyncio.sleep(0)
+    if wait_until_forgotten:
+        while s.tasks:
+            await asyncio.sleep(0)
 
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     x, y = c.compute([df.x.size, out.x.size])
-    await get_shuffle_id(s)
+    await wait_until_new_shuffle_is_initialized(s)
     shuffle_extA.block_barrier.set()
     shuffle_extB.block_barrier.set()
 
@@ -1492,7 +1501,7 @@ async def test_shuffle_lifecycle(c, s, a):
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = out.persist()
 
-    shuffle_id = await get_shuffle_id(s)
+    shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     shuffle_dict = scheduler_ext.get(shuffle_id, None, None, None, a.worker_address)
     assert await worker_ext._get_shuffle_run(shuffle_id, shuffle_dict["run_id"])
     with pytest.raises(RuntimeError, match="Invalid shuffle state"):
@@ -1510,7 +1519,7 @@ async def test_shuffle_lifecycle(c, s, a):
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = out.persist()
 
-    new_shuffle_id = await get_shuffle_id(s)
+    new_shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     assert shuffle_id == new_shuffle_id
     new_shuffle_dict = scheduler_ext.get(shuffle_id, None, None, None, a.worker_address)
     assert shuffle_dict["run_id"] < new_shuffle_dict["run_id"]
@@ -1580,7 +1589,7 @@ async def test_replace_stale_shuffle(c, s, a, b):
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = out.persist()
 
-    shuffle_id = await get_shuffle_id(s)
+    shuffle_id = await wait_until_new_shuffle_is_initialized(s)
 
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, a)
     await ext_B.finished_get_shuffle_run.wait()
