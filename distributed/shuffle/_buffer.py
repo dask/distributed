@@ -9,6 +9,7 @@ from typing import Any, Generic, Sized, TypeVar
 
 from distributed.metrics import time
 from distributed.shuffle._limiter import ResourceLimiter
+from distributed.sizeof import sizeof
 
 logger = logging.getLogger("distributed.shuffle")
 
@@ -143,7 +144,7 @@ class ShardsBuffer(Generic[ShardType]):
                         try:
                             shard = self.shards[part_id].pop()
                             shards.append(shard)
-                            s = len(shard)
+                            s = sizeof(shard)
                             size += s
                             self.sizes[part_id] -= s
                         except IndexError:
@@ -183,7 +184,7 @@ class ShardsBuffer(Generic[ShardType]):
 
         sizes = {}
         for id_, shards in data.items():
-            size = sum(map(len, shards))
+            size = sum(map(sizeof, shards))
             sizes[id_] = size
         total_batch_size = sum(sizes.values())
         self.bytes_memory += total_batch_size
