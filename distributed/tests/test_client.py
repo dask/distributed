@@ -39,12 +39,8 @@ import dask
 import dask.bag as db
 from dask import delayed
 from dask.optimization import SubgraphCallable
-from dask.utils import (
-    get_default_shuffle_algorithm,
-    parse_timedelta,
-    stringify,
-    tmpfile,
-)
+from dask.utils import get_default_shuffle_algorithm  # type: ignore
+from dask.utils import parse_timedelta, stringify, tmpfile
 
 from distributed import (
     CancelledError,
