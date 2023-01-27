@@ -1487,7 +1487,17 @@ async def test_handle_stale_barrier(c, s, a, b, wait_until_forgotten):
     {"shuffle": BlockedBarrierShuffleWorkerExtension},
 )
 @gen_cluster(client=True, nthreads=[("", 1)])
-async def test_shuffle_lifecycle(c, s, a):
+async def test_shuffle_run_consistency(c, s, a):
+    """This test checks the correct creation of shuffle run IDs through the scheduler
+    as well as the correct handling through the workers.
+
+    In particular, newer run IDs for the same shuffle must always be larger than
+    previous ones so that we can detect stale runs.
+
+    .. note:
+        The P2P implementation relies on the correctness of this behavior,
+        but it is an implementation detail that users should not rely upon.
+    """
     worker_ext = a.extensions["shuffle"]
     scheduler_ext = s.extensions["shuffle"]
 
@@ -1503,7 +1513,12 @@ async def test_shuffle_lifecycle(c, s, a):
 
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     shuffle_dict = scheduler_ext.get(shuffle_id, None, None, None, a.worker_address)
+
+    # Worker extension can fetch the current run
     assert await worker_ext._get_shuffle_run(shuffle_id, shuffle_dict["run_id"])
+
+    # This should never occur, but fetching an ID larger than the ID available on
+    # the scheduler should result in an error.
     with pytest.raises(RuntimeError, match="Invalid shuffle state"):
         await worker_ext._get_shuffle_run(shuffle_id, shuffle_dict["run_id"] + 1)
 
@@ -1521,9 +1536,16 @@ async def test_shuffle_lifecycle(c, s, a):
 
     new_shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     assert shuffle_id == new_shuffle_id
+
     new_shuffle_dict = scheduler_ext.get(shuffle_id, None, None, None, a.worker_address)
+
+    # Check invariant that the new run ID is larger than the previous
     assert shuffle_dict["run_id"] < new_shuffle_dict["run_id"]
+
+    # Worker extension can fetch the new shuffle run
     assert await worker_ext._get_shuffle_run(shuffle_id, new_shuffle_dict["run_id"])
+
+    # Fetching a stale run from a worker aware of the new run raises an error
     with pytest.raises(RuntimeError, match="Stale shuffle"):
         await worker_ext._get_shuffle_run(shuffle_id, shuffle_dict["run_id"])
 

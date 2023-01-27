@@ -478,6 +478,7 @@ class ShuffleWorkerExtension:
         if run_id < shuffle.run_id:
             raise RuntimeError("Stale shuffle")
         elif run_id > shuffle.run_id:
+            # This should never happen
             raise RuntimeError("Invalid shuffle state")
 
         if shuffle._exception:
