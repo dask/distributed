@@ -936,10 +936,7 @@ class Client(SyncMethodMixin):
 
         self._start_arg = address
         self._set_as_default = set_as_default
-        if set_as_default:
-            self._set_config = dask.config.set(
-                scheduler="dask.distributed", shuffle="tasks"
-            )
+
         self._event_handlers = {}
 
         self._stream_handlers = {
@@ -1632,10 +1629,6 @@ class Client(SyncMethodMixin):
         with log_errors():
             _del_global_client(self)
             self._scheduler_identity = {}
-            with suppress(AttributeError):
-                # clear the dask.config set keys
-                with self._set_config:
-                    pass
             if self.get == dask.config.get("get", None):
                 del dask.config.config["get"]
 
@@ -5226,7 +5219,6 @@ def ensure_default_client(client):
     client : Client
         The client
     """
-    dask.config.set(scheduler="dask.distributed")
     _set_global_client(client)
 
 

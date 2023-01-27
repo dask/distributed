@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import os
 import pathlib
 import shutil
 from typing import BinaryIO, Callable
@@ -60,8 +59,7 @@ class DiskShardsBuffer(ShardsBuffer):
             concurrency_limit=1,
         )
         self.directory = pathlib.Path(directory)
-        if not os.path.exists(self.directory):
-            os.mkdir(self.directory)
+        self.directory.mkdir(exist_ok=True)
         self.dump = dump
         self.load = load
 

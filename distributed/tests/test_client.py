@@ -39,6 +39,7 @@ import dask
 import dask.bag as db
 from dask import delayed
 from dask.optimization import SubgraphCallable
+from dask.utils import get_default_shuffle_algorithm  # type: ignore
 from dask.utils import parse_timedelta, stringify, tmpfile
 
 from distributed import (
@@ -3332,25 +3333,28 @@ def test_default_get(loop_in_thread):
     loop = loop_in_thread
     with cluster() as (s, [a, b]):
         pre_get = dask.base.get_scheduler()
-        pytest.raises(KeyError, dask.config.get, "shuffle")
+        # These may change in the future but the selection below shoul dnot
+        distributed_default = "tasks"
+        local_default = "disk"
+        assert get_default_shuffle_algorithm() == local_default
         with Client(s["address"], set_as_default=True, loop=loop) as c:
             assert dask.base.get_scheduler() == c.get
-            assert dask.config.get("shuffle") == "tasks"
+            assert get_default_shuffle_algorithm() == distributed_default
 
         assert dask.base.get_scheduler() == pre_get
-        pytest.raises(KeyError, dask.config.get, "shuffle")
+        assert get_default_shuffle_algorithm() == local_default
 
         c = Client(s["address"], set_as_default=False, loop=loop)
         assert dask.base.get_scheduler() == pre_get
-        pytest.raises(KeyError, dask.config.get, "shuffle")
+        assert get_default_shuffle_algorithm() == local_default
         c.close()
 
         c = Client(s["address"], set_as_default=True, loop=loop)
-        assert dask.config.get("shuffle") == "tasks"
+        assert get_default_shuffle_algorithm() == distributed_default
         assert dask.base.get_scheduler() == c.get
         c.close()
         assert dask.base.get_scheduler() == pre_get
-        pytest.raises(KeyError, dask.config.get, "shuffle")
+        assert get_default_shuffle_algorithm() == local_default
 
         with Client(s["address"], loop=loop) as c:
             assert dask.base.get_scheduler() == c.get
@@ -6665,9 +6669,8 @@ def test_futures_in_subgraphs(loop_in_thread):
     """Regression test of <https://github.com/dask/distributed/issues/4145>"""
 
     dd = pytest.importorskip("dask.dataframe")
+    pd = pytest.importorskip("pandas")
     with cluster() as (s, [a, b]), Client(s["address"], loop=loop_in_thread) as c:
-        import pandas as pd
-
         ddf = dd.from_pandas(
             pd.DataFrame(
                 dict(
