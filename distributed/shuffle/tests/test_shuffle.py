@@ -808,7 +808,43 @@ async def test_tail(c, s, a, b):
 
 @pytest.mark.parametrize("wait_until_forgotten", [True, False])
 @gen_cluster(client=True)
-async def test_repeat(c, s, a, b, wait_until_forgotten):
+async def test_repeat_shuffle_instance(c, s, a, b, wait_until_forgotten):
+    """Tests repeating the same instance of a shuffle-based task graph.
+
+    See Also
+    --------
+    test_repeat_shuffle_operation
+    """
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="100 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p").size
+    await c.compute(out)
+
+    if wait_until_forgotten:
+        while s.tasks:
+            await asyncio.sleep(0)
+
+    await c.compute(out)
+
+    await clean_worker(a, timeout=2)
+    await clean_worker(b, timeout=2)
+    await clean_scheduler(s, timeout=2)
+
+
+@pytest.mark.parametrize("wait_until_forgotten", [True, False])
+@gen_cluster(client=True)
+async def test_repeat_shuffle_operation(c, s, a, b, wait_until_forgotten):
+    """Tests repeating the same shuffle operation using two distinct instances of the
+    task graph.
+
+    See Also
+    --------
+    test_repeat_shuffle_instance
+    """
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
