@@ -394,6 +394,14 @@ class ShuffleWorkerExtension:
             await shuffle.inputs_done()
 
     def shuffle_fail(self, shuffle_id: ShuffleId, run_id: int, message: str) -> None:
+        """Fails the shuffle run with the message as exception and triggers cleanup.
+
+        .. warning::
+            To guarantee the correct order of operations, shuffle_fail must be
+            synchronous. See
+            https://github.com/dask/distributed/pull/7486#discussion_r1088857185
+            for more details.
+        """
         shuffle = self.shuffles.get(shuffle_id, None)
         if shuffle is None or shuffle.run_id != run_id:
             return
