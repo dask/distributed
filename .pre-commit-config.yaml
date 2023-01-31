@@ -58,9 +58,9 @@ repos:
           - types-setuptools
           # Typed libraries
           - click
-          - dask
           - numpy
           - pytest
           - tornado
-          - zict
           - pyarrow
+          - git+https://github.com/dask/dask
+          - git+https://github.com/dask/zict
