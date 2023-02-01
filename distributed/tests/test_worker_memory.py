@@ -919,7 +919,6 @@ async def test_disk_cleanup_on_terminate(c, s, a, ignore_sigterm):
     assert not os.path.exists(spill_fname)
 
 
-@pytest.mark.repeat(40)
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,
