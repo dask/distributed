@@ -5,7 +5,6 @@ import glob
 import logging
 import os
 import signal
-import threading
 from collections import Counter, UserDict
 from time import sleep
 
@@ -920,6 +919,7 @@ async def test_disk_cleanup_on_terminate(c, s, a, ignore_sigterm):
     assert not os.path.exists(spill_fname)
 
 
+@pytest.mark.repeat(40)
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,
@@ -943,7 +943,7 @@ async def test_pause_while_spilling(c, s, a):
 
     def get_process_memory():
         if len(a.data) < N_PAUSE:
-            # Don't trigger spilling until after all tasks have completed
+            # Don't trigger spilling until after some tasks have completed
             return 0
         elif a.data.fast and not a.data.slow:
             # Trigger spilling
@@ -955,25 +955,22 @@ async def test_pause_while_spilling(c, s, a):
     a.monitor.get_process_memory = get_process_memory
 
     class SlowSpill:
-        def __init__(self, _):
-            # Can't pickle a Semaphore, so instead of a default value, we create it
-            # here. Don't worry about race conditions; the worker is single-threaded.
-            if not hasattr(type(self), "sem"):
-                type(self).sem = threading.Semaphore(N_PAUSE)
-            # Block if there are N_PAUSE tasks in a.data.fast
-            self.sem.acquire()
+        def __init__(self):
+            # We need to record the worker while we are inside a task; can't do it in
+            # __reduce__ or it will pick up an arbitrary one among all running workers
+            self.worker = distributed.get_worker()
+            while len(self.worker.data.fast) >= N_PAUSE:
+                sleep(0.01)
 
         def __reduce__(self):
-            paused = distributed.get_worker().status == Status.paused
+            paused = self.worker.status == Status.paused
             if not paused:
                 sleep(0.1)
-            self.sem.release()
             return bool, (paused,)
 
-    futs = c.map(SlowSpill, range(N_TOTAL))
-    while len(a.data.slow) < (N_PAUSE + 1 if a.state.ready else N_PAUSE):
-        await asyncio.sleep(0.01)
+    futs = [c.submit(SlowSpill, pure=False) for _ in range(N_TOTAL)]
 
+    await async_wait_for(lambda: len(a.data.slow) >= N_PAUSE, timeout=5, period=0)
     assert a.status == Status.paused
     # Worker should have become paused after the first `SlowSpill` was evicted, because
     # the spill to disk took longer than the memory monitor interval.
@@ -984,8 +981,8 @@ async def test_pause_while_spilling(c, s, a):
     # lands, only 3 will be in memory. If after, the 4th will block on the semaphore
     # until one of the others is spilled.
     assert len(a.data.slow) in (N_PAUSE, N_PAUSE + 1)
-    n_spilled_while_not_paused = sum(paused is False for paused in a.data.slow.values())
-    assert 0 <= n_spilled_while_not_paused <= 1
+    n_spilled_while_not_paused = sum(not paused for paused in a.data.slow.values())
+    assert n_spilled_while_not_paused == 1
 
 
 @pytest.mark.slow
