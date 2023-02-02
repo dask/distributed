@@ -57,6 +57,7 @@ from distributed.comm.utils import OFFLOAD_THRESHOLD
 from distributed.compatibility import PeriodicCallback, randbytes, to_thread
 from distributed.core import (
     ConnectionPool,
+    PooledRPCCall,
     Status,
     coerce_to_address,
     error_message,
@@ -266,7 +267,7 @@ class Worker(BaseWorker, ServerNode):
         executor.
     * **local_directory:** ``path``:
         Path on local machine to store temporary files
-    * **scheduler:** ``rpc``:
+    * **scheduler:** ``PooledRPCCall``:
         Location of scheduler.  See ``.ip/.port`` attributes.
     * **name:** ``string``:
         Alias
@@ -437,7 +438,7 @@ class Worker(BaseWorker, ServerNode):
     metrics: dict[str, Callable[[Worker], Any]]
     startup_information: dict[str, Callable[[Worker], Any]]
     low_level_profiler: bool
-    scheduler: Any
+    scheduler: PooledRPCCall
     execution_state: dict[str, Any]
     plugins: dict[str, WorkerPlugin]
     _pending_plugins: tuple[WorkerPlugin, ...]

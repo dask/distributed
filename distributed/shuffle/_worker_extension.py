@@ -84,7 +84,7 @@ class ShuffleRun:
         A callable returning a PooledRPCCall to contact other Shuffle instances.
         Typically a ConnectionPool.
     barrier:
-        A function that executes the `barrier` RPC on the scheduler.
+        A PooledRPCCall to to contact the scheduler.
     memory_limiter_disk:
     memory_limiter_comm:
         A ``ResourceLimiter`` limiting the total amount of memory used in either
@@ -103,14 +103,14 @@ class ShuffleRun:
         directory: str,
         nthreads: int,
         rpc: Callable[[str], PooledRPCCall],
-        barrier: Callable,
+        scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
     ):
 
         import pandas as pd
 
-        self._barrier = barrier
+        self.scheduler = scheduler
         self.rpc = rpc
         self.column = column
         self.id = id
@@ -164,7 +164,7 @@ class ShuffleRun:
         self.raise_if_closed()
         # TODO: Consider broadcast pinging once when the shuffle starts to warm
         # up the comm pool on scheduler side
-        await self._barrier(id=self.id, run_id=self.run_id)
+        await self.scheduler.shuffle_barrier(id=self.id, run_id=self.run_id)
 
     async def send(self, address: str, shards: list[tuple[int, bytes]]) -> None:
         self.raise_if_closed()
@@ -587,7 +587,7 @@ class ShuffleWorkerExtension:
             nthreads=self.worker.state.nthreads,
             local_address=self.worker.address,
             rpc=self.worker.rpc,
-            barrier=self.worker.scheduler.shuffle_barrier,
+            scheduler=self.worker.scheduler,
             memory_limiter_disk=self.memory_limiter_disk,
             memory_limiter_comms=self.memory_limiter_comms,
         )
