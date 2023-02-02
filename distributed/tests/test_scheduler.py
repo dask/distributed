@@ -2834,7 +2834,7 @@ async def test_too_many_groups(c, s, a, b):
 
 @gen_test()
 async def test_multiple_listeners():
-    with captured_logger(logging.getLogger("distributed.scheduler")) as log:
+    with captured_logger("distributed.scheduler") as log:
         async with Scheduler(dashboard_address=":0", protocol=["inproc", "tcp"]) as s:
             async with Worker(s.listeners[0].contact_address) as a:
                 async with Worker(s.listeners[1].contact_address) as b:
@@ -2861,7 +2861,7 @@ async def test_worker_name_collision(s, a):
     # test that a name collision for workers produces the expected response
     # and leaves the data structures of Scheduler in a good state
     # is not updated by the second worker
-    with captured_logger(logging.getLogger("distributed.scheduler")) as log:
+    with captured_logger("distributed.scheduler") as log:
         with raises_with_cause(
             RuntimeError, None, ValueError, f"name taken, {a.name!r}"
         ):

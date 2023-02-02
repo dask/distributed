@@ -304,7 +304,7 @@ async def test_fail_to_pickle_spill(c, s, a):
     """
     a.monitor.get_process_memory = lambda: 701 if a.data.fast else 0
 
-    with captured_logger(logging.getLogger("distributed.spill")) as logs:
+    with captured_logger("distributed.spill") as logs:
         bad = c.submit(FailToPickle, key="bad")
         await wait(bad)
 
@@ -586,7 +586,7 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
     while a.state.executing_count != 1:
         await asyncio.sleep(0.01)
 
-    with captured_logger(logging.getLogger("distributed.worker.memory")) as logger:
+    with captured_logger("distributed.worker.memory") as logger:
         # Task that is queued on the worker when the worker pauses
         y = c.submit(inc, 1, key="y")
         while "y" not in a.state.tasks:
@@ -770,7 +770,7 @@ async def test_override_data_vs_memory_monitor(c, s, a):
             return 8_100_000_000
 
     # Capture output of log_errors()
-    with captured_logger(logging.getLogger("distributed.utils")) as logger:
+    with captured_logger("distributed.utils") as logger:
         x = c.submit(C)
         await wait(x)
 

@@ -644,8 +644,8 @@ async def test_gather_skip(c, s, a):
     x = c.submit(div, 1, 0, priority=10)
     y = c.submit(slowinc, 1, delay=0.5)
 
-    with captured_logger(logging.getLogger("distributed.scheduler")) as sched:
-        with captured_logger(logging.getLogger("distributed.client")) as client:
+    with captured_logger("distributed.scheduler") as sched:
+        with captured_logger("distributed.client") as client:
             L = await c.gather([x, y], errors="skip")
             assert L == [2]
 
@@ -3479,7 +3479,7 @@ async def test_get_foo_lost_keys(c, s, u, v, w):
 )
 async def test_bad_tasks_fail(c, s, a, b):
     f = c.submit(sys.exit, 0)
-    with captured_logger(logging.getLogger("distributed.scheduler")) as logger:
+    with captured_logger("distributed.scheduler") as logger:
         with pytest.raises(KilledWorker) as info:
             await f
 
@@ -5015,7 +5015,7 @@ async def test_fire_and_forget_err(c, s, a, b):
 
 
 def test_quiet_client_close(loop):
-    with captured_logger(logging.getLogger("distributed")) as logger:
+    with captured_logger("distributed") as logger:
         with Client(
             loop=loop,
             processes=False,
@@ -5041,7 +5041,7 @@ def test_quiet_client_close(loop):
 
 @pytest.mark.slow
 def test_quiet_client_close_when_cluster_is_closed_before_client(loop):
-    with captured_logger(logging.getLogger("tornado.application")) as logger:
+    with captured_logger("tornado.application") as logger:
         cluster = LocalCluster(loop=loop, n_workers=1, dashboard_address=":0")
         client = Client(cluster, loop=loop)
         cluster.close()
@@ -5584,7 +5584,7 @@ async def test_profile_keys(c, s, a, b):
 
     assert p["count"] == xp["count"] + yp["count"]
 
-    with captured_logger(logging.getLogger("distributed")) as logger:
+    with captured_logger("distributed") as logger:
         prof = await c.profile("does-not-exist")
         assert prof == profile.create()
     out = logger.getvalue()
@@ -5839,7 +5839,7 @@ def test_client_doesnt_close_given_loop(loop_in_thread, s, a, b):
 @gen_cluster(client=True, nthreads=[])
 async def test_quiet_scheduler_loss(c, s):
     c._periodic_callbacks["scheduler-info"].interval = 10
-    with captured_logger(logging.getLogger("distributed.client")) as logger:
+    with captured_logger("distributed.client") as logger:
         await s.close()
     text = logger.getvalue()
     assert "BrokenPipeError" not in text
@@ -6335,7 +6335,7 @@ async def test_shutdown_is_quiet_with_cluster():
     async with LocalCluster(
         n_workers=1, asynchronous=True, processes=False, dashboard_address=":0"
     ) as cluster:
-        with captured_logger(logging.getLogger("distributed.client")) as logger:
+        with captured_logger("distributed.client") as logger:
             timeout = 0.1
             async with Client(cluster, asynchronous=True, timeout=timeout) as c:
                 await c.shutdown()
@@ -6349,7 +6349,7 @@ async def test_client_is_quiet_cluster_close():
     async with LocalCluster(
         n_workers=1, asynchronous=True, processes=False, dashboard_address=":0"
     ) as cluster:
-        with captured_logger(logging.getLogger("distributed.client")) as logger:
+        with captured_logger("distributed.client") as logger:
             timeout = 0.1
             async with Client(cluster, asynchronous=True, timeout=timeout) as c:
                 await cluster.close()
@@ -6830,7 +6830,7 @@ async def test_log_event_multiple_clients(c, s):
         while len(s.event_subscriber["test-topic"]) != 2:
             await asyncio.sleep(0.01)
 
-        with captured_logger(logging.getLogger("distributed.client")) as logger:
+        with captured_logger("distributed.client") as logger:
             await c.log_event("test-topic", {})
 
         while len(received_events) < 2:
@@ -7472,7 +7472,7 @@ async def test_log_event_warn(c, s, a, b):
         # missing "message" key should log TypeError
         get_worker().log_event("warn", {})
 
-    with captured_logger(logging.getLogger("distributed.client")) as log:
+    with captured_logger("distributed.client") as log:
         await c.submit(no_message)
         assert "TypeError" in log.getvalue()
 
@@ -7600,7 +7600,7 @@ async def test_print_manual(c, s, a, b, capsys):
         # this should log a TypeError in the client
         get_worker().log_event("print", {"args": ("hello",), "file": "bad value"})
 
-    with captured_logger(logging.getLogger("distributed.client")) as log:
+    with captured_logger("distributed.client") as log:
         await c.submit(print_otherfile)
         assert "TypeError" in log.getvalue()
 
@@ -7610,7 +7610,7 @@ async def test_print_manual_bad_args(c, s, a, b, capsys):
     def foo():
         get_worker().log_event("print", {"args": "not a tuple"})
 
-    with captured_logger(logging.getLogger("distributed.client")) as log:
+    with captured_logger("distributed.client") as log:
         await c.submit(foo)
         assert "TypeError" in log.getvalue()
 
