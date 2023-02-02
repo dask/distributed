@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import heapq
 import logging
 import logging.config
 import os
 import sys
+from collections.abc import Callable, Hashable
+from typing import Any
 
 import yaml
 
 import dask
-from dask.utils import import_required
+from dask.utils import import_required, parse_timedelta
 
 from distributed.compatibility import WINDOWS, logging_names
+from distributed.metrics import monotonic
 
 config = dask.config.config
 
@@ -166,6 +170,74 @@ def initialize_logging(config):
             _initialize_logging_new_style(config)
         else:
             _initialize_logging_old_style(config)
+
+
+class RateLimitedLogger:
+    """A wrapper around a logger that limits how frequently a specific message
+    will be logged, suppressing any others more frequent than that.
+
+    Example
+    -------
+    >>> logger = RateLimitedLogger(logging.getLogger("foo"))
+    >>> logger.info("hello-world", "Hello World!")
+    Hello world!
+    >>> logger.info("accounting", "You paid 100$")  # tracking is specific to each tag
+    You paid 100$
+    >>> logger.info("hello-world", "Hi again!")  # Too soon! This is muted
+    >>> time.sleep(10)
+    >>> logger.info("hello-world", "You there?")  # Enough time has passed
+    You there?
+
+    Tags don't need to be constant; obsolete tags are cleaned up automatically after
+    they expire so that won't cause a memory leak.
+    """
+
+    logger: logging.Logger
+    rate: float
+    _prev_heap: list[tuple[float, Hashable]]
+    _prev_set: set[Hashable]
+
+    def __init__(self, logger: logging.Logger, rate: str | float = "10s"):
+        self.logger = logger
+        self.rate = parse_timedelta(rate)
+        self._prev_heap = []
+        self._prev_set = set()
+
+    def _log(
+        self, func: Callable, tag: Hashable, msg: str, /, *args: Any, **kwargs: Any
+    ) -> None:
+        now = monotonic()
+
+        # Self-clean to avoid accumulating tags over time
+        oldest = now - self.rate
+        while self._prev_heap and self._prev_heap[0][0] < oldest:
+            _, purge_tag = heapq.heappop(self._prev_heap)
+            self._prev_set.remove(purge_tag)
+
+        if tag not in self._prev_set:
+            heapq.heappush(self._prev_heap, (now, tag))
+            self._prev_set.add(tag)
+            func(msg, *args, **kwargs)
+
+    def clear(self) -> None:
+        """Clear memory of recent log messages"""
+        self._prev_heap.clear()
+        self._prev_set.clear()
+
+    def debug(self, tag: Hashable, msg: str, /, *args: Any, **kwargs: Any) -> None:
+        self._log(self.logger.debug, tag, msg, *args, **kwargs)
+
+    def info(self, tag: Hashable, msg: str, /, *args: Any, **kwargs: Any) -> None:
+        self._log(self.logger.info, tag, msg, *args, **kwargs)
+
+    def warning(self, tag: Hashable, msg: str, /, *args: Any, **kwargs: Any) -> None:
+        self._log(self.logger.warning, tag, msg, *args, **kwargs)
+
+    def error(self, tag: Hashable, msg: str, /, *args: Any, **kwargs: Any) -> None:
+        self._log(self.logger.error, tag, msg, *args, **kwargs)
+
+    def critical(self, tag: Hashable, msg: str, /, *args: Any, **kwargs: Any) -> None:
+        self._log(self.logger.critical, tag, msg, *args, **kwargs)
 
 
 def initialize_event_loop(config):

@@ -12,10 +12,12 @@ from packaging.version import parse as parse_version
 
 import zict
 
+from distributed.config import RateLimitedLogger
 from distributed.protocol import deserialize_bytes, serialize_bytelist
 from distributed.sizeof import safe_sizeof
 
-logger = logging.getLogger(__name__)
+rl_logger = RateLimitedLogger(logging.getLogger(__name__))
+
 has_zict_220 = parse_version(zict.__version__) >= parse_version("2.2.0")
 has_zict_230 = parse_version(zict.__version__) >= parse_version("2.3.0")
 
@@ -122,13 +124,8 @@ class SpillBuffer(zict.Buffer):
         Managed memory, in bytes, to start spilling at
     max_spill: int | False, optional
         Limit of number of bytes to be spilled on disk. Set to False to disable.
-    min_log_interval: float, optional
-        Minimum interval, in seconds, between warnings on the log file about full disk
     """
 
-    last_logged: float
-    min_log_interval: float
-    logged_pickle_errors: set[str]
     fast_metrics: FastMetrics
 
     def __init__(
@@ -136,7 +133,6 @@ class SpillBuffer(zict.Buffer):
         spill_directory: str,
         target: int,
         max_spill: int | Literal[False] = False,
-        min_log_interval: float = 2,
     ):
         slow: MutableMapping[str, Any] = Slow(spill_directory, max_spill)
         if has_zict_220:
@@ -145,10 +141,6 @@ class SpillBuffer(zict.Buffer):
             slow = zict.Cache(slow, zict.WeakValueMapping())
 
         super().__init__(fast={}, slow=slow, n=target, weight=_in_memory_weight)
-        self.last_logged = 0
-        self.min_log_interval = min_log_interval
-        self.logged_pickle_errors = set()  # keys logged with pickle error
-
         self.fast_metrics = FastMetrics()
 
     @contextmanager
@@ -161,21 +153,17 @@ class SpillBuffer(zict.Buffer):
             (key_e,) = e.args
             assert key_e in self.fast
             assert key_e not in self.slow
-            now = perf_counter()
-            if now - self.last_logged >= self.min_log_interval:
-                logger.warning(
-                    "Spill file on disk reached capacity; keeping data in memory"
-                )
-                self.last_logged = now
+            rl_logger.warning(
+                "max-spill-exceeded",
+                "Spill file on disk reached capacity; keeping data in memory",
+            )
             raise HandledError()
         except OSError:
-            # Typically, this is a disk full error
-            now = perf_counter()
-            if now - self.last_logged >= self.min_log_interval:
-                logger.error(
-                    "Spill to disk failed; keeping data in memory", exc_info=True
-                )
-                self.last_logged = now
+            rl_logger.error(
+                "spill-failed",
+                "Spill to disk failed; keeping data in memory",
+                exc_info=True,
+            )
             raise HandledError()
         except PickleError as e:
             key_e, orig_e = e.args
@@ -197,9 +185,11 @@ class SpillBuffer(zict.Buffer):
                 # another, unrelated key to be spilled out of the LRU, and that key
                 # failed to serialize. There's nothing wrong with the new key. The older
                 # key is still in memory.
-                if key_e not in self.logged_pickle_errors:
-                    logger.error(f"Failed to pickle {key_e!r}", exc_info=True)
-                    self.logged_pickle_errors.add(key_e)
+                rl_logger.error(
+                    ("pickle-error", key_e),
+                    f"Failed to pickle {key_e!r}",
+                    exc_info=True,
+                )
                 raise HandledError()
 
     def __setitem__(self, key: str, value: Any) -> None:
@@ -225,7 +215,6 @@ class SpillBuffer(zict.Buffer):
         try:
             with self.handle_errors(key):
                 super().__setitem__(key, value)
-                self.logged_pickle_errors.discard(key)
         except HandledError:
             assert key in self.fast
             assert key not in self.slow
@@ -255,10 +244,6 @@ class SpillBuffer(zict.Buffer):
             self.fast_metrics.log_read(nbytes)
 
         return super().__getitem__(key)
-
-    def __delitem__(self, key: str) -> None:
-        super().__delitem__(key)
-        self.logged_pickle_errors.discard(key)
 
     @property
     def memory(self) -> Mapping[str, Any]:

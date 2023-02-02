@@ -38,6 +38,7 @@ from dask.utils import format_bytes, parse_bytes, parse_timedelta
 
 from distributed import system
 from distributed.compatibility import WINDOWS, PeriodicCallback
+from distributed.config import RateLimitedLogger
 from distributed.core import Status
 from distributed.metrics import monotonic
 from distributed.spill import ManualEvictProto, SpillBuffer
@@ -76,6 +77,8 @@ class WorkerMemoryManager:
     memory_pause_fraction: float | Literal[False]
     max_spill: int | Literal[False]
     memory_monitor_interval: float
+    logger: logging.Logger
+    rl_logger: RateLimitedLogger
     _throttled_gc: ThrottledGC
 
     def __init__(
@@ -102,6 +105,7 @@ class WorkerMemoryManager:
         memory_pause_fraction: float | Literal[False] | None = None,
     ):
         self.logger = logging.getLogger("distributed.worker.memory")
+        self.rl_logger = RateLimitedLogger(self.logger)
         self.memory_limit = parse_memory_limit(
             memory_limit, nthreads, logger=self.logger
         )
@@ -208,7 +212,10 @@ class WorkerMemoryManager:
             # Try to free some memory while in paused state
             self._throttled_gc.collect()
             if worker.status == Status.running:
-                self.logger.warning(
+                # If a worker flickers a lot between paused and running state,
+                # don't flood the log
+                self.rl_logger.warning(
+                    "pause",
                     "Worker is at %d%% memory usage. Pausing worker.  "
                     "Process memory: %s -- Worker memory limit: %s",
                     int(frac * 100),
@@ -219,7 +226,8 @@ class WorkerMemoryManager:
                 )
                 worker.status = Status.paused
         elif worker.status == Status.paused:
-            self.logger.warning(
+            self.rl_logger.warning(
+                "unpause",
                 "Worker is at %d%% memory usage. Resuming worker. "
                 "Process memory: %s -- Worker memory limit: %s",
                 int(frac * 100),
@@ -246,10 +254,11 @@ class WorkerMemoryManager:
             return
 
         total_spilled = 0
-        self.logger.debug(
-            "Worker is at %.0f%% memory usage. Start spilling data to disk.",
-            frac * 100,
-        )
+        if data.fast:
+            self.logger.debug(
+                "Worker is at %.0f%% memory usage. Start spilling data to disk.",
+                frac * 100,
+            )
         # Implement hysteresis cycle where spilling starts at the spill threshold and
         # stops at the target threshold. Normally that here the target threshold defines
         # process memory, whereas normally it defines reported managed memory (e.g.
@@ -263,7 +272,8 @@ class WorkerMemoryManager:
 
         while memory > target:
             if not data.fast:
-                self.logger.warning(
+                self.rl_logger.warning(
+                    "unmanaged-memory-high",
                     "Unmanaged memory use is high. This may indicate a memory leak "
                     "or the memory may not be released to the OS; see "
                     "https://distributed.dask.org/en/latest/worker-memory.html#memory-not-released-back-to-the-os "

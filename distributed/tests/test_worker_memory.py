@@ -21,6 +21,7 @@ from distributed import Client, Event, KilledWorker, Nanny, Scheduler, Worker, w
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import Status
 from distributed.metrics import monotonic
+from distributed.spill import rl_logger as spill_logger
 from distributed.utils_test import (
     NO_AMM,
     async_wait_for,
@@ -304,7 +305,8 @@ async def test_fail_to_pickle_spill(c, s, a):
     """
     a.monitor.get_process_memory = lambda: 701 if a.data.fast else 0
 
-    with captured_logger(logging.getLogger("distributed.spill")) as logs:
+    spill_logger.clear()
+    with captured_logger("distributed.spill") as logs:
         bad = c.submit(FailToPickle, key="bad")
         await wait(bad)
 
@@ -626,6 +628,24 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
 
         assert a.status == Status.running
         assert "Resuming worker" in logger.getvalue()
+
+
+@gen_cluster(
+    nthreads=[("", 1)],
+    config={
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": 0.0001,
+        "distributed.worker.memory.pause": False,
+        "distributed.worker.memory.monitor-interval": "10ms",
+    },
+)
+async def test_high_unmanaged_memory_warning(s, a):
+    a.memory_manager.rl_logger.clear()
+    with captured_logger("distributed.worker.memory") as logger:
+        await asyncio.sleep(0.1)  # Enough for 10 runs of the memory monitor
+    value = logger.getvalue()
+    assert "Unmanaged memory use is high" in value
+    assert len(value.splitlines()) == 1  # It's rate limited
 
 
 @gen_cluster(

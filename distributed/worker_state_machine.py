@@ -1468,7 +1468,6 @@ class WorkerState:
         who_has)
         This is idempotent
         """
-        logger.debug("Purge task: %s", ts)
         key = ts.key
         self.data.pop(key, None)
         self.actors.pop(key, None)

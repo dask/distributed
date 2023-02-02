@@ -6,12 +6,13 @@ import os
 import subprocess
 import sys
 import tempfile
+from time import sleep
 
 import pytest
 import yaml
 
-from distributed.config import initialize_logging
-from distributed.utils_test import new_config, new_config_file
+from distributed.config import RateLimitedLogger, initialize_logging
+from distributed.utils_test import captured_logger, new_config, new_config_file
 
 
 @pytest.mark.parametrize(
@@ -250,6 +251,42 @@ qualname=foo.bar
             """
         subprocess.check_call([sys.executable, "-c", code])
     os.remove(logging_config.name)
+
+
+def test_rate_limited_logger():
+    logger = RateLimitedLogger(logging.getLogger("foo"), rate="100ms")
+    with captured_logger("foo", level=logging.DEBUG) as log:
+        logger.debug("tag1", "debug")
+        logger.info("tag2", "info")
+        logger.info("tag3", "info")  # different tag, same message
+        logger.warning("tag4", "warning")
+        logger.error("tag5", "error")
+        logger.critical(("not", "a", "string"), "critical")
+
+        logger.info("tag2", "be quiet")  # tag was used <0.1s ago
+        sleep(0.1)
+        logger.info("tag2", "again")
+        logger.clear()
+        logger.info("tag2", "more")
+
+    assert (
+        log.getvalue() == "debug\ninfo\ninfo\nwarning\nerror\ncritical\nagain\nmore\n"
+    )
+
+
+def test_rate_limited_logger_many_tags():
+    logger = RateLimitedLogger(logging.getLogger("foo"), rate="100ms")
+    with captured_logger("foo") as log:
+        for i in range(120):
+            logger.info(i, "x")
+        for i in range(120):
+            logger.info(i, "x")  # All muted
+        assert len(logger._prev_set) == len(logger._prev_heap) == 120
+
+        sleep(0.1)
+        logger.info(0, "x")  # Event that will flush obsolete tags away
+        assert len(logger._prev_set) == len(logger._prev_heap) == 1
+    assert len(log.getvalue().splitlines()) == 121
 
 
 def test_schema():
