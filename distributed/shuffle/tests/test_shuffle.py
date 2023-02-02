@@ -329,37 +329,8 @@ async def test_closed_bystanding_worker_during_shuffle(c, s, w1, w2, w3):
 
 
 class BlockedInputsDoneShuffle(ShuffleRun):
-    def __init__(
-        self,
-        worker_for,
-        output_workers,
-        column,
-        schema,
-        id,
-        run_id,
-        local_address,
-        directory,
-        nthreads,
-        rpc,
-        broadcast,
-        memory_limiter_disk,
-        memory_limiter_comms,
-    ):
-        super().__init__(
-            worker_for,
-            output_workers,
-            column,
-            schema,
-            id,
-            run_id,
-            local_address,
-            directory,
-            nthreads,
-            rpc,
-            broadcast,
-            memory_limiter_disk,
-            memory_limiter_comms,
-        )
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.in_inputs_done = asyncio.Event()
         self.block_inputs_done = asyncio.Event()
 
@@ -1131,12 +1102,10 @@ class ShuffleTestPool:
     def __call__(self, addr: str, *args: Any, **kwargs: Any) -> PooledRPCShuffle:
         return PooledRPCShuffle(self.shuffles[addr])
 
-    async def fake_broadcast(self, msg):
-
-        op = msg.pop("op").replace("shuffle_", "")
+    async def fake_barrier(self, id, run_id):
         out = {}
         for addr, s in self.shuffles.items():
-            out[addr] = await getattr(s, op)()
+            out[addr] = await s.inputs_done()
         return out
 
     def new_shuffle(
@@ -1154,7 +1123,7 @@ class ShuffleTestPool:
             local_address=name,
             nthreads=2,
             rpc=self,
-            broadcast=self.fake_broadcast,
+            barrier=self.fake_barrier,
             memory_limiter_disk=ResourceLimiter(10000000),
             memory_limiter_comms=ResourceLimiter(10000000),
         )
