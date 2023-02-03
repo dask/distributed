@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import random
 from datetime import timedelta
 from time import sleep
@@ -64,7 +63,7 @@ def test_variable_in_task(loop):
 async def test_delete_unset_variable(c, s, a, b):
     x = Variable()
     assert x.client is c
-    with captured_logger(logging.getLogger("distributed.utils")) as logger:
+    with captured_logger("distributed.utils") as logger:
         x.delete()
         await c.close()
     text = logger.getvalue()

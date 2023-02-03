@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import os
 import re
 import shutil
@@ -298,8 +297,8 @@ def dask_teardown(worker):
     raise Exception(456)
 """
 
-    with captured_logger(logging.getLogger("distributed.scheduler")) as s_logger:
-        with captured_logger(logging.getLogger("distributed.worker")) as w_logger:
+    with captured_logger("distributed.scheduler") as s_logger:
+        with captured_logger("distributed.worker") as w_logger:
             async with Scheduler(dashboard_address=":0", preload=text) as s:
                 async with Worker(s.address, preload=[text]) as w:
                     pass
