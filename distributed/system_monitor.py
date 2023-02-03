@@ -8,7 +8,7 @@ import psutil
 
 import dask
 
-from distributed.compatibility import WINDOWS
+from distributed.compatibility import LINUX, WINDOWS
 from distributed.diagnostics import nvml
 from distributed.metrics import monotonic, time
 
@@ -113,7 +113,8 @@ class SystemMonitor:
         as the OS allocating and releasing memory is highly volatile and a constant
         source of flakiness.
         """
-        return self.proc.memory_info().rss
+        minfo = self.proc.memory_full_info()
+        return minfo.rss + minfo.swap if LINUX else minfo.rss
 
     def update(self) -> dict[str, Any]:
         now = time()

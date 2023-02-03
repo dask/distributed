@@ -62,5 +62,6 @@ repos:
           - numpy
           - pytest
           - tornado
-          - zict
+          # DO NOT MERGE
+          - git+https://github.com/crusaderky/zict@shared_memory
           - pyarrow

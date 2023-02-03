@@ -70,21 +70,17 @@ class WorkerMetricCollector(PrometheusCollector):
             value=self.server.latency,
         )
 
-        try:
-            spilled_memory, spilled_disk = self.server.data.spilled_total  # type: ignore
-        except AttributeError:
-            spilled_memory, spilled_disk = 0, 0  # spilling is disabled
-        process_memory = self.server.monitor.get_process_memory()
-        managed_memory = min(process_memory, ws.nbytes - spilled_memory)
-
         memory = GaugeMetricFamily(
             self.build_name("memory_bytes"),
             "Memory breakdown",
             labels=["type"],
         )
-        memory.add_metric(["managed"], managed_memory)
-        memory.add_metric(["unmanaged"], process_memory - managed_memory)
-        memory.add_metric(["spilled"], spilled_disk)
+        process = self.server.monitor.get_process_memory()
+        managed, spilled = self.server.get_managed_memory_bytes()
+        managed = min(managed, process)
+        memory.add_metric(["managed"], managed)
+        memory.add_metric(["unmanaged"], process - managed)
+        memory.add_metric(["spilled"], spilled)
         yield memory
 
         yield GaugeMetricFamily(

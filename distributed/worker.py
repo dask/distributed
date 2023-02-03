@@ -329,9 +329,6 @@ class Worker(BaseWorker, ServerNode):
     memory_pause_fraction: float or False
         Fraction of memory at which we stop running new tasks
         (default: read from config key distributed.worker.memory.pause)
-    max_spill: int, string or False
-        Limit of number of bytes to be spilled on disk.
-        (default: read from config key distributed.worker.memory.max-spill)
     executor: concurrent.futures.Executor, dict[str, concurrent.futures.Executor], "offload"
         The executor(s) to use. Depending on the type, it has the following meanings:
             - Executor instance: The default executor.
@@ -1001,13 +998,7 @@ class Worker(BaseWorker, ServerNode):
             },
         )
 
-    async def get_metrics(self) -> dict:
-        try:
-            spilled_memory, spilled_disk = self.data.spilled_total  # type: ignore
-        except AttributeError:
-            # spilling is disabled
-            spilled_memory, spilled_disk = 0, 0
-
+    async def get_metrics(self) -> dict[str, Any]:
         out = dict(
             task_counts=self.state.task_counts,
             bandwidth={
@@ -1016,10 +1007,6 @@ class Worker(BaseWorker, ServerNode):
                 "types": keymap(typename, self.bandwidth_types),
             },
             managed_bytes=self.state.nbytes,
-            spilled_bytes={
-                "memory": spilled_memory,
-                "disk": spilled_disk,
-            },
             transfer={
                 "incoming_bytes": self.state.transfer_incoming_bytes,
                 "incoming_count": self.state.transfer_incoming_count,
@@ -1050,7 +1037,54 @@ class Worker(BaseWorker, ServerNode):
             except Exception:  # TODO: log error once
                 pass
 
+        managed, spilled = self.get_managed_memory_bytes()
+        out["spilled_bytes"] = {
+            # Amount of managed memory, according to sizeof(), that was moved from RAM
+            # and to the spill directory.
+            # We're doing these convoluted maths, instead of just overriding
+            # out["managed_bytes"] with the info from the SpillBuffer, because on the
+            # Scheduler side we're going to use the total managed bytes info that comes
+            # in quasi-real time as tasks complete, while the information of how much
+            # memory is spilled lags behind by up to 1s until the heartbeat arrives.
+            "memory": self.state.nbytes - managed,
+            "disk": spilled,
+        }
+
         return out
+
+    def get_managed_memory_bytes(self) -> tuple[int, int]:
+        """Wrapper around SpillBuffer.nbytes, covering keys that are not saved in the
+        SpillBuffer and the case where there is no SpillBuffer to begin with
+
+        Returns
+        -------
+        - managed memory (bytes)
+        - spilled memory (bytes)
+
+        Note
+        ----
+        Managed memory returned by this function can be transitorily higher than
+        self.state.nbytes, as tasks land into the SpillBuffer slightly before they
+        transition from flight to memory.
+
+        Managed memory can be higher than process memory. This happens:
+
+        - because process and managed memory are not sampled exactly at the same instant
+        - when sizeof() returns incorrect results
+        - in some edge cases, e.g. with CUDA objects where sizeof() returns the device
+          memory usage and not the host memory usage
+        """
+        try:
+            managed, spilled = self.data.nbytes  # type: ignore
+        except (AttributeError, TypeError, ValueError):
+            # Not a SpillBuffer or wrapper around a SpillBuffer
+            managed = self.state.nbytes
+            spilled = 0
+        else:
+            for key in self.state.actors:
+                managed += self.state.tasks[key].nbytes or 0
+
+        return managed, spilled
 
     async def get_startup_information(self):
         result = {}
@@ -1691,22 +1725,58 @@ class Worker(BaseWorker, ServerNode):
         self.stream_comms[address].send(msg)
 
     async def get_data(
-        self, comm, keys=None, who=None, serializers=None, max_connections=None
+        self,
+        comm,
+        keys=None,
+        who=None,
+        serializers=None,
+        max_connections=None,
+        shared_memory=False,
     ) -> dict | Status:
+        """
+        Send data to another worker that is asking for it
+
+        Returns
+        -------
+        One of:
+
+        - .. code-block:: python
+
+              {
+                status: "OK",
+                "data": {key: value, ...},
+                "files": {key: (file path, pickled size, buffers size), ...}
+              }
+
+        - ``{status: "busy"}``
+        - Status.dont_reply
+
+        If shared memory is enabled and ``who`` and self are on the same host, ``data``
+        is populated with the actors' values, while ``files`` contains the paths
+        to regular data on disk. In all other cases, all data is returned in ``data``.
+
+        If the peer's who_has information is outdated, less keys may be returned than
+        the ones requested.
+        """
         start = time()
 
         if max_connections is None:
             max_connections = self.transfer_outgoing_count_limit
 
-        # Allow same-host connections more liberally
-        if (
-            max_connections
-            and comm
-            and get_address_host(comm.peer_address) == get_address_host(self.address)
-        ):
-            max_connections = max_connections * 2
+        same_host = get_address_host(comm.peer_address) == get_address_host(
+            self.address
+        )
+        shared_memory = (
+            shared_memory and same_host and getattr(self.data, "shared_memory", False)
+        )
 
-        if self.status == Status.paused:
+        # Allow same-host connections more liberally
+        if shared_memory:
+            max_connections = False
+        elif max_connections and same_host:
+            max_connections *= 2
+
+        if self.status == Status.paused and not shared_memory:
             max_connections = 1
             throttle_msg = (
                 " Throttling outgoing data transfers because worker is paused."
@@ -1731,18 +1801,32 @@ class Worker(BaseWorker, ServerNode):
 
         self.transfer_outgoing_count += 1
         self.transfer_outgoing_count_total += 1
-        data = {k: self.data[k] for k in keys if k in self.data}
 
-        if len(data) < len(keys):
-            for k in set(keys) - set(data):
-                if k in self.state.actors:
-                    from distributed.actor import Actor
+        data = {}
+        files = {}
+        for k in keys:
+            if k in self.data:
+                if shared_memory:
+                    assert hasattr(self.data, "shm_export")
+                    shm_info = self.data.shm_export(k)
+                    if shm_info is not None:  # Failed to evict; logged by SpillBuffer
+                        files[k] = shm_info
+                        continue
+                # not shared_memory or failed to evict
+                data[k] = self.data[k]
 
-                    data[k] = Actor(
-                        type(self.state.actors[k]), self.address, k, worker=self
-                    )
+            elif k in self.state.actors:
+                from distributed.actor import Actor
 
-        msg = {"status": "OK", "data": {k: to_serialize(v) for k, v in data.items()}}
+                data[k] = Actor(
+                    type(self.state.actors[k]), self.address, k, worker=self
+                )
+
+        msg = {
+            "status": "OK",
+            "data": {k: to_serialize(v) for k, v in data.items()},
+            "files": files,
+        }
         # Note: `if k in self.data` above guarantees that
         # k is in self.state.tasks too and that nbytes is non-None
         bytes_per_task = {k: self.state.tasks[k].nbytes or 0 for k in data}
@@ -1980,11 +2064,11 @@ class Worker(BaseWorker, ServerNode):
         start: float,
         stop: float,
         data: dict[str, object],
+        keys: list[str],
         cause: TaskState,
         worker: str,
     ) -> None:
-
-        total_bytes = sum(self.state.tasks[key].get_nbytes() for key in data)
+        total_bytes = sum(self.state.tasks[key].get_nbytes() for key in keys)
 
         cause.startstops.append(
             {
@@ -2002,7 +2086,7 @@ class Worker(BaseWorker, ServerNode):
                 "stop": stop + self.scheduler_delay,
                 "middle": (start + stop) / 2.0 + self.scheduler_delay,
                 "duration": duration,
-                "keys": {key: self.state.tasks[key].nbytes for key in data},
+                "keys": {key: self.state.tasks[key].nbytes for key in keys},
                 "total": total_bytes,
                 "bandwidth": bandwidth,
                 "who": worker,
@@ -2021,7 +2105,7 @@ class Worker(BaseWorker, ServerNode):
 
         self.digest_metric("transfer-bandwidth", total_bytes / duration)
         self.digest_metric("transfer-duration", duration)
-        self.counters["transfer-count"].add(len(data))
+        self.counters["transfer-count"].add(len(keys))
 
     @fail_hard
     async def gather_dep(
@@ -2055,10 +2139,15 @@ class Worker(BaseWorker, ServerNode):
             logger.debug("Request %d keys from %s", len(to_gather), worker)
 
             start = time()
+
             response = await get_data_from_worker(
-                self.rpc, to_gather, worker, who=self.address
+                self.rpc,
+                to_gather,
+                worker,
+                who=self.address,
+                shared_memory=getattr(self.data, "shared_memory", False),
             )
-            stop = time()
+
             if response["status"] == "busy":
                 self.state.log.append(
                     ("busy-gather", worker, to_gather, stimulus_id, time())
@@ -2070,21 +2159,41 @@ class Worker(BaseWorker, ServerNode):
                 )
 
             assert response["status"] == "OK"
+            keys = list(response["data"])
+            # This can take a long time, a it may trigger spilling
+            self.data.update(response["data"])
+
+            if response["files"]:
+                assert getattr(self.data, "shared_memory", False)
+                assert hasattr(self.data, "shm_import")
+                # In most cases this is instantaneous, but it's still I/O, so it
+                # could be slown down by an unresponsive mountpoint
+                keys.extend(self.data.shm_import(response["files"]))
+
+            stop = time()
+
             cause = self._get_cause(to_gather)
             self._update_metrics_received_data(
                 start=start,
                 stop=stop,
                 data=response["data"],
+                keys=keys,
                 cause=cause,
                 worker=worker,
             )
             self.state.log.append(
-                ("receive-dep", worker, set(response["data"]), stimulus_id, time())
+                (
+                    "receive-dep",
+                    worker,
+                    keys,
+                    stimulus_id,
+                    time(),
+                )
             )
             return GatherDepSuccessEvent(
                 worker=worker,
                 total_nbytes=total_nbytes,
-                data=response["data"],
+                keys=keys,
                 stimulus_id=f"gather-dep-success-{time()}",
             )
 
@@ -2828,6 +2937,7 @@ async def get_data_from_worker(
     max_connections=None,
     serializers=None,
     deserializers=None,
+    shared_memory=False,
 ):
     """Get keys from worker
 
@@ -2857,6 +2967,7 @@ async def get_data_from_worker(
                 keys=keys,
                 who=who,
                 max_connections=max_connections,
+                shared_memory=shared_memory,
             )
             try:
                 status = response["status"]

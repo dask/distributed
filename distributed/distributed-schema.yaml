@@ -583,6 +583,11 @@ properties:
                   When the process memory reaches this level the nanny process will kill
                   the worker (if a nanny is present)
 
+              shared:
+                type: boolean
+                description: >-
+                  Enable shared memory model
+
               max-spill:
                 oneOf:
                   - type: string

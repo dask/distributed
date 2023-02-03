@@ -46,7 +46,6 @@ def assert_buf(
     }
     total_weight = psize(tmp_path, **expect_slow)
     assert slow.total_weight == total_weight
-    assert buf.spilled_total == total_weight
 
 
 def test_psize(tmp_path):
