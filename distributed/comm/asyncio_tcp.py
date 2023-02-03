@@ -965,7 +965,8 @@ class _ZeroCopyWriter:
                 if not data:
                     return
             # Not all was written; register write handler.
-            self._loop.add_writer(transport._sock_fd, self._on_write_ready)
+            # Don't use the public API add_writer; it makes test_tcp_deserialize fail
+            self._loop._add_writer(transport._sock_fd, self._on_write_ready)  # type: ignore[attr-defined]
 
         # Add it to the buffer.
         self._buffer_append(data)
@@ -991,7 +992,8 @@ class _ZeroCopyWriter:
             if not self._buffers:
                 return
             # Not all was written; register write handler.
-            self._loop.add_writer(self.transport._sock_fd, self._on_write_ready)
+            # Don't use the public API add_writer; it makes test_tcp_deserialize fail
+            self._loop._add_writer(self.transport._sock_fd, self._on_write_ready)  # type: ignore[attr-defined]
 
         self._maybe_pause_protocol()
 
@@ -1026,13 +1028,15 @@ class _ZeroCopyWriter:
         except (SystemExit, KeyboardInterrupt):
             raise
         except BaseException as exc:
-            self._loop.remove_writer(transport._sock_fd)
+            # Don't use the public API remove_writer; it makes test_tcp_deserialize fail
+            self._loop._remove_writer(transport._sock_fd)  # type: ignore[attr-defined]
             self._buffers.clear()
             transport._fatal_error(exc, "Fatal write error on socket transport")
         else:
             self._maybe_resume_protocol()
             if not self._buffers:
-                self._loop.remove_writer(transport._sock_fd)
+                # Don't use the public API remove_writer; it makes test_tcp_deserialize fail
+                self._loop._remove_writer(transport._sock_fd)  # type: ignore[attr-defined]
                 if transport._closing:
                     transport._call_connection_lost(None)
                 elif transport._eof:
