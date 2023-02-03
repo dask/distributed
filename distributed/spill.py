@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import os.path
+import weakref
 from collections.abc import Iterator, Mapping, MutableMapping, Sized
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -8,6 +10,7 @@ from functools import partial
 from time import perf_counter
 from typing import Any, Literal, NamedTuple, Protocol, cast
 
+import psutil
 from packaging.version import parse as parse_version
 
 import zict
@@ -21,18 +24,52 @@ has_zict_230 = parse_version(zict.__version__) >= parse_version("2.3.0")
 
 
 class SpilledSize(NamedTuple):
-    """Size of a key/value pair when spilled to disk, in bytes"""
+    """Size of a key/value pair when spilled to disk, in bytes, broken down into
 
-    # output of sizeof()
-    memory: int
-    # pickled size
-    disk: int
+    - what is going to be deep-copied into pure-Python structures by deserialize_bytes,
+      e.g. pickle.dumps() output
+    - what is going to remain referenced by the deserialized object, e.g numpy buffers
+    """
+
+    by_value: int
+    by_ref: int
 
     def __add__(self, other: SpilledSize) -> SpilledSize:  # type: ignore
-        return SpilledSize(self.memory + other.memory, self.disk + other.disk)
+        return SpilledSize(self.by_value + other.by_value, self.by_ref + other.by_ref)
 
     def __sub__(self, other: SpilledSize) -> SpilledSize:
-        return SpilledSize(self.memory - other.memory, self.disk - other.disk)
+        return SpilledSize(self.by_value - other.by_value, self.by_ref - other.by_ref)
+
+    @classmethod
+    def from_frames(cls, frames: list[bytes | memoryview]) -> SpilledSize:
+        """Heuristic to predict how much of the serialized data is going to be
+        deep-copied by deserialize_bytes (e.g. into pure Python objects) and how much
+        is going to remain referenced by the deserialized object.
+
+        This algorithm is not foolproof and could be misled by some exotic data types: a
+        bytes object could be used as the underlying buffer of an object and a non-bytes
+        object could be deep-copied upon deserialization for some reason (namely, if you
+        want a writeable numpy array but the buffer you're given is read-only).
+        """
+        by_value = 0
+        by_ref = 0
+
+        for frame in frames:
+            if isinstance(frame, bytes):
+                # - pack_frames_prelude() output
+                # - header
+                by_value += len(frame)
+            else:
+                assert isinstance(frame, memoryview)
+                if isinstance(frame.obj, bytes):
+                    # output of pickle.dumps or of one of the compression algorithms
+                    by_value += frame.nbytes
+                else:
+                    # numpy.ndarray, pyarrow.Buffer, or some more exotic types which we
+                    # blindly assume won't be deep-copied upon deserialization.
+                    by_ref += frame.nbytes
+
+        return cls(by_value, by_ref)
 
 
 class ManualEvictProto(Protocol):
@@ -52,8 +89,9 @@ class ManualEvictProto(Protocol):
         """
         ...  # pragma: nocover
 
-    def evict(self) -> int:
+    def evict(self, key: str | None = None) -> int:
         """Manually evict a key/value pair from fast to slow memory.
+        If no key is specified, the buffer must choose one.
         Return size of the evicted value in fast memory.
 
         If the eviction failed for whatever reason, return -1. This method must
@@ -120,6 +158,20 @@ class SpillBuffer(zict.Buffer):
         Location on disk to write the spill files to
     target: int
         Managed memory, in bytes, to start spilling at
+    shared_memory: bool, optional
+        Enable shared memory model.
+        Read TODO link to documentation
+
+        This has the following effects:
+        - set keep_spill=True in zict.Buffer
+        - set memmap=True in zict.File
+        - disable compression (otherwise, it uses the same settings as network comms)
+
+        Design note
+            Technically, these three settings are independent, and there are some edge
+            cases where it may be useful to switch some but not the others.
+            A single all-or-nothing toggle was chosen in order to reduce complexity.
+
     max_spill: int | False, optional
         Limit of number of bytes to be spilled on disk. Set to False to disable.
     min_log_interval: float, optional
@@ -135,21 +187,40 @@ class SpillBuffer(zict.Buffer):
         self,
         spill_directory: str,
         target: int,
+        *,
+        shared_memory: bool = False,
         max_spill: int | Literal[False] = False,
         min_log_interval: float = 2,
     ):
-        slow: MutableMapping[str, Any] = Slow(spill_directory, max_spill)
+        if shared_memory and not has_zict_230:
+            raise ValueError(
+                "zict >= 2.3.0 required to set distributed.worker.memory.shared: true"
+            )
+
+        slow: MutableMapping[str, Any] = Slow(
+            spill_directory, memmap=shared_memory, max_weight=max_spill
+        )
         if has_zict_220:
             # If a value is still in use somewhere on the worker since the last time it
             # was unspilled, don't duplicate it
             slow = zict.Cache(slow, zict.WeakValueMapping())
 
-        super().__init__(fast={}, slow=slow, n=target, weight=_in_memory_weight)
+        super().__init__(
+            fast={},
+            slow=slow,
+            n=target,
+            weight=partial(_in_memory_weight, weakref.ref(self)),
+            keep_slow=shared_memory,
+        )
         self.last_logged = 0
         self.min_log_interval = min_log_interval
         self.logged_pickle_errors = set()  # keys logged with pickle error
 
         self.fast_metrics = FastMetrics()
+
+    @property
+    def shared_memory(self) -> bool:
+        return self.keep_slow
 
     @contextmanager
     def handle_errors(self, key: str | None) -> Iterator[None]:
@@ -230,11 +301,11 @@ class SpillBuffer(zict.Buffer):
             assert key in self.fast
             assert key not in self.slow
 
-    def evict(self) -> int:
+    def evict(self, key: str | None = None) -> int:
         """Implementation of :meth:`ManualEvictProto.evict`.
 
-        Manually evict the oldest key/value pair, even if target has not been
-        reached. Returns sizeof(value).
+        Manually evict a key/value pair, or the oldest key/value pair if not specified,
+        even if target has not been reached. Returns sizeof(value).
         If the eviction failed (value failed to pickle, disk full, or max_spill
         exceeded), return -1; the key/value pair that caused the issue will remain in
         fast. The exception has been logged internally.
@@ -242,10 +313,92 @@ class SpillBuffer(zict.Buffer):
         """
         try:
             with self.handle_errors(None):
-                _, _, weight = self.fast.evict()
+                _, _, weight = self.fast.evict(key)
                 return cast(int, weight)
         except HandledError:
             return -1
+
+    def shm_export(self, key: str) -> tuple[str, int, int] | None:
+        """Ensure that the file has been spilled to disk and is available for another
+        worker to pick up through the shared memory model.
+
+        If the key is found exclusively in memory, force eviction to disk, overriding
+        LRU priority.
+
+        Returns
+        -------
+        - file path on disk for this worker
+        - pickled size, in bytes (without buffers)
+        - buffers size, in bytes
+
+        If eviction failed (e.g. disk full), then return None instead.
+
+        See also
+        --------
+        SpillBuffer.shm_import
+        """
+        if not has_zict_230:
+            raise AttributeError("shm_export requires zict >= 2.3.0")  # pragma: nocover
+
+        if key not in self.slow:
+            if key not in self.fast:
+                raise KeyError(key)
+            if self.evict(key) == -1:
+                return None
+
+        slow = self._slow_uncached
+        return slow.d.get_path(key), *slow.weight_by_key[key]
+
+    def shm_import(self, paths: Mapping[str, tuple[str, int, int]]) -> Iterator[str]:
+        """Hardlink a spilled file from another worker's local_directory into our own
+        and add its key to self.
+
+        Parameters
+        ----------
+        paths: dict[str, tuple[str, int, int]]
+            {key : (
+                file path on disk in the local_directory of the peer worker,
+                pickled size, in bytes (without buffers)
+                buffers size, in bytes
+            )}
+
+        Returns
+        -------
+        Iterator of keys that were successfully imported
+
+        See also
+        --------
+        SpillBuffer.shm_export
+        """
+        if not has_zict_230:
+            raise AttributeError("shm_import requires zict >= 2.3.0")  # pragma: nocover
+
+        slow = self._slow_uncached
+        for key, (path, pickled_size, buffers_size) in paths.items():
+            if key in self:
+                # This should never happen
+                logger.error(  # pragma: nocover
+                    f"SpillBuffer.link(): {key} is already in buffer; skipping"
+                )
+                continue  # pragma: nocover
+
+            weight = SpilledSize(pickled_size, buffers_size)
+            try:
+                slow.d.link(key, path)
+                self._len += 1
+                slow.weight_by_key[key] = weight
+                slow.total_weight += weight
+                yield key
+            except FileNotFoundError:
+                # This can happen sporadically due to race conditions
+                pass
+            except OSError as e:
+                # - [Errno 18] Invalid cross-device link
+                # - PermissionError caused by workers running as different users
+                logger.error(
+                    "Failed to import memory-mapped data from peer worker: "
+                    f"{e.__class__.__name__}: {e} ({key=}, {path=})"
+                )
 
     def __getitem__(self, key: str) -> Any:
         if key in self.fast:
@@ -280,16 +433,38 @@ class SpillBuffer(zict.Buffer):
         return cast(Slow, slow)
 
     @property
-    def spilled_total(self) -> SpilledSize:
-        """Number of bytes spilled to disk. Tuple of
+    def spill_directory(self) -> str:
+        return self._slow_uncached.d.directory
 
-        - output of sizeof()
-        - pickled size
+    @property
+    def nbytes(self) -> tuple[int, int]:
+        """Number of bytes in memory and spilled to disk. Tuple of
 
-        The two may differ substantially, e.g. if sizeof() is inaccurate or in case of
-        compression.
+        - bytes in the process memory
+        - bytes on disk or shared memory
+
+        The sum of the two may different substantially from WorkerStateMachine.nbytes,
+        e.g. if the output of sizeof() is inaccurate or in case of compression.
+
+        If shared_memory=True, then pure-Python objects (such as object string columns
+        in pandas DataFrames) may end up occupying both process and shared memory, in
+        their live and pickled formats, at the same time.
+
+        Also, in the case of shared memory, this property does not return just the
+        portion known by the current worker, but the total divided by the number of
+        workers on the host. This assumes that no other applications (significantly)
+        uses the same mountpoint.
         """
-        return self._slow_uncached.total_weight
+        fast = cast(int, self.fast.total_weight)
+
+        if not self.shared_memory:
+            slow = sum(self._slow_uncached.total_weight)
+        else:
+            spill_root = os.path.join(self.spill_directory, "..", "..")
+            n_workers = sum(not d.endswith("lock") for d in os.listdir(spill_root))
+            slow = psutil.disk_usage(spill_root).used // n_workers
+
+        return fast, slow
 
     def get_metrics(self) -> dict[str, float]:
         """Metrics to be exported to Prometheus or to be parsed directly.
@@ -321,7 +496,7 @@ class SpillBuffer(zict.Buffer):
             "memory_count": len(self.fast),
             "memory_bytes": self.fast.total_weight,
             "disk_count": len(self.slow),
-            "disk_bytes": self._slow_uncached.total_weight.disk,
+            "disk_bytes": sum(self._slow_uncached.total_weight),
         }
 
         for k, v in fm.__dict__.items():
@@ -331,8 +506,27 @@ class SpillBuffer(zict.Buffer):
         return out
 
 
-def _in_memory_weight(key: str, value: Any) -> int:
-    return safe_sizeof(value)
+def _in_memory_weight(sb_ref: weakref.ref[SpillBuffer], key: str, value: Any) -> int:
+    nbytes = safe_sizeof(value)
+
+    sb = sb_ref()
+    assert sb is not None
+    if sb.shared_memory:
+        # If pickle5 buffers are backed by shared memory and are uncompressed, then they
+        # won't use any process memory. This assumes that the deserialization of the
+        # object won't create a deep copy of the pickle5 buffer.
+        try:
+            by_ref = sb._slow_uncached.weight_by_key[key].by_ref
+            if by_ref:
+                # Bare minimum size of a CPython PyObject with a buffer on 64 bit:
+                # 8 bytes for class ID
+                # 8 bytes for reference counter
+                # 8 bytes for pointer to buffer
+                return max(24, nbytes - by_ref)
+        except KeyError:
+            pass
+
+    return nbytes
 
 
 # Internal exceptions. These are never raised by SpillBuffer.
@@ -350,16 +544,24 @@ class HandledError(Exception):
 
 # zict.Func[str, Any] requires zict >= 2.2.0
 class Slow(zict.Func):
+    d: zict.File
     max_weight: int | Literal[False]
     weight_by_key: dict[str, SpilledSize]
     total_weight: SpilledSize
     metrics: SlowMetrics
 
-    def __init__(self, spill_directory: str, max_weight: int | Literal[False] = False):
+    def __init__(
+        self, spill_directory: str, memmap: bool, max_weight: int | Literal[False]
+    ):
+        if memmap:
+            dump = partial(serialize_bytelist, on_error="raise", compression=False)
+        else:
+            dump = partial(serialize_bytelist, on_error="raise")
+
         super().__init__(
-            partial(serialize_bytelist, on_error="raise"),
+            dump,
             deserialize_bytes,
-            zict.File(spill_directory),
+            zict.File(spill_directory, memmap=memmap),
         )
         self.max_weight = max_weight
         self.weight_by_key = {}
@@ -369,14 +571,24 @@ class Slow(zict.Func):
     def __getitem__(self, key: str) -> Any:
         t0 = perf_counter()
         pickled = self.d[key]
-        assert isinstance(pickled, bytearray if has_zict_230 else bytes)
+        w = self.weight_by_key[key]
+        assert isinstance(pickled, (bytearray, memoryview) if has_zict_230 else bytes)
+        assert len(pickled) == w.by_value + w.by_ref
         t1 = perf_counter()
         out = self.load(pickled)  # type: ignore
         t2 = perf_counter()
 
+        if self.d.memmap:
+            # pickle5 buffers have not been touched from the shared memory. This
+            # assumes that the deserialization of the object didn't perform a
+            # deep copy.
+            key_bytes = w.by_value
+        else:
+            key_bytes = w.by_value + w.by_ref
+
         # For the sake of simplicity, we're not metering failure use cases.
         self.metrics.log_read(
-            key_bytes=len(pickled),
+            key_bytes=key_bytes,
             read_time=t1 - t0,
             unpickle_time=t2 - t1,
         )
@@ -387,17 +599,15 @@ class Slow(zict.Func):
         t0 = perf_counter()
         try:
             # FIXME https://github.com/python/mypy/issues/708
-            pickled = self.dump(value)  # type: ignore
+            frames = self.dump(value)  # type: ignore
         except Exception as e:
             # zict.LRU ensures that the key remains in fast if we raise.
             # Wrap the exception so that it's recognizable by SpillBuffer,
             # which will then unwrap it.
             raise PickleError(key, e)
 
-        pickled_size = sum(
-            frame.nbytes if isinstance(frame, memoryview) else len(frame)
-            for frame in pickled
-        )
+        weight = SpilledSize.from_frames(frames)
+
         t1 = perf_counter()
 
         # Thanks to Buffer.__setitem__, we never update existing
@@ -407,7 +617,7 @@ class Slow(zict.Func):
 
         if (
             self.max_weight is not False
-            and self.total_weight.disk + pickled_size > self.max_weight
+            and sum(self.total_weight) + sum(weight) > self.max_weight
         ):
             # Stop callbacks and ensure that the key ends up in SpillBuffer.fast
             # To be caught by SpillBuffer.__setitem__
@@ -415,17 +625,16 @@ class Slow(zict.Func):
 
         # Store to disk through File.
         # This may raise OSError, which is caught by SpillBuffer above.
-        self.d[key] = pickled
+        self.d[key] = frames
 
         t2 = perf_counter()
 
-        weight = SpilledSize(safe_sizeof(value), pickled_size)
         self.weight_by_key[key] = weight
         self.total_weight += weight
 
         # For the sake of simplicity, we're not metering failure use cases.
         self.metrics.log_write(
-            key_bytes=pickled_size,
+            key_bytes=sum(weight),
             pickle_time=t1 - t0,
             write_time=t2 - t1,
         )

@@ -24,7 +24,7 @@ from distributed.protocol.utils import (
     pack_frames_prelude,
     unpack_frames,
 )
-from distributed.utils import ensure_memoryview, has_keyword
+from distributed.utils import ensure_memoryview, has_keyword, no_default
 
 dask_serialize = dask.utils.Dispatch("dask_serialize")
 dask_deserialize = dask.utils.Dispatch("dask_deserialize")
@@ -639,10 +639,12 @@ def nested_deserialize(x):
     return replace_inner(x)
 
 
-def serialize_bytelist(x, **kwargs):
+def serialize_bytelist(x, *, compression=no_default, **kwargs):
     header, frames = serialize_and_split(x, **kwargs)
     if frames:
-        compression, frames = zip(*map(maybe_compress, frames))
+        compression, frames = zip(
+            *(maybe_compress(frame, compression=compression) for frame in frames)
+        )
     else:
         compression = []
     header["compression"] = compression

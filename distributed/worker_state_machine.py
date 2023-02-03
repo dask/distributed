@@ -671,18 +671,9 @@ class GatherDepSuccessEvent(GatherDepDoneEvent):
     remote worker fetched successfully
     """
 
-    __slots__ = ("data",)
-
-    data: dict[str, object]  # There may be less keys than in GatherDep
-
-    def to_loggable(self, *, handled: float) -> StateMachineEvent:
-        out = copy(self)
-        out.handled = handled
-        out.data = {k: None for k in self.data}
-        return out
-
-    def _after_from_dict(self) -> None:
-        self.data = {k: None for k in self.data}
+    __slots__ = ("keys",)
+    # There may be less keys than in GatherDep
+    keys: Collection[str]
 
 
 @dataclass
@@ -1823,16 +1814,12 @@ class WorkerState:
             is individually larger than target * memory_limit, and the task is not an
             actor.
         """
-        if ts.key in self.data:
-            ts.state = "memory"
-            return {}, []
-
         recommendations: Recs = {}
         instructions: Instructions = []
 
         if ts.key in self.actors:
             self.actors[ts.key] = value
-        else:
+        elif ts.key not in self.data:
             start = time()
             self.data[ts.key] = value
             stop = time()
@@ -2264,6 +2251,9 @@ class WorkerState:
     ) -> RecsInstrs:
         if not ts.done:
             return {}, []
+
+        if ts.key in self.data:
+            del self.data[ts.key]
 
         ts.previous = None
         ts.done = False
@@ -2944,9 +2934,11 @@ class WorkerState:
         The response may contain fewer keys than the request.
         """
         recommendations: Recs = {}
+        successful_keys = set(ev.keys)
         for ts in self._gather_dep_done_common(ev):
-            if ts.key in ev.data:
-                recommendations[ts] = ("memory", ev.data[ts.key], ts.run_id)
+            if ts.key in successful_keys:
+                assert ts.key in self.data
+                recommendations[ts] = ("memory", None, ts.run_id)
             else:
                 self.log.append((ts.key, "missing-dep", ev.stimulus_id, time()))
                 if self.validate:
@@ -3271,6 +3263,7 @@ class WorkerState:
         n_actors_in_memory = sum(
             self.tasks[key].state == "memory" for key in self.actors
         )
+        n_data_in_flight = sum(ts.key in self.data for ts in self.in_flight_tasks)
 
         out: dict[TaskStateState | Literal["other"], int] = {
             # Key measure for occupancy.
@@ -3278,7 +3271,7 @@ class WorkerState:
             "executing": len(self.executing),
             # Also includes cancelled(long-running) and resumed(long-running->fetch)
             "long-running": len(self.long_running),
-            "memory": len(self.data) + n_actors_in_memory,
+            "memory": len(self.data) + n_actors_in_memory - n_data_in_flight,
             "ready": len(self.ready),
             "constrained": len(self.constrained),
             "waiting": len(self.waiting),
@@ -3379,7 +3372,6 @@ class WorkerState:
         - ts.state == cancelled, ts.previous == flight
         - ts.state == resumed, ts.previous == flight, ts.next == waiting
         """
-        assert ts.key not in self.data
         assert ts.key not in self.actors
         assert ts in self.in_flight_tasks
         for dep in ts.dependents:
@@ -3563,7 +3555,7 @@ class WorkerState:
         assert self.nbytes == expect_nbytes, f"{self.nbytes=}; expected {expect_nbytes}"
 
         for key in self.data:
-            assert key in self.tasks, key
+            assert self.tasks[key].state in ("memory", "flight"), key
         for key in self.actors:
             assert key in self.tasks, key
 

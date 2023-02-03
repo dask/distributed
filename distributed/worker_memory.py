@@ -74,7 +74,6 @@ class WorkerMemoryManager:
     memory_target_fraction: float | Literal[False]
     memory_spill_fraction: float | Literal[False]
     memory_pause_fraction: float | Literal[False]
-    max_spill: int | Literal[False]
     memory_monitor_interval: float
     _throttled_gc: ThrottledGC
 
@@ -121,8 +120,8 @@ class WorkerMemoryManager:
             memory_pause_fraction,
         )
 
+        shared_memory = dask.config.get("distributed.worker.memory.shared")
         max_spill = dask.config.get("distributed.worker.memory.max-spill")
-        self.max_spill = False if max_spill is False else parse_bytes(max_spill)
 
         if isinstance(data, MutableMapping):
             self.data = data
@@ -143,20 +142,23 @@ class WorkerMemoryManager:
                 )
             else:
                 self.data = func(**kwargs)
-        elif self.memory_limit and (
-            self.memory_target_fraction or self.memory_spill_fraction
-        ):
-            if self.memory_target_fraction:
-                target = int(
-                    self.memory_limit
-                    * (self.memory_target_fraction or self.memory_spill_fraction)
-                )
+        elif (
+            self.memory_limit
+            and (
+                self.memory_target_fraction is not False
+                or self.memory_spill_fraction is not False
+            )
+        ) or shared_memory:
+            if self.memory_limit and self.memory_target_fraction is not False:
+                target = int(self.memory_limit * self.memory_target_fraction)
             else:
                 target = sys.maxsize
+
             self.data = SpillBuffer(
                 os.path.join(worker.local_directory, "storage"),
                 target=target,
-                max_spill=self.max_spill,
+                shared_memory=shared_memory,
+                max_spill=max_spill,
             )
         else:
             self.data = {}
@@ -255,8 +257,11 @@ class WorkerMemoryManager:
         # process memory, whereas normally it defines reported managed memory (e.g.
         # output of sizeof() ). If target=False, disable hysteresis.
         target = self.memory_limit * (
-            self.memory_target_fraction or self.memory_spill_fraction
+            self.memory_target_fraction
+            if self.memory_target_fraction is not False
+            else self.memory_spill_fraction
         )
+
         count = 0
         need = memory - target
         last_checked_for_pause = last_yielded = monotonic()

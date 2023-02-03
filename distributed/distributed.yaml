@@ -163,6 +163,13 @@ distributed:
       # Set to false for no maximum.
       max-spill: false
 
+      # Use shared memory, which can be greatly beneficial when multiple worker
+      # processes are started on the same host (not to be confused with multiple threads
+      # in the same worker process). This requires tweaking your memory sizing and host
+      # configuration, and is actually harmful in some use cases; before you enable it,
+      # read <TODO link to docs>.
+      shared: false
+
       # Interval between checks for the spill, pause, and terminate thresholds.
       # The target threshold is checked every time new data is inserted.
       monitor-interval: 100ms
