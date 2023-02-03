@@ -336,8 +336,11 @@ class WorkerMemoryManager:
             )
 
     def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
-        info = {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
-        del info["logger"]
+        info = {
+            k: v
+            for k, v in self.__dict__.items()
+            if not k.startswith("_") and k not in ("logger", "rl_logger")
+        }
         info["data"] = dict.fromkeys(self.data)
         return info
 
