@@ -548,15 +548,21 @@ class ShuffleWorkerExtension:
     ) -> ShuffleRun:
         import pyarrow as pa
 
-        result = await self.worker.scheduler.shuffle_get(
-            id=shuffle_id,
-            schema=pa.Schema.from_pandas(empty).serialize().to_pybytes()
-            if empty is not None
-            else None,
-            npartitions=npartitions,
-            column=column,
-            worker=self.worker.address,
-        )
+        if empty is None:
+            result = await self.worker.scheduler.shuffle_get(
+                id=shuffle_id,
+                worker=self.worker.address,
+            )
+        else:
+            result = await self.worker.scheduler.shuffle_get_or_create(
+                id=shuffle_id,
+                spec={
+                    "schema": pa.Schema.from_pandas(empty).serialize().to_pybytes(),
+                    "npartitions": npartitions,
+                    "column": column,
+                },
+                worker=self.worker.address,
+            )
         if result["status"] == "ERROR":
             raise RuntimeError(result["message"])
         assert result["status"] == "OK"

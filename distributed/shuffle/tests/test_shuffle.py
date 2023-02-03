@@ -1548,7 +1548,7 @@ async def test_shuffle_run_consistency(c, s, a):
     out = out.persist()
 
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
-    shuffle_dict = scheduler_ext.get(shuffle_id, None, None, None, a.worker_address)
+    shuffle_dict = scheduler_ext.get(shuffle_id, a.worker_address)
 
     # Worker extension can fetch the current run
     assert await worker_ext._get_shuffle_run(shuffle_id, shuffle_dict["run_id"])
@@ -1573,7 +1573,7 @@ async def test_shuffle_run_consistency(c, s, a):
     new_shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     assert shuffle_id == new_shuffle_id
 
-    new_shuffle_dict = scheduler_ext.get(shuffle_id, None, None, None, a.worker_address)
+    new_shuffle_dict = scheduler_ext.get(shuffle_id, a.worker_address)
 
     # Check invariant that the new run ID is larger than the previous
     assert shuffle_dict["run_id"] < new_shuffle_dict["run_id"]
