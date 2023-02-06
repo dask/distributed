@@ -257,7 +257,7 @@ class Security:
                 if isinstance(val, str) and "\n" in val:
                     attr[k] = "Temporary (In-memory)"
                 elif isinstance(val, str):
-                    attr[k] = f"Local ({os.path.abspath(val)})"
+                    attr[k] = f"Local ({os.path.abspath(os.path.expanduser(val))})"
                 else:
                     attr[k] = val
 
