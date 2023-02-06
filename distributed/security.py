@@ -218,7 +218,7 @@ class Security:
         else:
             val = dask.config.get(config_name)
 
-        if not val is None:
+        if val is not None:
             val = os.path.abspath(os.path.expanduser(val))
 
         setattr(self, field, val)
