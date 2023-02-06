@@ -88,8 +88,8 @@ def test_from_config():
 def test_path_from_config():
     from pathlib import Path
 
-    s = Security(tls_ca_file="~/test/fisk.pem")
-    assert s.tls_ca_file == str(Path.home() / "test" / "fisk.pem")
+    s = Security(tls_ca_file="~/cert.pem")
+    assert s.tls_ca_file == str(Path.home() / "cert.pem")
 
 
 @pytest.mark.parametrize("min_ver", [None, 1.2, 1.3])
