@@ -219,7 +219,7 @@ class Security:
             val = dask.config.get(config_name)
 
         if val is not None:
-            val = os.path.abspath(os.path.expanduser(val))
+            val = os.path.expanduser(val)
 
         setattr(self, field, val)
 
@@ -261,7 +261,7 @@ class Security:
                 if isinstance(val, str) and "\n" in val:
                     attr[k] = "Temporary (In-memory)"
                 elif isinstance(val, str):
-                    attr[k] = f"Local ({val})"
+                    attr[k] = f"Local ({os.path.abspath(val)})"
                 else:
                     attr[k] = val
 
