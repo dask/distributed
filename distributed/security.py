@@ -217,6 +217,10 @@ class Security:
             val = kwargs[field]
         else:
             val = dask.config.get(config_name)
+
+        if not val is None:
+            val = os.path.abspath(os.path.expanduser(val))
+
         setattr(self, field, val)
 
     def _set_tls_version_field(self, kwargs, field, config_name, default=None):
@@ -257,7 +261,7 @@ class Security:
                 if isinstance(val, str) and "\n" in val:
                     attr[k] = "Temporary (In-memory)"
                 elif isinstance(val, str):
-                    attr[k] = f"Local ({os.path.abspath(os.path.expanduser(val))})"
+                    attr[k] = f"Local ({val})"
                 else:
                     attr[k] = val
 
