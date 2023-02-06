@@ -84,10 +84,13 @@ def test_from_config():
     assert sec.tls_worker_key is None
     assert sec.tls_worker_cert == "wcert.pem"
 
+
 def test_path_from_config():
     from pathlib import Path
-    s = Security(tls_ca_file='~/test/fisk.pem')
-    assert s.tls_ca_file == str(Path.home() / 'test' / 'fisk.pem')
+
+    s = Security(tls_ca_file="~/test/fisk.pem")
+    assert s.tls_ca_file == str(Path.home() / "test" / "fisk.pem")
+
 
 @pytest.mark.parametrize("min_ver", [None, 1.2, 1.3])
 @pytest.mark.parametrize("max_ver", [None, 1.2, 1.3])
