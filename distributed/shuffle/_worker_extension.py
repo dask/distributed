@@ -145,7 +145,7 @@ class RechunkRun:
 
         self.diagnostics: dict[str, float] = defaultdict(float)
         self.transferred = False
-        self.received: set[int] = set()
+        self.received: set[tuple[tuple[int, ...], tuple[int, ...]]] = set()
         self.total_recvd = 0
         self.start_time = time.time()
         self._exception: Exception | None = None
@@ -240,17 +240,21 @@ class RechunkRun:
             "start": self.start_time,
         }
 
-    async def receive(self, data: list[tuple[int, bytes]]) -> None:
+    async def receive(
+        self, data: list[tuple[tuple[int, ...], tuple[int, ...], bytes]]
+    ) -> None:
         await self._receive(data)
 
-    async def _receive(self, data: list[tuple[Any, bytes]]) -> None:
+    async def _receive(
+        self, data: list[tuple[tuple[int, ...], tuple[int, ...], bytes]]
+    ) -> None:
         self.raise_if_closed()
 
         filtered = []
         for d in data:
-            if d[0] not in self.received:
+            if d[0:2] not in self.received:
                 filtered.append(d)
-                self.received.add(d[0])
+                self.received.add(d[0:2])
                 self.total_recvd += sizeof(d)
         del data
         if not filtered:
@@ -288,16 +292,27 @@ class RechunkRun:
             raise RuntimeError(f"Cannot add more partitions to shuffle {self}")
 
         def _() -> dict[str, list[tuple[tuple[int, ...], tuple[int, ...], bytes]]]:
+            import msgpack
+
             out: dict[
                 str, list[tuple[tuple[int, ...], tuple[int, ...], bytes]]
             ] = defaultdict(list)
             for new_index, subdim_index, slices in self._mapping[chunk]:
                 out[self.worker_for[new_index]].append(
-                    (new_index, subdim_index, data[slices].tobytes())
+                    (
+                        new_index,
+                        subdim_index,
+                        msgpack.packb(
+                            {
+                                "shape": data[slices].shape,
+                                "payload": data[slices].tobytes(),
+                            }
+                        ),
+                    )
                 )
             return out
 
-        out = _()  # await self.offload(_)
+        out = await self.offload(_)
         await self._write_to_comm(out)
         return self.run_id
 
@@ -1075,8 +1090,15 @@ def assemble_chunk(data: bytes, subdims: tuple[int, ...]) -> np.ndarray:
     unpacker = msgpack.Unpacker(file)
     rec_cat_arg = np.empty(subdims, dtype="O")
     for subindex, subarray in unpacker:
-        rec_cat_arg[subindex] = (np.frombuffer(subarray),)
+        usubarray = msgpack.unpackb(subarray)
+        rec_cat_arg[tuple(subindex)] = usubarray
+        # np.frombuffer(usubarray["payload"]).reshape(usubarray["shape"]),
+        # )
     del data
     del file
     del unpacker
-    return concatenate3(rec_cat_arg.tolist())
+    arrs = [
+        [np.frombuffer(arr["payload"]).reshape(arr["shape"]) for arr in dim]
+        for dim in rec_cat_arg.tolist()
+    ]
+    return concatenate3(arrs)
