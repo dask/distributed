@@ -9,10 +9,14 @@ import time
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from io import BytesIO  # TODO: Only for rechunk
+from itertools import product
 from typing import TYPE_CHECKING, Any, TypeVar, overload
 
+import msgpack  # TODO: Only for rechunk
 import toolz
 
+from dask.array.rechunk import _old_to_new, intersect_chunks
 from dask.utils import parse_bytes
 
 from distributed.core import PooledRPCCall
@@ -33,6 +37,7 @@ from distributed.sizeof import sizeof
 from distributed.utils import log_errors, sync
 
 if TYPE_CHECKING:
+    import numpy as np
     import pandas as pd
     import pyarrow as pa
 
@@ -45,6 +50,323 @@ logger = logging.getLogger(__name__)
 
 class ShuffleClosedError(RuntimeError):
     pass
+
+
+class RechunkRun:
+    """State for a single active rechunk execution
+
+    This object is responsible for splitting, sending, receiving and combining
+    data shards.
+
+    It is entirely agnostic to the distributed system and can perform a shuffle
+    with other `Shuffle` instances using `rpc` and `broadcast`.
+
+    The user of this needs to guarantee that only `Shuffle`s of the same unique
+    `ShuffleID` interact.
+
+    Parameters
+    ----------
+    worker_for:
+        A mapping partition_id -> worker_address.
+    output_workers:
+        A set of all participating worker (addresses).
+    old_chunks:
+        TODO
+    new_chunks:
+        TODO
+    id:
+        A unique `ShuffleID` this belongs to.
+    run_id:
+        A unique identifier of the specific execution of the shuffle this belongs to.
+    local_address:
+        The local address this Shuffle can be contacted by using `rpc`.
+    directory:
+        The scratch directory to buffer data in.
+    nthreads:
+        How many background threads to use for compute.
+    loop:
+        The event loop.
+    rpc:
+        A callable returning a PooledRPCCall to contact other Shuffle instances.
+        Typically a ConnectionPool.
+    broadcast:
+        A function that ensures a RPC is evaluated on all `Shuffle` instances of
+        a given `ShuffleID`.
+    memory_limiter_disk:
+    memory_limiter_comm:
+        A ``ResourceLimiter`` limiting the total amount of memory used in either
+        buffer.
+    """
+
+    def __init__(
+        self,
+        worker_for: dict[tuple[int, ...], str],  # TODO
+        output_workers: set,
+        old_chunks: tuple[tuple[int, ...], ...],
+        new_chunks: tuple[tuple[int, ...], ...],
+        id: ShuffleId,
+        run_id: int,
+        local_address: str,
+        directory: str,
+        nthreads: int,
+        rpc: Callable[[str], PooledRPCCall],
+        broadcast: Callable,
+        memory_limiter_disk: ResourceLimiter,
+        memory_limiter_comms: ResourceLimiter,
+    ):
+        self.broadcast = broadcast
+        self.rpc = rpc
+        self.old_chunks = old_chunks
+        self.new_chunks = new_chunks
+        self.id = id
+        self.run_id = run_id
+        self.output_workers = output_workers
+        self.executor = ThreadPoolExecutor(nthreads)
+        partitions_of = defaultdict(list)
+        self.local_address = local_address
+        for part, addr in worker_for.items():
+            partitions_of[addr].append(part)
+        self.partitions_of = dict(partitions_of)
+        self.worker_for = worker_for
+        self.closed = False
+
+        self._disk_buffer = DiskShardsBuffer(
+            dump=dump_shards,
+            load=load_partition,
+            directory=directory,
+            memory_limiter=memory_limiter_disk,
+        )
+
+        self._comm_buffer = CommShardsBuffer(
+            send=self.send, memory_limiter=memory_limiter_comms
+        )
+        # TODO: reduce number of connections to number of workers
+        # MultiComm.max_connections = min(10, n_workers)
+
+        self.diagnostics: dict[str, float] = defaultdict(float)
+        self.transferred = False
+        self.received: set[int] = set()
+        self.total_recvd = 0
+        self.start_time = time.time()
+        self._exception: Exception | None = None
+        self._closed_event = asyncio.Event()
+        self._mapping = self._map_old_to_new(old_chunks, new_chunks)
+        self._old_to_new = _old_to_new(old_chunks, new_chunks)
+
+    def _map_old_to_new(
+        self, old: tuple[tuple[int, ...], ...], new: tuple[tuple[int, ...], ...]
+    ) -> dict[
+        tuple[int, ...], list[tuple[tuple[int, ...], tuple[int, ...], tuple[slice]]]
+    ]:  # TODO
+
+        # intersections is contains the new individual chunks as combined slices
+        # of the old chunks.
+        #
+        # Each chunk consists of all the n-dimensional slices of the old chunks
+        # that make up the new chunk.
+        #
+        # Each n-dimensional slice contains n tuples consisting of the index of
+        # the old chunk on the n-th dimension and the slice along that dimension.
+        intersections = intersect_chunks(old, new)
+
+        new_indices = product(*(range(len(c)) for c in new))
+
+        ndim = len(old)
+
+        old_to_new = defaultdict(list)
+
+        for new_index, new_chunk in zip(new_indices, intersections):
+            # sub-dimensions of new chunk composed of slices
+            subdims = [
+                len({slice[dim][0] for slice in new_chunk}) for dim in range(ndim)
+            ]
+
+            subdim_indices = product(*(range(dim) for dim in subdims))
+
+            for subdim_index, nchunkslice in zip(subdim_indices, new_chunk):
+                old_index, slices = zip(*nchunkslice)
+                old_to_new[old_index].append((new_index, subdim_index, slices))
+        return old_to_new
+
+    def __repr__(self) -> str:
+        return f"<Shuffle {self.id}[{self.run_id}] on {self.local_address}>"
+
+    def __hash__(self) -> int:
+        return self.run_id
+
+    @contextlib.contextmanager
+    def time(self, name: str) -> Iterator[None]:
+        start = time.time()
+        yield
+        stop = time.time()
+        self.diagnostics[name] += stop - start
+
+    async def barrier(self) -> None:
+        self.raise_if_closed()
+        # TODO: Consider broadcast pinging once when the shuffle starts to warm
+        # up the comm pool on scheduler side
+        await self.broadcast(
+            msg={
+                "op": "shuffle_inputs_done",
+                "shuffle_id": self.id,
+                "run_id": self.run_id,
+            }
+        )
+
+    async def send(self, address: str, shards: list[tuple[Any, bytes]]) -> None:
+        self.raise_if_closed()
+        return await self.rpc(address).shuffle_receive(
+            data=to_serialize(shards),
+            shuffle_id=self.id,
+            run_id=self.run_id,
+        )
+
+    async def offload(self, func: Callable[..., T], *args: Any) -> T:
+        self.raise_if_closed()
+        with self.time("cpu"):
+            return await asyncio.get_running_loop().run_in_executor(
+                self.executor,
+                func,
+                *args,
+            )
+
+    def heartbeat(self) -> dict[str, Any]:
+        comm_heartbeat = self._comm_buffer.heartbeat()
+        comm_heartbeat["read"] = self.total_recvd
+        return {
+            "disk": self._disk_buffer.heartbeat(),
+            "comm": comm_heartbeat,
+            "diagnostics": self.diagnostics,
+            "start": self.start_time,
+        }
+
+    async def receive(self, data: list[tuple[int, bytes]]) -> None:
+        await self._receive(data)
+
+    async def _receive(self, data: list[tuple[Any, bytes]]) -> None:
+        self.raise_if_closed()
+
+        filtered = []
+        for d in data:
+            if d[0] not in self.received:
+                filtered.append(d)
+                self.received.add(d[0])
+                self.total_recvd += sizeof(d)
+        del data
+        if not filtered:
+            return
+        try:
+            buffers = await self.offload(self._reserialize_buffers, filtered)
+            del filtered
+            await self._write_to_disk(buffers)
+        except Exception as e:
+            self._exception = e
+            raise
+
+    def _reserialize_buffers(
+        self, data: list[tuple[tuple[int, ...], tuple[int, ...], bytes]]
+    ) -> dict[str, list[bytes]]:
+        return {
+            "_".join(str(i) for i in d[0]): [msgpack.packb((d[1], d[2]))] for d in data
+        }
+
+    async def _write_to_disk(self, data: dict[str, list[bytes]]) -> None:
+        self.raise_if_closed()
+        await self._disk_buffer.write(data)
+
+    def raise_if_closed(self) -> None:
+        if self.closed:
+            if self._exception:
+                raise self._exception
+            raise ShuffleClosedError(
+                f"Shuffle {self.id} has been closed on {self.local_address}"
+            )
+
+    async def add_partition(self, data: np.ndarray, chunk: tuple[int, ...]) -> int:
+        self.raise_if_closed()
+        if self.transferred:
+            raise RuntimeError(f"Cannot add more partitions to shuffle {self}")
+
+        def _() -> dict[str, list[tuple[tuple[int, ...], tuple[int, ...], bytes]]]:
+            out: dict[
+                str, list[tuple[tuple[int, ...], tuple[int, ...], bytes]]
+            ] = defaultdict(list)
+            for new_index, subdim_index, slices in self._mapping[chunk]:
+                out[self.worker_for[new_index]].append(
+                    (new_index, subdim_index, data[slices].tobytes())
+                )
+            return out
+
+        out = _()  # await self.offload(_)
+        await self._write_to_comm(out)
+        return self.run_id
+
+    async def _write_to_comm(
+        self, data: dict[str, list[tuple[tuple[int, ...], tuple[int, ...], bytes]]]
+    ) -> None:
+        self.raise_if_closed()
+        await self._comm_buffer.write(data)
+
+    async def get_output_partition(self, i: tuple[int, ...]) -> np.ndarray:
+        self.raise_if_closed()
+        assert self.transferred, "`get_output_partition` called before barrier task"
+
+        assert self.worker_for[i] == self.local_address, (
+            f"Output partition {i} belongs on {self.worker_for[i]}, "
+            f"not {self.local_address}. "
+        )
+        # ^ NOTE: this check isn't necessary, just a nice validation to prevent incorrect
+        # data in the case something has gone very wrong
+
+        await self.flush_receive()
+        data = self._read_from_disk(i)
+        subdims = tuple(len(self._old_to_new[dim][ix]) for dim, ix in enumerate(i))
+        arr = assemble_chunk(data, subdims)
+        return arr
+
+    def _read_from_disk(self, id: tuple[int, ...]) -> bytes:
+        self.raise_if_closed()
+        sid = "_".join(str(i) for i in id)
+        data: list[bytes] = self._disk_buffer.read(sid)
+        assert len(data) == 1
+        return data[0]
+
+    async def inputs_done(self) -> None:
+        self.raise_if_closed()
+        assert not self.transferred, "`inputs_done` called multiple times"
+        self.transferred = True
+        await self._flush_comm()
+        try:
+            self._comm_buffer.raise_on_exception()
+        except Exception as e:
+            self._exception = e
+            raise
+
+    async def _flush_comm(self) -> None:
+        self.raise_if_closed()
+        await self._comm_buffer.flush()
+
+    async def flush_receive(self) -> None:
+        self.raise_if_closed()
+        await self._disk_buffer.flush()
+
+    async def close(self) -> None:
+        if self.closed:
+            await self._closed_event.wait()
+            return
+
+        self.closed = True
+        await self._comm_buffer.close()
+        await self._disk_buffer.close()
+        try:
+            self.executor.shutdown(cancel_futures=True)
+        except Exception:
+            self.executor.shutdown()
+        self._closed_event.set()
+
+    def fail(self, exception: Exception) -> None:
+        if not self.closed:
+            self._exception = exception
 
 
 class ShuffleRun:
@@ -742,3 +1064,19 @@ def split_by_partition(t: pa.Table, column: str) -> dict[Any, pa.Table]:
     assert len(t) == sum(map(len, shards))
     assert len(partitions) == len(shards)
     return dict(zip(partitions, shards))
+
+
+def assemble_chunk(data: bytes, subdims: tuple[int, ...]) -> np.ndarray:
+    import numpy as np
+
+    from dask.array.core import concatenate3
+
+    file = BytesIO(data)
+    unpacker = msgpack.Unpacker(file)
+    rec_cat_arg = np.empty(subdims, dtype="O")
+    for subindex, subarray in unpacker:
+        rec_cat_arg[subindex] = (np.frombuffer(subarray),)
+    del data
+    del file
+    del unpacker
+    return concatenate3(rec_cat_arg.tolist())

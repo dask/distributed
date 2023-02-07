@@ -106,7 +106,11 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         try:
             return self.get(id, worker)
         except KeyError:
-            state = self._create_dataframe_shuffle_state(id, spec)
+            type = spec.pop("type")
+            if type == "DataFrameShuffle":
+                state = self._create_dataframe_shuffle_state(id, spec)
+            else:
+                raise NotImplementedError
             self.states[id] = state
             state.participating_workers.add(worker)
             return state.to_msg()
