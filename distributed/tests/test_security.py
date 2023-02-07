@@ -88,7 +88,8 @@ def test_from_config():
 def test_path_from_config():
     from pathlib import Path
 
-    s = Security(tls_ca_file="~/cert.pem")
+    cert_path = str(Path("~") / "cert.pem")
+    s = Security(tls_ca_file=cert_path)
     assert s.tls_ca_file == str(Path.home() / "cert.pem")
 
 
