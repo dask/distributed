@@ -4,6 +4,7 @@ import abc
 import contextlib
 import itertools
 import logging
+import math
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -34,7 +35,7 @@ class ShuffleState(abc.ABC):
 
 @dataclass
 class DataFrameShuffleState(ShuffleState):
-    type: ClassVar[str] = "DataframeShuffle"
+    type: ClassVar[str] = "DataFrameShuffle"
     worker_for: dict[int, str]
     schema: bytes
     column: str
@@ -47,6 +48,25 @@ class DataFrameShuffleState(ShuffleState):
             "worker_for": self.worker_for,
             "column": self.column,
             "schema": self.schema,
+            "output_workers": self.output_workers,
+        }
+
+
+@dataclass
+class ArrayRechunkState(ShuffleState):
+    type: ClassVar[str] = "ArrayRechunk"
+    worker_for: dict[tuple[int, ...], str]
+    old: tuple[tuple[int, ...], ...]
+    new: tuple[tuple[int, ...], ...]
+
+    def to_msg(self) -> dict[str, Any]:
+        return {
+            "status": "OK",
+            "type": ArrayRechunkState.type,
+            "run_id": self.run_id,
+            "worker_for": self.worker_for,
+            "old": self.old,
+            "new": self.new,
             "output_workers": self.output_workers,
         }
 
@@ -100,15 +120,17 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     def get_or_create(
         self,
         id: ShuffleId,
-        spec: dict,
+        type: str,
         worker: str,
+        spec,
     ) -> dict:
         try:
             return self.get(id, worker)
         except KeyError:
-            type = spec.pop("type")
             if type == "DataFrameShuffle":
                 state = self._create_dataframe_shuffle_state(id, spec)
+            elif type == "ArrayRechunk":
+                state = self._create_array_rechunk_state(id, spec)
             else:
                 raise NotImplementedError
             self.states[id] = state
@@ -148,6 +170,43 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             schema=schema,
             column=column,
             output_workers=output_workers,
+            completed_workers=set(),
+            participating_workers=output_workers.copy(),
+        )
+
+    def _create_array_rechunk_state(
+        self, id: ShuffleId, spec: dict[str, Any]
+    ) -> ArrayRechunkState:
+        old = spec["old"]
+        new = spec["new"]
+        assert old is not None
+        assert new is not None
+
+        workers = list(self.scheduler.workers)
+        output_workers = set()
+
+        name = barrier_key(id)
+        mapping = {}
+
+        shape = (len(dim) for dim in new)
+
+        for ts in self.scheduler.tasks[name].dependents:
+            part = ts.annotations["shuffle"]  # TODO Improve this
+            if ts.worker_restrictions:
+                output_worker = list(ts.worker_restrictions)[0]
+            else:
+                output_worker = get_worker_for_chunk(part, workers, shape)
+            mapping[part] = output_worker
+            output_workers.add(output_worker)
+            self.scheduler.set_restrictions({ts.key: {output_worker}})
+
+        return ArrayRechunkState(
+            id=id,
+            run_id=next(ShuffleState._run_id_iterator),
+            worker_for=mapping,
+            output_workers=output_workers,
+            old=old,
+            new=new,
             completed_workers=set(),
             participating_workers=output_workers.copy(),
         )
@@ -230,4 +289,16 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
 def get_worker_for(output_partition: int, workers: list[str], npartitions: int) -> str:
     "Get the address of the worker which should hold this output partition number"
     i = len(workers) * output_partition // npartitions
+    return workers[i]
+
+
+def get_worker_for_chunk(chunk: tuple[int, ...], workers: list[str], shape) -> str:
+    nchunks = math.prod(shape)
+    multiplier = 1
+    flat_index = 0
+
+    for i, n in zip(chunk, shape):
+        flat_index += i * multiplier
+        flat_index *= n
+    i = len(workers) * flat_index // nchunks
     return workers[i]

@@ -48,7 +48,8 @@ def shuffle_transfer(
     try:
         return _get_worker_extension().add_partition(
             input,
-            id,
+            shuffle_id=id,
+            type="DataFrameShuffle",
             input_partition=input_partition,
             npartitions=npartitions,
             column=column,

@@ -78,9 +78,9 @@ class RechunkRun:
         A mapping partition_id -> worker_address.
     output_workers:
         A set of all participating worker (addresses).
-    old_chunks:
+    old:
         TODO
-    new_chunks:
+    new:
         TODO
     id:
         A unique `ShuffleID` this belongs to.
@@ -110,8 +110,8 @@ class RechunkRun:
         self,
         worker_for: dict[NIndex, str],  # TODO
         output_workers: set,
-        old_chunks: ChunkedAxes,
-        new_chunks: ChunkedAxes,
+        old: ChunkedAxes,
+        new: ChunkedAxes,
         id: ShuffleId,
         run_id: int,
         local_address: str,
@@ -124,8 +124,8 @@ class RechunkRun:
     ):
         self.broadcast = broadcast
         self.rpc = rpc
-        self.old_chunks = old_chunks
-        self.new_chunks = new_chunks
+        self.old = old
+        self.new = new
         self.id = id
         self.run_id = run_id
         self.output_workers = output_workers
@@ -158,8 +158,8 @@ class RechunkRun:
         self.start_time = time.time()
         self._exception: Exception | None = None
         self._closed_event = asyncio.Event()
-        self._mapping = self._map_old_to_new(old_chunks, new_chunks)
-        self._old_to_new = _old_to_new(old_chunks, new_chunks)
+        self._mapping = self._map_old_to_new(old, new)
+        self._old_to_new = _old_to_new(old, new)
 
     def _map_old_to_new(
         self, old: ChunkedAxes, new: ChunkedAxes
@@ -288,7 +288,7 @@ class RechunkRun:
                 f"Shuffle {self.id} has been closed on {self.local_address}"
             )
 
-    async def add_partition(self, data: np.ndarray, chunk: NIndex) -> int:
+    async def add_partition(self, data: np.ndarray, input_partition: NIndex) -> int:
         self.raise_if_closed()
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to shuffle {self}")
@@ -297,7 +297,7 @@ class RechunkRun:
             import msgpack
 
             out: dict[str, list[tuple[NIndex, NIndex, bytes]]] = defaultdict(list)
-            for new_index, subdim_index, slices in self._mapping[chunk]:
+            for new_index, subdim_index, slices in self._mapping[input_partition]:
                 out[self.worker_for[new_index]].append(
                     (
                         new_index,
@@ -755,14 +755,14 @@ class ShuffleWorkerExtension:
     def add_partition(
         self,
         data: pd.DataFrame,
-        shuffle_id: ShuffleId,
         input_partition: int,
-        npartitions: int,
-        column: str,
+        shuffle_id: ShuffleId,
+        type: str,
+        **kwargs: dict,
     ) -> int:
-        shuffle = self.get_or_create_shuffle(
-            shuffle_id, empty=data, npartitions=npartitions, column=column
-        )
+        if type == "DataFrameShuffle":
+            kwargs["empty"] = data
+        shuffle = self.get_or_create_shuffle(shuffle_id, type=type, **kwargs)
         return sync(
             self.worker.loop,
             shuffle.add_partition,
@@ -825,9 +825,8 @@ class ShuffleWorkerExtension:
     async def _get_or_create_shuffle(
         self,
         shuffle_id: ShuffleId,
-        empty: pd.DataFrame,
-        column: str,
-        npartitions: int,
+        type: str,
+        **kwargs,
     ) -> ShuffleRun:
         """Get or create a shuffle matching the ID and data spec.
 
@@ -846,9 +845,8 @@ class ShuffleWorkerExtension:
         if shuffle is None:
             shuffle = await self._refresh_shuffle(
                 shuffle_id=shuffle_id,
-                empty=empty,
-                column=column,
-                npartitions=npartitions,
+                type=type,
+                kwargs=kwargs,
             )
 
         if self.closed:
@@ -870,36 +868,48 @@ class ShuffleWorkerExtension:
     async def _refresh_shuffle(
         self,
         shuffle_id: ShuffleId,
-        empty: pd.DataFrame,
-        column: str,
-        npartitions: int,
+        type: str,
+        kwargs: dict,
     ) -> ShuffleRun:
         ...
 
     async def _refresh_shuffle(
         self,
         shuffle_id: ShuffleId,
-        empty: pd.DataFrame | None = None,
-        column: str | None = None,
-        npartitions: int | None = None,
+        type: str | None = None,
+        kwargs: dict | None = None,
     ) -> ShuffleRun:
         import pyarrow as pa
 
-        if empty is None:
+        if type is None:
             result = await self.worker.scheduler.shuffle_get(
                 id=shuffle_id,
                 worker=self.worker.address,
             )
-        else:
+        elif type == "DataFrameShuffle":
+            assert kwargs is not None
             result = await self.worker.scheduler.shuffle_get_or_create(
                 id=shuffle_id,
+                type=type,
                 spec={
-                    "schema": pa.Schema.from_pandas(empty).serialize().to_pybytes(),
-                    "npartitions": npartitions,
-                    "column": column,
+                    "schema": pa.Schema.from_pandas(kwargs["empty"])
+                    .serialize()
+                    .to_pybytes(),
+                    "npartitions": kwargs["npartitions"],
+                    "column": kwargs["column"],
                 },
                 worker=self.worker.address,
             )
+        elif type == "ArrayRechunk":
+            assert kwargs is not None
+            result = await self.worker.scheduler.shuffle_get_or_create(
+                id=shuffle_id,
+                type=type,
+                spec=kwargs,
+                worker=self.worker.address,
+            )
+        else:
+            raise TypeError(type)
         if result["status"] == "ERROR":
             raise RuntimeError(result["message"])
         assert result["status"] == "OK"
@@ -923,25 +933,50 @@ class ShuffleWorkerExtension:
                     extension._runs.remove(shuffle)
 
                 self.worker._ongoing_background_tasks.call_soon(_, self, existing)
-
-        shuffle = ShuffleRun(
-            column=result["column"],
-            worker_for=result["worker_for"],
-            output_workers=result["output_workers"],
-            schema=deserialize_schema(result["schema"]),
-            id=shuffle_id,
-            run_id=result["run_id"],
-            directory=os.path.join(
-                self.worker.local_directory,
-                f"shuffle-{shuffle_id}-{result['run_id']}",
-            ),
-            nthreads=self.worker.state.nthreads,
-            local_address=self.worker.address,
-            rpc=self.worker.rpc,
-            broadcast=functools.partial(self._broadcast_to_participants, shuffle_id),
-            memory_limiter_disk=self.memory_limiter_disk,
-            memory_limiter_comms=self.memory_limiter_comms,
-        )
+        if result["type"] == "DataFrameShuffle":
+            shuffle = ShuffleRun(
+                column=result["column"],
+                worker_for=result["worker_for"],
+                output_workers=result["output_workers"],
+                schema=deserialize_schema(result["schema"]),
+                id=shuffle_id,
+                run_id=result["run_id"],
+                directory=os.path.join(
+                    self.worker.local_directory,
+                    f"shuffle-{shuffle_id}-{result['run_id']}",
+                ),
+                nthreads=self.worker.state.nthreads,
+                local_address=self.worker.address,
+                rpc=self.worker.rpc,
+                broadcast=functools.partial(
+                    self._broadcast_to_participants, shuffle_id
+                ),
+                memory_limiter_disk=self.memory_limiter_disk,
+                memory_limiter_comms=self.memory_limiter_comms,
+            )
+        elif result["type"] == "ArrayRechunk":
+            shuffle = RechunkRun(
+                worker_for=result["worker_for"],
+                output_workers=result["output_workers"],
+                old=result["old"],
+                new=result["new"],
+                id=shuffle_id,
+                run_id=result["run_id"],
+                directory=os.path.join(
+                    self.worker.local_directory,
+                    f"shuffle-{shuffle_id}-{result['run_id']}",
+                ),
+                nthreads=self.worker.state.nthreads,
+                local_address=self.worker.address,
+                rpc=self.worker.rpc,
+                broadcast=functools.partial(
+                    self._broadcast_to_participants, shuffle_id
+                ),
+                memory_limiter_disk=self.memory_limiter_disk,
+                memory_limiter_comms=self.memory_limiter_comms,
+            )
+        else:
+            raise TypeError(result["type"])
         self.shuffles[shuffle_id] = shuffle
         self._runs.add(shuffle)
         return shuffle
@@ -986,17 +1021,15 @@ class ShuffleWorkerExtension:
     def get_or_create_shuffle(
         self,
         shuffle_id: ShuffleId,
-        empty: pd.DataFrame | None = None,
-        column: str | None = None,
-        npartitions: int | None = None,
+        type: str,
+        **kwargs,
     ) -> ShuffleRun:
         return sync(
             self.worker.loop,
             self._get_or_create_shuffle,
             shuffle_id,
-            empty,
-            column,
-            npartitions,
+            type,
+            **kwargs,
         )
 
     def get_output_partition(
@@ -1097,8 +1130,11 @@ def assemble_chunk(data: bytes, subdims: tuple[int, ...]) -> np.ndarray:
     del data
     del file
     del unpacker
-    arrs = [
-        [np.frombuffer(arr["payload"]).reshape(arr["shape"]) for arr in dim]
-        for dim in rec_cat_arg.tolist()
-    ]
+    arrs = rec_cat_arg.tolist()
+    for index in np.ndindex(rec_cat_arg.shape):
+        tarrs = arrs
+        for i in index[:-1]:
+            tarrs = tarrs[i]
+        arr = tarrs[index[-1]]
+        tarrs[index[-1]] = np.frombuffer(arr["payload"]).reshape(arr["shape"])
     return concatenate3(arrs)

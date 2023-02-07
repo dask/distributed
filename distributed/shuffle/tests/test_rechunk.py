@@ -7,14 +7,16 @@ from typing import Any
 import numpy as np
 import pytest
 
+import dask.array as da
 from dask.array.core import concatenate3
+from dask.array.rechunk import rechunk
 
 from distributed.core import PooledRPCCall
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_extension import get_worker_for
 from distributed.shuffle._shuffle import ShuffleId
 from distributed.shuffle._worker_extension import RechunkRun
-from distributed.utils_test import gen_test
+from distributed.utils_test import gen_cluster, gen_test
 
 
 class PooledRPCShuffle(PooledRPCCall):
@@ -61,8 +63,8 @@ class ShuffleTestPool:
         self,
         name,
         worker_for_mapping,
-        old_chunks,
-        new_chunks,
+        old,
+        new,
         directory,
         loop,
         Shuffle=RechunkRun,
@@ -71,8 +73,8 @@ class ShuffleTestPool:
             worker_for=worker_for_mapping,
             # FIXME: Is output_workers redundant with worker_for?
             output_workers=set(worker_for_mapping.values()),
-            old_chunks=old_chunks,
-            new_chunks=new_chunks,
+            old=old,
+            new=new,
             directory=directory / name,
             id=ShuffleId(name),
             run_id=next(ShuffleTestPool._shuffle_run_id_iterator),
@@ -119,8 +121,8 @@ async def test_lowlevel_rechunk(tmpdir, loop_in_thread, n_workers):
             local_shuffle_pool.new_shuffle(
                 name=workers[i],
                 worker_for_mapping=worker_for_mapping,
-                old_chunks=old,
-                new_chunks=new,
+                old=old,
+                new=new,
                 directory=tmpdir,
                 loop=loop_in_thread,
             )
@@ -163,3 +165,37 @@ async def test_lowlevel_rechunk(tmpdir, loop_in_thread, n_workers):
     np.testing.assert_array_equal(
         concatenate3(old_cs.tolist()), concatenate3(all_chunks.tolist()), strict=True
     )
+
+
+@gen_cluster(client=True, config={"optimization.fuse.active": False})
+async def test_rechunk_1d(c, s, *ws):
+    """Try rechunking a random 1d matrix"""
+    a = np.random.uniform(0, 1, 30)
+    x = da.from_array(a, chunks=((10,) * 3,))
+    new = ((6,) * 5,)
+    x2 = rechunk(x, chunks=new, rechunk="p2p")
+    assert x2.chunks == new
+    assert np.all(await c.compute(x2) == a)
+
+
+@gen_cluster(client=True, config={"optimization.fuse.active": False})
+async def test_rechunk_2d(c, s, *ws):
+    """Try rechunking a random 2d matrix"""
+    a = np.random.uniform(0, 1, 300).reshape((10, 30))
+    x = da.from_array(a, chunks=((1, 2, 3, 4), (5,) * 6))
+    new = ((5, 5), (15,) * 2)
+    x2 = rechunk(x, chunks=new)
+    assert x2.chunks == new
+    assert np.all(await c.compute(x2) == a)
+
+
+@gen_cluster(client=True, config={"optimization.fuse.active": False})
+async def test_rechunk_4d(c, s, *ws):
+    """Try rechunking a random 4d matrix"""
+    old = ((5, 5),) * 4
+    a = np.random.uniform(0, 1, 10000).reshape((10,) * 4)
+    x = da.from_array(a, chunks=old)
+    new = ((10,),) * 4
+    x2 = rechunk(x, chunks=new)
+    assert x2.chunks == new
+    assert np.all(await c.compute(x2) == a)
