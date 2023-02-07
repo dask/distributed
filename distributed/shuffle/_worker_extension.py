@@ -37,13 +37,21 @@ from distributed.sizeof import sizeof
 from distributed.utils import log_errors, sync
 
 if TYPE_CHECKING:
+    # TODO import from typing (requires Python >=3.10)
     import numpy as np
     import pandas as pd
     import pyarrow as pa
+    from typing_extensions import TypeAlias
 
     from distributed.worker import Worker
 
 T = TypeVar("T")
+
+# TODO remove quotes (requires Python >=3.9)
+ChunkedAxis: TypeAlias = "tuple[int, ...]"
+ChunkedAxes: TypeAlias = "tuple[ChunkedAxis, ...]"
+NIndex: TypeAlias = "tuple[int, ...]"
+NSlice: TypeAlias = "tuple[slice, ...]"
 
 logger = logging.getLogger(__name__)
 
@@ -100,10 +108,10 @@ class RechunkRun:
 
     def __init__(
         self,
-        worker_for: dict[tuple[int, ...], str],  # TODO
+        worker_for: dict[NIndex, str],  # TODO
         output_workers: set,
-        old_chunks: tuple[tuple[int, ...], ...],
-        new_chunks: tuple[tuple[int, ...], ...],
+        old_chunks: ChunkedAxes,
+        new_chunks: ChunkedAxes,
         id: ShuffleId,
         run_id: int,
         local_address: str,
@@ -145,7 +153,7 @@ class RechunkRun:
 
         self.diagnostics: dict[str, float] = defaultdict(float)
         self.transferred = False
-        self.received: set[tuple[tuple[int, ...], tuple[int, ...]]] = set()
+        self.received: set[tuple[NIndex, NIndex]] = set()
         self.total_recvd = 0
         self.start_time = time.time()
         self._exception: Exception | None = None
@@ -154,10 +162,8 @@ class RechunkRun:
         self._old_to_new = _old_to_new(old_chunks, new_chunks)
 
     def _map_old_to_new(
-        self, old: tuple[tuple[int, ...], ...], new: tuple[tuple[int, ...], ...]
-    ) -> dict[
-        tuple[int, ...], list[tuple[tuple[int, ...], tuple[int, ...], tuple[slice]]]
-    ]:  # TODO
+        self, old: ChunkedAxes, new: ChunkedAxes
+    ) -> dict[NIndex, list[tuple[NIndex, NIndex, NSlice]]]:
 
         # intersections is contains the new individual chunks as combined slices
         # of the old chunks.
@@ -240,14 +246,10 @@ class RechunkRun:
             "start": self.start_time,
         }
 
-    async def receive(
-        self, data: list[tuple[tuple[int, ...], tuple[int, ...], bytes]]
-    ) -> None:
+    async def receive(self, data: list[tuple[NIndex, NIndex, bytes]]) -> None:
         await self._receive(data)
 
-    async def _receive(
-        self, data: list[tuple[tuple[int, ...], tuple[int, ...], bytes]]
-    ) -> None:
+    async def _receive(self, data: list[tuple[NIndex, NIndex, bytes]]) -> None:
         self.raise_if_closed()
 
         filtered = []
@@ -268,7 +270,7 @@ class RechunkRun:
             raise
 
     def _reserialize_buffers(
-        self, data: list[tuple[tuple[int, ...], tuple[int, ...], bytes]]
+        self, data: list[tuple[NIndex, NIndex, bytes]]
     ) -> dict[str, list[bytes]]:
         return {
             "_".join(str(i) for i in d[0]): [msgpack.packb((d[1], d[2]))] for d in data
@@ -286,17 +288,15 @@ class RechunkRun:
                 f"Shuffle {self.id} has been closed on {self.local_address}"
             )
 
-    async def add_partition(self, data: np.ndarray, chunk: tuple[int, ...]) -> int:
+    async def add_partition(self, data: np.ndarray, chunk: NIndex) -> int:
         self.raise_if_closed()
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to shuffle {self}")
 
-        def _() -> dict[str, list[tuple[tuple[int, ...], tuple[int, ...], bytes]]]:
+        def _() -> dict[str, list[tuple[NIndex, NIndex, bytes]]]:
             import msgpack
 
-            out: dict[
-                str, list[tuple[tuple[int, ...], tuple[int, ...], bytes]]
-            ] = defaultdict(list)
+            out: dict[str, list[tuple[NIndex, NIndex, bytes]]] = defaultdict(list)
             for new_index, subdim_index, slices in self._mapping[chunk]:
                 out[self.worker_for[new_index]].append(
                     (
@@ -317,12 +317,12 @@ class RechunkRun:
         return self.run_id
 
     async def _write_to_comm(
-        self, data: dict[str, list[tuple[tuple[int, ...], tuple[int, ...], bytes]]]
+        self, data: dict[str, list[tuple[NIndex, NIndex, bytes]]]
     ) -> None:
         self.raise_if_closed()
         await self._comm_buffer.write(data)
 
-    async def get_output_partition(self, i: tuple[int, ...]) -> np.ndarray:
+    async def get_output_partition(self, i: NIndex) -> np.ndarray:
         self.raise_if_closed()
         assert self.transferred, "`get_output_partition` called before barrier task"
 
@@ -339,7 +339,7 @@ class RechunkRun:
         arr = assemble_chunk(data, subdims)
         return arr
 
-    def _read_from_disk(self, id: tuple[int, ...]) -> bytes:
+    def _read_from_disk(self, id: NIndex) -> bytes:
         self.raise_if_closed()
         sid = "_".join(str(i) for i in id)
         data: list[bytes] = self._disk_buffer.read(sid)
