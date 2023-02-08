@@ -356,7 +356,7 @@ class Slow(zict.Func):
         pickled = self.d[key]
         assert isinstance(pickled, bytearray if has_zict_230 else bytes)
         t1 = perf_counter()
-        out = self.load(pickled)  # type: ignore
+        out = self.load(pickled)
         t2 = perf_counter()
 
         # For the sake of simplicity, we're not metering failure use cases.
@@ -371,8 +371,7 @@ class Slow(zict.Func):
     def __setitem__(self, key: str, value: Any) -> None:
         t0 = perf_counter()
         try:
-            # FIXME https://github.com/python/mypy/issues/708
-            pickled = self.dump(value)  # type: ignore
+            pickled = self.dump(value)
         except Exception as e:
             # zict.LRU ensures that the key remains in fast if we raise.
             # Wrap the exception so that it's recognizable by SpillBuffer,
