@@ -283,7 +283,7 @@ def test_rate_limited_logger_many_tags():
             logger.info(i, "x")  # All muted
         assert len(logger._prev_set) == len(logger._prev_heap) == 120
 
-        sleep(0.1)
+        sleep(0.2)
         logger.info(0, "x")  # Event that will flush obsolete tags away
         assert len(logger._prev_set) == len(logger._prev_heap) == 1
     assert len(log.getvalue().splitlines()) == 121
