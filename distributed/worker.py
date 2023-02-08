@@ -28,7 +28,17 @@ from concurrent.futures import Executor
 from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, TextIO, TypeVar, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Literal,
+    TextIO,
+    TypedDict,
+    TypeVar,
+    cast,
+    overload,
+)
 
 from tlz import first, keymap, pluck
 from tornado.ioloop import IOLoop
@@ -164,6 +174,15 @@ WORKER_ANY_RUNNING = {
     Status.paused,
     Status.closing_gracefully,
 }
+
+
+class GetDataBusy(TypedDict):
+    status: Literal["busy"]
+
+
+class GetDataSuccess(TypedDict):
+    status: Literal["OK"]
+    data: dict[str, object]
 
 
 def fail_hard(method: Callable[P, T]) -> Callable[P, T]:
@@ -1302,7 +1321,7 @@ class Worker(BaseWorker, ServerNode):
             if k not in self.data
         }
         result, missing_keys, missing_workers = await gather_from_workers(
-            who_has, rpc=self.rpc, who=self.address
+            who_has=who_has, rpc=self.rpc, who=self.address
         )
         self.update_data(data=result, report=False)
         if missing_keys:
@@ -1691,12 +1710,20 @@ class Worker(BaseWorker, ServerNode):
         self.stream_comms[address].send(msg)
 
     async def get_data(
-        self, comm, keys=None, who=None, serializers=None, max_connections=None
-    ) -> dict | Status:
+        self,
+        comm: Comm,
+        keys: Collection[str] | None = None,
+        who: str | None = None,
+        serializers: list[str] | None = None,
+        max_connections: int | None = None,
+    ) -> GetDataBusy | Literal[Status.dont_reply]:
         start = time()
 
         if max_connections is None:
             max_connections = self.transfer_outgoing_count_limit
+
+        if keys is None:
+            keys = set()
 
         # Allow same-host connections more liberally
         if (
@@ -2055,7 +2082,7 @@ class Worker(BaseWorker, ServerNode):
 
             start = time()
             response = await get_data_from_worker(
-                self.rpc, to_gather, worker, who=self.address
+                rpc=self.rpc, keys=to_gather, worker=worker, who=self.address
             )
             stop = time()
             if response["status"] == "busy":
@@ -2819,15 +2846,44 @@ class Reschedule(Exception):
     """
 
 
+@overload
 async def get_data_from_worker(
-    rpc,
-    keys,
-    worker,
-    who=None,
-    max_connections=None,
-    serializers=None,
-    deserializers=None,
-):
+    rpc: ConnectionPool,
+    keys: Collection[str],
+    worker: str,
+    *,
+    who: str | None = None,
+    max_connections: Literal[False],
+    serializers: list[str] | None = None,
+    deserializers: list[str] | None = None,
+) -> GetDataSuccess:
+    ...
+
+
+@overload
+async def get_data_from_worker(
+    rpc: ConnectionPool,
+    keys: Collection[str],
+    worker: str,
+    *,
+    who: str | None = None,
+    max_connections: bool | int | None = None,
+    serializers: list[str] | None = None,
+    deserializers: list[str] | None = None,
+) -> GetDataBusy | GetDataSuccess:
+    ...
+
+
+async def get_data_from_worker(
+    rpc: ConnectionPool,
+    keys: Collection[str],
+    worker: str,
+    *,
+    who: str | None = None,
+    max_connections: bool | int | None = None,
+    serializers: list[str] | None = None,
+    deserializers: list[str] | None = None,
+) -> GetDataBusy | GetDataSuccess:
     """Get keys from worker
 
     The worker has a two step handshake to acknowledge when data has been fully

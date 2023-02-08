@@ -4,9 +4,10 @@ import asyncio
 import logging
 import random
 from collections import defaultdict
+from collections.abc import Callable, Collection, Coroutine, Mapping
 from functools import partial
 from itertools import cycle
-from typing import Any, Callable
+from typing import Any, TypeVar
 
 from tlz import concat, drop, groupby, merge
 
@@ -14,13 +15,19 @@ import dask.config
 from dask.optimization import SubgraphCallable
 from dask.utils import is_namedtuple_instance, parse_timedelta, stringify
 
-from distributed.core import rpc
+from distributed.core import ConnectionPool, rpc
 from distributed.utils import All
 
 logger = logging.getLogger(__name__)
 
 
-async def gather_from_workers(who_has, rpc, close=True, serializers=None, who=None):
+async def gather_from_workers(
+    who_has: Mapping[str, Collection[str]],
+    rpc: ConnectionPool,
+    close: bool = True,
+    serializers: list[str] | None = None,
+    who: str | None = None,
+) -> tuple[dict[str, object], dict[str, list[str]], list[str]]:
     """Gather data directly from peers
 
     Parameters
@@ -38,18 +45,18 @@ async def gather_from_workers(who_has, rpc, close=True, serializers=None, who=No
     """
     from distributed.worker import get_data_from_worker
 
-    bad_addresses = set()
+    bad_addresses: set[str] = set()
     missing_workers = set()
     original_who_has = who_has
-    who_has = {k: set(v) for k, v in who_has.items()}
-    results = dict()
-    all_bad_keys = set()
+    new_who_has = {k: set(v) for k, v in who_has.items()}
+    results: dict[str, object] = {}
+    all_bad_keys: set[str] = set()
 
     while len(results) + len(all_bad_keys) < len(who_has):
         d = defaultdict(list)
         rev = dict()
         bad_keys = set()
-        for key, addresses in who_has.items():
+        for key, addresses in new_who_has.items():
             if key in results:
                 continue
             try:
@@ -74,7 +81,7 @@ async def gather_from_workers(who_has, rpc, close=True, serializers=None, who=No
             )
             for address, keys in d.items()
         }
-        response = {}
+        response: dict[str, object] = {}
         for worker, c in coroutines.items():
             try:
                 r = await c
@@ -91,8 +98,11 @@ async def gather_from_workers(who_has, rpc, close=True, serializers=None, who=No
         bad_addresses |= {v for k, v in rev.items() if k not in response}
         results.update(response)
 
-    bad_keys = {k: list(original_who_has[k]) for k in all_bad_keys}
-    return (results, bad_keys, list(missing_workers))
+    return (
+        results,
+        {k: list(original_who_has[k]) for k in all_bad_keys},
+        list(missing_workers),
+    )
 
 
 class WrappedKey:
@@ -345,15 +355,19 @@ def subs_multiple(o, d):
             return o
 
 
+T = TypeVar("T")
+
+
 async def retry(
-    coro,
-    count,
-    delay_min,
-    delay_max,
-    jitter_fraction=0.1,
-    retry_on_exceptions=(EnvironmentError, IOError),
-    operation=None,
-):
+    coro: Callable[[], Coroutine[Any, Any, T]],
+    count: int,
+    delay_min: float,
+    delay_max: float,
+    jitter_fraction: float = 0.1,
+    retry_on_exceptions: type[BaseException]
+    | tuple[type[BaseException], ...] = (EnvironmentError, IOError),
+    operation: str | None = None,
+) -> T:
     """
     Return the result of ``await coro()``, re-trying in case of exceptions
 
@@ -403,7 +417,13 @@ async def retry(
     return await coro()
 
 
-async def retry_operation(coro, *args, operation=None, **kwargs):
+# ParamSpec is not supported here due to the additional "operation" kwarg
+async def retry_operation(
+    coro: Callable[..., Coroutine[Any, Any, T]],
+    *args: object,
+    operation: str | None = None,
+    **kwargs: object,
+) -> T:
     """
     Retry an operation using the configuration values for the retry parameters
     """
