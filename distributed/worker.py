@@ -2900,31 +2900,28 @@ async def get_data_from_worker(
     if deserializers is None:
         deserializers = rpc.deserializers
 
-    async def _get_data():
-        comm = await rpc.connect(worker)
-        comm.name = "Ephemeral Worker->Worker for gather"
+    comm = await rpc.connect(worker)
+    comm.name = "Ephemeral Worker->Worker for gather"
+    try:
+        response = await send_recv(
+            comm,
+            serializers=serializers,
+            deserializers=deserializers,
+            op="get_data",
+            keys=keys,
+            who=who,
+            max_connections=max_connections,
+        )
         try:
-            response = await send_recv(
-                comm,
-                serializers=serializers,
-                deserializers=deserializers,
-                op="get_data",
-                keys=keys,
-                who=who,
-                max_connections=max_connections,
-            )
-            try:
-                status = response["status"]
-            except KeyError:  # pragma: no cover
-                raise ValueError("Unexpected response", response)
-            else:
-                if status == "OK":
-                    await comm.write("OK")
-            return response
-        finally:
-            rpc.reuse(worker, comm)
-
-    return await retry_operation(_get_data, operation="get_data_from_worker")
+            status = response["status"]
+        except KeyError:  # pragma: no cover
+            raise ValueError("Unexpected response", response)
+        else:
+            if status == "OK":
+                await comm.write("OK")
+        return response
+    finally:
+        rpc.reuse(worker, comm)
 
 
 job_counter = [0]

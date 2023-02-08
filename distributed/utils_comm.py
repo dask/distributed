@@ -69,13 +69,17 @@ async def gather_from_workers(
             all_bad_keys |= bad_keys
         coroutines = {
             address: asyncio.create_task(
-                get_data_from_worker(
-                    rpc,
-                    keys,
-                    address,
-                    who=who,
-                    serializers=serializers,
-                    max_connections=False,
+                retry_operation(
+                    partial(
+                        get_data_from_worker,
+                        rpc,
+                        keys,
+                        address,
+                        who=who,
+                        serializers=serializers,
+                        max_connections=False,
+                    ),
+                    operation="get_data_from_worker",
                 ),
                 name=f"get-data-from-{address}",
             )
