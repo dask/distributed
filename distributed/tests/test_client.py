@@ -39,7 +39,12 @@ import dask
 import dask.bag as db
 from dask import delayed
 from dask.optimization import SubgraphCallable
-from dask.utils import parse_timedelta, stringify, tmpfile
+from dask.utils import (
+    get_default_shuffle_algorithm,
+    parse_timedelta,
+    stringify,
+    tmpfile,
+)
 
 from distributed import (
     CancelledError,
@@ -639,8 +644,8 @@ async def test_gather_skip(c, s, a):
     x = c.submit(div, 1, 0, priority=10)
     y = c.submit(slowinc, 1, delay=0.5)
 
-    with captured_logger(logging.getLogger("distributed.scheduler")) as sched:
-        with captured_logger(logging.getLogger("distributed.client")) as client:
+    with captured_logger("distributed.scheduler") as sched:
+        with captured_logger("distributed.client") as client:
             L = await c.gather([x, y], errors="skip")
             assert L == [2]
 
@@ -3330,25 +3335,28 @@ def test_default_get(loop_in_thread):
     loop = loop_in_thread
     with cluster() as (s, [a, b]):
         pre_get = dask.base.get_scheduler()
-        pytest.raises(KeyError, dask.config.get, "shuffle")
+        # These may change in the future but the selection below shoul dnot
+        distributed_default = "tasks"
+        local_default = "disk"
+        assert get_default_shuffle_algorithm() == local_default
         with Client(s["address"], set_as_default=True, loop=loop) as c:
             assert dask.base.get_scheduler() == c.get
-            assert dask.config.get("shuffle") == "tasks"
+            assert get_default_shuffle_algorithm() == distributed_default
 
         assert dask.base.get_scheduler() == pre_get
-        pytest.raises(KeyError, dask.config.get, "shuffle")
+        assert get_default_shuffle_algorithm() == local_default
 
         c = Client(s["address"], set_as_default=False, loop=loop)
         assert dask.base.get_scheduler() == pre_get
-        pytest.raises(KeyError, dask.config.get, "shuffle")
+        assert get_default_shuffle_algorithm() == local_default
         c.close()
 
         c = Client(s["address"], set_as_default=True, loop=loop)
-        assert dask.config.get("shuffle") == "tasks"
+        assert get_default_shuffle_algorithm() == distributed_default
         assert dask.base.get_scheduler() == c.get
         c.close()
         assert dask.base.get_scheduler() == pre_get
-        pytest.raises(KeyError, dask.config.get, "shuffle")
+        assert get_default_shuffle_algorithm() == local_default
 
         with Client(s["address"], loop=loop) as c:
             assert dask.base.get_scheduler() == c.get
@@ -3471,7 +3479,7 @@ async def test_get_foo_lost_keys(c, s, u, v, w):
 )
 async def test_bad_tasks_fail(c, s, a, b):
     f = c.submit(sys.exit, 0)
-    with captured_logger(logging.getLogger("distributed.scheduler")) as logger:
+    with captured_logger("distributed.scheduler") as logger:
         with pytest.raises(KilledWorker) as info:
             await f
 
@@ -5007,7 +5015,7 @@ async def test_fire_and_forget_err(c, s, a, b):
 
 
 def test_quiet_client_close(loop):
-    with captured_logger(logging.getLogger("distributed")) as logger:
+    with captured_logger("distributed") as logger:
         with Client(
             loop=loop,
             processes=False,
@@ -5033,7 +5041,7 @@ def test_quiet_client_close(loop):
 
 @pytest.mark.slow
 def test_quiet_client_close_when_cluster_is_closed_before_client(loop):
-    with captured_logger(logging.getLogger("tornado.application")) as logger:
+    with captured_logger("tornado.application") as logger:
         cluster = LocalCluster(loop=loop, n_workers=1, dashboard_address=":0")
         client = Client(cluster, loop=loop)
         cluster.close()
@@ -5576,7 +5584,7 @@ async def test_profile_keys(c, s, a, b):
 
     assert p["count"] == xp["count"] + yp["count"]
 
-    with captured_logger(logging.getLogger("distributed")) as logger:
+    with captured_logger("distributed") as logger:
         prof = await c.profile("does-not-exist")
         assert prof == profile.create()
     out = logger.getvalue()
@@ -5749,10 +5757,10 @@ async def test_logs_from_worker_submodules(c, s, a):
     await c.run(on_worker)
     logs = await c.get_worker_logs()
     logs = [row[1].partition(" - ")[2] for row in logs[a.worker_address]]
-    assert logs[-3:] == [
-        "distributed.worker - INFO - AAA",
-        "distributed.worker.state_machine - INFO - BBB",
+    assert logs[:3] == [
         "distributed.worker.memory - INFO - CCC",
+        "distributed.worker.state_machine - INFO - BBB",
+        "distributed.worker - INFO - AAA",
     ]
 
     def on_nanny(dask_worker):
@@ -5764,9 +5772,9 @@ async def test_logs_from_worker_submodules(c, s, a):
     await c.run(on_nanny, nanny=True)
     logs = await c.get_worker_logs(nanny=True)
     logs = [row[1].partition(" - ")[2] for row in logs[a.worker_address]]
-    assert logs[-2:] == [
-        "distributed.nanny - INFO - DDD",
+    assert logs[:2] == [
         "distributed.nanny.memory - INFO - EEE",
+        "distributed.nanny - INFO - DDD",
     ]
 
 
@@ -5831,7 +5839,7 @@ def test_client_doesnt_close_given_loop(loop_in_thread, s, a, b):
 @gen_cluster(client=True, nthreads=[])
 async def test_quiet_scheduler_loss(c, s):
     c._periodic_callbacks["scheduler-info"].interval = 10
-    with captured_logger(logging.getLogger("distributed.client")) as logger:
+    with captured_logger("distributed.client") as logger:
         await s.close()
     text = logger.getvalue()
     assert "BrokenPipeError" not in text
@@ -6327,7 +6335,7 @@ async def test_shutdown_is_quiet_with_cluster():
     async with LocalCluster(
         n_workers=1, asynchronous=True, processes=False, dashboard_address=":0"
     ) as cluster:
-        with captured_logger(logging.getLogger("distributed.client")) as logger:
+        with captured_logger("distributed.client") as logger:
             timeout = 0.1
             async with Client(cluster, asynchronous=True, timeout=timeout) as c:
                 await c.shutdown()
@@ -6341,7 +6349,7 @@ async def test_client_is_quiet_cluster_close():
     async with LocalCluster(
         n_workers=1, asynchronous=True, processes=False, dashboard_address=":0"
     ) as cluster:
-        with captured_logger(logging.getLogger("distributed.client")) as logger:
+        with captured_logger("distributed.client") as logger:
             timeout = 0.1
             async with Client(cluster, asynchronous=True, timeout=timeout) as c:
                 await cluster.close()
@@ -6690,29 +6698,29 @@ async def test_mixed_compression(s):
                 await c.compute(y.sum())
 
 
-@gen_cluster(client=True)
-async def test_futures_in_subgraphs(c, s, a, b):
+def test_futures_in_subgraphs(loop_in_thread):
     """Regression test of <https://github.com/dask/distributed/issues/4145>"""
 
     dd = pytest.importorskip("dask.dataframe")
-    import pandas as pd
+    pd = pytest.importorskip("pandas")
+    with cluster() as (s, [a, b]), Client(s["address"], loop=loop_in_thread) as c:
+        ddf = dd.from_pandas(
+            pd.DataFrame(
+                dict(
+                    uid=range(50),
+                    enter_time=pd.date_range(
+                        start="2020-01-01", end="2020-09-01", periods=50, tz="UTC"
+                    ),
+                )
+            ),
+            npartitions=5,
+        )
 
-    ddf = dd.from_pandas(
-        pd.DataFrame(
-            dict(
-                uid=range(50),
-                enter_time=pd.date_range(
-                    start="2020-01-01", end="2020-09-01", periods=50, tz="UTC"
-                ),
-            )
-        ),
-        npartitions=5,
-    )
-
-    ddf = ddf[ddf.uid.isin(range(29))].persist()
-    ddf["local_time"] = ddf.enter_time.dt.tz_convert("US/Central")
-    ddf["day"] = ddf.enter_time.dt.day_name()
-    ddf = await c.submit(dd.categorical.categorize, ddf, columns=["day"], index=False)
+        ddf = ddf[ddf.uid.isin(range(29))].persist()
+        ddf["local_time"] = ddf.enter_time.dt.tz_convert("US/Central")
+        ddf["day"] = ddf.enter_time.dt.day_name()
+        ddf = dd.categorical.categorize(ddf, columns=["day"], index=False)
+        ddf.compute()
 
 
 @gen_cluster(client=True)
@@ -6822,7 +6830,7 @@ async def test_log_event_multiple_clients(c, s):
         while len(s.event_subscriber["test-topic"]) != 2:
             await asyncio.sleep(0.01)
 
-        with captured_logger(logging.getLogger("distributed.client")) as logger:
+        with captured_logger("distributed.client") as logger:
             await c.log_event("test-topic", {})
 
         while len(received_events) < 2:
@@ -7464,7 +7472,7 @@ async def test_log_event_warn(c, s, a, b):
         # missing "message" key should log TypeError
         get_worker().log_event("warn", {})
 
-    with captured_logger(logging.getLogger("distributed.client")) as log:
+    with captured_logger("distributed.client") as log:
         await c.submit(no_message)
         assert "TypeError" in log.getvalue()
 
@@ -7592,7 +7600,7 @@ async def test_print_manual(c, s, a, b, capsys):
         # this should log a TypeError in the client
         get_worker().log_event("print", {"args": ("hello",), "file": "bad value"})
 
-    with captured_logger(logging.getLogger("distributed.client")) as log:
+    with captured_logger("distributed.client") as log:
         await c.submit(print_otherfile)
         assert "TypeError" in log.getvalue()
 
@@ -7602,7 +7610,7 @@ async def test_print_manual_bad_args(c, s, a, b, capsys):
     def foo():
         get_worker().log_event("print", {"args": "not a tuple"})
 
-    with captured_logger(logging.getLogger("distributed.client")) as log:
+    with captured_logger("distributed.client") as log:
         await c.submit(foo)
         assert "TypeError" in log.getvalue()
 

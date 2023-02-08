@@ -1,12 +1,45 @@
 Changelog
 =========
 
+.. _v2023.1.1:
+
+2023.1.1
+---------
+
+Released on January 27, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- P2P shuffle deduplicates data and can be run several times (:pr:`7486`) `Hendrik Makait`_
+- Reverse order of ``get_logs()`` and ``get_worker_logs()`` (:pr:`7475`) `Nicholas R. Knezek`_
+- Add prometheus metric for time and memory used per task prefix (:pr:`7406`) `Thomas Grainger`_
+- Additive worker counts in Prometheus (:pr:`7468`) `crusaderky`_
+- Add help tool for taskstream (:pr:`7478`) `Florian Jetter`_
+
+Bug Fixes
+^^^^^^^^^
+- Do not allow for a worker to reject a drop replica request (:pr:`7490`) `Hendrik Makait`_
+- Fix un/packing for namedtuples with custom constructors (:pr:`7465`) `antonymayi`_
+
+Documentation
+^^^^^^^^^^^^^
+- Remove ``timeout=`` from docstring example for ``worker_client`` (:pr:`7497`) `Florian Jetter`_
+
+Maintenance
+^^^^^^^^^^^
+- Ignore get_default_shuffle_algorithm linting issue (:pr:`7506`) `Florian Jetter`_
+- Remove set_config when using default client (:pr:`7482`) `Florian Jetter`_
+- Update gpuCI ``RAPIDS_VER`` to ``23.04`` (:pr:`7501`)
+- Fix ``test_balance_expensive_tasks`` and improve helper functions in ``test_steal.py`` (:pr:`7253`) `Hendrik Makait`_
+- Sign every compute task with run ID to correlate response (:pr:`7463`) `Hendrik Makait`_
+
+
 .. _v2023.1.0:
 
 2023.1.0
 ---------
 
-Released on December 13, 2023
+Released on January 13, 2023
 
 New Features
 ^^^^^^^^^^^^
@@ -4601,3 +4634,5 @@ significantly without many new features.
 .. _`bstadlbauer`: https://github.com/bstadlbauer
 .. _`Stuart Berg`: https://github.com/stuarteberg
 .. _`Dylan Wragge`: https://github.com/dwragge
+.. _`Nicholas R. Knezek`: https://github.com/nknezek
+.. _`antonymayi`: https://github.com/antonymayi

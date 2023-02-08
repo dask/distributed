@@ -1125,6 +1125,7 @@ async def test_shuffling(c, s, a, b):
         ss.update()
         await asyncio.sleep(0.1)
         assert time() < start + 5
+    await df2
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True}, timeout=60)

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from io import BytesIO
 from typing import TYPE_CHECKING, BinaryIO
 
 if TYPE_CHECKING:
     import pyarrow as pa
 
 
-def dump_shards(shards: list[pa.Table], file: BinaryIO) -> None:
+def dump_shards(shards: list[bytes], file: BinaryIO) -> None:
     """
     Write multiple shard tables to the file
 
@@ -17,14 +18,11 @@ def dump_shards(shards: list[pa.Table], file: BinaryIO) -> None:
     --------
     load_partition
     """
-    import pyarrow as pa
-
-    for table in shards:
-        with pa.ipc.new_stream(file, table.schema) as writer:
-            writer.write_table(table)
+    for shard in shards:
+        file.write(shard)
 
 
-def load_partition(file: BinaryIO) -> pa.Table:
+def load_partition(file: BinaryIO) -> list[bytes]:
     """Load partition data written to file back out into a single table
 
     Example
@@ -41,14 +39,14 @@ def load_partition(file: BinaryIO) -> pa.Table:
     --------
     dump_shards
     """
-    import os
+    return [file.read()]
 
+
+def convert_partition(data: bytes) -> pa.Table:
     import pyarrow as pa
 
-    pos = file.tell()
-    file.seek(0, os.SEEK_END)
-    end = file.tell()
-    file.seek(pos)
+    file = BytesIO(data)
+    end = len(data)
     shards = []
     while file.tell() < end:
         sr = pa.RecordBatchStreamReader(file)
