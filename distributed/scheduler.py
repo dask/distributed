@@ -2252,6 +2252,22 @@ class SchedulerState:
                 if not (ws := self.decide_worker_rootish_queuing_enabled(ts)):
                     return {ts.key: "queued"}, {}, {}
         else:
+            if not math.isinf(self.WORKER_SATURATION):
+                # Queuing can break priority ordering, e.g. when there are
+                # worker restrictions.
+                # We need to check here if there is a more important queued task
+                # and send the currently transitioning task back in the line to
+                # avoid breadth first search
+                # See also https://github.com/dask/distributed/issues/7496
+                slots_available = sum(
+                    _task_slots_available(ws, self.WORKER_SATURATION)
+                    for ws in self.idle_task_count
+                )
+
+                for qts in self.queued.peekn(slots_available):
+                    if qts.priority < ts.priority:
+                        return {ts.key: "queued"}, {}, {}
+
             if not (ws := self.decide_worker_non_rootish(ts)):
                 return {ts.key: "no-worker"}, {}, {}
 
@@ -2681,7 +2697,14 @@ class SchedulerState:
         ts = self.tasks[key]
 
         if self.validate:
-            assert not self.idle_task_count, (ts, self.idle_task_count)
+            if self.is_rootish(ts):
+                assert not self.idle_task_count, (ts, self.idle_task_count)
+            else:
+                assert (
+                    ts.worker_restrictions
+                    or ts.host_restrictions
+                    or ts.resource_restrictions
+                )
             self._validate_ready(ts)
 
         ts.state = "queued"
@@ -2722,10 +2745,15 @@ class SchedulerState:
             assert not ts.actor, f"Actors can't be queued: {ts}"
             assert ts in self.queued
 
-        if ws := self.decide_worker_rootish_queuing_enabled(ts):
-            self.queued.discard(ts)
-            worker_msgs = self._add_to_processing(ts, ws)
         # If no worker, task just stays `queued`
+        if self._is_rootish_no_restrictions(ts):
+            if not (ws := self.decide_worker_rootish_queuing_enabled(ts)):
+                return {}, {}, {}
+        else:
+            if not (ws := self.decide_worker_non_rootish(ts)):
+                return {ts.key: "no-worker"}, {}, {}
+        self.queued.discard(ts)
+        worker_msgs = self._add_to_processing(ts, ws)
 
         return recommendations, {}, worker_msgs
 
@@ -5037,7 +5065,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert not ts.processing_on
         assert not (
             ts.worker_restrictions or ts.host_restrictions or ts.resource_restrictions
-        )
+        ) or not self.is_rootish(ts)
         for dts in ts.dependencies:
             assert dts.who_has
             assert ts in dts.waiters
