@@ -229,7 +229,6 @@ class ShuffleRun(Generic[ShuffleUnitIDType, PartitionIDType, PartitionType], abc
     async def _receive(self, data: list[tuple[ShuffleUnitIDType, bytes]]) -> None:
         raise NotImplementedError
 
-    # FIXME Typing
     @abc.abstractmethod
     async def add_partition(
         self, data: PartitionType, input_partition: PartitionIDType
