@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 from distributed.comm.addressing import (
     get_address_host,
     get_address_host_port,
@@ -23,7 +25,7 @@ def _register_transports():
 
     tcp_backend = dask.config.get("distributed.comm.tcp.backend")
 
-    if tcp_backend == "asyncio":
+    if sys.platform == "win32" or tcp_backend == "asyncio":
         from distributed.comm import asyncio_tcp
 
         backends["tcp"] = asyncio_tcp.TCPBackend()
