@@ -13,6 +13,7 @@ from dask.sizeof import sizeof
 from distributed import profile
 from distributed.compatibility import WINDOWS
 from distributed.spill import SpillBuffer, has_zict_220
+from distributed.utils import RateLimiterFilter
 from distributed.utils_test import captured_logger
 
 requires_zict_220 = pytest.mark.skipif(
@@ -127,7 +128,7 @@ def test_disk_size_calculation(tmp_path):
 
 def test_spillbuffer_maxlim(tmp_path_factory):
     buf_dir = tmp_path_factory.mktemp("buf")
-    buf = SpillBuffer(str(buf_dir), target=200, max_spill=600, min_log_interval=0)
+    buf = SpillBuffer(str(buf_dir), target=200, max_spill=600)
 
     a, b, c, d, e = "a" * 200, "b" * 100, "c" * 99, "d" * 199, "e" * 98
 
@@ -158,6 +159,7 @@ def test_spillbuffer_maxlim(tmp_path_factory):
     # size of d > target, d should go to slow but slow reached the max_spill limit then
     # d will end up on fast with c (which can't be move to slow because it won't fit
     # either)
+    RateLimiterFilter.clear(buf.logger)
     with captured_logger("distributed.spill") as logs_d:
         buf["d"] = d
 
@@ -175,6 +177,7 @@ def test_spillbuffer_maxlim(tmp_path_factory):
     unlimited_buf["a_large"] = a_large
     assert psize(unlimited_buf_dir, a_large=a_large)[1] > 600
 
+    RateLimiterFilter.clear(buf.logger)
     with captured_logger("distributed.spill") as logs_alarge:
         buf["a"] = a_large
 
@@ -185,6 +188,7 @@ def test_spillbuffer_maxlim(tmp_path_factory):
     # max_spill
 
     d_large = "d" * 501
+    RateLimiterFilter.clear(buf.logger)
     with captured_logger("distributed.spill") as logs_dlarge:
         buf["d"] = d_large
 
@@ -208,7 +212,7 @@ class Bad:
 
 
 def test_spillbuffer_fail_to_serialize(tmp_path):
-    buf = SpillBuffer(str(tmp_path), target=200, max_spill=600, min_log_interval=0)
+    buf = SpillBuffer(str(tmp_path), target=200, max_spill=600)
 
     # bad data individually larger than spill threshold target 200
     a = Bad(size=201)
@@ -242,7 +246,7 @@ def test_spillbuffer_fail_to_serialize(tmp_path):
 
 @pytest.mark.skipif(WINDOWS, reason="Needs chmod")
 def test_spillbuffer_oserror(tmp_path):
-    buf = SpillBuffer(str(tmp_path), target=200, max_spill=800, min_log_interval=0)
+    buf = SpillBuffer(str(tmp_path), target=200, max_spill=800)
 
     a, b, c, d = (
         "a" * 200,
@@ -272,6 +276,7 @@ def test_spillbuffer_oserror(tmp_path):
 
     # add key to fast which is smaller than target but when added it triggers spill,
     # which triggers OSError
+    RateLimiterFilter.clear(buf.logger)
     with captured_logger("distributed.spill") as logs_oserror_evict:
         buf["d"] = d
 
@@ -280,7 +285,7 @@ def test_spillbuffer_oserror(tmp_path):
 
 
 def test_spillbuffer_evict(tmp_path):
-    buf = SpillBuffer(str(tmp_path), target=300, min_log_interval=0)
+    buf = SpillBuffer(str(tmp_path), target=300)
 
     bad = Bad(size=100)
     a = "a" * 100

@@ -1767,16 +1767,29 @@ class RateLimiterFilter(logging.Filter):
     """A Logging filter that ensures a matching message is emitted at most every
     `rate` seconds"""
 
-    def __init__(self, name, pattern, rate="10s"):
-        self.name = name
-        self.rate = parse_timedelta(rate)
+    pattern: re.Pattern
+    rate: float
+    _last_seen: float
+
+    def __init__(self, name: str, pattern: str, rate: str | float = "10s"):
+        super().__init__(name)
         self.pattern = re.compile(pattern)
+        self.rate = parse_timedelta(rate)
         self._last_seen = -self.rate
 
-    def filter(self, record):
+    def filter(self, record: logging.LogRecord) -> bool:
         if self.pattern.match(record.msg):
             now = monotonic()
             if now - self._last_seen < self.rate:
-                return 0
+                return False
             self._last_seen = now
-        return 1
+        return True
+
+    @classmethod
+    def clear(cls, logger: logging.Logger) -> None:
+        """Reset the timer on all RateLimiterFilters on a logger.
+        Useful in unit testing.
+        """
+        for filter in logger.filters:
+            if isinstance(filter, cls):
+                filter._last_seen = -filter.rate
