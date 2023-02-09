@@ -11,6 +11,8 @@ def dump_shards(shards: list[bytes], file: BinaryIO) -> None:
     """
     Write multiple shard tables to the file
 
+    FIXME: This docstring is outdated.
+
     Note: This function appends to the file and dumps each table as an individual stream.
     This results in multiple end-of-stream signals in the file.
 
@@ -24,6 +26,8 @@ def dump_shards(shards: list[bytes], file: BinaryIO) -> None:
 
 def load_partition(file: BinaryIO) -> list[bytes]:
     """Load partition data written to file back out into a single table
+
+    FIXME: This docstring is outdated.
 
     Example
     -------

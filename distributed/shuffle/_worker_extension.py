@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import abc
 import asyncio
 import contextlib
 import logging
@@ -10,7 +11,7 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO  # TODO: Only for rechunk
 from itertools import product
-from typing import TYPE_CHECKING, Any, TypeVar, overload
+from typing import TYPE_CHECKING, Any, BinaryIO, Generic, TypeVar, overload
 
 import msgpack  # TODO: Only for rechunk
 import toolz
@@ -28,6 +29,7 @@ from distributed.shuffle._arrow import (
     load_partition,
     serialize_table,
 )
+from distributed.shuffle._buffer import ShardType
 from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
@@ -44,8 +46,11 @@ if TYPE_CHECKING:
 
     from distributed.worker import Worker
 
+# ID of a single unit of data being shuffled (TODO: Wording)
+ShuffleUnitIDType = TypeVar("ShuffleUnitIDType")
+PartitionIDType = TypeVar("PartitionIDType")
+PartitionType = TypeVar("PartitionType")
 T = TypeVar("T")
-
 # TODO remove quotes (requires Python >=3.9)
 ChunkedAxis: TypeAlias = "tuple[int, ...]"
 ChunkedAxes: TypeAlias = "tuple[ChunkedAxis, ...]"
@@ -59,11 +64,183 @@ class ShuffleClosedError(RuntimeError):
     pass
 
 
-class ShuffleRun:
-    pass
+class ShuffleRun(Generic[ShuffleUnitIDType, PartitionIDType, PartitionType], abc.ABC):
+    def __init__(
+        self,
+        id: ShuffleId,
+        run_id: int,
+        output_workers: set[str],
+        local_address: str,
+        directory: str,
+        nthreads: int,
+        rpc: Callable[[str], PooledRPCCall],
+        scheduler: PooledRPCCall,
+        memory_limiter_disk: ResourceLimiter,
+        memory_limiter_comms: ResourceLimiter,
+        dump: Callable[[list[ShardType], BinaryIO], None],
+        load: Callable[[BinaryIO], list[ShardType]],
+    ):
+        self.id = id
+        self.run_id = run_id
+        self.output_workers = output_workers
+        self.local_address = local_address
+        self.executor = ThreadPoolExecutor(nthreads)
+        self.rpc = rpc
+        self.scheduler = scheduler
+        self.closed = False
+
+        self._disk_buffer = DiskShardsBuffer(
+            dump=dump,
+            load=load,
+            directory=directory,
+            memory_limiter=memory_limiter_disk,
+        )
+
+        self._comm_buffer = CommShardsBuffer(
+            send=self.send, memory_limiter=memory_limiter_comms
+        )
+        # TODO: reduce number of connections to number of workers
+        # MultiComm.max_connections = min(10, n_workers)
+
+        self.diagnostics: dict[str, float] = defaultdict(float)
+        self.transferred = False
+        self.total_recvd = 0
+        self.start_time = time.time()
+        self.received: set[ShuffleUnitIDType] = set()
+        self._exception: Exception | None = None
+        self._closed_event = asyncio.Event()
+
+    def __repr__(self) -> str:
+        return f"<{self.__class__.__name__} {self.id}[{self.run_id}] on {self.local_address}>"
+
+    def __hash__(self) -> int:
+        return self.run_id
+
+    @contextlib.contextmanager
+    def time(self, name: str) -> Iterator[None]:
+        start = time.time()
+        yield
+        stop = time.time()
+        self.diagnostics[name] += stop - start
+
+    # FIXME: Typing
+    async def send(self, address: str, shards: list[tuple[Any, bytes]]) -> None:
+        self.raise_if_closed()
+        return await self.rpc(address).shuffle_receive(
+            data=to_serialize(shards),
+            shuffle_id=self.id,
+            run_id=self.run_id,
+        )
+
+    async def barrier(self) -> None:
+        self.raise_if_closed()
+        # TODO: Consider broadcast pinging once when the shuffle starts to warm
+        # up the comm pool on scheduler side
+        await self.scheduler.shuffle_barrier(id=self.id, run_id=self.run_id)
+
+    async def offload(self, func: Callable[..., T], *args: Any) -> T:
+        self.raise_if_closed()
+        with self.time("cpu"):
+            return await asyncio.get_running_loop().run_in_executor(
+                self.executor,
+                func,
+                *args,
+            )
+
+    def heartbeat(self) -> dict[str, Any]:
+        comm_heartbeat = self._comm_buffer.heartbeat()
+        comm_heartbeat["read"] = self.total_recvd
+        return {
+            "disk": self._disk_buffer.heartbeat(),
+            "comm": comm_heartbeat,
+            "diagnostics": self.diagnostics,
+            "start": self.start_time,
+        }
+
+    async def _write_to_comm(
+        self, data: dict[str, list[tuple[ShuffleUnitIDType, bytes]]]
+    ) -> None:
+        self.raise_if_closed()
+        await self._comm_buffer.write(data)
+
+    async def _write_to_disk(self, data: dict[NIndex, list[bytes]]) -> None:
+        self.raise_if_closed()
+        await self._disk_buffer.write(
+            {"_".join(str(i) for i in k): v for k, v in data.items()}
+        )
+
+    def raise_if_closed(self) -> None:
+        if self.closed:
+            if self._exception:
+                raise self._exception
+            raise ShuffleClosedError(
+                f"Shuffle {self.id} has been closed on {self.local_address}"
+            )
+
+    async def inputs_done(self) -> None:
+        self.raise_if_closed()
+        # FIXME
+        assert not self.transferred, "`inputs_done` called multiple times"
+        self.transferred = True
+        await self._flush_comm()
+        try:
+            self._comm_buffer.raise_on_exception()
+        except Exception as e:
+            self._exception = e
+            raise
+
+    async def _flush_comm(self) -> None:
+        self.raise_if_closed()
+        await self._comm_buffer.flush()
+
+    async def flush_receive(self) -> None:
+        self.raise_if_closed()
+        await self._disk_buffer.flush()
+
+    async def close(self) -> None:
+        if self.closed:
+            await self._closed_event.wait()
+            return
+
+        self.closed = True
+        await self._comm_buffer.close()
+        await self._disk_buffer.close()
+        try:
+            self.executor.shutdown(cancel_futures=True)
+        except Exception:
+            self.executor.shutdown()
+        self._closed_event.set()
+
+    def fail(self, exception: Exception) -> None:
+        if not self.closed:
+            self._exception = exception
+
+    def _read_from_disk(self, id: NIndex) -> bytes:
+        self.raise_if_closed()
+        data: list[bytes] = self._disk_buffer.read("_".join(str(i) for i in id))
+        assert len(data) == 1
+        return data[0]
+
+    async def receive(self, data: list[tuple[ShuffleUnitIDType, bytes]]) -> None:
+        await self._receive(data)
+
+    @abc.abstractmethod
+    async def _receive(self, data: list[tuple[ShuffleUnitIDType, bytes]]) -> None:
+        raise NotImplementedError
+
+    # FIXME Typing
+    @abc.abstractmethod
+    async def add_partition(
+        self, data: PartitionType, input_partition: PartitionIDType
+    ) -> int:
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    async def get_output_partition(self, i: PartitionIDType) -> PartitionType:
+        raise NotImplementedError
 
 
-class ArrayRechunkRun(ShuffleRun):
+class ArrayRechunkRun(ShuffleRun[tuple[NIndex, NIndex], NIndex, "np.ndarray"]):
     """State for a single active rechunk execution
 
     This object is responsible for splitting, sending, receiving and combining
@@ -124,42 +301,27 @@ class ArrayRechunkRun(ShuffleRun):
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
     ):
-        self.rpc = rpc
-        self.scheduler = scheduler
+        super().__init__(
+            id=id,
+            run_id=run_id,
+            output_workers=output_workers,
+            local_address=local_address,
+            directory=directory,
+            nthreads=nthreads,
+            rpc=rpc,
+            scheduler=scheduler,
+            memory_limiter_comms=memory_limiter_comms,
+            memory_limiter_disk=memory_limiter_disk,
+            dump=dump_shards,
+            load=load_partition,
+        )
         self.old = old
         self.new = new
-        self.id = id
-        self.run_id = run_id
-        self.output_workers = output_workers
-        self.executor = ThreadPoolExecutor(nthreads)
         partitions_of = defaultdict(list)
-        self.local_address = local_address
         for part, addr in worker_for.items():
             partitions_of[addr].append(part)
         self.partitions_of = dict(partitions_of)
         self.worker_for = worker_for
-        self.closed = False
-
-        self._disk_buffer = DiskShardsBuffer(
-            dump=dump_shards,
-            load=load_partition,
-            directory=directory,
-            memory_limiter=memory_limiter_disk,
-        )
-
-        self._comm_buffer = CommShardsBuffer(
-            send=self.send, memory_limiter=memory_limiter_comms
-        )
-        # TODO: reduce number of connections to number of workers
-        # MultiComm.max_connections = min(10, n_workers)
-
-        self.diagnostics: dict[str, float] = defaultdict(float)
-        self.transferred = False
-        self.received: set[tuple[NIndex, NIndex]] = set()
-        self.total_recvd = 0
-        self.start_time = time.time()
-        self._exception: Exception | None = None
-        self._closed_event = asyncio.Event()
         self._mapping = self._map_old_to_new(old, new)
         self._old_to_new = _old_to_new(old, new)
 
@@ -196,32 +358,9 @@ class ArrayRechunkRun(ShuffleRun):
                 old_to_new[old_index].append((new_index, subdim_index, slices))
         return old_to_new
 
-    def __repr__(self) -> str:
-        return f"<Shuffle {self.id}[{self.run_id}] on {self.local_address}>"
-
-    def __hash__(self) -> int:
-        return self.run_id
-
-    @contextlib.contextmanager
-    def time(self, name: str) -> Iterator[None]:
-        start = time.time()
-        yield
-        stop = time.time()
-        self.diagnostics[name] += stop - start
-
-    async def barrier(self) -> None:
-        self.raise_if_closed()
-        # TODO: Consider broadcast pinging once when the shuffle starts to warm
-        # up the comm pool on scheduler side
-        await self.broadcast(
-            msg={
-                "op": "shuffle_inputs_done",
-                "shuffle_id": self.id,
-                "run_id": self.run_id,
-            }
-        )
-
-    async def send(self, address: str, shards: list[tuple[Any, bytes]]) -> None:
+    async def send(
+        self, address: str, shards: list[tuple[tuple[NIndex, NIndex], bytes]]
+    ) -> None:
         self.raise_if_closed()
         return await self.rpc(address).shuffle_receive(
             data=to_serialize(shards),
@@ -229,36 +368,17 @@ class ArrayRechunkRun(ShuffleRun):
             run_id=self.run_id,
         )
 
-    async def offload(self, func: Callable[..., T], *args: Any) -> T:
-        self.raise_if_closed()
-        with self.time("cpu"):
-            return await asyncio.get_running_loop().run_in_executor(
-                self.executor,
-                func,
-                *args,
-            )
-
-    def heartbeat(self) -> dict[str, Any]:
-        comm_heartbeat = self._comm_buffer.heartbeat()
-        comm_heartbeat["read"] = self.total_recvd
-        return {
-            "disk": self._disk_buffer.heartbeat(),
-            "comm": comm_heartbeat,
-            "diagnostics": self.diagnostics,
-            "start": self.start_time,
-        }
-
-    async def receive(self, data: list[tuple[NIndex, NIndex, bytes]]) -> None:
+    async def receive(self, data: list[tuple[tuple[NIndex, NIndex], bytes]]) -> None:
         await self._receive(data)
 
-    async def _receive(self, data: list[tuple[NIndex, NIndex, bytes]]) -> None:
+    async def _receive(self, data: list[tuple[tuple[NIndex, NIndex], bytes]]) -> None:
         self.raise_if_closed()
 
         filtered = []
         for d in data:
-            if d[0:2] not in self.received:
+            if d[0] not in self.received:
                 filtered.append(d)
-                self.received.add(d[0:2])
+                self.received.add(d[0])
                 self.total_recvd += sizeof(d)
         del data
         if not filtered:
@@ -272,38 +392,25 @@ class ArrayRechunkRun(ShuffleRun):
             raise
 
     def _reserialize_buffers(
-        self, data: list[tuple[NIndex, NIndex, bytes]]
-    ) -> dict[str, list[bytes]]:
-        return {
-            "_".join(str(i) for i in d[0]): [msgpack.packb((d[1], d[2]))] for d in data
-        }
-
-    async def _write_to_disk(self, data: dict[str, list[bytes]]) -> None:
-        self.raise_if_closed()
-        await self._disk_buffer.write(data)
-
-    def raise_if_closed(self) -> None:
-        if self.closed:
-            if self._exception:
-                raise self._exception
-            raise ShuffleClosedError(
-                f"Shuffle {self.id} has been closed on {self.local_address}"
-            )
+        self, data: list[tuple[tuple[NIndex, NIndex], bytes]]
+    ) -> dict[NIndex, list[bytes]]:
+        return {d[0][0]: [msgpack.packb((d[0][1], d[1]))] for d in data}
 
     async def add_partition(self, data: np.ndarray, input_partition: NIndex) -> int:
         self.raise_if_closed()
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to shuffle {self}")
 
-        def _() -> dict[str, list[tuple[NIndex, NIndex, bytes]]]:
+        def _() -> dict[str, list[tuple[tuple[NIndex, NIndex], bytes]]]:
             import msgpack
 
-            out: dict[str, list[tuple[NIndex, NIndex, bytes]]] = defaultdict(list)
+            out: dict[str, list[tuple[tuple[NIndex, NIndex], bytes]]] = defaultdict(
+                list
+            )
             for new_index, subdim_index, slices in self._mapping[input_partition]:
                 out[self.worker_for[new_index]].append(
                     (
-                        new_index,
-                        subdim_index,
+                        (new_index, subdim_index),
                         msgpack.packb(
                             {
                                 "shape": data[slices].shape,
@@ -317,12 +424,6 @@ class ArrayRechunkRun(ShuffleRun):
         out = await self.offload(_)
         await self._write_to_comm(out)
         return self.run_id
-
-    async def _write_to_comm(
-        self, data: dict[str, list[tuple[NIndex, NIndex, bytes]]]
-    ) -> None:
-        self.raise_if_closed()
-        await self._comm_buffer.write(data)
 
     async def get_output_partition(self, i: NIndex) -> np.ndarray:
         self.raise_if_closed()
@@ -341,52 +442,8 @@ class ArrayRechunkRun(ShuffleRun):
         arr = assemble_chunk(data, subdims)
         return arr
 
-    def _read_from_disk(self, id: NIndex) -> bytes:
-        self.raise_if_closed()
-        sid = "_".join(str(i) for i in id)
-        data: list[bytes] = self._disk_buffer.read(sid)
-        assert len(data) == 1
-        return data[0]
 
-    async def inputs_done(self) -> None:
-        self.raise_if_closed()
-        assert not self.transferred, "`inputs_done` called multiple times"
-        self.transferred = True
-        await self._flush_comm()
-        try:
-            self._comm_buffer.raise_on_exception()
-        except Exception as e:
-            self._exception = e
-            raise
-
-    async def _flush_comm(self) -> None:
-        self.raise_if_closed()
-        await self._comm_buffer.flush()
-
-    async def flush_receive(self) -> None:
-        self.raise_if_closed()
-        await self._disk_buffer.flush()
-
-    async def close(self) -> None:
-        if self.closed:
-            await self._closed_event.wait()
-            return
-
-        self.closed = True
-        await self._comm_buffer.close()
-        await self._disk_buffer.close()
-        try:
-            self.executor.shutdown(cancel_futures=True)
-        except Exception:
-            self.executor.shutdown()
-        self._closed_event.set()
-
-    def fail(self, exception: Exception) -> None:
-        if not self.closed:
-            self._exception = exception
-
-
-class DataFrameShuffleRun(ShuffleRun):
+class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
     """State for a single active shuffle execution
 
     This object is responsible for splitting, sending, receiving and combining
@@ -447,91 +504,29 @@ class DataFrameShuffleRun(ShuffleRun):
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
     ):
-
         import pandas as pd
 
-        self.scheduler = scheduler
-        self.rpc = rpc
+        super().__init__(
+            id=id,
+            run_id=run_id,
+            output_workers=output_workers,
+            local_address=local_address,
+            directory=directory,
+            nthreads=nthreads,
+            rpc=rpc,
+            scheduler=scheduler,
+            memory_limiter_comms=memory_limiter_comms,
+            memory_limiter_disk=memory_limiter_disk,
+            dump=dump_shards,
+            load=load_partition,
+        )
         self.column = column
-        self.id = id
-        self.run_id = run_id
         self.schema = schema
-        self.output_workers = output_workers
-        self.executor = ThreadPoolExecutor(nthreads)
         partitions_of = defaultdict(list)
-        self.local_address = local_address
         for part, addr in worker_for.items():
             partitions_of[addr].append(part)
         self.partitions_of = dict(partitions_of)
         self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
-        self.closed = False
-
-        self._disk_buffer = DiskShardsBuffer(
-            dump=dump_shards,
-            load=load_partition,
-            directory=directory,
-            memory_limiter=memory_limiter_disk,
-        )
-
-        self._comm_buffer = CommShardsBuffer(
-            send=self.send, memory_limiter=memory_limiter_comms
-        )
-        # TODO: reduce number of connections to number of workers
-        # MultiComm.max_connections = min(10, n_workers)
-
-        self.diagnostics: dict[str, float] = defaultdict(float)
-        self.transferred = False
-        self.received: set[int] = set()
-        self.total_recvd = 0
-        self.start_time = time.time()
-        self._exception: Exception | None = None
-        self._closed_event = asyncio.Event()
-
-    def __repr__(self) -> str:
-        return f"<Shuffle {self.id}[{self.run_id}] on {self.local_address}>"
-
-    def __hash__(self) -> int:
-        return self.run_id
-
-    @contextlib.contextmanager
-    def time(self, name: str) -> Iterator[None]:
-        start = time.time()
-        yield
-        stop = time.time()
-        self.diagnostics[name] += stop - start
-
-    async def barrier(self) -> None:
-        self.raise_if_closed()
-        # TODO: Consider broadcast pinging once when the shuffle starts to warm
-        # up the comm pool on scheduler side
-        await self.scheduler.shuffle_barrier(id=self.id, run_id=self.run_id)
-
-    async def send(self, address: str, shards: list[tuple[int, bytes]]) -> None:
-        self.raise_if_closed()
-        return await self.rpc(address).shuffle_receive(
-            data=to_serialize(shards),
-            shuffle_id=self.id,
-            run_id=self.run_id,
-        )
-
-    async def offload(self, func: Callable[..., T], *args: Any) -> T:
-        self.raise_if_closed()
-        with self.time("cpu"):
-            return await asyncio.get_running_loop().run_in_executor(
-                self.executor,
-                func,
-                *args,
-            )
-
-    def heartbeat(self) -> dict[str, Any]:
-        comm_heartbeat = self._comm_buffer.heartbeat()
-        comm_heartbeat["read"] = self.total_recvd
-        return {
-            "disk": self._disk_buffer.heartbeat(),
-            "comm": comm_heartbeat,
-            "diagnostics": self.diagnostics,
-            "start": self.start_time,
-        }
 
     async def receive(self, data: list[tuple[int, bytes]]) -> None:
         await self._receive(data)
@@ -556,24 +551,12 @@ class DataFrameShuffleRun(ShuffleRun):
             self._exception = e
             raise
 
-    def _repartition_buffers(self, data: list[bytes]) -> dict[str, list[bytes]]:
+    def _repartition_buffers(self, data: list[bytes]) -> dict[NIndex, list[bytes]]:
         table = list_of_buffers_to_table(data)
         groups = split_by_partition(table, self.column)
         assert len(table) == sum(map(len, groups.values()))
         del data
-        return {k: [serialize_table(v)] for k, v in groups.items()}
-
-    async def _write_to_disk(self, data: dict[str, list[bytes]]) -> None:
-        self.raise_if_closed()
-        await self._disk_buffer.write(data)
-
-    def raise_if_closed(self) -> None:
-        if self.closed:
-            if self._exception:
-                raise self._exception
-            raise ShuffleClosedError(
-                f"Shuffle {self.id} has been closed on {self.local_address}"
-            )
+        return {(k,): [serialize_table(v)] for k, v in groups.items()}
 
     async def add_partition(self, data: pd.DataFrame, input_partition: int) -> int:
         self.raise_if_closed()
@@ -593,10 +576,6 @@ class DataFrameShuffleRun(ShuffleRun):
         await self._write_to_comm(out)
         return self.run_id
 
-    async def _write_to_comm(self, data: dict[str, list[tuple[int, bytes]]]) -> None:
-        self.raise_if_closed()
-        await self._comm_buffer.write(data)
-
     async def get_output_partition(self, i: int) -> pd.DataFrame:
         self.raise_if_closed()
         assert self.transferred, "`get_output_partition` called before barrier task"
@@ -610,56 +589,13 @@ class DataFrameShuffleRun(ShuffleRun):
 
         await self.flush_receive()
         try:
-            data = self._read_from_disk(i)
+            data = self._read_from_disk((i,))
             df = convert_partition(data)
             with self.time("cpu"):
                 out = df.to_pandas()
         except KeyError:
             out = self.schema.empty_table().to_pandas()
         return out
-
-    def _read_from_disk(self, id: int | str) -> bytes:
-        self.raise_if_closed()
-        data: list[bytes] = self._disk_buffer.read(id)
-        assert len(data) == 1
-        return data[0]
-
-    async def inputs_done(self) -> None:
-        self.raise_if_closed()
-        assert not self.transferred, "`inputs_done` called multiple times"
-        self.transferred = True
-        await self._flush_comm()
-        try:
-            self._comm_buffer.raise_on_exception()
-        except Exception as e:
-            self._exception = e
-            raise
-
-    async def _flush_comm(self) -> None:
-        self.raise_if_closed()
-        await self._comm_buffer.flush()
-
-    async def flush_receive(self) -> None:
-        self.raise_if_closed()
-        await self._disk_buffer.flush()
-
-    async def close(self) -> None:
-        if self.closed:
-            await self._closed_event.wait()
-            return
-
-        self.closed = True
-        await self._comm_buffer.close()
-        await self._disk_buffer.close()
-        try:
-            self.executor.shutdown(cancel_futures=True)
-        except Exception:
-            self.executor.shutdown()
-        self._closed_event.set()
-
-    def fail(self, exception: Exception) -> None:
-        if not self.closed:
-            self._exception = exception
 
 
 class ShuffleWorkerExtension:
@@ -749,7 +685,7 @@ class ShuffleWorkerExtension:
 
     def add_partition(
         self,
-        data: pd.DataFrame,
+        data: Any,
         input_partition: int | tuple[int, ...],
         shuffle_id: ShuffleId,
         type: str,
@@ -821,7 +757,7 @@ class ShuffleWorkerExtension:
         self,
         shuffle_id: ShuffleId,
         type: str,
-        **kwargs,
+        **kwargs: Any,
     ) -> ShuffleRun:
         """Get or create a shuffle matching the ID and data spec.
 
@@ -1017,8 +953,8 @@ class ShuffleWorkerExtension:
         )
 
     def get_output_partition(
-        self, shuffle_id: ShuffleId, run_id: int, output_partition: int
-    ) -> pd.DataFrame:
+        self, shuffle_id: ShuffleId, run_id: int, output_partition: int | NIndex
+    ) -> Any:
         """
         Task: Retrieve a shuffled output partition from the ShuffleExtension.
 

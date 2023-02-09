@@ -38,20 +38,6 @@ class DataFrameShuffleState(ShuffleState):
     worker_for: dict[int, str]
     schema: bytes
     column: str
-    output_workers: set[str]
-    participating_workers: set[str]
-
-    @abc.abstractmethod
-    def to_msg(self) -> dict[str, Any]:
-        ...
-
-
-@dataclass
-class DataFrameShuffleState(ShuffleState):
-    type: ClassVar[str] = "DataFrameShuffle"
-    worker_for: dict[int, str]
-    schema: bytes
-    column: str
 
     def to_msg(self) -> dict[str, Any]:
         return {

@@ -58,7 +58,7 @@ def rechunk_p2p(x: da.Array, chunks: tuple[tuple[int, ...], ...]) -> da.Array:
         # Special case for empty array, as the algorithm below does not behave correctly
         return da.empty(x.shape, chunks=chunks, dtype=x.dtype)
 
-    dsk = {}
+    dsk: dict = {}
     token = tokenize(x, chunks)
     _barrier_key = barrier_key(ShuffleId(token))
     name = f"rechunk-transfer-{token}"

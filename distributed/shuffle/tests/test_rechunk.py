@@ -41,6 +41,7 @@ class PooledRPCShuffle(PooledRPCCall):
         return _
 
 
+# TODO: Copy-pasta from test_shuffle
 class ShuffleTestPool:
     _shuffle_run_id_iterator = itertools.count()
 
@@ -57,6 +58,12 @@ class ShuffleTestPool:
         out = {}
         for addr, s in self.shuffles.items():
             out[addr] = await getattr(s, op)()
+        return out
+
+    async def shuffle_barrier(self, id, run_id):
+        out = {}
+        for addr, s in self.shuffles.items():
+            out[addr] = await s.inputs_done()
         return out
 
     def new_shuffle(
@@ -81,7 +88,7 @@ class ShuffleTestPool:
             local_address=name,
             nthreads=2,
             rpc=self,
-            broadcast=self.fake_broadcast,
+            scheduler=self,
             memory_limiter_disk=ResourceLimiter(10000000),
             memory_limiter_comms=ResourceLimiter(10000000),
         )
