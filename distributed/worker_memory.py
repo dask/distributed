@@ -51,8 +51,6 @@ if TYPE_CHECKING:
 
 worker_logger = logging.getLogger("distributed.worker.memory")
 worker_logger.addFilter(RateLimiterFilter(r"Unmanaged memory use is high"))
-worker_logger.addFilter(RateLimiterFilter(r".*Pausing worker"))
-worker_logger.addFilter(RateLimiterFilter(r".*Resuming worker"))
 nanny_logger = logging.getLogger("distributed.nanny.memory")
 
 
