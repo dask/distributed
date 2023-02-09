@@ -96,7 +96,7 @@ class ShuffleRun(Generic[ShuffleUnitIDType, PartitionIDType, PartitionType], abc
             memory_limiter=memory_limiter_disk,
         )
 
-        self._comm_buffer = CommShardsBuffer(
+        self._comm_buffer: CommShardsBuffer = CommShardsBuffer(
             send=self.send, memory_limiter=memory_limiter_comms
         )
         # TODO: reduce number of connections to number of workers
@@ -104,9 +104,9 @@ class ShuffleRun(Generic[ShuffleUnitIDType, PartitionIDType, PartitionType], abc
 
         self.diagnostics: dict[str, float] = defaultdict(float)
         self.transferred = False
+        self.received: set[ShuffleUnitIDType] = set()
         self.total_recvd = 0
         self.start_time = time.time()
-        self.received: set[ShuffleUnitIDType] = set()
         self._exception: Exception | None = None
         self._closed_event = asyncio.Event()
 
@@ -123,20 +123,22 @@ class ShuffleRun(Generic[ShuffleUnitIDType, PartitionIDType, PartitionType], abc
         stop = time.time()
         self.diagnostics[name] += stop - start
 
+    async def barrier(self) -> None:
+        self.raise_if_closed()
+        # TODO: Consider broadcast pinging once when the shuffle starts to warm
+        # up the comm pool on scheduler side
+        await self.scheduler.shuffle_barrier(id=self.id, run_id=self.run_id)
+
     # FIXME: Typing
-    async def send(self, address: str, shards: list[tuple[Any, bytes]]) -> None:
+    async def send(
+        self, address: str, shards: list[tuple[ShuffleUnitIDType, bytes]]
+    ) -> None:
         self.raise_if_closed()
         return await self.rpc(address).shuffle_receive(
             data=to_serialize(shards),
             shuffle_id=self.id,
             run_id=self.run_id,
         )
-
-    async def barrier(self) -> None:
-        self.raise_if_closed()
-        # TODO: Consider broadcast pinging once when the shuffle starts to warm
-        # up the comm pool on scheduler side
-        await self.scheduler.shuffle_barrier(id=self.id, run_id=self.run_id)
 
     async def offload(self, func: Callable[..., T], *args: Any) -> T:
         self.raise_if_closed()
@@ -357,19 +359,6 @@ class ArrayRechunkRun(ShuffleRun[tuple[NIndex, NIndex], NIndex, "np.ndarray"]):
                 old_index, slices = zip(*nchunkslice)
                 old_to_new[old_index].append((new_index, subdim_index, slices))
         return old_to_new
-
-    async def send(
-        self, address: str, shards: list[tuple[tuple[NIndex, NIndex], bytes]]
-    ) -> None:
-        self.raise_if_closed()
-        return await self.rpc(address).shuffle_receive(
-            data=to_serialize(shards),
-            shuffle_id=self.id,
-            run_id=self.run_id,
-        )
-
-    async def receive(self, data: list[tuple[tuple[NIndex, NIndex], bytes]]) -> None:
-        await self._receive(data)
 
     async def _receive(self, data: list[tuple[tuple[NIndex, NIndex], bytes]]) -> None:
         self.raise_if_closed()
