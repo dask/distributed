@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import logging
-
 import pytest
 
 from distributed import Scheduler, SchedulerPlugin, Worker, get_worker
@@ -234,7 +232,7 @@ async def test_closing_errors_ok(c, s, a, b, capsys):
     await s.register_scheduler_plugin(OK())
     await s.register_scheduler_plugin(Bad())
 
-    with captured_logger(logging.getLogger("distributed.scheduler")) as logger:
+    with captured_logger("distributed.scheduler") as logger:
         await s.close()
 
     out, err = capsys.readouterr()

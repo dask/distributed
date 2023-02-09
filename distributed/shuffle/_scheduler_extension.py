@@ -25,7 +25,20 @@ class ShuffleState(abc.ABC):
     id: ShuffleId
     run_id: int
     output_workers: set[str]
-    completed_workers: set[str]
+    participating_workers: set[str]
+
+    @abc.abstractmethod
+    def to_msg(self) -> dict[str, Any]:
+        ...
+
+
+@dataclass
+class DataFrameShuffleState(ShuffleState):
+    type: ClassVar[str] = "DataFrameShuffle"
+    worker_for: dict[int, str]
+    schema: bytes
+    column: str
+    output_workers: set[str]
     participating_workers: set[str]
 
     @abc.abstractmethod
@@ -92,9 +105,9 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self.scheduler = scheduler
         self.scheduler.handlers.update(
             {
+                "shuffle_barrier": self.barrier,
                 "shuffle_get": self.get,
                 "shuffle_get_or_create": self.get_or_create,
-                "shuffle_get_participating_workers": self.get_participating_workers,
             }
         )
         self.heartbeats = defaultdict(lambda: defaultdict(dict))
@@ -104,6 +117,13 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
 
     def shuffle_ids(self) -> set[ShuffleId]:
         return set(self.states)
+
+    async def barrier(self, id: ShuffleId, run_id: int) -> None:
+        shuffle = self.states[id]
+        msg = {"op": "shuffle_inputs_done", "shuffle_id": id, "run_id": run_id}
+        await self.scheduler.broadcast(
+            msg=msg, workers=list(shuffle.participating_workers)
+        )
 
     def heartbeat(self, ws: WorkerState, data: dict) -> None:
         for shuffle_id, d in data.items():
@@ -171,7 +191,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             schema=schema,
             column=column,
             output_workers=output_workers,
-            completed_workers=set(),
             participating_workers=output_workers.copy(),
         )
 
@@ -208,12 +227,8 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             output_workers=output_workers,
             old=old,
             new=new,
-            completed_workers=set(),
             participating_workers=output_workers.copy(),
         )
-
-    def get_participating_workers(self, id: ShuffleId) -> list[str]:
-        return list(self.states[id].participating_workers)
 
     def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
         from time import time

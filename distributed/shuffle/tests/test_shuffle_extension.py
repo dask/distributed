@@ -35,10 +35,8 @@ async def test_installation_on_worker(s, a):
 async def test_installation_on_scheduler(s, a):
     ext = s.extensions["shuffle"]
     assert isinstance(ext, ShuffleSchedulerExtension)
+    assert s.handlers["shuffle_barrier"] == ext.barrier
     assert s.handlers["shuffle_get"] == ext.get
-    assert (
-        s.handlers["shuffle_get_participating_workers"] == ext.get_participating_workers
-    )
 
 
 def test_split_by_worker():

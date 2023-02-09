@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import functools
 import logging
 import os
 import time
@@ -101,9 +100,8 @@ class ArrayRechunkRun(ShuffleRun):
     rpc:
         A callable returning a PooledRPCCall to contact other Shuffle instances.
         Typically a ConnectionPool.
-    broadcast:
-        A function that ensures a RPC is evaluated on all `Shuffle` instances of
-        a given `ShuffleID`.
+    scheduler:
+        A PooledRPCCall to to contact the scheduler.
     memory_limiter_disk:
     memory_limiter_comm:
         A ``ResourceLimiter`` limiting the total amount of memory used in either
@@ -122,12 +120,12 @@ class ArrayRechunkRun(ShuffleRun):
         directory: str,
         nthreads: int,
         rpc: Callable[[str], PooledRPCCall],
-        broadcast: Callable,
+        scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
     ):
-        self.broadcast = broadcast
         self.rpc = rpc
+        self.scheduler = scheduler
         self.old = old
         self.new = new
         self.id = id
@@ -425,9 +423,8 @@ class DataFrameShuffleRun(ShuffleRun):
     rpc:
         A callable returning a PooledRPCCall to contact other Shuffle instances.
         Typically a ConnectionPool.
-    broadcast:
-        A function that ensures a RPC is evaluated on all `Shuffle` instances of
-        a given `ShuffleID`.
+    scheduler:
+        A PooledRPCCall to to contact the scheduler.
     memory_limiter_disk:
     memory_limiter_comm:
         A ``ResourceLimiter`` limiting the total amount of memory used in either
@@ -446,14 +443,14 @@ class DataFrameShuffleRun(ShuffleRun):
         directory: str,
         nthreads: int,
         rpc: Callable[[str], PooledRPCCall],
-        broadcast: Callable,
+        scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
     ):
 
         import pandas as pd
 
-        self.broadcast = broadcast
+        self.scheduler = scheduler
         self.rpc = rpc
         self.column = column
         self.id = id
@@ -507,13 +504,7 @@ class DataFrameShuffleRun(ShuffleRun):
         self.raise_if_closed()
         # TODO: Consider broadcast pinging once when the shuffle starts to warm
         # up the comm pool on scheduler side
-        await self.broadcast(
-            msg={
-                "op": "shuffle_inputs_done",
-                "shuffle_id": self.id,
-                "run_id": self.run_id,
-            }
-        )
+        await self.scheduler.shuffle_barrier(id=self.id, run_id=self.run_id)
 
     async def send(self, address: str, shards: list[tuple[int, bytes]]) -> None:
         self.raise_if_closed()
@@ -953,9 +944,7 @@ class ShuffleWorkerExtension:
                 nthreads=self.worker.state.nthreads,
                 local_address=self.worker.address,
                 rpc=self.worker.rpc,
-                broadcast=functools.partial(
-                    self._broadcast_to_participants, shuffle_id
-                ),
+                scheduler=self.worker.scheduler,
                 memory_limiter_disk=self.memory_limiter_disk,
                 memory_limiter_comms=self.memory_limiter_comms,
             )
@@ -974,9 +963,7 @@ class ShuffleWorkerExtension:
                 nthreads=self.worker.state.nthreads,
                 local_address=self.worker.address,
                 rpc=self.worker.rpc,
-                broadcast=functools.partial(
-                    self._broadcast_to_participants, shuffle_id
-                ),
+                scheduler=self.worker.scheduler,
                 memory_limiter_disk=self.memory_limiter_disk,
                 memory_limiter_comms=self.memory_limiter_comms,
             )
@@ -985,14 +972,6 @@ class ShuffleWorkerExtension:
         self.shuffles[shuffle_id] = shuffle
         self._runs.add(shuffle)
         return shuffle
-
-    async def _broadcast_to_participants(self, id: ShuffleId, msg: dict) -> dict:
-        participating_workers = (
-            await self.worker.scheduler.shuffle_get_participating_workers(id=id)
-        )
-        return await self.worker.scheduler.broadcast(
-            msg=msg, workers=participating_workers
-        )
 
     async def close(self) -> None:
         assert not self.closed

@@ -7,7 +7,7 @@ repos:
       - id: absolufy-imports
         name: absolufy-imports
   - repo: https://github.com/pycqa/isort
-    rev: 5.10.1
+    rev: 5.12.0
     hooks:
       - id: isort
         language_version: python3
@@ -41,7 +41,7 @@ repos:
           types_or: [rst, markdown]
           files: docs
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v0.991
+    rev: v1.0.0
     hooks:
       - id: mypy
         # Override default --ignore-missing-imports
@@ -58,9 +58,9 @@ repos:
           - types-setuptools
           # Typed libraries
           - click
-          - dask
           - numpy
           - pytest
           - tornado
-          - zict
           - pyarrow
+          - git+https://github.com/dask/dask
+          - git+https://github.com/dask/zict
