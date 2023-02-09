@@ -1010,15 +1010,15 @@ def test_load_json_robust_timeout(tmpdir):
 
 
 def test_rate_limiter_filter(caplog):
-    logger = logging.getLogger("foo")
-    logger.addFilter(RateLimiterFilter("hello", r"Hello .*", rate="10ms"))
+    logger = logging.getLogger("test_rate_limiter_filter")
+    logger.addFilter(RateLimiterFilter(r"Hello .*", rate="10ms"))
     logger.warning("Hello Al!")  # Match
     logger.warning("Hello Bianca!")  # Match and <10ms
     logger.warning("Hello %s!", "Charlie")  # Match and <10ms, with args
     logger.warning("Goodbye Al!")  # No match
     sleep(0.02)
     logger.warning("Hello again!")  # Match and >10ms
-    RateLimiterFilter.clear(logger)
+    RateLimiterFilter.reset_timer("test_rate_limiter_filter")
     logger.warning("Hello once more!")  # Match and <10ms, but after calling clear()
     assert [record.msg for record in caplog.records] == [
         "Hello Al!",

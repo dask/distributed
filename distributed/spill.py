@@ -16,6 +16,10 @@ from distributed.protocol import deserialize_bytes, serialize_bytelist
 from distributed.sizeof import safe_sizeof
 from distributed.utils import RateLimiterFilter
 
+logger = logging.getLogger(__name__)
+logger.addFilter(RateLimiterFilter("Spill file on disk reached capacity"))
+logger.addFilter(RateLimiterFilter("Spill to disk failed"))
+
 has_zict_220 = parse_version(zict.__version__) >= parse_version("2.2.0")
 has_zict_230 = parse_version(zict.__version__) >= parse_version("2.3.0")
 
@@ -134,12 +138,6 @@ class SpillBuffer(zict.Buffer):
         target: int,
         max_spill: int | Literal[False] = False,
     ):
-        self.logger = logging.getLogger(__name__)
-        for name, pattern in [
-            ("max-spill-reached", "Spill file on disk reached capacity"),
-            ("spill-failed", "Spill to disk failed"),
-        ]:
-            self.logger.addFilter(RateLimiterFilter(name, pattern))
         self.logged_pickle_errors = set()  # keys logged with pickle error
 
         slow: MutableMapping[str, Any] = Slow(spill_directory, max_spill)
@@ -162,15 +160,13 @@ class SpillBuffer(zict.Buffer):
             (key_e,) = e.args
             assert key_e in self.fast
             assert key_e not in self.slow
-            self.logger.warning(
+            logger.warning(
                 "Spill file on disk reached capacity; keeping data in memory"
             )
             raise HandledError()
         except OSError:
             # Typically, this is a disk full error
-            self.logger.error(
-                "Spill to disk failed; keeping data in memory", exc_info=True
-            )
+            logger.error("Spill to disk failed; keeping data in memory", exc_info=True)
             raise HandledError()
         except PickleError as e:
             key_e, orig_e = e.args
@@ -193,7 +189,7 @@ class SpillBuffer(zict.Buffer):
                 # failed to serialize. There's nothing wrong with the new key. The older
                 # key is still in memory.
                 if key_e not in self.logged_pickle_errors:
-                    self.logger.error("Failed to pickle %r", key_e, exc_info=True)
+                    logger.error("Failed to pickle %r", key_e, exc_info=True)
                     self.logged_pickle_errors.add(key_e)
                 raise HandledError()
 

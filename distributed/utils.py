@@ -1767,7 +1767,7 @@ class RateLimiterFilter(logging.Filter):
     rate: float
     _last_seen: float
 
-    def __init__(self, name: str, pattern: str, rate: str | float = "10s"):
+    def __init__(self, pattern: str, *, name: str = "", rate: str | float = "10s"):
         super().__init__(name)
         self.pattern = re.compile(pattern)
         self.rate = _parse_timedelta(rate)
@@ -1782,10 +1782,12 @@ class RateLimiterFilter(logging.Filter):
         return True
 
     @classmethod
-    def clear(cls, logger: logging.Logger) -> None:
+    def reset_timer(cls, logger: logging.Logger | str) -> None:
         """Reset the timer on all RateLimiterFilters on a logger.
         Useful in unit testing.
         """
+        if isinstance(logger, str):
+            logger = logging.getLogger(logger)
         for filter in logger.filters:
             if isinstance(filter, cls):
                 filter._last_seen = -filter.rate
