@@ -2075,7 +2075,16 @@ class SchedulerState:
 
         return ws
 
-    def decide_worker_rootish_queuing_enabled(self) -> WorkerState | None:
+    def worker_objective_rootish_queuing(self, ws, ts):
+        # FIXME: This is basically the ordinary worker_objective but with task
+        # counts instead of occupancy.
+        comm_bytes = sum(
+            dts.get_nbytes() for dts in ts.dependencies if ws not in dts.who_has
+        )
+        # See test_nbytes_determines_worker
+        return (len(ws.processing) / ws.nthreads, comm_bytes, ws.nbytes)
+
+    def decide_worker_rootish_queuing_enabled(self, ts) -> WorkerState | None:
         """Pick a worker for a runnable root-ish task, if not all are busy.
 
         Picks the least-busy worker out of the ``idle`` workers (idle workers have fewer
@@ -2115,7 +2124,7 @@ class SchedulerState:
         # NOTE: this will lead to worst-case scheduling with regards to co-assignment.
         ws = min(
             self.idle_task_count,
-            key=lambda ws: len(ws.processing) / ws.nthreads,
+            key=partial(self.worker_objective_rootish_queuing, ts=ts),
         )
         if self.validate:
             assert not _worker_full(ws, self.WORKER_SATURATION), (
@@ -2216,7 +2225,7 @@ class SchedulerState:
                 if not (ws := self.decide_worker_rootish_queuing_disabled(ts)):
                     return {ts.key: "no-worker"}, {}, {}
             else:
-                if not (ws := self.decide_worker_rootish_queuing_enabled()):
+                if not (ws := self.decide_worker_rootish_queuing_enabled(ts)):
                     return {ts.key: "queued"}, {}, {}
         else:
             if not (ws := self.decide_worker_non_rootish(ts)):
@@ -2689,7 +2698,7 @@ class SchedulerState:
             assert not ts.actor, f"Actors can't be queued: {ts}"
             assert ts in self.queued
 
-        if ws := self.decide_worker_rootish_queuing_enabled():
+        if ws := self.decide_worker_rootish_queuing_enabled(ts):
             self.queued.discard(ts)
             worker_msgs = self._add_to_processing(ts, ws)
         # If no worker, task just stays `queued`

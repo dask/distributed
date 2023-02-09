@@ -1331,13 +1331,13 @@ async def test_get_nbytes(c, s, a, b):
     assert s.get_nbytes(summary=False) == {x.key: sizeof(1), y.key: sizeof(2)}
 
 
-@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
-@gen_cluster([("127.0.0.1", 1), ("127.0.0.2", 2)], client=True)
+@gen_cluster([("", 1), ("", 2)], client=True)
 async def test_nbytes_determines_worker(c, s, a, b):
-    x = c.submit(identity, 1, workers=[a.ip])
-    y = c.submit(identity, tuple(range(100)), workers=[b.ip])
+    x = c.submit(identity, 1, workers=[a.address], key="x")
+    y = c.submit(identity, tuple(range(100)), workers=[b.address], key="y")
     await c.gather([x, y])
-
+    assert x.key in list(a.data.keys())
+    assert y.key in list(b.data.keys())
     z = c.submit(lambda x, y: None, x, y)
     await z
     assert s.tasks[z.key].who_has == {s.workers[b.address]}
