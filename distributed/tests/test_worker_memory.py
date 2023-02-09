@@ -505,6 +505,7 @@ async def test_spill_hysteresis(c, s, target, managed, expect_spilled):
         "distributed.worker.memory.target": False,
         "distributed.worker.memory.spill": False,
         "distributed.worker.memory.pause": False,
+        "distributed.scheduler.worker-saturation": "inf",
     },
 )
 async def test_pause_executor_manual(c, s, a):
@@ -567,6 +568,7 @@ async def test_pause_executor_manual(c, s, a):
         "distributed.worker.memory.spill": False,
         "distributed.worker.memory.pause": 0.8,
         "distributed.worker.memory.monitor-interval": "10ms",
+        "distributed.scheduler.worker-saturation": "inf",
     },
 )
 async def test_pause_executor_with_memory_monitor(c, s, a):

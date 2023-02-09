@@ -4013,7 +4013,12 @@ async def test_scatter_compute_store_lose(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True)
+# FIXME there is a subtle race condition depending on how fast a worker is being
+# closed. If is is closed very quickly, the transitions are never issuing a
+# cancelled-key report to the client and we're stuck in the x.status loop. This
+# is mor likely to happen if tasks are queued since y never makes it to the
+# threadpool, delaying its shutdown
+@gen_cluster(client=True, config={"distributed.scheduler.worker-saturation": "inf"})
 async def test_scatter_compute_store_lose_processing(c, s, a, b):
     """
     Create irreplaceable data on one machine,
@@ -4030,7 +4035,7 @@ async def test_scatter_compute_store_lose_processing(c, s, a, b):
     await a.close()
 
     while x.status == "finished":
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(0.5)
 
     assert y.status == "cancelled"
     assert z.status == "cancelled"

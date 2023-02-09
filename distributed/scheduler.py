@@ -2052,6 +2052,7 @@ class SchedulerState:
             and tg.last_worker_tasks_left
             and lws.status == Status.running
             and self.workers.get(lws.address) is lws
+            and len(tg) > self.total_nthreads * 2
         ):
             ws = lws
         else:
@@ -2819,10 +2820,14 @@ class SchedulerState:
         Root-ish tasks are part of a group that's much larger than the cluster,
         and have few or no dependencies.
         """
-        if ts.resource_restrictions or ts.worker_restrictions or ts.host_restrictions:
+        if (
+            ts.resource_restrictions
+            or ts.worker_restrictions
+            or ts.host_restrictions
+            or ts.actor
+        ):
             return False
         tg = ts.group
-        # TODO short-circuit to True if `not ts.dependencies`?
         return len(tg.dependencies) < 5 and sum(map(len, tg.dependencies)) < 5
 
     def check_idle_saturated(self, ws: WorkerState, occ: float = -1.0) -> None:
