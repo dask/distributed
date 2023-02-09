@@ -129,7 +129,6 @@ class ShuffleRun(Generic[ShuffleUnitIDType, PartitionIDType, PartitionType], abc
         # up the comm pool on scheduler side
         await self.scheduler.shuffle_barrier(id=self.id, run_id=self.run_id)
 
-    # FIXME: Typing
     async def send(
         self, address: str, shards: list[tuple[ShuffleUnitIDType, bytes]]
     ) -> None:
