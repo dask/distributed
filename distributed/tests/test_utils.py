@@ -4,6 +4,7 @@ import asyncio
 import contextvars
 import functools
 import io
+import logging
 import multiprocessing
 import os
 import queue
@@ -27,6 +28,7 @@ from distributed.utils import (
     Log,
     Logs,
     LoopRunner,
+    RateLimiterFilter,
     TimeoutError,
     _maybe_complex,
     ensure_ip,
@@ -1005,3 +1007,22 @@ def test_load_json_robust_timeout(tmpdir):
         assert fut.result() == {"foo": "bar"}
 
     assert json_load_robust(path) == {"foo": "bar"}
+
+
+def test_rate_limiter_filter(caplog):
+    logger = logging.getLogger("foo")
+    logger.addFilter(RateLimiterFilter("hello", r"Hello .*", rate="10ms"))
+    logger.warning("Hello Al!")  # Match
+    logger.warning("Hello Bianca!")  # Match and <10ms
+    logger.warning("Hello %s!", "Charlie")  # Match and <10ms, with args
+    logger.warning("Goodbye Al!")  # No match
+    sleep(0.02)
+    logger.warning("Hello again!")  # Match and >10ms
+    RateLimiterFilter.clear(logger)
+    logger.warning("Hello once more!")  # Match and <10ms, but after calling clear()
+    assert [record.msg for record in caplog.records] == [
+        "Hello Al!",
+        "Goodbye Al!",
+        "Hello again!",
+        "Hello once more!",
+    ]
