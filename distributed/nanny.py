@@ -174,7 +174,8 @@ class Nanny(ServerNode):
 
         if local_directory is None:
             local_directory = (
-                dask.config.get("temporary-directory") or tempfile.gettempdir()
+                dask.config.get("temporary-directory").format(**os.environ)
+                or tempfile.gettempdir()
             )
             self._original_local_dir = local_directory
             local_directory = os.path.join(local_directory, "dask-worker-space")
