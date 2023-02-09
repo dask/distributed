@@ -60,7 +60,11 @@ class ShuffleClosedError(RuntimeError):
     pass
 
 
-class RechunkRun:
+class ShuffleRun:
+    pass
+
+
+class ArrayRechunkRun(ShuffleRun):
     """State for a single active rechunk execution
 
     This object is responsible for splitting, sending, receiving and combining
@@ -384,7 +388,7 @@ class RechunkRun:
             self._exception = exception
 
 
-class ShuffleRun:
+class DataFrameShuffleRun(ShuffleRun):
     """State for a single active shuffle execution
 
     This object is responsible for splitting, sending, receiving and combining
@@ -755,10 +759,10 @@ class ShuffleWorkerExtension:
     def add_partition(
         self,
         data: pd.DataFrame,
-        input_partition: int,
+        input_partition: int | tuple[int, ...],
         shuffle_id: ShuffleId,
         type: str,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> int:
         if type == "DataFrameShuffle":
             kwargs["empty"] = data
@@ -933,8 +937,9 @@ class ShuffleWorkerExtension:
                     extension._runs.remove(shuffle)
 
                 self.worker._ongoing_background_tasks.call_soon(_, self, existing)
+        shuffle: ShuffleRun
         if result["type"] == "DataFrameShuffle":
-            shuffle = ShuffleRun(
+            shuffle = DataFrameShuffleRun(
                 column=result["column"],
                 worker_for=result["worker_for"],
                 output_workers=result["output_workers"],
@@ -955,7 +960,7 @@ class ShuffleWorkerExtension:
                 memory_limiter_comms=self.memory_limiter_comms,
             )
         elif result["type"] == "ArrayRechunk":
-            shuffle = RechunkRun(
+            shuffle = ArrayRechunkRun(
                 worker_for=result["worker_for"],
                 output_workers=result["output_workers"],
                 old=result["old"],
@@ -1022,7 +1027,7 @@ class ShuffleWorkerExtension:
         self,
         shuffle_id: ShuffleId,
         type: str,
-        **kwargs,
+        **kwargs: Any,
     ) -> ShuffleRun:
         return sync(
             self.worker.loop,
@@ -1125,8 +1130,6 @@ def assemble_chunk(data: bytes, subdims: tuple[int, ...]) -> np.ndarray:
     for subindex, subarray in unpacker:
         usubarray = msgpack.unpackb(subarray)
         rec_cat_arg[tuple(subindex)] = usubarray
-        # np.frombuffer(usubarray["payload"]).reshape(usubarray["shape"]),
-        # )
     del data
     del file
     del unpacker

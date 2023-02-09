@@ -21,9 +21,9 @@ if TYPE_CHECKING:
 def rechunk_transfer(
     input: np.ndarray,
     id: ShuffleId,
-    input_chunk,
-    new,
-    old,
+    input_chunk: tuple[int, ...],
+    new: tuple[tuple[int, ...], ...],
+    old: tuple[tuple[int, ...], ...],
 ) -> int:
     try:
         return _get_worker_extension().add_partition(

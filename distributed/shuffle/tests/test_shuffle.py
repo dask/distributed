@@ -28,6 +28,7 @@ from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_extension import get_worker_for
 from distributed.shuffle._shuffle import ShuffleId, barrier_key
 from distributed.shuffle._worker_extension import (
+    DataFrameShuffleRun,
     ShuffleRun,
     ShuffleWorkerExtension,
     convert_partition,
@@ -328,7 +329,7 @@ async def test_closed_bystanding_worker_during_shuffle(c, s, w1, w2, w3):
     await clean_scheduler(s)
 
 
-class BlockedInputsDoneShuffle(ShuffleRun):
+class BlockedInputsDoneShuffle(DataFrameShuffleRun):
     def __init__(
         self,
         worker_for,
@@ -370,7 +371,8 @@ class BlockedInputsDoneShuffle(ShuffleRun):
 
 
 @mock.patch(
-    "distributed.shuffle._worker_extension.ShuffleRun", BlockedInputsDoneShuffle
+    "distributed.shuffle._worker_extension.DataFrameShuffleRun",
+    BlockedInputsDoneShuffle,
 )
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_worker_during_barrier(c, s, a, b):
@@ -413,7 +415,8 @@ async def test_closed_worker_during_barrier(c, s, a, b):
 
 
 @mock.patch(
-    "distributed.shuffle._worker_extension.ShuffleRun", BlockedInputsDoneShuffle
+    "distributed.shuffle._worker_extension.DataFrameShuffleRun",
+    BlockedInputsDoneShuffle,
 )
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_other_worker_during_barrier(c, s, a, b):
@@ -459,7 +462,8 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
 
 @pytest.mark.slow
 @mock.patch(
-    "distributed.shuffle._worker_extension.ShuffleRun", BlockedInputsDoneShuffle
+    "distributed.shuffle._worker_extension.DataFrameShuffleRun",
+    BlockedInputsDoneShuffle,
 )
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_crashed_other_worker_during_barrier(c, s, a):
@@ -1101,7 +1105,7 @@ async def test_clean_after_close(c, s, a, b):
 
 
 class PooledRPCShuffle(PooledRPCCall):
-    def __init__(self, shuffle: ShuffleRun):
+    def __init__(self, shuffle: DataFrameShuffleRun):
         self.shuffle = shuffle
 
     def __getattr__(self, key):
@@ -1140,7 +1144,13 @@ class ShuffleTestPool:
         return out
 
     def new_shuffle(
-        self, name, worker_for_mapping, schema, directory, loop, Shuffle=ShuffleRun
+        self,
+        name,
+        worker_for_mapping,
+        schema,
+        directory,
+        loop,
+        Shuffle=DataFrameShuffleRun,
     ):
         s = Shuffle(
             column="_partition",
@@ -1270,7 +1280,7 @@ async def test_error_offload(tmpdir, loop_in_thread):
 
     local_shuffle_pool = ShuffleTestPool()
 
-    class ErrorOffload(ShuffleRun):
+    class ErrorOffload(DataFrameShuffleRun):
         async def offload(self, func, *args):
             raise RuntimeError("Error during deserialization")
 
@@ -1323,7 +1333,7 @@ async def test_error_send(tmpdir, loop_in_thread):
 
     local_shuffle_pool = ShuffleTestPool()
 
-    class ErrorSend(ShuffleRun):
+    class ErrorSend(DataFrameShuffleRun):
         async def send(self, *args: Any, **kwargs: Any) -> None:
             raise RuntimeError("Error during send")
 
@@ -1375,7 +1385,7 @@ async def test_error_receive(tmpdir, loop_in_thread):
 
     local_shuffle_pool = ShuffleTestPool()
 
-    class ErrorReceive(ShuffleRun):
+    class ErrorReceive(DataFrameShuffleRun):
         async def receive(self, data: list[tuple[int, bytes]]) -> None:
             raise RuntimeError("Error during receive")
 

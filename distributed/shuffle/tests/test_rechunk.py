@@ -9,19 +9,19 @@ import pytest
 
 import dask.array as da
 from dask.array.core import concatenate3
-from dask.array.rechunk import rechunk
+from dask.array.rechunk import normalize_chunks, rechunk
 
 from distributed.core import PooledRPCCall
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_extension import get_worker_for
 from distributed.shuffle._shuffle import ShuffleId
-from distributed.shuffle._worker_extension import RechunkRun
+from distributed.shuffle._worker_extension import ArrayRechunkRun
 from distributed.utils_test import gen_cluster, gen_test
 
 
 class PooledRPCShuffle(PooledRPCCall):
     # FIXME: Mostly copied from test_shuffle
-    def __init__(self, shuffle: RechunkRun):
+    def __init__(self, shuffle: ArrayRechunkRun):
         self.shuffle = shuffle
 
     def __getattr__(self, key):
@@ -67,7 +67,7 @@ class ShuffleTestPool:
         new,
         directory,
         loop,
-        Shuffle=RechunkRun,
+        Shuffle=ArrayRechunkRun,
     ):
         s = Shuffle(
             worker_for=worker_for_mapping,
@@ -184,7 +184,7 @@ async def test_rechunk_2d(c, s, *ws):
     a = np.random.uniform(0, 1, 300).reshape((10, 30))
     x = da.from_array(a, chunks=((1, 2, 3, 4), (5,) * 6))
     new = ((5, 5), (15,) * 2)
-    x2 = rechunk(x, chunks=new)
+    x2 = rechunk(x, chunks=new, rechunk="p2p")
     assert x2.chunks == new
     assert np.all(await c.compute(x2) == a)
 
@@ -196,6 +196,60 @@ async def test_rechunk_4d(c, s, *ws):
     a = np.random.uniform(0, 1, 10000).reshape((10,) * 4)
     x = da.from_array(a, chunks=old)
     new = ((10,),) * 4
-    x2 = rechunk(x, chunks=new)
+    x2 = rechunk(x, chunks=new, rechunk="p2p")
     assert x2.chunks == new
     assert np.all(await c.compute(x2) == a)
+
+
+@gen_cluster(client=True, config={"optimization.fuse.active": False})
+async def test_rechunk_expand(c, s, *ws):
+    a = np.random.uniform(0, 1, 100).reshape((10, 10))
+    x = da.from_array(a, chunks=(5, 5))
+    y = x.rechunk(chunks=((3, 3, 3, 1), (3, 3, 3, 1)), rechunk="p2p")
+    assert np.all(await c.compute(y) == a)
+
+
+@gen_cluster(client=True, config={"optimization.fuse.active": False})
+async def test_rechunk_expand2(c, s, *ws):
+    (a, b) = (3, 2)
+    orig = np.random.uniform(0, 1, a**b).reshape((a,) * b)
+    for off, off2 in product(range(1, a - 1), range(1, a - 1)):
+        old = ((a - off, off),) * b
+        x = da.from_array(orig, chunks=old)
+        new = ((a - off2, off2),) * b
+        assert np.all(await c.compute(x.rechunk(chunks=new, rechunk="p2p")) == orig)
+        if a - off - off2 > 0:
+            new = ((off, a - off2 - off, off2),) * b
+            y = await c.compute(x.rechunk(chunks=new, rechunk="p2p"))
+            assert np.all(y == orig)
+
+
+@gen_cluster(client=True, config={"optimization.fuse.active": False})
+async def test_rechunk_method(c, s, *ws):
+    """Test rechunking can be done as a method of dask array."""
+    old = ((5, 2, 3),) * 4
+    new = ((3, 3, 3, 1),) * 4
+    a = np.random.uniform(0, 1, 10000).reshape((10,) * 4)
+    x = da.from_array(a, chunks=old)
+    x2 = x.rechunk(chunks=new, rechunk="p2p")
+    assert x2.chunks == new
+    assert np.all(await c.compute(x2) == a)
+
+
+@gen_cluster(client=True, config={"optimization.fuse.active": False})
+async def test_rechunk_blockshape(c, s, *ws):
+    """Test that blockshape can be used."""
+    new_shape, new_chunks = (10, 10), (4, 3)
+    new_blockdims = normalize_chunks(new_chunks, new_shape)
+    old_chunks = ((4, 4, 2), (3, 3, 3, 1))
+    a = np.random.uniform(0, 1, 100).reshape((10, 10))
+    x = da.from_array(a, chunks=old_chunks)
+    check1 = rechunk(x, chunks=new_chunks, rechunk="p2p")
+    assert check1.chunks == new_blockdims
+    assert np.all(await c.compute(check1) == a)
+
+
+@gen_cluster(client=True, config={"optimization.fuse.active": False})
+async def test_dtype(c, s, *ws):
+    x = da.ones(5, chunks=(2,))
+    assert x.rechunk(chunks=(1,), rechunk="p2p").dtype == x.dtype

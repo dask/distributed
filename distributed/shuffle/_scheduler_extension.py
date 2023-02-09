@@ -7,7 +7,7 @@ import logging
 import math
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Iterable
 
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.shuffle._shuffle import ShuffleId, barrier_key, id_from_key
@@ -122,11 +122,12 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         id: ShuffleId,
         type: str,
         worker: str,
-        spec,
+        spec: dict[str, Any],
     ) -> dict:
         try:
             return self.get(id, worker)
         except KeyError:
+            state: ShuffleState
             if type == "DataFrameShuffle":
                 state = self._create_dataframe_shuffle_state(id, spec)
             elif type == "ArrayRechunk":
@@ -292,7 +293,9 @@ def get_worker_for(output_partition: int, workers: list[str], npartitions: int) 
     return workers[i]
 
 
-def get_worker_for_chunk(chunk: tuple[int, ...], workers: list[str], shape) -> str:
+def get_worker_for_chunk(
+    chunk: tuple[int, ...], workers: list[str], shape: Iterable[int]
+) -> str:
     nchunks = math.prod(shape)
     multiplier = 1
     flat_index = 0
