@@ -12,7 +12,7 @@ from dask.sizeof import sizeof
 
 from distributed import profile
 from distributed.compatibility import WINDOWS
-from distributed.spill import SpillBuffer, has_zict_220, logger
+from distributed.spill import SpillBuffer, has_zict_220
 from distributed.utils import RateLimiterFilter
 from distributed.utils_test import captured_logger
 
@@ -159,7 +159,7 @@ def test_spillbuffer_maxlim(tmp_path_factory):
     # size of d > target, d should go to slow but slow reached the max_spill limit then
     # d will end up on fast with c (which can't be move to slow because it won't fit
     # either)
-    RateLimiterFilter.reset_timer(logger)
+    RateLimiterFilter.reset_timer("distributed.spill")
     with captured_logger("distributed.spill") as logs_d:
         buf["d"] = d
 
@@ -177,7 +177,7 @@ def test_spillbuffer_maxlim(tmp_path_factory):
     unlimited_buf["a_large"] = a_large
     assert psize(unlimited_buf_dir, a_large=a_large)[1] > 600
 
-    RateLimiterFilter.reset_timer(logger)
+    RateLimiterFilter.reset_timer("distributed.spill")
     with captured_logger("distributed.spill") as logs_alarge:
         buf["a"] = a_large
 
@@ -188,7 +188,7 @@ def test_spillbuffer_maxlim(tmp_path_factory):
     # max_spill
 
     d_large = "d" * 501
-    RateLimiterFilter.reset_timer(logger)
+    RateLimiterFilter.reset_timer("distributed.spill")
     with captured_logger("distributed.spill") as logs_dlarge:
         buf["d"] = d_large
 
@@ -276,7 +276,7 @@ def test_spillbuffer_oserror(tmp_path):
 
     # add key to fast which is smaller than target but when added it triggers spill,
     # which triggers OSError
-    RateLimiterFilter.reset_timer(logger)
+    RateLimiterFilter.reset_timer("distributed.spill")
     with captured_logger("distributed.spill") as logs_oserror_evict:
         buf["d"] = d
 

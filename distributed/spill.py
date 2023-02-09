@@ -128,7 +128,6 @@ class SpillBuffer(zict.Buffer):
         Limit of number of bytes to be spilled on disk. Set to False to disable.
     """
 
-    logger: logging.Logger
     logged_pickle_errors: set[str]
     fast_metrics: FastMetrics
 
@@ -138,8 +137,6 @@ class SpillBuffer(zict.Buffer):
         target: int,
         max_spill: int | Literal[False] = False,
     ):
-        self.logged_pickle_errors = set()  # keys logged with pickle error
-
         slow: MutableMapping[str, Any] = Slow(spill_directory, max_spill)
         if has_zict_220:
             # If a value is still in use somewhere on the worker since the last time it
@@ -147,7 +144,7 @@ class SpillBuffer(zict.Buffer):
             slow = zict.Cache(slow, zict.WeakValueMapping())
 
         super().__init__(fast={}, slow=slow, n=target, weight=_in_memory_weight)
-
+        self.logged_pickle_errors = set()  # keys logged with pickle error
         self.fast_metrics = FastMetrics()
 
     @contextmanager
