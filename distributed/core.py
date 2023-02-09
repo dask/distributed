@@ -1321,10 +1321,13 @@ class ConnectionPool:
         # _connecting contains futures actively trying to establish a connection
         # while the _n_connecting also accounts for connection attempts which
         # are waiting due to the connection limit
-        self._connecting: set[asyncio.Task[Comm]] = set()
+        self._connecting: defaultdict[str, set[asyncio.Task[Comm]]] = defaultdict(set)
         self._pending_count = 0
         self._connecting_count = 0
         self.status = Status.init
+        self._reasons: weakref.WeakKeyDictionary[
+            asyncio.Task[Any], str
+        ] = weakref.WeakKeyDictionary()
 
     def _validate(self) -> None:
         """
@@ -1403,7 +1406,10 @@ class ConnectionPool:
             finally:
                 self._connecting_count -= 1
         except asyncio.CancelledError:
-            raise CommClosedError("ConnectionPool closing.")
+            current_task = asyncio.current_task()
+            assert current_task
+            reason = self._reasons.pop(current_task, "ConnectionPool closing.")
+            raise CommClosedError(reason)
         finally:
             self._pending_count -= 1
 
@@ -1433,9 +1439,21 @@ class ConnectionPool:
         # it to propagate
         connect_attempt = asyncio.create_task(self._connect(addr, timeout))
         done = asyncio.Event()
-        self._connecting.add(connect_attempt)
-        connect_attempt.add_done_callback(lambda _: done.set())
-        connect_attempt.add_done_callback(self._connecting.discard)
+        connecting = self._connecting[addr]
+        connecting.add(connect_attempt)
+
+        def callback(task: asyncio.Task[Comm]) -> None:
+            done.set()
+            connecting = self._connecting[addr]
+            connecting.discard(task)
+
+            if not connecting:
+                try:
+                    del self._connecting[addr]
+                except KeyError:  # pragma: no cover
+                    pass
+
+        connect_attempt.add_done_callback(callback)
 
         try:
             await done.wait()
@@ -1484,7 +1502,7 @@ class ConnectionPool:
                 self.semaphore.release()
             comms.clear()
 
-    def remove(self, addr: str) -> None:
+    def remove(self, addr: str, *, reason: str = "Address removed.") -> None:
         """
         Remove all Comms to a given address.
         """
@@ -1500,13 +1518,20 @@ class ConnectionPool:
                 IOLoop.current().add_callback(comm.close)
                 self.semaphore.release()
 
+        if addr in self._connecting:
+            tasks = self._connecting[addr]
+            for task in tasks:
+                self._reasons[task] = reason
+                task.cancel()
+
     async def close(self) -> None:
         """
         Close all communications
         """
         self.status = Status.closed
-        for conn_fut in self._connecting:
-            conn_fut.cancel()
+        for tasks in self._connecting.values():
+            for task in tasks:
+                task.cancel()
         for d in [self.available, self.occupied]:
             comms = set()
             while d:

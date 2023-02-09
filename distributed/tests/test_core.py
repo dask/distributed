@@ -7,6 +7,7 @@ import socket
 import threading
 import time as timemod
 import weakref
+from unittest import mock
 
 import pytest
 from tornado.ioloop import IOLoop
@@ -839,6 +840,34 @@ async def test_connection_pool_outside_cancellation(monkeypatch):
 
         done, _ = await asyncio.wait(tasks)
         assert all(t.cancelled() for t in tasks)
+
+
+@gen_test()
+async def test_remove_cancels_connect_attempts():
+    loop = asyncio.get_running_loop()
+    connect_started = asyncio.Event()
+    connect_finished = loop.create_future()
+
+    async def connect(*args, **kwargs):
+        connect_started.set()
+        await connect_finished
+
+    async def connect_to_server():
+        with pytest.raises(CommClosedError, match="Address removed."):
+            await rpc.connect("tcp://0.0.0.0")
+
+    async def remove_address():
+        await connect_started.wait()
+        rpc.remove("tcp://0.0.0.0")
+
+    rpc = await ConnectionPool(limit=1)
+
+    with mock.patch("distributed.core.connect", connect):
+        await asyncio.gather(
+            connect_to_server(),
+            remove_address(),
+        )
+    assert connect_finished.cancelled()
 
 
 @gen_test()
