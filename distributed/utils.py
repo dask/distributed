@@ -39,6 +39,10 @@ import click
 import psutil
 import tblib.pickling_support
 
+from dask.utils import parse_timedelta
+
+from distributed.metrics import monotonic
+
 try:
     import resource
 except ImportError:
@@ -1757,3 +1761,23 @@ class Deadline:
     def expired(self) -> bool:
         """Whether the deadline has already expired"""
         return self.remaining == 0
+
+
+class RateLimiterFilter(logging.Filter):
+    """A Logging filter that ensures a matching message is emitted at most every
+    `rate` seconds"""
+
+    def __init__(self, name, pattern, rate="10s"):
+        self.name = name
+        self.rate = parse_timedelta(rate)
+        self.pattern = re.compile(pattern)
+        self._last_seen = -1.0
+
+    def filter(self, record):
+        now = monotonic()
+        if self.pattern.match(record.msg):
+            old = self._last_seen
+            self._last_seen = now
+            if now - old > self.rate:
+                return 1
+        return 0

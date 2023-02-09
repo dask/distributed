@@ -40,6 +40,24 @@ from distributed.worker_state_machine import (
 )
 
 
+@gen_cluster(
+    nthreads=[("", 1)],
+    config={
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": 0.0001,
+        "distributed.worker.memory.pause": False,
+        "distributed.worker.memory.monitor-interval": "10ms",
+    },
+)
+async def test_high_unmanaged_memory_warning(s, a, caplog):
+    caplog.set_level(logging.WARNING, logger="distributed.worker.memory")
+    await asyncio.sleep(0.1)
+    assert (
+        sum("Unmanaged memory use is high" in record.msg for record in caplog.records)
+        == 1
+    )
+
+
 def memory_monitor_running(dask_worker: Worker | Nanny) -> bool:
     return "memory_monitor" in dask_worker.periodic_callbacks
 

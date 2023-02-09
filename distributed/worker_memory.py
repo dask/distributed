@@ -41,7 +41,7 @@ from distributed.compatibility import WINDOWS, PeriodicCallback
 from distributed.core import Status
 from distributed.metrics import monotonic
 from distributed.spill import ManualEvictProto, SpillBuffer
-from distributed.utils import has_arg, log_errors
+from distributed.utils import RateLimiterFilter, has_arg, log_errors
 from distributed.utils_perf import ThrottledGC
 
 if TYPE_CHECKING:
@@ -102,6 +102,15 @@ class WorkerMemoryManager:
         memory_pause_fraction: float | Literal[False] | None = None,
     ):
         self.logger = logging.getLogger("distributed.worker.memory")
+        for name, pattern in [
+            ("unmanaged", r"Unmanaged memory use is high"),
+        ]:
+            self.logger.addFilter(
+                RateLimiterFilter(
+                    name=name,
+                    pattern=pattern,
+                )
+            )
         self.memory_limit = parse_memory_limit(
             memory_limit, nthreads, logger=self.logger
         )
