@@ -638,6 +638,52 @@ async def test_bad_saturation_factor():
                 pass
 
 
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    config={"distributed.scheduler.worker-saturation": 1.0},
+)
+async def test_queued_resubmitted_key_collison(c, s, a):
+    """
+    Tests a very specific case where a queued task is cancelled, then re-submitted (with
+    the same priority), while the stale `TaskState` object on the scheduler hasn't been
+    GC'd. The old and new `TaskState` must not have the same hash.
+
+    See https://github.com/dask/distributed/issues/7510
+    """
+    ev = Event()
+    keys = [f"f-{i}" for i in range(4)]
+    fs = c.map(Event.wait, [ev] * len(keys), key=keys, fifo_timeout=100)
+    await wait_for_state(keys[0], "processing", s)
+
+    ts1 = s.tasks[keys[1]]
+    # We keep the reference to `ts1` so it can't be GC'd. We want the stale `TaskState`
+    # to remain in the `HeapSet`'s internal heap, and the weakref to be valid.
+    assert ts1.state == "queued"
+
+    # NOTE: don't release all futures, because when `HeapSet` is cleared, it internally
+    # clears its `_data` heap. We want to keep the weakref to `ts1` in the `HeapSet`.
+    del fs[1]
+    await async_wait_for(lambda: keys[1] not in s.tasks, 5)
+
+    if ts1.state != "forgotten":
+        pytest.fail(f"Test assumptions changed, {ts1.state=}")
+
+    # Re-submit `f-1`. We have to submit all 4 tasks though, so that the new `f-1` has
+    # the same priority as the old one. (`c.submit(...)` would give the task priority 0;
+    # it needs to have priority 1.) The other 3 futures just point to the existing tasks.
+    fs2 = c.map(Event.wait, [ev] * len(keys), key=keys, fifo_timeout=100)
+    await wait_for_state(keys[1], "queued", s)
+
+    # Even without this assertion, if the old `f-1` and new `f-1` had colliding hashes,
+    # the compute would fail when the old `f-1` tries to transition
+    # forgotten->processing.
+    assert ts1 not in s.queued
+
+    await ev.set()
+    await c.gather(fs2)
+
+
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 async def test_move_data_over_break_restrictions(client, s, a, b, c):
     [x] = await client.scatter([1], workers=b.address)
