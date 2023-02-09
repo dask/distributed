@@ -579,10 +579,11 @@ class Worker(BaseWorker, ServerNode):
 
         if not local_directory:
             local_directory = (
-                dask.config.get("temporary-directory").format(**os.environ)
-                or tempfile.gettempdir()
+                dask.config.get("temporary-directory") or tempfile.gettempdir()
             )
-        local_directory = os.path.join(local_directory, "dask-worker-space")
+        local_directory = os.path.join(
+            local_directory.format(**os.environ), "dask-worker-space"
+        )
 
         with warn_on_duration(
             "1s",

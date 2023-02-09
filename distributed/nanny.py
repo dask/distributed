@@ -174,8 +174,7 @@ class Nanny(ServerNode):
 
         if local_directory is None:
             local_directory = (
-                dask.config.get("temporary-directory").format(**os.environ)
-                or tempfile.gettempdir()
+                dask.config.get("temporary-directory") or tempfile.gettempdir()
             )
             self._original_local_dir = local_directory
             local_directory = os.path.join(local_directory, "dask-worker-space")
@@ -184,7 +183,7 @@ class Nanny(ServerNode):
 
         # Create directory if it doesn't exist and test for write access.
         # In case of PermissionError, change the name.
-        self.local_directory = WorkSpace(local_directory).base_dir
+        self.local_directory = WorkSpace(local_directory.format(**os.environ)).base_dir
 
         self.preload = preload
         if self.preload is None:
