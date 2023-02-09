@@ -180,8 +180,6 @@ class ShuffleRun(Generic[ShuffleUnitIDType, PartitionIDType, PartitionType], abc
 
     async def inputs_done(self) -> None:
         self.raise_if_closed()
-        # FIXME
-        assert not self.transferred, "`inputs_done` called multiple times"
         self.transferred = True
         await self._flush_comm()
         try:
@@ -381,7 +379,10 @@ class ArrayRechunkRun(ShuffleRun[tuple[NIndex, NIndex], NIndex, "np.ndarray"]):
     def _reserialize_buffers(
         self, data: list[tuple[tuple[NIndex, NIndex], bytes]]
     ) -> dict[NIndex, list[bytes]]:
-        return {d[0][0]: [msgpack.packb((d[0][1], d[1]))] for d in data}
+        result = defaultdict(list)
+        for d in data:
+            result[d[0][0]].append(msgpack.packb((d[0][1], d[1])))
+        return result
 
     async def add_partition(self, data: np.ndarray, input_partition: NIndex) -> int:
         self.raise_if_closed()
@@ -426,7 +427,8 @@ class ArrayRechunkRun(ShuffleRun[tuple[NIndex, NIndex], NIndex, "np.ndarray"]):
         await self.flush_receive()
         data = self._read_from_disk(i)
         subdims = tuple(len(self._old_to_new[dim][ix]) for dim, ix in enumerate(i))
-        arr = assemble_chunk(data, subdims)
+        with self.time("cpu"):
+            arr = assemble_chunk(data, subdims)
         return arr
 
 
