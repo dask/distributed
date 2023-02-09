@@ -1771,13 +1771,12 @@ class RateLimiterFilter(logging.Filter):
         self.name = name
         self.rate = parse_timedelta(rate)
         self.pattern = re.compile(pattern)
-        self._last_seen = -1.0
+        self._last_seen = -self.rate
 
     def filter(self, record):
-        now = monotonic()
         if self.pattern.match(record.msg):
-            old = self._last_seen
+            now = monotonic()
+            if now - self._last_seen < self.rate:
+                return 0
             self._last_seen = now
-            if now - old > self.rate:
-                return 1
-        return 0
+        return 1

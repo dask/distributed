@@ -103,14 +103,12 @@ class WorkerMemoryManager:
     ):
         self.logger = logging.getLogger("distributed.worker.memory")
         for name, pattern in [
-            ("unmanaged", r"Unmanaged memory use is high"),
+            ("high-unmanaged", r"Unmanaged memory use is high"),
+            ("pausing", r".*Pausing worker"),
+            ("resuming", r".*Resuming worker"),
         ]:
-            self.logger.addFilter(
-                RateLimiterFilter(
-                    name=name,
-                    pattern=pattern,
-                )
-            )
+            self.logger.addFilter(RateLimiterFilter(name, pattern))
+
         self.memory_limit = parse_memory_limit(
             memory_limit, nthreads, logger=self.logger
         )
