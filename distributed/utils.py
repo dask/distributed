@@ -39,10 +39,6 @@ import click
 import psutil
 import tblib.pickling_support
 
-from dask.utils import parse_timedelta
-
-from distributed.metrics import monotonic
-
 try:
     import resource
 except ImportError:
@@ -60,7 +56,7 @@ from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
 from distributed.compatibility import WINDOWS
-from distributed.metrics import time
+from distributed.metrics import monotonic, time
 
 try:
     from dask.context import thread_state
@@ -1774,7 +1770,7 @@ class RateLimiterFilter(logging.Filter):
     def __init__(self, name: str, pattern: str, rate: str | float = "10s"):
         super().__init__(name)
         self.pattern = re.compile(pattern)
-        self.rate = parse_timedelta(rate)
+        self.rate = _parse_timedelta(rate)
         self._last_seen = -self.rate
 
     def filter(self, record: logging.LogRecord) -> bool:

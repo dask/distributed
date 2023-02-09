@@ -1198,8 +1198,11 @@ async def test_worker_log_memory_limit_too_high(s, a, caplog):
     },
 )
 async def test_high_unmanaged_memory_warning(s, a, caplog):
-    await asyncio.sleep(0.05)  # Enough for 5 runs of the memory monitors
-    assert (
-        sum("Unmanaged memory use is high" in record.msg for record in caplog.records)
-        == 1  # Message is rate limited
-    )
+    def count_mem_warnings():
+        return sum(
+            "Unmanaged memory use is high" in record.msg for record in caplog.records
+        )
+
+    await async_wait_for(lambda: count_mem_warnings() > 0, timeout=5)
+    await asyncio.sleep(0.1)  # Enough for 10 runs of the memory monitors
+    assert count_mem_warnings() == 1  # Message is rate limited
