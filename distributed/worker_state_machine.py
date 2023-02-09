@@ -39,6 +39,7 @@ from tlz import peekn
 import dask
 from dask.utils import parse_bytes, typename
 
+from distributed import worker_metrics as metrics
 from distributed._stories import worker_story
 from distributed.collections import HeapSet
 from distributed.comm import get_address_host
@@ -301,6 +302,13 @@ class TaskState:
 
     def __post_init__(self) -> None:
         TaskState._instances.add(self)
+        metrics.tasks.labels(self.state).inc()
+
+    def __del__(self) -> None:
+        try:
+            metrics.tasks.labels(self.state).dec()
+        except AttributeError:
+            pass  # Interpreter shutting down
 
     def __repr__(self) -> str:
         if self.state == "cancelled":
@@ -430,13 +438,6 @@ class Execute(Instruction):
 class RetryBusyWorkerLater(Instruction):
     __slots__ = ("worker",)
     worker: str
-
-
-@dataclass
-class DigestMetric(Instruction):
-    __slots__ = ("name", "value")
-    name: str
-    value: float
 
 
 class SendMessageToScheduler(Instruction):
@@ -1589,6 +1590,8 @@ class WorkerState:
             self.in_flight_workers[worker] = to_gather_keys
             self.transfer_incoming_count_total += 1
             self.transfer_incoming_bytes += message_nbytes
+            metrics.transfers_bytes.labels("incoming").inc(message_nbytes)
+            metrics.transfers_count.labels("incoming").inc()
             if self._should_throttle_incoming_transfers():
                 break
 
@@ -1836,22 +1839,13 @@ class WorkerState:
             start = time()
             self.data[ts.key] = value
             stop = time()
-            if stop - start > 0.005:
+            elapsed = stop - start
+            if elapsed > 0.005:
                 ts.startstops.append(
                     {"action": "disk-write", "start": start, "stop": stop}
                 )
-                instructions.append(
-                    DigestMetric(
-                        # See metrics:
-                        # - disk-load-duration
-                        # - get-data-load-duration
-                        # - disk-write-target-duration
-                        # - disk-write-spill-duration
-                        name="disk-write-target-duration",
-                        value=stop - start,
-                        stimulus_id=stimulus_id,
-                    )
-                )
+                # See other labels for the same metrics
+                metrics.evloop_blocked.labels("disk-write-target").observe(elapsed)
 
         ts.state = "memory"
         if ts.nbytes is None:
@@ -2651,6 +2645,9 @@ class WorkerState:
                 time(),
             )
         )
+        metrics.tasks.labels(start).dec()
+        metrics.tasks.labels(ts.state).inc()
+
         return recs, instructions
 
     def _resource_restrictions_satisfied(self, ts: TaskState) -> bool:
@@ -2930,6 +2927,10 @@ class WorkerState:
         _execute_done_common
         """
         self.transfer_incoming_bytes -= ev.total_nbytes
+        metrics.transfers_count.labels("incoming").dec()
+        metrics.transfers_bytes.labels("incoming").dec(ev.total_nbytes)
+        metrics.transfers_total.labels("incoming").observe(ev.total_nbytes)
+
         keys = self.in_flight_workers.pop(ev.worker)
         for key in keys:
             ts = self.tasks[key]
@@ -3132,13 +3133,7 @@ class WorkerState:
         """Task completed successfully"""
         ts, recs, instr = self._execute_done_common(ev)
         ts.startstops.append({"action": "compute", "start": ev.start, "stop": ev.stop})
-        instr.append(
-            DigestMetric(
-                name="compute-duration",
-                value=ev.stop - ev.start,
-                stimulus_id=ev.stimulus_id,
-            )
-        )
+        metrics.compute.observe(ev.stop - ev.start)
         ts.nbytes = ev.nbytes
         ts.type = ev.type
         recs[ts] = ("memory", ev.value, ev.run_id)
@@ -3633,9 +3628,6 @@ class BaseWorker(abc.ABC):
             if isinstance(inst, SendMessageToScheduler):
                 self.batched_send(inst.to_dict())
 
-            elif isinstance(inst, DigestMetric):
-                self.digest_metric(inst.name, inst.value)
-
             elif isinstance(inst, GatherDep):
                 assert inst.to_gather
                 keys_str = ", ".join(peekn(27, inst.to_gather)[0])
@@ -3725,10 +3717,6 @@ class BaseWorker(abc.ABC):
     @abc.abstractmethod
     async def retry_busy_worker_later(self, worker: str) -> StateMachineEvent:
         """Wait some time, then take a peer worker out of busy state"""
-
-    @abc.abstractmethod
-    def digest_metric(self, name: str, value: float) -> None:
-        """Log an arbitrary numerical metric"""
 
 
 class DeprecatedWorkerStateAttribute:

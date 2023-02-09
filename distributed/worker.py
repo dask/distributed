@@ -47,6 +47,7 @@ from dask.utils import (
     typename,
 )
 
+import distributed.worker_metrics as metrics
 from distributed import preloading, profile, utils
 from distributed.batched import BatchedSend
 from distributed.collections import LRU
@@ -1206,7 +1207,7 @@ class Worker(BaseWorker, ServerNode):
 
     def _update_latency(self, latency: float) -> None:
         self.latency = latency * 0.05 + self.latency * 0.95
-        self.digest_metric("latency", latency)
+        metrics.latency.observe(latency)
 
     async def heartbeat(self) -> None:
         logger.debug("Heartbeat: %s", self.address)
@@ -1749,16 +1750,15 @@ class Worker(BaseWorker, ServerNode):
         total_bytes = sum(bytes_per_task.values())
         self.transfer_outgoing_bytes += total_bytes
         self.transfer_outgoing_bytes_total += total_bytes
-        stop = time()
+        metrics.transfers_count.labels("outgoing").inc()
+        metrics.transfers_bytes.labels("outgoing").inc(total_bytes)
 
+        stop = time()
+        elapsed = stop - start
         # Don't log metrics if all keys are in memory
-        if stop - start > 0.005:
-            # See metrics:
-            # - disk-load-duration
-            # - get-data-load-duration
-            # - disk-write-target-duration
-            # - disk-write-spill-duration
-            self.digest_metric("get-data-load-duration", stop - start)
+        if elapsed > 0.005:
+            # See other labels for the same metrics
+            metrics.evloop_blocked.labels("disk-read-get-data").observe(elapsed)
 
         start = time()
 
@@ -1777,6 +1777,10 @@ class Worker(BaseWorker, ServerNode):
         finally:
             self.transfer_outgoing_bytes -= total_bytes
             self.transfer_outgoing_count -= 1
+            metrics.transfers_count.labels("outgoing").dec()
+            metrics.transfers_bytes.labels("outgoing").dec(total_bytes)
+            metrics.transfers_total.labels("outgoing").observe(total_bytes)
+
         stop = time()
         self.digest_metric("get-data-send-duration", stop - start)
 
@@ -2127,10 +2131,6 @@ class Worker(BaseWorker, ServerNode):
             worker=worker, stimulus_id=f"retry-busy-worker-{time()}"
         )
 
-    def digest_metric(self, name: str, value: float) -> None:
-        """Implement BaseWorker.digest_metric by calling Server.digest_metric"""
-        ServerNode.digest_metric(self, name, value)
-
     @log_errors
     def find_missing(self) -> None:
         self.handle_stimulus(FindMissingEvent(stimulus_id=f"find-missing-{time()}"))
@@ -2370,15 +2370,14 @@ class Worker(BaseWorker, ServerNode):
                 data[k] = Actor(type(self.state.actors[k]), self.address, k, self)
         args2 = pack_data(args, data, key_types=(bytes, str))
         kwargs2 = pack_data(kwargs, data, key_types=(bytes, str))
+
         stop = time()
-        if stop - start > 0.005:
+        elapsed = stop - start
+        if elapsed > 0.005:
             ts.startstops.append({"action": "disk-read", "start": start, "stop": stop})
-            # See metrics:
-            # - disk-load-duration
-            # - get-data-load-duration
-            # - disk-write-target-duration
-            # - disk-write-spill-duration
-            self.digest_metric("disk-load-duration", stop - start)
+            # See other labels for the same metrics
+            metrics.evloop_blocked.labels("disk-read-execute").observe(elapsed)
+
         return args2, kwargs2
 
     ##################

@@ -32,7 +32,6 @@ from distributed.utils_test import (
 from distributed.worker_memory import parse_memory_limit
 from distributed.worker_state_machine import (
     ComputeTaskEvent,
-    DigestMetric,
     ExecuteSuccessEvent,
     GatherDep,
     GatherDepSuccessEvent,
@@ -204,7 +203,6 @@ def test_workerstate_fail_to_pickle_execute_1(ws_with_running_task):
         ExecuteSuccessEvent.dummy("x", None, stimulus_id="s1")
     )
     assert instructions == [
-        DigestMetric(name="compute-duration", value=1.0, stimulus_id="s1"),
         TaskErredMsg.match(key="x", stimulus_id="s1"),
     ]
     assert ws.tasks["x"].state == "error"

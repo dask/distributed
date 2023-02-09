@@ -14,12 +14,17 @@ from distributed.utils_test import (
     fetch_metrics_body,
     fetch_metrics_sample_names,
     gen_cluster,
+    inc,
 )
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_prometheus(c, s, a):
     pytest.importorskip("prometheus_client")
+
+    # Necessary to make the tasks metric appear
+    x = c.submit(inc, 1, key="x")
+    await x
 
     active_metrics = await fetch_metrics_sample_names(
         a.http_server.port, prefix="dask_worker_"
@@ -88,28 +93,13 @@ async def test_metrics_when_prometheus_client_not_installed(
 async def test_prometheus_collect_task_states(c, s, a):
     pytest.importorskip("prometheus_client")
 
-    async def assert_metrics(**kwargs):
-        expect = {
-            "constrained": 0,
-            "executing": 0,
-            "fetch": 0,
-            "flight": 0,
-            "long-running": 0,
-            "memory": 0,
-            "disk": 0,
-            "missing": 0,
-            "other": 0,
-            "ready": 0,
-            "waiting": 0,
-        }
-        expect.update(kwargs)
-
+    async def assert_metrics(**expect):
         families = await fetch_metrics(a.http_server.port, prefix="dask_worker_")
         actual = {
             sample.labels["state"]: sample.value
             for sample in families["dask_worker_tasks"].samples
         }
-
+        actual = {k: v for k, v in actual.items() if v}
         assert actual == expect
 
     assert not a.state.tasks

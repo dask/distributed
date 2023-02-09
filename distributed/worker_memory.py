@@ -36,6 +36,7 @@ import dask.config
 from dask.system import CPU_COUNT
 from dask.utils import format_bytes, parse_bytes, parse_timedelta
 
+import distributed.worker_metrics as metrics
 from distributed import system
 from distributed.compatibility import WINDOWS, PeriodicCallback
 from distributed.core import Status
@@ -304,19 +305,18 @@ class WorkerMemoryManager:
             # namely, the reception of new data from other workers. While this is
             # somewhat of an ugly hack,  DO NOT tweak this without a thorough cycle of
             # stress testing. See: https://github.com/dask/distributed/issues/6110.
-            if now - last_yielded > 0.5:
-                # See metrics:
-                # - disk-load-duration
-                # - get-data-load-duration
-                # - disk-write-target-duration
-                # - disk-write-spill-duration
-                worker.digest_metric("disk-write-spill-duration", now - last_yielded)
+            elapsed = now - last_yielded
+            if elapsed > 0.5:
+                # See other labels for the same metrics
+                metrics.evloop_blocked.labels("disk-write-spill").observe(elapsed)
+
                 await asyncio.sleep(0)
                 last_yielded = monotonic()
 
         now = monotonic()
-        if now - last_yielded > 0.005:
-            worker.digest_metric("disk-write-spill-duration", now - last_yielded)
+        elapsed = now - last_yielded
+        if elapsed > 0.005:
+            metrics.evloop_blocked.labels("disk-write-spill").observe(elapsed)
 
         if count:
             self.logger.debug(
