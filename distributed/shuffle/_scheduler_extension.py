@@ -194,7 +194,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         name = barrier_key(id)
         mapping = {}
 
-        shape = (len(dim) for dim in new)
+        shape = tuple(len(dim) for dim in new)
 
         for ts in self.scheduler.tasks[name].dependents:
             part = ts.annotations["shuffle"]  # TODO Improve this
