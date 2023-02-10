@@ -56,7 +56,7 @@ from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
 from distributed.compatibility import WINDOWS
-from distributed.metrics import time
+from distributed.metrics import monotonic, time
 
 try:
     from dask.context import thread_state
@@ -1757,3 +1757,37 @@ class Deadline:
     def expired(self) -> bool:
         """Whether the deadline has already expired"""
         return self.remaining == 0
+
+
+class RateLimiterFilter(logging.Filter):
+    """A Logging filter that ensures a matching message is emitted at most every
+    `rate` seconds"""
+
+    pattern: re.Pattern
+    rate: float
+    _last_seen: float
+
+    def __init__(self, pattern: str, *, name: str = "", rate: str | float = "10s"):
+        super().__init__(name)
+        self.pattern = re.compile(pattern)
+        self.rate = _parse_timedelta(rate)
+        self._last_seen = -self.rate
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if self.pattern.match(record.msg):
+            now = monotonic()
+            if now - self._last_seen < self.rate:
+                return False
+            self._last_seen = now
+        return True
+
+    @classmethod
+    def reset_timer(cls, logger: logging.Logger | str) -> None:
+        """Reset the timer on all RateLimiterFilters on a logger.
+        Useful in unit testing.
+        """
+        if isinstance(logger, str):
+            logger = logging.getLogger(logger)
+        for filter in logger.filters:
+            if isinstance(filter, cls):
+                filter._last_seen = -filter.rate
