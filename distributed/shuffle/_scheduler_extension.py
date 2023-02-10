@@ -303,6 +303,6 @@ def get_worker_for_chunk(
 
     for i, n in zip(chunk, shape):
         flat_index += i * multiplier
-        flat_index *= n
+        multiplier *= n
     i = len(workers) * flat_index // nchunks
     return workers[i]
