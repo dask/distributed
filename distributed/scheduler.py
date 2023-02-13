@@ -2697,14 +2697,8 @@ class SchedulerState:
         ts = self.tasks[key]
 
         if self.validate:
-            if self.is_rootish(ts):
+            if self._is_rootish_no_restrictions(ts):
                 assert not self.idle_task_count, (ts, self.idle_task_count)
-            else:
-                assert (
-                    ts.worker_restrictions
-                    or ts.host_restrictions
-                    or ts.resource_restrictions
-                )
             self._validate_ready(ts)
 
         ts.state = "queued"
@@ -2749,10 +2743,9 @@ class SchedulerState:
         if self._is_rootish_no_restrictions(ts):
             if not (ws := self.decide_worker_rootish_queuing_enabled(ts)):
                 return {}, {}, {}
-        else:
-            if not (ws := self.decide_worker_non_rootish(ts)):
-                return {ts.key: "no-worker"}, {}, {}
         self.queued.discard(ts)
+        if not (ws := self.decide_worker_non_rootish(ts)):
+            return {ts.key: "no-worker"}, {}, {}
         worker_msgs = self._add_to_processing(ts, ws)
 
         return recommendations, {}, worker_msgs
