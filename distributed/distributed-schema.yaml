@@ -416,6 +416,34 @@ properties:
               See https://distributed.dask.org/en/latest/resources.html for more information.
             properties: {}
 
+          name:
+            type: string
+            description: |
+              Name for the worker to use when registering with the scheduler. Must be unique.
+
+          contact-address:
+            type: string
+            description: |
+              Address that scheduler and other workers should dial back ones.
+              This is useful when the workers are NAT'd or otherwise obscured behind some other
+              IP address. This is common when running in containers with ports exposed on the host.
+              Or when running behind TCP proxies in a service mesh.
+
+          interface:
+            type: string
+            description: |
+              Network interface to listen on
+
+          host:
+            type: string
+            description: |
+              Host to bind to
+
+          port:
+            type: string
+            description: |
+              Port number to listen on
+
           lifetime:
             type: object
             description: |

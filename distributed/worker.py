@@ -614,7 +614,9 @@ class Worker(BaseWorker, ServerNode):
             scheduler_addr = coerce_to_address(scheduler_ip)
         else:
             scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
-        self.contact_address = contact_address
+        self.contact_address = dask.config.get(
+            "distributed.worker.contact-address", override_with=contact_address
+        )
 
         if protocol is None:
             protocol_address = scheduler_addr.split("://")
@@ -622,17 +624,23 @@ class Worker(BaseWorker, ServerNode):
                 protocol = protocol_address[0]
             assert protocol
 
-        self._start_port = port
-        self._start_host = host
-        if host:
+        self._start_port = dask.config.get(
+            "distributed.worker.port", override_with=port
+        )
+        self._start_host = dask.config.get(
+            "distributed.worker.host", override_with=host
+        )
+        if self._start_host:
             # Helpful error message if IPv6 specified incorrectly
-            _, host_address = parse_address(host)
+            _, host_address = parse_address(self._start_host)
             if host_address.count(":") > 1 and not host_address.startswith("["):
                 raise ValueError(
                     "Host address with IPv6 must be bracketed like '[::1]'; "
                     f"got {host_address}"
                 )
-        self._interface = interface
+        self._interface = dask.config.get(
+            "distributed.worker.interface", override_with=interface
+        )
         self._protocol = protocol
 
         nthreads = nthreads or CPU_COUNT
@@ -677,7 +685,9 @@ class Worker(BaseWorker, ServerNode):
             )
 
         self.batched_stream = BatchedSend(interval="2ms", loop=self.loop)
-        self.name = name
+        self.name = dask.config.get(
+            "distributed.worker.name", override_with=name
+        ).format(**os.environ)
         self.scheduler_delay = 0
         self.stream_comms = {}
 
@@ -801,7 +811,7 @@ class Worker(BaseWorker, ServerNode):
         pc = PeriodicCallback(self.find_missing, 1000)
         self.periodic_callbacks["find-missing"] = pc
 
-        self._address = contact_address
+        self._address = self.contact_address
 
         if extensions is None:
             extensions = DEFAULT_EXTENSIONS

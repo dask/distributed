@@ -93,7 +93,12 @@ distributed:
     preload-argv: []        # See https://docs.dask.org/en/latest/how-to/customize-initialization.html
     daemon: True
     validate: False         # Check worker state at every step for debugging
-    resources: {}           # Key: value pairs specifying worker resources.
+    resources: {}           # Key: value pairs specifying worker resources
+    name: null              # Name for the worker to use when registering with the scheduler (must be unique)
+    contact-address: null   # Address that scheduler and other workers should dial back on
+    interface: null         # Network interface to listen on
+    host: null              # Host to bind to
+    port: null              # Port to listen on
     lifetime:
       duration: null        # Time after which to gracefully shutdown the worker
       stagger: 0 seconds    # Random amount by which to stagger lifetimes
