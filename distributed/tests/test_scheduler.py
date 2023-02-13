@@ -643,7 +643,7 @@ async def test_bad_saturation_factor():
     nthreads=[("", 1)],
     config={"distributed.scheduler.worker-saturation": 1.0},
 )
-async def test_queued_resubmitted_key_collison(c, s, a):
+async def test_queued_resubmitted_key_collision(c, s, a):
     """
     Tests a very specific case where a queued task is cancelled, then re-submitted (with
     the same priority), while the stale `TaskState` object on the scheduler hasn't been
@@ -652,33 +652,21 @@ async def test_queued_resubmitted_key_collison(c, s, a):
     See https://github.com/dask/distributed/issues/7510
     """
     ev = Event()
-    keys = [f"f-{i}" for i in range(4)]
-    fs = c.map(Event.wait, [ev] * len(keys), key=keys, fifo_timeout=100)
-    await wait_for_state(keys[0], "processing", s)
+    ds = [delayed(Event.wait, pure=False)(ev) for _ in range(3)]
 
-    ts1 = s.tasks[keys[1]]
-    # We keep the reference to `ts1` so it can't be GC'd. We want the stale `TaskState`
+    fs = {f.key: f for f in c.compute(ds)}
+    await async_wait_for(lambda: s.queued, 5)
+
+    ts = s.queued.peek()
+    # We keep the reference to `ts` so it can't be GC'd. We want the stale `TaskState`
     # to remain in the `HeapSet`'s internal heap, and the weakref to be valid.
-    assert ts1.state == "queued"
+    assert ts.state == "queued"
 
-    # NOTE: don't release all futures, because when `HeapSet` is cleared, it internally
-    # clears its `_data` heap. We want to keep the weakref to `ts1` in the `HeapSet`.
-    del fs[1]
-    await async_wait_for(lambda: keys[1] not in s.tasks, 5)
+    del fs[ts.key]
+    await async_wait_for(lambda: len(s.queued) == 1, 5)
 
-    if ts1.state != "forgotten":
-        pytest.fail(f"Test assumptions changed, {ts1.state=}")
-
-    # Re-submit `f-1`. We have to submit all 4 tasks though, so that the new `f-1` has
-    # the same priority as the old one. (`c.submit(...)` would give the task priority 0;
-    # it needs to have priority 1.) The other 3 futures just point to the existing tasks.
-    fs2 = c.map(Event.wait, [ev] * len(keys), key=keys, fifo_timeout=100)
-    await wait_for_state(keys[1], "queued", s)
-
-    # Even without this assertion, if the old `f-1` and new `f-1` had colliding hashes,
-    # the compute would fail when the old `f-1` tries to transition
-    # forgotten->processing.
-    assert ts1 not in s.queued
+    fs2 = c.compute(ds)
+    await async_wait_for(lambda: len(s.queued) == 2, 5)
 
     await ev.set()
     await c.gather(fs2)
