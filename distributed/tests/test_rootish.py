@@ -78,8 +78,8 @@ def test_tree_reduce(abcde):
     assert not groups["c"].rootish
 
 
-@pytest.mark.parametrize("num_Bs, BRootish", [(4, False), (5, True)])
-def test_nearest_neighbor(abcde, num_Bs, BRootish):
+@pytest.mark.parametrize("num_Bs", [4, 5])
+def test_nearest_neighbor(abcde, num_Bs):
     r"""
     a1  a2  a3  a4  a5  a6  a7 a8  a9
      \  |  /  \ |  /  \ |  / \ |  /
@@ -117,19 +117,17 @@ def test_nearest_neighbor(abcde, num_Bs, BRootish):
     _, groups = dummy_dsk_to_taskstate(dsk)
     assert len(groups) == 2
 
-    if BRootish:
-        # As soon as a TG has five or more dependencies, we are no longer
-        # considering it rootish.
-        assert num_Bs == 5
+    # FIXME: This is an artifact of the magic numbers in the rootish
+    # classification
+    if num_Bs == 5:
         assert not groups["a"].rootish
-        assert groups["b"].rootish
     else:
         assert groups["a"].rootish
-        assert not groups["b"].rootish
+    assert groups["b"].rootish
 
 
-@pytest.mark.parametrize("num_Bs, rootish", [(4, False), (5, True)])
-def test_base_of_reduce_preferred(abcde, num_Bs, rootish):
+@pytest.mark.parametrize("num_Bs", range(3, 8))
+def test_base_of_reduce_preferred(abcde, num_Bs):
     r"""
                 a4
                /|
@@ -146,16 +144,13 @@ def test_base_of_reduce_preferred(abcde, num_Bs, rootish):
          c
     """
     a, b, c, d, e = abcde
-    dsk = {(a, i): (f, (a, i - 1), (b, i)) for i in range(1, num_Bs + 1)}
+    dsk = {(a, i): (f, (a, i - 1), (b, i)) for i in range(1, num_Bs)}
     dsk[(a, 0)] = (f, (b, 0))
-    dsk.update({(b, i): (f, c) for i in range(num_Bs + 1)})
+    dsk.update({(b, i): (f, c) for i in range(num_Bs)})
     dsk[c] = (f,)
 
     _, groups = dummy_dsk_to_taskstate(dsk)
     assert len(groups) == 3
     assert not groups["a"].rootish
-    if rootish:
-        assert groups["b"].rootish
-    else:
-        assert not groups["b"].rootish
-    assert not groups["c"].rootish
+    assert groups["b"].rootish
+    assert groups["c"].rootish

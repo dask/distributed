@@ -1113,9 +1113,10 @@ class TaskGroup:
         task doesn't have any restrictions and can be run anywhere
         """
         return (
-            len(self) >= 5
-            and len(self.dependencies) < 5
-            and sum(map(len, self.dependencies)) < 5
+            len(self.dependencies) < 5
+            and (ndeps := sum(map(len, self.dependencies))) < 5
+            # Fan-out
+            and (len(self) / ndeps > 2 if ndeps else True)
         )
 
 

@@ -300,7 +300,7 @@ async def test_decide_worker_rootish_while_last_worker_is_retiring(c, s, a):
         # - TaskGroup(y) has more than 4 tasks (total_nthreads * 2)
         # - TaskGroup(y) has less than 5 dependency groups
         # - TaskGroup(y) has less than 5 dependency tasks
-        assert s.is_rootish(s.tasks["y-2"])
+        assert s._is_rootish_no_restrictions(s.tasks["y-2"])
 
         await evx[0].set()
         await wait_for_state("y-0", "processing", s)
@@ -4276,7 +4276,7 @@ async def test_deadlock_resubmit_queued_tasks_fast(c, s, a):
     def assert_rootish():
         # Just to verify our assumptions in case the definition changes. This is
         # currently a bit brittle
-        assert all(s.is_rootish(s.tasks[k]) for k in keys)
+        assert all(s._is_rootish_no_restrictions(s.tasks[k]) for k in keys)
 
     f1 = submit_tasks()
     # Make sure that the worker is properly saturated
