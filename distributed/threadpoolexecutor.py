@@ -78,6 +78,7 @@ class ThreadPoolExecutor(thread.ThreadPoolExecutor):
         self._thread_name_prefix = kwargs.get(
             "thread_name_prefix", "DaskThreadPoolExecutor"
         )
+        self._available_effective_thread_ids = set(range(self._max_workers))
 
     def _adjust_thread_count(self):
         if len(self._threads) < self._max_workers:
@@ -87,9 +88,23 @@ class ThreadPoolExecutor(thread.ThreadPoolExecutor):
                 + "-%d-%d" % (os.getpid(), next(self._counter)),
                 args=(self, self._work_queue),
             )
+            t._effective_thread_id = self._get_next_effective_thread_id()
             t.daemon = True
             self._threads.add(t)
             t.start()
+
+    def _get_next_effective_thread_id(self):
+        # This should be used with a lock held
+        if len(self._threads) < self._max_workers:
+            next_effective_thread_id = min(self._available_effective_thread_ids)
+            self._available_effective_thread_ids.remove(next_effective_thread_id)
+            return next_effective_thread_id
+        else:
+            raise ValueError("Threadpool is full")
+
+    def _remove_thread(self, t):
+        self._threads.remove(t)
+        self._available_effective_thread_ids.add(t._effective_thread_id)
 
     def shutdown(self, wait=True, timeout=None):
         with threads_lock:
@@ -116,7 +131,7 @@ def secede(adjust=True):
     """
     thread_state.proceed = False
     with threads_lock:
-        thread_state.executor._threads.remove(threading.current_thread())
+        thread_state.executor._remove_thread(threading.current_thread())
         if adjust:
             thread_state.executor._adjust_thread_count()
 
