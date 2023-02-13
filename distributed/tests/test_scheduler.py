@@ -40,7 +40,13 @@ from distributed.compatibility import LINUX, MACOS, WINDOWS, PeriodicCallback
 from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps, loads
-from distributed.scheduler import KilledWorker, MemoryState, Scheduler, WorkerState
+from distributed.scheduler import (
+    KilledWorker,
+    MemoryState,
+    Scheduler,
+    TaskState,
+    WorkerState,
+)
 from distributed.utils import TimeoutError
 from distributed.utils_test import (
     NO_AMM,
@@ -4002,6 +4008,17 @@ async def test_TaskState__to_dict(c, s):
     assert isinstance(tasks["z"], dict)
     assert tasks["x"]["dependents"] == ["<TaskState 'y' waiting>"]
     assert tasks["y"]["dependencies"] == ["<TaskState 'x' queued>"]
+
+
+def test_TaskState_hash_eq_by_identity():
+    "See https://github.com/dask/distributed/issues/7510"
+    ts1 = TaskState("ts", None, "released")
+    ts2 = TaskState("ts", None, "released")
+    assert ts1 != ts2
+    assert hash(ts1) != hash(ts2)
+
+    assert ts1 == ts1
+    assert hash(ts1) == hash(ts1)
 
 
 def _verify_cluster_state(
