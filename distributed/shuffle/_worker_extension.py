@@ -20,7 +20,7 @@ from dask.array.rechunk import _old_to_new, intersect_chunks
 from dask.utils import parse_bytes
 
 from distributed.core import PooledRPCCall
-from distributed.protocol import to_serialize
+from distributed.protocol import deserialize, serialize, to_serialize
 from distributed.shuffle._arrow import (
     convert_partition,
     deserialize_schema,
@@ -381,7 +381,9 @@ class ArrayRechunkRun(ShuffleRun[tuple[NIndex, NIndex], NIndex, "np.ndarray"]):
     ) -> dict[NIndex, list[bytes]]:
         result = defaultdict(list)
         for d in data:
-            result[d[0][0]].append(msgpack.packb((d[0][1], d[1])))
+            result[d[0][0]].append(
+                msgpack.packb((d[0][1], serialize(to_serialize(d[1]))))
+            )
         return result
 
     async def add_partition(self, data: np.ndarray, input_partition: NIndex) -> int:
@@ -390,22 +392,13 @@ class ArrayRechunkRun(ShuffleRun[tuple[NIndex, NIndex], NIndex, "np.ndarray"]):
             raise RuntimeError(f"Cannot add more partitions to shuffle {self}")
 
         def _() -> dict[str, list[tuple[tuple[NIndex, NIndex], bytes]]]:
-            import msgpack
 
             out: dict[str, list[tuple[tuple[NIndex, NIndex], bytes]]] = defaultdict(
                 list
             )
             for new_index, subdim_index, slices in self._mapping[input_partition]:
                 out[self.worker_for[new_index]].append(
-                    (
-                        (new_index, subdim_index),
-                        msgpack.packb(
-                            {
-                                "shape": data[slices].shape,
-                                "payload": data[slices].tobytes(),
-                            }
-                        ),
-                    )
+                    ((new_index, subdim_index), data[slices])
                 )
             return out
 
@@ -1032,16 +1025,15 @@ def assemble_chunk(data: bytes, subdims: tuple[int, ...]) -> np.ndarray:
     unpacker = msgpack.Unpacker(file)
     rec_cat_arg = np.empty(subdims, dtype="O")
     for subindex, subarray in unpacker:
-        usubarray = msgpack.unpackb(subarray)
-        rec_cat_arg[tuple(subindex)] = usubarray
+        rec_cat_arg[tuple(subindex)] = deserialize(*subarray)
     del data
     del file
     del unpacker
     arrs = rec_cat_arg.tolist()
-    for index in np.ndindex(rec_cat_arg.shape):
-        tarrs = arrs
-        for i in index[:-1]:
-            tarrs = tarrs[i]
-        arr = tarrs[index[-1]]
-        tarrs[index[-1]] = np.frombuffer(arr["payload"]).reshape(arr["shape"])
+    # for index in np.ndindex(rec_cat_arg.shape):
+    #     tarrs = arrs
+    #     for i in index[:-1]:
+    #         tarrs = tarrs[i]
+    #     arr = tarrs[index[-1]]
+    #     tarrs[index[-1]] = np.frombuffer(arr["payload"]).reshape(arr["shape"])
     return concatenate3(arrs)
