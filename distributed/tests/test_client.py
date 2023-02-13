@@ -5035,6 +5035,7 @@ def test_quiet_client_close(loop):
                 or "heartbeat from unregistered worker" in line
                 or "unaware of this worker" in line
                 or "garbage" in line
+                or "Tried retiring worker" in line
                 or set(line) == {"-"}
             ), line
 
