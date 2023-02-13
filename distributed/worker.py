@@ -2866,6 +2866,8 @@ async def get_data_from_worker(
             else:
                 if status == "OK":
                     await comm.write("OK")
+                elif status == "busy":
+                    raise ValueError("Retry in a little while", response)
             return response
         finally:
             rpc.reuse(worker, comm)
