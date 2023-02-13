@@ -1096,6 +1096,28 @@ class TaskGroup:
         """
         return recursive_to_dict(self, exclude=exclude, members=True)
 
+    @property
+    def rootish(self):
+        """
+        Whether this ``TaskGroup`` is root or root-like.
+
+        Root-ish tasks are part of a group that's typically considered to be at
+        the root or near the root of the graph and we expect it to be
+        responsible for the majority of data production.
+
+        Similar fan-out like patterns can also be found in intermediate graph
+        layers.
+
+        Most scheduler heuristics should be using
+        `Scheduler.is_rootish_no_restrictions` if they need to guarantee that a
+        task doesn't have any restrictions and can be run anywhere
+        """
+        return (
+            len(self) >= 5
+            and len(self.dependencies) < 5
+            and sum(map(len, self.dependencies)) < 5
+        )
+
 
 class TaskState:
     """A simple object holding information about a task.
@@ -2039,6 +2061,7 @@ class SchedulerState:
         """
         if self.validate:
             # See root-ish-ness note below in `decide_worker_rootish_queuing_enabled`
+            assert self._is_rootish_no_restrictions(ts)
             assert math.isinf(self.WORKER_SATURATION)
 
         pool = self.idle.values() if self.idle else self.running
@@ -2216,7 +2239,7 @@ class SchedulerState:
         """
         ts = self.tasks[key]
 
-        if self.is_rootish(ts):
+        if self._is_rootish_no_restrictions(ts):
             # NOTE: having two root-ish methods is temporary. When the feature flag is
             # removed, there should only be one, which combines co-assignment and
             # queuing. Eventually, special-casing root tasks might be removed entirely,
@@ -2822,13 +2845,8 @@ class SchedulerState:
     # Assigning Tasks to Workers #
     ##############################
 
-    def is_rootish(self, ts: TaskState) -> bool:
-        """
-        Whether ``ts`` is a root or root-like task.
-
-        Root-ish tasks are part of a group that's much larger than the cluster,
-        and have few or no dependencies.
-        """
+    def _is_rootish_no_restrictions(self, ts: TaskState) -> bool:
+        """See also ``TaskGroup.rootish``"""
         if (
             ts.resource_restrictions
             or ts.worker_restrictions
@@ -2836,8 +2854,7 @@ class SchedulerState:
             or ts.actor
         ):
             return False
-        tg = ts.group
-        return len(tg.dependencies) < 5 and sum(map(len, tg.dependencies)) < 5
+        return ts.group.rootish
 
     def check_idle_saturated(self, ws: WorkerState, occ: float = -1.0) -> None:
         """Update the status of the idle and saturated state

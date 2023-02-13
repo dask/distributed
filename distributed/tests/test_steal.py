@@ -593,9 +593,6 @@ async def test_dont_steal_executing_tasks_2(c, s, a, b):
     assert not b.state.executing_count
 
 
-@pytest.mark.skip(
-    reason="submitted tasks are root-ish. Stealing works very differently for root-ish tasks. If queued, stealing is disabled entirely"
-)
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1)] * 10,
