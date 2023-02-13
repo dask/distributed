@@ -3885,8 +3885,14 @@ class Scheduler(SchedulerState, ServerNode):
                 await self.listen("tcp://localhost:0")
             os.environ["DASK_SCHEDULER_ADDRESS"] = self.listeners[-1].contact_address
 
+        async def log_errors(func, scheduler):
+            try:
+                await func(scheduler)
+            except Exception:
+                logger.exception("Plugin call failed during scheduler.start")
+
         await asyncio.gather(
-            *[plugin.start(self) for plugin in list(self.plugins.values())]
+            *[log_errors(plugin.start, self) for plugin in list(self.plugins.values())]
         )
 
         self.start_periodic_callbacks()

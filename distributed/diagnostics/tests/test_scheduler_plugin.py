@@ -243,3 +243,26 @@ async def test_closing_errors_ok(c, s, a, b, capsys):
     assert "BEFORE_CLOSE" in text
     text = logger.getvalue()
     assert "AFTER_CLOSE" in text
+
+
+@gen_test()
+async def test_start_errors_ok(capsys):
+    class OK(SchedulerPlugin):
+        async def start(self, scheduler):
+            print("foo")
+
+    class Bad(SchedulerPlugin):
+        async def start(self, scheduler):
+            raise RuntimeError("bar")
+
+    s = Scheduler(dashboard_address=":0", plugins=[OK(), Bad()])
+
+    with captured_logger(logging.getLogger("distributed.scheduler")) as logger:
+        await s.start()
+
+    out, _ = capsys.readouterr()
+    assert "foo" in out
+
+    text = logger.getvalue()
+    assert "RuntimeError" in text
+    assert "bar" in text
