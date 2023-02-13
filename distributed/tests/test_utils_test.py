@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import pathlib
 import signal
@@ -34,6 +35,7 @@ from distributed.utils_test import (
     _LockedCommPool,
     _UnhashableCallable,
     assert_story,
+    captured_handler,
     captured_logger,
     check_process_leak,
     check_thread_leak,
@@ -185,6 +187,55 @@ async def test_gen_cluster_tls(e, s, a, b):
         assert isinstance(w, Worker)
         assert w.address.startswith("tls://")
     assert set(s.workers) == {w.address for w in [a, b]}
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        # old style
+        {"logging": {"distributed.scheduler": "debug"}},
+        # new style, in case you're feeling masochistic
+        {
+            "logging": {
+                "version": 1,
+                "loggers": {
+                    "distributed.scheduler": {"level": "DEBUG", "handlers": ["stream"]}
+                },
+                "handlers": {
+                    "stream": {
+                        "class": "logging.StreamHandler",
+                        "stream": "ext://sys.stdout",
+                    }
+                },
+            }
+        },
+    ],
+)
+def test_gen_cluster_custom_logging(config):
+    @gen_cluster(client=True, config=config)
+    async def test_func(c, s, a, b):
+        logger = logging.getLogger("distributed.scheduler")
+        handlers = [l for l in logger.handlers if isinstance(l, logging.StreamHandler)]
+        assert len(handlers) == 1
+        with captured_handler(handlers[0]) as stream:
+            await c.submit(inc, 1)
+
+        # NOTE: relies on transitions being logged in scheduler at debug level
+        assert "Transitioned" in stream.getvalue()
+
+    test_func()
+
+
+@gen_cluster(client=True, config={"logging.distributed": "debug"})
+async def test_gen_cluster_custom_logging_global(c, s, a, b):
+    logger = logging.getLogger("distributed")
+    handlers = [l for l in logger.handlers if isinstance(l, logging.StreamHandler)]
+    assert len(handlers) == 1
+    with captured_handler(handlers[0]) as stream:
+        await c.submit(inc, 1)
+
+    # NOTE: relies on transitions being logged in scheduler at debug level
+    assert "Transitioned" in stream.getvalue()
 
 
 @pytest.mark.xfail(
