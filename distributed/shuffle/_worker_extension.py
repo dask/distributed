@@ -381,7 +381,7 @@ class ArrayRechunkRun(ShuffleRun[tuple[NIndex, NIndex], NIndex, "np.ndarray"]):
     ) -> dict[NIndex, list[bytes]]:
         result = defaultdict(list)
         for d in data:
-            result[d[0][0]].append(pickle.dumps((d[0][1], d[1])))
+            result[d[0][0]].append(d[1])
         return result
 
     async def add_partition(self, data: np.ndarray, input_partition: NIndex) -> int:
@@ -396,7 +396,10 @@ class ArrayRechunkRun(ShuffleRun[tuple[NIndex, NIndex], NIndex, "np.ndarray"]):
             )
             for new_index, subdim_index, slices in self._mapping[input_partition]:
                 out[self.worker_for[new_index]].append(
-                    ((new_index, subdim_index), data[slices])
+                    (
+                        (new_index, subdim_index),
+                        pickle.dumps((subdim_index, data[slices])),
+                    )
                 )
             return out
 
