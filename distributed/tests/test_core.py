@@ -841,7 +841,6 @@ async def test_connection_pool_outside_cancellation(monkeypatch):
 
 @gen_test()
 async def test_connection_pool_respects_limit():
-
     limit = 5
 
     async def ping(comm, delay=0.01):
@@ -1088,7 +1087,6 @@ async def test_close_properly():
     ip = get_ip()
     rpc_addr = f"tcp://{ip}:{ports[-1]}"
     async with rpc(rpc_addr) as remote:
-
         comm = await remote.live_comm()
         await comm.write({"op": "sleep"})
         await sleep_started.wait()
@@ -1204,7 +1202,6 @@ async def test_server_comms_mark_active_handlers():
 @pytest.mark.parametrize("close_via_rpc", [True, False])
 @gen_test()
 async def test_close_fast_without_active_handlers(close_via_rpc):
-
     server = await Server({})
     server.handlers["terminate"] = server.close
     await server.listen(0)

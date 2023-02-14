@@ -889,7 +889,6 @@ async def test_log_errors():
 
     # Use the logger of the caller module
     with captured_logger("test_utils") as caplog:
-
         # Context manager
         with log_errors():
             pass
@@ -997,7 +996,6 @@ def test_load_json_robust_timeout(tmpdir):
         json_load_robust(path, timeout=0.01)
 
     with ThreadPoolExecutor() as tpe:
-
         fut = tpe.submit(json_load_robust, path, timeout=30)
         import json
 

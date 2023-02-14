@@ -93,7 +93,6 @@ def _worker(executor_reference, work_queue):
 
 
 class ThreadPoolExecutor(_base.Executor):
-
     # Used to assign unique thread names when thread_name_prefix is not supplied.
     _counter = itertools.count()
 

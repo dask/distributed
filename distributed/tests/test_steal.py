@@ -1019,7 +1019,6 @@ async def test_balance_with_longer_task(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_blocklist_shuffle_split(c, s, a, b):
-
     pd = pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
     npart = 10

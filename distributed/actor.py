@@ -164,7 +164,6 @@ class Actor(WrappedKey):
         return sorted(o)
 
     def __getattr__(self, key):
-
         if self._future and self._future.status not in ("finished", "pending"):
             raise ValueError(
                 "Worker holding Actor was lost.  Status: " + self._future.status

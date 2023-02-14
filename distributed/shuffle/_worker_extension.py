@@ -107,7 +107,6 @@ class ShuffleRun:
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
     ):
-
         import pandas as pd
 
         self.scheduler = scheduler

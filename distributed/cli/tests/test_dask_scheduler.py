@@ -78,7 +78,6 @@ def test_dashboard(loop):
     with popen(
         ["dask", "scheduler", "--host", f"127.0.0.1:{port}"],
     ):
-
         with Client(f"127.0.0.1:{port}", loop=loop) as c:
             dashboard_port = _get_dashboard_port(c)
 

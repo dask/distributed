@@ -514,7 +514,9 @@ class Nanny(ServerNode):
     def _on_worker_exit_sync(self, exitcode):
         try:
             self._ongoing_background_tasks.call_soon(self._on_worker_exit, exitcode)
-        except AsyncTaskGroupClosedError:  # Async task group has already been closed, so the nanny is already clos(ed|ing).
+        except (
+            AsyncTaskGroupClosedError
+        ):  # Async task group has already been closed, so the nanny is already clos(ed|ing).
             pass
 
     @log_errors

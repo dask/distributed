@@ -153,7 +153,6 @@ async def test_worker_stream_died_during_comm(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_flight_to_executing_via_cancelled_resumed(c, s, b):
-
     block_get_data = asyncio.Lock()
     block_compute = Lock()
     enter_get_data = asyncio.Event()

@@ -297,7 +297,6 @@ class FlakyConnectionPool(ConnectionPool):
 @gen_cluster(client=True)
 async def test_retry_acquire(c, s, a, b):
     with dask.config.set({"distributed.comm.retry.count": 1}):
-
         pool = await FlakyConnectionPool(failing_connections=1)
 
         semaphore = await Semaphore(
@@ -440,7 +439,6 @@ async def test_timeout_zero(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_getvalue(c, s, a, b):
-
     sem = await Semaphore()
 
     assert await sem.get_value() == 0
