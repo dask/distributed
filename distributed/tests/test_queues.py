@@ -202,7 +202,7 @@ async def test_Future_knows_status_immediately(c, s, a, b):
 
         future2 = await q2.get()
         assert future2.status == "error"
-        with pytest.raises(Exception):
+        with pytest.raises(ZeroDivisionError):
             await future2
 
         start = time()

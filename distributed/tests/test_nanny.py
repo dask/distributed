@@ -554,9 +554,8 @@ async def test_worker_start_exception(s):
 @gen_cluster(nthreads=[])
 async def test_failure_during_worker_initialization(s):
     with captured_logger(logger="distributed.nanny", level=logging.WARNING) as logs:
-        with pytest.raises(Exception):
-            async with Nanny(s.address, foo="bar") as n:
-                await n
+        with pytest.raises(RuntimeError):
+            await Nanny(s.address, foo="bar")
     assert "Restarting worker" not in logs.getvalue()
 
 

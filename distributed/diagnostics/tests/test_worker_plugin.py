@@ -112,8 +112,11 @@ async def test_normal_task_transitions_called(c, s, w):
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
 async def test_failing_task_transitions_called(c, s, w):
+    class CustomError(Exception):
+        pass
+
     def failing(x):
-        raise Exception()
+        raise CustomError()
 
     expected_notifications = [
         {"key": "task", "start": "released", "finish": "waiting"},
@@ -128,7 +131,7 @@ async def test_failing_task_transitions_called(c, s, w):
 
     await c.register_worker_plugin(plugin)
 
-    with pytest.raises(Exception):
+    with pytest.raises(CustomError):
         await c.submit(failing, 1, key="task")
 
 

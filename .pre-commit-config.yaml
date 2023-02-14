@@ -12,7 +12,7 @@ repos:
       - id: isort
         language_version: python3
   - repo: https://github.com/asottile/pyupgrade
-    rev: v3.2.2
+    rev: v3.3.1
     hooks:
       - id: pyupgrade
         args:
@@ -26,14 +26,14 @@ repos:
         args:
           - --target-version=py38
   - repo: https://github.com/pycqa/flake8
-    rev: 5.0.4
+    rev: 6.0.0
     hooks:
       - id: flake8
         language_version: python3
         additional_dependencies:
         # NOTE: autoupdate does not pick up flake8-bugbear since it is a transitive
         #  dependency. Make sure to update flake8-bugbear manually on a regular basis.
-          - flake8-bugbear==22.9.23
+          - flake8-bugbear==23.2.13
   - repo: https://github.com/codespell-project/codespell
     rev: v2.2.2
     hooks:

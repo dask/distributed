@@ -100,7 +100,7 @@ def test_dashboard(loop):
                     raise
                 sleep(0.1)
 
-    with pytest.raises(Exception):
+    with pytest.raises(requests.ConnectionError):
         requests.get(f"http://127.0.0.1:{dashboard_port}/status/")
 
 
@@ -128,7 +128,8 @@ def test_dashboard_non_standard_ports(loop):
             except Exception:
                 sleep(0.1)
                 assert time() < start + 20
-    with pytest.raises(Exception):
+
+    with pytest.raises(requests.ConnectionError):
         requests.get(f"http://localhost:{port2}/status/")
 
 
@@ -152,7 +153,7 @@ def test_multiple_protocols(loop):
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 def test_dashboard_allowlist(loop):
     pytest.importorskip("bokeh")
-    with pytest.raises(Exception):
+    with pytest.raises(requests.ConnectionError):
         requests.get("http://localhost:8787/status/").ok
 
     port = open_port()
