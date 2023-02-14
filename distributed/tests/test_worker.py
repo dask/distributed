@@ -2287,7 +2287,6 @@ async def test_worker_client_closes_if_created_on_worker_one_worker(s, a):
 @gen_cluster()
 async def test_worker_client_closes_if_created_on_worker_last_worker_alive(s, a, b):
     async with Client(s.address, set_as_default=False, asynchronous=True) as c:
-
         with pytest.raises(ValueError):
             default_client()
 
@@ -2768,7 +2767,6 @@ async def test_hold_on_to_replicas(c, s, *workers):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_forget_dependents_after_release(c, s, a):
-
     fut = c.submit(inc, 1, key="f-1")
     fut2 = c.submit(inc, fut, key="f-2")
 

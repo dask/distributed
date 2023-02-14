@@ -428,7 +428,6 @@ class WorkStealing(SchedulerPlugin):
                 if not potential_thieves:
                     break
                 for victim in list(potential_victims):
-
                     stealable = self.stealable[victim.address][level]
                     if not stealable or not potential_thieves:
                         continue

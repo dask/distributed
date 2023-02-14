@@ -954,7 +954,6 @@ def gen_cluster(
                 workers = []
                 s = False
                 try:
-
                     for _ in range(60):
                         try:
                             s, ws = await start_cluster(

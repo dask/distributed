@@ -325,7 +325,6 @@ class MyServer(Server):
 
 @gen_test()
 async def test_locked_comm_drop_in_replacement(loop):
-
     async with MyServer({}) as a, await MyServer({}) as b:
         await a.listen(0)
 
@@ -354,7 +353,6 @@ async def test_locked_comm_drop_in_replacement(loop):
 
 @gen_test()
 async def test_locked_comm_intercept_read(loop):
-
     async with MyServer({}) as a, MyServer({}) as b:
         await a.listen(0)
         await b.listen(0)
@@ -383,7 +381,6 @@ async def test_locked_comm_intercept_read(loop):
 
 @gen_test()
 async def test_locked_comm_intercept_write(loop):
-
     async with MyServer({}) as a, MyServer({}) as b:
         await a.listen(0)
         await b.listen(0)

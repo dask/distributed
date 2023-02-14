@@ -1338,7 +1338,6 @@ class Worker(BaseWorker, ServerNode):
     #############
 
     async def start_unsafe(self):
-
         await super().start_unsafe()
 
         enable_gc_diagnosis()
@@ -1984,7 +1983,6 @@ class Worker(BaseWorker, ServerNode):
         cause: TaskState,
         worker: str,
     ) -> None:
-
         total_bytes = sum(self.state.tasks[key].get_nbytes() for key in data)
 
         cause.startstops.append(

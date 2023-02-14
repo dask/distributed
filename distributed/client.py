@@ -1797,7 +1797,6 @@ class Client(SyncMethodMixin):
         pure=None,
         **kwargs,
     ):
-
         """Submit a function application to the scheduler
 
         Parameters

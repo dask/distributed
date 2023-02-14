@@ -2660,7 +2660,6 @@ class TaskGroupGraph(DashboardComponent):
 
     @without_property_validation
     def update(self):
-
         if self.scheduler.transition_counter == self.old_counter:
             return
         self.old_counter = self.scheduler.transition_counter
@@ -2712,7 +2711,6 @@ class TaskGroupGraph(DashboardComponent):
         durations = set()
         nbytes = set()
         for tg in self.scheduler.task_groups.values():
-
             if tg.duration and tg.nbytes_total:
                 durations.add(tg.duration)
                 nbytes.add(tg.nbytes_total)
@@ -2724,7 +2722,6 @@ class TaskGroupGraph(DashboardComponent):
 
         box_dim = {}
         for key, tg in self.scheduler.task_groups.items():
-
             comp_tasks = (
                 tg.states["released"] + tg.states["memory"] + tg.states["erred"]
             )
@@ -2738,7 +2735,6 @@ class TaskGroupGraph(DashboardComponent):
                 and len(durations) > 1
                 and len(nbytes) > 1
             ):
-
                 # scale duration (width)
                 width_box = self.compute_size(
                     tg.duration / comp_tasks * tot_tasks,

@@ -187,7 +187,6 @@ def _unpack_remotedata_inner(
         if not o:
             return o
         if type(o[0]) is SubgraphCallable:
-
             # Unpack futures within the arguments of the subgraph callable
             futures: set[WrappedKey] = set()
             args = tuple(_unpack_remotedata_inner(i, byte_keys, futures) for i in o[1:])
