@@ -4,7 +4,6 @@ import abc
 import contextlib
 import itertools
 import logging
-import math
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Iterable
@@ -297,12 +296,11 @@ def get_worker_for(output_partition: int, workers: list[str], npartitions: int) 
 def get_worker_for_chunk(
     chunk: tuple[int, ...], workers: list[str], shape: Iterable[int]
 ) -> str:
-    nchunks = math.prod(shape)
     multiplier = 1
     flat_index = 0
 
     for i, n in zip(chunk, shape):
         flat_index += i * multiplier
         multiplier *= n
-    i = len(workers) * flat_index // nchunks
+    i = (flat_index * 12289) % len(workers)
     return workers[i]
