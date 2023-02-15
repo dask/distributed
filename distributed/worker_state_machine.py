@@ -2397,11 +2397,14 @@ class WorkerState:
         )
 
     def _transition_released_memory(
-        self, ts: TaskState, value: object, *, stimulus_id: str
+        self, ts: TaskState, value: object, run_id: int, *, stimulus_id: str
     ) -> RecsInstrs:
-        """This transition is triggered by scatter()"""
+        """This transition is triggered by scatter().
+        Do not send any message back to the scheduler, because the scheduler doesn't
+        know this key exists yet.
+        """
         return self._transition_to_memory(
-            ts, value, "add-keys", run_id=RUN_ID_SENTINEL, stimulus_id=stimulus_id
+            ts, value, False, run_id=RUN_ID_SENTINEL, stimulus_id=stimulus_id
         )
 
     def _transition_flight_memory(
@@ -2445,7 +2448,7 @@ class WorkerState:
         self,
         ts: TaskState,
         value: object,
-        msg_type: Literal["add-keys", "task-finished"],
+        msg_type: Literal[False, "add-keys", "task-finished"],
         run_id: int,
         *,
         stimulus_id: str,
@@ -2461,7 +2464,7 @@ class WorkerState:
         # memory on another worker, and won't trigger transitions.
         if msg_type == "add-keys":
             instrs.append(AddKeysMsg(keys=[ts.key], stimulus_id=stimulus_id))
-        else:
+        elif msg_type == "task-finished":
             assert msg_type == "task-finished"
             assert run_id != RUN_ID_SENTINEL
             instrs.append(
@@ -2721,22 +2724,13 @@ class WorkerState:
         for key, value in ev.data.items():
             try:
                 ts = self.tasks[key]
-                recommendations[ts] = ("memory", value, RUN_ID_SENTINEL)
             except KeyError:
                 self.tasks[key] = ts = TaskState(key)
 
-                try:
-                    recs, instrs = self._put_key_in_memory(
-                        ts, value, stimulus_id=ev.stimulus_id
-                    )
-                except Exception as e:
-                    recs = {ts: tuple(error_message(e).values())}
-                    instrs = []
-
-                recommendations.update(recs)
-                instructions.extend(instrs)
-
-            self.log.append((key, "receive-from-scatter", ev.stimulus_id, time()))
+            recommendations[ts] = ("memory", value, RUN_ID_SENTINEL)
+            self.log.append(
+                (key, "receive-from-scatter", ts.state, ev.stimulus_id, time())
+            )
 
         if ev.report:
             instructions.append(

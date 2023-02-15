@@ -168,8 +168,9 @@ def test_WorkerState__to_dict(ws):
             ["x", "released", "fetch", "fetch", {}, "s1"],
             ["gather-dependencies", "127.0.0.1:1235", ["x"], "s1"],
             ["x", "fetch", "flight", "flight", {}, "s1"],
-            ["y", "put-in-memory", "s2"],
             ["y", "receive-from-scatter", "s2"],
+            ["y", "put-in-memory", "s2"],
+            ["y", "released", "memory", "memory", {}, "s2"],
         ],
         "long_running": [],
         "missing_dep_flight": [],
@@ -207,7 +208,7 @@ def test_WorkerState__to_dict(ws):
                 "state": "memory",
             },
         },
-        "transition_counter": 2,
+        "transition_counter": 3,
     }
     assert actual == expect
 
