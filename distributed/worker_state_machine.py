@@ -2331,9 +2331,7 @@ class WorkerState:
     ) -> RecsInstrs:
         """This transition is triggered by scatter().
         This transition does not send any message back to the scheduler, because the
-        scheduler doesn't know this key exists yet. The UpdateDataEvent has a "report"
-        flag, which is True exclusively in a few unit tests, which reintroduces a
-        add-data message.
+        scheduler doesn't know this key exists yet.
         """
         return self._transition_to_memory(
             ts, value, False, run_id=RUN_ID_SENTINEL, stimulus_id=stimulus_id
@@ -2397,9 +2395,9 @@ class WorkerState:
         2. transfer from another worker terminated successfully. Initial state is
            - flight
            - resumed(prev=flight next=waiting)
-        3. scatter. In this case *normally* the key will be in released state, but it's
-           possible to have race conditions where the task is in any other state; these
-           are not well tested and are expected to misbehave.
+        3. scatter. In this case *normally* the task is in released state, but nothing
+           stops a client to scatter a key while is in any other state; these race
+           conditions are not well tested and are expected to misbehave.
         """
         recommendations: Recs = {}
         instructions: Instructions = []
@@ -2416,12 +2414,19 @@ class WorkerState:
             try:
                 self.data[ts.key] = value
             except Exception as e:
+                # distributed.worker.memory.target is enabled and the value is
+                # individually larger than target * memory_limit.
+                # Inserting this task in the SpillBuffer caused it to immediately
+                # spilled to disk, and it failed to serialize.
+                # Third-party MutableMappings (dask-cuda etc.) may have other use cases
+                # for this.
                 msg = error_message(e)
                 return {ts: tuple(msg.values())}, []
 
             stop = time()
             if stop - start > 0.005:
-                # This happens when the SpillBuffer has spilled other tasks to disk.
+                # The SpillBuffer has spilled this task (if larger than target) or other
+                # tasks (if smaller than target) to disk.
                 # Alternatively, a third-party MutableMapping may have spent time in
                 # other activities, e.g. transferring data between GPGPU and system
                 # memory.
