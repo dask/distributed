@@ -1020,9 +1020,8 @@ class StealRequestEvent(StateMachineEvent):
 
 @dataclass
 class UpdateDataEvent(StateMachineEvent):
-    __slots__ = ("data", "report")
+    __slots__ = ("data",)
     data: dict[str, object]
-    report: bool
 
     def to_loggable(self, *, handled: float) -> StateMachineEvent:
         out = copy(self)
@@ -2400,8 +2399,10 @@ class WorkerState:
         self, ts: TaskState, value: object, run_id: int, *, stimulus_id: str
     ) -> RecsInstrs:
         """This transition is triggered by scatter().
-        Do not send any message back to the scheduler, because the scheduler doesn't
-        know this key exists yet.
+        This transition does not send any message back to the scheduler, because the
+        scheduler doesn't know this key exists yet. The UpdateDataEvent has a "report"
+        flag, which is True exclusively in a few unit tests, which reintroduces a
+        add-data message.
         """
         return self._transition_to_memory(
             ts, value, False, run_id=RUN_ID_SENTINEL, stimulus_id=stimulus_id
@@ -2720,7 +2721,6 @@ class WorkerState:
     @_handle_event.register
     def _handle_update_data(self, ev: UpdateDataEvent) -> RecsInstrs:
         recommendations: Recs = {}
-        instructions: Instructions = []
         for key, value in ev.data.items():
             try:
                 ts = self.tasks[key]
@@ -2731,13 +2731,7 @@ class WorkerState:
             self.log.append(
                 (key, "receive-from-scatter", ts.state, ev.stimulus_id, time())
             )
-
-        if ev.report:
-            instructions.append(
-                AddKeysMsg(keys=list(ev.data), stimulus_id=ev.stimulus_id)
-            )
-
-        return recommendations, instructions
+        return recommendations, []
 
     @_handle_event.register
     def _handle_free_keys(self, ev: FreeKeysEvent) -> RecsInstrs:

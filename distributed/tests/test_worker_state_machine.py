@@ -142,9 +142,7 @@ def test_WorkerState__to_dict(ws):
             who_has={"x": ["127.0.0.1:1235"]}, nbytes={"x": 123}, stimulus_id="s1"
         )
     )
-    ws.handle_stimulus(
-        UpdateDataEvent(data={"y": object()}, report=False, stimulus_id="s2")
-    )
+    ws.handle_stimulus(UpdateDataEvent(data={"y": object()}, stimulus_id="s2"))
 
     actual = recursive_to_dict(ws)
     # Remove timestamps
@@ -168,7 +166,7 @@ def test_WorkerState__to_dict(ws):
             ["x", "released", "fetch", "fetch", {}, "s1"],
             ["gather-dependencies", "127.0.0.1:1235", ["x"], "s1"],
             ["x", "fetch", "flight", "flight", {}, "s1"],
-            ["y", "receive-from-scatter", "s2"],
+            ["y", "receive-from-scatter", "released", "s2"],
             ["y", "put-in-memory", "s2"],
             ["y", "released", "memory", "memory", {}, "s2"],
         ],
@@ -187,7 +185,6 @@ def test_WorkerState__to_dict(ws):
             {
                 "cls": "UpdateDataEvent",
                 "data": {"y": None},
-                "report": False,
                 "stimulus_id": "s2",
             },
         ],
@@ -228,7 +225,7 @@ def test_WorkerState_pickle(ws):
             who_has={"x": ["127.0.0.1:1235"]}, nbytes={"x": 123}, stimulus_id="s1"
         )
     )
-    ws.handle_stimulus(UpdateDataEvent(data={"y": 123}, report=False, stimulus_id="s"))
+    ws.handle_stimulus(UpdateDataEvent(data={"y": 123}, stimulus_id="s"))
     ws2 = pickle.loads(pickle.dumps(ws))
     assert ws2.tasks.keys() == {"x", "y"}
     assert ws2.data == {"y": 123}
@@ -428,7 +425,6 @@ def test_updatedata_to_dict():
     """The potentially very large UpdateDataEvent.data is not stored in the log"""
     ev = UpdateDataEvent(
         data={"x": "foo", "y": "bar"},
-        report=True,
         stimulus_id="test",
     )
     ev2 = ev.to_loggable(handled=11.22)
@@ -438,7 +434,6 @@ def test_updatedata_to_dict():
     assert d == {
         "cls": "UpdateDataEvent",
         "data": {"x": None, "y": None},
-        "report": True,
         "stimulus_id": "test",
         "handled": 11.22,
     }
@@ -1615,9 +1610,7 @@ def test_worker_nbytes(ws_with_running_task):
     assert ws.nbytes == 12 + 13
 
     # released -> memory (scatter)
-    ws.handle_stimulus(
-        UpdateDataEvent(data={"z": "bar"}, report=False, stimulus_id="s3")
-    )
+    ws.handle_stimulus(UpdateDataEvent(data={"z": "bar"}, stimulus_id="s3"))
     assert ws.nbytes == 12 + 13 + sizeof("bar")
 
     # actors
