@@ -3501,11 +3501,11 @@ class WorkerState:
                 # dependency can still be in `memory` before GC grabs it...?
                 # Might need better bookkeeping
                 assert self.tasks[dep.key] is dep
-                assert ts in dep.dependents, ts
+                assert ts in dep.dependents, self.story(ts)
 
             for ts_wait in ts.waiting_for_data:
                 assert self.tasks[ts_wait.key] is ts_wait
-                assert ts_wait.state in WAITING_FOR_DATA, ts_wait
+                assert ts_wait.state in WAITING_FOR_DATA, self.story(ts_wait)
 
         for worker, keys in self.has_what.items():
             assert worker != self.address
@@ -3518,30 +3518,30 @@ class WorkerState:
         for worker, tss in self.data_needed.items():
             for ts in tss:
                 fetch_tss.add(ts)
-                assert ts.state == "fetch"
-                assert worker in ts.who_has
+                assert ts.state == "fetch", self.story(ts)
+                assert worker in ts.who_has, f"{ts}; {ts.who_has=}"
         assert len(fetch_tss) == self.fetch_count
 
         for ts in self.missing_dep_flight:
-            assert ts.state == "missing"
+            assert ts.state == "missing", self.story(ts)
         for ts in self.ready:
-            assert ts.state == "ready"
+            assert ts.state == "ready", self.story(ts)
         for ts in self.constrained:
-            assert ts.state == "constrained"
+            assert ts.state == "constrained", self.story(ts)
         for ts in self.executing:
             assert ts.state == "executing" or (
                 ts.state in ("cancelled", "resumed") and ts.previous == "executing"
-            ), ts
+            ), self.story(ts)
         for ts in self.long_running:
             assert ts.state == "long-running" or (
                 ts.state in ("cancelled", "resumed") and ts.previous == "long-running"
-            ), ts
+            ), self.story(ts)
         for ts in self.in_flight_tasks:
             assert ts.state == "flight" or (
                 ts.state in ("cancelled", "resumed") and ts.previous == "flight"
-            ), ts
+            ), self.story(ts)
         for ts in self.waiting:
-            assert ts.state == "waiting"
+            assert ts.state == "waiting", self.story(ts)
 
         # Test that there aren't multiple TaskState objects with the same key in any
         # Set[TaskState]. See note in TaskState.__hash__.
@@ -3555,7 +3555,7 @@ class WorkerState:
             self.long_running,
             self.waiting,
         ):
-            assert self.tasks[ts.key] is ts
+            assert self.tasks[ts.key] is ts, f"{self.tasks[ts.key]} is not {ts}"
 
         expect_nbytes = sum(
             self.tasks[key].nbytes or 0 for key in chain(self.data, self.actors)
@@ -3563,9 +3563,9 @@ class WorkerState:
         assert self.nbytes == expect_nbytes, f"{self.nbytes=}; expected {expect_nbytes}"
 
         for key in self.data:
-            assert key in self.tasks, key
+            assert key in self.tasks, self.story(key)
         for key in self.actors:
-            assert key in self.tasks, key
+            assert key in self.tasks, self.story(key)
 
         for ts in self.tasks.values():
             self.validate_task(ts)
