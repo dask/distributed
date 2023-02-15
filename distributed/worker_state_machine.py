@@ -1798,75 +1798,6 @@ class WorkerState:
             stimulus_id=stimulus_id,
         )
 
-    def _put_key_in_memory(
-        self, ts: TaskState, value: object, *, stimulus_id: str
-    ) -> RecsInstrs:
-        """
-        Put a key into memory and set data related task state attributes.
-        On success, generate recommendations for dependents.
-
-        This method does not generate any scheduler messages since this method
-        cannot distinguish whether it has to be an `add-task` or a
-        `task-finished` signal. The caller is required to generate this message
-        on success.
-
-        Raises
-        ------
-        Exception:
-            In case the data is put into the in-memory buffer and a serialization error
-            occurs during spilling, this re-raises that error. This has to be handled by
-            the caller since most callers generate scheduler messages on success (see
-            comment above) but we need to signal that this was not successful.
-
-            Can only trigger if distributed.worker.memory.target is enabled, the value
-            is individually larger than target * memory_limit, and the task is not an
-            actor.
-        """
-        if ts.key in self.data:
-            ts.state = "memory"
-            return {}, []
-
-        recommendations: Recs = {}
-        instructions: Instructions = []
-
-        if ts.key in self.actors:
-            self.actors[ts.key] = value
-        else:
-            start = time()
-            self.data[ts.key] = value
-            stop = time()
-            if stop - start > 0.005:
-                ts.startstops.append(
-                    {"action": "disk-write", "start": start, "stop": stop}
-                )
-                instructions.append(
-                    DigestMetric(
-                        # See metrics:
-                        # - disk-load-duration
-                        # - get-data-load-duration
-                        # - disk-write-target-duration
-                        # - disk-write-spill-duration
-                        name="disk-write-target-duration",
-                        value=stop - start,
-                        stimulus_id=stimulus_id,
-                    )
-                )
-
-        ts.state = "memory"
-        if ts.nbytes is None:
-            ts.nbytes = sizeof(value)
-        self.nbytes += ts.nbytes
-
-        ts.type = type(value)
-
-        for dep in ts.dependents:
-            dep.waiting_for_data.discard(ts)
-            if not dep.waiting_for_data and dep.state == "waiting":
-                recommendations[dep] = "ready"
-
-        self.log.append((ts.key, "put-in-memory", stimulus_id, time()))
-        return recommendations, instructions
-
     ###############
     # Transitions #
     ###############
@@ -2454,28 +2385,95 @@ class WorkerState:
         *,
         stimulus_id: str,
     ) -> RecsInstrs:
-        try:
-            recs, instrs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
-        except Exception as e:
-            msg = error_message(e)
-            return {ts: tuple(msg.values())}, []
+        """Insert a task's output in self.data and set the state to memory.
+        This method is the one and only place where keys are inserted in self.data.
+
+        There are three ways to get here:
+        1. task execution just terminated successfully. Initial state is one of
+           - executing
+           - long-running
+           - resumed(prev=executing next=fetch)
+           - resumed(prev=long-running next=fetch)
+        2. transfer from another worker terminated successfully. Initial state is
+           - flight
+           - resumed(prev=flight next=waiting)
+        3. scatter. In this case *normally* the key will be in released state, but it's
+           possible to have race conditions where the task is in any other state; these
+           are not well tested and are expected to misbehave.
+        """
+        recommendations: Recs = {}
+        instructions: Instructions = []
+
+        if self.validate:
+            assert ts.key not in self.data
+            assert ts.state != "memory"
+
+        if ts.key in self.actors:
+            self.actors[ts.key] = value
+        else:
+            start = time()
+
+            try:
+                self.data[ts.key] = value
+            except Exception as e:
+                msg = error_message(e)
+                return {ts: tuple(msg.values())}, []
+
+            stop = time()
+            if stop - start > 0.005:
+                # This happens when the SpillBuffer has spilled other tasks to disk.
+                # Alternatively, a third-party MutableMapping may have spent time in
+                # other activities, e.g. transferring data between GPGPU and system
+                # memory.
+                ts.startstops.append(
+                    {"action": "disk-write", "start": start, "stop": stop}
+                )
+                instructions.append(
+                    DigestMetric(
+                        # See metrics:
+                        # - disk-load-duration
+                        # - get-data-load-duration
+                        # - disk-write-target-duration
+                        # - disk-write-spill-duration
+                        name="disk-write-target-duration",
+                        value=stop - start,
+                        stimulus_id=stimulus_id,
+                    )
+                )
+
+        ts.state = "memory"
+        if ts.nbytes is None:
+            ts.nbytes = sizeof(value)
+        self.nbytes += ts.nbytes
+        ts.type = type(value)
+
+        for dep in ts.dependents:
+            dep.waiting_for_data.discard(ts)
+            if not dep.waiting_for_data and dep.state == "waiting":
+                recommendations[dep] = "ready"
+
+        self.log.append((ts.key, "put-in-memory", stimulus_id, time()))
 
         # NOTE: The scheduler's reaction to these two messages is fundamentally
         # different. Namely, add-keys is only admissible for tasks that are already in
         # memory on another worker, and won't trigger transitions.
         if msg_type == "add-keys":
-            instrs.append(AddKeysMsg(keys=[ts.key], stimulus_id=stimulus_id))
+            instructions.append(AddKeysMsg(keys=[ts.key], stimulus_id=stimulus_id))
         elif msg_type == "task-finished":
-            assert msg_type == "task-finished"
             assert run_id != RUN_ID_SENTINEL
-            instrs.append(
+            instructions.append(
                 self._get_task_finished_msg(
                     ts,
                     run_id=run_id,
                     stimulus_id=stimulus_id,
                 )
             )
-        return recs, instrs
+        else:
+            # This happens on scatter(), where the scheduler doesn't know yet that the
+            # key exists.
+            assert msg_type is False
+
+        return recommendations, instructions
 
     def _transition_released_forgotten(
         self, ts: TaskState, *, stimulus_id: str
