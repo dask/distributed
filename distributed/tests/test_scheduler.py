@@ -1698,6 +1698,8 @@ async def test_include_communication_in_occupancy(c, s, a, b):
 async def test_new_worker_with_data_rejected(s):
     w = Worker(s.address, nthreads=1)
     w.update_data(data={"x": 0})
+    assert w.state.tasks["x"].state == "memory"
+    assert w.data == {"x": 0}
 
     with captured_logger(
         "distributed.worker", level=logging.WARNING
@@ -1729,6 +1731,8 @@ async def test_worker_arrives_with_processing_data(c, s, a, b):
 
     w = Worker(s.address, nthreads=1)
     w.update_data(data={y.key: 3})
+    assert w.state.tasks[y.key].state == "memory"
+    assert w.data == {y.key: 3}
 
     with pytest.raises(RuntimeError, match="Worker failed to start"):
         await w

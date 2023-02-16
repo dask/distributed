@@ -2366,7 +2366,7 @@ class Client(SyncMethodMixin):
                     direct = True
 
         if local_worker:  # running within task
-            local_worker.update_data(data=data, report=False)
+            local_worker.update_data(data=data)
 
             await self.scheduler.update_data(
                 who_has={key: [local_worker.address] for key in data},
@@ -2390,7 +2390,7 @@ class Client(SyncMethodMixin):
                     raise ValueError("No valid workers found")
 
                 _, who_has, nbytes = await scatter_to_workers(
-                    nthreads, data2, report=False, rpc=self.rpc
+                    nthreads, data2, rpc=self.rpc
                 )
 
                 await self.scheduler.update_data(

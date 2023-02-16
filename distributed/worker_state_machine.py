@@ -1020,9 +1020,8 @@ class StealRequestEvent(StateMachineEvent):
 
 @dataclass
 class UpdateDataEvent(StateMachineEvent):
-    __slots__ = ("data", "report")
+    __slots__ = ("data",)
     data: dict[str, object]
-    report: bool
 
     def to_loggable(self, *, handled: float) -> StateMachineEvent:
         out = copy(self)
@@ -1799,75 +1798,6 @@ class WorkerState:
             stimulus_id=stimulus_id,
         )
 
-    def _put_key_in_memory(
-        self, ts: TaskState, value: object, *, stimulus_id: str
-    ) -> RecsInstrs:
-        """
-        Put a key into memory and set data related task state attributes.
-        On success, generate recommendations for dependents.
-
-        This method does not generate any scheduler messages since this method
-        cannot distinguish whether it has to be an `add-task` or a
-        `task-finished` signal. The caller is required to generate this message
-        on success.
-
-        Raises
-        ------
-        Exception:
-            In case the data is put into the in-memory buffer and a serialization error
-            occurs during spilling, this re-raises that error. This has to be handled by
-            the caller since most callers generate scheduler messages on success (see
-            comment above) but we need to signal that this was not successful.
-
-            Can only trigger if distributed.worker.memory.target is enabled, the value
-            is individually larger than target * memory_limit, and the task is not an
-            actor.
-        """
-        if ts.key in self.data:
-            ts.state = "memory"
-            return {}, []
-
-        recommendations: Recs = {}
-        instructions: Instructions = []
-
-        if ts.key in self.actors:
-            self.actors[ts.key] = value
-        else:
-            start = time()
-            self.data[ts.key] = value
-            stop = time()
-            if stop - start > 0.005:
-                ts.startstops.append(
-                    {"action": "disk-write", "start": start, "stop": stop}
-                )
-                instructions.append(
-                    DigestMetric(
-                        # See metrics:
-                        # - disk-load-duration
-                        # - get-data-load-duration
-                        # - disk-write-target-duration
-                        # - disk-write-spill-duration
-                        name="disk-write-target-duration",
-                        value=stop - start,
-                        stimulus_id=stimulus_id,
-                    )
-                )
-
-        ts.state = "memory"
-        if ts.nbytes is None:
-            ts.nbytes = sizeof(value)
-        self.nbytes += ts.nbytes
-
-        ts.type = type(value)
-
-        for dep in ts.dependents:
-            dep.waiting_for_data.discard(ts)
-            if not dep.waiting_for_data and dep.state == "waiting":
-                recommendations[dep] = "ready"
-
-        self.log.append((ts.key, "put-in-memory", stimulus_id, time()))
-        return recommendations, instructions
-
     ###############
     # Transitions #
     ###############
@@ -2397,11 +2327,14 @@ class WorkerState:
         )
 
     def _transition_released_memory(
-        self, ts: TaskState, value: object, *, stimulus_id: str
+        self, ts: TaskState, value: object, run_id: int, *, stimulus_id: str
     ) -> RecsInstrs:
-        """This transition is triggered by scatter()"""
+        """This transition is triggered by scatter().
+        This transition does not send any message back to the scheduler, because the
+        scheduler doesn't know this key exists yet.
+        """
         return self._transition_to_memory(
-            ts, value, "add-keys", run_id=RUN_ID_SENTINEL, stimulus_id=stimulus_id
+            ts, value, False, run_id=RUN_ID_SENTINEL, stimulus_id=stimulus_id
         )
 
     def _transition_flight_memory(
@@ -2445,33 +2378,107 @@ class WorkerState:
         self,
         ts: TaskState,
         value: object,
-        msg_type: Literal["add-keys", "task-finished"],
+        msg_type: Literal[False, "add-keys", "task-finished"],
         run_id: int,
         *,
         stimulus_id: str,
     ) -> RecsInstrs:
-        try:
-            recs, instrs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
-        except Exception as e:
-            msg = error_message(e)
-            return {ts: tuple(msg.values())}, []
+        """Insert a task's output in self.data and set the state to memory.
+        This method is the one and only place where keys are inserted in self.data.
+
+        There are three ways to get here:
+        1. task execution just terminated successfully. Initial state is one of
+           - executing
+           - long-running
+           - resumed(prev=executing next=fetch)
+           - resumed(prev=long-running next=fetch)
+        2. transfer from another worker terminated successfully. Initial state is
+           - flight
+           - resumed(prev=flight next=waiting)
+        3. scatter. In this case *normally* the task is in released state, but nothing
+           stops a client to scatter a key while is in any other state; these race
+           conditions are not well tested and are expected to misbehave.
+        """
+        recommendations: Recs = {}
+        instructions: Instructions = []
+
+        if self.validate:
+            assert ts.key not in self.data
+            assert ts.state != "memory"
+
+        if ts.key in self.actors:
+            self.actors[ts.key] = value
+        else:
+            start = time()
+
+            try:
+                self.data[ts.key] = value
+            except Exception as e:
+                # distributed.worker.memory.target is enabled and the value is
+                # individually larger than target * memory_limit.
+                # Inserting this task in the SpillBuffer caused it to immediately
+                # spilled to disk, and it failed to serialize.
+                # Third-party MutableMappings (dask-cuda etc.) may have other use cases
+                # for this.
+                msg = error_message(e)
+                return {ts: tuple(msg.values())}, []
+
+            stop = time()
+            if stop - start > 0.005:
+                # The SpillBuffer has spilled this task (if larger than target) or other
+                # tasks (if smaller than target) to disk.
+                # Alternatively, a third-party MutableMapping may have spent time in
+                # other activities, e.g. transferring data between GPGPU and system
+                # memory.
+                ts.startstops.append(
+                    {"action": "disk-write", "start": start, "stop": stop}
+                )
+                instructions.append(
+                    DigestMetric(
+                        # See metrics:
+                        # - disk-load-duration
+                        # - get-data-load-duration
+                        # - disk-write-target-duration
+                        # - disk-write-spill-duration
+                        name="disk-write-target-duration",
+                        value=stop - start,
+                        stimulus_id=stimulus_id,
+                    )
+                )
+
+        ts.state = "memory"
+        if ts.nbytes is None:
+            ts.nbytes = sizeof(value)
+        self.nbytes += ts.nbytes
+        ts.type = type(value)
+
+        for dep in ts.dependents:
+            dep.waiting_for_data.discard(ts)
+            if not dep.waiting_for_data and dep.state == "waiting":
+                recommendations[dep] = "ready"
+
+        self.log.append((ts.key, "put-in-memory", stimulus_id, time()))
 
         # NOTE: The scheduler's reaction to these two messages is fundamentally
         # different. Namely, add-keys is only admissible for tasks that are already in
         # memory on another worker, and won't trigger transitions.
         if msg_type == "add-keys":
-            instrs.append(AddKeysMsg(keys=[ts.key], stimulus_id=stimulus_id))
-        else:
-            assert msg_type == "task-finished"
+            instructions.append(AddKeysMsg(keys=[ts.key], stimulus_id=stimulus_id))
+        elif msg_type == "task-finished":
             assert run_id != RUN_ID_SENTINEL
-            instrs.append(
+            instructions.append(
                 self._get_task_finished_msg(
                     ts,
                     run_id=run_id,
                     stimulus_id=stimulus_id,
                 )
             )
-        return recs, instrs
+        else:
+            # This happens on scatter(), where the scheduler doesn't know yet that the
+            # key exists.
+            assert msg_type is False
+
+        return recommendations, instructions
 
     def _transition_released_forgotten(
         self, ts: TaskState, *, stimulus_id: str
@@ -2717,33 +2724,17 @@ class WorkerState:
     @_handle_event.register
     def _handle_update_data(self, ev: UpdateDataEvent) -> RecsInstrs:
         recommendations: Recs = {}
-        instructions: Instructions = []
         for key, value in ev.data.items():
             try:
                 ts = self.tasks[key]
-                recommendations[ts] = ("memory", value, RUN_ID_SENTINEL)
             except KeyError:
                 self.tasks[key] = ts = TaskState(key)
 
-                try:
-                    recs, instrs = self._put_key_in_memory(
-                        ts, value, stimulus_id=ev.stimulus_id
-                    )
-                except Exception as e:
-                    recs = {ts: tuple(error_message(e).values())}
-                    instrs = []
-
-                recommendations.update(recs)
-                instructions.extend(instrs)
-
-            self.log.append((key, "receive-from-scatter", ev.stimulus_id, time()))
-
-        if ev.report:
-            instructions.append(
-                AddKeysMsg(keys=list(ev.data), stimulus_id=ev.stimulus_id)
+            recommendations[ts] = ("memory", value, RUN_ID_SENTINEL)
+            self.log.append(
+                (key, "receive-from-scatter", ts.state, ev.stimulus_id, time())
             )
-
-        return recommendations, instructions
+        return recommendations, []
 
     @_handle_event.register
     def _handle_free_keys(self, ev: FreeKeysEvent) -> RecsInstrs:

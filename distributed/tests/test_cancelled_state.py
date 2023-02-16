@@ -1076,7 +1076,7 @@ def test_cancel_with_dependencies_in_memory(ws, release_dep, done_ev_cls):
 
     Read: https://github.com/dask/distributed/issues/6893"""
     ws.handle_stimulus(
-        UpdateDataEvent(data={"x": 1}, report=False, stimulus_id="s1"),
+        UpdateDataEvent(data={"x": 1}, stimulus_id="s1"),
         ComputeTaskEvent.dummy("y", who_has={"x": [ws.address]}, stimulus_id="s2"),
     )
     assert ws.tasks["x"].state == "memory"

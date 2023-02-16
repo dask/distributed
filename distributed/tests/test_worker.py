@@ -469,12 +469,7 @@ async def test_plugin_exception():
         with raises_with_cause(
             RuntimeError, "Worker failed to start", ValueError, "Setup failed"
         ):
-            async with Worker(
-                s.address,
-                plugins={
-                    MyPlugin(),
-                },
-            ) as w:
+            async with Worker(s.address, plugins={MyPlugin()}):
                 pass
 
 
@@ -2136,7 +2131,6 @@ async def test_worker_descopes_data(c, s, a):
     assert not C.instances
 
 
-# @pytest.mark.slow
 @gen_cluster(client=True, config=NO_AMM)
 async def test_gather_dep_one_worker_always_busy(c, s, a, b):
     # Ensure that both dependencies for H are on another worker than H itself.
@@ -2178,6 +2172,7 @@ async def test_gather_dep_one_worker_always_busy(c, s, a, b):
         # ourselves. Note that doing so means that B won't know about the existence of
         # the extra replicas until it takes the initiative to invoke scheduler.who_has.
         x.update_data({"f": 2, "g": 3})
+        s.add_keys(worker=x.address, keys=("f", "g"))
         assert await h == 5
 
 
