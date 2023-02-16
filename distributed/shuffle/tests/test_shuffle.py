@@ -997,7 +997,6 @@ async def test_restrictions(c, s, a, b):
     assert all(stringify(key) in a.data for key in y.__dask_keys__())
 
 
-@pytest.mark.skip(reason="Fails on CI with unknown cause")
 @gen_cluster(client=True)
 async def test_delete_some_results(c, s, a, b):
     df = dask.datasets.timeseries(
