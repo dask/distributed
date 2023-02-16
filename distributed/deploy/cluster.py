@@ -524,7 +524,7 @@ class Cluster(SyncMethodMixin):
 
     def __exit__(self, exc_type, exc_value, traceback):
         aw = self.close()
-        assert aw is None
+        assert aw is None, aw
 
     def __await__(self):
         return self
