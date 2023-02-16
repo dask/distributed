@@ -14,16 +14,23 @@ from distributed.shuffle._shuffle import (
 
 if TYPE_CHECKING:
     import numpy as np
+    from typing_extensions import TypeAlias
 
     import dask.array as da
+
+
+# TODO remove quotes (requires Python >=3.9)
+ChunkedAxis: TypeAlias = "tuple[int, ...]"
+ChunkedAxes: TypeAlias = "tuple[ChunkedAxis, ...]"
+NIndex: TypeAlias = "tuple[int, ...]"
 
 
 def rechunk_transfer(
     input: np.ndarray,
     id: ShuffleId,
-    input_chunk: tuple[int, ...],
-    new: tuple[tuple[int, ...], ...],
-    old: tuple[tuple[int, ...], ...],
+    input_chunk: NIndex,
+    new: ChunkedAxes,
+    old: ChunkedAxes,
 ) -> int:
     try:
         return _get_worker_extension().add_partition(
@@ -39,7 +46,7 @@ def rechunk_transfer(
 
 
 def rechunk_unpack(
-    id: ShuffleId, output_chunk: tuple[int, ...], barrier_run_id: int
+    id: ShuffleId, output_chunk: NIndex, barrier_run_id: int
 ) -> np.ndarray:
     try:
         return _get_worker_extension().get_output_partition(
@@ -49,7 +56,7 @@ def rechunk_unpack(
         raise RuntimeError("rechunk_unpack failed during shuffle {id}") from e
 
 
-def rechunk_p2p(x: da.Array, chunks: tuple[tuple[int, ...], ...]) -> da.Array:
+def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
     import numpy as np
 
     import dask.array as da

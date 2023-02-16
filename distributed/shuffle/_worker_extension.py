@@ -33,6 +33,7 @@ from distributed.shuffle._buffer import ShardType
 from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
+from distributed.shuffle._rechunk import ChunkedAxes, NIndex
 from distributed.shuffle._shuffle import ShuffleId
 from distributed.sizeof import sizeof
 from distributed.utils import log_errors, sync
@@ -52,9 +53,6 @@ PartitionIDType = TypeVar("PartitionIDType")
 PartitionType = TypeVar("PartitionType")
 T = TypeVar("T")
 # TODO remove quotes (requires Python >=3.9)
-ChunkedAxis: TypeAlias = "tuple[int, ...]"
-ChunkedAxes: TypeAlias = "tuple[ChunkedAxis, ...]"
-NIndex: TypeAlias = "tuple[int, ...]"
 NSlice: TypeAlias = "tuple[slice, ...]"
 
 logger = logging.getLogger(__name__)
