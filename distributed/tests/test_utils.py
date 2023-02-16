@@ -11,6 +11,7 @@ import queue
 import socket
 import traceback
 import warnings
+import xml
 from array import array
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -621,7 +622,7 @@ def test_logs():
 
 def test_is_valid_xml():
     assert is_valid_xml("<a>foo</a>")
-    with pytest.raises(Exception):
+    with pytest.raises(xml.etree.ElementTree.ParseError):
         assert is_valid_xml("<a>foo")
 
 

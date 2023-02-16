@@ -416,7 +416,7 @@ class UCX(Comm):
         if self._ep is not None:
             try:
                 await self.ep.send(struct.pack("?Q", True, 0))
-            except (
+            except (  # noqa: B030
                 ucp.exceptions.UCXError,
                 ucp.exceptions.UCXCloseError,
                 ucp.exceptions.UCXCanceled,
