@@ -47,8 +47,7 @@ if TYPE_CHECKING:
 
     from distributed.worker import Worker
 
-# ID of a single unit of data being shuffled (TODO: Wording)
-ShuffleUnitIDType = TypeVar("ShuffleUnitIDType")
+ShardIDType = TypeVar("ShardIDType")
 PartitionIDType = TypeVar("PartitionIDType")
 PartitionType = TypeVar("PartitionType")
 T = TypeVar("T")
@@ -62,7 +61,7 @@ class ShuffleClosedError(RuntimeError):
     pass
 
 
-class ShuffleRun(Generic[ShuffleUnitIDType, PartitionIDType, PartitionType], abc.ABC):
+class ShuffleRun(Generic[ShardIDType, PartitionIDType, PartitionType], abc.ABC):
     def __init__(
         self,
         id: ShuffleId,
@@ -102,7 +101,7 @@ class ShuffleRun(Generic[ShuffleUnitIDType, PartitionIDType, PartitionType], abc
 
         self.diagnostics: dict[str, float] = defaultdict(float)
         self.transferred = False
-        self.received: set[ShuffleUnitIDType] = set()
+        self.received: set[ShardIDType] = set()
         self.total_recvd = 0
         self.start_time = time.time()
         self._exception: Exception | None = None
@@ -127,9 +126,7 @@ class ShuffleRun(Generic[ShuffleUnitIDType, PartitionIDType, PartitionType], abc
         # up the comm pool on scheduler side
         await self.scheduler.shuffle_barrier(id=self.id, run_id=self.run_id)
 
-    async def send(
-        self, address: str, shards: list[tuple[ShuffleUnitIDType, bytes]]
-    ) -> None:
+    async def send(self, address: str, shards: list[tuple[ShardIDType, bytes]]) -> None:
         self.raise_if_closed()
         return await self.rpc(address).shuffle_receive(
             data=to_serialize(shards),
@@ -157,7 +154,7 @@ class ShuffleRun(Generic[ShuffleUnitIDType, PartitionIDType, PartitionType], abc
         }
 
     async def _write_to_comm(
-        self, data: dict[str, list[tuple[ShuffleUnitIDType, bytes]]]
+        self, data: dict[str, list[tuple[ShardIDType, bytes]]]
     ) -> None:
         self.raise_if_closed()
         await self._comm_buffer.write(data)
@@ -218,11 +215,11 @@ class ShuffleRun(Generic[ShuffleUnitIDType, PartitionIDType, PartitionType], abc
         assert len(data) == 1
         return data[0]
 
-    async def receive(self, data: list[tuple[ShuffleUnitIDType, bytes]]) -> None:
+    async def receive(self, data: list[tuple[ShardIDType, bytes]]) -> None:
         await self._receive(data)
 
     @abc.abstractmethod
-    async def _receive(self, data: list[tuple[ShuffleUnitIDType, bytes]]) -> None:
+    async def _receive(self, data: list[tuple[ShardIDType, bytes]]) -> None:
         raise NotImplementedError
 
     @abc.abstractmethod
