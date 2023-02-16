@@ -724,10 +724,12 @@ async def test_connection_pool():
         *(rpc(ip="127.0.0.1", port=s.port).ping() for s in servers[:5])
     )
     await asyncio.gather(*(rpc(s.address).ping() for s in servers[:5]))
-    await asyncio.gather(*(rpc("127.0.0.1:%d" % s.port).ping() for s in servers[:5]))
+    await asyncio.gather(*(rpc(f"127.0.0.1:{s.port}").ping() for s in servers[:5]))
     await asyncio.gather(
         *(rpc(ip="127.0.0.1", port=s.port).ping() for s in servers[:5])
     )
+    await asyncio.gather(*(rpc(("127.0.0.1", s.port)).ping() for s in servers[:5]))
+
     assert sum(map(len, rpc.available.values())) == 5
     assert sum(map(len, rpc.occupied.values())) == 0
     assert rpc.active == 0
