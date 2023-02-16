@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import itertools
 import random
-from typing import Any
 
 import numpy as np
 import pytest
@@ -12,60 +10,17 @@ import dask.array as da
 from dask.array.core import concatenate3
 from dask.array.rechunk import normalize_chunks, rechunk
 
-from distributed.core import PooledRPCCall
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_extension import get_worker_for
 from distributed.shuffle._shuffle import ShuffleId
 from distributed.shuffle._worker_extension import ArrayRechunkRun
+from distributed.shuffle.tests.utils import AbstractShuffleTestPool
 from distributed.utils_test import gen_cluster, gen_test
 
 
-class PooledRPCShuffle(PooledRPCCall):
-    # FIXME: Mostly copied from test_shuffle
-    def __init__(self, shuffle: ArrayRechunkRun):
-        self.shuffle = shuffle
-
-    def __getattr__(self, key):
-        async def _(**kwargs):
-            from distributed.protocol.serialize import nested_deserialize
-
-            method_name = key.replace("shuffle_", "")
-            kwargs.pop("shuffle_id", None)
-            kwargs.pop("run_id", None)
-            # TODO: This is a bit awkward. At some point the arguments are
-            # already getting wrapped with a `Serialize`. We only want to unwrap
-            # here.
-            kwargs = nested_deserialize(kwargs)
-            meth = getattr(self.shuffle, method_name)
-            return await meth(**kwargs)
-
-        return _
-
-
-# TODO: Copy-pasta from test_shuffle
-class ShuffleTestPool:
-    _shuffle_run_id_iterator = itertools.count()
-
+class ArrayRechunkTestPool(AbstractShuffleTestPool):
     def __init__(self, *args, **kwargs):
-        self.shuffles = {}
         super().__init__(*args, **kwargs)
-
-    def __call__(self, addr: str, *args: Any, **kwargs: Any) -> PooledRPCShuffle:
-        return PooledRPCShuffle(self.shuffles[addr])
-
-    async def fake_broadcast(self, msg):
-
-        op = msg.pop("op").replace("shuffle_", "")
-        out = {}
-        for addr, s in self.shuffles.items():
-            out[addr] = await getattr(s, op)()
-        return out
-
-    async def shuffle_barrier(self, id, run_id):
-        out = {}
-        for addr, s in self.shuffles.items():
-            out[addr] = await s.inputs_done()
-        return out
 
     def new_shuffle(
         self,
@@ -85,7 +40,7 @@ class ShuffleTestPool:
             new=new,
             directory=directory / name,
             id=ShuffleId(name),
-            run_id=next(ShuffleTestPool._shuffle_run_id_iterator),
+            run_id=next(AbstractShuffleTestPool._shuffle_run_id_iterator),
             local_address=name,
             nthreads=2,
             rpc=self,
@@ -123,7 +78,7 @@ async def test_lowlevel_rechunk(
 
     assert len(set(worker_for_mapping.values())) == min(n_workers, len(new_indices))
 
-    local_shuffle_pool = ShuffleTestPool()
+    local_shuffle_pool = ArrayRechunkTestPool()
     shuffles = []
     for i in range(n_workers):
         shuffles.append(

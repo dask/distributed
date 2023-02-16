@@ -20,7 +20,6 @@ import dask.dataframe as dd
 from dask.distributed import Event, Nanny, Worker
 from dask.utils import stringify
 
-from distributed.core import PooledRPCCall
 from distributed.scheduler import Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._arrow import serialize_table
@@ -38,6 +37,7 @@ from distributed.shuffle._worker_extension import (
     split_by_partition,
     split_by_worker,
 )
+from distributed.shuffle.tests.utils import AbstractShuffleTestPool
 from distributed.utils import Deadline
 from distributed.utils_test import gen_cluster, gen_test, wait_for_state
 from distributed.worker_state_machine import TaskState as WorkerTaskState
@@ -1075,42 +1075,11 @@ async def test_clean_after_close(c, s, a, b):
     await clean_scheduler(s)
 
 
-class PooledRPCShuffle(PooledRPCCall):
-    def __init__(self, shuffle: DataFrameShuffleRun):
-        self.shuffle = shuffle
-
-    def __getattr__(self, key):
-        async def _(**kwargs):
-            from distributed.protocol.serialize import nested_deserialize
-
-            method_name = key.replace("shuffle_", "")
-            kwargs.pop("shuffle_id", None)
-            kwargs.pop("run_id", None)
-            # TODO: This is a bit awkward. At some point the arguments are
-            # already getting wrapped with a `Serialize`. We only want to unwrap
-            # here.
-            kwargs = nested_deserialize(kwargs)
-            meth = getattr(self.shuffle, method_name)
-            return await meth(**kwargs)
-
-        return _
-
-
-class ShuffleTestPool:
+class DataFrameShuffleTestPool(AbstractShuffleTestPool):
     _shuffle_run_id_iterator = itertools.count()
 
     def __init__(self, *args, **kwargs):
-        self.shuffles = {}
         super().__init__(*args, **kwargs)
-
-    def __call__(self, addr: str, *args: Any, **kwargs: Any) -> PooledRPCShuffle:
-        return PooledRPCShuffle(self.shuffles[addr])
-
-    async def shuffle_barrier(self, id, run_id):
-        out = {}
-        for addr, s in self.shuffles.items():
-            out[addr] = await s.inputs_done()
-        return out
 
     def new_shuffle(
         self,
@@ -1129,7 +1098,7 @@ class ShuffleTestPool:
             schema=schema,
             directory=directory / name,
             id=ShuffleId(name),
-            run_id=next(ShuffleTestPool._shuffle_run_id_iterator),
+            run_id=next(AbstractShuffleTestPool._shuffle_run_id_iterator),
             local_address=name,
             nthreads=2,
             rpc=self,
@@ -1174,7 +1143,7 @@ async def test_basic_lowlevel_shuffle(
     assert len(set(worker_for_mapping.values())) == min(n_workers, npartitions)
     schema = pa.Schema.from_pandas(dfs[0])
 
-    local_shuffle_pool = ShuffleTestPool()
+    local_shuffle_pool = DataFrameShuffleTestPool()
     shuffles = []
     for ix in range(n_workers):
         shuffles.append(
@@ -1247,7 +1216,7 @@ async def test_error_offload(tmpdir, loop_in_thread):
         partitions_for_worker[w].append(part)
     schema = pa.Schema.from_pandas(dfs[0])
 
-    local_shuffle_pool = ShuffleTestPool()
+    local_shuffle_pool = DataFrameShuffleTestPool()
 
     class ErrorOffload(DataFrameShuffleRun):
         async def offload(self, func, *args):
@@ -1300,7 +1269,7 @@ async def test_error_send(tmpdir, loop_in_thread):
         partitions_for_worker[w].append(part)
     schema = pa.Schema.from_pandas(dfs[0])
 
-    local_shuffle_pool = ShuffleTestPool()
+    local_shuffle_pool = DataFrameShuffleTestPool()
 
     class ErrorSend(DataFrameShuffleRun):
         async def send(self, *args: Any, **kwargs: Any) -> None:
@@ -1352,7 +1321,7 @@ async def test_error_receive(tmpdir, loop_in_thread):
         partitions_for_worker[w].append(part)
     schema = pa.Schema.from_pandas(dfs[0])
 
-    local_shuffle_pool = ShuffleTestPool()
+    local_shuffle_pool = DataFrameShuffleTestPool()
 
     class ErrorReceive(DataFrameShuffleRun):
         async def receive(self, data: list[tuple[int, bytes]]) -> None:
