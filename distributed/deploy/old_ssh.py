@@ -58,7 +58,6 @@ def async_ssh(cmd_dict):
             break
 
         except (SSHException, PasswordRequiredException) as e:
-
             print(
                 "[ dask ssh ] : "
                 + bcolors.FAIL
@@ -266,7 +265,6 @@ def start_worker(
     remote_dask_worker="distributed.cli.dask_worker",
     local_directory=None,
 ):
-
     cmd = (
         "{python} -m {remote_dask_worker} "
         "{scheduler_addr}:{scheduler_port} "
@@ -356,7 +354,6 @@ class SSHCluster:
         local_directory=None,
         **kwargs,
     ):
-
         self.scheduler_addr = scheduler_addr
         self.scheduler_port = scheduler_port
         self.nthreads = nthreads
@@ -458,7 +455,6 @@ class SSHCluster:
         return "%s:%d" % (self.scheduler_addr, self.scheduler_port)
 
     def monitor_remote_processes(self):
-
         # Form a list containing all processes, since we treat them equally from here on out.
         all_processes = [self.scheduler] + self.workers
 

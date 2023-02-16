@@ -21,7 +21,7 @@ from unittest import mock
 
 import psutil
 import pytest
-from tlz import first, merge, pluck, sliding_window
+from tlz import first, pluck, sliding_window
 from tornado.ioloop import IOLoop
 
 import dask
@@ -469,12 +469,7 @@ async def test_plugin_exception():
         with raises_with_cause(
             RuntimeError, "Worker failed to start", ValueError, "Setup failed"
         ):
-            async with Worker(
-                s.address,
-                plugins={
-                    MyPlugin(),
-                },
-            ) as w:
+            async with Worker(s.address, plugins={MyPlugin()}):
                 pass
 
 
@@ -2136,7 +2131,6 @@ async def test_worker_descopes_data(c, s, a):
     assert not C.instances
 
 
-# @pytest.mark.slow
 @gen_cluster(client=True, config=NO_AMM)
 async def test_gather_dep_one_worker_always_busy(c, s, a, b):
     # Ensure that both dependencies for H are on another worker than H itself.
@@ -2178,6 +2172,7 @@ async def test_gather_dep_one_worker_always_busy(c, s, a, b):
         # ourselves. Note that doing so means that B won't know about the existence of
         # the extra replicas until it takes the initiative to invoke scheduler.who_has.
         x.update_data({"f": 2, "g": 3})
+        s.add_keys(worker=x.address, keys=("f", "g"))
         assert await h == 5
 
 
@@ -2287,7 +2282,6 @@ async def test_worker_client_closes_if_created_on_worker_one_worker(s, a):
 @gen_cluster()
 async def test_worker_client_closes_if_created_on_worker_last_worker_alive(s, a, b):
     async with Client(s.address, set_as_default=False, asynchronous=True) as c:
-
         with pytest.raises(ValueError):
             default_client()
 
@@ -2768,7 +2762,6 @@ async def test_hold_on_to_replicas(c, s, *workers):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_forget_dependents_after_release(c, s, a):
-
     fut = c.submit(inc, 1, key="f-1")
     fut2 = c.submit(inc, fut, key="f-2")
 
@@ -3024,109 +3017,6 @@ async def test_remove_replicas_simple(c, s, a, b):
     # Ensure there is no delayed reply to re-register the key
     await asyncio.sleep(0.01)
     assert all(s.tasks[f.key].who_has == {s.workers[a.address]} for f in futs)
-
-
-@gen_cluster(
-    client=True,
-    nthreads=[("", 1), ("", 6)],  # Up to 5 threads of b will get stuck; read below
-    config=merge(NO_AMM, {"distributed.comm.recent-messages-log-length": 1_000}),
-)
-async def test_remove_replicas_while_computing(c, s, a, b):
-    futs = c.map(inc, range(10), workers=[a.address])
-    dependents_event = distributed.Event()
-
-    def some_slow(x, event):
-        if x % 2:
-            event.wait()
-        return x + 1
-
-    # All interesting things will happen on b
-    dependents = c.map(some_slow, futs, event=dependents_event, workers=[b.address])
-
-    while not any(f.key in b.state.tasks for f in dependents):
-        await asyncio.sleep(0.01)
-
-    # The scheduler removes keys from who_has/has_what immediately
-    # Make sure the worker responds to the rejection and the scheduler corrects
-    # the state
-    ws = s.workers[b.address]
-
-    def ws_has_futs(aggr_func):
-        nonlocal futs
-        return aggr_func(s.tasks[fut.key] in ws.has_what for fut in futs)
-
-    # Wait for all futs to transfer over
-    while not ws_has_futs(all):
-        await asyncio.sleep(0.01)
-
-    # Wait for some dependent tasks to be done. No more than half of the dependents can
-    # finish, as the others are blocked on dependents_event.
-    # Note: for this to work reliably regardless of scheduling order, we need to have 6+
-    # threads. At the moment of writing it works with 2 because futures of Client.map
-    # are always scheduled from left to right, but we'd rather not rely on this
-    # assumption.
-    while not any(fut.status == "finished" for fut in dependents):
-        await asyncio.sleep(0.01)
-    assert not all(fut.status == "finished" for fut in dependents)
-
-    # Try removing the initial keys
-    s.request_remove_replicas(
-        b.address, [fut.key for fut in futs], stimulus_id=f"test-{time()}"
-    )
-    # Scheduler removed all keys immediately...
-    assert not ws_has_futs(any)
-    # ... but the state is properly restored for all tasks for which the dependent task
-    # isn't done yet
-    while not ws_has_futs(any):
-        await asyncio.sleep(0.01)
-
-    # Let the remaining dependent tasks complete
-    await dependents_event.set()
-    await wait(dependents)
-    assert ws_has_futs(any) and not ws_has_futs(all)
-
-    # If a request is rejected, the worker responds with an add-keys message to
-    # reenlist the key in the schedulers state system to avoid race conditions,
-    # see also https://github.com/dask/distributed/issues/5265
-    rejections = set()
-    for msg in b.state.log:
-        if msg[0] == "remove-replica-rejected":
-            rejections.update(msg[1])
-    assert rejections
-
-    def answer_sent(key):
-        for batch in b.batched_stream.recent_message_log:
-            for msg in batch:
-                if "op" in msg and msg["op"] == "add-keys" and key in msg["keys"]:
-                    return True
-        return False
-
-    for rejected_key in rejections:
-        assert answer_sent(rejected_key)
-
-    # Now that all dependent tasks are done, futs replicas may be removed.
-    # They might be already gone due to the above remove replica calls
-    s.request_remove_replicas(
-        b.address,
-        [fut.key for fut in futs if ws in s.tasks[fut.key].who_has],
-        stimulus_id=f"test-{time()}",
-    )
-
-    while any(
-        b.state.tasks[f.key].state != "released" for f in futs if f.key in b.state.tasks
-    ):
-        await asyncio.sleep(0.01)
-
-    # The scheduler actually gets notified about the removed replica
-    while ws_has_futs(any):
-        await asyncio.sleep(0.01)
-    # A replica is still on workers[0]
-    assert all(len(s.tasks[f.key].who_has) == 1 for f in futs)
-
-    del dependents, futs
-
-    while any(w.state.tasks for w in (a, b)):
-        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 3, config=NO_AMM)
@@ -3622,6 +3512,8 @@ class BreakingWorker(Worker):
 @pytest.mark.slow
 @gen_cluster(client=True, Worker=BreakingWorker)
 async def test_broken_comm(c, s, a, b):
+    pytest.importorskip("dask.dataframe")
+
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -3767,23 +3659,6 @@ async def test_deprecation_of_renamed_worker_attributes(s, a, b):
     )
     with pytest.warns(DeprecationWarning, match=msg):
         assert a.outgoing_current_count == a.transfer_outgoing_count
-
-
-@gen_cluster(nthreads=[])
-async def test_worker_log_memory_limit_too_high(s):
-    with captured_logger("distributed.worker.memory") as caplog:
-        async with Worker(s.address, memory_limit="1PB"):
-            pass
-
-        expected_snippets = [
-            ("ignore", "ignoring"),
-            ("memory limit", "memory_limit"),
-            ("system"),
-            ("1PB"),
-        ]
-        for snippets in expected_snippets:
-            # assert any(snip in caplog.text for snip in snippets)
-            assert any(snip in caplog.getvalue().lower() for snip in snippets)
 
 
 @gen_cluster(client=True, Worker=Nanny)

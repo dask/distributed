@@ -10,12 +10,13 @@ import yaml
 from distributed.deploy.spec import run_spec
 
 
-@click.command(context_settings=dict(ignore_unknown_options=True))
+@click.command(name="spec", context_settings=dict(ignore_unknown_options=True))
 @click.argument("args", nargs=-1)
 @click.option("--spec", type=str, default="", help="")
 @click.option("--spec-file", type=str, default=None, help="")
 @click.version_option()
 def main(args: list, spec: str, spec_file: str) -> None:
+    """Launch a Dask process defined by a JSON/YAML specification"""
 
     if spec and spec_file or not spec and not spec_file:
         print("Must specify exactly one of --spec and --spec-file")

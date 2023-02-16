@@ -48,7 +48,6 @@ limit = parse_bytes("10.0 MiB")
 )
 @gen_test()
 async def test_memory_limit(big_payload):
-
     small_payload = {"small": [gen_bytes(0.1, limit)]}
 
     limiter = ResourceLimiter(limit)

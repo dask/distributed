@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import contextlib
+import itertools
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.shuffle._shuffle import ShuffleId, barrier_key, id_from_key
@@ -18,12 +18,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ShuffleState:
+    _run_id_iterator: ClassVar[itertools.count] = itertools.count()
+
     id: ShuffleId
+    run_id: int
     worker_for: dict[int, str]
     schema: bytes
     column: str
     output_workers: set[str]
-    completed_workers: set[str]
     participating_workers: set[str]
 
 
@@ -42,26 +44,30 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     scheduler: Scheduler
     states: dict[ShuffleId, ShuffleState]
     heartbeats: defaultdict[ShuffleId, dict]
-    tombstones: set[ShuffleId]
     erred_shuffles: dict[ShuffleId, Exception]
 
     def __init__(self, scheduler: Scheduler):
         self.scheduler = scheduler
         self.scheduler.handlers.update(
             {
+                "shuffle_barrier": self.barrier,
                 "shuffle_get": self.get,
-                "shuffle_get_participating_workers": self.get_participating_workers,
-                "shuffle_register_complete": self.register_complete,
             }
         )
         self.heartbeats = defaultdict(lambda: defaultdict(dict))
         self.states = {}
-        self.tombstones = set()
         self.erred_shuffles = {}
         self.scheduler.add_plugin(self)
 
     def shuffle_ids(self) -> set[ShuffleId]:
         return set(self.states)
+
+    async def barrier(self, id: ShuffleId, run_id: int) -> None:
+        shuffle = self.states[id]
+        msg = {"op": "shuffle_inputs_done", "shuffle_id": id, "run_id": run_id}
+        await self.scheduler.broadcast(
+            msg=msg, workers=list(shuffle.participating_workers)
+        )
 
     def heartbeat(self, ws: WorkerState, data: dict) -> None:
         for shuffle_id, d in data.items():
@@ -76,12 +82,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         npartitions: int | None,
         worker: str,
     ) -> dict:
-
-        if id in self.tombstones:
-            return {
-                "status": "ERROR",
-                "message": f"Shuffle {id} has already been forgotten",
-            }
         if exception := self.erred_shuffles.get(id):
             return {"status": "ERROR", "message": str(exception)}
 
@@ -107,11 +107,11 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
 
             state = ShuffleState(
                 id=id,
+                run_id=next(ShuffleState._run_id_iterator),
                 worker_for=mapping,
                 schema=schema,
                 column=column,
                 output_workers=output_workers,
-                completed_workers=set(),
                 participating_workers=output_workers.copy(),
             )
             self.states[id] = state
@@ -120,67 +120,38 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         state.participating_workers.add(worker)
         return {
             "status": "OK",
+            "run_id": state.run_id,
             "worker_for": state.worker_for,
             "column": state.column,
             "schema": state.schema,
             "output_workers": state.output_workers,
         }
 
-    def get_participating_workers(self, id: ShuffleId) -> list[str]:
-        return list(self.states[id].participating_workers)
-
-    async def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
-        affected_shuffles = set()
-        broadcasts = []
+    def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
         from time import time
 
-        recs: Recs = {}
         stimulus_id = f"shuffle-failed-worker-left-{time()}"
-        barriers = []
-        for shuffle_id, state in self.states.items():
-            if worker not in state.participating_workers:
+
+        for shuffle_id, shuffle in self.states.items():
+            if worker not in shuffle.participating_workers:
                 continue
             exception = RuntimeError(
                 f"Worker {worker} left during active shuffle {shuffle_id}"
             )
             self.erred_shuffles[shuffle_id] = exception
-            contact_workers = state.participating_workers.copy()
-            contact_workers.discard(worker)
-            affected_shuffles.add(shuffle_id)
-            name = barrier_key(shuffle_id)
-            barrier_task = self.scheduler.tasks.get(name)
-            if barrier_task:
-                barriers.append(barrier_task)
-                broadcasts.append(
-                    scheduler.broadcast(
-                        msg={
-                            "op": "shuffle_fail",
-                            "message": str(exception),
-                            "shuffle_id": shuffle_id,
-                        },
-                        workers=list(contact_workers),
-                    )
-                )
+            self._fail_on_workers(shuffle, str(exception))
 
-        results = await asyncio.gather(*broadcasts, return_exceptions=True)
-        for barrier_task in barriers:
+            barrier_task = self.scheduler.tasks[barrier_key(shuffle_id)]
+            recs: Recs = {}
             if barrier_task.state == "memory":
                 for dt in barrier_task.dependents:
                     if worker not in dt.worker_restrictions:
                         continue
                     dt.worker_restrictions.clear()
                     recs.update({dt.key: "waiting"})
-            # TODO: Do we need to handle other states?
-        self.scheduler.transitions(recs, stimulus_id=stimulus_id)
+                # TODO: Do we need to handle other states?
 
-        # Assumption: No new shuffle tasks scheduled on the worker
-        # + no existing tasks anymore
-        # All task-finished/task-errer are queued up in batched stream
-
-        exceptions = [result for result in results if isinstance(result, Exception)]
-        if exceptions:
-            # TODO: Do we need to handle errors here?
-            raise RuntimeError(exceptions)
+            self.scheduler.transitions(recs, stimulus_id=stimulus_id)
 
     def transition(
         self,
@@ -190,42 +161,42 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         *args: Any,
         **kwargs: Any,
     ) -> None:
-        if finish != "forgotten":
+        if finish not in ("released", "forgotten"):
             return
         if not key.startswith("shuffle-barrier-"):
             return
         shuffle_id = id_from_key(key)
-        if shuffle_id not in self.states:
+        try:
+            shuffle = self.states[shuffle_id]
+        except KeyError:
             return
-        participating_workers = self.states[shuffle_id].participating_workers
+        self._fail_on_workers(shuffle, message=f"Shuffle {shuffle_id} forgotten")
+        self._clean_on_scheduler(shuffle_id)
+
+    def _fail_on_workers(self, shuffle: ShuffleState, message: str) -> None:
         worker_msgs = {
             worker: [
                 {
                     "op": "shuffle-fail",
-                    "shuffle_id": shuffle_id,
-                    "message": f"Shuffle {shuffle_id} forgotten",
+                    "shuffle_id": shuffle.id,
+                    "run_id": shuffle.run_id,
+                    "message": message,
                 }
             ]
-            for worker in participating_workers
+            for worker in shuffle.participating_workers
         }
-        self._clean_on_scheduler(shuffle_id)
         self.scheduler.send_all({}, worker_msgs)
 
-    def register_complete(self, id: ShuffleId, worker: str) -> None:
-        """Learn from a worker that it has completed all reads of a shuffle"""
-        if exception := self.erred_shuffles.get(id):
-            raise exception
-        if id not in self.states:
-            logger.info("Worker shuffle reported complete after shuffle was removed")
-            return
-        self.states[id].completed_workers.add(worker)
-
     def _clean_on_scheduler(self, id: ShuffleId) -> None:
-        self.tombstones.add(id)
         del self.states[id]
         self.erred_shuffles.pop(id, None)
         with contextlib.suppress(KeyError):
             del self.heartbeats[id]
+
+    def restart(self, scheduler: Scheduler) -> None:
+        self.states.clear()
+        self.heartbeats.clear()
+        self.erred_shuffles.clear()
 
 
 def get_worker_for(output_partition: int, workers: list[str], npartitions: int) -> str:

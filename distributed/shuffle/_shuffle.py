@@ -43,31 +43,50 @@ def _get_worker_extension() -> ShuffleWorkerExtension:
 def shuffle_transfer(
     input: pd.DataFrame,
     id: ShuffleId,
+    input_partition: int,
     npartitions: int,
     column: str,
-) -> None:
+) -> int:
     try:
-        _get_worker_extension().add_partition(
-            input, id, npartitions=npartitions, column=column
+        return _get_worker_extension().add_partition(
+            input,
+            id,
+            input_partition=input_partition,
+            npartitions=npartitions,
+            column=column,
         )
     except Exception:
-        raise RuntimeError(f"shuffle_transfer failed during shuffle {id}")
+        msg = f"shuffle_transfer failed during shuffle {id}"
+        # FIXME: Use exception chaining instead of logging the traceback.
+        #  This has previously led to spurious recursion errors
+        logger.error(msg, exc_info=True)
+        raise RuntimeError(msg)
 
 
 def shuffle_unpack(
-    id: ShuffleId, output_partition: int, barrier: object
+    id: ShuffleId, output_partition: int, barrier_run_id: int
 ) -> pd.DataFrame:
     try:
-        return _get_worker_extension().get_output_partition(id, output_partition)
+        return _get_worker_extension().get_output_partition(
+            id, barrier_run_id, output_partition
+        )
     except Exception:
-        raise RuntimeError(f"shuffle_unpack failed during shuffle {id}")
+        msg = f"shuffle_unpack failed during shuffle {id}"
+        # FIXME: Use exception chaining instead of logging the traceback.
+        #  This has previously led to spurious recursion errors
+        logger.error(msg, exc_info=True)
+        raise RuntimeError(msg)
 
 
-def shuffle_barrier(id: ShuffleId, transfers: list[None]) -> None:
+def shuffle_barrier(id: ShuffleId, run_ids: list[int]) -> int:
     try:
-        return _get_worker_extension().barrier(id)
+        return _get_worker_extension().barrier(id, run_ids)
     except Exception:
-        raise RuntimeError(f"shuffle_barrier failed during shuffle {id}")
+        msg = f"shuffle_barrier failed during shuffle {id}"
+        # FIXME: Use exception chaining instead of logging the traceback.
+        #  This has previously led to spurious recursion errors
+        logger.error(msg, exc_info=True)
+        raise RuntimeError(msg)
 
 
 def rearrange_by_column_p2p(
@@ -82,6 +101,11 @@ def rearrange_by_column_p2p(
     token = tokenize(df, column, npartitions)
 
     empty = df._meta.copy()
+    if any(not isinstance(c, str) for c in empty.columns):
+        unsupported = {c: type(c) for c in empty.columns if not isinstance(c, str)}
+        raise TypeError(
+            f"p2p requires all column names to be str, found: {unsupported}",
+        )
 
     name = f"shuffle-p2p-{token}"
     layer = P2PShuffleLayer(
@@ -161,6 +185,7 @@ class P2PShuffleLayer(SimpleShuffleLayer):
                 shuffle_transfer,
                 (self.name_input, i),
                 token,
+                i,
                 self.npartitions,
                 self.column,
             )

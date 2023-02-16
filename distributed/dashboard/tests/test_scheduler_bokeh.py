@@ -321,8 +321,8 @@ async def test_WorkersMemory(c, s, a, b):
     cl.update()
     d = dict(cl.source.data)
     llens = {len(l) for l in d.values()}
-    # There are 2 workers. There is definitely going to be managed_in_memory and
-    # unmanaged_old; there may be unmanaged_new. There won't be managed_spilled.
+    # There are 2 workers. There is definitely going to be managed and
+    # unmanaged_old; there may be unmanaged_new. There won't be spilled.
     # Empty rects are removed.
     assert llens in ({4}, {5}, {6})
     assert all(d["width"])
@@ -340,8 +340,8 @@ async def test_ClusterMemory(c, s, a, b):
     llens = {len(l) for l in d.values()}
     # Unlike WorkersMemory, empty rects here aren't pruned away.
     assert llens == {4}
-    # There is definitely going to be managed_in_memory and
-    # unmanaged_old; there may be unmanaged_new. There won't be managed_spilled.
+    # There is definitely going to be managed and
+    # unmanaged_old; there may be unmanaged_new. There won't be spilled.
     assert any(d["width"])
     assert not all(d["width"])
 
@@ -546,7 +546,6 @@ async def test_WorkerTable_custom_metric_overlap_with_core_metric(c, s, a, b):
 
 @gen_cluster(client=True, worker_kwargs={"memory_limit": 0})
 async def test_WorkerTable_with_memory_limit_as_0(c, s, a, b):
-
     wt = WorkerTable(s)
     wt.update()
     assert all(wt.source.data.values())
@@ -1126,6 +1125,7 @@ async def test_shuffling(c, s, a, b):
         ss.update()
         await asyncio.sleep(0.1)
         assert time() < start + 5
+    await df2
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True}, timeout=60)

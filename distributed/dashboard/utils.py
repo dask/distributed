@@ -54,6 +54,8 @@ def update(source, data):
         for k, v in data.items():
             if type(v) is not np.ndarray and isinstance(v[0], Number):
                 d[k] = np.array(v)
+                if d[k].dtype == np.int32:  # avoid int32 (Windows default)
+                    d[k] = d[k].astype("int64")
             else:
                 d[k] = v
     else:

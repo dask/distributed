@@ -120,34 +120,8 @@ if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
     from typing_extensions import TypeAlias
 
-    # TODO move out of TYPE_CHECKING (requires Python >=3.10)
-    # Not to be confused with distributed.worker_state_machine.TaskStateState
-    TaskStateState: TypeAlias = Literal[
-        "released",
-        "waiting",
-        "no-worker",
-        "queued",
-        "processing",
-        "memory",
-        "erred",
-        "forgotten",
-    ]
-
-    # TODO remove quotes (requires Python >=3.9)
-    # {task key -> finish state}
-    # Not to be confused with distributed.worker_state_machine.Recs
-    Recs: TypeAlias = "dict[str, TaskStateState]"
-    # {client or worker address: [{op: <key>, ...}, ...]}
-    Msgs: TypeAlias = "dict[str, list[dict[str, Any]]]"
-    # (recommendations, client messages, worker messages)
-    RecsMsgs: TypeAlias = "tuple[Recs, Msgs, Msgs]"
-else:
-    TaskStateState = str
-    Recs = dict
-    Msgs = dict
-    RecsMsgs = tuple
-
-ALL_TASK_STATES: set[TaskStateState] = {
+# Not to be confused with distributed.worker_state_machine.TaskStateState
+TaskStateState: TypeAlias = Literal[
     "released",
     "waiting",
     "no-worker",
@@ -156,7 +130,18 @@ ALL_TASK_STATES: set[TaskStateState] = {
     "memory",
     "erred",
     "forgotten",
-}
+]
+
+ALL_TASK_STATES: Set[TaskStateState] = set(TaskStateState.__args__)  # type: ignore
+
+# TODO remove quotes (requires Python >=3.9)
+# {task key -> finish state}
+# Not to be confused with distributed.worker_state_machine.Recs
+Recs: TypeAlias = "dict[str, TaskStateState]"
+# {client or worker address: [{op: <key>, ...}, ...]}
+Msgs: TypeAlias = "dict[str, list[dict[str, Any]]]"
+# (recommendations, client messages, worker messages)
+RecsMsgs: TypeAlias = "tuple[Recs, Msgs, Msgs]"
 
 logger = logging.getLogger(__name__)
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
@@ -252,26 +237,26 @@ class MemoryState:
 
     Attributes / properties:
 
-    managed
+    managed_total
         Sum of the output of sizeof() for all dask keys held by the worker in memory,
         plus number of bytes spilled to disk
 
-    managed_in_memory
+    managed
         Sum of the output of sizeof() for the dask keys held in RAM. Note that this may
         be inaccurate, which may cause inaccurate unmanaged memory (see below).
 
-    managed_spilled
+    spilled
         Number of bytes  for the dask keys spilled to the hard drive.
         Note that this is the size on disk; size in memory may be different due to
         compression and inaccuracies in sizeof(). In other words, given the same keys,
-        'managed' will change depending if the keys are in memory or spilled.
+        'managed' will change depending on the keys being in memory or spilled.
 
     process
         Total RSS memory measured by the OS on the worker process.
-        This is always exactly equal to managed_in_memory + unmanaged.
+        This is always exactly equal to managed + unmanaged.
 
     unmanaged
-        process - managed_in_memory. This is the sum of
+        process - managed. This is the sum of
 
         - Python interpreter and modules
         - global variables
@@ -291,33 +276,15 @@ class MemoryState:
         spike.
 
     optimistic
-        managed_in_memory + unmanaged_old; in other words the memory held long-term by
+        managed + unmanaged_old; in other words the memory held long-term by
         the process under the hopeful assumption that all unmanaged_recent memory is a
         temporary spike
-
-    .. note::
-        There is an intentional misalignment in terminology between this class (which is
-        meant for internal / programmatic use) and the memory readings on the GUI (which
-        is aimed at the general public:
-
-        ================= =====================
-        MemoryState       GUI
-        ================= =====================
-        managed           n/a
-        managed_in_memory managed
-        managed_spilled   spilled
-        process           process (RSS); memory
-        unmanaged         n/a
-        unmanaged_old     unmanaged (old)
-        unmanaged_recent  unmanaged (recent)
-        optimistic        n/a
-        ================= =====================
     """
 
     process: int
     unmanaged_old: int
-    managed_in_memory: int
-    managed_spilled: int
+    managed: int
+    spilled: int
 
     __slots__ = tuple(__annotations__)
 
@@ -326,74 +293,88 @@ class MemoryState:
         *,
         process: int,
         unmanaged_old: int,
-        managed_in_memory: int,
-        managed_spilled: int,
+        managed: int,
+        spilled: int,
     ):
         # Some data arrives with the heartbeat, some other arrives in realtime as the
         # tasks progress. Also, sizeof() is not guaranteed to return correct results.
         # This can cause glitches where a partial measure is larger than the whole, so
         # we need to force all numbers to add up exactly by definition.
         self.process = process
-        self.managed_in_memory = min(self.process, managed_in_memory)
-        self.managed_spilled = managed_spilled
+        self.managed = min(self.process, managed)
+        self.spilled = spilled
         # Subtractions between unsigned ints guaranteed by construction to be >= 0
-        self.unmanaged_old = min(unmanaged_old, process - self.managed_in_memory)
+        self.unmanaged_old = min(unmanaged_old, process - self.managed)
 
     @staticmethod
     def sum(*infos: MemoryState) -> MemoryState:
         process = 0
         unmanaged_old = 0
-        managed_in_memory = 0
-        managed_spilled = 0
+        managed = 0
+        spilled = 0
         for ms in infos:
             process += ms.process
             unmanaged_old += ms.unmanaged_old
-            managed_spilled += ms.managed_spilled
-            managed_in_memory += ms.managed_in_memory
+            spilled += ms.spilled
+            managed += ms.managed
         return MemoryState(
             process=process,
             unmanaged_old=unmanaged_old,
-            managed_in_memory=managed_in_memory,
-            managed_spilled=managed_spilled,
+            managed=managed,
+            spilled=spilled,
         )
 
     @property
-    def managed(self) -> int:
-        return self.managed_in_memory + self.managed_spilled
+    def managed_total(self) -> int:
+        return self.managed + self.spilled
 
     @property
     def unmanaged(self) -> int:
         # This is never negative thanks to __init__
-        return self.process - self.managed_in_memory
+        return self.process - self.managed
 
     @property
     def unmanaged_recent(self) -> int:
         # This is never negative thanks to __init__
-        return self.process - self.managed_in_memory - self.unmanaged_old
+        return self.process - self.managed - self.unmanaged_old
 
     @property
     def optimistic(self) -> int:
-        return self.managed_in_memory + self.unmanaged_old
+        return self.managed + self.unmanaged_old
+
+    @property
+    def managed_in_memory(self) -> int:
+        warnings.warn("managed_in_memory has been renamed to managed", FutureWarning)
+        return self.managed
+
+    @property
+    def managed_spilled(self) -> int:
+        warnings.warn("managed_spilled has been renamed to spilled", FutureWarning)
+        return self.spilled
 
     def __repr__(self) -> str:
         return (
             f"Process memory (RSS)  : {format_bytes(self.process)}\n"
-            f"  - managed by Dask   : {format_bytes(self.managed_in_memory)}\n"
+            f"  - managed by Dask   : {format_bytes(self.managed)}\n"
             f"  - unmanaged (old)   : {format_bytes(self.unmanaged_old)}\n"
             f"  - unmanaged (recent): {format_bytes(self.unmanaged_recent)}\n"
-            f"Spilled to disk       : {format_bytes(self.managed_spilled)}\n"
+            f"Spilled to disk       : {format_bytes(self.spilled)}\n"
         )
 
     def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
         """Dictionary representation for debugging purposes.
-        Not type stable and not intended for roundtrips.
 
         See also
         --------
         Client.dump_cluster_state
         distributed.utils.recursive_to_dict
         """
-        return recursive_to_dict(self, exclude=exclude, members=True)
+        return {
+            k: getattr(self, k)
+            for k in dir(self)
+            if not k.startswith("_")
+            and k not in {"sum", "managed_in_memory", "managed_spilled"}
+        }
 
 
 class WorkerState:
@@ -622,25 +603,23 @@ class WorkerState:
         from optimistic memory, which is used for heuristics.
 
         Something that is less OK, but also less frequent, is that the sudden deletion
-        of spilled keys will cause a negative blip of managed_in_memory:
+        of spilled keys will cause a negative blip in managed memory:
 
         1. Delete 100MB of spilled data
         2. The updated managed memory *total* reaches the scheduler faster than the
            updated spilled portion
-        3. This causes managed_in_memory to temporarily plummet and be replaced by
-           unmanaged_recent, while managed_spilled remains unaltered
-        4. When the heartbeat arrives, managed_in_memory goes back up, unmanaged_recent
-           goes back down, and managed_spilled goes down by 100MB as it should have to
+        3. This causes the managed memory to temporarily plummet and be replaced by
+           unmanaged_recent, while spilled memory remains unaltered
+        4. When the heartbeat arrives, managed goes back up, unmanaged_recent
+           goes back down, and spilled goes down by 100MB as it should have to
            begin with.
 
         https://github.com/dask/distributed/issues/6002 will let us solve this.
         """
         return MemoryState(
             process=self.metrics["memory"],
-            managed_in_memory=max(
-                0, self.nbytes - self.metrics["spilled_bytes"]["memory"]
-            ),
-            managed_spilled=self.metrics["spilled_bytes"]["disk"],
+            managed=max(0, self.nbytes - self.metrics["spilled_bytes"]["memory"]),
+            spilled=self.metrics["spilled_bytes"]["disk"],
             unmanaged_old=self._memory_unmanaged_old,
         )
 
@@ -938,7 +917,7 @@ class TaskPrefix:
     groups: list[TaskGroup]
 
     #: Accumulate count of number of tasks in each state
-    state_counts: defaultdict[str, int]
+    state_counts: defaultdict[TaskStateState, int]
 
     __slots__ = tuple(__annotations__)
 
@@ -1316,6 +1295,14 @@ class TaskState:
     #: Task annotations
     annotations: dict[str, Any]
 
+    #: The unique identifier of a specific execution of a task. This identifier
+    #: is used to sign a task such that the assigned worker is expected to return
+    #: the same identifier in the task-finished message. This is used to correlate
+    #: responses.
+    #: Only the most recently assigned worker is trusted. All other results will
+    #: be rejected.
+    run_id: int | None
+
     #: Cached hash of :attr:`~TaskState.client_key`
     _hash: int
 
@@ -1323,10 +1310,18 @@ class TaskState:
     __weakref__: Any = None
     __slots__ = tuple(__annotations__)
 
+    #: Global iterator used to create unique task run IDs
+    _run_id_iterator: ClassVar[itertools.count] = itertools.count()
+
     # Instances not part of slots since class variable
     _instances: ClassVar[weakref.WeakSet[TaskState]] = weakref.WeakSet()
 
-    def __init__(self, key: str, run_spec: object, state: TaskStateState):
+    def __init__(
+        self,
+        key: str,
+        run_spec: object,
+        state: TaskStateState,
+    ):
         self.key = key
         self._hash = hash(key)
         self.run_spec = run_spec
@@ -1360,6 +1355,7 @@ class TaskState:
         self.metadata = {}
         self.annotations = {}
         self.erred_on = set()
+        self.run_id = None
         TaskState._instances.add(self)
 
     def __hash__(self) -> int:
@@ -2863,23 +2859,21 @@ class SchedulerState:
 
         p = len(ws.processing)
 
-        idle = self.idle
-        saturated = self.saturated
-        saturated.discard(ws)
-        if self.is_unoccupied(ws, occ, p):
-            if ws.status == Status.running:
-                idle[ws.address] = ws
+        self.saturated.discard(ws)
+        if ws.status != Status.running:
+            self.idle.pop(ws.address, None)
+        elif self.is_unoccupied(ws, occ, p):
+            self.idle[ws.address] = ws
         else:
-            idle.pop(ws.address, None)
+            self.idle.pop(ws.address, None)
             nc = ws.nthreads
             if p > nc:
                 pending = occ * (p - nc) / (p * nc)
                 if 0.4 < pending > 1.9 * (self.total_occupancy / self.total_nthreads):
-                    saturated.add(ws)
+                    self.saturated.add(ws)
 
-        if not _worker_full(ws, self.WORKER_SATURATION):
-            if ws.status == Status.running:
-                self.idle_task_count.add(ws)
+        if not _worker_full(ws, self.WORKER_SATURATION) and ws.status == Status.running:
+            self.idle_task_count.add(ws)
         else:
             self.idle_task_count.discard(ws)
 
@@ -3263,10 +3257,12 @@ class SchedulerState:
         #        time to compute and submit this
         if duration < 0:
             duration = self.get_task_duration(ts)
+        ts.run_id = next(TaskState._run_id_iterator)
 
         msg: dict[str, Any] = {
             "op": "compute-task",
             "key": ts.key,
+            "run_id": ts.run_id,
             "priority": ts.priority,
             "duration": duration,
             "stimulus_id": f"compute-task-{time()}",
@@ -4626,9 +4622,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.transitions(recommendations, stimulus_id)
 
-    def stimulus_task_finished(self, key=None, worker=None, stimulus_id=None, **kwargs):
+    def stimulus_task_finished(self, key, worker, stimulus_id, run_id, **kwargs):
         """Mark that a task has finished execution on a particular worker"""
-        logger.debug("Stimulus task finished %s, %s", key, worker)
+        logger.debug("Stimulus task finished %s[%d] %s", key, run_id, worker)
 
         recommendations: Recs = {}
         client_msgs: Msgs = {}
@@ -4652,6 +4648,24 @@ class Scheduler(SchedulerState, ServerNode):
                     "stimulus_id": stimulus_id,
                 }
             ]
+        elif ts.run_id != run_id:
+            if not ts.processing_on or ts.processing_on.address != worker:
+                logger.debug(
+                    "Received stale task run, worker: %s, key: %s, run_id: %d (%d)",
+                    worker,
+                    key,
+                    run_id,
+                    ts.run_id,
+                )
+                worker_msgs[worker] = [
+                    {
+                        "op": "free-keys",
+                        "keys": [key],
+                        "stimulus_id": stimulus_id,
+                    }
+                ]
+            else:
+                recommendations[ts.key] = "released"
         elif ts.state == "memory":
             self.add_keys(worker=worker, keys=[key])
         else:
@@ -4704,8 +4718,6 @@ class Scheduler(SchedulerState, ServerNode):
         stack = list(keys)
         seen = set()
         roots = []
-        ts: TaskState
-        dts: TaskState
         while stack:
             key = stack.pop()
             seen.add(key)
@@ -4895,10 +4907,9 @@ class Scheduler(SchedulerState, ServerNode):
     async def _cancel_key(self, key, client, force=False):
         """Cancel a particular key and all dependents"""
         # TODO: this should be converted to use the transition mechanism
-        ts: TaskState | None = self.tasks.get(key)
-        dts: TaskState
+        ts = self.tasks.get(key)
         try:
-            cs: ClientState = self.clients[client]
+            cs = self.clients[client]
         except KeyError:
             return
 
@@ -5076,16 +5087,35 @@ class Scheduler(SchedulerState, ServerNode):
             raise ValueError("Workers not the same in all collections")
 
         assert self.running.issuperset(self.idle.values()), (
-            self.running,
-            list(self.idle.values()),
+            self.running.copy(),
+            set(self.idle.values()),
         )
+        assert self.running.issuperset(self.idle_task_count), (
+            self.running.copy(),
+            self.idle_task_count.copy(),
+        )
+        assert self.running.issuperset(self.saturated), (
+            self.running.copy(),
+            self.saturated.copy(),
+        )
+        assert self.saturated.isdisjoint(self.idle.values()), (
+            self.saturated.copy(),
+            set(self.idle.values()),
+        )
+
         task_prefix_counts: defaultdict[str, int] = defaultdict(int)
         for w, ws in self.workers.items():
             assert isinstance(w, str), (type(w), w)
             assert isinstance(ws, WorkerState), (type(ws), ws)
             assert ws.address == w
-            if ws.status != Status.running:
+
+            if ws.status == Status.running:
+                assert ws in self.running
+            else:
+                assert ws not in self.running
                 assert ws.address not in self.idle
+                assert ws not in self.saturated
+
             assert ws.long_running.issubset(ws.processing)
             if not ws.processing:
                 assert not ws.occupancy
@@ -5385,6 +5415,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.running.discard(ws)
             self.idle.pop(ws.address, None)
             self.idle_task_count.discard(ws)
+            self.saturated.discard(ws)
 
     async def handle_request_refresh_who_has(
         self, keys: Iterable[str], worker: str, stimulus_id: str
@@ -5624,9 +5655,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         assert isinstance(data, dict)
 
-        keys, who_has, nbytes = await scatter_to_workers(
-            nthreads, data, rpc=self.rpc, report=False
-        )
+        keys, who_has, nbytes = await scatter_to_workers(nthreads, data, rpc=self.rpc)
 
         self.update_data(who_has=who_has, nbytes=nbytes, client=client)
 
@@ -7522,7 +7551,6 @@ class Scheduler(SchedulerState, ServerNode):
         from distributed.dashboard.core import TabPanel
 
         # HTML
-        ws: WorkerState
         html = """
         <h1> Dask Performance Report </h1>
 

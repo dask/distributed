@@ -1698,6 +1698,8 @@ async def test_include_communication_in_occupancy(c, s, a, b):
 async def test_new_worker_with_data_rejected(s):
     w = Worker(s.address, nthreads=1)
     w.update_data(data={"x": 0})
+    assert w.state.tasks["x"].state == "memory"
+    assert w.data == {"x": 0}
 
     with captured_logger(
         "distributed.worker", level=logging.WARNING
@@ -1729,6 +1731,8 @@ async def test_worker_arrives_with_processing_data(c, s, a, b):
 
     w = Worker(s.address, nthreads=1)
     w.update_data(data={y.key: 3})
+    assert w.state.tasks[y.key].state == "memory"
+    assert w.data == {y.key: 3}
 
     with pytest.raises(RuntimeError, match="Worker failed to start"):
         await w
@@ -2834,7 +2838,7 @@ async def test_too_many_groups(c, s, a, b):
 
 @gen_test()
 async def test_multiple_listeners():
-    with captured_logger(logging.getLogger("distributed.scheduler")) as log:
+    with captured_logger("distributed.scheduler") as log:
         async with Scheduler(dashboard_address=":0", protocol=["inproc", "tcp"]) as s:
             async with Worker(s.listeners[0].contact_address) as a:
                 async with Worker(s.listeners[1].contact_address) as b:
@@ -2861,7 +2865,7 @@ async def test_worker_name_collision(s, a):
     # test that a name collision for workers produces the expected response
     # and leaves the data structures of Scheduler in a good state
     # is not updated by the second worker
-    with captured_logger(logging.getLogger("distributed.scheduler")) as log:
+    with captured_logger("distributed.scheduler") as log:
         with raises_with_cause(
             RuntimeError, None, ValueError, f"name taken, {a.name!r}"
         ):
@@ -2948,17 +2952,22 @@ def test_memorystate():
     m = MemoryState(
         process=100,
         unmanaged_old=15,
-        managed_in_memory=68,
-        managed_spilled=12,
+        managed=68,
+        spilled=12,
     )
     assert m.process == 100
-    assert m.managed == 80
-    assert m.managed_in_memory == 68
-    assert m.managed_spilled == 12
+    assert m.managed_total == 80
+    assert m.managed == 68
+    assert m.spilled == 12
     assert m.unmanaged == 32
     assert m.unmanaged_old == 15
     assert m.unmanaged_recent == 17
     assert m.optimistic == 83
+
+    with pytest.warns(FutureWarning):
+        assert m.managed_spilled == m.spilled
+    with pytest.warns(FutureWarning):
+        assert m.managed_in_memory == m.managed
 
     assert (
         repr(m)
@@ -2978,40 +2987,52 @@ def test_memorystate_sum():
     m1 = MemoryState(
         process=100,
         unmanaged_old=15,
-        managed_in_memory=68,
-        managed_spilled=12,
+        managed=68,
+        spilled=12,
     )
     m2 = MemoryState(
         process=80,
         unmanaged_old=10,
-        managed_in_memory=58,
-        managed_spilled=2,
+        managed=58,
+        spilled=2,
     )
     m3 = MemoryState.sum(m1, m2)
     assert m3.process == 180
     assert m3.unmanaged_old == 25
-    assert m3.managed == 140
-    assert m3.managed_spilled == 14
+    assert m3.managed_total == 140
+    assert m3.spilled == 14
 
 
 @pytest.mark.parametrize(
-    "process,unmanaged_old,managed_in_memory,managed_spilled",
+    "process,unmanaged_old,managed,spilled",
     list(product(*[[0, 1, 2, 3]] * 4)),
 )
-def test_memorystate_adds_up(
-    process, unmanaged_old, managed_in_memory, managed_spilled
-):
+def test_memorystate_adds_up(process, unmanaged_old, managed, spilled):
     """Input data is massaged by __init__ so that everything adds up by construction"""
     m = MemoryState(
         process=process,
         unmanaged_old=unmanaged_old,
-        managed_in_memory=managed_in_memory,
-        managed_spilled=managed_spilled,
+        managed=managed,
+        spilled=spilled,
     )
-    assert m.managed_in_memory + m.unmanaged == m.process
-    assert m.managed_in_memory + m.managed_spilled == m.managed
+    assert m.managed + m.unmanaged == m.process
+    assert m.managed + m.spilled == m.managed_total
     assert m.unmanaged_old + m.unmanaged_recent == m.unmanaged
     assert m.optimistic + m.unmanaged_recent == m.process
+
+
+def test_memorystate__to_dict():
+    m = MemoryState(process=11, unmanaged_old=2, managed=3, spilled=1)
+    assert m._to_dict() == {
+        "managed": 3,
+        "managed_total": 4,
+        "optimistic": 5,
+        "process": 11,
+        "spilled": 1,
+        "unmanaged": 8,
+        "unmanaged_old": 2,
+        "unmanaged_recent": 6,
+    }
 
 
 _test_leak = []
@@ -3107,9 +3128,9 @@ async def test_memory(c, s, *nannies):
 
     # On each worker, we now have 50 MiB managed + 100 MiB fresh leak
     await asyncio.gather(
-        assert_memory(a, "managed_in_memory", 50, 51, timeout=0),
-        assert_memory(b, "managed_in_memory", 50, 51, timeout=0),
-        assert_memory(s, "managed_in_memory", 100, 101, timeout=0),
+        assert_memory(a, "managed", 50, 51, timeout=0),
+        assert_memory(b, "managed", 50, 51, timeout=0),
+        assert_memory(s, "managed", 100, 101, timeout=0),
         assert_memory(a, "unmanaged_recent", 100, 120, timeout=0),
         assert_memory(b, "unmanaged_recent", 100, 120, timeout=0),
         assert_memory(s, "unmanaged_recent", 200, 240, timeout=0),
@@ -3131,7 +3152,7 @@ async def test_memory(c, s, *nannies):
     )
 
     # dask serialization compresses ("x" * 50 * 2**20) from 50 MiB to ~200 kiB.
-    # Test that managed_spilled reports the actual size on disk and not the output of
+    # Test that spilled reports the actual size on disk and not the output of
     # sizeof().
     # FIXME https://github.com/dask/distributed/issues/5807
     #       This would be more robust if we could just enable zlib compression in
@@ -3140,23 +3161,23 @@ async def test_memory(c, s, *nannies):
 
     if default_compression:
         await asyncio.gather(
-            assert_memory(a, "managed_spilled", 0.1, 0.5, timeout=3),
-            assert_memory(b, "managed_spilled", 0.1, 0.5, timeout=3),
-            assert_memory(s, "managed_spilled", 0.2, 1.0, timeout=3.1),
+            assert_memory(a, "spilled", 0.1, 0.5, timeout=3),
+            assert_memory(b, "spilled", 0.1, 0.5, timeout=3),
+            assert_memory(s, "spilled", 0.2, 1.0, timeout=3.1),
         )
     else:
         # Long timeout to allow spilling 100 MiB to disk
         await asyncio.gather(
-            assert_memory(a, "managed_spilled", 50, 51, timeout=10),
-            assert_memory(b, "managed_spilled", 50, 51, timeout=10),
-            assert_memory(s, "managed_spilled", 100, 102, timeout=10.1),
+            assert_memory(a, "spilled", 50, 51, timeout=10),
+            assert_memory(b, "spilled", 50, 51, timeout=10),
+            assert_memory(s, "spilled", 100, 102, timeout=10.1),
         )
 
-    # FIXME on Windows and MacOS we occasionally observe managed_in_memory = 49 bytes
+    # FIXME on Windows and MacOS we occasionally observe managed = 49 bytes
     await asyncio.gather(
-        assert_memory(a, "managed_in_memory", 0, 0.1, timeout=0),
-        assert_memory(b, "managed_in_memory", 0, 0.1, timeout=0),
-        assert_memory(s, "managed_in_memory", 0, 0.1, timeout=0),
+        assert_memory(a, "managed", 0, 0.1, timeout=0),
+        assert_memory(b, "managed", 0, 0.1, timeout=0),
+        assert_memory(s, "managed", 0, 0.1, timeout=0),
     )
 
     print_memory_info("After spill")
@@ -3165,9 +3186,9 @@ async def test_memory(c, s, *nannies):
     del f1
     del f2
     await asyncio.gather(
-        assert_memory(a, "managed_spilled", 0, 0, timeout=3),
-        assert_memory(b, "managed_spilled", 0, 0, timeout=3),
-        assert_memory(s, "managed_spilled", 0, 0, timeout=3.1),
+        assert_memory(a, "spilled", 0, 0, timeout=3),
+        assert_memory(b, "spilled", 0, 0, timeout=3),
+        assert_memory(s, "spilled", 0, 0, timeout=3.1),
     )
 
     print_memory_info("After clearing spilled keys")
@@ -3205,7 +3226,7 @@ async def test_memory(c, s, *nannies):
 
 @gen_cluster(client=True, worker_kwargs={"memory_limit": 0})
 async def test_memory_no_zict(c, s, a, b):
-    """When Worker.data is not a SpillBuffer, test that querying managed_spilled
+    """When Worker.data is not a SpillBuffer, test that querying spilled
     defaults to 0 and doesn't raise KeyError
     """
     await c.wait_for_workers(2)
@@ -3213,8 +3234,8 @@ async def test_memory_no_zict(c, s, a, b):
     assert isinstance(b.data, dict)
     f = c.submit(leaking, 10, 0, 0)
     await f
-    assert 10 * 2**20 < s.memory.managed_in_memory < 11 * 2**20
-    assert s.memory.managed_spilled == 0
+    assert 10 * 2**20 < s.memory.managed < 11 * 2**20
+    assert s.memory.spilled == 0
 
 
 @gen_cluster(nthreads=[])
@@ -3954,7 +3975,9 @@ async def test_TaskState__to_dict(c, s):
 
 
 def _verify_cluster_state(
-    state: dict, workers: Collection[Worker], allow_missing: bool = False
+    state: dict,
+    workers: Collection[Worker],
+    allow_missing: bool = False,
 ) -> None:
     addrs = {w.address for w in workers}
     assert state.keys() == {"scheduler", "workers", "versions"}
@@ -4106,7 +4129,6 @@ async def test_repr(s, a):
 
 @gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "2s"})
 async def test_ensure_events_dont_include_taskstate_objects(c, s, a, b):
-
     event = Event()
 
     def block(x, event):

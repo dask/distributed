@@ -686,7 +686,6 @@ class TLSListener(BaseTCPListener):
 
 
 class BaseTCPBackend(Backend):
-
     # I/O
 
     def get_connector(self):

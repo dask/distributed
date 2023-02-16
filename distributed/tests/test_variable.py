@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import random
 from datetime import timedelta
 from time import sleep
@@ -64,7 +63,7 @@ def test_variable_in_task(loop):
 async def test_delete_unset_variable(c, s, a, b):
     x = Variable()
     assert x.client is c
-    with captured_logger(logging.getLogger("distributed.utils")) as logger:
+    with captured_logger("distributed.utils") as logger:
         x.delete()
         await c.close()
     text = logger.getvalue()
@@ -237,7 +236,7 @@ async def test_Future_knows_status_immediately(c, s, a, b):
 
         future2 = await v2.get()
         assert future2.status == "error"
-        with pytest.raises(Exception):
+        with pytest.raises(ZeroDivisionError):
             await future2
 
         start = time()

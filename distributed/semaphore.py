@@ -64,15 +64,17 @@ class SemaphoreExtension:
             dask.config.get("distributed.scheduler.locks.lease-validation-interval"),
             default="s",
         )
-        self._pc_lease_timeout = PeriodicCallback(
+        self.scheduler.periodic_callbacks[
+            "semaphore-lease-timeout"
+        ] = pc = PeriodicCallback(
             self._check_lease_timeout, validation_callback_time * 1000
         )
-        self._pc_lease_timeout.start()
+        pc.start()
         self.lease_timeout = parse_timedelta(
             dask.config.get("distributed.scheduler.locks.lease-timeout"), default="s"
         )
 
-    async def get_value(self, name=None):
+    def get_value(self, name=None):
         return len(self.leases[name])
 
     # `comm` here is required by the handler interface
@@ -342,7 +344,6 @@ class Semaphore(SyncMethodMixin):
         scheduler_rpc=None,
         loop=None,
     ):
-
         try:
             worker = get_worker()
             self.scheduler = scheduler_rpc or worker.scheduler
@@ -527,6 +528,7 @@ class Semaphore(SyncMethodMixin):
         )
 
     def close(self):
+        self.refresh_callback.stop()
         return self.sync(self.scheduler.semaphore_close, name=self.name)
 
     def __del__(self):

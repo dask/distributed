@@ -110,12 +110,14 @@ def test_TaskState__to_dict():
     assert actual == [
         {
             "key": "x",
+            "run_id": -1,
             "state": "memory",
             "done": True,
             "dependents": ["<TaskState 'y' released>"],
         },
         {
             "key": "y",
+            "run_id": -1,
             "state": "released",
             "dependencies": ["<TaskState 'x' memory>"],
             "priority": [0],
@@ -140,9 +142,7 @@ def test_WorkerState__to_dict(ws):
             who_has={"x": ["127.0.0.1:1235"]}, nbytes={"x": 123}, stimulus_id="s1"
         )
     )
-    ws.handle_stimulus(
-        UpdateDataEvent(data={"y": object()}, report=False, stimulus_id="s2")
-    )
+    ws.handle_stimulus(UpdateDataEvent(data={"y": object()}, stimulus_id="s2"))
 
     actual = recursive_to_dict(ws)
     # Remove timestamps
@@ -166,8 +166,9 @@ def test_WorkerState__to_dict(ws):
             ["x", "released", "fetch", "fetch", {}, "s1"],
             ["gather-dependencies", "127.0.0.1:1235", ["x"], "s1"],
             ["x", "fetch", "flight", "flight", {}, "s1"],
+            ["y", "receive-from-scatter", "released", "s2"],
             ["y", "put-in-memory", "s2"],
-            ["y", "receive-from-scatter", "s2"],
+            ["y", "released", "memory", "memory", {}, "s2"],
         ],
         "long_running": [],
         "missing_dep_flight": [],
@@ -184,7 +185,6 @@ def test_WorkerState__to_dict(ws):
             {
                 "cls": "UpdateDataEvent",
                 "data": {"y": None},
-                "report": False,
                 "stimulus_id": "s2",
             },
         ],
@@ -192,6 +192,7 @@ def test_WorkerState__to_dict(ws):
             "x": {
                 "coming_from": "127.0.0.1:1235",
                 "key": "x",
+                "run_id": -1,
                 "nbytes": 123,
                 "priority": [1],
                 "state": "flight",
@@ -199,11 +200,12 @@ def test_WorkerState__to_dict(ws):
             },
             "y": {
                 "key": "y",
+                "run_id": -1,
                 "nbytes": sizeof(object()),
                 "state": "memory",
             },
         },
-        "transition_counter": 2,
+        "transition_counter": 3,
     }
     assert actual == expect
 
@@ -223,7 +225,7 @@ def test_WorkerState_pickle(ws):
             who_has={"x": ["127.0.0.1:1235"]}, nbytes={"x": 123}, stimulus_id="s1"
         )
     )
-    ws.handle_stimulus(UpdateDataEvent(data={"y": 123}, report=False, stimulus_id="s"))
+    ws.handle_stimulus(UpdateDataEvent(data={"y": 123}, stimulus_id="s"))
     ws2 = pickle.loads(pickle.dumps(ws))
     assert ws2.tasks.keys() == {"x", "y"}
     assert ws2.data == {"y": 123}
@@ -363,6 +365,7 @@ def test_computetask_to_dict():
         function=b"blob",
         args=b"blob",
         kwargs=None,
+        run_id=5,
     )
     assert ev.run_spec == SerializedTask(function=b"blob", args=b"blob")
     ev2 = ev.to_loggable(handled=11.22)
@@ -386,6 +389,7 @@ def test_computetask_to_dict():
         "function": None,
         "args": None,
         "kwargs": None,
+        "run_id": 5,
     }
     ev3 = StateMachineEvent.from_dict(d)
     assert isinstance(ev3, ComputeTaskEvent)
@@ -409,6 +413,7 @@ def test_computetask_dummy():
         function=None,
         args=None,
         kwargs=None,
+        run_id=0,
     )
 
     # nbytes is generated from who_has if omitted
@@ -420,7 +425,6 @@ def test_updatedata_to_dict():
     """The potentially very large UpdateDataEvent.data is not stored in the log"""
     ev = UpdateDataEvent(
         data={"x": "foo", "y": "bar"},
-        report=True,
         stimulus_id="test",
     )
     ev2 = ev.to_loggable(handled=11.22)
@@ -430,7 +434,6 @@ def test_updatedata_to_dict():
     assert d == {
         "cls": "UpdateDataEvent",
         "data": {"x": None, "y": None},
-        "report": True,
         "stimulus_id": "test",
         "handled": 11.22,
     }
@@ -444,6 +447,7 @@ def test_executesuccess_to_dict():
     ev = ExecuteSuccessEvent(
         stimulus_id="test",
         key="x",
+        run_id=1,
         value=123,
         start=123.4,
         stop=456.7,
@@ -459,6 +463,7 @@ def test_executesuccess_to_dict():
         "stimulus_id": "test",
         "handled": 11.22,
         "key": "x",
+        "run_id": 1,
         "value": None,
         "nbytes": 890,
         "start": 123.4,
@@ -470,6 +475,7 @@ def test_executesuccess_to_dict():
     assert ev3.stimulus_id == "test"
     assert ev3.handled == 11.22
     assert ev3.key == "x"
+    assert ev3.run_id == 1
     assert ev3.value is None
     assert ev3.start == 123.4
     assert ev3.stop == 456.7
@@ -481,6 +487,7 @@ def test_executesuccess_dummy():
     ev = ExecuteSuccessEvent.dummy("x", stimulus_id="s")
     assert ev == ExecuteSuccessEvent(
         key="x",
+        run_id=1,
         value=None,
         start=0.0,
         stop=1.0,
@@ -1603,9 +1610,7 @@ def test_worker_nbytes(ws_with_running_task):
     assert ws.nbytes == 12 + 13
 
     # released -> memory (scatter)
-    ws.handle_stimulus(
-        UpdateDataEvent(data={"z": "bar"}, report=False, stimulus_id="s3")
-    )
+    ws.handle_stimulus(UpdateDataEvent(data={"z": "bar"}, stimulus_id="s3"))
     assert ws.nbytes == 12 + 13 + sizeof("bar")
 
     # actors

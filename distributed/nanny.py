@@ -514,7 +514,9 @@ class Nanny(ServerNode):
     def _on_worker_exit_sync(self, exitcode):
         try:
             self._ongoing_background_tasks.call_soon(self._on_worker_exit, exitcode)
-        except AsyncTaskGroupClosedError:  # Async task group has already been closed, so the nanny is already clos(ed|ing).
+        except (
+            AsyncTaskGroupClosedError
+        ):  # Async task group has already been closed, so the nanny is already clos(ed|ing).
             pass
 
     @log_errors
@@ -796,8 +798,13 @@ class WorkerProcess:
         if self.status == Status.stopping:
             await self.stopped.wait()
             return
+        # If the process is not properly up it will not watch the closing queue
+        # and we may end up leaking this process
+        # Therefore wait for it to be properly started before killing it
+        if self.status == Status.starting:
+            await self.running.wait()
+
         assert self.status in (
-            Status.starting,
             Status.running,
             Status.failed,  # process failed to start, but hasn't been joined yet
         ), self.status

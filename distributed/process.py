@@ -10,7 +10,7 @@ import threading
 import weakref
 from collections.abc import Callable
 from queue import Queue as PyQueue
-from typing import TypeVar
+from typing import TYPE_CHECKING
 
 from tornado.concurrent import Future
 from tornado.ioloop import IOLoop
@@ -18,6 +18,11 @@ from tornado.ioloop import IOLoop
 import dask
 
 from distributed.utils import get_mp_context
+
+if TYPE_CHECKING:
+    # TODO import from typing (requires Python >=3.11)
+    from typing_extensions import Self
+
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +53,6 @@ class _ProcessState:
     is_alive = False
     pid = None
     exitcode = None
-
-
-_T_async_process = TypeVar("_T_async_process", bound="AsyncProcess")
 
 
 class AsyncProcess:
@@ -325,9 +327,7 @@ class AsyncProcess:
             self._process = None
             self._closed = True
 
-    def set_exit_callback(
-        self: _T_async_process, func: Callable[[_T_async_process], None]
-    ) -> None:
+    def set_exit_callback(self: Self, func: Callable[[Self], None]) -> None:
         """
         Set a function to be called by the event loop when the process exits.
         The function is called with the AsyncProcess as sole argument.

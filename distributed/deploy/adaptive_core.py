@@ -225,7 +225,6 @@ class AdaptiveCore:
         status = None
 
         try:
-
             target = await self.safe_target()
             recommendations = await self.recommendations(target)
 

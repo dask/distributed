@@ -479,7 +479,6 @@ class Cluster(SyncMethodMixin):
         return tab
 
     def _repr_html_(self, cluster_status=None):
-
         try:
             scheduler_info_repr = self.scheduler_info._repr_html_()
         except AttributeError:

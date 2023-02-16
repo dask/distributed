@@ -23,7 +23,16 @@ from copy import copy
 from dataclasses import dataclass, field
 from functools import lru_cache, partial, singledispatchmethod
 from itertools import chain
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypedDict, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Literal,
+    NamedTuple,
+    Sequence,
+    TypedDict,
+    cast,
+)
 
 from tlz import peekn
 
@@ -43,34 +52,32 @@ from distributed.utils import recursive_to_dict
 logger = logging.getLogger("distributed.worker.state_machine")
 
 if TYPE_CHECKING:
-    # TODO import from typing (requires Python >=3.10)
-    from typing_extensions import TypeAlias
+    # TODO import from typing (TypeAlias requires Python >=3.10)
+    # TODO import from typing (NotRequired requires Python >=3.11)
+    from typing_extensions import NotRequired, TypeAlias
 
     # Circular imports
     from distributed.diagnostics.plugin import WorkerPlugin
     from distributed.worker import Worker
 
-    # TODO move out of TYPE_CHECKING (requires Python >=3.10)
-    # Not to be confused with distributed.scheduler.TaskStateState
-    TaskStateState: TypeAlias = Literal[
-        "cancelled",
-        "constrained",
-        "error",
-        "executing",
-        "fetch",
-        "flight",
-        "forgotten",
-        "long-running",
-        "memory",
-        "missing",
-        "ready",
-        "released",
-        "rescheduled",
-        "resumed",
-        "waiting",
-    ]
-else:
-    TaskStateState = str
+# Not to be confused with distributed.scheduler.TaskStateState
+TaskStateState: TypeAlias = Literal[
+    "cancelled",
+    "constrained",
+    "error",
+    "executing",
+    "fetch",
+    "flight",
+    "forgotten",
+    "long-running",
+    "memory",
+    "missing",
+    "ready",
+    "released",
+    "rescheduled",
+    "resumed",
+    "waiting",
+]
 
 # TaskState.state subsets
 PROCESSING: set[TaskStateState] = {
@@ -79,8 +86,6 @@ PROCESSING: set[TaskStateState] = {
     "constrained",
     "executing",
     "long-running",
-    "cancelled",
-    "resumed",
 }
 READY: set[TaskStateState] = {"ready", "constrained"}
 # Valid states for a task that is found in TaskState.waiting_for_data
@@ -98,6 +103,8 @@ WAITING_FOR_DATA: set[TaskStateState] = {
 
 NO_VALUE = "--no-value-sentinel--"
 
+RUN_ID_SENTINEL = -1
+
 
 class SerializedTask(NamedTuple):
     """Info from distributed.scheduler.TaskState.run_spec
@@ -112,11 +119,11 @@ class SerializedTask(NamedTuple):
     task: object = NO_VALUE
 
 
-class StartStop(TypedDict, total=False):
-    action: str
+class StartStop(TypedDict):
+    action: Literal["compute", "transfer", "disk-read", "disk-write", "deserialize"]
     start: float
     stop: float
-    source: str  # optional
+    source: NotRequired[str]
 
 
 class InvalidTransition(Exception):
@@ -222,6 +229,8 @@ class TaskState:
 
     #: Task key. Mandatory.
     key: str
+    #: Task run ID.
+    run_id: int = RUN_ID_SENTINEL
     #: A named tuple containing the ``function``, ``args``, ``kwargs`` and ``task``
     #: associated with this `TaskState` instance. This defaults to ``None`` and can
     #: remain empty if it is a dependency that this worker will receive from another
@@ -344,11 +353,6 @@ class TaskState:
         # Remove all Nones and empty containers
         return {k: v for k, v in out.items() if v}
 
-    def is_protected(self) -> bool:
-        return self.state in PROCESSING or any(
-            dep_ts.state in PROCESSING for dep_ts in self.dependents
-        )
-
 
 @dataclass
 class Instruction:
@@ -453,6 +457,7 @@ class TaskFinishedMsg(SendMessageToScheduler):
     op = "task-finished"
 
     key: str
+    run_id: int
     nbytes: int | None
     type: bytes  # serialized class
     typename: str
@@ -738,6 +743,7 @@ class GatherDepFailureEvent(GatherDepDoneEvent):
 @dataclass
 class ComputeTaskEvent(StateMachineEvent):
     key: str
+    run_id: int
     who_has: dict[str, Collection[str]]
     nbytes: dict[str, int]
     priority: tuple[int, ...]
@@ -749,6 +755,7 @@ class ComputeTaskEvent(StateMachineEvent):
     resource_restrictions: dict[str, float]
     actor: bool
     annotations: dict
+
     __slots__ = tuple(__annotations__)
 
     def __post_init__(self) -> None:
@@ -787,6 +794,7 @@ class ComputeTaskEvent(StateMachineEvent):
     def dummy(
         key: str,
         *,
+        run_id: int = 0,
         who_has: dict[str, Collection[str]] | None = None,
         nbytes: dict[str, int] | None = None,
         priority: tuple[int, ...] = (0,),
@@ -801,6 +809,7 @@ class ComputeTaskEvent(StateMachineEvent):
         """
         return ComputeTaskEvent(
             key=key,
+            run_id=run_id,
             who_has=who_has or {},
             nbytes=nbytes or {k: 1 for k in who_has or ()},
             priority=priority,
@@ -828,6 +837,7 @@ class ExecuteDoneEvent(StateMachineEvent):
 
 @dataclass
 class ExecuteSuccessEvent(ExecuteDoneEvent):
+    run_id: int  # FIXME: Utilize the run ID in all ExecuteDoneEvents
     value: object
     start: float
     stop: float
@@ -857,6 +867,7 @@ class ExecuteSuccessEvent(ExecuteDoneEvent):
         key: str,
         value: object = None,
         *,
+        run_id: int = 1,
         nbytes: int = 1,
         stimulus_id: str,
     ) -> ExecuteSuccessEvent:
@@ -865,6 +876,7 @@ class ExecuteSuccessEvent(ExecuteDoneEvent):
         """
         return ExecuteSuccessEvent(
             key=key,
+            run_id=run_id,
             value=value,
             start=0.0,
             stop=1.0,
@@ -989,7 +1001,7 @@ class RemoveReplicasEvent(StateMachineEvent):
 @dataclass
 class FreeKeysEvent(StateMachineEvent):
     __slots__ = ("keys",)
-    keys: Collection[str]
+    keys: Sequence[str]
 
 
 @dataclass
@@ -1008,9 +1020,8 @@ class StealRequestEvent(StateMachineEvent):
 
 @dataclass
 class UpdateDataEvent(StateMachineEvent):
-    __slots__ = ("data", "report")
+    __slots__ = ("data",)
     data: dict[str, object]
-    report: bool
 
     def to_loggable(self, *, handled: float) -> StateMachineEvent:
         out = copy(self)
@@ -1026,18 +1037,12 @@ class SecedeEvent(StateMachineEvent):
     compute_duration: float
 
 
-if TYPE_CHECKING:
-    # TODO remove quotes (requires Python >=3.9)
-    # TODO get out of TYPE_CHECKING (requires Python >=3.10)
-    # {TaskState -> finish: TaskStateState | (finish: TaskStateState, transition *args)}
-    # Not to be confused with distributed.scheduler.Recs
-    Recs: TypeAlias = "dict[TaskState, TaskStateState | tuple]"
-    Instructions: TypeAlias = "list[Instruction]"
-    RecsInstrs: TypeAlias = "tuple[Recs, Instructions]"
-else:
-    Recs = dict
-    Instructions = list
-    RecsInstrs = tuple
+# TODO remove quotes (requires Python >=3.9)
+# {TaskState -> finish: TaskStateState | (finish: TaskStateState, transition *args)}
+# Not to be confused with distributed.scheduler.Recs
+Recs: TypeAlias = "dict[TaskState, TaskStateState | tuple]"
+Instructions: TypeAlias = "list[Instruction]"
+RecsInstrs: TypeAlias = "tuple[Recs, Instructions]"
 
 
 def merge_recs_instructions(*args: RecsInstrs) -> RecsInstrs:
@@ -1759,7 +1764,10 @@ class WorkerState:
         return None
 
     def _get_task_finished_msg(
-        self, ts: TaskState, stimulus_id: str
+        self,
+        ts: TaskState,
+        run_id: int,
+        stimulus_id: str,
     ) -> TaskFinishedMsg:
         if ts.key not in self.data and ts.key not in self.actors:
             raise RuntimeError(f"Task {ts} not ready")
@@ -1780,6 +1788,7 @@ class WorkerState:
             typ_serialized = pickle.dumps(typ.__name__)
         return TaskFinishedMsg(
             key=ts.key,
+            run_id=run_id,
             nbytes=ts.nbytes,
             type=typ_serialized,
             typename=typename(typ),
@@ -1788,75 +1797,6 @@ class WorkerState:
             startstops=ts.startstops,
             stimulus_id=stimulus_id,
         )
-
-    def _put_key_in_memory(
-        self, ts: TaskState, value: object, *, stimulus_id: str
-    ) -> RecsInstrs:
-        """
-        Put a key into memory and set data related task state attributes.
-        On success, generate recommendations for dependents.
-
-        This method does not generate any scheduler messages since this method
-        cannot distinguish whether it has to be an `add-task` or a
-        `task-finished` signal. The caller is required to generate this message
-        on success.
-
-        Raises
-        ------
-        Exception:
-            In case the data is put into the in-memory buffer and a serialization error
-            occurs during spilling, this re-raises that error. This has to be handled by
-            the caller since most callers generate scheduler messages on success (see
-            comment above) but we need to signal that this was not successful.
-
-            Can only trigger if distributed.worker.memory.target is enabled, the value
-            is individually larger than target * memory_limit, and the task is not an
-            actor.
-        """
-        if ts.key in self.data:
-            ts.state = "memory"
-            return {}, []
-
-        recommendations: Recs = {}
-        instructions: Instructions = []
-
-        if ts.key in self.actors:
-            self.actors[ts.key] = value
-        else:
-            start = time()
-            self.data[ts.key] = value
-            stop = time()
-            if stop - start > 0.005:
-                ts.startstops.append(
-                    {"action": "disk-write", "start": start, "stop": stop}
-                )
-                instructions.append(
-                    DigestMetric(
-                        # See metrics:
-                        # - disk-load-duration
-                        # - get-data-load-duration
-                        # - disk-write-target-duration
-                        # - disk-write-spill-duration
-                        name="disk-write-target-duration",
-                        value=stop - start,
-                        stimulus_id=stimulus_id,
-                    )
-                )
-
-        ts.state = "memory"
-        if ts.nbytes is None:
-            ts.nbytes = sizeof(value)
-        self.nbytes += ts.nbytes
-
-        ts.type = type(value)
-
-        for dep in ts.dependents:
-            dep.waiting_for_data.discard(ts)
-            if not dep.waiting_for_data and dep.state == "waiting":
-                recommendations[dep] = "ready"
-
-        self.log.append((ts.key, "put-in-memory", stimulus_id, time()))
-        return recommendations, instructions
 
     ###############
     # Transitions #
@@ -2138,7 +2078,6 @@ class WorkerState:
         --------
         _transition_cancelled_fetch
         _transition_cancelled_waiting
-        _transition_resumed_waiting
         _transition_flight_fetch
         """
         if ts.previous == "flight":
@@ -2185,47 +2124,6 @@ class WorkerState:
         ts.next = None
         return {}, []
 
-    def _transition_resumed_waiting(
-        self, ts: TaskState, *, stimulus_id: str
-    ) -> RecsInstrs:
-        """
-        See also
-        --------
-        _transition_cancelled_fetch
-        _transition_cancelled_or_resumed_long_running
-        _transition_cancelled_waiting
-        _transition_resumed_fetch
-        """
-        # None of the exit events of execute or gather_dep recommend a transition to
-        # waiting
-        assert not ts.done
-        if ts.previous == "executing":
-            assert ts.next == "fetch"
-            # We're back where we started. We should forget about the entire
-            # cancellation attempt
-            ts.state = "executing"
-            ts.next = None
-            ts.previous = None
-            return {}, []
-
-        elif ts.previous == "long-running":
-            assert ts.next == "fetch"
-            # Same as executing, and in addition send the LongRunningMsg in arrears
-            # Note that, if the task seceded before it was cancelled, this will cause
-            # the message to be sent twice.
-            ts.state = "long-running"
-            ts.next = None
-            ts.previous = None
-            smsg = LongRunningMsg(
-                key=ts.key, compute_duration=None, stimulus_id=stimulus_id
-            )
-            return {}, [smsg]
-
-        else:
-            assert ts.previous == "flight"
-            assert ts.next == "waiting"
-            return {}, []
-
     def _transition_cancelled_fetch(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
@@ -2234,7 +2132,6 @@ class WorkerState:
         --------
         _transition_cancelled_waiting
         _transition_resumed_fetch
-        _transition_resumed_waiting
         """
         if ts.previous == "flight":
             if ts.done:
@@ -2263,7 +2160,6 @@ class WorkerState:
         _transition_cancelled_fetch
         _transition_cancelled_or_resumed_long_running
         _transition_resumed_fetch
-        _transition_resumed_waiting
         """
         # None of the exit events of gather_dep or execute recommend a transition to
         # waiting
@@ -2413,7 +2309,6 @@ class WorkerState:
         --------
         _transition_executing_long_running
         _transition_cancelled_waiting
-        _transition_resumed_waiting
         """
         assert ts.previous in ("executing", "long-running")
         ts.previous = "long-running"
@@ -2422,35 +2317,38 @@ class WorkerState:
         return self._ensure_computing()
 
     def _transition_executing_memory(
-        self, ts: TaskState, value: object, *, stimulus_id: str
+        self, ts: TaskState, value: object, run_id: int, *, stimulus_id: str
     ) -> RecsInstrs:
         """This transition is *normally* triggered by ExecuteSuccessEvent.
         However, beware that it can also be triggered by scatter().
         """
         return self._transition_to_memory(
-            ts, value, "task-finished", stimulus_id=stimulus_id
+            ts, value, "task-finished", run_id=run_id, stimulus_id=stimulus_id
         )
 
     def _transition_released_memory(
-        self, ts: TaskState, value: object, *, stimulus_id: str
+        self, ts: TaskState, value: object, run_id: int, *, stimulus_id: str
     ) -> RecsInstrs:
-        """This transition is triggered by scatter()"""
+        """This transition is triggered by scatter().
+        This transition does not send any message back to the scheduler, because the
+        scheduler doesn't know this key exists yet.
+        """
         return self._transition_to_memory(
-            ts, value, "add-keys", stimulus_id=stimulus_id
+            ts, value, False, run_id=RUN_ID_SENTINEL, stimulus_id=stimulus_id
         )
 
     def _transition_flight_memory(
-        self, ts: TaskState, value: object, *, stimulus_id: str
+        self, ts: TaskState, value: object, run_id: int, *, stimulus_id: str
     ) -> RecsInstrs:
         """This transition is *normally* triggered by GatherDepSuccessEvent.
         However, beware that it can also be triggered by scatter().
         """
         return self._transition_to_memory(
-            ts, value, "add-keys", stimulus_id=stimulus_id
+            ts, value, "add-keys", run_id=RUN_ID_SENTINEL, stimulus_id=stimulus_id
         )
 
     def _transition_resumed_memory(
-        self, ts: TaskState, value: object, *, stimulus_id: str
+        self, ts: TaskState, value: object, run_id: int, *, stimulus_id: str
     ) -> RecsInstrs:
         """Normally, we send to the scheduler a 'task-finished' message for a completed
         execution and 'add-data' for a completed replication from another worker. The
@@ -2472,31 +2370,115 @@ class WorkerState:
 
         ts.previous = None
         ts.next = None
-        return self._transition_to_memory(ts, value, msg_type, stimulus_id=stimulus_id)
+        return self._transition_to_memory(
+            ts, value, msg_type, run_id=run_id, stimulus_id=stimulus_id
+        )
 
     def _transition_to_memory(
         self,
         ts: TaskState,
         value: object,
-        msg_type: Literal["add-keys", "task-finished"],
+        msg_type: Literal[False, "add-keys", "task-finished"],
+        run_id: int,
         *,
         stimulus_id: str,
     ) -> RecsInstrs:
-        try:
-            recs, instrs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
-        except Exception as e:
-            msg = error_message(e)
-            return {ts: tuple(msg.values())}, []
+        """Insert a task's output in self.data and set the state to memory.
+        This method is the one and only place where keys are inserted in self.data.
+
+        There are three ways to get here:
+        1. task execution just terminated successfully. Initial state is one of
+           - executing
+           - long-running
+           - resumed(prev=executing next=fetch)
+           - resumed(prev=long-running next=fetch)
+        2. transfer from another worker terminated successfully. Initial state is
+           - flight
+           - resumed(prev=flight next=waiting)
+        3. scatter. In this case *normally* the task is in released state, but nothing
+           stops a client to scatter a key while is in any other state; these race
+           conditions are not well tested and are expected to misbehave.
+        """
+        recommendations: Recs = {}
+        instructions: Instructions = []
+
+        if self.validate:
+            assert ts.key not in self.data
+            assert ts.state != "memory"
+
+        if ts.key in self.actors:
+            self.actors[ts.key] = value
+        else:
+            start = time()
+
+            try:
+                self.data[ts.key] = value
+            except Exception as e:
+                # distributed.worker.memory.target is enabled and the value is
+                # individually larger than target * memory_limit.
+                # Inserting this task in the SpillBuffer caused it to immediately
+                # spilled to disk, and it failed to serialize.
+                # Third-party MutableMappings (dask-cuda etc.) may have other use cases
+                # for this.
+                msg = error_message(e)
+                return {ts: tuple(msg.values())}, []
+
+            stop = time()
+            if stop - start > 0.005:
+                # The SpillBuffer has spilled this task (if larger than target) or other
+                # tasks (if smaller than target) to disk.
+                # Alternatively, a third-party MutableMapping may have spent time in
+                # other activities, e.g. transferring data between GPGPU and system
+                # memory.
+                ts.startstops.append(
+                    {"action": "disk-write", "start": start, "stop": stop}
+                )
+                instructions.append(
+                    DigestMetric(
+                        # See metrics:
+                        # - disk-load-duration
+                        # - get-data-load-duration
+                        # - disk-write-target-duration
+                        # - disk-write-spill-duration
+                        name="disk-write-target-duration",
+                        value=stop - start,
+                        stimulus_id=stimulus_id,
+                    )
+                )
+
+        ts.state = "memory"
+        if ts.nbytes is None:
+            ts.nbytes = sizeof(value)
+        self.nbytes += ts.nbytes
+        ts.type = type(value)
+
+        for dep in ts.dependents:
+            dep.waiting_for_data.discard(ts)
+            if not dep.waiting_for_data and dep.state == "waiting":
+                recommendations[dep] = "ready"
+
+        self.log.append((ts.key, "put-in-memory", stimulus_id, time()))
 
         # NOTE: The scheduler's reaction to these two messages is fundamentally
         # different. Namely, add-keys is only admissible for tasks that are already in
         # memory on another worker, and won't trigger transitions.
         if msg_type == "add-keys":
-            instrs.append(AddKeysMsg(keys=[ts.key], stimulus_id=stimulus_id))
+            instructions.append(AddKeysMsg(keys=[ts.key], stimulus_id=stimulus_id))
+        elif msg_type == "task-finished":
+            assert run_id != RUN_ID_SENTINEL
+            instructions.append(
+                self._get_task_finished_msg(
+                    ts,
+                    run_id=run_id,
+                    stimulus_id=stimulus_id,
+                )
+            )
         else:
-            assert msg_type == "task-finished"
-            instrs.append(self._get_task_finished_msg(ts, stimulus_id=stimulus_id))
-        return recs, instrs
+            # This happens on scatter(), where the scheduler doesn't know yet that the
+            # key exists.
+            assert msg_type is False
+
+        return recommendations, instructions
 
     def _transition_released_forgotten(
         self, ts: TaskState, *, stimulus_id: str
@@ -2538,7 +2520,6 @@ class WorkerState:
         ("resumed", "memory"): _transition_resumed_memory,
         ("resumed", "released"): _transition_resumed_released,
         ("resumed", "rescheduled"): _transition_resumed_rescheduled,
-        ("resumed", "waiting"): _transition_resumed_waiting,
         ("constrained", "executing"): _transition_constrained_executing,
         ("constrained", "released"): _transition_generic_released,
         ("error", "released"): _transition_generic_released,
@@ -2743,33 +2724,17 @@ class WorkerState:
     @_handle_event.register
     def _handle_update_data(self, ev: UpdateDataEvent) -> RecsInstrs:
         recommendations: Recs = {}
-        instructions: Instructions = []
         for key, value in ev.data.items():
             try:
                 ts = self.tasks[key]
-                recommendations[ts] = ("memory", value)
             except KeyError:
                 self.tasks[key] = ts = TaskState(key)
 
-                try:
-                    recs, instrs = self._put_key_in_memory(
-                        ts, value, stimulus_id=ev.stimulus_id
-                    )
-                except Exception as e:
-                    recs = {ts: tuple(error_message(e).values())}
-                    instrs = []
-
-                recommendations.update(recs)
-                instructions.extend(instrs)
-
-            self.log.append((key, "receive-from-scatter", ev.stimulus_id, time()))
-
-        if ev.report:
-            instructions.append(
-                AddKeysMsg(keys=list(ev.data), stimulus_id=ev.stimulus_id)
+            recommendations[ts] = ("memory", value, RUN_ID_SENTINEL)
+            self.log.append(
+                (key, "receive-from-scatter", ts.state, ev.stimulus_id, time())
             )
-
-        return recommendations, instructions
+        return recommendations, []
 
     @_handle_event.register
     def _handle_free_keys(self, ev: FreeKeysEvent) -> RecsInstrs:
@@ -2802,35 +2767,28 @@ class WorkerState:
         holding this unnecessary data, if the worker hasn't released the data itself,
         already.
 
-        This handler does not guarantee the task nor the data to be actually
-        released but only asks the worker to release the data on a best effort
-        guarantee. This protects from race conditions where the given keys may
-        already have been rescheduled for compute in which case the compute
-        would win and this handler is ignored.
+        This handler only releases tasks that are indeed in state memory.
 
         For stronger guarantees, see handler free_keys
         """
         recommendations: Recs = {}
         instructions: Instructions = []
 
-        rejected = []
         for key in ev.keys:
             ts = self.tasks.get(key)
             if ts is None or ts.state != "memory":
                 continue
-            if not ts.is_protected():
-                self.log.append(
-                    (ts.key, "remove-replica-confirmed", ev.stimulus_id, time())
-                )
-                recommendations[ts] = "released"
-            else:
-                rejected.append(key)
-
-        if rejected:
-            self.log.append(
-                ("remove-replica-rejected", rejected, ev.stimulus_id, time())
-            )
-            instructions.append(AddKeysMsg(keys=rejected, stimulus_id=ev.stimulus_id))
+            # If the task is still in executing or long-running, the scheduler
+            # should never have asked the worker to drop this key.
+            # We cannot simply forget it because there is a time window between
+            # setting the state to executing/long-running and
+            # preparing/collecting the data for the task.
+            # If a dependency was released during this time, this would pop up
+            # as a KeyError during execute which is hard to understand
+            if any(dep.state in ("executing", "long-running") for dep in ts.dependents):
+                raise RuntimeError("Encountered invalid state")  # pragma: no cover
+            self.log.append((ts.key, "remove-replica", ev.stimulus_id, time()))
+            recommendations[ts] = "released"
 
         return recommendations, instructions
 
@@ -2869,7 +2827,7 @@ class WorkerState:
         except KeyError:
             self.tasks[ev.key] = ts = TaskState(ev.key)
         self.log.append((ev.key, "compute-task", ts.state, ev.stimulus_id, time()))
-
+        ts.run_id = ev.run_id
         recommendations: Recs = {}
         instructions: Instructions = []
 
@@ -2881,7 +2839,9 @@ class WorkerState:
             pass
         elif ts.state == "memory":
             instructions.append(
-                self._get_task_finished_msg(ts, stimulus_id=ev.stimulus_id)
+                self._get_task_finished_msg(
+                    ts, run_id=ev.run_id, stimulus_id=ev.stimulus_id
+                )
             )
         elif ts.state == "error":
             instructions.append(TaskErredMsg.from_task(ts, stimulus_id=ev.stimulus_id))
@@ -2977,7 +2937,7 @@ class WorkerState:
         recommendations: Recs = {}
         for ts in self._gather_dep_done_common(ev):
             if ts.key in ev.data:
-                recommendations[ts] = ("memory", ev.data[ts.key])
+                recommendations[ts] = ("memory", ev.data[ts.key], ts.run_id)
             else:
                 self.log.append((ts.key, "missing-dep", ev.stimulus_id, time()))
                 if self.validate:
@@ -3172,7 +3132,7 @@ class WorkerState:
         )
         ts.nbytes = ev.nbytes
         ts.type = ev.type
-        recs[ts] = ("memory", ev.value)
+        recs[ts] = ("memory", ev.value, ev.run_id)
         return recs, instr
 
     @_handle_event.register
@@ -3532,11 +3492,11 @@ class WorkerState:
                 # dependency can still be in `memory` before GC grabs it...?
                 # Might need better bookkeeping
                 assert self.tasks[dep.key] is dep
-                assert ts in dep.dependents, ts
+                assert ts in dep.dependents, self.story(ts)
 
             for ts_wait in ts.waiting_for_data:
                 assert self.tasks[ts_wait.key] is ts_wait
-                assert ts_wait.state in WAITING_FOR_DATA, ts_wait
+                assert ts_wait.state in WAITING_FOR_DATA, self.story(ts_wait)
 
         for worker, keys in self.has_what.items():
             assert worker != self.address
@@ -3549,30 +3509,30 @@ class WorkerState:
         for worker, tss in self.data_needed.items():
             for ts in tss:
                 fetch_tss.add(ts)
-                assert ts.state == "fetch"
-                assert worker in ts.who_has
+                assert ts.state == "fetch", self.story(ts)
+                assert worker in ts.who_has, f"{ts}; {ts.who_has=}"
         assert len(fetch_tss) == self.fetch_count
 
         for ts in self.missing_dep_flight:
-            assert ts.state == "missing"
+            assert ts.state == "missing", self.story(ts)
         for ts in self.ready:
-            assert ts.state == "ready"
+            assert ts.state == "ready", self.story(ts)
         for ts in self.constrained:
-            assert ts.state == "constrained"
+            assert ts.state == "constrained", self.story(ts)
         for ts in self.executing:
             assert ts.state == "executing" or (
                 ts.state in ("cancelled", "resumed") and ts.previous == "executing"
-            ), ts
+            ), self.story(ts)
         for ts in self.long_running:
             assert ts.state == "long-running" or (
                 ts.state in ("cancelled", "resumed") and ts.previous == "long-running"
-            ), ts
+            ), self.story(ts)
         for ts in self.in_flight_tasks:
             assert ts.state == "flight" or (
                 ts.state in ("cancelled", "resumed") and ts.previous == "flight"
-            ), ts
+            ), self.story(ts)
         for ts in self.waiting:
-            assert ts.state == "waiting"
+            assert ts.state == "waiting", self.story(ts)
 
         # Test that there aren't multiple TaskState objects with the same key in any
         # Set[TaskState]. See note in TaskState.__hash__.
@@ -3586,7 +3546,7 @@ class WorkerState:
             self.long_running,
             self.waiting,
         ):
-            assert self.tasks[ts.key] is ts
+            assert self.tasks[ts.key] is ts, f"{self.tasks[ts.key]} is not {ts}"
 
         expect_nbytes = sum(
             self.tasks[key].nbytes or 0 for key in chain(self.data, self.actors)
@@ -3594,9 +3554,9 @@ class WorkerState:
         assert self.nbytes == expect_nbytes, f"{self.nbytes=}; expected {expect_nbytes}"
 
         for key in self.data:
-            assert key in self.tasks, key
+            assert key in self.tasks, self.story(key)
         for key in self.actors:
-            assert key in self.tasks, key
+            assert key in self.tasks, self.story(key)
 
         for ts in self.tasks.values():
             self.validate_task(ts)

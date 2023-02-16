@@ -41,13 +41,17 @@ from distributed.compatibility import WINDOWS, PeriodicCallback
 from distributed.core import Status
 from distributed.metrics import monotonic
 from distributed.spill import ManualEvictProto, SpillBuffer
-from distributed.utils import has_arg, log_errors
+from distributed.utils import RateLimiterFilter, has_arg, log_errors
 from distributed.utils_perf import ThrottledGC
 
 if TYPE_CHECKING:
     # Circular imports
     from distributed.nanny import Nanny
     from distributed.worker import Worker
+
+worker_logger = logging.getLogger("distributed.worker.memory")
+worker_logger.addFilter(RateLimiterFilter(r"Unmanaged memory use is high"))
+nanny_logger = logging.getLogger("distributed.nanny.memory")
 
 
 class WorkerMemoryManager:
@@ -101,9 +105,8 @@ class WorkerMemoryManager:
         memory_spill_fraction: float | Literal[False] | None = None,
         memory_pause_fraction: float | Literal[False] | None = None,
     ):
-        self.logger = logging.getLogger("distributed.worker.memory")
         self.memory_limit = parse_memory_limit(
-            memory_limit, nthreads, logger=self.logger
+            memory_limit, nthreads, logger=worker_logger
         )
         self.memory_target_fraction = _parse_threshold(
             "distributed.worker.memory.target",
@@ -180,7 +183,7 @@ class WorkerMemoryManager:
             )
             worker.periodic_callbacks["memory_monitor"] = pc
 
-        self._throttled_gc = ThrottledGC(logger=self.logger)
+        self._throttled_gc = ThrottledGC(logger=worker_logger)
 
     @log_errors
     async def memory_monitor(self, worker: Worker) -> None:
@@ -208,7 +211,7 @@ class WorkerMemoryManager:
             # Try to free some memory while in paused state
             self._throttled_gc.collect()
             if worker.status == Status.running:
-                self.logger.warning(
+                worker_logger.warning(
                     "Worker is at %d%% memory usage. Pausing worker.  "
                     "Process memory: %s -- Worker memory limit: %s",
                     int(frac * 100),
@@ -219,7 +222,7 @@ class WorkerMemoryManager:
                 )
                 worker.status = Status.paused
         elif worker.status == Status.paused:
-            self.logger.warning(
+            worker_logger.warning(
                 "Worker is at %d%% memory usage. Resuming worker. "
                 "Process memory: %s -- Worker memory limit: %s",
                 int(frac * 100),
@@ -246,7 +249,7 @@ class WorkerMemoryManager:
             return
 
         total_spilled = 0
-        self.logger.debug(
+        worker_logger.debug(
             "Worker is at %.0f%% memory usage. Start spilling data to disk.",
             frac * 100,
         )
@@ -263,7 +266,7 @@ class WorkerMemoryManager:
 
         while memory > target:
             if not data.fast:
-                self.logger.warning(
+                worker_logger.warning(
                     "Unmanaged memory use is high. This may indicate a memory leak "
                     "or the memory may not be released to the OS; see "
                     "https://distributed.dask.org/en/latest/worker-memory.html#memory-not-released-back-to-the-os "
@@ -319,7 +322,7 @@ class WorkerMemoryManager:
             worker.digest_metric("disk-write-spill-duration", now - last_yielded)
 
         if count:
-            self.logger.debug(
+            worker_logger.debug(
                 "Moved %d tasks worth %s to disk",
                 count,
                 format_bytes(total_spilled),
@@ -327,7 +330,6 @@ class WorkerMemoryManager:
 
     def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
         info = {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
-        del info["logger"]
         info["data"] = dict.fromkeys(self.data)
         return info
 
@@ -344,9 +346,8 @@ class NannyMemoryManager:
         *,
         memory_limit: str | float = "auto",
     ):
-        self.logger = logging.getLogger("distributed.nanny.memory")
         self.memory_limit = parse_memory_limit(
-            memory_limit, nanny.nthreads, logger=self.logger
+            memory_limit, nanny.nthreads, logger=nanny_logger
         )
         self.memory_terminate_fraction = dask.config.get(
             "distributed.worker.memory.terminate"
@@ -385,7 +386,7 @@ class NannyMemoryManager:
             return
 
         if self._last_terminated_pid != process.pid:
-            self.logger.warning(
+            nanny_logger.warning(
                 f"Worker {nanny.worker_address} (pid={process.pid}) exceeded "
                 f"{self.memory_terminate_fraction * 100:.0f}% memory budget. "
                 "Restarting...",
@@ -407,7 +408,7 @@ class NannyMemoryManager:
             # seconds and, if the worker did it, any task that was running and leaking
             # would continue to do so for the whole duration of the cleanup, increasing
             # the risk of going beyond 100%.
-            self.logger.warning(
+            nanny_logger.warning(
                 f"Worker {nanny.worker_address} (pid={process.pid}) is slow to %s",
                 # On Windows, kill() is an alias to terminate()
                 "terminate; trying again"

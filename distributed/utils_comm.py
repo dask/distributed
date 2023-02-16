@@ -6,7 +6,7 @@ import random
 from collections import defaultdict
 from functools import partial
 from itertools import cycle
-from typing import Any
+from typing import Any, Callable
 
 from tlz import concat, drop, groupby, merge
 
@@ -116,7 +116,7 @@ class WrappedKey:
 _round_robin_counter = [0]
 
 
-async def scatter_to_workers(nthreads, data, rpc=rpc, report=True):
+async def scatter_to_workers(nthreads, data, rpc=rpc):
     """Scatter data directly to workers
 
     This distributes data in a round-robin fashion to a set of workers based on
@@ -140,15 +140,7 @@ async def scatter_to_workers(nthreads, data, rpc=rpc, report=True):
 
     rpcs = {addr: rpc(addr) for addr in d}
     try:
-        out = await All(
-            [
-                rpcs[address].update_data(
-                    data=v,
-                    report=report,
-                )
-                for address, v in d.items()
-            ]
-        )
+        out = await All([rpcs[address].update_data(data=v) for address, v in d.items()])
     finally:
         for r in rpcs.values():
             await r.close_rpc()
@@ -163,6 +155,20 @@ async def scatter_to_workers(nthreads, data, rpc=rpc, report=True):
 collection_types = (tuple, list, set, frozenset)
 
 
+def _namedtuple_packing(o: Any, handler: Callable[..., Any]) -> Any:
+    """Special pack/unpack dispatcher for namedtuples respecting their potential constructors."""
+    assert is_namedtuple_instance(o)
+    typ = type(o)
+    if hasattr(o, "__getnewargs_ex__"):
+        args, kwargs = o.__getnewargs_ex__()
+        handled_args = [handler(item) for item in args]
+        handled_kwargs = {k: handler(v) for k, v in kwargs.items()}
+        return typ(*handled_args, **handled_kwargs)
+    args = o.__getnewargs__() if hasattr(typ, "__getnewargs__") else o
+    handled_args = [handler(item) for item in args]
+    return typ(*handled_args)
+
+
 def _unpack_remotedata_inner(
     o: Any, byte_keys: bool, found_keys: set[WrappedKey]
 ) -> Any:
@@ -173,7 +179,6 @@ def _unpack_remotedata_inner(
         if not o:
             return o
         if type(o[0]) is SubgraphCallable:
-
             # Unpack futures within the arguments of the subgraph callable
             futures: set[WrappedKey] = set()
             args = tuple(_unpack_remotedata_inner(i, byte_keys, futures) for i in o[1:])
@@ -202,8 +207,11 @@ def _unpack_remotedata_inner(
                 _unpack_remotedata_inner(item, byte_keys, found_keys) for item in o
             )
     elif is_namedtuple_instance(o):
-        return typ(
-            *[_unpack_remotedata_inner(item, byte_keys, found_keys) for item in o]
+        return _namedtuple_packing(
+            o,
+            partial(
+                _unpack_remotedata_inner, byte_keys=byte_keys, found_keys=found_keys
+            ),
         )
 
     if typ in collection_types:
@@ -291,6 +299,8 @@ def pack_data(o, d, key_types=object):
         return typ([pack_data(x, d, key_types=key_types) for x in o])
     elif typ is dict:
         return {k: pack_data(v, d, key_types=key_types) for k, v in o.items()}
+    elif is_namedtuple_instance(o):
+        return _namedtuple_packing(o, partial(pack_data, d=d, key_types=key_types))
     else:
         return o
 

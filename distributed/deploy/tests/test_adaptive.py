@@ -58,7 +58,6 @@ async def test_adaptive_local_cluster_multi_workers():
         dashboard_address=":0",
         asynchronous=True,
     ) as cluster:
-
         cluster.scheduler.allowed_failures = 1000
         adapt = cluster.adapt(interval="100 ms")
         async with Client(cluster, asynchronous=True) as c:

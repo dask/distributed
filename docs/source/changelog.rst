@@ -1,6 +1,119 @@
 Changelog
 =========
 
+.. _v2023.2.0:
+
+2023.2.0
+--------
+
+Released on February 10, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Rate limit the worker memory logs (:pr:`7529`) `Florian Jetter`_
+- Move P2P barrier logic to scheduler extension (:pr:`7519`) `Hendrik Makait`_
+
+Maintenance
+^^^^^^^^^^^
+- Use PEP 673 ``Self`` type (:pr:`7530`) `Thomas Grainger`_
+- Tentatively fix ``test_pause_while_spilling`` (:pr:`7517`) `crusaderky`_
+- Annotate ``asyncio_tcp.py`` (:pr:`7522`) `crusaderky`_
+- Use dask git tip for ``mypy`` (:pr:`7516`) `crusaderky`_
+- Upgrade to ``mypy`` v1 (:pr:`7525`) `Thomas Grainger`_
+- Clean up calls to ``captured_logger`` (:pr:`7521`) `crusaderky`_
+- Update ``isort`` version to 5.12.0 (:pr:`7513`) `Lawrence Mitchell`_
+
+.. _v2023.1.1:
+
+2023.1.1
+--------
+
+Released on January 27, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- P2P shuffle deduplicates data and can be run several times (:pr:`7486`) `Hendrik Makait`_
+- Reverse order of ``get_logs()`` and ``get_worker_logs()`` (:pr:`7475`) `Nicholas R. Knezek`_
+- Add prometheus metric for time and memory used per task prefix (:pr:`7406`) `Thomas Grainger`_
+- Additive worker counts in Prometheus (:pr:`7468`) `crusaderky`_
+- Add help tool for taskstream (:pr:`7478`) `Florian Jetter`_
+
+Bug Fixes
+^^^^^^^^^
+- Do not allow for a worker to reject a drop replica request (:pr:`7490`) `Hendrik Makait`_
+- Fix un/packing for namedtuples with custom constructors (:pr:`7465`) `antonymayi`_
+
+Documentation
+^^^^^^^^^^^^^
+- Remove ``timeout=`` from docstring example for ``worker_client`` (:pr:`7497`) `Florian Jetter`_
+
+Maintenance
+^^^^^^^^^^^
+- Ignore get_default_shuffle_algorithm linting issue (:pr:`7506`) `Florian Jetter`_
+- Remove set_config when using default client (:pr:`7482`) `Florian Jetter`_
+- Update gpuCI ``RAPIDS_VER`` to ``23.04`` (:pr:`7501`)
+- Fix ``test_balance_expensive_tasks`` and improve helper functions in ``test_steal.py`` (:pr:`7253`) `Hendrik Makait`_
+- Sign every compute task with run ID to correlate response (:pr:`7463`) `Hendrik Makait`_
+
+
+.. _v2023.1.0:
+
+2023.1.0
+---------
+
+Released on January 13, 2023
+
+New Features
+^^^^^^^^^^^^
+- Add local ``SubprocessCluster`` that runs workers in separate processes (:pr:`7431`) `Hendrik Makait`_
+
+Enhancements
+^^^^^^^^^^^^
+- Ensure client session is quiet after ``cluster.close()`` or ``client.shutdown()`` (:pr:`7429`) `James Bourbeau`_
+- Set ``lifetime-stagger`` default value to ``None`` (:pr:`7445`) `bstadlbauer`_
+- Memory thresholds should never be exactly ``0.0`` (:pr:`7458`) `Stuart Berg`_
+- Remove the Incorrect-Sizeof-Warning (:pr:`7450`) `Mads R. B. Kristensen`_
+- Log exceptions in P2P shuffle tasks (:pr:`7442`) `Hendrik Makait`_
+- Add support for packing ``namedtuple`` and add test for future resolution in submit (:pr:`7292`) `Andrew`_
+- Avoid deep copy on ``lz4`` decompression (:pr:`7437`) `crusaderky`_
+- Avoid deep copy of ``numpy`` buffers on unspill (:pr:`7435`) `crusaderky`_
+- Don't error when clicking on empty task stream plot (:pr:`7432`) `James Bourbeau`_
+- Do not count spilled memory when comparing vs. process memory (:pr:`7430`) `crusaderky`_
+- Stop ``Client`` periodic callbacks during ``shutdown()`` (:pr:`7428`) `James Bourbeau`_
+- Add ``dask spec`` CLI (:pr:`7427`) `Matthew Rocklin`_
+- Create new ``zstd`` (de)compressor for each compression call (:pr:`7404`) `Dylan Wragge`_
+- Rename ``managed_in_memory`` etc. to match GUI (:pr:`7418`) `crusaderky`_
+- Warn users when ``sizeof()`` returns inflated output (:pr:`7419`) `crusaderky`_
+
+Bug Fixes
+^^^^^^^^^
+- Ensure dicts are properly recognized as ``msgpack`` serializable (:pr:`7473`) `Florian Jetter`_
+- Reset state of ``ShuffleSchedulerExtension`` on restart (:pr:`7446`) `Hendrik Makait`_
+- Reject non-string column names in P2P shuffle (:pr:`7447`) `Hendrik Makait`_
+- Avoid ``int32`` in dashboard (:pr:`7443`) `Matthew Rocklin`_
+- Fix ``P2PShuffle`` serialization for categorical data (:pr:`7410`) `Hendrik Makait`_
+- ``WorkerPorcess`` blocks on kill if still starting (:pr:`7424`) `Matthew Rocklin`_
+
+Documentation
+^^^^^^^^^^^^^
+- Move Prometheus docs from ``dask/dask`` (:pr:`7405`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Various cleanups in semaphore (:pr:`5885`) `Florian Jetter`_
+- ``test_rlimit`` fails on MacOSX (:pr:`7457`) `crusaderky`_
+- Bump ``actions/checkout`` from 3.2.0 to 3.3.0 (:pr:`7464`)
+- Remove conditional imports of ``psutil`` (:pr:`7462`) `crusaderky`_
+- Drop support for ``zict < 2.1.0`` (:pr:`7456`) `crusaderky`_
+- Fix flaky ``test_digests`` (:pr:`7454`) `crusaderky`_
+- Add minimum dependency testing to CI (:pr:`7285`) `Charles Blackmon-Luca`_
+- Avoid overflow in ``statitics.mean`` (:pr:`7426`) `Matthew Rocklin`_
+- Ignore ``numpy`` ``bool8`` deprecation (:pr:`7423`) `Matthew Rocklin`_
+- Add missing skips for pyarrow (:pr:`7416`) `Elliott Sales de Andrade`_
+- Be more permissive about expected ciphers in tests (:pr:`7417`) `Elliott Sales de Andrade`_
+- Revert "TST: Fetch executables from build root (:pr:`2551`)" (:pr:`7415`) `Elliott Sales de Andrade`_
+
+
 .. _v2022.12.1:
 
 2022.12.1
@@ -4540,3 +4653,8 @@ significantly without many new features.
 .. _`Enrico Minack`: https://github.com/EnricoMi
 .. _`Laurence Watts`: https://github.com/lwatt
 .. _`Mateusz Paprocki`: https://github.com/mattpap
+.. _`bstadlbauer`: https://github.com/bstadlbauer
+.. _`Stuart Berg`: https://github.com/stuarteberg
+.. _`Dylan Wragge`: https://github.com/dwragge
+.. _`Nicholas R. Knezek`: https://github.com/nknezek
+.. _`antonymayi`: https://github.com/antonymayi

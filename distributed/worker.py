@@ -57,6 +57,7 @@ from distributed.comm.utils import OFFLOAD_THRESHOLD
 from distributed.compatibility import PeriodicCallback, randbytes, to_thread
 from distributed.core import (
     ConnectionPool,
+    PooledRPCCall,
     Status,
     coerce_to_address,
     error_message,
@@ -266,7 +267,7 @@ class Worker(BaseWorker, ServerNode):
         executor.
     * **local_directory:** ``path``:
         Path on local machine to store temporary files
-    * **scheduler:** ``rpc``:
+    * **scheduler:** ``PooledRPCCall``:
         Location of scheduler.  See ``.ip/.port`` attributes.
     * **name:** ``string``:
         Alias
@@ -437,7 +438,7 @@ class Worker(BaseWorker, ServerNode):
     metrics: dict[str, Callable[[Worker], Any]]
     startup_information: dict[str, Callable[[Worker], Any]]
     low_level_profiler: bool
-    scheduler: Any
+    scheduler: PooledRPCCall
     execution_state: dict[str, Any]
     plugins: dict[str, WorkerPlugin]
     _pending_plugins: tuple[WorkerPlugin, ...]
@@ -1050,14 +1051,6 @@ class Worker(BaseWorker, ServerNode):
             except Exception:  # TODO: log error once
                 pass
 
-        if out["managed_bytes"] > out["memory"]:
-            logger.warning(
-                "Managed memory exceeds process memory; this will cause premature "
-                "spilling as well as malfunctions in several heuristics. Please ensure "
-                "that sizeof() returns accurate outputs for your data. Read more: "
-                "https://distributed.dask.org/en/stable/worker-memory.html"
-            )
-
         return out
 
     async def get_startup_information(self):
@@ -1311,7 +1304,7 @@ class Worker(BaseWorker, ServerNode):
         result, missing_keys, missing_workers = await gather_from_workers(
             who_has, rpc=self.rpc, who=self.address
         )
-        self.update_data(data=result, report=False)
+        self.update_data(data=result)
         if missing_keys:
             logger.warning(
                 "Could not find data: %s on workers: %s (who_has: %s)",
@@ -1345,7 +1338,6 @@ class Worker(BaseWorker, ServerNode):
     #############
 
     async def start_unsafe(self):
-
         await super().start_unsafe()
 
         enable_gc_diagnosis()
@@ -1812,16 +1804,11 @@ class Worker(BaseWorker, ServerNode):
     def update_data(
         self,
         data: dict[str, object],
-        report: bool = True,
         stimulus_id: str | None = None,
     ) -> dict[str, Any]:
-        self.handle_stimulus(
-            UpdateDataEvent(
-                data=data,
-                report=report,
-                stimulus_id=stimulus_id or f"update-data-{time()}",
-            )
-        )
+        if stimulus_id is None:
+            stimulus_id = f"update-data-{time()}"
+        self.handle_stimulus(UpdateDataEvent(data=data, stimulus_id=stimulus_id))
         return {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
 
     async def set_resources(self, **resources: float) -> None:
@@ -1991,7 +1978,6 @@ class Worker(BaseWorker, ServerNode):
         cause: TaskState,
         worker: str,
     ) -> None:
-
         total_bytes = sum(self.state.tasks[key].get_nbytes() for key in data)
 
         cause.startstops.append(
@@ -2234,6 +2220,7 @@ class Worker(BaseWorker, ServerNode):
 
         # The key *must* be in the worker state thanks to the cancelled state
         ts = self.state.tasks[key]
+        run_id = ts.run_id
 
         try:
             function, args, kwargs = await self._maybe_deserialize_task(ts)
@@ -2305,6 +2292,7 @@ class Worker(BaseWorker, ServerNode):
                     self.digests["task-duration"].add(result["stop"] - result["start"])
                 return ExecuteSuccessEvent(
                     key=key,
+                    run_id=run_id,
                     value=result["result"],
                     start=result["start"],
                     stop=result["stop"],
