@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import random
 from typing import Any
 
 import numpy as np
@@ -100,16 +101,17 @@ from itertools import product
 
 
 @pytest.mark.parametrize("n_workers", [1, 10])
+@pytest.mark.parametrize("barrier_first_worker", [True, False])
 @gen_test()
-async def test_lowlevel_rechunk(tmpdir, loop_in_thread, n_workers):
+async def test_lowlevel_rechunk(
+    tmpdir, loop_in_thread, n_workers, barrier_first_worker
+):
     old = ((1, 2, 3, 4), (5,) * 6)
     new = ((5, 5), (12, 18))
 
     ind_chunks = [[(i, x) for i, x in enumerate(dim)] for dim in old]
     ind_chunks = [list(zip(x, y)) for x, y in product(*ind_chunks)]
     old_chunks = {idx: np.random.random(chunk) for idx, chunk in ind_chunks}
-
-    # arrs = [np.random.random(csize) for csize in old[0]]
 
     workers = list("abcdefghijklmn")[:n_workers]
 
@@ -134,9 +136,12 @@ async def test_lowlevel_rechunk(tmpdir, loop_in_thread, n_workers):
                 loop=loop_in_thread,
             )
         )
-    # TODO
-    # random.seed(42)
-    barrier_worker = shuffles[0]
+    random.seed(42)
+    if barrier_first_worker:
+        barrier_worker = shuffles[0]
+    else:
+        barrier_worker = random.sample(shuffles, k=1)[0]
+
     try:
         for i, (idx, arr) in enumerate(old_chunks.items()):
             s = shuffles[i % len(shuffles)]
@@ -154,14 +159,12 @@ async def test_lowlevel_rechunk(tmpdir, loop_in_thread, n_workers):
             total_bytes_recvd += metrics["disk"]["total"]
             total_bytes_recvd_shuffle += s.total_recvd
 
-        # assert total_bytes_recvd_shuffle == total_bytes_sent
+        assert total_bytes_recvd_shuffle == total_bytes_sent
 
         all_chunks = np.empty(tuple(len(dim) for dim in new), dtype="O")
         for ix, worker in worker_for_mapping.items():
             s = local_shuffle_pool.shuffles[worker]
             all_chunks[ix] = await s.get_output_partition(ix)
-
-            # all_chunks = await asyncio.gather(*all_chunks)
 
     finally:
         await asyncio.gather(*[s.close() for s in shuffles])
