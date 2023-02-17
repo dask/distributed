@@ -141,10 +141,13 @@ def test_rechunk_slicing_2():
     new = ((58, 4, 20, 18),)
     actual = rechunk_slicing(old, new)
     expected = {
-        (0,): [],
-        (1,): [],
-        (2,): [],
-        (3,): [],
-        (4,): [],
+        (0,): [((0,), (0,), (slice(0, 20, None),))],
+        (1,): [((0,), (1,), (slice(0, 20, None),))],
+        (2,): [
+            ((0,), (2,), (slice(0, 18, None),)),
+            ((1,), (0,), (slice(18, 20, None),)),
+        ],
+        (3,): [((1,), (1,), (slice(0, 2, None),)), ((2,), (0,), (slice(2, 20, None),))],
+        (4,): [((2,), (1,), (slice(0, 2, None),)), ((3,), (0,), (slice(2, 20, None),))],
     }
     assert actual == expected
