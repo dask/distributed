@@ -344,7 +344,6 @@ class Semaphore(SyncMethodMixin):
         scheduler_rpc=None,
         loop=None,
     ):
-
         try:
             worker = get_worker()
             self.scheduler = scheduler_rpc or worker.scheduler

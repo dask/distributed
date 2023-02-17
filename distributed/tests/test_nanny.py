@@ -18,7 +18,7 @@ from distributed.diagnostics.plugin import WorkerPlugin
 
 pytestmark = pytest.mark.gpu
 
-from tlz import first, valmap
+from tlz import first
 from tornado.ioloop import IOLoop
 
 import dask
@@ -32,6 +32,7 @@ from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.utils import TimeoutError, get_mp_context, parse_ports
 from distributed.utils_test import (
+    async_wait_for,
     captured_logger,
     gen_cluster,
     gen_test,
@@ -56,24 +57,22 @@ async def test_nanny_process_failure(c, s):
 
         assert os.path.exists(first_dir)
 
-        ww = rpc(n.worker_address)
-        await ww.update_data(data=valmap(dumps, {"x": 1, "y": 2}))
         pid = n.pid
         assert pid is not None
         with suppress(CommClosedError):
             await c.run(os._exit, 0, workers=[n.worker_address])
 
-        while n.pid == pid:  # wait while process dies and comes back
-            await asyncio.sleep(0.01)
-
-        await asyncio.sleep(1)
-        while not n.is_alive():  # wait while process comes back
-            await asyncio.sleep(0.01)
+        # Wait while process dies
+        await async_wait_for(lambda: n.pid != pid, timeout=5)
+        # Wait while process comes back
+        await async_wait_for(lambda: n.is_alive(), timeout=5)
 
         # assert n.worker_address != original_address  # most likely
 
-        while n.worker_address not in s.workers or n.worker_dir is None:
-            await asyncio.sleep(0.01)
+        await async_wait_for(
+            lambda: n.worker_address in s.workers and n.worker_dir is not None,
+            timeout=5,
+        )
 
         second_dir = n.worker_dir
 
@@ -81,7 +80,6 @@ async def test_nanny_process_failure(c, s):
     assert not os.path.exists(second_dir)
     assert not os.path.exists(first_dir)
     assert first_dir != n.worker_dir
-    await ww.close_rpc()
     s.stop()
 
 
@@ -296,13 +294,11 @@ async def test_environment_variable(c, s):
 
 @gen_cluster(nthreads=[], client=True)
 async def test_environment_variable_by_config(c, s, monkeypatch):
-
     with dask.config.set({"distributed.nanny.environ": "456"}):
         with pytest.raises(TypeError, match="configuration must be of type dict"):
             Nanny(s.address, memory_limit=0)
 
     with dask.config.set({"distributed.nanny.environ": {"FOO": "456"}}):
-
         # precedence
         # kwargs > env var > config
 
@@ -554,9 +550,8 @@ async def test_worker_start_exception(s):
 @gen_cluster(nthreads=[])
 async def test_failure_during_worker_initialization(s):
     with captured_logger(logger="distributed.nanny", level=logging.WARNING) as logs:
-        with pytest.raises(Exception):
-            async with Nanny(s.address, foo="bar") as n:
-                await n
+        with pytest.raises(RuntimeError):
+            await Nanny(s.address, foo="bar")
     assert "Restarting worker" not in logs.getvalue()
 
 

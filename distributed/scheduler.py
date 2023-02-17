@@ -4718,8 +4718,6 @@ class Scheduler(SchedulerState, ServerNode):
         stack = list(keys)
         seen = set()
         roots = []
-        ts: TaskState
-        dts: TaskState
         while stack:
             key = stack.pop()
             seen.add(key)
@@ -4909,10 +4907,9 @@ class Scheduler(SchedulerState, ServerNode):
     async def _cancel_key(self, key, client, force=False):
         """Cancel a particular key and all dependents"""
         # TODO: this should be converted to use the transition mechanism
-        ts: TaskState | None = self.tasks.get(key)
-        dts: TaskState
+        ts = self.tasks.get(key)
         try:
-            cs: ClientState = self.clients[client]
+            cs = self.clients[client]
         except KeyError:
             return
 
@@ -5658,9 +5655,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         assert isinstance(data, dict)
 
-        keys, who_has, nbytes = await scatter_to_workers(
-            nthreads, data, rpc=self.rpc, report=False
-        )
+        keys, who_has, nbytes = await scatter_to_workers(nthreads, data, rpc=self.rpc)
 
         self.update_data(who_has=who_has, nbytes=nbytes, client=client)
 
@@ -7556,7 +7551,6 @@ class Scheduler(SchedulerState, ServerNode):
         from distributed.dashboard.core import TabPanel
 
         # HTML
-        ws: WorkerState
         html = """
         <h1> Dask Performance Report </h1>
 

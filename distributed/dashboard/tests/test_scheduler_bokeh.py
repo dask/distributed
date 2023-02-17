@@ -546,7 +546,6 @@ async def test_WorkerTable_custom_metric_overlap_with_core_metric(c, s, a, b):
 
 @gen_cluster(client=True, worker_kwargs={"memory_limit": 0})
 async def test_WorkerTable_with_memory_limit_as_0(c, s, a, b):
-
     wt = WorkerTable(s)
     wt.update()
     assert all(wt.source.data.values())

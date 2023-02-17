@@ -1304,7 +1304,7 @@ class Worker(BaseWorker, ServerNode):
         result, missing_keys, missing_workers = await gather_from_workers(
             who_has, rpc=self.rpc, who=self.address
         )
-        self.update_data(data=result, report=False)
+        self.update_data(data=result)
         if missing_keys:
             logger.warning(
                 "Could not find data: %s on workers: %s (who_has: %s)",
@@ -1338,7 +1338,6 @@ class Worker(BaseWorker, ServerNode):
     #############
 
     async def start_unsafe(self):
-
         await super().start_unsafe()
 
         enable_gc_diagnosis()
@@ -1805,16 +1804,11 @@ class Worker(BaseWorker, ServerNode):
     def update_data(
         self,
         data: dict[str, object],
-        report: bool = True,
         stimulus_id: str | None = None,
     ) -> dict[str, Any]:
-        self.handle_stimulus(
-            UpdateDataEvent(
-                data=data,
-                report=report,
-                stimulus_id=stimulus_id or f"update-data-{time()}",
-            )
-        )
+        if stimulus_id is None:
+            stimulus_id = f"update-data-{time()}"
+        self.handle_stimulus(UpdateDataEvent(data=data, stimulus_id=stimulus_id))
         return {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
 
     async def set_resources(self, **resources: float) -> None:
@@ -1984,7 +1978,6 @@ class Worker(BaseWorker, ServerNode):
         cause: TaskState,
         worker: str,
     ) -> None:
-
         total_bytes = sum(self.state.tasks[key].get_nbytes() for key in data)
 
         cause.startstops.append(

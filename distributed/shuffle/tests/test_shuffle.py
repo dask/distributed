@@ -111,7 +111,6 @@ async def test_concurrent(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_bad_disk(c, s, a, b):
-
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -191,7 +190,6 @@ async def wait_until_new_shuffle_is_initialized(
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_worker_during_transfer(c, s, a, b):
-
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-03-01",
@@ -946,7 +944,6 @@ async def test_new_worker(c, s, a, b):
         await asyncio.sleep(0.001)
 
     async with Worker(s.address) as w:
-
         await c.compute(persisted)
 
         await clean_worker(a)
@@ -1006,7 +1003,6 @@ async def test_restrictions(c, s, a, b):
     assert all(stringify(key) in a.data for key in y.__dask_keys__())
 
 
-@pytest.mark.skip(reason="Fails on CI with unknown cause")
 @gen_cluster(client=True)
 async def test_delete_some_results(c, s, a, b):
     df = dask.datasets.timeseries(

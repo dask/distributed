@@ -197,7 +197,6 @@ class CommunicatingStream(DashboardComponent):
             [transfer_incoming_log, self.transfer_incoming],
             [transfer_outgoing_log, self.transfer_outgoing],
         ]:
-
             for msg in msgs:
                 if "compressed" in msg:
                     del msg["compressed"]

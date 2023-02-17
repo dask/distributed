@@ -48,7 +48,6 @@ async def test_scale_up_and_down():
         asynchronous=True,
     ) as cluster:
         async with Client(cluster, asynchronous=True) as c:
-
             assert not cluster.workers
 
             cluster.scale(2)

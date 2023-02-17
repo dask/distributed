@@ -305,7 +305,6 @@ def dataframe_from_jxml(run: Iterable) -> pandas.DataFrame:
 def download_and_parse_artifacts(
     repo: str, branch: str, events: list[str], max_days: int, max_runs: int
 ) -> Iterator[pandas.DataFrame]:
-
     print("Getting list of workflow runs...")
     runs = []
     with get_session() as session:

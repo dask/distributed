@@ -317,6 +317,8 @@ def _get_memory_total(h):
 def _get_name(h):
     try:
         return pynvml.nvmlDeviceGetName(h).decode()
+    except AttributeError:
+        return pynvml.nvmlDeviceGetName(h)
     except pynvml.NVMLError_NotSupported:
         return None
 

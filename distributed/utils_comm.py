@@ -116,7 +116,7 @@ class WrappedKey:
 _round_robin_counter = [0]
 
 
-async def scatter_to_workers(nthreads, data, rpc=rpc, report=True):
+async def scatter_to_workers(nthreads, data, rpc=rpc):
     """Scatter data directly to workers
 
     This distributes data in a round-robin fashion to a set of workers based on
@@ -140,15 +140,7 @@ async def scatter_to_workers(nthreads, data, rpc=rpc, report=True):
 
     rpcs = {addr: rpc(addr) for addr in d}
     try:
-        out = await All(
-            [
-                rpcs[address].update_data(
-                    data=v,
-                    report=report,
-                )
-                for address, v in d.items()
-            ]
-        )
+        out = await All([rpcs[address].update_data(data=v) for address, v in d.items()])
     finally:
         for r in rpcs.values():
             await r.close_rpc()
@@ -187,7 +179,6 @@ def _unpack_remotedata_inner(
         if not o:
             return o
         if type(o[0]) is SubgraphCallable:
-
             # Unpack futures within the arguments of the subgraph callable
             futures: set[WrappedKey] = set()
             args = tuple(_unpack_remotedata_inner(i, byte_keys, futures) for i in o[1:])

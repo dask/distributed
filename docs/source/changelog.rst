@@ -1,10 +1,32 @@
 Changelog
 =========
 
+.. _v2023.2.0:
+
+2023.2.0
+--------
+
+Released on February 10, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Rate limit the worker memory logs (:pr:`7529`) `Florian Jetter`_
+- Move P2P barrier logic to scheduler extension (:pr:`7519`) `Hendrik Makait`_
+
+Maintenance
+^^^^^^^^^^^
+- Use PEP 673 ``Self`` type (:pr:`7530`) `Thomas Grainger`_
+- Tentatively fix ``test_pause_while_spilling`` (:pr:`7517`) `crusaderky`_
+- Annotate ``asyncio_tcp.py`` (:pr:`7522`) `crusaderky`_
+- Use dask git tip for ``mypy`` (:pr:`7516`) `crusaderky`_
+- Upgrade to ``mypy`` v1 (:pr:`7525`) `Thomas Grainger`_
+- Clean up calls to ``captured_logger`` (:pr:`7521`) `crusaderky`_
+- Update ``isort`` version to 5.12.0 (:pr:`7513`) `Lawrence Mitchell`_
+
 .. _v2023.1.1:
 
 2023.1.1
----------
+--------
 
 Released on January 27, 2023
 

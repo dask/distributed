@@ -4,12 +4,14 @@ import asyncio
 import contextvars
 import functools
 import io
+import logging
 import multiprocessing
 import os
 import queue
 import socket
 import traceback
 import warnings
+import xml
 from array import array
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -27,6 +29,7 @@ from distributed.utils import (
     Log,
     Logs,
     LoopRunner,
+    RateLimiterFilter,
     TimeoutError,
     _maybe_complex,
     ensure_ip,
@@ -619,7 +622,7 @@ def test_logs():
 
 def test_is_valid_xml():
     assert is_valid_xml("<a>foo</a>")
-    with pytest.raises(Exception):
+    with pytest.raises(xml.etree.ElementTree.ParseError):
         assert is_valid_xml("<a>foo")
 
 
@@ -887,7 +890,6 @@ async def test_log_errors():
 
     # Use the logger of the caller module
     with captured_logger("test_utils") as caplog:
-
         # Context manager
         with log_errors():
             pass
@@ -995,7 +997,6 @@ def test_load_json_robust_timeout(tmpdir):
         json_load_robust(path, timeout=0.01)
 
     with ThreadPoolExecutor() as tpe:
-
         fut = tpe.submit(json_load_robust, path, timeout=30)
         import json
 
@@ -1005,3 +1006,22 @@ def test_load_json_robust_timeout(tmpdir):
         assert fut.result() == {"foo": "bar"}
 
     assert json_load_robust(path) == {"foo": "bar"}
+
+
+def test_rate_limiter_filter(caplog):
+    logger = logging.getLogger("test_rate_limiter_filter")
+    logger.addFilter(RateLimiterFilter(r"Hello .*", rate="10ms"))
+    logger.warning("Hello Al!")  # Match
+    logger.warning("Hello Bianca!")  # Match and <10ms
+    logger.warning("Hello %s!", "Charlie")  # Match and <10ms, with args
+    logger.warning("Goodbye Al!")  # No match
+    sleep(0.02)
+    logger.warning("Hello again!")  # Match and >10ms
+    RateLimiterFilter.reset_timer("test_rate_limiter_filter")
+    logger.warning("Hello once more!")  # Match and <10ms, but after calling clear()
+    assert [record.msg for record in caplog.records] == [
+        "Hello Al!",
+        "Goodbye Al!",
+        "Hello again!",
+        "Hello once more!",
+    ]

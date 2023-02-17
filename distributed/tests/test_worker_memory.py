@@ -20,6 +20,7 @@ from distributed import Client, Event, KilledWorker, Nanny, Scheduler, Worker, w
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import Status
 from distributed.metrics import monotonic
+from distributed.utils import RateLimiterFilter
 from distributed.utils_test import (
     NO_AMM,
     async_wait_for,
@@ -1179,3 +1180,30 @@ async def test_pause_while_saturated(c, s, a, b):
     assert sa in s.running
 
     await ev.set()
+
+
+@gen_cluster(nthreads=[])
+async def test_worker_log_memory_limit_too_high(s, caplog):
+    async with Worker(s.address, memory_limit="1 PB"):
+        assert any(
+            "Ignoring provided memory limit" in record.msg for record in caplog.records
+        )
+
+
+@gen_cluster(
+    nthreads=[],
+    config={
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": 0.0001,
+        "distributed.worker.memory.pause": False,
+        "distributed.worker.memory.monitor-interval": "10ms",
+    },
+)
+async def test_high_unmanaged_memory_warning(s, caplog):
+    RateLimiterFilter.reset_timer("distributed.worker.memory")
+    async with Worker(s.address):
+        await asyncio.sleep(0.1)  # Enough for 10 runs of the memory monitors
+    assert (
+        sum("Unmanaged memory use is high" in record.msg for record in caplog.records)
+        == 1
+    )  # Message is rate limited

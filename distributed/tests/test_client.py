@@ -610,7 +610,7 @@ async def test_gather_lost(c, s, a, b):
 
     await a.close()
 
-    with pytest.raises(Exception):
+    with pytest.raises(CancelledError):
         await c.gather([x, y])
 
 
@@ -1082,7 +1082,6 @@ async def test_map_quotes(c, s, a, b):
 @gen_cluster()
 async def test_two_consecutive_clients_share_results(s, a, b):
     async with Client(s.address, asynchronous=True) as c:
-
         x = c.submit(random.randint, 0, 1000, pure=True)
         xx = await x
 
@@ -2185,7 +2184,6 @@ def test_repr_sync(c):
 async def test_multi_client(s, a, b):
     async with Client(s.address, asynchronous=True) as f:
         async with Client(s.address, asynchronous=True) as c:
-
             assert set(s.client_comms) == {c.id, f.id}
 
             x = c.submit(inc, 1)
@@ -2258,7 +2256,6 @@ async def test_multi_garbage_collection(s, a, b):
     async with Client(s.address, asynchronous=True) as c, Client(
         s.address, asynchronous=True
     ) as f:
-
         x = c.submit(inc, 1)
         y = f.submit(inc, 2)
         y2 = c.submit(inc, 2)
@@ -2349,7 +2346,6 @@ async def test_cancel_tuple_key(c, s, a, b):
 async def test_cancel_multi_client(s, a, b):
     async with Client(s.address, asynchronous=True, name="c") as c:
         async with Client(s.address, asynchronous=True, name="f") as f:
-
             x = c.submit(slowinc, 1)
             y = f.submit(slowinc, 1)
 
@@ -3103,7 +3099,6 @@ async def test_replicate_tuple_keys(c, s, a, b):
     config=NO_AMM,
 )
 async def test_replicate_workers(c, s, *workers):
-
     [a, b] = await c.scatter([1, 2], workers=[workers[0].address])
     await s.replicate(
         keys=[a.key, b.key], n=5, workers=[w.address for w in workers[:5]]
@@ -3825,7 +3820,6 @@ async def test_idempotence(s, a, b):
     async with Client(s.address, asynchronous=True) as c, Client(
         s.address, asynchronous=True
     ) as f:
-
         # Submit
         x = c.submit(inc, 1)
         await x
@@ -4041,7 +4035,6 @@ async def test_serialize_future(s, a, b):
     async with Client(s.address, asynchronous=True) as c1, Client(
         s.address, asynchronous=True
     ) as c2:
-
         future = c1.submit(lambda: 1)
         result = await future
 
@@ -4062,7 +4055,6 @@ async def test_temp_default_client(s, a, b):
     async with Client(s.address, asynchronous=True) as c1, Client(
         s.address, asynchronous=True
     ) as c2:
-
         with temp_default_client(c1):
             assert default_client() is c1
             assert default_client(c2) is c2
@@ -4077,7 +4069,6 @@ async def test_as_current(c, s, a, b):
     async with Client(s.address, asynchronous=True) as c1, Client(
         s.address, asynchronous=True
     ) as c2:
-
         with temp_default_client(c):
             assert Client.current() is c
             with pytest.raises(ValueError):
@@ -5748,26 +5739,28 @@ async def test_logs(c, s, a, b):
 async def test_logs_from_worker_submodules(c, s, a):
     def on_worker(dask_worker):
         from distributed.worker import logger as l1
-        from distributed.worker_state_machine import logger as l2
+        from distributed.worker_memory import worker_logger as l2
+        from distributed.worker_state_machine import logger as l3
 
         l1.info("AAA")
         l2.info("BBB")
-        dask_worker.memory_manager.logger.info("CCC")
+        l3.info("CCC")
 
     await c.run(on_worker)
     logs = await c.get_worker_logs()
     logs = [row[1].partition(" - ")[2] for row in logs[a.worker_address]]
     assert logs[:3] == [
-        "distributed.worker.memory - INFO - CCC",
-        "distributed.worker.state_machine - INFO - BBB",
+        "distributed.worker.state_machine - INFO - CCC",
+        "distributed.worker.memory - INFO - BBB",
         "distributed.worker - INFO - AAA",
     ]
 
     def on_nanny(dask_worker):
-        from distributed.nanny import logger as l3
+        from distributed.nanny import logger as l4
+        from distributed.worker_memory import nanny_logger as l5
 
-        l3.info("DDD")
-        dask_worker.memory_manager.logger.info("EEE")
+        l4.info("DDD")
+        l5.info("EEE")
 
     await c.run(on_nanny, nanny=True)
     logs = await c.get_worker_logs(nanny=True)
@@ -6073,7 +6066,6 @@ async def test_mixing_clients(s, a, b):
     async with Client(s.address, asynchronous=True) as c1, Client(
         s.address, asynchronous=True
     ) as c2:
-
         future = c1.submit(inc, 1)
         with pytest.raises(ValueError):
             c2.submit(inc, future)
@@ -6725,7 +6717,6 @@ def test_futures_in_subgraphs(loop_in_thread):
 
 @gen_cluster(client=True)
 async def test_get_task_metadata(c, s, a, b):
-
     # Populate task metadata
     await c.register_worker_plugin(TaskStateMetadataPlugin())
 
@@ -6746,7 +6737,6 @@ async def test_get_task_metadata(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_get_task_metadata_multiple(c, s, a, b):
-
     # Populate task metadata
     await c.register_worker_plugin(TaskStateMetadataPlugin())
 
@@ -6784,7 +6774,6 @@ async def test_register_worker_plugin_exception(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_log_event(c, s, a):
-
     # Log an event from inside a task
     def foo():
         get_worker().log_event("topic1", {"foo": "bar"})
@@ -7037,7 +7026,6 @@ async def test_annotations_loose_restrictions(c, s, a, b):
     ],
 )
 async def test_annotations_submit_map(c, s, a, b):
-
     with dask.annotate(resources={"foo": 1}):
         f = c.submit(inc, 0)
     with dask.annotate(resources={"foo": 1}):
@@ -7091,7 +7079,6 @@ async def test_get_client_functions_spawn_clusters(c, s, a):
 
 
 def test_computation_code_walk_frames():
-
     test_function_code = inspect.getsource(test_computation_code_walk_frames)
     code = Client._get_computation_code()
 
@@ -7350,7 +7337,6 @@ async def test_async_task_with_partial(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_events_subscribe_topic(c, s, a):
-
     log = []
 
     def user_event_handler(event):

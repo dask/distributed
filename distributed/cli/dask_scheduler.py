@@ -140,6 +140,7 @@ def main(
         warnings.warn(
             "dask-scheduler is deprecated and will be removed in a future release; use `dask scheduler` instead",
             FutureWarning,
+            stacklevel=1,
         )
 
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653

@@ -469,12 +469,7 @@ async def test_plugin_exception():
         with raises_with_cause(
             RuntimeError, "Worker failed to start", ValueError, "Setup failed"
         ):
-            async with Worker(
-                s.address,
-                plugins={
-                    MyPlugin(),
-                },
-            ) as w:
+            async with Worker(s.address, plugins={MyPlugin()}):
                 pass
 
 
@@ -2136,7 +2131,6 @@ async def test_worker_descopes_data(c, s, a):
     assert not C.instances
 
 
-# @pytest.mark.slow
 @gen_cluster(client=True, config=NO_AMM)
 async def test_gather_dep_one_worker_always_busy(c, s, a, b):
     # Ensure that both dependencies for H are on another worker than H itself.
@@ -2178,6 +2172,7 @@ async def test_gather_dep_one_worker_always_busy(c, s, a, b):
         # ourselves. Note that doing so means that B won't know about the existence of
         # the extra replicas until it takes the initiative to invoke scheduler.who_has.
         x.update_data({"f": 2, "g": 3})
+        s.add_keys(worker=x.address, keys=("f", "g"))
         assert await h == 5
 
 
@@ -2287,7 +2282,6 @@ async def test_worker_client_closes_if_created_on_worker_one_worker(s, a):
 @gen_cluster()
 async def test_worker_client_closes_if_created_on_worker_last_worker_alive(s, a, b):
     async with Client(s.address, set_as_default=False, asynchronous=True) as c:
-
         with pytest.raises(ValueError):
             default_client()
 
@@ -2768,7 +2762,6 @@ async def test_hold_on_to_replicas(c, s, *workers):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_forget_dependents_after_release(c, s, a):
-
     fut = c.submit(inc, 1, key="f-1")
     fut2 = c.submit(inc, fut, key="f-2")
 
@@ -3666,23 +3659,6 @@ async def test_deprecation_of_renamed_worker_attributes(s, a, b):
     )
     with pytest.warns(DeprecationWarning, match=msg):
         assert a.outgoing_current_count == a.transfer_outgoing_count
-
-
-@gen_cluster(nthreads=[])
-async def test_worker_log_memory_limit_too_high(s):
-    with captured_logger("distributed.worker.memory") as caplog:
-        async with Worker(s.address, memory_limit="1PB"):
-            pass
-
-        expected_snippets = [
-            ("ignore", "ignoring"),
-            ("memory limit", "memory_limit"),
-            ("system"),
-            ("1PB"),
-        ]
-        for snippets in expected_snippets:
-            # assert any(snip in caplog.text for snip in snippets)
-            assert any(snip in caplog.getvalue().lower() for snip in snippets)
 
 
 @gen_cluster(client=True, Worker=Nanny)

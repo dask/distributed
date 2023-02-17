@@ -325,7 +325,6 @@ def _watch(
     omit: Collection[str],
     stop: Callable[[], bool],
 ) -> None:
-
     recent = create()
     last = time()
 

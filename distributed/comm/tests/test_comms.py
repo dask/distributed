@@ -755,7 +755,6 @@ async def check_comm_closed_implicit(
         await comm.close()
 
     async with listen(addr, handle_comm, **listen_args) as listener:
-
         comm = await connect(listener.contact_address, **connect_args)
         with pytest.raises(CommClosedError):
             await comm.write({})
@@ -936,7 +935,6 @@ async def test_retry_connect(tcp, monkeypatch):
 
     class UnreliableConnector(tcp.TCPConnector):
         def __init__(self):
-
             self.num_failures = 2
             self.failures = 0
             super().__init__()

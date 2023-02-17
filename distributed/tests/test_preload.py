@@ -42,7 +42,6 @@ def test_worker_preload_file(loop):
         with cluster(worker_kwargs={"preload": [path]}) as (s, workers), Client(
             s["address"], loop=loop
         ) as c:
-
             assert c.run(check_worker) == {
                 worker["address"]: worker["address"] for worker in workers
             }
@@ -99,7 +98,6 @@ def test_worker_preload_module(loop):
             s,
             workers,
         ), Client(s["address"], loop=loop) as c:
-
             assert c.run(check_worker) == {
                 worker["address"]: worker["address"] for worker in workers
             }
