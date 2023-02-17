@@ -317,41 +317,8 @@ class ArrayRechunkRun(ShuffleRun[tuple[NIndex, NIndex], NIndex, "np.ndarray"]):
             partitions_of[addr].append(part)
         self.partitions_of = dict(partitions_of)
         self.worker_for = worker_for
-        self._mapping = self._map_old_to_new(old, new)
+        self._slicing = rechunk_slicing(old, new)
         self._old_to_new = _old_to_new(old, new)
-
-    def _map_old_to_new(
-        self, old: ChunkedAxes, new: ChunkedAxes
-    ) -> dict[NIndex, list[tuple[NIndex, NIndex, NSlice]]]:
-
-        # intersections is contains the new individual chunks as combined slices
-        # of the old chunks.
-        #
-        # Each chunk consists of all the n-dimensional slices of the old chunks
-        # that make up the new chunk.
-        #
-        # Each n-dimensional slice contains n tuples consisting of the index of
-        # the old chunk on the n-th dimension and the slice along that dimension.
-        intersections = intersect_chunks(old, new)
-
-        new_indices = product(*(range(len(c)) for c in new))
-
-        ndim = len(old)
-
-        old_to_new = defaultdict(list)
-
-        for new_index, new_chunk in zip(new_indices, intersections):
-            # sub-dimensions of new chunk composed of slices
-            subdims = [
-                len({slice[dim][0] for slice in new_chunk}) for dim in range(ndim)
-            ]
-
-            subdim_indices = product(*(range(dim) for dim in subdims))
-
-            for subdim_index, nchunkslice in zip(subdim_indices, new_chunk):
-                old_index, slices = zip(*nchunkslice)
-                old_to_new[old_index].append((new_index, subdim_index, slices))
-        return old_to_new
 
     async def _receive(self, data: list[tuple[tuple[NIndex, NIndex], bytes]]) -> None:
         self.raise_if_closed()
@@ -391,7 +358,7 @@ class ArrayRechunkRun(ShuffleRun[tuple[NIndex, NIndex], NIndex, "np.ndarray"]):
             out: dict[str, list[tuple[tuple[NIndex, NIndex], bytes]]] = defaultdict(
                 list
             )
-            for new_index, subdim_index, slices in self._mapping[input_partition]:
+            for new_index, subdim_index, slices in self._slicing[input_partition]:
                 out[self.worker_for[new_index]].append(
                     (
                         (new_index, subdim_index),
@@ -1012,6 +979,46 @@ def split_by_partition(t: pa.Table, column: str) -> dict[Any, pa.Table]:
     assert len(t) == sum(map(len, shards))
     assert len(partitions) == len(shards)
     return dict(zip(partitions, shards))
+
+
+def rechunk_slicing(
+    old: ChunkedAxes, new: ChunkedAxes
+) -> dict[NIndex, list[tuple[NIndex, NIndex, NSlice]]]:
+    """Calculate how to slice the old chunks to create the new chunks
+
+    Returns
+    -------
+        Mapping of each old chunk to a list of tuples defining where each slice
+        of the old chunk belongs. Each tuple consists of the index
+        of the new chunk, the index of the slice within the composition of slices
+        creating the new chunk, and the slice to be applied to the old chunk.
+    """
+    # intersections contains the new individual chunks as combined slices
+    # of the old chunks.
+    #
+    # Each chunk consists of all the n-dimensional slices of the old chunks
+    # that make up the new chunk.
+    #
+    # Each n-dimensional slice contains n tuples consisting of the index of
+    # the old chunk on the n-th dimension and the slice along that dimension.
+    intersections = intersect_chunks(old, new)
+
+    new_indices = product(*(range(len(c)) for c in new))
+
+    ndim = len(old)
+
+    slicing = defaultdict(list)
+
+    for new_index, new_chunk in zip(new_indices, intersections):
+        # sub-dimensions of new chunk composed of slices
+        subdims = [len({slice[dim][0] for slice in new_chunk}) for dim in range(ndim)]
+
+        subdim_indices = product(*(range(dim) for dim in subdims))
+
+        for subdim_index, nchunkslice in zip(subdim_indices, new_chunk):
+            old_index, slices = zip(*nchunkslice)
+            slicing[old_index].append((new_index, subdim_index, slices))
+    return slicing
 
 
 def assemble_chunk(data: bytes, subdims: tuple[int, ...]) -> np.ndarray:
