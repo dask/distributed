@@ -220,3 +220,69 @@ async def test_rechunk_blockshape(c, s, *ws):
 async def test_dtype(c, s, *ws):
     x = da.ones(5, chunks=(2,))
     assert x.rechunk(chunks=(1,), rechunk="p2p").dtype == x.dtype
+
+
+@gen_cluster(client=True, config={"optimization.fuse.active": False})
+async def test_rechunk_with_dict(c, s, *ws):
+    x = da.ones((24, 24), chunks=(4, 8))
+    y = x.rechunk(chunks={0: 12}, rechunk="p2p")
+    assert y.chunks == ((12, 12), (8, 8, 8))
+
+    x = da.ones((24, 24), chunks=(4, 8))
+    y = x.rechunk(chunks={0: (12, 12)}, rechunk="p2p")
+    assert y.chunks == ((12, 12), (8, 8, 8))
+
+    x = da.ones((24, 24), chunks=(4, 8))
+    y = x.rechunk(chunks={0: -1}, rechunk="p2p")
+    assert y.chunks == ((24,), (8, 8, 8))
+
+    x = da.ones((24, 24), chunks=(4, 8))
+    y = x.rechunk(chunks={0: None, 1: "auto"}, rechunk="p2p")
+    assert y.chunks == ((4, 4, 4, 4, 4, 4), (24,))
+
+
+@gen_cluster(client=True, config={"optimization.fuse.active": False})
+async def test_rechunk_with_empty_input(c, s, *ws):
+    x = da.ones((24, 24), chunks=(4, 8))
+    assert x.rechunk(chunks={}, rechunk="p2p").chunks == x.chunks
+    with pytest.raises(ValueError):
+        x.rechunk(chunks=(), rechunk="p2p")
+
+
+@gen_cluster(client=True, config={"optimization.fuse.active": False})
+async def test_rechunk_with_null_dimensions(c, s, *ws):
+    x = da.from_array(np.ones((24, 24)), chunks=(4, 8))
+    assert (
+        x.rechunk(chunks=(None, 4), rechunk="p2p").chunks
+        == da.ones((24, 24), chunks=(4, 4)).chunks
+    )
+    assert (
+        x.rechunk(chunks={0: None, 1: 4}, rechunk="p2p").chunks
+        == da.ones((24, 24), chunks=(4, 4)).chunks
+    )
+
+
+@gen_cluster(client=True, config={"optimization.fuse.active": False})
+async def test_rechunk_with_integer(c, s, *ws):
+    x = da.from_array(np.arange(5), chunks=4)
+    y = x.rechunk(3, rechunk="p2p")
+    assert y.chunks == ((3, 2),)
+    assert (await c.compute(x) == await c.compute(y)).all()
+
+
+@gen_cluster(client=True, config={"optimization.fuse.active": False})
+async def test_rechunk_0d(c, s, *ws):
+    a = np.array(42)
+    x = da.from_array(a, chunks=())
+    y = x.rechunk((), rechunk="p2p")
+    assert y.chunks == ()
+    assert await c.compute(y) == a
+
+
+@pytest.mark.parametrize(
+    "arr", [da.array([]), da.array([[], []]), da.array([[[]], [[]]])]
+)
+@gen_cluster(client=True, config={"optimization.fuse.active": False})
+async def test_rechunk_empty_array(c, s, *ws, arr):
+    arr.rechunk(rechunk="p2p")
+    assert arr.size == 0
