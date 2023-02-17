@@ -218,7 +218,9 @@ async def _force_close(self, reason: str):
         # Worker is in a very broken state if closing fails. We need to shut down
         # immediately, to ensure things don't get even worse and this worker potentially
         # deadlocks the cluster.
-        if self.state.validate and not self.nanny:
+        from distributed import Scheduler
+
+        if Scheduler._instances:
             # We're likely in a unit test. Don't kill the whole test suite!
             raise
 
@@ -554,7 +556,7 @@ class Worker(BaseWorker, ServerNode):
         self.profile_history = deque(maxlen=3600)
 
         if validate is None:
-            validate = dask.config.get("distributed.scheduler.validate")
+            validate = dask.config.get("distributed.worker.validate")
 
         self.transfer_incoming_log = deque(maxlen=100000)
         self.transfer_outgoing_log = deque(maxlen=100000)

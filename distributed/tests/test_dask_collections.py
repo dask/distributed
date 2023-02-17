@@ -73,11 +73,10 @@ async def test_dataframes(c, s, a, b):
 
 
 @ignore_single_machine_warning
-@gen_cluster(client=True)
+@gen_cluster(client=True, config={"distributed.scheduler.validate": False})
 async def test_dask_array_collections(c, s, a, b):
     import dask.array as da
 
-    s.validate = False
     x_dsk = {("x", i, j): np.random.random((3, 3)) for i in range(3) for j in range(2)}
     y_dsk = {("y", i, j): np.random.random((3, 3)) for i in range(2) for j in range(3)}
     x_futures = await c.scatter(x_dsk)

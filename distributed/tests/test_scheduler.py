@@ -634,7 +634,7 @@ def test_saturation_factor(
 async def test_bad_saturation_factor():
     with pytest.raises(ValueError, match="foo"):
         with dask.config.set({"distributed.scheduler.worker-saturation": "foo"}):
-            async with Scheduler(dashboard_address=":0", validate=True):
+            async with Scheduler(dashboard_address=":0"):
                 pass
 
 

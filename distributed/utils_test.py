@@ -371,13 +371,11 @@ def _run_and_close_tornado(async_fn, /, *args, **kwargs):
 
 
 def run_scheduler(q, nputs, config, port=0, **kwargs):
-    with dask.config.set(config):
+    with config_for_cluster_tests(**config):
 
         async def _():
             try:
-                scheduler = await Scheduler(
-                    validate=True, host="127.0.0.1", port=port, **kwargs
-                )
+                scheduler = await Scheduler(host="127.0.0.1", port=port, **kwargs)
             except Exception as exc:
                 for _ in range(nputs):
                     q.put(exc)
@@ -699,6 +697,7 @@ def cluster(
 
 def gen_test(
     timeout: float = _TEST_TIMEOUT,
+    config: dict | None = None,
     clean_kwargs: dict[str, Any] | None = None,
 ) -> Callable[[Callable], Callable]:
     """Coroutine test
@@ -722,10 +721,11 @@ def gen_test(
         timeout = 3600
 
     async def async_fn_outer(async_fn, /, *args, **kwargs):
-        async with _acheck_active_rpc():
-            return await asyncio.wait_for(
-                asyncio.create_task(async_fn(*args, **kwargs)), timeout
-            )
+        with config_for_cluster_tests(**(config or {})):
+            async with _acheck_active_rpc():
+                return await asyncio.wait_for(
+                    asyncio.create_task(async_fn(*args, **kwargs)), timeout
+                )
 
     def _(func):
         @functools.wraps(func)
@@ -756,7 +756,6 @@ async def start_cluster(
     worker_kwargs = worker_kwargs or {}
 
     s = await Scheduler(
-        validate=True,
         security=security,
         port=0,
         host=scheduler_addr,
@@ -769,7 +768,6 @@ async def start_cluster(
             nthreads=ncore[1],
             name=i,
             security=security,
-            validate=True,
             host=ncore[0],
             **(
                 merge(worker_kwargs, ncore[2])  # type: ignore
@@ -1771,6 +1769,8 @@ def config_for_cluster_tests(**extra_config):
         {
             "local_directory": tempfile.gettempdir(),
             "distributed.admin.tick.interval": "500 ms",
+            "distributed.scheduler.validate": True,
+            "distributed.worker.validate": True,
             "distributed.worker.profile.enabled": False,
         },
         **extra_config,
@@ -2173,7 +2173,7 @@ class BlockedGatherDep(Worker):
     -------
     .. code-block:: python
 
-        @gen_test()
+        @gen_cluster()
         async def test1(s, a, b):
             async with BlockedGatherDep(s.address) as x:
                 # [do something to cause x to fetch data from a or b]
