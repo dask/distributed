@@ -13,6 +13,7 @@ from distributed.shuffle._scheduler_extension import (
 )
 from distributed.shuffle._worker_extension import (
     ShuffleWorkerExtension,
+    rechunk_slicing,
     split_by_partition,
     split_by_worker,
 )
@@ -119,3 +120,31 @@ def test_split_by_partition():
     assert set(out) == {1, 2, 3}
     assert out[1].column_names == list(df.columns)
     assert sum(map(len, out.values())) == len(df)
+
+
+def test_rechunk_slicing_1():
+    old = ((10, 10, 10, 10, 10),)
+    new = ((25, 5, 20),)
+    actual = rechunk_slicing(old, new)
+    expected = {
+        (0,): [((0,), (0,), (slice(0, 10, None),))],
+        (1,): [((0,), (1,), (slice(0, 10, None),))],
+        (2,): [((0,), (2,), (slice(0, 5, None),)), ((1,), (0,), (slice(5, 10, None),))],
+        (3,): [((2,), (0,), (slice(0, 10, None),))],
+        (4,): [((2,), (1,), (slice(0, 10, None),))],
+    }
+    assert actual == expected
+
+
+def test_rechunk_slicing_2():
+    old = ((20, 20, 20, 20, 20),)
+    new = ((58, 4, 20, 18),)
+    actual = rechunk_slicing(old, new)
+    expected = {
+        (0,): [],
+        (1,): [],
+        (2,): [],
+        (3,): [],
+        (4,): [],
+    }
+    assert actual == expected
