@@ -125,7 +125,7 @@ def test_split_by_partition():
 def test_rechunk_slicing_1():
     old = ((10, 10, 10, 10, 10),)
     new = ((25, 5, 20),)
-    actual = rechunk_slicing(old, new)
+    result = rechunk_slicing(old, new)
     expected = {
         (0,): [((0,), (0,), (slice(0, 10, None),))],
         (1,): [((0,), (1,), (slice(0, 10, None),))],
@@ -133,13 +133,13 @@ def test_rechunk_slicing_1():
         (3,): [((2,), (0,), (slice(0, 10, None),))],
         (4,): [((2,), (1,), (slice(0, 10, None),))],
     }
-    assert actual == expected
+    assert result == expected
 
 
 def test_rechunk_slicing_2():
     old = ((20, 20, 20, 20, 20),)
     new = ((58, 4, 20, 18),)
-    actual = rechunk_slicing(old, new)
+    result = rechunk_slicing(old, new)
     expected = {
         (0,): [((0,), (0,), (slice(0, 20, None),))],
         (1,): [((0,), (1,), (slice(0, 20, None),))],
@@ -150,4 +150,166 @@ def test_rechunk_slicing_2():
         (3,): [((1,), (1,), (slice(0, 2, None),)), ((2,), (0,), (slice(2, 20, None),))],
         (4,): [((2,), (1,), (slice(0, 2, None),)), ((3,), (0,), (slice(2, 20, None),))],
     }
-    assert actual == expected
+    assert result == expected
+
+
+def test_intersect_nan():
+    old_chunks = ((float("nan"), float("nan")), (8,))
+    new_chunks = ((float("nan"), float("nan")), (4, 4))
+    result = rechunk_slicing(old_chunks, new_chunks)
+    expected = {
+        (0, 0): [
+            ((0, 0), (0, 0), (slice(0, None, None), slice(0, 4, None))),
+            ((0, 1), (0, 0), (slice(0, None, None), slice(4, 8, None))),
+        ],
+        (1, 0): [
+            ((1, 0), (0, 0), (slice(0, None, None), slice(0, 4, None))),
+            ((1, 1), (0, 0), (slice(0, None, None), slice(4, 8, None))),
+        ],
+    }
+    assert result == expected
+
+
+def test_intersect_nan_single():
+    old_chunks = ((float("nan"),), (10,))
+    new_chunks = ((float("nan"),), (5, 5))
+
+    result = rechunk_slicing(old_chunks, new_chunks)
+    expected = {
+        (0, 0): [
+            ((0, 0), (0, 0), (slice(0, None, None), slice(0, 5, None))),
+            ((0, 1), (0, 0), (slice(0, None, None), slice(5, 10, None))),
+        ],
+    }
+    assert result == expected
+
+
+def test_intersect_nan_long():
+    old_chunks = (tuple([float("nan")] * 4), (10,))
+    new_chunks = (tuple([float("nan")] * 4), (5, 5))
+    result = rechunk_slicing(old_chunks, new_chunks)
+    expected = {
+        (0, 0): [
+            ((0, 0), (0, 0), (slice(0, None, None), slice(0, 5, None))),
+            ((0, 1), (0, 0), (slice(0, None, None), slice(5, 10, None))),
+        ],
+        (1, 0): [
+            ((1, 0), (0, 0), (slice(0, None, None), slice(0, 5, None))),
+            ((1, 1), (0, 0), (slice(0, None, None), slice(5, 10, None))),
+        ],
+        (2, 0): [
+            ((2, 0), (0, 0), (slice(0, None, None), slice(0, 5, None))),
+            ((2, 1), (0, 0), (slice(0, None, None), slice(5, 10, None))),
+        ],
+        (3, 0): [
+            ((3, 0), (0, 0), (slice(0, None, None), slice(0, 5, None))),
+            ((3, 1), (0, 0), (slice(0, None, None), slice(5, 10, None))),
+        ],
+    }
+    assert result == expected
+
+
+def test_intersect_chunks_with_nonzero():
+    old = ((4, 4), (2,))
+    new = ((8,), (1, 1))
+    result = rechunk_slicing(old, new)
+    expected = {
+        (0, 0): [
+            ((0, 0), (0, 0), (slice(0, 4, None), slice(0, 1, None))),
+            ((0, 1), (0, 0), (slice(0, 4, None), slice(1, 2, None))),
+        ],
+        (1, 0): [
+            ((0, 0), (1, 0), (slice(0, 4, None), slice(0, 1, None))),
+            ((0, 1), (1, 0), (slice(0, 4, None), slice(1, 2, None))),
+        ],
+    }
+    assert result == expected
+
+
+def test_intersect_chunks_with_zero():
+    old = ((4, 4), (2,))
+    new = ((4, 0, 0, 4), (1, 1))
+    result = rechunk_slicing(old, new)
+
+    expected = {
+        (0, 0): [
+            ((0, 0), (0, 0), (slice(0, 4, None), slice(0, 1, None))),
+            ((0, 1), (0, 0), (slice(0, 4, None), slice(1, 2, None))),
+        ],
+        (1, 0): [
+            # FIXME: We should probably filter these out to avoid sending empty shards
+            ((1, 0), (0, 0), (slice(0, 0, None), slice(0, 1, None))),
+            ((1, 1), (0, 0), (slice(0, 0, None), slice(1, 2, None))),
+            ((2, 0), (0, 0), (slice(0, 0, None), slice(0, 1, None))),
+            ((2, 1), (0, 0), (slice(0, 0, None), slice(1, 2, None))),
+            ((3, 0), (0, 0), (slice(0, 4, None), slice(0, 1, None))),
+            ((3, 1), (0, 0), (slice(0, 4, None), slice(1, 2, None))),
+        ],
+    }
+
+    assert result == expected
+
+    old = ((4, 0, 0, 4), (1, 1))
+    new = ((4, 4), (2,))
+    result = rechunk_slicing(old, new)
+
+    expected = {
+        (0, 0): [
+            ((0, 0), (0, 0), (slice(0, 4, None), slice(0, 1, None))),
+        ],
+        (0, 1): [
+            ((0, 0), (0, 1), (slice(0, 4, None), slice(0, 1, None))),
+        ],
+        (3, 0): [
+            ((1, 0), (0, 0), (slice(0, 4, None), slice(0, 1, None))),
+        ],
+        (3, 1): [
+            ((1, 0), (0, 1), (slice(0, 4, None), slice(0, 1, None))),
+        ],
+    }
+
+    assert result == expected
+
+    old = ((4, 4), (2,))
+    new = ((2, 0, 0, 2, 4), (1, 1))
+    result = rechunk_slicing(old, new)
+    expected = {
+        (0, 0): [
+            ((0, 0), (0, 0), (slice(0, 2, None), slice(0, 1, None))),
+            ((0, 1), (0, 0), (slice(0, 2, None), slice(1, 2, None))),
+            # FIXME: We should probably filter these out to avoid sending empty shards
+            ((1, 0), (0, 0), (slice(2, 2, None), slice(0, 1, None))),
+            ((1, 1), (0, 0), (slice(2, 2, None), slice(1, 2, None))),
+            ((2, 0), (0, 0), (slice(2, 2, None), slice(0, 1, None))),
+            ((2, 1), (0, 0), (slice(2, 2, None), slice(1, 2, None))),
+            ((3, 0), (0, 0), (slice(2, 4, None), slice(0, 1, None))),
+            ((3, 1), (0, 0), (slice(2, 4, None), slice(1, 2, None))),
+        ],
+        (1, 0): [
+            ((4, 0), (0, 0), (slice(0, 4, None), slice(0, 1, None))),
+            ((4, 1), (0, 0), (slice(0, 4, None), slice(1, 2, None))),
+        ],
+    }
+
+    assert result == expected
+
+    old = ((4, 4), (2,))
+    new = ((0, 0, 4, 4), (1, 1))
+    result = rechunk_slicing(old, new)
+    expected = {
+        (0, 0): [
+            # FIXME: We should probably filter these out to avoid sending empty shards
+            ((0, 0), (0, 0), (slice(0, 0, None), slice(0, 1, None))),
+            ((0, 1), (0, 0), (slice(0, 0, None), slice(1, 2, None))),
+            ((1, 0), (0, 0), (slice(0, 0, None), slice(0, 1, None))),
+            ((1, 1), (0, 0), (slice(0, 0, None), slice(1, 2, None))),
+            ((2, 0), (0, 0), (slice(0, 4, None), slice(0, 1, None))),
+            ((2, 1), (0, 0), (slice(0, 4, None), slice(1, 2, None))),
+        ],
+        (1, 0): [
+            ((3, 0), (0, 0), (slice(0, 4, None), slice(0, 1, None))),
+            ((3, 1), (0, 0), (slice(0, 4, None), slice(1, 2, None))),
+        ],
+    }
+
+    assert result == expected

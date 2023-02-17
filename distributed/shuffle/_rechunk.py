@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 
 # TODO remove quotes (requires Python >=3.9)
-ChunkedAxis: TypeAlias = "tuple[int, ...]"
+ChunkedAxis: TypeAlias = "tuple[float, ...]"  # chunks must either be an int or NaN
 ChunkedAxes: TypeAlias = "tuple[ChunkedAxis, ...]"
 NIndex: TypeAlias = "tuple[int, ...]"
 
