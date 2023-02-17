@@ -24,7 +24,7 @@ from distributed.scheduler import Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._arrow import serialize_table
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._scheduler_extension import get_worker_for
+from distributed.shuffle._scheduler_extension import get_worker_for_range_sharding
 from distributed.shuffle._shuffle import ShuffleId, barrier_key
 from distributed.shuffle._worker_extension import (
     DataFrameShuffleRun,
@@ -241,13 +241,14 @@ async def test_crashed_worker_during_transfer(c, s, a):
 # TODO: Deduplicate instead of failing: distributed#7324
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_input_only_worker_during_transfer(c, s, a, b):
-    def mock_get_worker_for(
+    def mock_get_worker_for_range_sharding(
         output_partition: int, workers: list[str], npartitions: int
     ) -> str:
         return a.address
 
     with mock.patch(
-        "distributed.shuffle._scheduler_extension.get_worker_for", mock_get_worker_for
+        "distributed.shuffle._scheduler_extension.get_worker_for_range_sharding",
+        mock_get_worker_for_range_sharding,
     ):
         df = dask.datasets.timeseries(
             start="2000-01-01",
@@ -273,13 +274,14 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)], clean_kwargs={"processes": False})
 async def test_crashed_input_only_worker_during_transfer(c, s, a):
-    def mock_get_worker_for(
+    def mock_mock_get_worker_for_range_sharding(
         output_partition: int, workers: list[str], npartitions: int
     ) -> str:
         return a.address
 
     with mock.patch(
-        "distributed.shuffle._scheduler_extension.get_worker_for", mock_get_worker_for
+        "distributed.shuffle._scheduler_extension.get_worker_for_range_sharding",
+        mock_mock_get_worker_for_range_sharding,
     ):
         async with Nanny(s.address, nthreads=1) as n:
             killed_worker_address = n.worker_address
@@ -1139,7 +1141,9 @@ async def test_basic_lowlevel_shuffle(
     worker_for_mapping = {}
 
     for part in range(npartitions):
-        worker_for_mapping[part] = get_worker_for(part, workers, npartitions)
+        worker_for_mapping[part] = get_worker_for_range_sharding(
+            part, workers, npartitions
+        )
     assert len(set(worker_for_mapping.values())) == min(n_workers, npartitions)
     schema = pa.Schema.from_pandas(dfs[0])
 
@@ -1212,7 +1216,9 @@ async def test_error_offload(tmpdir, loop_in_thread):
     partitions_for_worker = defaultdict(list)
 
     for part in range(npartitions):
-        worker_for_mapping[part] = w = get_worker_for(part, workers, npartitions)
+        worker_for_mapping[part] = w = get_worker_for_range_sharding(
+            part, workers, npartitions
+        )
         partitions_for_worker[w].append(part)
     schema = pa.Schema.from_pandas(dfs[0])
 
@@ -1265,7 +1271,9 @@ async def test_error_send(tmpdir, loop_in_thread):
     partitions_for_worker = defaultdict(list)
 
     for part in range(npartitions):
-        worker_for_mapping[part] = w = get_worker_for(part, workers, npartitions)
+        worker_for_mapping[part] = w = get_worker_for_range_sharding(
+            part, workers, npartitions
+        )
         partitions_for_worker[w].append(part)
     schema = pa.Schema.from_pandas(dfs[0])
 
@@ -1317,7 +1325,9 @@ async def test_error_receive(tmpdir, loop_in_thread):
     partitions_for_worker = defaultdict(list)
 
     for part in range(npartitions):
-        worker_for_mapping[part] = w = get_worker_for(part, workers, npartitions)
+        worker_for_mapping[part] = w = get_worker_for_range_sharding(
+            part, workers, npartitions
+        )
         partitions_for_worker[w].append(part)
     schema = pa.Schema.from_pandas(dfs[0])
 

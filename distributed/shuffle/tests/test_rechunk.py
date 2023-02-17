@@ -11,7 +11,7 @@ from dask.array.core import concatenate3
 from dask.array.rechunk import normalize_chunks, rechunk
 
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._scheduler_extension import get_worker_for
+from distributed.shuffle._scheduler_extension import get_worker_for_range_sharding
 from distributed.shuffle._shuffle import ShuffleId
 from distributed.shuffle._worker_extension import ArrayRechunkRun
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
@@ -74,7 +74,9 @@ async def test_lowlevel_rechunk(
 
     new_indices = list(product(*(range(len(dim)) for dim in new)))
     for i, idx in enumerate(new_indices):
-        worker_for_mapping[idx] = get_worker_for(i, workers, len(new_indices))
+        worker_for_mapping[idx] = get_worker_for_range_sharding(
+            i, workers, len(new_indices)
+        )
 
     assert len(set(worker_for_mapping.values())) == min(n_workers, len(new_indices))
 

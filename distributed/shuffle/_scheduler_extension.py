@@ -6,9 +6,10 @@ import itertools
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Iterable
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from distributed.diagnostics.plugin import SchedulerPlugin
+from distributed.shuffle._rechunk import ChunkedAxes, NIndex
 from distributed.shuffle._shuffle import ShuffleId, barrier_key, id_from_key
 
 if TYPE_CHECKING:
@@ -53,9 +54,9 @@ class DataFrameShuffleState(ShuffleState):
 @dataclass
 class ArrayRechunkState(ShuffleState):
     type: ClassVar[str] = "ArrayRechunk"
-    worker_for: dict[tuple[int, ...], str]
-    old: tuple[tuple[int, ...], ...]
-    new: tuple[tuple[int, ...], ...]
+    worker_for: dict[NIndex, str]
+    old: ChunkedAxes
+    new: ChunkedAxes
 
     def to_msg(self) -> dict[str, Any]:
         return {
@@ -164,7 +165,9 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             if ts.worker_restrictions:
                 output_worker = list(ts.worker_restrictions)[0]
             else:
-                output_worker = get_worker_for(part, workers, npartitions)
+                output_worker = get_worker_for_range_sharding(
+                    part, workers, npartitions
+                )
             mapping[part] = output_worker
             output_workers.add(output_worker)
             self.scheduler.set_restrictions({ts.key: {output_worker}})
@@ -193,14 +196,12 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         name = barrier_key(id)
         mapping = {}
 
-        shape = tuple(len(dim) for dim in new)
-
         for ts in self.scheduler.tasks[name].dependents:
             part = ts.annotations["shuffle"]  # TODO Improve this
             if ts.worker_restrictions:
                 output_worker = list(ts.worker_restrictions)[0]
             else:
-                output_worker = get_worker_for_chunk(part, workers, shape)
+                output_worker = get_worker_for_hash_sharding(part, workers)
             mapping[part] = output_worker
             output_workers.add(output_worker)
             self.scheduler.set_restrictions({ts.key: {output_worker}})
@@ -287,20 +288,15 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self.erred_shuffles.clear()
 
 
-def get_worker_for(output_partition: int, workers: list[str], npartitions: int) -> str:
-    "Get the address of the worker which should hold this output partition number"
+def get_worker_for_range_sharding(
+    output_partition: int, workers: list[str], npartitions: int
+) -> str:
+    """Get address of target worker for this output partition using range sharding"""
     i = len(workers) * output_partition // npartitions
     return workers[i]
 
 
-def get_worker_for_chunk(
-    chunk: tuple[int, ...], workers: list[str], shape: Iterable[int]
-) -> str:
-    multiplier = 1
-    flat_index = 0
-
-    for i, n in zip(chunk, shape):
-        flat_index += i * multiplier
-        multiplier *= n
-    i = (flat_index * 12289) % len(workers)
+def get_worker_for_hash_sharding(output_partition: NIndex, workers: list[str]) -> str:
+    """Get address of target worker for this output partition using hash sharding"""
+    i = hash(output_partition) % len(workers)
     return workers[i]
