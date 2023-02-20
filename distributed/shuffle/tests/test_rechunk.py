@@ -164,23 +164,6 @@ async def test_rechunk_configuration(c, s, *ws, rechunk_config, rechunk_keyword)
 
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
-async def test_rechunk_config(c, s, *ws):
-    """Try rechunking a random 1d matrix
-
-    See Also
-    --------
-    dask.array.tests.test_rechunk.test_rechunk_1d
-    """
-    a = np.random.uniform(0, 1, 30)
-    x = da.from_array(a, chunks=((10,) * 3,))
-    new = ((6,) * 5,)
-    x2 = rechunk(x, chunks=new, rechunk="p2p")
-    assert all(key[0].startswith("rechunk-p2p") for key in x2.__dask_keys__())
-    assert x2.chunks == new
-    assert np.all(await c.compute(x2) == a)
-
-
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_2d(c, s, *ws):
     """Try rechunking a random 2d matrix
 
