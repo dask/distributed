@@ -352,14 +352,23 @@ class ArrayRechunkRun(ShuffleRun["tuple[NIndex, NIndex]", NIndex, "np.ndarray"])
             raise RuntimeError(f"Cannot add more partitions to shuffle {self}")
 
         def _() -> dict[str, list[tuple[tuple[NIndex, NIndex], bytes]]]:
+            """Return a mapping of worker addresses to a list of tuples of shard IDs
+            and shard data
+
+            Each shard is uniquely identified by its new chunk as well as its sub-index
+            within the new chunk. The receiver uses this identifier for deduplication.
+
+            As shard data, we serialize the data together with the sub-index of the
+            slice within the new chunk to assemble the new chunk from its pieces.
+            """
             out: dict[str, list[tuple[tuple[NIndex, NIndex], bytes]]] = defaultdict(
                 list
             )
-            for new_index, subdim_index, slices in self._slicing[input_partition]:
+            for new_index, sub_index, nslice in self._slicing[input_partition]:
                 out[self.worker_for[new_index]].append(
                     (
-                        (new_index, subdim_index),
-                        pickle.dumps((subdim_index, data[slices])),
+                        (new_index, sub_index),
+                        pickle.dumps((sub_index, data[nslice])),
                     )
                 )
             return out
