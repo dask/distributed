@@ -61,7 +61,7 @@ class ShuffleClosedError(RuntimeError):
     pass
 
 
-class ShuffleRun(Generic[TransferShardIDType, PartitionIDType, PartitionType], abc.ABC):
+class ShuffleRun(Generic[TransferShardIDType, PartitionIDType, PartitionType]):
     def __init__(
         self,
         id: ShuffleId,
@@ -235,7 +235,8 @@ class ShuffleRun(Generic[TransferShardIDType, PartitionIDType, PartitionType], a
         raise NotImplementedError
 
 
-class ArrayRechunkRun(ShuffleRun[tuple[NIndex, NIndex], NIndex, "np.ndarray"]):
+# TODO remove quotes on tuple (requires Python >=3.9)
+class ArrayRechunkRun(ShuffleRun["tuple[NIndex, NIndex]", NIndex, "np.ndarray"]):
     """State for a single active rechunk execution
 
     This object is responsible for splitting, sending, receiving and combining
