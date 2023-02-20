@@ -123,6 +123,11 @@ def test_split_by_partition():
 
 
 def test_rechunk_slicing_1():
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_intersect_1
+    """
     old = ((10, 10, 10, 10, 10),)
     new = ((25, 5, 20),)
     result = rechunk_slicing(old, new)
@@ -137,6 +142,11 @@ def test_rechunk_slicing_1():
 
 
 def test_rechunk_slicing_2():
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_intersect_2
+    """
     old = ((20, 20, 20, 20, 20),)
     new = ((58, 4, 20, 18),)
     result = rechunk_slicing(old, new)
@@ -154,6 +164,11 @@ def test_rechunk_slicing_2():
 
 
 def test_intersect_nan():
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_intersect_nan
+    """
     old_chunks = ((float("nan"), float("nan")), (8,))
     new_chunks = ((float("nan"), float("nan")), (4, 4))
     result = rechunk_slicing(old_chunks, new_chunks)
@@ -171,6 +186,11 @@ def test_intersect_nan():
 
 
 def test_intersect_nan_single():
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_intersect_nan_single
+    """
     old_chunks = ((float("nan"),), (10,))
     new_chunks = ((float("nan"),), (5, 5))
 
@@ -185,6 +205,11 @@ def test_intersect_nan_single():
 
 
 def test_intersect_nan_long():
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_intersect_nan_long
+    """
     old_chunks = (tuple([float("nan")] * 4), (10,))
     new_chunks = (tuple([float("nan")] * 4), (5, 5))
     result = rechunk_slicing(old_chunks, new_chunks)
@@ -210,6 +235,11 @@ def test_intersect_nan_long():
 
 
 def test_intersect_chunks_with_nonzero():
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_intersect_chunks_with_nonzero
+    """
     old = ((4, 4), (2,))
     new = ((8,), (1, 1))
     result = rechunk_slicing(old, new)
@@ -227,6 +257,11 @@ def test_intersect_chunks_with_nonzero():
 
 
 def test_intersect_chunks_with_zero():
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_intersect_chunks_with_zero
+    """
     old = ((4, 4), (2,))
     new = ((4, 0, 0, 4), (1, 1))
     result = rechunk_slicing(old, new)
