@@ -696,7 +696,7 @@ def test_processing_chain():
     out = {}
     for k, bio in filesystem.items():
         bio.seek(0)
-        out[k] = convert_partition(load_partition(bio)[0])
+        out[k] = convert_partition(load_partition(bio))
 
     shuffled_df = pd.concat(table.to_pandas() for table in out.values())
     pd.testing.assert_frame_equal(

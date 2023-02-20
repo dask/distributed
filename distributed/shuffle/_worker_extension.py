@@ -23,12 +23,9 @@ from distributed.protocol import to_serialize
 from distributed.shuffle._arrow import (
     convert_partition,
     deserialize_schema,
-    dump_shards,
     list_of_buffers_to_table,
-    load_partition,
     serialize_table,
 )
-from distributed.shuffle._buffer import ShardType
 from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
@@ -73,8 +70,8 @@ class ShuffleRun(Generic[TransferShardIDType, PartitionIDType, PartitionType]):
         scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
-        dump: Callable[[list[ShardType], BinaryIO], None],
-        load: Callable[[BinaryIO], list[ShardType]],
+        dump: Callable[[list[bytes], BinaryIO], None],
+        load: Callable[[BinaryIO], bytes],
     ):
         self.id = id
         self.run_id = run_id
@@ -212,9 +209,8 @@ class ShuffleRun(Generic[TransferShardIDType, PartitionIDType, PartitionType]):
 
     def _read_from_disk(self, id: NIndex) -> bytes:
         self.raise_if_closed()
-        data: list[bytes] = self._disk_buffer.read("_".join(str(i) for i in id))
-        assert len(data) == 1
-        return data[0]
+        data: bytes = self._disk_buffer.read("_".join(str(i) for i in id))
+        return data
 
     async def receive(self, data: list[tuple[TransferShardIDType, bytes]]) -> None:
         await self._receive(data)
@@ -1011,6 +1007,31 @@ def rechunk_slicing(
             old_index, nslice = zip(*sliced_chunk)
             slicing[old_index].append((new_index, sub_index, nslice))
     return slicing
+
+
+def dump_shards(shards: list[bytes], file: BinaryIO) -> None:
+    """
+    Append multiple serialized shards to the file
+
+    Note: Since this function appends the shards to the file, they must be serialized
+    in a format that allows reading them back as a stream.
+
+    See Also
+    --------
+    load_partition
+    """
+    for shard in shards:
+        file.write(shard)
+
+
+def load_partition(file: BinaryIO) -> bytes:
+    """Load all partition data from the file as a single `bytes` object.
+
+    See Also
+    --------
+    dump_shards
+    """
+    return file.read()
 
 
 def assemble_chunk(data: bytes, subdims: tuple[int, ...]) -> np.ndarray:

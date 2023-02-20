@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable, Generic, TypeVar
+from typing import Any, Awaitable, Callable
 
 from dask.utils import parse_bytes
 
@@ -8,10 +8,8 @@ from distributed.shuffle._disk import ShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.utils import log_errors
 
-T = TypeVar("T")
 
-
-class CommShardsBuffer(ShardsBuffer, Generic[T]):
+class CommShardsBuffer(ShardsBuffer):
     """Accept, buffer, and send many small messages to many workers
 
     This takes in lots of small messages destined for remote workers, buffers
@@ -21,8 +19,7 @@ class CommShardsBuffer(ShardsBuffer, Generic[T]):
 
     **State**
 
-    # FIXME: Outdated typing
-    -   shards: dict[str, list[bytes]]
+    -   shards: dict[str, list[ShardType]]
 
         This is our in-memory buffer of data waiting to be sent to other workers.
 

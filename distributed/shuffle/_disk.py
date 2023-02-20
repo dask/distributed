@@ -5,7 +5,7 @@ import pathlib
 import shutil
 from typing import BinaryIO, Callable
 
-from distributed.shuffle._buffer import ShardsBuffer, ShardType
+from distributed.shuffle._buffer import ShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.utils import log_errors
 
@@ -19,7 +19,7 @@ class DiskShardsBuffer(ShardsBuffer):
 
     **State**
 
-    -   shards: dict[str, list[ShardType]]
+    -   shards: dict[str, list[bytes]]
 
         This is our in-memory buffer of data waiting to be written to files.
 
@@ -49,8 +49,8 @@ class DiskShardsBuffer(ShardsBuffer):
     def __init__(
         self,
         directory: str,
-        dump: Callable[[list[ShardType], BinaryIO], None],
-        load: Callable[[BinaryIO], list[ShardType]],
+        dump: Callable[[list[bytes], BinaryIO], None],
+        load: Callable[[BinaryIO], bytes],
         memory_limiter: ResourceLimiter | None = None,
     ):
         super().__init__(
@@ -63,7 +63,7 @@ class DiskShardsBuffer(ShardsBuffer):
         self.dump = dump
         self.load = load
 
-    async def _process(self, id: str, shards: list[ShardType]) -> None:
+    async def _process(self, id: str, shards: list[bytes]) -> None:
         """Write one buffer to file
 
         This function was built to offload the disk IO, but since then we've
@@ -85,12 +85,11 @@ class DiskShardsBuffer(ShardsBuffer):
                 ) as f:
                     self.dump(shards, f)
 
-    def read(self, id: int | str) -> list[ShardType]:
+    def read(self, id: int | str) -> bytes:
         """Read a complete file back into memory"""
         self.raise_on_exception()
         if not self._inputs_done:
             raise RuntimeError("Tried to read from file before done.")
-        parts = []
 
         try:
             with self.time("read"):
