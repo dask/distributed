@@ -76,6 +76,8 @@ class SchedulerPlugin:
         scheduler: Scheduler,
         *,
         keys: set[str],
+        tasks: list[str],
+        priority: dict[str, tuple[int | float, ...]],
         **kwargs: Any,
     ) -> None:
         """Run when a new graph / tasks enter the scheduler"""

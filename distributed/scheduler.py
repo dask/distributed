@@ -3577,7 +3577,7 @@ class Scheduler(SchedulerState, ServerNode):
         }
 
         client_handlers = {
-            "update-graph-hlg": self.update_graph_hlg,
+            "update-graph": self.update_graph,
             "client-desires-keys": self.client_desires_keys,
             "update-data": self.update_data,
             "report-key": self.report_on_key,
@@ -4247,7 +4247,7 @@ class Scheduler(SchedulerState, ServerNode):
         }
         return msg
 
-    def update_graph_hlg(
+    def update_graph(
         self,
         client: str,
         graph_header: dict,
@@ -4285,7 +4285,12 @@ class Scheduler(SchedulerState, ServerNode):
             # FIXME: what the heck?
             annotations = annotations.data  # type: ignore
         stimulus_id = stimulus_id or f"update-graph-{time()}"
-        dsk, dependencies, layer_annotations = self.materialize_graph(graph)
+        (
+            dsk,
+            dependencies,
+            layer_annotations,
+            pre_stringified_keys,
+        ) = self.materialize_graph(graph)
 
         requested_keys = set(keys)
         del keys
@@ -4308,6 +4313,7 @@ class Scheduler(SchedulerState, ServerNode):
             tasks=new_tasks,
             annotations=annotations,
             layer_annotations=layer_annotations,
+            pre_stringified_keys=pre_stringified_keys,
         )
 
         self._set_priorities(
@@ -4332,11 +4338,14 @@ class Scheduler(SchedulerState, ServerNode):
 
         # Compute recommendations
         recommendations: Recs = {}
+        priority = dict()
         for ts in sorted(
             runnable,
             key=operator.attrgetter("priority"),
             reverse=True,
         ):
+            assert ts.priority  # mypy
+            priority[ts.key] = ts.priority
             assert ts.run_spec
             if ts.state == "released":
                 recommendations[ts.key] = "waiting"
@@ -4353,10 +4362,11 @@ class Scheduler(SchedulerState, ServerNode):
                 plugin.update_graph(
                     self,
                     client=client,
-                    tasks=touched_tasks,
+                    tasks=[ts.key for ts in touched_tasks],
                     keys=requested_keys,
                     dependencies=dependencies,
                     annotations=annotations,
+                    priority=priority,
                 )
             except Exception as e:
                 logger.exception(e)
@@ -4431,6 +4441,7 @@ class Scheduler(SchedulerState, ServerNode):
         tasks: Iterable[TaskState],
         annotations: dict,
         layer_annotations: dict[str, dict],
+        pre_stringified_keys: dict[Hashable, str],
     ) -> None:
         """Apply the provided annotations to the provided `TaskState` objects.
 
@@ -4457,7 +4468,7 @@ class Scheduler(SchedulerState, ServerNode):
             for annot, value in out.items():
                 # Pop the key since names don't always match attributes
                 if callable(value):
-                    value = value(key)
+                    value = value(pre_stringified_keys[key])
                 out[annot] = value
                 if annot in ("restrictions", "workers"):
                     if not isinstance(value, (list, tuple, set)):
@@ -4600,15 +4611,16 @@ class Scheduler(SchedulerState, ServerNode):
         return done
 
     @staticmethod
-    def materialize_graph(hlg) -> tuple[dict, dict, dict]:
+    def materialize_graph(hlg) -> tuple[dict, dict, dict, dict]:
         from distributed.worker import dumps_task
 
         key_annotations = {}
         dsk = dask.utils.ensure_dict(hlg)
 
         for layer in hlg.layers.values():
-            if annotations := layer.annotations:
-                key_annotations.update({stringify(k): annotations for k in layer})
+            if layer.annotations:
+                annot = layer.annotations
+                key_annotations.update({stringify(k): annot for k in layer})
 
         dependencies, _ = get_deps(dsk)
 
@@ -4625,8 +4637,14 @@ class Scheduler(SchedulerState, ServerNode):
         for k, futures in fut_deps.items():
             dependencies[k].update(f.key for f in futures)
         new_dsk = {}
+        # Annotation callables are evaluated on the non-stringified version of
+        # the keys
+        pre_stringified_keys = {}
         for k, v in dsk.items():
-            new_dsk[stringify(k)] = stringify(v, exclusive=hlg)
+            new_k = stringify(k)
+            pre_stringified_keys[new_k] = k
+            new_dsk[new_k] = stringify(v, exclusive=hlg)
+        assert len(new_dsk) == len(pre_stringified_keys)
         dsk = new_dsk
         dependencies = {
             stringify(k): {stringify(dep) for dep in deps}
@@ -4645,7 +4663,7 @@ class Scheduler(SchedulerState, ServerNode):
             if dsk[k] is k:
                 del dsk[k]
         dsk = valmap(dumps_task, dsk)
-        return dsk, dependencies, key_annotations
+        return dsk, dependencies, key_annotations, pre_stringified_keys
 
     def stimulus_queue_slots_maybe_opened(self, *, stimulus_id: str) -> None:
         """Respond to an event which may have opened spots on worker threadpools

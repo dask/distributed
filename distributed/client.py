@@ -3088,7 +3088,7 @@ class Client(SyncMethodMixin):
                 )
             self._send_to_scheduler(
                 {
-                    "op": "update-graph-hlg",
+                    "op": "update-graph",
                     "graph_header": header,
                     "graph_frames": frames,
                     "keys": list(map(stringify, keys)),
