@@ -14,6 +14,7 @@ from unittest import mock
 import pytest
 
 pd = pytest.importorskip("pandas")
+dd = pytest.importorskip("dask.dataframe")
 
 import dask
 import dask.dataframe as dd

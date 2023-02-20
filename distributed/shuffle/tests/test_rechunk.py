@@ -7,9 +7,9 @@ import warnings
 import pytest
 
 np = pytest.importorskip("numpy")
+da = pytest.importorskip("dask.array")
 
 import dask
-import dask.array as da
 from dask.array.core import concatenate3
 from dask.array.rechunk import normalize_chunks, rechunk
 from dask.array.utils import assert_eq
