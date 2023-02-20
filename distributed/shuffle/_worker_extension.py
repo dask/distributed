@@ -354,7 +354,6 @@ class ArrayRechunkRun(ShuffleRun[tuple[NIndex, NIndex], NIndex, "np.ndarray"]):
             raise RuntimeError(f"Cannot add more partitions to shuffle {self}")
 
         def _() -> dict[str, list[tuple[tuple[NIndex, NIndex], bytes]]]:
-
             out: dict[str, list[tuple[tuple[NIndex, NIndex], bytes]]] = defaultdict(
                 list
             )
