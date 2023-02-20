@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any, BinaryIO, Generic, TypeVar, overload
 
 import toolz
 
-from dask.array.rechunk import _old_to_new, intersect_chunks
 from dask.utils import parse_bytes
 
 from distributed.core import PooledRPCCall
@@ -297,6 +296,8 @@ class ArrayRechunkRun(ShuffleRun["tuple[NIndex, NIndex]", NIndex, "np.ndarray"])
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
     ):
+        from dask.array.rechunk import _old_to_new
+
         super().__init__(
             id=id,
             run_id=run_id,
@@ -993,6 +994,8 @@ def rechunk_slicing(
         of the new chunk, the index of the slice within the composition of slices
         creating the new chunk, and the slice to be applied to the old chunk.
     """
+    from dask.array.rechunk import intersect_chunks
+
     # intersections contains the new individual chunks as combined slices
     # of the old chunks.
     #
