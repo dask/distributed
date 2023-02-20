@@ -14,7 +14,7 @@ from dask.sizeof import sizeof
 
 import distributed.profile as profile
 from distributed import Nanny, Worker, wait
-from distributed.compatibility import MACOS
+from distributed.compatibility import MACOS, WINDOWS
 from distributed.protocol.serialize import Serialize
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.utils import recursive_to_dict
@@ -1719,9 +1719,12 @@ def test_task_counter(ws):
     assert ws.task_counter.current_count(by_prefix=False) == {"waiting": 1, "flight": 3}
 
     def assert_time(actual, expect):
+        # timer accuracy in Windows can be very poor;
+        # see awful hack in distributed.metrics
+        margin_lo = 0.099 if WINDOWS else 0
         # sleep() has been observed to have up to 250ms lag on MacOSX GitHub CI
-        margin = 0.4 if MACOS else 0.1
-        assert expect <= actual < expect + margin
+        margin_hi = 0.4 if MACOS else 0.1
+        assert expect - margin_lo <= actual < expect + margin_hi
 
     sleep(0.1)
     elapsed = ws.task_counter.cumulative_elapsed()
