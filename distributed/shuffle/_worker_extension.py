@@ -996,31 +996,20 @@ def rechunk_slicing(
     """
     from dask.array.rechunk import intersect_chunks
 
-    # intersections contains the new individual chunks as combined slices
-    # of the old chunks.
-    #
-    # Each chunk consists of all the n-dimensional slices of the old chunks
-    # that make up the new chunk.
-    #
-    # Each n-dimensional slice contains n tuples consisting of the index of
-    # the old chunk on the n-th dimension and the slice along that dimension.
-    intersections = intersect_chunks(old, new)
-
-    new_indices = product(*(range(len(c)) for c in new))
-
     ndim = len(old)
+    intersections = intersect_chunks(old, new)
+    new_indices = product(*(range(len(c)) for c in new))
 
     slicing = defaultdict(list)
 
     for new_index, new_chunk in zip(new_indices, intersections):
-        # sub-dimensions of new chunk composed of slices
-        subdims = [len({slice[dim][0] for slice in new_chunk}) for dim in range(ndim)]
+        sub_shape = [len({slice[dim][0] for slice in new_chunk}) for dim in range(ndim)]
 
-        subdim_indices = product(*(range(dim) for dim in subdims))
+        sub_indices = product(*(range(dim) for dim in sub_shape))
 
-        for subdim_index, nchunkslice in zip(subdim_indices, new_chunk):
-            old_index, slices = zip(*nchunkslice)
-            slicing[old_index].append((new_index, subdim_index, slices))
+        for sub_index, sliced_chunk in zip(sub_indices, new_chunk):
+            old_index, nslice = zip(*sliced_chunk)
+            slicing[old_index].append((new_index, sub_index, nslice))
     return slicing
 
 
