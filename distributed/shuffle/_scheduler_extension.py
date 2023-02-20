@@ -197,7 +197,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         mapping = {}
 
         for ts in self.scheduler.tasks[name].dependents:
-            part = ts.annotations["shuffle"]  # TODO Improve this
+            part = ts.annotations["shuffle"]
             if ts.worker_restrictions:
                 output_worker = list(ts.worker_restrictions)[0]
             else:

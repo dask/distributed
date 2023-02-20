@@ -10,7 +10,7 @@ import time
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from io import BytesIO  # TODO: Only for rechunk
+from io import BytesIO
 from itertools import product
 from typing import TYPE_CHECKING, Any, BinaryIO, Generic, TypeVar, overload
 
@@ -254,9 +254,9 @@ class ArrayRechunkRun(ShuffleRun["tuple[NIndex, NIndex]", NIndex, "np.ndarray"])
     output_workers:
         A set of all participating worker (addresses).
     old:
-        TODO
+        Existing chunking of the array per dimension.
     new:
-        TODO
+        Desired chunking of the array per dimension.
     id:
         A unique `ShuffleID` this belongs to.
     run_id:
@@ -282,7 +282,7 @@ class ArrayRechunkRun(ShuffleRun["tuple[NIndex, NIndex]", NIndex, "np.ndarray"])
 
     def __init__(
         self,
-        worker_for: dict[NIndex, str],  # TODO
+        worker_for: dict[NIndex, str],
         output_workers: set,
         old: ChunkedAxes,
         new: ChunkedAxes,
