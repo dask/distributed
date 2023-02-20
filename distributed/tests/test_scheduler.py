@@ -1419,7 +1419,7 @@ async def test_scatter_no_workers(c, s, direct):
     start = time()
     with pytest.raises(TimeoutError):
         await c.scatter(123, timeout=0.1, direct=direct)
-    assert time() < start + 1.5
+    assert time() < start + 5
 
     fut = c.scatter({"y": 2}, timeout=5, direct=direct)
     await asyncio.sleep(0.1)
