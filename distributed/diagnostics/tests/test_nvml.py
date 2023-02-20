@@ -154,7 +154,7 @@ async def test_gpu_monitoring_recent(s, a, b):
         res[a.address]["range_query"]["gpu_memory_used"]
         == pynvml.nvmlDeviceGetMemoryInfo(h).used
     )
-    assert res[a.address]["gpu_name"] == pynvml.nvmlDeviceGetName(h).decode()
+    assert res[a.address]["gpu_name"] == nvml._get_name(h)
     assert res[a.address]["gpu_memory_total"] == pynvml.nvmlDeviceGetMemoryInfo(h).total
 
 
