@@ -140,7 +140,12 @@ async def test_lowlevel_rechunk(
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_1d(c, s, *ws):
-    """Try rechunking a random 1d matrix"""
+    """Try rechunking a random 1d matrix
+
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_1d
+    """
     a = np.random.uniform(0, 1, 30)
     x = da.from_array(a, chunks=((10,) * 3,))
     new = ((6,) * 5,)
@@ -151,7 +156,12 @@ async def test_rechunk_1d(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_2d(c, s, *ws):
-    """Try rechunking a random 2d matrix"""
+    """Try rechunking a random 2d matrix
+
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_2d
+    """
     a = np.random.uniform(0, 1, 300).reshape((10, 30))
     x = da.from_array(a, chunks=((1, 2, 3, 4), (5,) * 6))
     new = ((5, 5), (15,) * 2)
@@ -162,7 +172,12 @@ async def test_rechunk_2d(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_4d(c, s, *ws):
-    """Try rechunking a random 4d matrix"""
+    """Try rechunking a random 4d matrix
+
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_4d
+    """
     old = ((5, 5),) * 4
     a = np.random.uniform(0, 1, 10000).reshape((10,) * 4)
     x = da.from_array(a, chunks=old)
@@ -174,6 +189,11 @@ async def test_rechunk_4d(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_expand(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_expand
+    """
     a = np.random.uniform(0, 1, 100).reshape((10, 10))
     x = da.from_array(a, chunks=(5, 5))
     y = x.rechunk(chunks=((3, 3, 3, 1), (3, 3, 3, 1)), rechunk="p2p")
@@ -182,6 +202,11 @@ async def test_rechunk_expand(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_expand2(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_expand2
+    """
     (a, b) = (3, 2)
     orig = np.random.uniform(0, 1, a**b).reshape((a,) * b)
     for off, off2 in product(range(1, a - 1), range(1, a - 1)):
@@ -197,7 +222,12 @@ async def test_rechunk_expand2(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_method(c, s, *ws):
-    """Test rechunking can be done as a method of dask array."""
+    """Test rechunking can be done as a method of dask array.
+
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_method
+    """
     old = ((5, 2, 3),) * 4
     new = ((3, 3, 3, 1),) * 4
     a = np.random.uniform(0, 1, 10000).reshape((10,) * 4)
@@ -209,7 +239,12 @@ async def test_rechunk_method(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_blockshape(c, s, *ws):
-    """Test that blockshape can be used."""
+    """Test that blockshape can be used.
+
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_blockshape
+    """
     new_shape, new_chunks = (10, 10), (4, 3)
     new_blockdims = normalize_chunks(new_chunks, new_shape)
     old_chunks = ((4, 4, 2), (3, 3, 3, 1))
@@ -222,12 +257,22 @@ async def test_rechunk_blockshape(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_dtype(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_dtype
+    """
     x = da.ones(5, chunks=(2,))
     assert x.rechunk(chunks=(1,), rechunk="p2p").dtype == x.dtype
 
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_with_dict(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_with_dict
+    """
     x = da.ones((24, 24), chunks=(4, 8))
     y = x.rechunk(chunks={0: 12}, rechunk="p2p")
     assert y.chunks == ((12, 12), (8, 8, 8))
@@ -247,6 +292,11 @@ async def test_rechunk_with_dict(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_with_empty_input(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_with_empty_input
+    """
     x = da.ones((24, 24), chunks=(4, 8))
     assert x.rechunk(chunks={}, rechunk="p2p").chunks == x.chunks
     with pytest.raises(ValueError):
@@ -255,6 +305,11 @@ async def test_rechunk_with_empty_input(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_with_null_dimensions(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_with_null_dimensions
+    """
     x = da.from_array(np.ones((24, 24)), chunks=(4, 8))
     assert (
         x.rechunk(chunks=(None, 4), rechunk="p2p").chunks
@@ -268,6 +323,11 @@ async def test_rechunk_with_null_dimensions(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_with_integer(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_with_integer
+    """
     x = da.from_array(np.arange(5), chunks=4)
     y = x.rechunk(3, rechunk="p2p")
     assert y.chunks == ((3, 2),)
@@ -276,6 +336,11 @@ async def test_rechunk_with_integer(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_0d(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_0d
+    """
     a = np.array(42)
     x = da.from_array(a, chunks=())
     y = x.rechunk((), rechunk="p2p")
@@ -288,12 +353,22 @@ async def test_rechunk_0d(c, s, *ws):
 )
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_empty_array(c, s, *ws, arr):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_empty_array
+    """
     arr.rechunk(rechunk="p2p")
     assert arr.size == 0
 
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_empty(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_empty
+    """
     x = da.ones((0, 10), chunks=(5, 5))
     y = x.rechunk((2, 2), rechunk="p2p")
     assert y.chunks == ((0,), (2,) * 5)
@@ -302,6 +377,11 @@ async def test_rechunk_empty(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_zero_dim_array(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_zero_dim_array
+    """
     x = da.zeros((4, 0), chunks=3)
     y = x.rechunk({0: 4}, rechunk="p2p")
     assert y.chunks == ((4,), (0,))
@@ -310,6 +390,11 @@ async def test_rechunk_zero_dim_array(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_zero_dim_array_II(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_zero_dim_array_II
+    """
     x = da.zeros((4, 0, 6, 10), chunks=3)
     y = x.rechunk({0: 4, 2: 2}, rechunk="p2p")
     assert y.chunks == ((4,), (0,), (2, 2, 2), (3, 3, 3, 1))
@@ -318,6 +403,11 @@ async def test_rechunk_zero_dim_array_II(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_same(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_same
+    """
     x = da.ones((24, 24), chunks=(4, 8))
     y = x.rechunk(x.chunks, rechunk="p2p")
     assert x is y
@@ -325,6 +415,11 @@ async def test_rechunk_same(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_with_zero_placeholders(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_with_zero_placeholders
+    """
     x = da.ones((24, 24), chunks=((12, 12), (24, 0)))
     y = da.ones((24, 24), chunks=((12, 12), (12, 12)))
     y = y.rechunk(((12, 12), (24, 0)), rechunk="p2p")
@@ -333,6 +428,11 @@ async def test_rechunk_with_zero_placeholders(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_minus_one(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_minus_one
+    """
     x = da.ones((24, 24), chunks=(4, 8))
     y = x.rechunk((-1, 8), rechunk="p2p")
     assert y.chunks == ((24,), (8, 8, 8))
@@ -341,6 +441,11 @@ async def test_rechunk_minus_one(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_warning(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_warning
+    """
     N = 20
     x = da.random.normal(size=(N, N, 100), chunks=(1, N, 100))
     with warnings.catch_warnings(record=True) as w:
@@ -350,6 +455,11 @@ async def test_rechunk_warning(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_unknown_from_pandas(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_unknown_from_pandas
+    """
     dd = pytest.importorskip("dask.dataframe")
     pd = pytest.importorskip("pandas")
 
@@ -367,6 +477,11 @@ async def test_rechunk_unknown_from_pandas(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_unknown_from_array(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_unknown_from_array
+    """
     dd = pytest.importorskip("dask.dataframe")
     # pd = pytest.importorskip('pandas')
     x = dd.from_array(da.ones(shape=(4, 4), chunks=(2, 2))).values
@@ -397,6 +512,11 @@ async def test_rechunk_unknown_from_array(c, s, *ws):
 )
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_unknown(c, s, *ws, x, chunks):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_unknown
+    """
     dd = pytest.importorskip("dask.dataframe")
     y = dd.from_array(x).values
     result = y.rechunk(chunks, rechunk="p2p")
@@ -408,6 +528,11 @@ async def test_rechunk_unknown(c, s, *ws, x, chunks):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_unknown_explicit(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_unknown_explicit
+    """
     dd = pytest.importorskip("dask.dataframe")
     x = da.ones(shape=(10, 10), chunks=(5, 2))
     y = dd.from_array(x).values
@@ -427,6 +552,11 @@ def assert_chunks_match(left, right):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_unknown_raises(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_unknown_raises
+    """
     dd = pytest.importorskip("dask.dataframe")
 
     x = dd.from_array(da.ones(shape=(10, 10), chunks=(5, 5))).values
@@ -436,6 +566,11 @@ async def test_rechunk_unknown_raises(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_zero_dim(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_zero_dim
+    """
     da = pytest.importorskip("dask.array")
 
     x = da.ones((0, 10, 100), chunks=(0, 10, 10)).rechunk((0, 10, 50), rechunk="p2p")
@@ -444,6 +579,11 @@ async def test_rechunk_zero_dim(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_empty_chunks(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_empty_chunks
+    """
     x = da.zeros((7, 24), chunks=((7,), (10, 0, 0, 9, 0, 5)))
     y = x.rechunk((2, 3), rechunk="p2p")
     assert_eq(await c.compute(x), await c.compute(y))
@@ -470,6 +610,11 @@ async def test_rechunk_empty_chunks(c, s, *ws):
 )
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_auto_1d(c, s, *ws, shape, chunks, bs, expected):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_auto_1d
+    """
     x = da.ones(shape, chunks=(chunks,))
     y = x.rechunk({0: "auto"}, block_size_limit=bs * x.dtype.itemsize, rechunk="p2p")
     assert y.chunks == (expected,)
@@ -477,6 +622,11 @@ async def test_rechunk_auto_1d(c, s, *ws, shape, chunks, bs, expected):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_auto_2d(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_auto_2d
+    """
     x = da.ones((20, 20), chunks=(2, 2))
     y = x.rechunk(
         {0: -1, 1: "auto"}, block_size_limit=20 * x.dtype.itemsize, rechunk="p2p"
@@ -500,6 +650,11 @@ async def test_rechunk_auto_2d(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_auto_3d(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_auto_3d
+    """
     x = da.ones((20, 20, 20), chunks=((2, 2, 2)))
     y = x.rechunk(
         {0: "auto", 1: "auto"}, block_size_limit=200 * x.dtype.itemsize, rechunk="p2p"
@@ -512,6 +667,11 @@ async def test_rechunk_auto_3d(c, s, *ws):
 @pytest.mark.parametrize("n", [100, 1000])
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_auto_image_stack(c, s, *ws, n):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_auto_image_stack
+    """
     with dask.config.set({"array.chunk-size": "10MiB"}):
         x = da.ones((n, 1000, 1000), chunks=(1, 1000, 1000), dtype="uint8")
         y = x.rechunk("auto", rechunk="p2p")
@@ -533,6 +693,11 @@ async def test_rechunk_auto_image_stack(c, s, *ws, n):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_down(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_down
+    """
     with dask.config.set({"array.chunk-size": "10MiB"}):
         x = da.ones((100, 1000, 1000), chunks=(1, 1000, 1000), dtype="uint8")
         y = x.rechunk("auto", rechunk="p2p")
@@ -552,6 +717,11 @@ async def test_rechunk_down(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_zero(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_zero
+    """
     with dask.config.set({"array.chunk-size": "1B"}):
         x = da.ones(10, chunks=(5,))
         y = x.rechunk("auto", rechunk="p2p")
@@ -560,6 +730,11 @@ async def test_rechunk_zero(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_bad_keys(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_bad_keys
+    """
     x = da.zeros((2, 3, 4), chunks=1)
     assert x.rechunk({-1: 4}, rechunk="p2p").chunks == ((1, 1), (1, 1, 1), (4,))
     assert x.rechunk({-x.ndim: 2}, rechunk="p2p").chunks == (
@@ -586,6 +761,11 @@ async def test_rechunk_bad_keys(c, s, *ws):
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk_with_zero(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_with_zero
+    """
     a = da.ones((8, 8), chunks=(4, 4))
     result = a.rechunk(((4, 4), (4, 0, 0, 4)), rechunk="p2p")
     expected = da.ones((8, 8), chunks=((4, 4), (4, 0, 0, 4)))
