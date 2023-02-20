@@ -1769,29 +1769,25 @@ class WorkerState:
         run_id: int,
         stimulus_id: str,
     ) -> TaskFinishedMsg:
-        if ts.key not in self.data and ts.key not in self.actors:
-            raise RuntimeError(f"Task {ts} not ready")
-        typ = ts.type
-        if ts.nbytes is None or typ is None:
-            try:
-                value = self.data[ts.key]
-            except KeyError:
-                value = self.actors[ts.key]
-            ts.nbytes = sizeof(value)
-            typ = ts.type = type(value)
-            del value
+        if self.validate:
+            assert ts.state == "memory"
+            assert ts.key in self.data or ts.key in self.actors
+            assert ts.type is not None
+            assert ts.nbytes is not None
+
         try:
-            typ_serialized = pickle.dumps(typ)
+            type_serialized = pickle.dumps(ts.type)
         except Exception:
-            # Some types fail pickling (example: _thread.lock objects),
+            # Some types fail pickling (example: _thread.lock objects);
             # send their name as a best effort.
-            typ_serialized = pickle.dumps(typ.__name__)
+            type_serialized = pickle.dumps(typename(ts.type))
+
         return TaskFinishedMsg(
             key=ts.key,
             run_id=run_id,
             nbytes=ts.nbytes,
-            type=typ_serialized,
-            typename=typename(typ),
+            type=type_serialized,
+            typename=typename(ts.type),
             metadata=ts.metadata,
             thread=self.threads.get(ts.key),
             startstops=ts.startstops,
