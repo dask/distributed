@@ -1219,7 +1219,7 @@ class Worker(BaseWorker, ServerNode):
                 now=start,
                 metrics=await self.get_metrics(),
                 executing={
-                    key: start - self.state.tasks[key].start_time
+                    key: start - cast(float, self.state.tasks[key].start_time)
                     for key in self.active_keys
                     if key in self.state.tasks
                 },

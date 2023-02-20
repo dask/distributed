@@ -40,46 +40,55 @@ class _WindowsTime:
     absolute clock with fine resolution.
     """
 
-    # Resync every N seconds, to avoid drifting
-    RESYNC_EVERY = 600
+    base_timer: Callable[[], float]
+    delta: float
+    previous: float | None
+    next_resync: float
+    resync_every: float
 
-    def __init__(self, base: Callable[[], float]):
+    def __init__(
+        self, base: Callable[[], float], is_monotonic: bool, resync_every: float = 600.0
+    ):
         self.base_timer = base
-        self.delta = None
-        self.last_resync = float("-inf")
+        self.previous = float("-inf") if is_monotonic else None
+        self.next_resync = float("-inf")
+        self.resync_every = resync_every
 
-    perf_counter = timemod.perf_counter
+    def time(self) -> float:
+        cur = timemod.perf_counter()
+        if cur > self.next_resync:
+            self.resync()
+            self.next_resync = cur + self.resync_every
+        cur += self.delta
+        if self.previous is not None:
+            # Monotonic timer
+            if cur <= self.previous:
+                cur = self.previous + 1e-9
+            self.previous = cur
+        return cur
 
-    def time(self):
-        delta = self.delta
-        cur = self.perf_counter()
-        if cur - self.last_resync >= self.RESYNC_EVERY:
-            delta = self.resync()
-            self.last_resync = cur
-        return delta + cur
-
-    def resync(self):
+    def resync(self) -> None:
         _time = self.base_timer
-        _perf_counter = self.perf_counter
+        _perf_counter = timemod.perf_counter
         min_samples = 5
         while True:
-            times = [(_time(), _perf_counter()) for i in range(min_samples * 2)]
+            times = [(_time(), _perf_counter()) for _ in range(min_samples * 2)]
             abs_times = collections.Counter(t[0] for t in times)
             first, nfirst = abs_times.most_common()[0]
             if nfirst < min_samples:
                 # System too noisy? Start again
                 continue
-            else:
-                perf_times = [t[1] for t in times if t[0] == first][:-1]
-                assert len(perf_times) >= min_samples - 1, perf_times
-                self.delta = first - sum(perf_times) / len(perf_times)
-                return self.delta
+
+            perf_times = [t[1] for t in times if t[0] == first][:-1]
+            assert len(perf_times) >= min_samples - 1, perf_times
+            self.delta = first - sum(perf_times) / len(perf_times)
+            break
 
 
 # A high-resolution wall clock timer measuring the seconds since Unix epoch
 if WINDOWS:
-    time = _WindowsTime(timemod.time).time
-    monotonic = _WindowsTime(timemod.monotonic).time
+    time = _WindowsTime(timemod.time, is_monotonic=False).time
+    monotonic = _WindowsTime(timemod.monotonic, is_monotonic=True).time
 else:
     # Under modern Unixes, time.time() and time.monotonic() should be good enough
     time = timemod.time
