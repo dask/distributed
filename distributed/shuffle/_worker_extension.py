@@ -383,7 +383,7 @@ class ArrayRechunkRun(ShuffleRun["tuple[NIndex, NIndex]", NIndex, "np.ndarray"])
         data = self._read_from_disk(i)
         subdims = tuple(len(self._old_to_new[dim][ix]) for dim, ix in enumerate(i))
         with self.time("cpu"):
-            arr = assemble_chunk(data, subdims)
+            arr = convert_chunk(data, subdims)
         return arr
 
 
@@ -1034,7 +1034,7 @@ def load_partition(file: BinaryIO) -> bytes:
     return file.read()
 
 
-def assemble_chunk(data: bytes, subdims: tuple[int, ...]) -> np.ndarray:
+def convert_chunk(data: bytes, subdims: tuple[int, ...]) -> np.ndarray:
     import numpy as np
 
     from dask.array.core import concatenate3
