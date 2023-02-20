@@ -49,6 +49,6 @@ dependencies:
   - zict
   - zstandard >=0.9.0
   - pip:
-      - git+https://github.com/dask/dask
+      - git+https://github.com/fjetter/dask@17ee0e3f05526fbfd54836a2e42b13512ddab044
       - keras
       - gilknocker>=0.3.0

@@ -6083,7 +6083,6 @@ async def test_mixing_clients_different_scheduler(s, a, b):
     async with Scheduler(port=open_port()) as s2, Worker(s2.address) as w1, Client(
         s.address, asynchronous=True
     ) as c1, Client(s2.address, asynchronous=True) as c2:
-
         future = c1.submit(inc, 1)
         with pytest.raises(CancelledError):
             await c2.submit(inc, future)

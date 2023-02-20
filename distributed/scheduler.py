@@ -4543,7 +4543,10 @@ class Scheduler(SchedulerState, ServerNode):
             task_user_prio = user_priority
             if isinstance(user_priority, dict):
                 task_user_prio = user_priority.get(ts.key, 0)
-            annotated_prio = ts.annotations.get("priority", task_user_prio)
+            annotated_prio = ts.annotations.get("priority", {})
+            if not annotated_prio:
+                annotated_prio = task_user_prio
+
             if not ts.priority and ts.key in internal_priority:
                 ts.priority = (
                     -annotated_prio,
