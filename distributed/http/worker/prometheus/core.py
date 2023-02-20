@@ -39,13 +39,15 @@ class WorkerMetricCollector(PrometheusCollector):
             "Number of tasks at worker.",
             labels=["state"],
         )
-        for k, n in ws.task_counts.items():
-            if k == "memory" and hasattr(self.server.data, "slow"):
+        for state, n in ws.task_counter.current_count(by_prefix=False).items():
+            if state == "memory" and hasattr(self.server.data, "slow"):
                 n_spilled = len(self.server.data.slow)
-                tasks.add_metric(["memory"], n - n_spilled)
-                tasks.add_metric(["disk"], n_spilled)
+                if n - n_spilled:
+                    tasks.add_metric(["memory"], n - n_spilled)
+                if n_spilled:
+                    tasks.add_metric(["disk"], n_spilled)
             else:
-                tasks.add_metric([k], n)
+                tasks.add_metric([state], n)
         yield tasks
 
         yield GaugeMetricFamily(

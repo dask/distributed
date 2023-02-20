@@ -5,6 +5,7 @@ import gc
 import pickle
 from collections import defaultdict
 from collections.abc import Iterator
+from time import sleep
 
 import pytest
 from tlz import first
@@ -13,6 +14,7 @@ from dask.sizeof import sizeof
 
 import distributed.profile as profile
 from distributed import Nanny, Worker, wait
+from distributed.compatibility import MACOS
 from distributed.protocol.serialize import Serialize
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.utils import recursive_to_dict
@@ -20,6 +22,7 @@ from distributed.utils_test import (
     NO_AMM,
     _LockedCommPool,
     assert_story,
+    async_wait_for,
     freeze_data_fetching,
     gen_cluster,
     inc,
@@ -205,8 +208,18 @@ def test_WorkerState__to_dict(ws):
                 "state": "memory",
             },
         },
+        "task_counts": {"['x', 'flight']": 1, "['y', 'memory']": 1},
+        "task_cumulative_elapsed": {
+            "['x', 'flight']": "SNIP",
+            "['y', 'memory']": "SNIP",
+        },
         "transition_counter": 3,
     }
+
+    # timings data (a few microseconds each)
+    for k in actual["task_cumulative_elapsed"]:
+        actual["task_cumulative_elapsed"][k] = "SNIP"
+
     assert actual == expect
 
 
@@ -649,16 +662,16 @@ async def test_lose_replica_during_fetch(c, s, w1, w2, w3, as_deps):
 
         assert len(s.tasks["x"].who_has) == 2
         await w2.close()
-        while len(s.tasks["x"].who_has) > 1:
-            await asyncio.sleep(0.01)
+        await async_wait_for(lambda: len(s.tasks["x"].who_has) == 1, timeout=5)
 
         if as_deps:
             y2 = c.submit(inc, x, key="y2", workers=[w1.address])
         else:
             s.request_acquire_replicas(w1.address, ["x"], stimulus_id="test")
 
-        while w1.state.tasks["x"].who_has != {w3.address}:
-            await asyncio.sleep(0.01)
+        await async_wait_for(
+            lambda: w1.state.tasks["x"].who_has == {w3.address}, timeout=5
+        )
 
     await wait_for_state("x", "memory", w1)
     assert_story(
@@ -1209,7 +1222,7 @@ def test_resumed_task_releases_resources(ws_with_running_task, done_ev_cls):
     assert ws.available_resources == {"R": 0}
     ws2 = "127.0.0.1:2"
 
-    ws.handle_stimulus(FreeKeysEvent("cancel", ["x"]))
+    ws.handle_stimulus(FreeKeysEvent(keys=["x"], stimulus_id="cancel"))
     assert ws.tasks["x"].state == "cancelled"
     assert ws.available_resources == {"R": 0}
 
@@ -1681,47 +1694,60 @@ def test_fetch_count(ws):
     assert len(ws.missing_dep_flight) == 1
 
 
-def test_task_counts(ws):
-    assert ws.task_counts == {
-        "constrained": 0,
-        "executing": 0,
-        "fetch": 0,
-        "flight": 0,
-        "long-running": 0,
-        "memory": 0,
-        "missing": 0,
-        "other": 0,
-        "ready": 0,
-        "waiting": 0,
-    }
+def test_task_counter(ws):
+    ws2 = "127.0.0.1:2"
+    ws3 = "127.0.0.1:3"
+    for by_prefix in (False, True):
+        assert ws.task_counter.current_count(by_prefix=by_prefix) == {}
+        assert ws.task_counter.cumulative_elapsed(by_prefix=by_prefix) == {}
 
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy(
+            "('y-123', 7)", who_has={"('x-456', 8)": [ws2]}, stimulus_id="s1"
+        ),
+        AcquireReplicasEvent(
+            who_has={"('x-789', 0)": [ws3], "z": [ws3]},
+            nbytes={"('x-789', 0)": 1, "z": 1},
+            stimulus_id="s2",
+        ),
+    )
+    assert ws.task_counter.current_count() == {
+        ("x", "flight"): 2,
+        ("y", "waiting"): 1,
+        ("z", "flight"): 1,
+    }
+    assert ws.task_counter.current_count(by_prefix=False) == {"waiting": 1, "flight": 3}
 
-def test_task_counts_with_actors(ws):
-    ws.handle_stimulus(ComputeTaskEvent.dummy("x", actor=True, stimulus_id="s1"))
-    assert ws.actors == {"x": None}
-    assert ws.task_counts == {
-        "constrained": 0,
-        "executing": 1,
-        "fetch": 0,
-        "flight": 0,
-        "long-running": 0,
-        "memory": 0,
-        "missing": 0,
-        "other": 0,
-        "ready": 0,
-        "waiting": 0,
+    def assert_time(actual, expect):
+        # sleep() has been observed to have up to 250ms lag on MacOSX GitHub CI
+        margin = 0.4 if MACOS else 0.1
+        assert expect <= actual < expect + margin
+
+    sleep(0.1)
+    elapsed = ws.task_counter.cumulative_elapsed()
+    # Transitory states are not recorded
+    assert len(elapsed) == 3
+    assert_time(elapsed["x", "flight"], 0.2)
+    assert_time(elapsed["y", "waiting"], 0.1)
+    assert_time(elapsed["z", "flight"], 0.1)
+
+    elapsed = ws.task_counter.cumulative_elapsed(by_prefix=False)
+    assert len(elapsed) == 2
+    assert_time(elapsed["flight"], 0.3)
+    assert_time(elapsed["waiting"], 0.1)
+
+    # Forgotten keys disappear from current_count() and stop accruing time in
+    # cumulative_elapsed()
+    ws.handle_stimulus(FreeKeysEvent(keys=["('y-123', 7)"], stimulus_id="s3"))
+    assert ws.task_counter.current_count() == {
+        ("x", "cancelled"): 1,
+        ("x", "flight"): 1,
+        ("z", "flight"): 1,
     }
-    ws.handle_stimulus(ExecuteSuccessEvent.dummy("x", value=123, stimulus_id="s2"))
-    assert ws.actors == {"x": 123}
-    assert ws.task_counts == {
-        "constrained": 0,
-        "executing": 0,
-        "fetch": 0,
-        "flight": 0,
-        "long-running": 0,
-        "memory": 1,
-        "missing": 0,
-        "other": 0,
-        "ready": 0,
-        "waiting": 0,
-    }
+    sleep(0.15)
+    elapsed = ws.task_counter.cumulative_elapsed()
+    assert len(elapsed) == 4
+    assert_time(elapsed["x", "flight"], 0.35)
+    assert_time(elapsed["x", "cancelled"], 0.15)
+    assert_time(elapsed["y", "waiting"], 0.1)
+    assert_time(elapsed["z", "flight"], 0.25)

@@ -10,7 +10,7 @@ import random
 import sys
 import warnings
 import weakref
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from collections.abc import (
     Callable,
     Collection,
@@ -18,6 +18,7 @@ from collections.abc import (
     Iterator,
     Mapping,
     MutableMapping,
+    Set,
 )
 from copy import copy
 from dataclasses import dataclass, field
@@ -37,13 +38,13 @@ from typing import (
 from tlz import peekn
 
 import dask
-from dask.utils import parse_bytes, typename
+from dask.utils import key_split, parse_bytes, typename
 
 from distributed._stories import worker_story
 from distributed.collections import HeapSet
 from distributed.comm import get_address_host
 from distributed.core import ErrorMessage, error_message
-from distributed.metrics import time
+from distributed.metrics import monotonic, time
 from distributed.protocol import pickle
 from distributed.protocol.serialize import Serialize
 from distributed.sizeof import safe_sizeof as sizeof
@@ -80,16 +81,16 @@ TaskStateState: TypeAlias = Literal[
 ]
 
 # TaskState.state subsets
-PROCESSING: set[TaskStateState] = {
+PROCESSING: Set[TaskStateState] = {
     "waiting",
     "ready",
     "constrained",
     "executing",
     "long-running",
 }
-READY: set[TaskStateState] = {"ready", "constrained"}
+READY: Set[TaskStateState] = {"ready", "constrained"}
 # Valid states for a task that is found in TaskState.waiting_for_data
-WAITING_FOR_DATA: set[TaskStateState] = {
+WAITING_FOR_DATA: Set[TaskStateState] = {
     "constrained",
     "executing",
     "fetch",
@@ -216,10 +217,10 @@ def _default_data_size() -> int:
 
 # Note: can't specify __slots__ manually to enable slots in Python <3.10 in a @dataclass
 # that defines any default values
-dc_slots = {"slots": True} if sys.version_info >= (3, 10) else {}
+DC_SLOTS = {"slots": True} if sys.version_info >= (3, 10) else {}
 
 
-@dataclass(repr=False, eq=False, **dc_slots)
+@dataclass(repr=False, eq=False, **DC_SLOTS)
 class TaskState:
     """Holds volatile state relating to an individual Dask task.
 
@@ -229,6 +230,8 @@ class TaskState:
 
     #: Task key. Mandatory.
     key: str
+    #: Task prefix (leftmost part of the key)
+    prefix: str = field(init=False)
     #: Task run ID.
     run_id: int = RUN_ID_SENTINEL
     #: A named tuple containing the ``function``, ``args``, ``kwargs`` and ``task``
@@ -301,6 +304,7 @@ class TaskState:
 
     def __post_init__(self) -> None:
         TaskState._instances.add(self)
+        self.prefix = key_split(self.key)
 
     def __repr__(self) -> str:
         if self.state == "cancelled":
@@ -350,8 +354,8 @@ class TaskState:
         there's an acyclic dependency chain of ~200+ tasks.
         """
         out = recursive_to_dict(self, exclude=exclude, members=True)
-        # Remove all Nones and empty containers
-        return {k: v for k, v in out.items() if v}
+        # Remove all Nones, empty containers, and derived attributes
+        return {k: v for k, v in out.items() if v and k != "prefix"}
 
 
 @dataclass
@@ -1244,6 +1248,10 @@ class WorkerState:
     #: Typically disabled in production.
     validate: bool
 
+    #: Current number of tasks and cumulative elapsed time in each state,
+    #: both broken down by :attr:`prefix`
+    task_counter: TaskCounter
+
     #: Total number of state transitions so far.
     #: See also :attr:`log` and :attr:`transition_counter_max`.
     transition_counter: int
@@ -1319,6 +1327,7 @@ class WorkerState:
         self.transfer_message_bytes_limit = transfer_message_bytes_limit
         self.log = deque(maxlen=100_000)
         self.stimulus_log = deque(maxlen=10_000)
+        self.task_counter = TaskCounter()
         self.transition_counter = 0
         self.transition_counter_max = transition_counter_max
         self.transfer_incoming_bytes_limit = transfer_incoming_bytes_limit
@@ -1413,6 +1422,7 @@ class WorkerState:
             logger.debug("Data task %s already known (stimulus_id=%s)", ts, stimulus_id)
         except KeyError:
             self.tasks[key] = ts = TaskState(key)
+            self.task_counter.new_task(ts)
         if not ts.priority:
             assert priority
             ts.priority = priority
@@ -2682,11 +2692,13 @@ class WorkerState:
         """
         instructions = []
         tasks = set()
+        initial_states: dict[TaskState, TaskStateState] = {}
 
         def process_recs(recs: Recs) -> None:
             while recs:
                 ts, finish = recs.popitem()
                 tasks.add(ts)
+                initial_states.setdefault(ts, ts.state)
                 a_recs, a_instructions = self._transition(
                     ts, finish, stimulus_id=stimulus_id
                 )
@@ -2705,6 +2717,8 @@ class WorkerState:
         a_recs, a_instructions = self._ensure_communicating(stimulus_id=stimulus_id)
         instructions += a_instructions
         process_recs(a_recs)
+
+        self.task_counter.transitions(initial_states)
 
         if self.validate:
             # Full state validation is very expensive
@@ -2729,6 +2743,7 @@ class WorkerState:
                 ts = self.tasks[key]
             except KeyError:
                 self.tasks[key] = ts = TaskState(key)
+                self.task_counter.new_task(ts)
 
             recommendations[ts] = ("memory", value, RUN_ID_SENTINEL)
             self.log.append(
@@ -2826,6 +2841,8 @@ class WorkerState:
             )
         except KeyError:
             self.tasks[ev.key] = ts = TaskState(ev.key)
+            self.task_counter.new_task(ts)
+
         self.log.append((ev.key, "compute-task", ts.state, ev.stimulus_id, time()))
         ts.run_id = ev.run_id
         recommendations: Recs = {}
@@ -3252,36 +3269,11 @@ class WorkerState:
             "stimulus_log": self.stimulus_log,
             "transition_counter": self.transition_counter,
             "tasks": self.tasks,
+            "task_counts": dict(self.task_counter.current_count()),
+            "task_cumulative_elapsed": dict(self.task_counter.cumulative_elapsed()),
         }
         info = {k: v for k, v in info.items() if k not in exclude}
         return recursive_to_dict(info, exclude=exclude)
-
-    @property
-    def task_counts(self) -> dict[TaskStateState | Literal["other"], int]:
-        # Actors can be in any state other than {fetch, flight, missing}
-        n_actors_in_memory = sum(
-            self.tasks[key].state == "memory" for key in self.actors
-        )
-
-        out: dict[TaskStateState | Literal["other"], int] = {
-            # Key measure for occupancy.
-            # Also includes cancelled(executing) and resumed(executing->fetch)
-            "executing": len(self.executing),
-            # Also includes cancelled(long-running) and resumed(long-running->fetch)
-            "long-running": len(self.long_running),
-            "memory": len(self.data) + n_actors_in_memory,
-            "ready": len(self.ready),
-            "constrained": len(self.constrained),
-            "waiting": len(self.waiting),
-            "fetch": self.fetch_count,
-            "missing": len(self.missing_dep_flight),
-            # Also includes cancelled(flight) and resumed(flight->waiting)
-            "flight": len(self.in_flight_tasks),
-        }
-        # released | error
-        out["other"] = other = len(self.tasks) - sum(out.values())
-        assert other >= 0
-        return out
 
     ##############
     # Validation #
@@ -3561,6 +3553,14 @@ class WorkerState:
         for ts in self.tasks.values():
             self.validate_task(ts)
 
+        expect_state_count = Counter(
+            (ts.prefix, ts.state) for ts in self.tasks.values()
+        )
+        assert self.task_counter.current_count() == expect_state_count, (
+            self.task_counter.current_count(),
+            expect_state_count,
+        )
+
         if self.transition_counter_max:
             assert self.transition_counter < self.transition_counter_max
 
@@ -3720,6 +3720,128 @@ class BaseWorker(abc.ABC):
     @abc.abstractmethod
     def digest_metric(self, name: str, value: float) -> None:
         """Log an arbitrary numerical metric"""
+
+
+class TaskCounter:
+    # When the monotonic timer was last sampled
+    _previous_ts: float | None
+    # Current task counts, per prefix, per state, on the worker
+    _current_count: Counter[tuple[str, TaskStateState]]
+    # Tasks that have just been inserted in the WorkerState and will be immediately
+    # transitioned to a new state
+    _new_tasks: set[TaskState]
+    # Ever-increasing cumulative task runtimes, per prefix, including tasks that have
+    # left a state or even that don't exist anymore, updated as of the latest call
+    # to cumulative_elapsed() or transitions()
+    _cumulative_elapsed: defaultdict[tuple[str, TaskStateState], float]
+
+    __slots__ = tuple(__annotations__)
+
+    def __init__(self) -> None:
+        self._previous_ts = None
+        self._current_count = Counter()
+        self._new_tasks = set()
+        self._cumulative_elapsed = defaultdict(float)
+
+    def current_count(self, by_prefix: bool = True) -> Counter:
+        """Return current count of tasks.
+
+        Parameters
+        ----------
+        by_prefix: bool, optional
+            True (default)
+                Return counter of (task prefix, task state) -> count
+            False
+                Return counter of task state -> count
+        """
+        if by_prefix:
+            return self._current_count
+
+        out: Counter[TaskStateState] = Counter()
+        for (_, state), n in self._current_count.items():
+            out[state] += n
+        return out
+
+    def cumulative_elapsed(self, by_prefix: bool = True) -> Mapping[Any, float]:
+        """Ever-increasing cumulative task runtimes, including tasks that have left a
+        state or even that don't exist anymore, updated as of the moment when this
+        method is called.
+
+        Parameters
+        ----------
+        by_prefix: bool, optional
+            True (default)
+                Return mapping of (task prefix, task state) -> seconds
+            False
+                Return mapping of task state -> seconds
+        """
+        if self._previous_ts is None:
+            assert not self._current_count
+            assert not self._cumulative_elapsed
+        else:
+            now = monotonic()
+            elapsed = now - self._previous_ts
+            self._previous_ts = now
+            for k, n_tasks in self._current_count.items():
+                self._cumulative_elapsed[k] += elapsed * n_tasks
+
+        if by_prefix:
+            return self._cumulative_elapsed
+
+        out: defaultdict[TaskStateState, float] = defaultdict(float)
+        for (_, state), n in self._cumulative_elapsed.items():
+            out[state] += n
+        return out
+
+    def new_task(self, ts: TaskState) -> None:
+        """A new task has just been created and will be immediately fed into the
+        recommendations for transitions
+        """
+        self._new_tasks.add(ts)
+
+    def transitions(self, prev_states: dict[TaskState, TaskStateState]) -> None:
+        """Tasks have just transitioned to a new state"""
+        if not prev_states and not self._new_tasks:
+            return
+
+        now = monotonic()
+        if self._previous_ts is not None:
+            elapsed = now - self._previous_ts
+
+        for ts, prev_state in prev_states.items():
+            if ts in self._new_tasks:
+                self._new_tasks.discard(ts)
+                continue
+            if ts.state == prev_state:
+                continue
+
+            k = ts.prefix, prev_state
+            if self._previous_ts is not None:
+                self._cumulative_elapsed[k] += elapsed
+
+            new_count = self._current_count[k] - 1
+            if new_count > 0:
+                self._current_count[k] = new_count
+            else:
+                assert new_count == 0
+                del self._current_count[k]
+
+        if self._previous_ts is not None:
+            for k, n_tasks in self._current_count.items():
+                self._cumulative_elapsed[k] += elapsed * n_tasks
+
+        for ts, prev_state in prev_states.items():
+            if ts.state not in (prev_state, "forgotten"):
+                self._current_count[ts.prefix, ts.state] += 1
+
+        for ts in self._new_tasks:
+            # This happens exclusively on a transition from cancelled(flight) to
+            # resumed(flight->waiting) of a task with dependencies; the dependencies
+            # will remain in released state and never transition to anything else.
+            self._current_count[ts.prefix, ts.state] += 1
+        self._new_tasks.clear()
+
+        self._previous_ts = now
 
 
 class DeprecatedWorkerStateAttribute:
