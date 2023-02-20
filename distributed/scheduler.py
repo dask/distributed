@@ -78,7 +78,7 @@ from distributed.comm import (
 )
 from distributed.comm.addressing import addresses_from_user_args
 from distributed.compatibility import PeriodicCallback
-from distributed.core import Status, clean_exception, rpc, send_recv
+from distributed.core import Status, clean_exception, error_message, rpc, send_recv
 from distributed.diagnostics.memory_sampler import MemorySamplerExtension
 from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
@@ -4249,56 +4249,59 @@ class Scheduler(SchedulerState, ServerNode):
 
     def update_graph_hlg(
         self,
-        client,
-        graph_header,
-        graph_frames,
-        keys,
-        internal_priority,
-        submitting_task,
-        user_priority=0,
-        actors=None,
-        fifo_timeout=0,
-        code=None,
-        annotations=None,
-        stimulus_id=None,
-    ):
+        client: str,
+        graph_header: dict,
+        graph_frames: list[bytes],
+        keys: list[str],
+        internal_priority: dict[str, int] | None,
+        submitting_task: str | None,
+        user_priority: int | dict[str, int] = 0,
+        actors: bool | list[str] | None = None,
+        fifo_timeout: float = 0.0,
+        code: str | None = None,
+        annotations: dict | None = None,
+        stimulus_id: str | None = None,
+    ) -> None:
         start = time()
         try:
             from distributed.protocol import deserialize
 
             graph = deserialize(graph_header, graph_frames).data
         except Exception as e:
-            text = str(e)
-            exc = pickle.dumps(e)
+            err = error_message(e)
             for key in keys:
-                ts = self.new_task(key, None, "erred", computation=None)  # computation
-                ts.exception = exc
-                ts.exception_text = text
-                ts.exception_blame = ts
+                self.report(
+                    {
+                        "op": "task-erred",
+                        "key": key,
+                        "exception": err["exception"],
+                        "traceback": err["traceback"],
+                    }
+                )
 
-            self.client_desires_keys(keys=keys, client=client)
             return
-
-        if isinstance(annotations, ToPickle):
+        annotations = annotations or {}
+        if isinstance(annotations, ToPickle):  # type: ignore
             # FIXME: what the heck?
-            annotations = annotations.data
+            annotations = annotations.data  # type: ignore
         stimulus_id = stimulus_id or f"update-graph-{time()}"
         dsk, dependencies, layer_annotations = self.materialize_graph(graph)
 
-        keys = set(keys)
+        requested_keys = set(keys)
+        del keys
         if len(dsk) > 1:
             self.log_event(
                 ["all", client], {"action": "update_graph", "count": len(dsk)}
             )
         self._pop_known_tasks(dsk, dependencies)
-        lost_keys = self._pop_lost_tasks(dsk, dependencies, keys)
-        if lost_keys:
+
+        if lost_keys := self._pop_lost_tasks(dsk, dependencies, requested_keys):
             self.report({"op": "cancelled-keys", "keys": lost_keys}, client=client)
             self.client_releases_keys(
                 keys=lost_keys, client=client, stimulus_id=stimulus_id
             )
         runnable, touched_tasks, new_tasks = self._generate_taskstates(
-            keys=keys, dsk=dsk, dependencies=dependencies, code=code
+            keys=requested_keys, dsk=dsk, dependencies=dependencies, code=code
         )
 
         self._parse_and_apply_annotations(
@@ -4318,11 +4321,11 @@ class Scheduler(SchedulerState, ServerNode):
             dependencies=dependencies,
         )
 
-        self.client_desires_keys(keys=keys, client=client)
+        self.client_desires_keys(keys=requested_keys, client=client)
 
         # Add actors
         if actors is True:
-            actors = list(keys)
+            actors = list(requested_keys)
         for actor in actors or []:
             ts = self.tasks[actor]
             ts.actor = True
@@ -4351,7 +4354,7 @@ class Scheduler(SchedulerState, ServerNode):
                     self,
                     client=client,
                     tasks=touched_tasks,
-                    keys=keys,
+                    keys=requested_keys,
                     dependencies=dependencies,
                     annotations=annotations,
                 )
@@ -4367,7 +4370,9 @@ class Scheduler(SchedulerState, ServerNode):
         end = time()
         self.digest_metric("update-graph-duration", end - start)
 
-    def _generate_taskstates(self, keys, dsk, dependencies, code):
+    def _generate_taskstates(
+        self, keys: set[str], dsk: dict, dependencies: dict, code: str | None
+    ):
         if self.total_occupancy > 1e-9 and self.computations:
             # Still working on something. Assign new tasks to same computation
             computation = self.computations[-1]
@@ -4486,14 +4491,14 @@ class Scheduler(SchedulerState, ServerNode):
 
     def _set_priorities(
         self,
-        internal_priority,
-        submitting_task,
-        user_priority,
-        fifo_timeout,
-        start,
-        dsk,
-        tasks,
-        dependencies,
+        internal_priority: dict[str, int] | None,
+        submitting_task: str | None,
+        user_priority: int | dict[str, int],
+        fifo_timeout: int | float | str,
+        start: float,
+        dsk: dict,
+        tasks: list[TaskState],
+        dependencies: dict,
     ):
         fifo_timeout = parse_timedelta(fifo_timeout)
         if submitting_task:  # sub-tasks get better priority than parent tasks
@@ -4540,16 +4545,18 @@ class Scheduler(SchedulerState, ServerNode):
                     isinstance(el, (int, float)) for el in ts.priority
                 )
 
-    def _pop_lost_tasks(self, dsk, dependencies, keys) -> list[str]:
+    def _pop_lost_tasks(
+        self, dsk: dict, dependencies: dict, keys: set[str]
+    ) -> set[str]:
         n = 0
-        out = []
+        out = set()
         while len(dsk) != n:  # walk through new tasks, cancel any bad deps
             n = len(dsk)
             for k, deps in list(dependencies.items()):
                 if any(
                     dep not in self.tasks and dep not in dsk for dep in deps
                 ):  # bad key
-                    out.append(k)
+                    out.add(k)
                     logger.info("User asked for computation on lost data, %s", k)
                     del dsk[k]
                     del dependencies[k]
@@ -4557,7 +4564,7 @@ class Scheduler(SchedulerState, ServerNode):
                         keys.remove(k)
         return out
 
-    def _pop_known_tasks(self, dsk, dependencies) -> set[str]:
+    def _pop_known_tasks(self, dsk: dict, dependencies: dict) -> set[str]:
         # Avoid computation that is already finished
         already_in_memory = set()  # tasks that are already done
         for k, v in dependencies.items():
@@ -4593,7 +4600,7 @@ class Scheduler(SchedulerState, ServerNode):
         return done
 
     @staticmethod
-    def materialize_graph(hlg):
+    def materialize_graph(hlg) -> tuple[dict, dict, dict]:
         from distributed.worker import dumps_task
 
         key_annotations = {}
@@ -4639,7 +4646,6 @@ class Scheduler(SchedulerState, ServerNode):
                 del dsk[k]
         dsk = valmap(dumps_task, dsk)
         return dsk, dependencies, key_annotations
-        # TODO: balance workers
 
     def stimulus_queue_slots_maybe_opened(self, *, stimulus_id: str) -> None:
         """Respond to an event which may have opened spots on worker threadpools
