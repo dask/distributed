@@ -4,8 +4,9 @@ import asyncio
 import random
 import warnings
 
-import numpy as np
 import pytest
+
+np = pytest.importorskip("numpy")
 
 import dask
 import dask.array as da
