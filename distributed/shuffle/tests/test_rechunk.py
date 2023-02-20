@@ -138,8 +138,33 @@ async def test_lowlevel_rechunk(
     )
 
 
+@pytest.mark.parametrize("rechunk_config", ["tasks", "p2p", None])
+@pytest.mark.parametrize("rechunk_keyword", ["tasks", "p2p", None])
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
-async def test_rechunk_1d(c, s, *ws):
+async def test_rechunk_configuration(c, s, *ws, rechunk_config, rechunk_keyword):
+    """Try rechunking a random 1d matrix
+
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_1d
+    """
+    a = np.random.uniform(0, 1, 30)
+    x = da.from_array(a, chunks=((10,) * 3,))
+    new = ((6,) * 5,)
+    with dask.config.set(rechunk=rechunk_config):
+        x2 = rechunk(x, chunks=new, rechunk=rechunk_keyword)
+    expected_method = rechunk_keyword if rechunk_keyword is not None else rechunk_config
+    if expected_method == "p2p":
+        assert all(key[0].startswith("rechunk-p2p") for key in x2.__dask_keys__())
+    else:
+        assert not any(key[0].startswith("rechunk-p2p") for key in x2.__dask_keys__())
+
+    assert x2.chunks == new
+    assert np.all(await c.compute(x2) == a)
+
+
+@gen_cluster(client=True, config={"optimization.fuse.active": False})
+async def test_rechunk_config(c, s, *ws):
     """Try rechunking a random 1d matrix
 
     See Also
@@ -150,6 +175,7 @@ async def test_rechunk_1d(c, s, *ws):
     x = da.from_array(a, chunks=((10,) * 3,))
     new = ((6,) * 5,)
     x2 = rechunk(x, chunks=new, rechunk="p2p")
+    assert all(key[0].startswith("rechunk-p2p") for key in x2.__dask_keys__())
     assert x2.chunks == new
     assert np.all(await c.compute(x2) == a)
 
