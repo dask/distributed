@@ -97,12 +97,12 @@ async def test_dask_array_collections(c, s, a, b):
     ]
 
     for expr in exprs:
-        local = expr(x_local, y_local).compute(scheduler="sync")
+        z_local = expr(x_local, y_local)
+        o_local = z_local.compute(scheduler="sync")
 
-        remote = c.compute(expr(x_remote, y_remote))
-        remote = await remote
-
-        assert np.all(local == remote)
+        z_remote = expr(x_remote, y_remote)
+        o_remote = await c.compute(z_remote)
+        np.testing.assert_equal(o_local, o_remote)
 
 
 @gen_cluster(client=True)
