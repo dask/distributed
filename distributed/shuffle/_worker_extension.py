@@ -856,7 +856,7 @@ class ShuffleWorkerExtension:
                 memory_limiter_disk=self.memory_limiter_disk,
                 memory_limiter_comms=self.memory_limiter_comms,
             )
-        else:
+        else:  # pragma: no cover
             raise TypeError(result["type"])
         self.shuffles[shuffle_id] = shuffle
         self._runs.add(shuffle)
