@@ -19,6 +19,7 @@ from distributed.protocol.pickle import (
     dumps,
     loads,
 )
+from distributed.protocol.serialize import dask_deserialize, dask_serialize
 from distributed.utils_test import save_sys_modules
 
 
@@ -220,3 +221,32 @@ def test_pickle_by_value_when_registered():
 
             finally:
                 sys.path.pop(0)
+
+
+class NoPickle:
+    def __getstate__(self):
+        raise TypeError("nope")
+
+
+def _serialize_nopickle(x):
+    return {}, ["hooray"]
+
+
+def _deserialize_nopickle(header, frames):
+    assert header == {}
+    assert frames == ["hooray"]
+    return NoPickle()
+
+
+def test_allow_pickle_if_registered_in_dask_serialize():
+    with pytest.raises(TypeError, match="nope"):
+        dumps(NoPickle())
+
+    dask_serialize.register(NoPickle)(_serialize_nopickle)
+    dask_deserialize.register(NoPickle)(_deserialize_nopickle)
+
+    try:
+        assert isinstance(loads(dumps(NoPickle())), NoPickle)
+    finally:
+        del dask_serialize._lookup[NoPickle]
+        del dask_deserialize._lookup[NoPickle]
