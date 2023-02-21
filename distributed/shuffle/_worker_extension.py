@@ -190,7 +190,7 @@ class ShuffleRun(Generic[TransferShardIDType, PartitionIDType, PartitionType]):
         await self._disk_buffer.flush()
 
     async def close(self) -> None:
-        if self.closed:
+        if self.closed:  # pragma: no cover
             await self._closed_event.wait()
             return
 
@@ -199,7 +199,7 @@ class ShuffleRun(Generic[TransferShardIDType, PartitionIDType, PartitionType]):
         await self._disk_buffer.close()
         try:
             self.executor.shutdown(cancel_futures=True)
-        except Exception:
+        except Exception:  # pragma: no cover
             self.executor.shutdown()
         self._closed_event.set()
 
@@ -217,17 +217,17 @@ class ShuffleRun(Generic[TransferShardIDType, PartitionIDType, PartitionType]):
 
     @abc.abstractmethod
     async def _receive(self, data: list[tuple[TransferShardIDType, bytes]]) -> None:
-        raise NotImplementedError
+        """Receive shards belonging to output partitions of this shuffle run"""
 
     @abc.abstractmethod
     async def add_partition(
         self, data: PartitionType, input_partition: PartitionIDType
     ) -> int:
-        raise NotImplementedError
+        """Add an input partition to the shuffle run"""
 
     @abc.abstractmethod
     async def get_output_partition(self, i: PartitionIDType) -> PartitionType:
-        raise NotImplementedError
+        """Get an output partition to the shuffle run"""
 
 
 # TODO remove quotes on tuple (requires Python >=3.9)
@@ -792,7 +792,7 @@ class ShuffleWorkerExtension:
                 spec=kwargs,
                 worker=self.worker.address,
             )
-        else:
+        else:  # pragma: no cover
             raise TypeError(type)
         if result["status"] == "ERROR":
             raise RuntimeError(result["message"])

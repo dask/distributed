@@ -29,7 +29,7 @@ class ShuffleState(abc.ABC):
 
     @abc.abstractmethod
     def to_msg(self) -> dict[str, Any]:
-        ...
+        """Transform the shuffle state into a JSON-serializable message"""
 
 
 @dataclass
@@ -138,8 +138,8 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
                 state = self._create_dataframe_shuffle_state(id, spec)
             elif type == "ArrayRechunk":
                 state = self._create_array_rechunk_state(id, spec)
-            else:
-                raise NotImplementedError
+            else:  # pragma: no cover
+                raise TypeError(type)
             self.states[id] = state
             state.participating_workers.add(worker)
             return state.to_msg()
