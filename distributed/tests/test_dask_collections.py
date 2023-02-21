@@ -73,11 +73,14 @@ async def test_dataframes(c, s, a, b):
 
 
 @ignore_single_machine_warning
-@gen_cluster(client=True)
+@gen_cluster(
+    client=True,
+    # FIXME https://github.com/dask/distributed/issues/7566
+    config={"distributed.scheduler.validate": False},
+)
 async def test_dask_array_collections(c, s, a, b):
     import dask.array as da
 
-    s.validate = False
     x_dsk = {("x", i, j): np.random.random((3, 3)) for i in range(3) for j in range(2)}
     y_dsk = {("y", i, j): np.random.random((3, 3)) for i in range(2) for j in range(3)}
     x_futures = await c.scatter(x_dsk)
@@ -98,12 +101,12 @@ async def test_dask_array_collections(c, s, a, b):
     ]
 
     for expr in exprs:
-        local = expr(x_local, y_local).compute(scheduler="sync")
+        z_local = expr(x_local, y_local)
+        o_local = z_local.compute(scheduler="sync")
 
-        remote = c.compute(expr(x_remote, y_remote))
-        remote = await remote
-
-        assert np.all(local == remote)
+        z_remote = expr(x_remote, y_remote)
+        o_remote = await c.compute(z_remote)
+        np.testing.assert_equal(o_local, o_remote)
 
 
 @gen_cluster(client=True)
