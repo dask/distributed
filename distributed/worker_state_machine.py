@@ -3803,32 +3803,22 @@ class TaskCounter:
         now = monotonic()
         if self._previous_ts is not None:
             elapsed = now - self._previous_ts
-
-        for ts, prev_state in prev_states.items():
-            if ts in self._new_tasks:
-                self._new_tasks.discard(ts)
-                continue
-            if ts.state == prev_state:
-                continue
-
-            k = ts.prefix, prev_state
-            if self._previous_ts is not None:
-                self._cumulative_elapsed[k] += elapsed
-
-            new_count = self._current_count[k] - 1
-            if new_count > 0:
-                self._current_count[k] = new_count
-            else:
-                assert new_count == 0
-                del self._current_count[k]
-
-        if self._previous_ts is not None:
             for k, n_tasks in self._current_count.items():
                 self._cumulative_elapsed[k] += elapsed * n_tasks
 
         for ts, prev_state in prev_states.items():
-            if ts.state not in (prev_state, "forgotten"):
+            if ts.state != "forgotten":
                 self._current_count[ts.prefix, ts.state] += 1
+
+            if ts in self._new_tasks:
+                self._new_tasks.discard(ts)
+            else:
+                dec_count = self._current_count[ts.prefix, prev_state] - 1
+                if dec_count > 0:
+                    self._current_count[ts.prefix, prev_state] = dec_count
+                else:
+                    assert dec_count == 0
+                    del self._current_count[ts.prefix, prev_state]
 
         for ts in self._new_tasks:
             # This happens exclusively on a transition from cancelled(flight) to
