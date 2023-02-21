@@ -42,9 +42,9 @@ class WorkerMetricCollector(PrometheusCollector):
         for state, n in ws.task_counter.current_count(by_prefix=False).items():
             if state == "memory" and hasattr(self.server.data, "slow"):
                 n_spilled = len(self.server.data.slow)
-                if n - n_spilled:
+                if n - n_spilled > 0:
                     tasks.add_metric(["memory"], n - n_spilled)
-                if n_spilled:
+                if n_spilled > 0:
                     tasks.add_metric(["disk"], n_spilled)
             else:
                 tasks.add_metric([state], n)
