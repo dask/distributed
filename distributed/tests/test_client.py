@@ -857,75 +857,6 @@ async def test_long_tasks_dont_trigger_timeout(c, s, a, b):
     await x
 
 
-@pytest.mark.skip
-@gen_cluster(client=True)
-async def test_missing_data_heals(c, s, a, b):
-    a.validate = False
-    b.validate = False
-    x = c.submit(inc, 1)
-    y = c.submit(inc, x)
-    z = c.submit(inc, y)
-
-    await wait([x, y, z])
-
-    # Secretly delete y's key
-    if y.key in a.data:
-        del a.data[y.key]
-        a.release_key(y.key, stimulus_id="test")
-    if y.key in b.data:
-        del b.data[y.key]
-        b.release_key(y.key, stimulus_id="test")
-    await asyncio.sleep(0)
-
-    w = c.submit(add, y, z)
-
-    result = await w
-    assert result == 3 + 4
-
-
-@pytest.mark.skip
-@gen_cluster(client=True)
-async def test_gather_robust_to_missing_data(c, s, a, b):
-    a.validate = False
-    b.validate = False
-    x, y, z = c.map(inc, range(3))
-    await wait([x, y, z])  # everything computed
-
-    for f in [x, y]:
-        for w in [a, b]:
-            if f.key in w.data:
-                del w.data[f.key]
-                await asyncio.sleep(0)
-                w.release_key(f.key, stimulus_id="test")
-
-    xx, yy, zz = await c.gather([x, y, z])
-    assert (xx, yy, zz) == (1, 2, 3)
-
-
-@pytest.mark.skip
-@gen_cluster(client=True)
-async def test_gather_robust_to_nested_missing_data(c, s, a, b):
-    a.validate = False
-    b.validate = False
-    w = c.submit(inc, 1)
-    x = c.submit(inc, w)
-    y = c.submit(inc, x)
-    z = c.submit(inc, y)
-
-    await wait([z])
-
-    for worker in [a, b]:
-        for datum in [y, z]:
-            if datum.key in worker.data:
-                del worker.data[datum.key]
-                await asyncio.sleep(0)
-                worker.release_key(datum.key, stimulus_id="test")
-
-    result = await c.gather([z])
-
-    assert result == [inc(inc(inc(inc(1))))]
-
-
 @gen_cluster(client=True)
 async def test_tokenize_on_futures(c, s, a, b):
     x = c.submit(inc, 1)
@@ -3645,6 +3576,7 @@ async def test_scatter_raises_if_no_workers(c, s):
         await c.scatter(1, timeout=0.5)
 
 
+@pytest.mark.slow
 @gen_test()
 async def test_reconnect():
     port = open_port()
@@ -4854,6 +4786,7 @@ class WorkerStartTime(WorkerPlugin):
         worker.start_time = time()
 
 
+@pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny, worker_kwargs={"plugins": [WorkerStartTime()]})
 async def test_restart_workers(c, s, a, b):
     # Get initial worker start times
@@ -4897,6 +4830,7 @@ class SlowKillNanny(Nanny):
         return await super().kill(timeout=timeout)
 
 
+@pytest.mark.slow
 @gen_cluster(client=True, Worker=SlowKillNanny)
 async def test_restart_workers_timeout(c, s, a, b):
     with pytest.raises(TimeoutError) as excinfo:
@@ -5829,6 +5763,7 @@ def test_client_doesnt_close_given_loop(loop_in_thread, s, a, b):
         assert c.submit(inc, 2).result() == 3
 
 
+@pytest.mark.slow
 @gen_cluster(client=True, nthreads=[])
 async def test_quiet_scheduler_loss(c, s):
     c._periodic_callbacks["scheduler-info"].interval = 10
@@ -6253,7 +6188,9 @@ async def test_wait_for_workers(c, s, a, b):
 
 
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
-@pytest.mark.parametrize("Worker", [Worker, Nanny])
+@pytest.mark.parametrize(
+    "Worker", [Worker, pytest.param(Nanny, marks=[pytest.mark.slow])]
+)
 @gen_test()
 async def test_file_descriptors_dont_leak(Worker):
     pytest.importorskip("pandas")
@@ -6589,6 +6526,7 @@ async def test_run_on_scheduler_async_def_wait(c, s, a, b):
     assert b.foo == "bar"
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(WINDOWS, reason="frequently kills off the whole test suite")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 2)
 async def test_performance_report(c, s, a, b):
@@ -7264,6 +7202,7 @@ async def test_computation_object_code_client_compute(c, s, a, b):
     assert comp.code[0] == test_function_code
 
 
+@pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny)
 async def test_upload_directory(c, s, a, b, tmp_path):
     from dask.distributed import UploadDirectory

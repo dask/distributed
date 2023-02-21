@@ -634,7 +634,7 @@ def test_saturation_factor(
 async def test_bad_saturation_factor():
     with pytest.raises(ValueError, match="foo"):
         with dask.config.set({"distributed.scheduler.worker-saturation": "foo"}):
-            async with Scheduler(dashboard_address=":0", validate=True):
+            async with Scheduler(dashboard_address=":0"):
                 pass
 
 
@@ -1033,6 +1033,7 @@ async def test_ready_remove_worker(s, a, b, worker_saturation):
     )
 
 
+@pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny, timeout=60)
 async def test_restart(c, s, a, b):
     with captured_logger("distributed.scheduler") as caplog:
@@ -1095,6 +1096,7 @@ class SlowKillNanny(Nanny):
         return await super().kill(timeout=timeout, reason=reason)
 
 
+@pytest.mark.slow
 @gen_cluster(client=True, Worker=SlowKillNanny, nthreads=[("", 1)] * 2)
 async def test_restart_nanny_timeout_exceeded(c, s, a, b):
     f = c.submit(div, 1, 0)
@@ -1199,6 +1201,7 @@ async def test_restart_some_nannies_some_not(c, s, a, b):
         assert w.address not in s.workers
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
@@ -1786,7 +1789,7 @@ async def test_close_worker(s, a, b):
     assert len(s.workers) == 1
 
 
-# @pytest.mark.slow
+@pytest.mark.slow
 @gen_cluster(Worker=Nanny)
 async def test_close_nanny(s, a, b):
     assert len(s.workers) == 2
@@ -1826,6 +1829,7 @@ async def test_retire_workers_close(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
+@pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny)
 async def test_retire_nannies_close(c, s, a, b):
     nannies = [a, b]
@@ -2016,6 +2020,7 @@ async def test_cancel_fire_and_forget(c, s, a, b):
     await ev2.set()
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True, Worker=Nanny, clean_kwargs={"processes": False, "threads": False}
 )
@@ -2270,6 +2275,7 @@ async def test_collect_versions(c, s, a, b):
     assert cs.versions == w1.versions == w2.versions
 
 
+@pytest.mark.slow
 @gen_cluster(client=True)
 async def test_idle_timeout(c, s, a, b):
     beginning = time()
@@ -2353,6 +2359,7 @@ async def test_bandwidth(c, s, a, b):
     assert not s.bandwidth_workers
 
 
+@pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny, timeout=60)
 async def test_bandwidth_clear(c, s, a, b):
     np = pytest.importorskip("numpy")
@@ -2666,6 +2673,7 @@ async def test_task_prefix(c, s, a, b):
     assert s.task_prefixes["sum-aggregate"].states["memory"] == 2
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True, Worker=Nanny, config={"distributed.scheduler.allowed-failures": 0}
 )
@@ -3262,6 +3270,7 @@ async def test_close_scheduler__close_workers_Worker(s, a, b):
     assert "retry" not in log
 
 
+@pytest.mark.slow
 @gen_cluster(Worker=Nanny)
 async def test_close_scheduler__close_workers_Nanny(s, a, b):
     with captured_logger("distributed.comm", level=logging.DEBUG) as log:
@@ -3293,6 +3302,7 @@ async def assert_ndata(client, by_addr, total=None):
         raise AssertionError(f"Expected {by_addr}; {total=}; got {out}")
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     Worker=Nanny,
@@ -3435,6 +3445,7 @@ async def test_rebalance_no_limit(c, s, a, b):
     assert len(b.data) == 50
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     Worker=Nanny,
@@ -3491,6 +3502,7 @@ async def test_rebalance_skip_all_recipients(c, s, a, b):
     assert (len(a.data), len(b.data)) == (9, 2)
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     Worker=Nanny,
@@ -3510,6 +3522,7 @@ async def test_rebalance_sender_below_mean(c, s, *_):
     assert await c.has_what() == {a: (f1.key,), b: (f2.key,)}
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     Worker=Nanny,

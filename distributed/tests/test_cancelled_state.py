@@ -1016,7 +1016,7 @@ async def test_execute_preamble_early_cancel(
     https://github.com/dask/dask/issues/9330
     test_worker.py::test_execute_preamble_abort_retirement
     """
-    async with BlockedExecute(s.address, validate=True) as a:
+    async with BlockedExecute(s.address) as a:
         if critical_section == "execute":
             in_ev = a.in_execute
             block_ev = a.block_execute

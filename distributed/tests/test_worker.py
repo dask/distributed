@@ -1823,6 +1823,7 @@ async def test_package_install_installs_once_with_multiple_workers(c, s, a, b):
             assert "already been installed" in logs
 
 
+@pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
 async def test_package_install_restarts_on_nanny(c, s, a):
     (addr,) = s.workers
@@ -1978,6 +1979,7 @@ async def test_heartbeat_missing_real_cluster(s, a):
         assert not s.workers
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
@@ -3482,6 +3484,7 @@ async def test_benchmark_hardware(s, a, b):
     assert set(disk) == set(memory) == set(network) == set(sizes)
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     config={

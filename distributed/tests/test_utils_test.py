@@ -187,6 +187,23 @@ async def test_gen_cluster_tls(e, s, a, b):
     assert set(s.workers) == {w.address for w in [a, b]}
 
 
+@gen_cluster(nthreads=[("", 1)])
+async def test_gen_cluster_validate(s, a):
+    """gen_cluster() flips the default for the validate flag from False to True"""
+    assert s.validate
+    assert a.state.validate
+    async with Worker(s.address) as b:
+        assert b.state.validate
+
+
+@gen_cluster(nthreads=[("", 1)], config={"distributed.worker.validate": False})
+async def test_gen_cluster_validate_override(s, a):
+    assert s.validate
+    assert not a.state.validate
+    async with Worker(s.address) as b:
+        assert not b.state.validate
+
+
 @pytest.mark.xfail(
     reason="Test should always fail to ensure the body of the test function was run",
     strict=True,
@@ -235,6 +252,21 @@ async def test_gen_test_double_parametrized(foo, bar):
 @gen_test()
 async def test_gen_test_pytest_fixture(tmp_path):
     assert isinstance(tmp_path, pathlib.Path)
+
+
+@gen_test(config={"foo": 123, "distributed.worker.validate": False})
+async def test_gen_test_config():
+    assert dask.config.get("foo") == 123
+    # Some config defaults are different in gen_test() and gen_cluster()
+    assert dask.config.get("distributed.scheduler.validate") is True
+    assert dask.config.get("distributed.worker.validate") is False
+
+
+@gen_test()
+async def test_gen_test_config_default():
+    # Some config defaults are different in gen_test() and gen_cluster()
+    assert dask.config.get("distributed.scheduler.validate") is True
+    assert dask.config.get("distributed.worker.validate") is True
 
 
 @contextmanager
