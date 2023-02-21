@@ -250,3 +250,31 @@ def test_allow_pickle_if_registered_in_dask_serialize():
     finally:
         del dask_serialize._lookup[NoPickle]
         del dask_deserialize._lookup[NoPickle]
+
+
+class NestedNoPickle:
+    def __init__(self) -> None:
+        self.stuff = {"foo": NoPickle()}
+
+
+def test_nopickle_nested():
+    nested_obj = [NoPickle()]
+    with pytest.raises(TypeError, match="nope"):
+        dumps(nested_obj)
+    with pytest.raises(TypeError, match="nope"):
+        dumps(NestedNoPickle())
+
+    dask_serialize.register(NoPickle)(_serialize_nopickle)
+    dask_deserialize.register(NoPickle)(_deserialize_nopickle)
+
+    try:
+        obj = NestedNoPickle()
+        roundtrip = loads(dumps(obj))
+        assert roundtrip is not obj
+        assert isinstance(roundtrip.stuff["foo"], NoPickle)
+        roundtrip = loads(dumps(nested_obj))
+        assert roundtrip is not nested_obj
+        assert isinstance(roundtrip[0], NoPickle)
+    finally:
+        del dask_serialize._lookup[NoPickle]
+        del dask_deserialize._lookup[NoPickle]
