@@ -332,32 +332,6 @@ def test_retries_get(c):
         x.compute()
 
 
-@pytest.mark.xfail(reason="Is this a sane thing to do?")
-@gen_cluster(client=True)
-async def test_compute_persisted_retries(c, s, a, b):
-    args = [ZeroDivisionError("one"), ZeroDivisionError("two"), 3]
-
-    # Sanity check
-    x = c.persist(delayed(varying(args))())
-    fut = c.compute(x)
-    with pytest.raises(ZeroDivisionError, match="one"):
-        await fut
-    await asyncio.sleep(1)
-    x = c.persist(delayed(varying(args))())
-    fut = c.compute(x, retries=1)
-    with pytest.raises(ZeroDivisionError, match="two"):
-        await fut
-
-    x = c.persist(delayed(varying(args))())
-    fut = c.compute(x, retries=2)
-    assert await fut == 3
-
-    args.append(4)
-    x = c.persist(delayed(varying(args))())
-    fut = c.compute(x, retries=3)
-    assert await fut == 3
-
-
 @gen_cluster(client=True)
 async def test_persist_retries(c, s, a, b):
     # Same retries for all
@@ -1915,9 +1889,6 @@ class FatallySerializedObject:
         sys.exit(0)
 
 
-@pytest.mark.xfail(
-    reason="raises during deserialization which is not handled gracefully by the client"
-)
 @gen_cluster(client=True)
 async def test_badly_serialized_input(c, s, a, b):
     o = BadlySerializedObject()
