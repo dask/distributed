@@ -73,7 +73,11 @@ async def test_dataframes(c, s, a, b):
 
 
 @ignore_single_machine_warning
-@gen_cluster(client=True, config={"distributed.scheduler.validate": False})
+@gen_cluster(
+    client=True,
+    # FIXME https://github.com/dask/distributed/issues/7566
+    config={"distributed.scheduler.validate": False},
+)
 async def test_dask_array_collections(c, s, a, b):
     import dask.array as da
 
