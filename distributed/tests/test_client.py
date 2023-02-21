@@ -1878,17 +1878,6 @@ class BadlySerializedObject:
         raise TypeError("hello!")
 
 
-class FatallySerializedObject:
-    def __getstate__(self):
-        return 1
-
-    def __setstate__(self, state):
-        print("This should never have been deserialized, closing")
-        import sys
-
-        sys.exit(0)
-
-
 @gen_cluster(client=True)
 async def test_badly_serialized_input(c, s, a, b):
     o = BadlySerializedObject()
@@ -2513,17 +2502,6 @@ async def test_dont_delete_recomputed_results(c, s, w):
 
     while time() < start + (s.delete_interval + 100) / 1000:  # and stays
         assert xx.key in w.data
-        await asyncio.sleep(0.01)
-
-
-@pytest.mark.xfail(reason="not sure, yet")
-@gen_cluster(nthreads=[], client=True)
-async def test_fatally_serialized_input(c, s):
-    o = FatallySerializedObject()
-
-    future = c.submit(inc, o)
-
-    while not s.tasks:
         await asyncio.sleep(0.01)
 
 
