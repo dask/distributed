@@ -4884,7 +4884,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.bandwidth_workers.pop((address, w), None)
             self.bandwidth_workers.pop((w, address), None)
 
-        async def remove_worker_from_events():
+        async def remove_worker_from_events() -> None:
             # If the worker isn't registered anymore after the delay, remove from events
             if address not in self.workers and address in self.events:
                 del self.events[address]
@@ -5300,7 +5300,9 @@ class Scheduler(SchedulerState, ServerNode):
                 cleanup_delay, remove_client_from_events
             )
 
-    def send_task_to_worker(self, worker, ts: TaskState, duration: float = -1):
+    def send_task_to_worker(
+        self, worker: str, ts: TaskState, duration: float = -1
+    ) -> None:
         """Send a single computational task to a worker"""
         try:
             msg: dict = self._task_to_msg(ts, duration)
@@ -6815,7 +6817,9 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Retired worker %s", ws.address)
         return ws.address, ws.identity()
 
-    def add_keys(self, worker=None, keys=(), stimulus_id=None):
+    def add_keys(
+        self, worker=None, keys=(), stimulus_id=None
+    ) -> Literal["OK", "not found"]:
         """
         Learn that a worker has certain keys
 
@@ -6827,7 +6831,7 @@ class Scheduler(SchedulerState, ServerNode):
         ws: WorkerState = self.workers[worker]
         redundant_replicas = []
         for key in keys:
-            ts: TaskState = self.tasks.get(key)
+            ts = self.tasks.get(key)
             if ts is not None and ts.state == "memory":
                 if ws not in ts.who_has:
                     self.add_replica(ts, ws)
