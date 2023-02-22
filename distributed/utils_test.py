@@ -724,9 +724,7 @@ def gen_test(
     async def async_fn_outer(async_fn, /, *args, **kwargs):
         with config_for_cluster_tests(**(config or {})):
             async with _acheck_active_rpc():
-                return await asyncio.wait_for(
-                    asyncio.create_task(async_fn(*args, **kwargs)), timeout
-                )
+                return await utils_wait_for(async_fn(*args, **kwargs), timeout)
 
     def _(func):
         @functools.wraps(func)
@@ -978,7 +976,7 @@ def gen_cluster(
                     yield s, workers
                 finally:
                     await end_cluster(s, workers)
-                    await asyncio.wait_for(cleanup_global_workers(), 1)
+                    await utils_wait_for(cleanup_global_workers(), 1)
 
             async def async_fn():
                 result = None
@@ -992,7 +990,7 @@ def gen_cluster(
                         try:
                             coro = func(*args, *outer_args, **kwargs)
                             task = asyncio.create_task(coro)
-                            coro2 = asyncio.wait_for(asyncio.shield(task), timeout)
+                            coro2 = utils_wait_for(asyncio.shield(task), timeout)
                             result = await coro2
                             validate_state(s, *workers)
 
@@ -1085,7 +1083,7 @@ def gen_cluster(
             async def async_fn_outer():
                 async with _acheck_active_rpc(active_rpc_timeout=active_rpc_timeout):
                     if timeout:
-                        return await asyncio.wait_for(async_fn(), timeout=timeout * 2)
+                        return await utils_wait_for(async_fn(), timeout=timeout * 2)
                     return await async_fn()
 
             return _run_and_close_tornado(async_fn_outer)
