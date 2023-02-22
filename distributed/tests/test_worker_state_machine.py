@@ -1722,8 +1722,8 @@ def test_task_counter(ws):
         # timer accuracy in Windows can be very poor;
         # see awful hack in distributed.metrics
         margin_lo = 0.099 if WINDOWS else 0
-        # sleep() has been observed to have up to 250ms lag on MacOSX GitHub CI
-        margin_hi = 0.4 if MACOS else 0.1
+        # sleep() has been observed to have up to 450ms lag on MacOSX GitHub CI
+        margin_hi = 0.6 if MACOS else 0.1
         assert expect - margin_lo <= actual < expect + margin_hi
 
     sleep(0.1)
