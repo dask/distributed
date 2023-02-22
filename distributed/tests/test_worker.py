@@ -3428,6 +3428,8 @@ async def test_Worker__to_dict(c, s, a):
         "transition_counter",
         "tasks",
         "data_needed",
+        "task_counts",
+        "task_cumulative_elapsed",
     }
     assert d["tasks"]["x"]["key"] == "x"
     assert d["data"] == {"x": None}
