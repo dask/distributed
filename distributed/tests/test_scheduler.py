@@ -48,7 +48,7 @@ from distributed.utils_test import (
     BlockedGatherDep,
     BrokenComm,
     assert_story,
-    async_wait_for,
+    async_poll_for,
     captured_logger,
     cluster,
     dec,
@@ -413,7 +413,7 @@ async def test_queued_release_multiple_workers(c, s, *workers):
             range(rootish_threshold),
             key=[f"first-{i}" for i in range(rootish_threshold)],
         )
-        await async_wait_for(lambda: s.queued, 5)
+        await async_poll_for(lambda: s.queued, 5)
 
         second_batch = c2.map(
             lambda i: event.wait(),
@@ -421,7 +421,7 @@ async def test_queued_release_multiple_workers(c, s, *workers):
             key=[f"second-{i}" for i in range(rootish_threshold)],
             fifo_timeout=0,
         )
-        await async_wait_for(lambda: second_batch[0].key in s.tasks, 5)
+        await async_poll_for(lambda: second_batch[0].key in s.tasks, 5)
 
         # All of the second batch should be queued after the first batch
         assert [ts.key for ts in s.queued.sorted()] == [
@@ -436,7 +436,7 @@ async def test_queued_release_multiple_workers(c, s, *workers):
         await c.close()
         del c, first_batch
 
-        await async_wait_for(lambda: len(s.tasks) == len(second_batch), 5)
+        await async_poll_for(lambda: len(s.tasks) == len(second_batch), 5)
 
         # Second batch should move up the queue and start processing
         assert len(s.queued) == len(second_batch) - s.total_nthreads, list(
@@ -550,13 +550,13 @@ async def test_queued_remove_add_worker(c, s, a, b):
     event = Event()
     fs = c.map(lambda i: event.wait(), range(10))
 
-    await async_wait_for(lambda: len(s.queued) == 6, timeout=5)
+    await async_poll_for(lambda: len(s.queued) == 6, timeout=5)
     await s.remove_worker(a.address, stimulus_id="fake")
     assert len(s.queued) == 8
 
     # Add a new worker
     async with Worker(s.address, nthreads=2) as w:
-        await async_wait_for(lambda: len(s.queued) == 6, timeout=5)
+        await async_poll_for(lambda: len(s.queued) == 6, timeout=5)
 
         await event.set()
         await wait(fs)
@@ -573,10 +573,10 @@ async def test_secede_opens_slot(c, s, a):
         second.wait()
 
     fs = c.map(func, [first] * 5, [second] * 5)
-    await async_wait_for(lambda: a.state.executing, timeout=5)
+    await async_poll_for(lambda: a.state.executing, timeout=5)
 
     await first.set()
-    await async_wait_for(lambda: len(a.state.long_running) == len(fs), timeout=5)
+    await async_poll_for(lambda: len(a.state.long_running) == len(fs), timeout=5)
 
     await second.set()
     await c.gather(fs)
@@ -2472,14 +2472,14 @@ async def test_adaptive_target_empty_cluster(c, s, queue):
     assert s.adaptive_target() == 0
 
     f = c.submit(inc, -1)
-    await async_wait_for(lambda: s.tasks, timeout=5)
+    await async_poll_for(lambda: s.tasks, timeout=5)
     assert s.adaptive_target() == 1
     del f
 
     if queue:
         # only queuing supports fast scale-up for empty clusters https://github.com/dask/distributed/issues/6962
         fs = c.map(inc, range(100))
-        await async_wait_for(lambda: len(s.tasks) == len(fs), timeout=5)
+        await async_poll_for(lambda: len(s.tasks) == len(fs), timeout=5)
         assert s.adaptive_target() > 1
 
 
@@ -3823,7 +3823,7 @@ async def test_transition_counter_max_worker(c, s, a):
     a.state.transition_counter_max = 1
     fut = c.submit(inc, 2)
     with captured_logger("distributed.worker") as logger:
-        await async_wait_for(lambda: a.state.transition_counter > 0, timeout=5)
+        await async_poll_for(lambda: a.state.transition_counter > 0, timeout=5)
 
     assert "TransitionCounterMaxExceeded" in logger.getvalue()
     # Worker state is corrupted. Avoid test failure on gen_cluster teardown.
@@ -4256,7 +4256,7 @@ async def test_transition_waiting_memory(c, s, a, b):
             assert s.tasks["y"].state == "waiting"
             await wait_for_state("y", "memory", b)
 
-    await async_wait_for(lambda: not b.state.tasks, timeout=5)
+    await async_poll_for(lambda: not b.state.tasks, timeout=5)
 
     assert s.tasks["x"].state == "no-worker"
     assert s.tasks["y"].state == "waiting"

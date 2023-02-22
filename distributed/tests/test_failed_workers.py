@@ -24,7 +24,7 @@ from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
     BlockedGetData,
-    async_wait_for,
+    async_poll_for,
     captured_logger,
     cluster,
     div,
@@ -212,7 +212,7 @@ async def test_multiple_clients_restart(s, a, b):
         assert await y2 == 3
 
         del x2, y2
-        await async_wait_for(lambda: not s.tasks, timeout=5)
+        await async_poll_for(lambda: not s.tasks, timeout=5)
 
 
 @gen_cluster(Worker=Nanny, timeout=60)
