@@ -59,11 +59,14 @@ def dumps(x, *, buffer_callback=None, protocol=HIGHEST_PROTOCOL):
     if dump_kwargs["protocol"] >= 5 and buffer_callback is not None:
         dump_kwargs["buffer_callback"] = buffers.append
     try:
-        f = io.BytesIO()
-        pickler = _DaskPickler(f, **dump_kwargs)
-        buffers.clear()
-        pickler.dump(x)
-        result = f.getvalue()
+        try:
+            result = pickle.dumps(x, **dump_kwargs)
+        except Exception:
+            f = io.BytesIO()
+            pickler = _DaskPickler(f, **dump_kwargs)
+            buffers.clear()
+            pickler.dump(x)
+            result = f.getvalue()
         if b"__main__" in result or (
             CLOUDPICKLE_GTE_20
             and getattr(inspect.getmodule(x), "__name__", None)
