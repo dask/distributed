@@ -3509,7 +3509,8 @@ class Scheduler(SchedulerState, ServerNode):
                 )
             )
             j.initialize(
-                new_httpserver=False, argv=[]
+                new_httpserver=False,
+                argv=[],
             )
             self._jupyter_server_application = j
             self.http_application.add_application(j.web_app)
