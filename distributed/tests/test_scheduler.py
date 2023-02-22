@@ -13,6 +13,7 @@ from itertools import product
 from textwrap import dedent
 from time import sleep
 from typing import Collection
+from unittest import mock
 
 import cloudpickle
 import psutil
@@ -2744,23 +2745,26 @@ class FlakyConnectionPool(ConnectionPool):
 
 
 @gen_cluster(client=True)
-async def test_gather_failing_cnn_recover(c, s, a, b):
-    orig_rpc = s.rpc
+async def test_gather_failing_cnn_recover(c, s, a, b, caplog):
     x = await c.scatter({"x": 1}, workers=a.address)
-
-    s.rpc = await FlakyConnectionPool(failing_connections=1)
-    with dask.config.set({"distributed.comm.retry.count": 1}):
+    rpc = await FlakyConnectionPool(failing_connections=1)
+    with mock.patch.object(s, "rpc", rpc), dask.config.set(
+        {"distributed.comm.retry.count": 1}
+    ), caplog.at_level(logging.INFO):
+        caplog.clear()
         res = await s.gather(keys=["x"])
+    assert [
+        record.message for record in caplog.records if record.levelno == logging.INFO
+    ] == ["Retrying get_data_from_worker after exception in attempt 0/1: "]
     assert res["status"] == "OK"
 
 
 @gen_cluster(client=True)
 async def test_gather_failing_cnn_error(c, s, a, b):
-    orig_rpc = s.rpc
     x = await c.scatter({"x": 1}, workers=a.address)
-
-    s.rpc = await FlakyConnectionPool(failing_connections=10)
-    res = await s.gather(keys=["x"])
+    rpc = await FlakyConnectionPool(failing_connections=10)
+    with mock.patch.object(s, "rpc", rpc):
+        res = await s.gather(keys=["x"])
     assert res["status"] == "error"
     assert list(res["keys"]) == ["x"]
 
