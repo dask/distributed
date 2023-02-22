@@ -42,7 +42,7 @@ from distributed.core import ConnectionPool, Status, clean_exception, connect, r
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps, loads
 from distributed.scheduler import KilledWorker, MemoryState, Scheduler, WorkerState
-from distributed.utils import TimeoutError
+from distributed.utils import TimeoutError, wait_for
 from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
@@ -668,7 +668,7 @@ async def test_no_valid_workers(client, s, a, b, c):
     assert s.tasks[x.key] in s.unrunnable
 
     with pytest.raises(TimeoutError):
-        await asyncio.wait_for(x, 0.05)
+        await wait_for(x, 0.05)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
@@ -699,7 +699,7 @@ async def test_no_workers(client, s, queue):
         assert ts.state == "no-worker"
 
     with pytest.raises(TimeoutError):
-        await asyncio.wait_for(x, 0.05)
+        await wait_for(x, 0.05)
 
     async with Worker(s.address, nthreads=1):
         await wait(x)
@@ -1092,7 +1092,7 @@ class SlowKillNanny(Nanny):
     async def kill(self, *, timeout, reason=None):
         self.kill_called.set()
         print("kill called")
-        await asyncio.wait_for(self.kill_proceed.wait(), timeout)
+        await wait_for(self.kill_proceed.wait(), timeout)
         print("kill proceed")
         return await super().kill(timeout=timeout, reason=reason)
 

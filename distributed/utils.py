@@ -339,7 +339,7 @@ class SyncMethodMixin:
         if asynchronous:
             future = func(*args, **kwargs)
             if callback_timeout is not None:
-                future = asyncio.wait_for(future, callback_timeout)
+                future = wait_for(future, callback_timeout)
             return future
         else:
             return sync(
@@ -380,7 +380,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             yield gen.moment
             future = func(*args, **kwargs)
             if callback_timeout is not None:
-                future = asyncio.wait_for(future, callback_timeout)
+                future = wait_for(future, callback_timeout)
             future = asyncio.ensure_future(future)
             result = yield future
         except Exception:

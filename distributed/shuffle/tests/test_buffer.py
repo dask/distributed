@@ -10,6 +10,7 @@ from dask.utils import parse_bytes
 
 from distributed.shuffle._buffer import ShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
+from distributed.utils import wait_for
 from distributed.utils_test import gen_test
 
 
@@ -74,7 +75,7 @@ async def test_memory_limit(big_payload):
 
         new_put = asyncio.create_task(buf.write(small_payload))
         with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(asyncio.shield(new_put), 0.1)
+            await wait_for(asyncio.shield(new_put), 0.1)
         buf.allow_process.set()
         many_small = asyncio.gather(*many_small)
         await new_put
@@ -85,9 +86,9 @@ async def test_memory_limit(big_payload):
         big = asyncio.create_task(buf.write(big_payload))
         small = asyncio.create_task(buf.write(small_payload))
         with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(asyncio.shield(big), 0.1)
+            await wait_for(asyncio.shield(big), 0.1)
         with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(asyncio.shield(small), 0.1)
+            await wait_for(asyncio.shield(small), 0.1)
         # Puts only return once we're below memory limit
         buf.allow_process.set()
         await big

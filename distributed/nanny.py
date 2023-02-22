@@ -52,6 +52,7 @@ from distributed.utils import (
     log_errors,
     parse_ports,
     silence_logging,
+    wait_for,
 )
 from distributed.worker import Worker, run
 from distributed.worker_memory import (
@@ -304,7 +305,7 @@ class Nanny(ServerNode):
             return
 
         try:
-            await asyncio.wait_for(
+            await wait_for(
                 self.scheduler.unregister(
                     address=self.worker_address, stimulus_id=f"nanny-close-{time()}"
                 ),
@@ -423,9 +424,7 @@ class Nanny(ServerNode):
 
         if self.death_timeout:
             try:
-                result = await asyncio.wait_for(
-                    self.process.start(), self.death_timeout
-                )
+                result = await wait_for(self.process.start(), self.death_timeout)
             except asyncio.TimeoutError:
                 logger.error(
                     "Timed out connecting Nanny '%s' to scheduler '%s'",
@@ -496,7 +495,7 @@ class Nanny(ServerNode):
                 await self.instantiate()
 
         try:
-            await asyncio.wait_for(_(), timeout)
+            await wait_for(_(), timeout)
         except asyncio.TimeoutError:
             logger.error(
                 f"Restart timed out after {timeout}s; returning before finished"

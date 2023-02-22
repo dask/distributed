@@ -11,7 +11,7 @@ from dask.utils import parse_timedelta
 from distributed.core import CommClosedError
 from distributed.metrics import time
 from distributed.protocol.serialize import to_serialize
-from distributed.utils import TimeoutError, sync
+from distributed.utils import TimeoutError, sync, wait_for
 
 logger = logging.getLogger(__name__)
 
@@ -419,7 +419,7 @@ class Sub:
                 await self.condition.wait()
 
             try:
-                await asyncio.wait_for(_(), timeout2)
+                await wait_for(_(), timeout2)
             finally:
                 self.condition.release()
 

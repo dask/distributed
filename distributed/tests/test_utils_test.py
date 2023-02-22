@@ -28,7 +28,7 @@ from distributed.compatibility import WINDOWS
 from distributed.core import Server, Status, rpc
 from distributed.metrics import time
 from distributed.tests.test_batched import EchoServer
-from distributed.utils import get_mp_context
+from distributed.utils import get_mp_context, wait_for
 from distributed.utils_test import (
     SizeOf,
     _LockedCommPool,
@@ -404,7 +404,7 @@ async def test_locked_comm_intercept_read(loop):
             await asyncio.sleep(0.001)
 
         with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(asyncio.shield(fut), 0.01)
+            await wait_for(asyncio.shield(fut), 0.01)
 
         assert await read_queue.get() == (b.address, "pong")
         read_event.set()
@@ -427,7 +427,7 @@ async def test_locked_comm_intercept_write(loop):
         fut = asyncio.create_task(ping_pong())
 
         with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(asyncio.shield(fut), 0.01)
+            await wait_for(asyncio.shield(fut), 0.01)
         # Write was blocked. The remote hasn't received the message, yet
         assert b.counter == 0
         assert await write_queue.get() == (b.address, {"op": "ping", "reply": True})
@@ -1023,11 +1023,11 @@ async def test_wait_for_state(c, s, a, capsys):
     )
 
     with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(wait_for_state("x", "bad_state", s), timeout=0.1)
+        await wait_for(wait_for_state("x", "bad_state", s), timeout=0.1)
     with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(wait_for_state("x", ("this", "that"), s), timeout=0.1)
+        await wait_for(wait_for_state("x", ("this", "that"), s), timeout=0.1)
     with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(wait_for_state("y", "memory", s), timeout=0.1)
+        await wait_for(wait_for_state("y", "memory", s), timeout=0.1)
     assert capsys.readouterr().out == (
         f"tasks[x].state='memory' on {s.address}; expected state='bad_state'\n"
         f"tasks[x].state='memory' on {s.address}; expected state=('this', 'that')\n"
