@@ -4,7 +4,28 @@ from io import BytesIO
 from typing import TYPE_CHECKING, BinaryIO
 
 if TYPE_CHECKING:
+    import pandas as pd
     import pyarrow as pa
+
+
+def check_dtype_support(meta_input: pd.DataFrame) -> None:
+    import pandas as pd
+
+    for name in meta_input:
+        column = meta_input[name]
+        # FIXME: PyArrow does not support complex numbers: https://issues.apache.org/jira/browse/ARROW-638
+        if pd.api.types.is_complex_dtype(column):
+            raise TypeError(
+                f"p2p does not support data of type '{column.dtype}' found in column '{name}'."
+            )
+        # FIXME: Serializing custom objects to PyArrow is not supported in P2P shuffling
+        if pd.api.types.is_object_dtype(column):
+            raise TypeError(
+                f"p2p does not support custom objects found in column '{name}'."
+            )
+        # FIXME: PyArrow does not support sparse data: https://issues.apache.org/jira/browse/ARROW-8679
+        if pd.api.types.is_sparse(column):
+            raise TypeError("p2p does not support sparse data found in column '{name}'")
 
 
 def dump_shards(shards: list[bytes], file: BinaryIO) -> None:
