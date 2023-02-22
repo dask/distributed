@@ -4869,15 +4869,14 @@ async def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
         )
     fs = futures_of(fs)
     if return_when == ALL_COMPLETED:
-        wait_for = distributed.utils.All
+        future = distributed.utils.All({f._state.wait() for f in fs})
     elif return_when == FIRST_COMPLETED:
-        wait_for = distributed.utils.Any
+        future = distributed.utils.Any({f._state.wait() for f in fs})
     else:
         raise NotImplementedError(
             "Only return_when='ALL_COMPLETED' and 'FIRST_COMPLETED' are supported"
         )
 
-    future = wait_for({f._state.wait() for f in fs})
     if timeout is not None:
         future = asyncio.wait_for(future, timeout)
     await future
