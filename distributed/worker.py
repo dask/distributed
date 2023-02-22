@@ -766,6 +766,7 @@ class Worker(BaseWorker, ServerNode):
             "steal-request": self._handle_remote_stimulus(StealRequestEvent),
             "refresh-who-has": self._handle_remote_stimulus(RefreshWhoHasEvent),
             "worker-status-change": self.handle_worker_status_change,
+            "remove-worker": self._remove_worker,
         }
 
         ServerNode.__init__(
@@ -2615,6 +2616,9 @@ class Worker(BaseWorker, ServerNode):
         get_worker
         """
         return self.active_threads[threading.get_ident()]
+
+    def _remove_worker(self, worker: str, stimulus_id: str) -> None:
+        self.rpc.remove(worker)
 
     def validate_state(self) -> None:
         try:

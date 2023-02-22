@@ -4898,6 +4898,16 @@ class Scheduler(SchedulerState, ServerNode):
         )
         logger.debug("Removed worker %s", ws)
 
+        for w in self.workers:
+            self.worker_send(
+                w,
+                {
+                    "op": "remove-worker",
+                    "worker": address,
+                    "stimulus_id": stimulus_id,
+                },
+            )
+
         return "OK"
 
     def stimulus_cancel(
