@@ -3771,10 +3771,8 @@ class TaskCounter:
             False
                 Return mapping of task state -> seconds
         """
-        if self._previous_ts is None:
-            assert not self._current_count
-            assert not self._cumulative_elapsed
-        else:
+        if self._current_count:
+            assert self._previous_ts is not None
             now = monotonic()
             elapsed = now - self._previous_ts
             self._previous_ts = now
@@ -3801,10 +3799,12 @@ class TaskCounter:
             return
 
         now = monotonic()
-        if self._previous_ts is not None:
+        if self._current_count:
+            assert self._previous_ts is not None
             elapsed = now - self._previous_ts
             for k, n_tasks in self._current_count.items():
                 self._cumulative_elapsed[k] += elapsed * n_tasks
+        self._previous_ts = now
 
         for ts, prev_state in prev_states.items():
             if ts.state != "forgotten":
@@ -3826,8 +3826,6 @@ class TaskCounter:
             # will remain in released state and never transition to anything else.
             self._current_count[ts.prefix, ts.state] += 1
         self._new_tasks.clear()
-
-        self._previous_ts = now
 
 
 class DeprecatedWorkerStateAttribute:
