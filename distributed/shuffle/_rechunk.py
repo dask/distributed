@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections import defaultdict
+from dataclasses import dataclass
+from itertools import product
 from typing import TYPE_CHECKING
 
 from dask.base import tokenize
@@ -24,6 +27,7 @@ if TYPE_CHECKING:
 ChunkedAxis: TypeAlias = "tuple[float, ...]"  # chunks must either be an int or NaN
 ChunkedAxes: TypeAlias = "tuple[ChunkedAxis, ...]"
 NIndex: TypeAlias = "tuple[int, ...]"
+NSlice: TypeAlias = "tuple[slice, ...]"
 
 
 def rechunk_transfer(
@@ -95,3 +99,44 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
         graph = HighLevelGraph.from_collections(name, layer, dependencies=[x])
 
         return da.Array(graph, name, chunks, meta=x)
+
+
+@dataclass(frozen=True)
+class ShardID:
+    """Unique identifier of an individual shard within an array rechunk"""
+
+    #: Index of the new chunk the shard belongs
+    new_index: NIndex
+    #: Sub-index of the shard within the new chunk
+    sub_index: NIndex
+
+
+def rechunk_slicing(
+    old: ChunkedAxes, new: ChunkedAxes
+) -> dict[NIndex, list[tuple[ShardID, NSlice]]]:
+    """Calculate how to slice the old chunks to create the new chunks
+
+    Returns
+    -------
+        Mapping of each old chunk to a list of tuples defining where each slice
+        of the old chunk belongs. Each tuple consists of the index
+        of the new chunk, the index of the slice within the composition of slices
+        creating the new chunk, and the slice to be applied to the old chunk.
+    """
+    from dask.array.rechunk import intersect_chunks
+
+    ndim = len(old)
+    intersections = intersect_chunks(old, new)
+    new_indices = product(*(range(len(c)) for c in new))
+
+    slicing = defaultdict(list)
+
+    for new_index, new_chunk in zip(new_indices, intersections):
+        sub_shape = [len({slice[dim][0] for slice in new_chunk}) for dim in range(ndim)]
+
+        sub_indices = product(*(range(dim) for dim in sub_shape))
+
+        for sub_index, sliced_chunk in zip(sub_indices, new_chunk):
+            old_index, nslice = zip(*sliced_chunk)
+            slicing[old_index].append((ShardID(new_index, sub_index), nslice))
+    return slicing

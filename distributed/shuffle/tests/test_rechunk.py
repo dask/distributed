@@ -15,6 +15,7 @@ from dask.array.rechunk import normalize_chunks, rechunk
 from dask.array.utils import assert_eq
 
 from distributed.shuffle._limiter import ResourceLimiter
+from distributed.shuffle._rechunk import ShardID, rechunk_slicing
 from distributed.shuffle._scheduler_extension import get_worker_for_range_sharding
 from distributed.shuffle._shuffle import ShuffleId
 from distributed.shuffle._worker_extension import ArrayRechunkRun
@@ -783,3 +784,246 @@ async def test_rechunk_with_zero(c, s, *ws):
     a, expected = expected, a
     result = a.rechunk((4, 4), rechunk="p2p")
     assert_eq(await c.compute(result), await c.compute(expected))
+
+
+def test_rechunk_slicing_1():
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_intersect_1
+    """
+    old = ((10, 10, 10, 10, 10),)
+    new = ((25, 5, 20),)
+    result = rechunk_slicing(old, new)
+    expected = {
+        (0,): [(ShardID((0,), (0,)), (slice(0, 10, None),))],
+        (1,): [(ShardID((0,), (1,)), (slice(0, 10, None),))],
+        (2,): [
+            (ShardID((0,), (2,)), (slice(0, 5, None),)),
+            (ShardID((1,), (0,)), (slice(5, 10, None),)),
+        ],
+        (3,): [(ShardID((2,), (0,)), (slice(0, 10, None),))],
+        (4,): [(ShardID((2,), (1,)), (slice(0, 10, None),))],
+    }
+    assert result == expected
+
+
+def test_rechunk_slicing_2():
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_intersect_2
+    """
+    old = ((20, 20, 20, 20, 20),)
+    new = ((58, 4, 20, 18),)
+    result = rechunk_slicing(old, new)
+    expected = {
+        (0,): [(ShardID((0,), (0,)), (slice(0, 20, None),))],
+        (1,): [(ShardID((0,), (1,)), (slice(0, 20, None),))],
+        (2,): [
+            (ShardID((0,), (2,)), (slice(0, 18, None),)),
+            (ShardID((1,), (0,)), (slice(18, 20, None),)),
+        ],
+        (3,): [
+            (ShardID((1,), (1,)), (slice(0, 2, None),)),
+            (ShardID((2,), (0,)), (slice(2, 20, None),)),
+        ],
+        (4,): [
+            (ShardID((2,), (1,)), (slice(0, 2, None),)),
+            (ShardID((3,), (0,)), (slice(2, 20, None),)),
+        ],
+    }
+    assert result == expected
+
+
+def test_rechunk_slicing_nan():
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_intersect_nan
+    """
+    old_chunks = ((float("nan"), float("nan")), (8,))
+    new_chunks = ((float("nan"), float("nan")), (4, 4))
+    result = rechunk_slicing(old_chunks, new_chunks)
+    expected = {
+        (0, 0): [
+            (
+                ShardID((0, 0), (0, 0)),
+                (slice(0, None, None), slice(0, 4, None)),
+            ),
+            (
+                ShardID((0, 1), (0, 0)),
+                (slice(0, None, None), slice(4, 8, None)),
+            ),
+        ],
+        (1, 0): [
+            (ShardID((1, 0), (0, 0)), (slice(0, None, None), slice(0, 4, None))),
+            (ShardID((1, 1), (0, 0)), (slice(0, None, None), slice(4, 8, None))),
+        ],
+    }
+    assert result == expected
+
+
+def test_rechunk_slicing_nan_single():
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_intersect_nan_single
+    """
+    old_chunks = ((float("nan"),), (10,))
+    new_chunks = ((float("nan"),), (5, 5))
+
+    result = rechunk_slicing(old_chunks, new_chunks)
+    expected = {
+        (0, 0): [
+            (ShardID((0, 0), (0, 0)), (slice(0, None, None), slice(0, 5, None))),
+            (ShardID((0, 1), (0, 0)), (slice(0, None, None), slice(5, 10, None))),
+        ],
+    }
+    assert result == expected
+
+
+def test_rechunk_slicing_nan_long():
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_intersect_nan_long
+    """
+    old_chunks = (tuple([float("nan")] * 4), (10,))
+    new_chunks = (tuple([float("nan")] * 4), (5, 5))
+    result = rechunk_slicing(old_chunks, new_chunks)
+    expected = {
+        (0, 0): [
+            (ShardID((0, 0), (0, 0)), (slice(0, None, None), slice(0, 5, None))),
+            (ShardID((0, 1), (0, 0)), (slice(0, None, None), slice(5, 10, None))),
+        ],
+        (1, 0): [
+            (ShardID((1, 0), (0, 0)), (slice(0, None, None), slice(0, 5, None))),
+            (ShardID((1, 1), (0, 0)), (slice(0, None, None), slice(5, 10, None))),
+        ],
+        (2, 0): [
+            (ShardID((2, 0), (0, 0)), (slice(0, None, None), slice(0, 5, None))),
+            (ShardID((2, 1), (0, 0)), (slice(0, None, None), slice(5, 10, None))),
+        ],
+        (3, 0): [
+            (ShardID((3, 0), (0, 0)), (slice(0, None, None), slice(0, 5, None))),
+            (ShardID((3, 1), (0, 0)), (slice(0, None, None), slice(5, 10, None))),
+        ],
+    }
+    assert result == expected
+
+
+def test_rechunk_slicing_chunks_with_nonzero():
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_intersect_chunks_with_nonzero
+    """
+    old = ((4, 4), (2,))
+    new = ((8,), (1, 1))
+    result = rechunk_slicing(old, new)
+    expected = {
+        (0, 0): [
+            (ShardID((0, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
+            (ShardID((0, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
+        ],
+        (1, 0): [
+            (ShardID((0, 0), (1, 0)), (slice(0, 4, None), slice(0, 1, None))),
+            (ShardID((0, 1), (1, 0)), (slice(0, 4, None), slice(1, 2, None))),
+        ],
+    }
+    assert result == expected
+
+
+def test_rechunk_slicing_chunks_with_zero():
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_intersect_chunks_with_zero
+    """
+    old = ((4, 4), (2,))
+    new = ((4, 0, 0, 4), (1, 1))
+    result = rechunk_slicing(old, new)
+
+    expected = {
+        (0, 0): [
+            (ShardID((0, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
+            (ShardID((0, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
+        ],
+        (1, 0): [
+            # FIXME: We should probably filter these out to avoid sending empty shards
+            (ShardID((1, 0), (0, 0)), (slice(0, 0, None), slice(0, 1, None))),
+            (ShardID((1, 1), (0, 0)), (slice(0, 0, None), slice(1, 2, None))),
+            (ShardID((2, 0), (0, 0)), (slice(0, 0, None), slice(0, 1, None))),
+            (ShardID((2, 1), (0, 0)), (slice(0, 0, None), slice(1, 2, None))),
+            (ShardID((3, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
+            (ShardID((3, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
+        ],
+    }
+
+    assert result == expected
+
+    old = ((4, 0, 0, 4), (1, 1))
+    new = ((4, 4), (2,))
+    result = rechunk_slicing(old, new)
+
+    expected = {
+        (0, 0): [
+            (ShardID((0, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
+        ],
+        (0, 1): [
+            (ShardID((0, 0), (0, 1)), (slice(0, 4, None), slice(0, 1, None))),
+        ],
+        (3, 0): [
+            (ShardID((1, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
+        ],
+        (3, 1): [
+            (ShardID((1, 0), (0, 1)), (slice(0, 4, None), slice(0, 1, None))),
+        ],
+    }
+
+    assert result == expected
+
+    old = ((4, 4), (2,))
+    new = ((2, 0, 0, 2, 4), (1, 1))
+    result = rechunk_slicing(old, new)
+    expected = {
+        (0, 0): [
+            (ShardID((0, 0), (0, 0)), (slice(0, 2, None), slice(0, 1, None))),
+            (ShardID((0, 1), (0, 0)), (slice(0, 2, None), slice(1, 2, None))),
+            # FIXME: We should probably filter these out to avoid sending empty shards
+            (ShardID((1, 0), (0, 0)), (slice(2, 2, None), slice(0, 1, None))),
+            (ShardID((1, 1), (0, 0)), (slice(2, 2, None), slice(1, 2, None))),
+            (ShardID((2, 0), (0, 0)), (slice(2, 2, None), slice(0, 1, None))),
+            (ShardID((2, 1), (0, 0)), (slice(2, 2, None), slice(1, 2, None))),
+            (ShardID((3, 0), (0, 0)), (slice(2, 4, None), slice(0, 1, None))),
+            (ShardID((3, 1), (0, 0)), (slice(2, 4, None), slice(1, 2, None))),
+        ],
+        (1, 0): [
+            (ShardID((4, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
+            (ShardID((4, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
+        ],
+    }
+
+    assert result == expected
+
+    old = ((4, 4), (2,))
+    new = ((0, 0, 4, 4), (1, 1))
+    result = rechunk_slicing(old, new)
+    expected = {
+        (0, 0): [
+            # FIXME: We should probably filter these out to avoid sending empty shards
+            (ShardID((0, 0), (0, 0)), (slice(0, 0, None), slice(0, 1, None))),
+            (ShardID((0, 1), (0, 0)), (slice(0, 0, None), slice(1, 2, None))),
+            (ShardID((1, 0), (0, 0)), (slice(0, 0, None), slice(0, 1, None))),
+            (ShardID((1, 1), (0, 0)), (slice(0, 0, None), slice(1, 2, None))),
+            (ShardID((2, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
+            (ShardID((2, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
+        ],
+        (1, 0): [
+            (ShardID((3, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
+            (ShardID((3, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
+        ],
+    }
+
+    assert result == expected

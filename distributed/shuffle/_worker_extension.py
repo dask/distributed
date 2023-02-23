@@ -10,9 +10,7 @@ import time
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from io import BytesIO
-from itertools import product
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 
 import toolz
@@ -31,6 +29,8 @@ from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._rechunk import ChunkedAxes, NIndex
+from distributed.shuffle._rechunk import ShardID as ArrayRechunkShardID
+from distributed.shuffle._rechunk import rechunk_slicing
 from distributed.shuffle._shuffle import ShuffleId, ShuffleType
 from distributed.sizeof import sizeof
 from distributed.utils import log_errors, sync
@@ -40,7 +40,6 @@ if TYPE_CHECKING:
     import numpy as np
     import pandas as pd
     import pyarrow as pa
-    from typing_extensions import TypeAlias
 
     from distributed.worker import Worker
 
@@ -48,8 +47,6 @@ T_transfer_shard_id = TypeVar("T_transfer_shard_id")
 T_partition_id = TypeVar("T_partition_id")
 T_partition_type = TypeVar("T_partition_type")
 T = TypeVar("T")
-# TODO remove quotes (requires Python >=3.9)
-NSlice: TypeAlias = "tuple[slice, ...]"
 
 logger = logging.getLogger(__name__)
 
@@ -227,16 +224,6 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         """Get an output partition to the shuffle run"""
 
 
-@dataclass(frozen=True)
-class ArrayRechunkShardID:
-    """Unique identifier of an individual shard within an array rechunk"""
-
-    #: Index of the new chunk the shard belongs
-    new_index: NIndex
-    #: Sub-index of the shard within the new chunk
-    sub_index: NIndex
-
-
 # TODO remove quotes on tuple (requires Python >=3.9)
 class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
     """State for a single active rechunk execution
@@ -358,12 +345,9 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
             slice within the new chunk to assemble the new chunk from its pieces.
             """
             out: dict[str, list[tuple[ArrayRechunkShardID, bytes]]] = defaultdict(list)
-            for new_index, sub_index, nslice in self._slicing[input_partition]:
-                out[self.worker_for[new_index]].append(
-                    (
-                        ArrayRechunkShardID(new_index, sub_index),
-                        pickle.dumps((sub_index, data[nslice])),
-                    )
+            for id, nslice in self._slicing[input_partition]:
+                out[self.worker_for[id.new_index]].append(
+                    (id, pickle.dumps((id.sub_index, data[nslice])))
                 )
             return out
 
@@ -977,37 +961,6 @@ def split_by_partition(t: pa.Table, column: str) -> dict[Any, pa.Table]:
     assert len(t) == sum(map(len, shards))
     assert len(partitions) == len(shards)
     return dict(zip(partitions, shards))
-
-
-def rechunk_slicing(
-    old: ChunkedAxes, new: ChunkedAxes
-) -> dict[NIndex, list[tuple[NIndex, NIndex, NSlice]]]:
-    """Calculate how to slice the old chunks to create the new chunks
-
-    Returns
-    -------
-        Mapping of each old chunk to a list of tuples defining where each slice
-        of the old chunk belongs. Each tuple consists of the index
-        of the new chunk, the index of the slice within the composition of slices
-        creating the new chunk, and the slice to be applied to the old chunk.
-    """
-    from dask.array.rechunk import intersect_chunks
-
-    ndim = len(old)
-    intersections = intersect_chunks(old, new)
-    new_indices = product(*(range(len(c)) for c in new))
-
-    slicing = defaultdict(list)
-
-    for new_index, new_chunk in zip(new_indices, intersections):
-        sub_shape = [len({slice[dim][0] for slice in new_chunk}) for dim in range(ndim)]
-
-        sub_indices = product(*(range(dim) for dim in sub_shape))
-
-        for sub_index, sliced_chunk in zip(sub_indices, new_chunk):
-            old_index, nslice = zip(*sliced_chunk)
-            slicing[old_index].append((new_index, sub_index, nslice))
-    return slicing
 
 
 def convert_chunk(data: bytes, subdims: tuple[int, ...]) -> np.ndarray:
