@@ -7,8 +7,8 @@ from collections import defaultdict
 
 from dask.utils import parse_timedelta, stringify
 
-from distributed.client import Client, Future
-from distributed.worker import get_client, get_worker
+from distributed.client import Future
+from distributed.worker import get_client
 
 logger = logging.getLogger(__name__)
 
@@ -167,17 +167,24 @@ class Queue:
 
     def __init__(self, name=None, client=None, maxsize=0):
         try:
-            self.client = client or Client.current()
+            self.client = client or get_client()
         except ValueError:
-            # Initialise new client
-            self.client = get_worker().client
+            self.client = None
         self.name = name or "queue-" + uuid.uuid4().hex
         self.maxsize = maxsize
+        if self.client:
+            if self.client.asynchronous:
+                self._started = asyncio.ensure_future(self._start())
+            else:
+                self.client.sync(self._start)
 
-        if self.client.asynchronous:
-            self._started = asyncio.ensure_future(self._start())
-        else:
-            self.client.sync(self._start)
+    def _verify_running(self):
+        if not self.client:
+            raise RuntimeError(
+                f"{type(self)} object not properly initialized. This can happen"
+                " if the object is being deserialized outside of the context of"
+                " a Client or Worker."
+            )
 
     async def _start(self):
         await self.client.scheduler.queue_create(name=self.name, maxsize=self.maxsize)
@@ -213,6 +220,7 @@ class Queue:
             Instead of number of seconds, it is also possible to specify
             a timedelta in string format, e.g. "200ms".
         """
+        self._verify_running()
         timeout = parse_timedelta(timeout)
         return self.client.sync(self._put, value, timeout=timeout, **kwargs)
 
@@ -230,11 +238,13 @@ class Queue:
             If an integer than return that many elements from the queue
             If False (default) then return one item at a time
         """
+        self._verify_running()
         timeout = parse_timedelta(timeout)
         return self.client.sync(self._get, timeout=timeout, batch=batch, **kwargs)
 
     def qsize(self, **kwargs):
         """Current number of elements in the queue"""
+        self._verify_running()
         return self.client.sync(self._qsize, **kwargs)
 
     async def _get(self, timeout=None, batch=False):
@@ -267,17 +277,9 @@ class Queue:
         return result
 
     def close(self):
+        self._verify_running()
         if self.client.status == "running":  # TODO: can leave zombie futures
             self.client._send_to_scheduler({"op": "queue_release", "name": self.name})
 
-    def __getstate__(self):
-        return (self.name, self.client.scheduler.address)
-
-    def __setstate__(self, state):
-        name, address = state
-        try:
-            client = get_client(address)
-            assert client.scheduler.address == address
-        except (AttributeError, AssertionError):
-            client = Client(address, set_as_default=False)
-        self.__init__(name=name, client=client)
+    def __reduce__(self):
+        return type(self), (self.name, None, self.maxsize)
