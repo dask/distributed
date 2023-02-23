@@ -575,3 +575,34 @@ async def test_release_failure(c, s, a, b, caplog):
         assert ext.get_value(name) == 1  # lease is still registered
         while not (await semaphore.get_value() == 0):
             await asyncio.sleep(0.01)
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_unpickle_without_client(c, s):
+    """Ensure that the object properly pickle roundtrips even if no client, worker, etc. is active in the given context.
+
+    This typically happens if the object is being deserialized on the scheduler.
+    """
+    sem = await Semaphore()
+    pickled = pickle.dumps(sem)
+    await c.close()
+
+    # We do not want to initialize a client during unpickling
+    with pytest.raises(ValueError):
+        Client.current()
+
+    s2 = pickle.loads(pickled)
+
+    with pytest.raises(ValueError):
+        Client.current()
+
+    assert s2.scheduler is None
+    await asyncio.sleep(0)
+    assert not s2.refresh_callback.is_running()
+
+    with pytest.raises(RuntimeError, match="not properly initialized"):
+        await s2.acquire()
+
+    async with Client(s.address, asynchronous=True):
+        s3 = pickle.loads(pickled)
+        assert await s3.acquire()

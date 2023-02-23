@@ -345,15 +345,19 @@ class Semaphore(SyncMethodMixin):
         loop=None,
     ):
         try:
-            worker = get_worker()
-            self.scheduler = scheduler_rpc or worker.scheduler
-            self.loop = loop or worker.loop
+            try:
+                worker = get_worker()
+                self.scheduler = scheduler_rpc or worker.scheduler
+                self.loop = loop or worker.loop
 
+            except ValueError:
+                client = get_client()
+                self.scheduler = scheduler_rpc or client.scheduler
+                self.loop = loop or client.loop
         except ValueError:
-            client = get_client()
-            self.scheduler = scheduler_rpc or client.scheduler
-            self.loop = loop or client.loop
-
+            # This happens if this is deserialized on the scheduler
+            self.scheduler = None
+            self.loop = None
         self.name = name or "semaphore-" + uuid.uuid4().hex
         self.max_leases = max_leases
         self.id = uuid.uuid4().hex
@@ -381,7 +385,12 @@ class Semaphore(SyncMethodMixin):
 
         # Need to start the callback using IOLoop.add_callback to ensure that the
         # PC uses the correct event loop.
-        self.loop.add_callback(pc.start)
+        if self.loop is not None:
+            self.loop.add_callback(pc.start)
+
+    def _verify_running(self):
+        if not self.scheduler or not self.loop:
+            raise RuntimeError("Semaphore object not properly initialized.")
 
     async def _register(self):
         await retry_operation(
@@ -453,6 +462,7 @@ class Semaphore(SyncMethodMixin):
             Instead of number of seconds, it is also possible to specify
             a timedelta in string format, e.g. "200ms".
         """
+        self._verify_running()
         timeout = parse_timedelta(timeout)
         return self.sync(self._acquire, timeout=timeout)
 
@@ -486,6 +496,7 @@ class Semaphore(SyncMethodMixin):
             immediately, but it will always be automatically released after a specific interval configured using
             "distributed.scheduler.locks.lease-validation-interval" and "distributed.scheduler.locks.lease-timeout".
         """
+        self._verify_running()
         if not self._leases:
             raise RuntimeError("Released too often")
 
@@ -498,9 +509,11 @@ class Semaphore(SyncMethodMixin):
         """
         Return the number of currently registered leases.
         """
+        self._verify_running()
         return self.sync(self.scheduler.semaphore_value, name=self.name)
 
     def __enter__(self):
+        self._verify_running()
         self.acquire()
         return self
 
@@ -508,6 +521,7 @@ class Semaphore(SyncMethodMixin):
         self.release()
 
     async def __aenter__(self):
+        self._verify_running()
         await self.acquire()
         return self
 
@@ -528,6 +542,7 @@ class Semaphore(SyncMethodMixin):
         )
 
     def close(self):
+        self._verify_running()
         self.refresh_callback.stop()
         return self.sync(self.scheduler.semaphore_close, name=self.name)
 
