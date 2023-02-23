@@ -138,6 +138,7 @@ from distributed.worker_state_machine import (
     PauseEvent,
     RefreshWhoHasEvent,
     RemoveReplicasEvent,
+    RemoveWorkerEvent,
     RescheduleEvent,
     RetryBusyWorkerEvent,
     SecedeEvent,
@@ -2619,6 +2620,7 @@ class Worker(BaseWorker, ServerNode):
 
     def _remove_worker(self, worker: str, stimulus_id: str) -> None:
         self.rpc.remove(worker)
+        self.handle_stimulus(RemoveWorkerEvent(worker=worker, stimulus_id=stimulus_id))
 
     def validate_state(self) -> None:
         try:
