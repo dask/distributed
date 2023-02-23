@@ -44,9 +44,9 @@ if TYPE_CHECKING:
 
     from distributed.worker import Worker
 
-TransferShardIDType = TypeVar("TransferShardIDType")
-PartitionIDType = TypeVar("PartitionIDType")
-PartitionType = TypeVar("PartitionType")
+T_transfer_shard_id = TypeVar("T_transfer_shard_id")
+T_partition_id = TypeVar("T_partition_id")
+T_partition_type = TypeVar("T_partition_type")
 T = TypeVar("T")
 # TODO remove quotes (requires Python >=3.9)
 NSlice: TypeAlias = "tuple[slice, ...]"
@@ -58,7 +58,7 @@ class ShuffleClosedError(RuntimeError):
     pass
 
 
-class ShuffleRun(Generic[TransferShardIDType, PartitionIDType, PartitionType]):
+class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type]):
     def __init__(
         self,
         id: ShuffleId,
@@ -94,7 +94,7 @@ class ShuffleRun(Generic[TransferShardIDType, PartitionIDType, PartitionType]):
 
         self.diagnostics: dict[str, float] = defaultdict(float)
         self.transferred = False
-        self.received: set[TransferShardIDType] = set()
+        self.received: set[T_transfer_shard_id] = set()
         self.total_recvd = 0
         self.start_time = time.time()
         self._exception: Exception | None = None
@@ -120,7 +120,7 @@ class ShuffleRun(Generic[TransferShardIDType, PartitionIDType, PartitionType]):
         await self.scheduler.shuffle_barrier(id=self.id, run_id=self.run_id)
 
     async def send(
-        self, address: str, shards: list[tuple[TransferShardIDType, bytes]]
+        self, address: str, shards: list[tuple[T_transfer_shard_id, bytes]]
     ) -> None:
         self.raise_if_closed()
         return await self.rpc(address).shuffle_receive(
@@ -149,7 +149,7 @@ class ShuffleRun(Generic[TransferShardIDType, PartitionIDType, PartitionType]):
         }
 
     async def _write_to_comm(
-        self, data: dict[str, list[tuple[TransferShardIDType, bytes]]]
+        self, data: dict[str, list[tuple[T_transfer_shard_id, bytes]]]
     ) -> None:
         self.raise_if_closed()
         await self._comm_buffer.write(data)
@@ -209,21 +209,21 @@ class ShuffleRun(Generic[TransferShardIDType, PartitionIDType, PartitionType]):
         data: bytes = self._disk_buffer.read("_".join(str(i) for i in id))
         return data
 
-    async def receive(self, data: list[tuple[TransferShardIDType, bytes]]) -> None:
+    async def receive(self, data: list[tuple[T_transfer_shard_id, bytes]]) -> None:
         await self._receive(data)
 
     @abc.abstractmethod
-    async def _receive(self, data: list[tuple[TransferShardIDType, bytes]]) -> None:
+    async def _receive(self, data: list[tuple[T_transfer_shard_id, bytes]]) -> None:
         """Receive shards belonging to output partitions of this shuffle run"""
 
     @abc.abstractmethod
     async def add_partition(
-        self, data: PartitionType, input_partition: PartitionIDType
+        self, data: T_partition_type, input_partition: T_partition_id
     ) -> int:
         """Add an input partition to the shuffle run"""
 
     @abc.abstractmethod
-    async def get_output_partition(self, i: PartitionIDType) -> PartitionType:
+    async def get_output_partition(self, i: T_partition_id) -> T_partition_type:
         """Get an output partition to the shuffle run"""
 
 
