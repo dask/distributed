@@ -390,7 +390,9 @@ class Semaphore(SyncMethodMixin):
 
     def _verify_running(self):
         if not self.scheduler or not self.loop:
-            raise RuntimeError("Semaphore object not properly initialized.")
+            raise RuntimeError(
+                f"{type(self)} object not properly initialized. This can happen if the object is being deserialized outside of the context of a Client or Worker."
+            )
 
     async def _register(self):
         await retry_operation(
