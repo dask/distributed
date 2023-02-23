@@ -3,6 +3,8 @@ from __future__ import annotations
 from io import BytesIO
 from typing import TYPE_CHECKING, BinaryIO
 
+from packaging.version import parse
+
 if TYPE_CHECKING:
     import pandas as pd
     import pyarrow as pa
@@ -40,13 +42,13 @@ def check_minimal_arrow_version() -> None:
     minversion = "7.0.0"
     try:
         import pyarrow as pa
-        from packaging.version import parse
-
-        if parse(pa.__version__) >= parse(minversion):
-            return
-        suffix = f" but only found {pa.__version__}"
-    finally:
+    except ImportError:
         raise RuntimeError(f"P2P shuffling requires pyarrow>={minversion}" + suffix)
+
+    if parse(pa.__version__) < parse(minversion):
+        raise RuntimeError(
+            f"P2P shuffling requires pyarrow>={minversion} but only found {pa.__version__}"
+        )
 
 
 def dump_shards(shards: list[bytes], file: BinaryIO) -> None:
