@@ -198,41 +198,53 @@ class Future(WrappedKey):
     def __init__(self, key, client=None, inform=True, state=None):
         self.key = key
         self._cleared = False
-        tkey = stringify(key)
-        if not client:
+        self._tkey = stringify(key)
+        self._client = client
+        self._input_state = state
+        self._inform = inform
+        self._state = None
+        self._bind_late()
+
+    @property
+    def client(self):
+        self._bind_late()
+        return self._client
+
+    def _bind_late(self):
+        if not self._client:
             try:
                 client = get_client()
             except ValueError:
                 client = None
-        self.client = client
-        if self.client:
-            self.client._inc_ref(tkey)
-            self._generation = self.client.generation
+            self._client = client
+        if self._client and not self._state:
+            self._client._inc_ref(self._tkey)
+            self._generation = self._client.generation
 
-            if tkey in self.client.futures:
-                self._state = self.client.futures[tkey]
+            if self._tkey in self._client.futures:
+                self._state = self._client.futures[self._tkey]
             else:
-                self._state = self.client.futures[tkey] = FutureState()
+                self._state = self._client.futures[self._tkey] = FutureState()
 
-            if inform:
-                self.client._send_to_scheduler(
+            if self._inform:
+                self._client._send_to_scheduler(
                     {
                         "op": "client-desires-keys",
-                        "keys": [stringify(key)],
-                        "client": self.client.id,
+                        "keys": [self._tkey],
+                        "client": self._client.id,
                     }
                 )
 
-            if state is not None:
+            if self._input_state is not None:
                 try:
-                    handler = self.client._state_handlers[state]
+                    handler = self._client._state_handlers[self._input_state]
                 except KeyError:
                     pass
                 else:
-                    handler(key=key)
+                    handler(key=self.key)
 
     def _verify_initialized(self):
-        if not self.client:
+        if not self.client or not self._state:
             raise RuntimeError(
                 f"{type(self)} object not properly initialized. This can happen"
                 " if the object is being deserialized outside of the context of"

@@ -178,7 +178,7 @@ class Actor(WrappedKey):
             raise ValueError(
                 "Worker holding Actor was lost.  Status: " + self._future.status
             )
-
+        self._try_bind_worker_client()
         if (
             self._worker
             and self._worker.address == self._address
