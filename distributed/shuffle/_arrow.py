@@ -3,6 +3,8 @@ from __future__ import annotations
 from io import BytesIO
 from typing import TYPE_CHECKING, BinaryIO
 
+from packaging.version import parse
+
 if TYPE_CHECKING:
     import pandas as pd
     import pyarrow as pa
@@ -26,6 +28,26 @@ def check_dtype_support(meta_input: pd.DataFrame) -> None:
         # FIXME: PyArrow does not support sparse data: https://issues.apache.org/jira/browse/ARROW-8679
         if pd.api.types.is_sparse(column):
             raise TypeError("p2p does not support sparse data found in column '{name}'")
+
+
+def check_minimal_arrow_version() -> None:
+    """Verify that the the correct version of pyarrow is installed to support
+    the P2P extension.
+
+    Raises a RuntimeError in case pyarrow is not installed or installed version
+    is not recent enough.
+    """
+    # First version to introduce Table.sort_by
+    minversion = "7.0.0"
+    try:
+        import pyarrow as pa
+    except ImportError:
+        raise RuntimeError(f"P2P shuffling requires pyarrow>={minversion}")
+
+    if parse(pa.__version__) < parse(minversion):
+        raise RuntimeError(
+            f"P2P shuffling requires pyarrow>={minversion} but only found {pa.__version__}"
+        )
 
 
 def dump_shards(shards: list[bytes], file: BinaryIO) -> None:
