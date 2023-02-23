@@ -1,17 +1,34 @@
 from __future__ import annotations
 
 import inspect
+import io
 import logging
 import pickle
 
 import cloudpickle
 from packaging.version import parse as parse_version
 
+from distributed.protocol.serialize import dask_deserialize, dask_serialize
+
 CLOUDPICKLE_GTE_20 = parse_version(cloudpickle.__version__) >= parse_version("2.0.0")
 
 HIGHEST_PROTOCOL = pickle.HIGHEST_PROTOCOL
 
 logger = logging.getLogger(__name__)
+
+
+class _DaskPickler(pickle.Pickler):
+    def reducer_override(self, obj):
+        # For some objects this causes segfaults otherwise, see
+        # https://github.com/dask/distributed/pull/7564#issuecomment-1438727339
+        if _always_use_pickle_for(obj):
+            return NotImplemented
+        try:
+            serialize = dask_serialize.dispatch(type(obj))
+            deserialize = dask_deserialize.dispatch(type(obj))
+            return deserialize, serialize(obj)
+        except TypeError:
+            return NotImplemented
 
 
 def _always_use_pickle_for(x):
@@ -42,8 +59,14 @@ def dumps(x, *, buffer_callback=None, protocol=HIGHEST_PROTOCOL):
     if dump_kwargs["protocol"] >= 5 and buffer_callback is not None:
         dump_kwargs["buffer_callback"] = buffers.append
     try:
-        buffers.clear()
-        result = pickle.dumps(x, **dump_kwargs)
+        try:
+            result = pickle.dumps(x, **dump_kwargs)
+        except Exception:
+            f = io.BytesIO()
+            pickler = _DaskPickler(f, **dump_kwargs)
+            buffers.clear()
+            pickler.dump(x)
+            result = f.getvalue()
         if b"__main__" in result or (
             CLOUDPICKLE_GTE_20
             and getattr(inspect.getmodule(x), "__name__", None)
@@ -56,8 +79,8 @@ def dumps(x, *, buffer_callback=None, protocol=HIGHEST_PROTOCOL):
         try:
             buffers.clear()
             result = cloudpickle.dumps(x, **dump_kwargs)
-        except Exception as e:
-            logger.info("Failed to serialize %s. Exception: %s", x, e)
+        except Exception:
+            logger.exception("Failed to serialize %s.", x)
             raise
     if buffer_callback is not None:
         for b in buffers:
