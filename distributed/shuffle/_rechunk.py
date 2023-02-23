@@ -110,6 +110,8 @@ class ShardID:
     #: Sub-index of the shard within the new chunk
     sub_index: NIndex
 
+    __slots__ = tuple(__annotations__)
+
 
 def rechunk_slicing(
     old: ChunkedAxes, new: ChunkedAxes
