@@ -31,7 +31,7 @@ from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._rechunk import ChunkedAxes, NIndex
-from distributed.shuffle._shuffle import ShuffleId
+from distributed.shuffle._shuffle import ShuffleId, ShuffleType
 from distributed.sizeof import sizeof
 from distributed.utils import log_errors, sync
 
@@ -633,10 +633,10 @@ class ShuffleWorkerExtension:
         data: Any,
         input_partition: int | tuple[int, ...],
         shuffle_id: ShuffleId,
-        type: str,
+        type: ShuffleType,
         **kwargs: Any,
     ) -> int:
-        if type == "DataFrameShuffle":
+        if type == ShuffleType.DATAFRAME:
             kwargs["empty"] = data
         shuffle = self.get_or_create_shuffle(shuffle_id, type=type, **kwargs)
         return sync(
@@ -701,7 +701,7 @@ class ShuffleWorkerExtension:
     async def _get_or_create_shuffle(
         self,
         shuffle_id: ShuffleId,
-        type: str,
+        type: ShuffleType,
         **kwargs: Any,
     ) -> ShuffleRun:
         """Get or create a shuffle matching the ID and data spec.
@@ -744,7 +744,7 @@ class ShuffleWorkerExtension:
     async def _refresh_shuffle(
         self,
         shuffle_id: ShuffleId,
-        type: str,
+        type: ShuffleType,
         kwargs: dict,
     ) -> ShuffleRun:
         ...
@@ -752,7 +752,7 @@ class ShuffleWorkerExtension:
     async def _refresh_shuffle(
         self,
         shuffle_id: ShuffleId,
-        type: str | None = None,
+        type: ShuffleType | None = None,
         kwargs: dict | None = None,
     ) -> ShuffleRun:
         import pyarrow as pa
@@ -762,7 +762,7 @@ class ShuffleWorkerExtension:
                 id=shuffle_id,
                 worker=self.worker.address,
             )
-        elif type == "DataFrameShuffle":
+        elif type == ShuffleType.DATAFRAME:
             assert kwargs is not None
             result = await self.worker.scheduler.shuffle_get_or_create(
                 id=shuffle_id,
@@ -776,7 +776,7 @@ class ShuffleWorkerExtension:
                 },
                 worker=self.worker.address,
             )
-        elif type == "ArrayRechunk":
+        elif type == ShuffleType.ARRAY_RECHUNK:
             assert kwargs is not None
             result = await self.worker.scheduler.shuffle_get_or_create(
                 id=shuffle_id,
@@ -810,7 +810,7 @@ class ShuffleWorkerExtension:
 
                 self.worker._ongoing_background_tasks.call_soon(_, self, existing)
         shuffle: ShuffleRun
-        if result["type"] == "DataFrameShuffle":
+        if result["type"] == ShuffleType.DATAFRAME:
             shuffle = DataFrameShuffleRun(
                 column=result["column"],
                 worker_for=result["worker_for"],
@@ -829,7 +829,7 @@ class ShuffleWorkerExtension:
                 memory_limiter_disk=self.memory_limiter_disk,
                 memory_limiter_comms=self.memory_limiter_comms,
             )
-        elif result["type"] == "ArrayRechunk":
+        elif result["type"] == ShuffleType.ARRAY_RECHUNK:
             shuffle = ArrayRechunkRun(
                 worker_for=result["worker_for"],
                 output_workers=result["output_workers"],
@@ -886,7 +886,7 @@ class ShuffleWorkerExtension:
     def get_or_create_shuffle(
         self,
         shuffle_id: ShuffleId,
-        type: str,
+        type: ShuffleType,
         **kwargs: Any,
     ) -> ShuffleRun:
         return sync(

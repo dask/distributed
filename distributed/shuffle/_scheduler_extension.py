@@ -10,7 +10,12 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.shuffle._rechunk import ChunkedAxes, NIndex
-from distributed.shuffle._shuffle import ShuffleId, barrier_key, id_from_key
+from distributed.shuffle._shuffle import (
+    ShuffleId,
+    ShuffleType,
+    barrier_key,
+    id_from_key,
+)
 
 if TYPE_CHECKING:
     from distributed.scheduler import Recs, Scheduler, TaskStateState, WorkerState
@@ -34,7 +39,7 @@ class ShuffleState(abc.ABC):
 
 @dataclass
 class DataFrameShuffleState(ShuffleState):
-    type: ClassVar[str] = "DataFrameShuffle"
+    type: ClassVar[ShuffleType] = ShuffleType.DATAFRAME
     worker_for: dict[int, str]
     schema: bytes
     column: str
@@ -53,7 +58,7 @@ class DataFrameShuffleState(ShuffleState):
 
 @dataclass
 class ArrayRechunkState(ShuffleState):
-    type: ClassVar[str] = "ArrayRechunk"
+    type: ClassVar[ShuffleType] = ShuffleType.ARRAY_RECHUNK
     worker_for: dict[NIndex, str]
     old: ChunkedAxes
     new: ChunkedAxes
@@ -134,9 +139,9 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             return self.get(id, worker)
         except KeyError:
             state: ShuffleState
-            if type == "DataFrameShuffle":
+            if type == ShuffleType.DATAFRAME:
                 state = self._create_dataframe_shuffle_state(id, spec)
-            elif type == "ArrayRechunk":
+            elif type == ShuffleType.ARRAY_RECHUNK:
                 state = self._create_array_rechunk_state(id, spec)
             else:  # pragma: no cover
                 raise TypeError(type)

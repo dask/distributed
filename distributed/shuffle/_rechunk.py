@@ -7,6 +7,7 @@ from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 
 from distributed.shuffle._shuffle import (
     ShuffleId,
+    ShuffleType,
     _get_worker_extension,
     barrier_key,
     shuffle_barrier,
@@ -37,7 +38,7 @@ def rechunk_transfer(
             input,
             input_partition=input_chunk,
             shuffle_id=id,
-            type="ArrayRechunk",
+            type=ShuffleType.ARRAY_RECHUNK,
             new=new,
             old=old,
         )
