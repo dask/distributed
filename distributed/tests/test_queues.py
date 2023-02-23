@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import pickle
 from datetime import timedelta
 from time import sleep
 
@@ -86,7 +87,6 @@ async def test_hold_futures(s, a, b):
         assert result == 11
 
 
-@pytest.mark.skip(reason="getting same client from main thread")
 @gen_cluster(client=True)
 async def test_picklability(c, s, a, b):
     q = Queue()
@@ -301,3 +301,34 @@ def test_queue_in_task(loop):
 
                 result = c.submit(foo).result()
                 assert result == 123
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_unpickle_without_client(c, s):
+    """Ensure that the object properly pickle roundtrips even if no client, worker, etc. is active in the given context.
+
+    This typically happens if the object is being deserialized on the scheduler.
+    """
+    q = await Queue()
+    pickled = pickle.dumps(q)
+    await c.close()
+
+    # We do not want to initialize a client during unpickling
+    with pytest.raises(ValueError):
+        Client.current()
+
+    q2 = pickle.loads(pickled)
+
+    with pytest.raises(ValueError):
+        Client.current()
+
+    assert q2.client is None
+    await asyncio.sleep(0)
+
+    with pytest.raises(RuntimeError, match="not properly initialized"):
+        await q2.put(1)
+
+    async with Client(s.address, asynchronous=True):
+        q3 = pickle.loads(pickled)
+        await q3.put(1)
+        assert await q3.get() == 1
