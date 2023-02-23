@@ -5356,20 +5356,13 @@ def test_serialize_collections_of_futures_sync(c):
 
     df = pd.DataFrame({"x": [1, 2, 3]})
     ddf = dd.from_pandas(df, npartitions=2).persist()
-    # future = c.scatter(ddf)
+    future = c.scatter(ddf)
 
-    # result = future.result()
-    # futs = futures_of(result)
-    assert_eq(ddf.compute(), df)
+    result = future.result()
+    assert_eq(result.compute(), df)
 
-    # assert future.type == dd.DataFrame
-    # futs = futures_of(future)
-    def inner(x, y):
-        futs = futures_of(x)
-        df = x.compute()
-        assert_eq(df, y)
-
-    c.submit(inner, ddf, df).result()
+    assert future.type == dd.DataFrame
+    assert c.submit(lambda x, y: assert_eq(x.compute(), y), future, df).result()
 
 
 def _dynamic_workload(x, delay=0.01):

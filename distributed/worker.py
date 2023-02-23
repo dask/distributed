@@ -2155,26 +2155,10 @@ class Worker(BaseWorker, ServerNode):
     ################
 
     def run(self, comm, function, args=(), wait=True, kwargs=None):
-        return run(
-            self,
-            comm,
-            function=function,
-            args=args,
-            kwargs=kwargs,
-            wait=wait,
-            thread_state={"execution_state": self.execution_state},
-        )
+        return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
 
     def run_coroutine(self, comm, function, args=(), kwargs=None, wait=True):
-        return run(
-            self,
-            comm,
-            function=function,
-            args=args,
-            kwargs=kwargs,
-            wait=wait,
-            thread_state={"execution_state": self.execution_state},
-        )
+        return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
 
     async def actor_execute(
         self,
@@ -3285,9 +3269,7 @@ def convert_kwargs_to_str(kwargs: dict, max_len: int | None = None) -> str:
         return "{{{}}}".format(", ".join(strs))
 
 
-async def run(
-    server, comm, function, args=(), kwargs=None, wait=True, thread_state=None
-):
+async def run(server, comm, function, args=(), kwargs=None, wait=True):
     kwargs = kwargs or {}
     function = pickle.loads(function)
     is_coro = iscoroutinefunction(function)
@@ -3303,7 +3285,6 @@ async def run(
     logger.info("Run out-of-band function %r", funcname(function))
 
     try:
-        thread_state = thread_state or {}
         if not is_coro:
             result = function(*args, **kwargs)
         else:

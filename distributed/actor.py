@@ -105,8 +105,6 @@ class Actor(WrappedKey):
 
     def _try_bind_worker_client(self):
         try:
-            # TODO: `get_worker` may return the wrong worker instance for async local clusters (most tests)
-            # when run outside of a task (when deserializing a key pointing to an Actor, etc.)
             self._worker = get_worker()
         except ValueError:
             self._worker = None
