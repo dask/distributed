@@ -229,7 +229,7 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
 
 @dataclass(frozen=True)
 class ArrayRechunkShardID:
-    """Unique identifier of an individual shard within an array rechunking"""
+    """Unique identifier of an individual shard within an array rechunk"""
 
     #: Index of the new chunk the shard belongs
     new_index: NIndex
