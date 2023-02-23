@@ -23,8 +23,9 @@ async def test_prometheus_api_doc(c, s, a):
     """
     pytest.importorskip("prometheus_client")
 
-    # Some metrics only appear after a task is executed
-    await c.submit(inc, 1)
+    # Some metrics only appear if there are tasks on the cluster
+    fut = c.submit(inc, 1)
+    await fut
     # Semaphore metrics only appear after semaphores are used
     sem = await Semaphore()
     await sem.acquire()

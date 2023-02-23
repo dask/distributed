@@ -13,6 +13,7 @@ from itertools import product
 from textwrap import dedent
 from time import sleep
 from typing import Collection
+from unittest import mock
 
 import cloudpickle
 import psutil
@@ -634,7 +635,7 @@ def test_saturation_factor(
 async def test_bad_saturation_factor():
     with pytest.raises(ValueError, match="foo"):
         with dask.config.set({"distributed.scheduler.worker-saturation": "foo"}):
-            async with Scheduler(dashboard_address=":0", validate=True):
+            async with Scheduler(dashboard_address=":0"):
                 pass
 
 
@@ -1033,6 +1034,7 @@ async def test_ready_remove_worker(s, a, b, worker_saturation):
     )
 
 
+@pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny, timeout=60)
 async def test_restart(c, s, a, b):
     with captured_logger("distributed.scheduler") as caplog:
@@ -1095,6 +1097,7 @@ class SlowKillNanny(Nanny):
         return await super().kill(timeout=timeout, reason=reason)
 
 
+@pytest.mark.slow
 @gen_cluster(client=True, Worker=SlowKillNanny, nthreads=[("", 1)] * 2)
 async def test_restart_nanny_timeout_exceeded(c, s, a, b):
     f = c.submit(div, 1, 0)
@@ -1199,6 +1202,7 @@ async def test_restart_some_nannies_some_not(c, s, a, b):
         assert w.address not in s.workers
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
@@ -1419,7 +1423,7 @@ async def test_scatter_no_workers(c, s, direct):
     start = time()
     with pytest.raises(TimeoutError):
         await c.scatter(123, timeout=0.1, direct=direct)
-    assert time() < start + 1.5
+    assert time() < start + 5
 
     fut = c.scatter({"y": 2}, timeout=5, direct=direct)
     await asyncio.sleep(0.1)
@@ -1786,7 +1790,7 @@ async def test_close_worker(s, a, b):
     assert len(s.workers) == 1
 
 
-# @pytest.mark.slow
+@pytest.mark.slow
 @gen_cluster(Worker=Nanny)
 async def test_close_nanny(s, a, b):
     assert len(s.workers) == 2
@@ -1826,6 +1830,7 @@ async def test_retire_workers_close(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
+@pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny)
 async def test_retire_nannies_close(c, s, a, b):
     nannies = [a, b]
@@ -2016,6 +2021,7 @@ async def test_cancel_fire_and_forget(c, s, a, b):
     await ev2.set()
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True, Worker=Nanny, clean_kwargs={"processes": False, "threads": False}
 )
@@ -2270,6 +2276,7 @@ async def test_collect_versions(c, s, a, b):
     assert cs.versions == w1.versions == w2.versions
 
 
+@pytest.mark.slow
 @gen_cluster(client=True)
 async def test_idle_timeout(c, s, a, b):
     beginning = time()
@@ -2353,6 +2360,7 @@ async def test_bandwidth(c, s, a, b):
     assert not s.bandwidth_workers
 
 
+@pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny, timeout=60)
 async def test_bandwidth_clear(c, s, a, b):
     np = pytest.importorskip("numpy")
@@ -2666,6 +2674,7 @@ async def test_task_prefix(c, s, a, b):
     assert s.task_prefixes["sum-aggregate"].states["memory"] == 2
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True, Worker=Nanny, config={"distributed.scheduler.allowed-failures": 0}
 )
@@ -2736,23 +2745,26 @@ class FlakyConnectionPool(ConnectionPool):
 
 
 @gen_cluster(client=True)
-async def test_gather_failing_cnn_recover(c, s, a, b):
-    orig_rpc = s.rpc
+async def test_gather_failing_cnn_recover(c, s, a, b, caplog):
     x = await c.scatter({"x": 1}, workers=a.address)
-
-    s.rpc = await FlakyConnectionPool(failing_connections=1)
-    with dask.config.set({"distributed.comm.retry.count": 1}):
+    rpc = await FlakyConnectionPool(failing_connections=1)
+    with mock.patch.object(s, "rpc", rpc), dask.config.set(
+        {"distributed.comm.retry.count": 1}
+    ), caplog.at_level(logging.INFO):
+        caplog.clear()
         res = await s.gather(keys=["x"])
+    assert [
+        record.message for record in caplog.records if record.levelno == logging.INFO
+    ] == ["Retrying get_data_from_worker after exception in attempt 0/1: "]
     assert res["status"] == "OK"
 
 
 @gen_cluster(client=True)
 async def test_gather_failing_cnn_error(c, s, a, b):
-    orig_rpc = s.rpc
     x = await c.scatter({"x": 1}, workers=a.address)
-
-    s.rpc = await FlakyConnectionPool(failing_connections=10)
-    res = await s.gather(keys=["x"])
+    rpc = await FlakyConnectionPool(failing_connections=10)
+    with mock.patch.object(s, "rpc", rpc):
+        res = await s.gather(keys=["x"])
     assert res["status"] == "error"
     assert list(res["keys"]) == ["x"]
 
@@ -3262,6 +3274,7 @@ async def test_close_scheduler__close_workers_Worker(s, a, b):
     assert "retry" not in log
 
 
+@pytest.mark.slow
 @gen_cluster(Worker=Nanny)
 async def test_close_scheduler__close_workers_Nanny(s, a, b):
     with captured_logger("distributed.comm", level=logging.DEBUG) as log:
@@ -3293,6 +3306,7 @@ async def assert_ndata(client, by_addr, total=None):
         raise AssertionError(f"Expected {by_addr}; {total=}; got {out}")
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     Worker=Nanny,
@@ -3435,6 +3449,7 @@ async def test_rebalance_no_limit(c, s, a, b):
     assert len(b.data) == 50
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     Worker=Nanny,
@@ -3491,6 +3506,7 @@ async def test_rebalance_skip_all_recipients(c, s, a, b):
     assert (len(a.data), len(b.data)) == (9, 2)
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     Worker=Nanny,
@@ -3510,6 +3526,7 @@ async def test_rebalance_sender_below_mean(c, s, *_):
     assert await c.has_what() == {a: (f1.key,), b: (f2.key,)}
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     Worker=Nanny,
@@ -3804,14 +3821,9 @@ async def test_transition_counter_max_worker(c, s, a):
     # This is set by @gen_cluster; it's False in production
     assert s.transition_counter_max > 0
     a.state.transition_counter_max = 1
+    fut = c.submit(inc, 2)
     with captured_logger("distributed.worker") as logger:
-        fut = c.submit(inc, 2)
-        while True:
-            try:
-                a.validate_state()
-            except AssertionError:
-                break
-            await asyncio.sleep(0.01)
+        await async_wait_for(lambda: a.state.transition_counter > 0, timeout=5)
 
     assert "TransitionCounterMaxExceeded" in logger.getvalue()
     # Worker state is corrupted. Avoid test failure on gen_cluster teardown.

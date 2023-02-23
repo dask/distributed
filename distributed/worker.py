@@ -28,7 +28,17 @@ from concurrent.futures import Executor
 from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, TextIO, TypeVar, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Literal,
+    TextIO,
+    TypedDict,
+    TypeVar,
+    cast,
+    overload,
+)
 
 from tlz import first, keymap, pluck
 from tornado.ioloop import IOLoop
@@ -166,6 +176,15 @@ WORKER_ANY_RUNNING = {
 }
 
 
+class GetDataBusy(TypedDict):
+    status: Literal["busy"]
+
+
+class GetDataSuccess(TypedDict):
+    status: Literal["OK"]
+    data: dict[str, object]
+
+
 def fail_hard(method: Callable[P, T]) -> Callable[P, T]:
     """
     Decorator to close the worker if this method encounters an exception.
@@ -218,7 +237,9 @@ async def _force_close(self, reason: str):
         # Worker is in a very broken state if closing fails. We need to shut down
         # immediately, to ensure things don't get even worse and this worker potentially
         # deadlocks the cluster.
-        if self.state.validate and not self.nanny:
+        from distributed import Scheduler
+
+        if Scheduler._instances:
             # We're likely in a unit test. Don't kill the whole test suite!
             raise
 
@@ -554,7 +575,7 @@ class Worker(BaseWorker, ServerNode):
         self.profile_history = deque(maxlen=3600)
 
         if validate is None:
-            validate = dask.config.get("distributed.scheduler.validate")
+            validate = dask.config.get("distributed.worker.validate")
 
         self.transfer_incoming_log = deque(maxlen=100000)
         self.transfer_outgoing_log = deque(maxlen=100000)
@@ -1010,7 +1031,7 @@ class Worker(BaseWorker, ServerNode):
             spilled_memory, spilled_disk = 0, 0
 
         out = dict(
-            task_counts=self.state.task_counts,
+            task_counts=self.state.task_counter.current_count(by_prefix=False),
             bandwidth={
                 "total": self.bandwidth,
                 "workers": dict(self.bandwidth_workers),
@@ -1219,7 +1240,7 @@ class Worker(BaseWorker, ServerNode):
                 now=start,
                 metrics=await self.get_metrics(),
                 executing={
-                    key: start - self.state.tasks[key].start_time
+                    key: start - cast(float, self.state.tasks[key].start_time)
                     for key in self.active_keys
                     if key in self.state.tasks
                 },
@@ -1302,7 +1323,7 @@ class Worker(BaseWorker, ServerNode):
             if k not in self.data
         }
         result, missing_keys, missing_workers = await gather_from_workers(
-            who_has, rpc=self.rpc, who=self.address
+            who_has=who_has, rpc=self.rpc, who=self.address
         )
         self.update_data(data=result)
         if missing_keys:
@@ -1691,12 +1712,20 @@ class Worker(BaseWorker, ServerNode):
         self.stream_comms[address].send(msg)
 
     async def get_data(
-        self, comm, keys=None, who=None, serializers=None, max_connections=None
-    ) -> dict | Status:
+        self,
+        comm: Comm,
+        keys: Collection[str] | None = None,
+        who: str | None = None,
+        serializers: list[str] | None = None,
+        max_connections: int | None = None,
+    ) -> GetDataBusy | Literal[Status.dont_reply]:
         start = time()
 
         if max_connections is None:
             max_connections = self.transfer_outgoing_count_limit
+
+        if keys is None:
+            keys = set()
 
         # Allow same-host connections more liberally
         if (
@@ -2050,7 +2079,7 @@ class Worker(BaseWorker, ServerNode):
 
             start = time()
             response = await get_data_from_worker(
-                self.rpc, to_gather, worker, who=self.address
+                rpc=self.rpc, keys=to_gather, worker=worker, who=self.address
             )
             stop = time()
             if response["status"] == "busy":
@@ -2814,15 +2843,44 @@ class Reschedule(Exception):
     """
 
 
+@overload
 async def get_data_from_worker(
-    rpc,
-    keys,
-    worker,
-    who=None,
-    max_connections=None,
-    serializers=None,
-    deserializers=None,
-):
+    rpc: ConnectionPool,
+    keys: Collection[str],
+    worker: str,
+    *,
+    who: str | None = None,
+    max_connections: Literal[False],
+    serializers: list[str] | None = None,
+    deserializers: list[str] | None = None,
+) -> GetDataSuccess:
+    ...
+
+
+@overload
+async def get_data_from_worker(
+    rpc: ConnectionPool,
+    keys: Collection[str],
+    worker: str,
+    *,
+    who: str | None = None,
+    max_connections: bool | int | None = None,
+    serializers: list[str] | None = None,
+    deserializers: list[str] | None = None,
+) -> GetDataBusy | GetDataSuccess:
+    ...
+
+
+async def get_data_from_worker(
+    rpc: ConnectionPool,
+    keys: Collection[str],
+    worker: str,
+    *,
+    who: str | None = None,
+    max_connections: bool | int | None = None,
+    serializers: list[str] | None = None,
+    deserializers: list[str] | None = None,
+) -> GetDataBusy | GetDataSuccess:
     """Get keys from worker
 
     The worker has a two step handshake to acknowledge when data has been fully
@@ -2839,31 +2897,28 @@ async def get_data_from_worker(
     if deserializers is None:
         deserializers = rpc.deserializers
 
-    async def _get_data():
-        comm = await rpc.connect(worker)
-        comm.name = "Ephemeral Worker->Worker for gather"
+    comm = await rpc.connect(worker)
+    comm.name = "Ephemeral Worker->Worker for gather"
+    try:
+        response = await send_recv(
+            comm,
+            serializers=serializers,
+            deserializers=deserializers,
+            op="get_data",
+            keys=keys,
+            who=who,
+            max_connections=max_connections,
+        )
         try:
-            response = await send_recv(
-                comm,
-                serializers=serializers,
-                deserializers=deserializers,
-                op="get_data",
-                keys=keys,
-                who=who,
-                max_connections=max_connections,
-            )
-            try:
-                status = response["status"]
-            except KeyError:  # pragma: no cover
-                raise ValueError("Unexpected response", response)
-            else:
-                if status == "OK":
-                    await comm.write("OK")
-            return response
-        finally:
-            rpc.reuse(worker, comm)
-
-    return await retry_operation(_get_data, operation="get_data_from_worker")
+            status = response["status"]
+        except KeyError:  # pragma: no cover
+            raise ValueError("Unexpected response", response)
+        else:
+            if status == "OK":
+                await comm.write("OK")
+        return response
+    finally:
+        rpc.reuse(worker, comm)
 
 
 job_counter = [0]
