@@ -10,9 +10,10 @@ import time
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from io import BytesIO
 from itertools import product
-from typing import TYPE_CHECKING, Any, BinaryIO, Generic, TypeVar, overload
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 
 import toolz
 
@@ -70,8 +71,6 @@ class ShuffleRun(Generic[TransferShardIDType, PartitionIDType, PartitionType]):
         scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
-        dump: Callable[[list[bytes], BinaryIO], None],
-        load: Callable[[BinaryIO], bytes],
     ):
         self.id = id
         self.run_id = run_id
@@ -83,13 +82,11 @@ class ShuffleRun(Generic[TransferShardIDType, PartitionIDType, PartitionType]):
         self.closed = False
 
         self._disk_buffer = DiskShardsBuffer(
-            dump=dump,
-            load=load,
             directory=directory,
             memory_limiter=memory_limiter_disk,
         )
 
-        self._comm_buffer: CommShardsBuffer = CommShardsBuffer(
+        self._comm_buffer = CommShardsBuffer(
             send=self.send, memory_limiter=memory_limiter_comms
         )
         # TODO: reduce number of connections to number of workers
@@ -230,8 +227,18 @@ class ShuffleRun(Generic[TransferShardIDType, PartitionIDType, PartitionType]):
         """Get an output partition to the shuffle run"""
 
 
+@dataclass(frozen=True)
+class ArrayRechunkShardID:
+    """Unique identifier of an individual shard within an array rechunking"""
+
+    #: Index of the new chunk the shard belongs
+    new_index: NIndex
+    #: Sub-index of the shard within the new chunk
+    sub_index: NIndex
+
+
 # TODO remove quotes on tuple (requires Python >=3.9)
-class ArrayRechunkRun(ShuffleRun["tuple[NIndex, NIndex]", NIndex, "np.ndarray"]):
+class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
     """State for a single active rechunk execution
 
     This object is responsible for splitting, sending, receiving and combining
@@ -305,8 +312,6 @@ class ArrayRechunkRun(ShuffleRun["tuple[NIndex, NIndex]", NIndex, "np.ndarray"])
             scheduler=scheduler,
             memory_limiter_comms=memory_limiter_comms,
             memory_limiter_disk=memory_limiter_disk,
-            dump=dump_shards,
-            load=load_partition,
         )
         self.old = old
         self.new = new
@@ -318,56 +323,45 @@ class ArrayRechunkRun(ShuffleRun["tuple[NIndex, NIndex]", NIndex, "np.ndarray"])
         self._slicing = rechunk_slicing(old, new)
         self._old_to_new = _old_to_new(old, new)
 
-    async def _receive(self, data: list[tuple[tuple[NIndex, NIndex], bytes]]) -> None:
+    async def _receive(self, data: list[tuple[ArrayRechunkShardID, bytes]]) -> None:
         self.raise_if_closed()
 
-        filtered = []
+        buffers = defaultdict(list)
         for d in data:
-            if d[0] not in self.received:
-                filtered.append(d)
-                self.received.add(d[0])
-                self.total_recvd += sizeof(d)
+            id, payload = d
+            if id in self.received:
+                continue
+            self.received.add(id)
+            self.total_recvd += sizeof(d)
+
+            buffers[id.new_index].append(payload)
+
         del data
-        if not filtered:
+        if not buffers:
             return
         try:
-            buffers = await self.offload(self._reserialize_buffers, filtered)
-            del filtered
             await self._write_to_disk(buffers)
         except Exception as e:
             self._exception = e
             raise
-
-    def _reserialize_buffers(
-        self, data: list[tuple[tuple[NIndex, NIndex], bytes]]
-    ) -> dict[NIndex, list[bytes]]:
-        result = defaultdict(list)
-        for d in data:
-            result[d[0][0]].append(d[1])
-        return result
 
     async def add_partition(self, data: np.ndarray, input_partition: NIndex) -> int:
         self.raise_if_closed()
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to shuffle {self}")
 
-        def _() -> dict[str, list[tuple[tuple[NIndex, NIndex], bytes]]]:
+        def _() -> dict[str, list[tuple[ArrayRechunkShardID, bytes]]]:
             """Return a mapping of worker addresses to a list of tuples of shard IDs
-            and shard data
-
-            Each shard is uniquely identified by its new chunk as well as its sub-index
-            within the new chunk. The receiver uses this identifier for deduplication.
+            and shard data.
 
             As shard data, we serialize the data together with the sub-index of the
             slice within the new chunk to assemble the new chunk from its pieces.
             """
-            out: dict[str, list[tuple[tuple[NIndex, NIndex], bytes]]] = defaultdict(
-                list
-            )
+            out: dict[str, list[tuple[ArrayRechunkShardID, bytes]]] = defaultdict(list)
             for new_index, sub_index, nslice in self._slicing[input_partition]:
                 out[self.worker_for[new_index]].append(
                     (
-                        (new_index, sub_index),
+                        ArrayRechunkShardID(new_index, sub_index),
                         pickle.dumps((sub_index, data[nslice])),
                     )
                 )
@@ -470,8 +464,6 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
             scheduler=scheduler,
             memory_limiter_comms=memory_limiter_comms,
             memory_limiter_disk=memory_limiter_disk,
-            dump=dump_shards,
-            load=load_partition,
         )
         self.column = column
         self.schema = schema
@@ -1016,31 +1008,6 @@ def rechunk_slicing(
             old_index, nslice = zip(*sliced_chunk)
             slicing[old_index].append((new_index, sub_index, nslice))
     return slicing
-
-
-def dump_shards(shards: list[bytes], file: BinaryIO) -> None:
-    """
-    Append multiple serialized shards to the file
-
-    Note: Since this function appends the shards to the file, they must be serialized
-    in a format that allows reading them back as a stream.
-
-    See Also
-    --------
-    load_partition
-    """
-    for shard in shards:
-        file.write(shard)
-
-
-def load_partition(file: BinaryIO) -> bytes:
-    """Load all partition data from the file as a single `bytes` object.
-
-    See Also
-    --------
-    dump_shards
-    """
-    return file.read()
 
 
 def convert_chunk(data: bytes, subdims: tuple[int, ...]) -> np.ndarray:

@@ -3,7 +3,6 @@ from __future__ import annotations
 import contextlib
 import pathlib
 import shutil
-from typing import BinaryIO, Callable
 
 from distributed.shuffle._buffer import ShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
@@ -36,10 +35,6 @@ class DiskShardsBuffer(ShardsBuffer):
     ----------
     directory: pathlib.Path
         Where to write and read data.  Ideally points to fast disk.
-    dump: callable
-        Writes an object to a file, like pickle.dump
-    load: callable
-        Reads an object from that file, like pickle.load
     sizeof: callable
         Measures the size of an object in memory
     """
@@ -49,8 +44,6 @@ class DiskShardsBuffer(ShardsBuffer):
     def __init__(
         self,
         directory: str,
-        dump: Callable[[list[bytes], BinaryIO], None],
-        load: Callable[[BinaryIO], bytes],
         memory_limiter: ResourceLimiter | None = None,
     ):
         super().__init__(
@@ -60,8 +53,6 @@ class DiskShardsBuffer(ShardsBuffer):
         )
         self.directory = pathlib.Path(directory)
         self.directory.mkdir(exist_ok=True)
-        self.dump = dump
-        self.load = load
 
     async def _process(self, id: str, shards: list[bytes]) -> None:
         """Write one buffer to file
@@ -83,7 +74,8 @@ class DiskShardsBuffer(ShardsBuffer):
                 with open(
                     self.directory / str(id), mode="ab", buffering=100_000_000
                 ) as f:
-                    self.dump(shards, f)
+                    for shard in shards:
+                        f.write(shard)
 
     def read(self, id: int | str) -> bytes:
         """Read a complete file back into memory"""
@@ -96,15 +88,14 @@ class DiskShardsBuffer(ShardsBuffer):
                 with open(
                     self.directory / str(id), mode="rb", buffering=100_000_000
                 ) as f:
-                    parts = self.load(f)
+                    data = f.read()
                     size = f.tell()
         except FileNotFoundError:
             raise KeyError(id)
 
-        # TODO: We could consider deleting the file at this point
-        if parts:
+        if data:
             self.bytes_read += size
-            return parts
+            return data
         else:
             raise KeyError(id)
 

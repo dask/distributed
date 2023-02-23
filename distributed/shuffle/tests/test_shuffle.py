@@ -31,9 +31,7 @@ from distributed.shuffle._worker_extension import (
     ShuffleRun,
     ShuffleWorkerExtension,
     convert_partition,
-    dump_shards,
     list_of_buffers_to_table,
-    load_partition,
     split_by_partition,
     split_by_worker,
 )
@@ -684,19 +682,17 @@ def test_processing_chain():
     )
 
     # Our simple file system
-
     filesystem = defaultdict(io.BytesIO)
 
     for partitions in splits_by_worker.values():
         for partition, tables in partitions.items():
-            dump_shards(
-                [serialize_table(table) for table in tables], filesystem[partition]
-            )
+            for table in tables:
+                filesystem[partition].write(serialize_table(table))
 
     out = {}
     for k, bio in filesystem.items():
         bio.seek(0)
-        out[k] = convert_partition(load_partition(bio))
+        out[k] = convert_partition(bio.read())
 
     shuffled_df = pd.concat(table.to_pandas() for table in out.values())
     pd.testing.assert_frame_equal(
