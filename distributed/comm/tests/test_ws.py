@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import warnings
 
@@ -33,10 +34,15 @@ def test_registered():
 
 @gen_test()
 async def test_listen_connect():
+    comm_closed = asyncio.Event()
+
     async def handle_comm(comm):
-        while True:
-            msg = await comm.read()
-            await comm.write(msg)
+        try:
+            while True:
+                msg = await comm.read()
+                await comm.write(msg)
+        finally:
+            comm_closed.set()
 
     async with listen("ws://", handle_comm) as listener:
         comm = await connect(listener.contact_address)
@@ -45,14 +51,20 @@ async def test_listen_connect():
         assert result == b"Hello!"
 
         await comm.close()
+        await comm_closed.wait()
 
 
 @gen_test()
 async def test_listen_connect_wss():
+    comm_closed = asyncio.Event()
+
     async def handle_comm(comm):
-        while True:
-            msg = await comm.read()
-            await comm.write(msg)
+        try:
+            while True:
+                msg = await comm.read()
+                await comm.write(msg)
+        finally:
+            comm_closed.set()
 
     server_ctx = get_server_ssl_context()
     client_ctx = get_client_ssl_context()
@@ -65,6 +77,7 @@ async def test_listen_connect_wss():
         result = await comm.read()
         assert result == b"Hello!"
         await comm.close()
+        await comm_closed.wait()
 
 
 @gen_test()
