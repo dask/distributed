@@ -555,9 +555,9 @@ async def test_assert_story_identity(c, s, a, strict):
 
 
 @gen_cluster()
-async def test_dump_cluster_state(s, a, b, tmpdir):
-    await dump_cluster_state(s, [a, b], str(tmpdir), "dump")
-    with open(f"{tmpdir}/dump.yaml") as fh:
+async def test_dump_cluster_state(s, a, b, tmp_path):
+    await dump_cluster_state(s, [a, b], str(tmp_path), "dump")
+    with open(f"{tmp_path}/dump.yaml") as fh:
         out = yaml.safe_load(fh)
 
     assert out.keys() == {"scheduler", "workers", "versions"}
@@ -565,9 +565,9 @@ async def test_dump_cluster_state(s, a, b, tmpdir):
 
 
 @gen_cluster(nthreads=[])
-async def test_dump_cluster_state_no_workers(s, tmpdir):
-    await dump_cluster_state(s, [], str(tmpdir), "dump")
-    with open(f"{tmpdir}/dump.yaml") as fh:
+async def test_dump_cluster_state_no_workers(s, tmp_path):
+    await dump_cluster_state(s, [], str(tmp_path), "dump")
+    with open(f"{tmp_path}/dump.yaml") as fh:
         out = yaml.safe_load(fh)
 
     assert out.keys() == {"scheduler", "workers", "versions"}
@@ -575,9 +575,9 @@ async def test_dump_cluster_state_no_workers(s, tmpdir):
 
 
 @gen_cluster(Worker=Nanny)
-async def test_dump_cluster_state_nannies(s, a, b, tmpdir):
-    await dump_cluster_state(s, [a, b], str(tmpdir), "dump")
-    with open(f"{tmpdir}/dump.yaml") as fh:
+async def test_dump_cluster_state_nannies(s, a, b, tmp_path):
+    await dump_cluster_state(s, [a, b], str(tmp_path), "dump")
+    with open(f"{tmp_path}/dump.yaml") as fh:
         out = yaml.safe_load(fh)
 
     assert out.keys() == {"scheduler", "workers", "versions"}
@@ -585,10 +585,10 @@ async def test_dump_cluster_state_nannies(s, a, b, tmpdir):
 
 
 @gen_cluster()
-async def test_dump_cluster_state_unresponsive_local_worker(s, a, b, tmpdir):
+async def test_dump_cluster_state_unresponsive_local_worker(s, a, b, tmp_path):
     a.stop()
-    await dump_cluster_state(s, [a, b], str(tmpdir), "dump")
-    with open(f"{tmpdir}/dump.yaml") as fh:
+    await dump_cluster_state(s, [a, b], str(tmp_path), "dump")
+    with open(f"{tmp_path}/dump.yaml") as fh:
         out = yaml.safe_load(fh)
 
     assert out.keys() == {"scheduler", "workers", "versions"}
@@ -602,14 +602,14 @@ async def test_dump_cluster_state_unresponsive_local_worker(s, a, b, tmpdir):
     Worker=Nanny,
     config={"distributed.comm.timeouts.connect": "600ms"},
 )
-async def test_dump_cluster_unresponsive_remote_worker(c, s, a, b, tmpdir):
+async def test_dump_cluster_unresponsive_remote_worker(c, s, a, b, tmp_path):
     clog_fut = asyncio.create_task(
         c.run(lambda dask_scheduler: dask_scheduler.stop(), workers=[a.worker_address])
     )
     await asyncio.sleep(0.2)
 
-    await dump_cluster_state(s, [a, b], str(tmpdir), "dump")
-    with open(f"{tmpdir}/dump.yaml") as fh:
+    await dump_cluster_state(s, [a, b], str(tmp_path), "dump")
+    with open(f"{tmp_path}/dump.yaml") as fh:
         out = yaml.safe_load(fh)
 
     assert out.keys() == {"scheduler", "workers", "versions"}
