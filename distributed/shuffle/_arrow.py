@@ -28,6 +28,21 @@ def check_dtype_support(meta_input: pd.DataFrame) -> None:
             raise TypeError("p2p does not support sparse data found in column '{name}'")
 
 
+def check_minimal_arrow_version() -> None:
+    suffix = ""
+    # First version to introduce Table.sort_by
+    minversion = "7.0.0"
+    try:
+        import pyarrow as pa
+        from packaging.version import parse
+
+        if parse(pa.__version__) >= parse(minversion):
+            return
+        suffix = f" but only found {pa.__version__}"
+    finally:
+        raise RuntimeError(f"P2P shuffling requires pyarrow>={minversion}" + suffix)
+
+
 def dump_shards(shards: list[bytes], file: BinaryIO) -> None:
     """
     Write multiple shard tables to the file

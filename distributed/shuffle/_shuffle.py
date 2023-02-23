@@ -8,6 +8,7 @@ from dask.highlevelgraph import HighLevelGraph
 from dask.layers import SimpleShuffleLayer
 
 from distributed.shuffle._arrow import check_dtype_support
+from distributed.shuffle._arrow import check_minimal_arrow_version
 
 logger = logging.getLogger("distributed.shuffle")
 if TYPE_CHECKING:
@@ -138,6 +139,7 @@ class P2PShuffleLayer(SimpleShuffleLayer):
         parts_out: list | None = None,
         annotations: dict | None = None,
     ):
+        check_minimal_arrow_version()
         annotations = annotations or {}
         annotations.update({"shuffle": lambda key: key[1]})
         super().__init__(

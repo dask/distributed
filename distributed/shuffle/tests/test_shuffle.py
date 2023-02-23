@@ -41,6 +41,11 @@ from distributed.utils import Deadline
 from distributed.utils_test import gen_cluster, gen_test, wait_for_state
 from distributed.worker_state_machine import TaskState as WorkerTaskState
 
+try:
+    import pyarrow as pa
+except ImportError:
+    pa = None
+
 
 async def clean_worker(
     worker: Worker, interval: float = 0.01, timeout: int | None = None
@@ -67,6 +72,22 @@ async def clean_scheduler(
         await asyncio.sleep(interval)
     assert not extension.states
     assert not extension.heartbeats
+
+
+@pytest.mark.skipif(
+    pa is not None,
+    reason="We don't have a CI job that is installing a very old pyarrow version",
+)
+@gen_cluster(client=True)
+async def test_minimal_version(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    with pytest.raises(RuntimeError, match="requires pyarrow"):
+        await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
 
 
 @gen_cluster(client=True)
