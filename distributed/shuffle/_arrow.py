@@ -37,13 +37,12 @@ def check_minimal_arrow_version() -> None:
     Raises a RuntimeError in case pyarrow is not installed or installed version
     is not recent enough.
     """
-    suffix = ""
     # First version to introduce Table.sort_by
     minversion = "7.0.0"
     try:
         import pyarrow as pa
     except ImportError:
-        raise RuntimeError(f"P2P shuffling requires pyarrow>={minversion}" + suffix)
+        raise RuntimeError(f"P2P shuffling requires pyarrow>={minversion}")
 
     if parse(pa.__version__) < parse(minversion):
         raise RuntimeError(
