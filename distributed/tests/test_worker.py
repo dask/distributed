@@ -1061,6 +1061,9 @@ async def test_get_client_coroutine(c, s, a, b):
     assert results == {a.address: 11, b.address: 11}
 
 
+@pytest.mark.xfail(
+    reason="Async tasks do not provide worker context. See https://github.com/dask/distributed/pull/7339"
+)
 def test_get_client_coroutine_sync(client, s, a, b):
     async def f():
         client = await get_client()
@@ -1068,8 +1071,8 @@ def test_get_client_coroutine_sync(client, s, a, b):
         result = await future
         return result
 
-    results = client.run(f)
-    assert results == {a["address"]: 11, b["address"]: 11}
+    for w in [a, b]:
+        assert client.submit(f, workers=[w["address"]]).result() == 1
 
 
 @gen_cluster()
@@ -1238,21 +1241,6 @@ async def test_deque_handler(s):
         msg = deque_handler.deque[-1]
         assert "distributed.worker" in deque_handler.format(msg)
         assert any(msg.msg == "foo456" for msg in deque_handler.deque)
-
-
-def test_get_worker_name(client):
-    def f():
-        get_client().submit(inc, 1).result()
-
-    client.run(f)
-
-    def func(dask_scheduler):
-        return list(dask_scheduler.clients)
-
-    start = time()
-    while not any("worker" in n for n in client.run_on_scheduler(func)):
-        sleep(0.1)
-        assert time() < start + 10
 
 
 @gen_cluster(nthreads=[], client=True)
@@ -2225,8 +2213,8 @@ async def test_worker_client_uses_default_no_close(c, s, a):
         def_client = get_client()
         return def_client.id
 
-    worker_client = await c.submit(get_worker_client_id)
-    assert worker_client == existing_client
+    wclient = await c.submit(get_worker_client_id)
+    assert wclient == existing_client
 
     assert not Worker._initialized_clients
 

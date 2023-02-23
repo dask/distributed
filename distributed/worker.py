@@ -41,7 +41,7 @@ from typing import (
     overload,
 )
 
-from tlz import first, keymap, pluck
+from tlz import keymap, pluck
 from tornado.ioloop import IOLoop
 
 import dask
@@ -106,6 +106,7 @@ from distributed.utils import (
     parse_ports,
     recursive_to_dict,
     run_in_executor_with_context,
+    set_thread_state,
     silence_logging,
     thread_state,
     wait_for,
@@ -2154,10 +2155,26 @@ class Worker(BaseWorker, ServerNode):
     ################
 
     def run(self, comm, function, args=(), wait=True, kwargs=None):
-        return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
+        return run(
+            self,
+            comm,
+            function=function,
+            args=args,
+            kwargs=kwargs,
+            wait=wait,
+            thread_state={"execution_state": self.execution_state},
+        )
 
     def run_coroutine(self, comm, function, args=(), kwargs=None, wait=True):
-        return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
+        return run(
+            self,
+            comm,
+            function=function,
+            args=args,
+            kwargs=kwargs,
+            wait=wait,
+            thread_state={"execution_state": self.execution_state},
+        )
 
     async def actor_execute(
         self,
@@ -2208,9 +2225,13 @@ class Worker(BaseWorker, ServerNode):
         start = time()
         # Offload deserializing large tasks
         if sizeof(ts.run_spec) > OFFLOAD_THRESHOLD:
-            function, args, kwargs = await offload(_deserialize, *ts.run_spec)
+            function, args, kwargs = await offload(
+                _deserialize, *ts.run_spec, execution_state=self.execution_state
+            )
         else:
-            function, args, kwargs = _deserialize(*ts.run_spec)
+            function, args, kwargs = _deserialize(
+                *ts.run_spec, execution_state=self.execution_state
+            )
         stop = time()
 
         if stop - start > 0.010:
@@ -2704,10 +2725,7 @@ def get_worker() -> Worker:
     try:
         return thread_state.execution_state["worker"]
     except AttributeError:
-        try:
-            return first(w for w in Worker._instances if w.status in WORKER_ANY_RUNNING)
-        except StopIteration:
-            raise ValueError("No workers found")
+        raise ValueError("No workers found") from None
 
 
 def get_client(address=None, timeout=None, resolve_address=True) -> Client:
@@ -2925,21 +2943,26 @@ def loads_function(bytes_object):
 
 
 @context_meter.meter("deserialize")
-def _deserialize(function=None, args=None, kwargs=None, task=NO_VALUE):
+def _deserialize(
+    function=None, args=None, kwargs=None, task=NO_VALUE, execution_state=None
+):
     """Deserialize task inputs and regularize to func, args, kwargs"""
-    if function is not None:
-        function = loads_function(function)
-    if args and isinstance(args, bytes):
-        args = pickle.loads(args)
-    if kwargs and isinstance(kwargs, bytes):
-        kwargs = pickle.loads(kwargs)
+    # Some objects require threadlocal state during deserialization, e.g. to
+    # detect the current worker
+    with set_thread_state(execution_state=execution_state):
+        if function is not None:
+            function = loads_function(function)
+        if args and isinstance(args, bytes):
+            args = pickle.loads(args)
+        if kwargs and isinstance(kwargs, bytes):
+            kwargs = pickle.loads(kwargs)
 
-    if task is not NO_VALUE:
-        assert not function and not args and not kwargs
-        function = execute_task
-        args = (task,)
+        if task is not NO_VALUE:
+            assert not function and not args and not kwargs
+            function = execute_task
+            args = (task,)
 
-    return function, args or (), kwargs or {}
+        return function, args or (), kwargs or {}
 
 
 def execute_task(task):
@@ -3055,11 +3078,12 @@ def apply_function(
     ident = threading.get_ident()
     with active_threads_lock:
         active_threads[ident] = key
-    thread_state.start_time = time()
-    thread_state.execution_state = execution_state
-    thread_state.key = key
-
-    msg = apply_function_simple(function, args, kwargs, time_delay)
+    with set_thread_state(
+        start_time=time(),
+        execution_state=execution_state,
+        key=key,
+    ):
+        msg = apply_function_simple(function, args, kwargs, time_delay)
 
     with active_threads_lock:
         del active_threads[ident]
@@ -3186,16 +3210,18 @@ def apply_function_actor(
     with active_threads_lock:
         active_threads[ident] = key
 
-    thread_state.execution_state = execution_state
-    thread_state.key = key
-    thread_state.actor = True
+    with set_thread_state(
+        start_time=time(),
+        execution_state=execution_state,
+        key=key,
+        actor=True,
+    ):
+        result = function(*args, **kwargs)
 
-    result = function(*args, **kwargs)
+        with active_threads_lock:
+            del active_threads[ident]
 
-    with active_threads_lock:
-        del active_threads[ident]
-
-    return result
+        return result
 
 
 def get_msg_safe_str(msg):
@@ -3259,7 +3285,9 @@ def convert_kwargs_to_str(kwargs: dict, max_len: int | None = None) -> str:
         return "{{{}}}".format(", ".join(strs))
 
 
-async def run(server, comm, function, args=(), kwargs=None, wait=True):
+async def run(
+    server, comm, function, args=(), kwargs=None, wait=True, thread_state=None
+):
     kwargs = kwargs or {}
     function = pickle.loads(function)
     is_coro = iscoroutinefunction(function)
@@ -3273,7 +3301,9 @@ async def run(server, comm, function, args=(), kwargs=None, wait=True):
     if has_arg(function, "dask_scheduler"):
         kwargs["dask_scheduler"] = server
     logger.info("Run out-of-band function %r", funcname(function))
+
     try:
+        thread_state = thread_state or {}
         if not is_coro:
             result = function(*args, **kwargs)
         else:

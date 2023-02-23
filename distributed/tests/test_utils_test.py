@@ -39,6 +39,7 @@ from distributed.utils_test import (
     check_thread_leak,
     cluster,
     dump_cluster_state,
+    ensure_no_new_clients,
     freeze_batched_send,
     gen_cluster,
     gen_nbytes,
@@ -1081,3 +1082,31 @@ def test_sizeof():
 def test_sizeof_error(input, exc, msg):
     with pytest.raises(exc, match=msg):
         SizeOf(input)
+
+
+@gen_test()
+async def test_ensure_no_new_clients():
+    with ensure_no_new_clients():
+        async with Scheduler() as s:
+            pass
+    async with Scheduler() as s:
+        # Running client already exists
+        async with Client(s.address, asynchronous=True):
+            try:
+                # We detect a running client
+                with pytest.raises(AssertionError):
+                    with ensure_no_new_clients():
+                        c = await Client(s.address, asynchronous=True)
+            finally:
+                await c.close()
+
+        # Forbid also clients that are closed again
+        with pytest.raises(AssertionError):
+            with ensure_no_new_clients():
+                async with Client(s.address, asynchronous=True):
+                    pass
+
+        # But we also want to forbid any initialization
+        with pytest.raises(AssertionError):
+            with ensure_no_new_clients():
+                Client(s.address, asynchronous=True)

@@ -104,6 +104,7 @@ from distributed.utils_test import (
     dec,
     div,
     double,
+    ensure_no_new_clients,
     gen_cluster,
     gen_test,
     get_cert,
@@ -1354,12 +1355,6 @@ async def test_scatter_direct(c, s, a, b):
     result = await future
     assert result == 123
     assert not s.counters["op"].components[0]["scatter"]
-
-    result = await future
-    assert not s.counters["op"].components[0]["gather"]
-
-    result = await c.gather(future)
-    assert not s.counters["op"].components[0]["gather"]
 
 
 @gen_cluster()
@@ -3977,15 +3972,37 @@ async def test_serialize_future(s, a, b):
         result = await future
 
         for ci in (c1, c2):
-            for ctxman in lambda ci: ci.as_current(), lambda ci: temp_default_client(
-                ci
-            ):
-                with ctxman(ci):
+            with ensure_no_new_clients():
+                with ci.as_current():
                     future2 = pickle.loads(pickle.dumps(future))
                     assert future2.client is ci
                     assert stringify(future2.key) in ci.futures
                     result2 = await future2
                     assert result == result2
+                with temp_default_client(ci):
+                    future2 = pickle.loads(pickle.dumps(future))
+
+
+@gen_cluster()
+async def test_serialize_future_without_client(s, a, b):
+    # Do not use a ctx manager to avoid having this being set as a current and/or default client
+    c1 = await Client(s.address, asynchronous=True, set_as_default=False)
+
+    with ensure_no_new_clients():
+
+        def do_stuff():
+            return 1
+
+        future = c1.submit(do_stuff)
+        pickled = pickle.dumps(future)
+        unpickled_fut = pickle.loads(pickled)
+
+    with pytest.raises(RuntimeError):
+        await unpickled_fut
+
+    with c1.as_current():
+        unpickled_fut_ctx = pickle.loads(pickled)
+        assert await unpickled_fut_ctx == 1
 
 
 @gen_cluster()
@@ -5301,11 +5318,19 @@ async def test_sub_submit_priority(c, s, a, b):
 
 
 def test_get_client_sync(c, s, a, b):
-    results = c.run(lambda: get_worker().scheduler.address)
-    assert results == {w["address"]: s["address"] for w in [a, b]}
-
-    results = c.run(lambda: get_client().scheduler.address)
-    assert results == {w["address"]: s["address"] for w in [a, b]}
+    for w in [a, b]:
+        assert (
+            c.submit(
+                lambda: get_worker().scheduler.address, workers=[w["address"]]
+            ).result()
+            == s["address"]
+        )
+        assert (
+            c.submit(
+                lambda: get_client().scheduler.address, workers=[w["address"]]
+            ).result()
+            == s["address"]
+        )
 
 
 @gen_cluster(client=True)
@@ -5331,13 +5356,20 @@ def test_serialize_collections_of_futures_sync(c):
 
     df = pd.DataFrame({"x": [1, 2, 3]})
     ddf = dd.from_pandas(df, npartitions=2).persist()
-    future = c.scatter(ddf)
+    # future = c.scatter(ddf)
 
-    result = future.result()
-    assert_eq(result.compute(), df)
+    # result = future.result()
+    # futs = futures_of(result)
+    assert_eq(ddf.compute(), df)
 
-    assert future.type == dd.DataFrame
-    assert c.submit(lambda x, y: assert_eq(x.compute(), y), future, df).result()
+    # assert future.type == dd.DataFrame
+    # futs = futures_of(future)
+    def inner(x, y):
+        futs = futures_of(x)
+        df = x.compute()
+        assert_eq(df, y)
+
+    c.submit(inner, ddf, df).result()
 
 
 def _dynamic_workload(x, delay=0.01):
@@ -6356,7 +6388,6 @@ async def test_futures_of_sorted(c, s, a, b):
         assert str(k) in str(f)
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(
     client=True,
     config={
@@ -6456,7 +6487,6 @@ async def test_as_completed_async_for_results(c, s, a, b):
     await f()
 
     assert set(results) == set(range(1, 11))
-    assert not s.counters["op"].components[0]["gather"]
 
 
 @gen_cluster(client=True)

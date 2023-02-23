@@ -342,20 +342,21 @@ class Semaphore(SyncMethodMixin):
         scheduler_rpc=None,
         loop=None,
     ):
-        try:
+        self.scheduler = scheduler_rpc
+        self.loop = loop
+        if scheduler_rpc is None or loop is None:
             try:
-                worker = get_worker()
-                self.scheduler = scheduler_rpc or worker.scheduler
-                self.loop = loop or worker.loop
+                try:
+                    worker = get_worker()
+                    self.scheduler = scheduler_rpc or worker.scheduler
+                    self.loop = loop or worker.loop
 
+                except ValueError:
+                    client = get_client()
+                    self.scheduler = scheduler_rpc or client.scheduler
+                    self.loop = loop or client.loop
             except ValueError:
-                client = get_client()
-                self.scheduler = scheduler_rpc or client.scheduler
-                self.loop = loop or client.loop
-        except ValueError:
-            # This happens if this is deserialized on the scheduler
-            self.scheduler = None
-            self.loop = None
+                pass
         self.name = name or "semaphore-" + uuid.uuid4().hex
         self.max_leases = max_leases
         self.id = uuid.uuid4().hex
@@ -547,4 +548,5 @@ class Semaphore(SyncMethodMixin):
         return self.sync(self.scheduler.semaphore_close, name=self.name)
 
     def __del__(self):
-        self.refresh_callback.stop()
+        if hasattr(self, "refresh_callback"):
+            self.refresh_callback.stop()
