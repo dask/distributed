@@ -29,6 +29,12 @@ def check_dtype_support(meta_input: pd.DataFrame) -> None:
 
 
 def check_minimal_arrow_version() -> None:
+    """Verify that the the correct version of pyarrow is installed to support
+    the P2P extension.
+
+    Raises a RuntimeError in case pyarrow is not installed or installed version
+    is not recent enough.
+    """
     suffix = ""
     # First version to introduce Table.sort_by
     minversion = "7.0.0"
