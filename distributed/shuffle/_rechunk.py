@@ -118,11 +118,11 @@ class ShardID(NamedTuple):
     }
     """
 
-    #: Index of the new chunk to which the shard belongs
-    new_index: NIndex
+    #: Index of the new output chunk to which the shard belongs
+    chunk_index: NIndex
     #: Index of the shard within the multi-dimensional array of shards that will be
     # concatenated into the new chunk
-    sub_index: NIndex
+    shard_index: NIndex
 
 
 def rechunk_slicing(
@@ -148,9 +148,9 @@ def rechunk_slicing(
     for new_index, new_chunk in zip(new_indices, intersections):
         sub_shape = [len({slice[dim][0] for slice in new_chunk}) for dim in range(ndim)]
 
-        sub_indices = product(*(range(dim) for dim in sub_shape))
+        shard_indices = product(*(range(dim) for dim in sub_shape))
 
-        for sub_index, sliced_chunk in zip(sub_indices, new_chunk):
+        for shard_index, sliced_chunk in zip(shard_indices, new_chunk):
             old_index, nslice = zip(*sliced_chunk)
-            slicing[old_index].append((ShardID(new_index, sub_index), nslice))
+            slicing[old_index].append((ShardID(new_index, shard_index), nslice))
     return slicing

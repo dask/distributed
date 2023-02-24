@@ -321,7 +321,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
             self.received.add(id)
             self.total_recvd += sizeof(d)
 
-            buffers[id.new_index].append(payload)
+            buffers[id.chunk_index].append(payload)
 
         del data
         if not buffers:
@@ -349,8 +349,8 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
             """
             out: dict[str, list[tuple[ArrayRechunkShardID, bytes]]] = defaultdict(list)
             for id, nslice in self._slicing[input_partition]:
-                out[self.worker_for[id.new_index]].append(
-                    (id, pickle.dumps((id.sub_index, data[nslice])))
+                out[self.worker_for[id.chunk_index]].append(
+                    (id, pickle.dumps((id.shard_index, data[nslice])))
                 )
             return out
 
