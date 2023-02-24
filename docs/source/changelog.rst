@@ -1,6 +1,52 @@
 Changelog
 =========
 
+.. _v2023.2.1:
+
+2023.2.1
+--------
+
+Released on February 24, 2023
+
+
+Enhancements
+^^^^^^^^^^^^
+- P2P for array rechunking (:pr:`7534`) `Hendrik Makait`_
+- P2P HashJoin (:pr:`7514`) `Florian Jetter`_
+- Unpickle Events, Variables, Queues and Semaphore safely without Client context (:pr:`7579`) `Florian Jetter`_
+- Allow pickle to fall back to dask_serialize (:pr:`7567`) `Florian Jetter`_
+- make ``ConnectionPool.remove`` cancel connection attempts  (:pr:`7547`) `Thomas Grainger`_
+- Meter how long each task prefix stays in each state (:pr:`7560`) `crusaderky`_
+
+Bug Fixes
+^^^^^^^^^
+- Avoid parsing ``sys.argv`` when starting ``jupyter`` server (:pr:`7573`) `Brett Naul`_
+- ``str``/``bytes`` compatibility for PyNVML device name (:pr:`7563`) `James Bourbeau`_
+- ``metrics.monotonic()`` is not monotonic on Windows (:pr:`7558`) `crusaderky`_
+- Fix for ``bytes``/``str`` discrepancy after PyNVML update (:pr:`7544`) `Peter Andreas Entschev`_
+
+Maintenance
+^^^^^^^^^^^
+- Raise when attempting P2P with active fuse optimization (:pr:`7585`) `Hendrik Makait`_
+- Fix ``test_shuffling`` (:pr:`7581`) `Hendrik Makait`_
+- P2P: raise RuntimeError if pyarrow version is not sufficient (:pr:`7578`) `Florian Jetter`_
+- Check for dtype support in p2p (:pr:`7425`) `Hendrik Makait`_
+- Update parsing of FULL_RAPIDS_VER/FULL_UCX_PY_VER (:pr:`7568`) `Charles Blackmon-Luca`_
+- move retry from get_data_from_worker to gather_from_workers  (:pr:`7546`) `Thomas Grainger`_
+- Increase ``numpy`` and ``pandas`` version pins for nightlies (:pr:`7562`) `James Bourbeau`_
+- Set validate=True in all tests (:pr:`7557`) `crusaderky`_
+- Remove dead code from _get_task_finished_msg (:pr:`7561`) `crusaderky`_
+- Mark tests that take >2s as slow (:pr:`7556`) `crusaderky`_
+- Fix test_scatter_no_workers on slow CI (:pr:`7559`) `crusaderky`_
+- Unskip ``test_delete_some_results`` (:pr:`7508`) `Hendrik Makait`_
+- scatter() should not sidestep the worker transition machinery (:pr:`7545`) `crusaderky`_
+- pre-commit bump (:pr:`7541`) `crusaderky`_
+- Better assertions in Worker.validate_state() (:pr:`7549`) `crusaderky`_
+- Bump jacobtomlinson/gha-find-replace from 2 to 3 (:pr:`7540`) `James Bourbeau`_
+- Bump ``black`` to 23.1.0 (:pr:`7542`) `crusaderky`_
+- Run GPU tests on python 3.8 & 3.10 (:pr:`7537`) `Charles Blackmon-Luca`_
+
+
 .. _v2023.2.0:
 
 2023.2.0
