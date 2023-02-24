@@ -177,7 +177,6 @@ async def test_merge(c, s, a, b, how):
 @gen_cluster(client=True)
 @pytest.mark.parametrize("how", ["inner", "outer", "left", "right"])
 async def test_merge_by_multiple_columns(c, s, a, b, how):
-    shuffle_method = "p2p"
     # warnings here from pandas
     pdf1l = pd.DataFrame(
         {
