@@ -101,7 +101,7 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
         return da.Array(graph, name, chunks, meta=x)
 
 
-@dataclass(frozen=True)
+@dataclass
 class ShardID:
     """Unique identifier of an individual shard within an array rechunk"""
 
