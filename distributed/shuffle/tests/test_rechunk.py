@@ -147,10 +147,10 @@ def test_raise_on_fuse_optimization():
         rechunk(x, chunks=new, algorithm="p2p")
 
 
-@pytest.mark.parametrize("rechunk_config", ["tasks", "p2p", None])
-@pytest.mark.parametrize("rechunk_keyword", ["tasks", "p2p", None])
+@pytest.mark.parametrize("config", ["tasks", "p2p", None])
+@pytest.mark.parametrize("keyword", ["tasks", "p2p", None])
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
-async def test_rechunk_configuration(c, s, *ws, rechunk_config, rechunk_keyword):
+async def test_rechunk_configuration(c, s, *ws, config, keyword):
     """Try rechunking a random 1d matrix
 
     See Also
@@ -160,10 +160,10 @@ async def test_rechunk_configuration(c, s, *ws, rechunk_config, rechunk_keyword)
     a = np.random.uniform(0, 1, 30)
     x = da.from_array(a, chunks=((10,) * 3,))
     new = ((6,) * 5,)
-    with dask.config.set(rechunk=rechunk_config):
-        x2 = rechunk(x, chunks=new, rechunk=rechunk_keyword)
-    expected_method = rechunk_keyword if rechunk_keyword is not None else rechunk_config
-    if expected_method == "p2p":
+    with dask.config.set({"array.rechunk.algorithm": config}):
+        x2 = rechunk(x, chunks=new, algorithm=keyword)
+    expected_algorithm = keyword if keyword is not None else config
+    if expected_algorithm == "p2p":
         assert all(key[0].startswith("rechunk-p2p") for key in x2.__dask_keys__())
     else:
         assert not any(key[0].startswith("rechunk-p2p") for key in x2.__dask_keys__())
@@ -183,7 +183,7 @@ async def test_rechunk_2d(c, s, *ws):
     a = np.random.uniform(0, 1, 300).reshape((10, 30))
     x = da.from_array(a, chunks=((1, 2, 3, 4), (5,) * 6))
     new = ((5, 5), (15,) * 2)
-    x2 = rechunk(x, chunks=new, rechunk="p2p")
+    x2 = rechunk(x, chunks=new, algorithm="p2p")
     assert x2.chunks == new
     assert np.all(await c.compute(x2) == a)
 
@@ -200,7 +200,7 @@ async def test_rechunk_4d(c, s, *ws):
     a = np.random.uniform(0, 1, 10000).reshape((10,) * 4)
     x = da.from_array(a, chunks=old)
     new = ((10,),) * 4
-    x2 = rechunk(x, chunks=new, rechunk="p2p")
+    x2 = rechunk(x, chunks=new, algorithm="p2p")
     assert x2.chunks == new
     assert np.all(await c.compute(x2) == a)
 
@@ -214,7 +214,7 @@ async def test_rechunk_expand(c, s, *ws):
     """
     a = np.random.uniform(0, 1, 100).reshape((10, 10))
     x = da.from_array(a, chunks=(5, 5))
-    y = x.rechunk(chunks=((3, 3, 3, 1), (3, 3, 3, 1)), rechunk="p2p")
+    y = x.rechunk(chunks=((3, 3, 3, 1), (3, 3, 3, 1)), algorithm="p2p")
     assert np.all(await c.compute(y) == a)
 
 
@@ -231,10 +231,10 @@ async def test_rechunk_expand2(c, s, *ws):
         old = ((a - off, off),) * b
         x = da.from_array(orig, chunks=old)
         new = ((a - off2, off2),) * b
-        assert np.all(await c.compute(x.rechunk(chunks=new, rechunk="p2p")) == orig)
+        assert np.all(await c.compute(x.rechunk(chunks=new, algorithm="p2p")) == orig)
         if a - off - off2 > 0:
             new = ((off, a - off2 - off, off2),) * b
-            y = await c.compute(x.rechunk(chunks=new, rechunk="p2p"))
+            y = await c.compute(x.rechunk(chunks=new, algorithm="p2p"))
             assert np.all(y == orig)
 
 
@@ -250,7 +250,7 @@ async def test_rechunk_method(c, s, *ws):
     new = ((3, 3, 3, 1),) * 4
     a = np.random.uniform(0, 1, 10000).reshape((10,) * 4)
     x = da.from_array(a, chunks=old)
-    x2 = x.rechunk(chunks=new, rechunk="p2p")
+    x2 = x.rechunk(chunks=new, algorithm="p2p")
     assert x2.chunks == new
     assert np.all(await c.compute(x2) == a)
 
@@ -268,7 +268,7 @@ async def test_rechunk_blockshape(c, s, *ws):
     old_chunks = ((4, 4, 2), (3, 3, 3, 1))
     a = np.random.uniform(0, 1, 100).reshape((10, 10))
     x = da.from_array(a, chunks=old_chunks)
-    check1 = rechunk(x, chunks=new_chunks, rechunk="p2p")
+    check1 = rechunk(x, chunks=new_chunks, algorithm="p2p")
     assert check1.chunks == new_blockdims
     assert np.all(await c.compute(check1) == a)
 
@@ -281,7 +281,7 @@ async def test_dtype(c, s, *ws):
     dask.array.tests.test_rechunk.test_dtype
     """
     x = da.ones(5, chunks=(2,))
-    assert x.rechunk(chunks=(1,), rechunk="p2p").dtype == x.dtype
+    assert x.rechunk(chunks=(1,), algorithm="p2p").dtype == x.dtype
 
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
@@ -292,19 +292,19 @@ async def test_rechunk_with_dict(c, s, *ws):
     dask.array.tests.test_rechunk.test_rechunk_with_dict
     """
     x = da.ones((24, 24), chunks=(4, 8))
-    y = x.rechunk(chunks={0: 12}, rechunk="p2p")
+    y = x.rechunk(chunks={0: 12}, algorithm="p2p")
     assert y.chunks == ((12, 12), (8, 8, 8))
 
     x = da.ones((24, 24), chunks=(4, 8))
-    y = x.rechunk(chunks={0: (12, 12)}, rechunk="p2p")
+    y = x.rechunk(chunks={0: (12, 12)}, algorithm="p2p")
     assert y.chunks == ((12, 12), (8, 8, 8))
 
     x = da.ones((24, 24), chunks=(4, 8))
-    y = x.rechunk(chunks={0: -1}, rechunk="p2p")
+    y = x.rechunk(chunks={0: -1}, algorithm="p2p")
     assert y.chunks == ((24,), (8, 8, 8))
 
     x = da.ones((24, 24), chunks=(4, 8))
-    y = x.rechunk(chunks={0: None, 1: "auto"}, rechunk="p2p")
+    y = x.rechunk(chunks={0: None, 1: "auto"}, algorithm="p2p")
     assert y.chunks == ((4, 4, 4, 4, 4, 4), (24,))
 
 
@@ -316,9 +316,9 @@ async def test_rechunk_with_empty_input(c, s, *ws):
     dask.array.tests.test_rechunk.test_rechunk_with_empty_input
     """
     x = da.ones((24, 24), chunks=(4, 8))
-    assert x.rechunk(chunks={}, rechunk="p2p").chunks == x.chunks
+    assert x.rechunk(chunks={}, algorithm="p2p").chunks == x.chunks
     with pytest.raises(ValueError):
-        x.rechunk(chunks=(), rechunk="p2p")
+        x.rechunk(chunks=(), algorithm="p2p")
 
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
@@ -330,11 +330,11 @@ async def test_rechunk_with_null_dimensions(c, s, *ws):
     """
     x = da.from_array(np.ones((24, 24)), chunks=(4, 8))
     assert (
-        x.rechunk(chunks=(None, 4), rechunk="p2p").chunks
+        x.rechunk(chunks=(None, 4), algorithm="p2p").chunks
         == da.ones((24, 24), chunks=(4, 4)).chunks
     )
     assert (
-        x.rechunk(chunks={0: None, 1: 4}, rechunk="p2p").chunks
+        x.rechunk(chunks={0: None, 1: 4}, algorithm="p2p").chunks
         == da.ones((24, 24), chunks=(4, 4)).chunks
     )
 
@@ -347,7 +347,7 @@ async def test_rechunk_with_integer(c, s, *ws):
     dask.array.tests.test_rechunk.test_rechunk_with_integer
     """
     x = da.from_array(np.arange(5), chunks=4)
-    y = x.rechunk(3, rechunk="p2p")
+    y = x.rechunk(3, algorithm="p2p")
     assert y.chunks == ((3, 2),)
     assert (await c.compute(x) == await c.compute(y)).all()
 
@@ -361,7 +361,7 @@ async def test_rechunk_0d(c, s, *ws):
     """
     a = np.array(42)
     x = da.from_array(a, chunks=())
-    y = x.rechunk((), rechunk="p2p")
+    y = x.rechunk((), algorithm="p2p")
     assert y.chunks == ()
     assert await c.compute(y) == a
 
@@ -376,7 +376,7 @@ async def test_rechunk_empty_array(c, s, *ws, arr):
     --------
     dask.array.tests.test_rechunk.test_rechunk_empty_array
     """
-    arr.rechunk(rechunk="p2p")
+    arr.rechunk(algorithm="p2p")
     assert arr.size == 0
 
 
@@ -388,7 +388,7 @@ async def test_rechunk_empty(c, s, *ws):
     dask.array.tests.test_rechunk.test_rechunk_empty
     """
     x = da.ones((0, 10), chunks=(5, 5))
-    y = x.rechunk((2, 2), rechunk="p2p")
+    y = x.rechunk((2, 2), algorithm="p2p")
     assert y.chunks == ((0,), (2,) * 5)
     assert_eq(await c.compute(x), await c.compute(y))
 
@@ -401,7 +401,7 @@ async def test_rechunk_zero_dim_array(c, s, *ws):
     dask.array.tests.test_rechunk.test_rechunk_zero_dim_array
     """
     x = da.zeros((4, 0), chunks=3)
-    y = x.rechunk({0: 4}, rechunk="p2p")
+    y = x.rechunk({0: 4}, algorithm="p2p")
     assert y.chunks == ((4,), (0,))
     assert_eq(await c.compute(x), await c.compute(y))
 
@@ -414,7 +414,7 @@ async def test_rechunk_zero_dim_array_II(c, s, *ws):
     dask.array.tests.test_rechunk.test_rechunk_zero_dim_array_II
     """
     x = da.zeros((4, 0, 6, 10), chunks=3)
-    y = x.rechunk({0: 4, 2: 2}, rechunk="p2p")
+    y = x.rechunk({0: 4, 2: 2}, algorithm="p2p")
     assert y.chunks == ((4,), (0,), (2, 2, 2), (3, 3, 3, 1))
     assert_eq(await c.compute(x), await c.compute(y))
 
@@ -427,7 +427,7 @@ async def test_rechunk_same(c, s, *ws):
     dask.array.tests.test_rechunk.test_rechunk_same
     """
     x = da.ones((24, 24), chunks=(4, 8))
-    y = x.rechunk(x.chunks, rechunk="p2p")
+    y = x.rechunk(x.chunks, algorithm="p2p")
     assert x is y
 
 
@@ -440,7 +440,7 @@ async def test_rechunk_with_zero_placeholders(c, s, *ws):
     """
     x = da.ones((24, 24), chunks=((12, 12), (24, 0)))
     y = da.ones((24, 24), chunks=((12, 12), (12, 12)))
-    y = y.rechunk(((12, 12), (24, 0)), rechunk="p2p")
+    y = y.rechunk(((12, 12), (24, 0)), algorithm="p2p")
     assert x.chunks == y.chunks
 
 
@@ -452,7 +452,7 @@ async def test_rechunk_minus_one(c, s, *ws):
     dask.array.tests.test_rechunk.test_rechunk_minus_one
     """
     x = da.ones((24, 24), chunks=(4, 8))
-    y = x.rechunk((-1, 8), rechunk="p2p")
+    y = x.rechunk((-1, 8), algorithm="p2p")
     assert y.chunks == ((24,), (8, 8, 8))
     assert_eq(await c.compute(x), await c.compute(y))
 
@@ -467,7 +467,7 @@ async def test_rechunk_warning(c, s, *ws):
     N = 20
     x = da.random.normal(size=(N, N, 100), chunks=(1, N, 100))
     with warnings.catch_warnings(record=True) as w:
-        x = x.rechunk((N, 1, 100), rechunk="p2p")
+        x = x.rechunk((N, 1, 100), algorithm="p2p")
     assert not w
 
 
@@ -483,12 +483,12 @@ async def test_rechunk_unknown_from_pandas(c, s, *ws):
 
     arr = np.random.randn(50, 10)
     x = dd.from_pandas(pd.DataFrame(arr), 2).values
-    result = x.rechunk((None, (5, 5)), rechunk="p2p")
+    result = x.rechunk((None, (5, 5)), algorithm="p2p")
     assert np.isnan(x.chunks[0]).all()
     assert np.isnan(result.chunks[0]).all()
     assert result.chunks[1] == (5, 5)
     expected = da.from_array(arr, chunks=((25, 25), (10,))).rechunk(
-        (None, (5, 5)), rechunk="p2p"
+        (None, (5, 5)), algorithm="p2p"
     )
     assert_eq(await c.compute(result), await c.compute(expected))
 
@@ -501,10 +501,8 @@ async def test_rechunk_unknown_from_array(c, s, *ws):
     dask.array.tests.test_rechunk.test_rechunk_unknown_from_array
     """
     dd = pytest.importorskip("dask.dataframe")
-    # pd = pytest.importorskip('pandas')
     x = dd.from_array(da.ones(shape=(4, 4), chunks=(2, 2))).values
-    # result = x.rechunk({1: 5}, rechunk="p2p")
-    result = x.rechunk((None, 4), rechunk="p2p")
+    result = x.rechunk((None, 4), algorithm="p2p")
     assert np.isnan(x.chunks[0]).all()
     assert np.isnan(result.chunks[0]).all()
     assert x.chunks[1] == (4,)
@@ -537,8 +535,8 @@ async def test_rechunk_unknown(c, s, *ws, x, chunks):
     """
     dd = pytest.importorskip("dask.dataframe")
     y = dd.from_array(x).values
-    result = y.rechunk(chunks, rechunk="p2p")
-    expected = x.rechunk(chunks, rechunk="p2p")
+    result = y.rechunk(chunks, algorithm="p2p")
+    expected = x.rechunk(chunks, algorithm="p2p")
 
     assert_chunks_match(result.chunks, expected.chunks)
     assert_eq(await c.compute(result), await c.compute(expected))
@@ -554,8 +552,8 @@ async def test_rechunk_unknown_explicit(c, s, *ws):
     dd = pytest.importorskip("dask.dataframe")
     x = da.ones(shape=(10, 10), chunks=(5, 2))
     y = dd.from_array(x).values
-    result = y.rechunk(((float("nan"), float("nan")), (5, 5)), rechunk="p2p")
-    expected = x.rechunk((None, (5, 5)), rechunk="p2p")
+    result = y.rechunk(((float("nan"), float("nan")), (5, 5)), algorithm="p2p")
+    expected = x.rechunk((None, (5, 5)), algorithm="p2p")
     assert_chunks_match(result.chunks, expected.chunks)
     assert_eq(await c.compute(result), await c.compute(expected))
 
@@ -579,7 +577,7 @@ async def test_rechunk_unknown_raises(c, s, *ws):
 
     x = dd.from_array(da.ones(shape=(10, 10), chunks=(5, 5))).values
     with pytest.raises(ValueError):
-        x.rechunk((None, (5, 5, 5)), rechunk="p2p")
+        x.rechunk((None, (5, 5, 5)), algorithm="p2p")
 
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
@@ -591,7 +589,7 @@ async def test_rechunk_zero_dim(c, s, *ws):
     """
     da = pytest.importorskip("dask.array")
 
-    x = da.ones((0, 10, 100), chunks=(0, 10, 10)).rechunk((0, 10, 50), rechunk="p2p")
+    x = da.ones((0, 10, 100), chunks=(0, 10, 10)).rechunk((0, 10, 50), algorithm="p2p")
     assert len(await c.compute(x)) == 0
 
 
@@ -603,17 +601,17 @@ async def test_rechunk_empty_chunks(c, s, *ws):
     dask.array.tests.test_rechunk.test_rechunk_empty_chunks
     """
     x = da.zeros((7, 24), chunks=((7,), (10, 0, 0, 9, 0, 5)))
-    y = x.rechunk((2, 3), rechunk="p2p")
+    y = x.rechunk((2, 3), algorithm="p2p")
     assert_eq(await c.compute(x), await c.compute(y))
 
 
-# FIXME: We should avoid P2P in this case
-# @gen_cluster(client=True, config={"optimization.fuse.active": False})
-# async def test_rechunk_avoid_needless_chunking(c, s, *ws):
-#     x = da.ones(16, chunks=2)
-#     y = x.rechunk(8, rechunk="p2p")
-#     dsk = y.__dask_graph__()
-#     assert len(dsk) <= 8 + 2
+@pytest.mark.skip(reason="FIXME: We should avoid P2P in this case")
+@gen_cluster(client=True, config={"optimization.fuse.active": False})
+async def test_rechunk_avoid_needless_chunking(c, s, *ws):
+    x = da.ones(16, chunks=2)
+    y = x.rechunk(8, algorithm="p2p")
+    dsk = y.__dask_graph__()
+    assert len(dsk) <= 8 + 2
 
 
 @pytest.mark.parametrize(
@@ -634,7 +632,7 @@ async def test_rechunk_auto_1d(c, s, *ws, shape, chunks, bs, expected):
     dask.array.tests.test_rechunk.test_rechunk_auto_1d
     """
     x = da.ones(shape, chunks=(chunks,))
-    y = x.rechunk({0: "auto"}, block_size_limit=bs * x.dtype.itemsize, rechunk="p2p")
+    y = x.rechunk({0: "auto"}, block_size_limit=bs * x.dtype.itemsize, algorithm="p2p")
     assert y.chunks == (expected,)
 
 
@@ -647,21 +645,21 @@ async def test_rechunk_auto_2d(c, s, *ws):
     """
     x = da.ones((20, 20), chunks=(2, 2))
     y = x.rechunk(
-        {0: -1, 1: "auto"}, block_size_limit=20 * x.dtype.itemsize, rechunk="p2p"
+        {0: -1, 1: "auto"}, block_size_limit=20 * x.dtype.itemsize, algorithm="p2p"
     )
     assert y.chunks == ((20,), (1,) * 20)
 
     x = da.ones((20, 20), chunks=(2, 2))
-    y = x.rechunk((-1, "auto"), block_size_limit=80 * x.dtype.itemsize, rechunk="p2p")
+    y = x.rechunk((-1, "auto"), block_size_limit=80 * x.dtype.itemsize, algorithm="p2p")
     assert y.chunks == ((20,), (4,) * 5)
 
     x = da.ones((20, 20), chunks=((2, 2)))
-    y = x.rechunk({0: "auto"}, block_size_limit=20 * x.dtype.itemsize, rechunk="p2p")
+    y = x.rechunk({0: "auto"}, block_size_limit=20 * x.dtype.itemsize, algorithm="p2p")
     assert y.chunks[1] == x.chunks[1]
     assert y.chunks[0] == (10, 10)
 
     x = da.ones((20, 20), chunks=((2,) * 10, (2, 2, 2, 2, 2, 5, 5)))
-    y = x.rechunk({0: "auto"}, block_size_limit=20 * x.dtype.itemsize, rechunk="p2p")
+    y = x.rechunk({0: "auto"}, block_size_limit=20 * x.dtype.itemsize, algorithm="p2p")
     assert y.chunks[1] == x.chunks[1]
     assert y.chunks[0] == (4, 4, 4, 4, 4)  # limited by largest
 
@@ -675,7 +673,7 @@ async def test_rechunk_auto_3d(c, s, *ws):
     """
     x = da.ones((20, 20, 20), chunks=((2, 2, 2)))
     y = x.rechunk(
-        {0: "auto", 1: "auto"}, block_size_limit=200 * x.dtype.itemsize, rechunk="p2p"
+        {0: "auto", 1: "auto"}, block_size_limit=200 * x.dtype.itemsize, algorithm="p2p"
     )
     assert y.chunks[2] == x.chunks[2]
     assert y.chunks[0] == (10, 10)
@@ -692,12 +690,12 @@ async def test_rechunk_auto_image_stack(c, s, *ws, n):
     """
     with dask.config.set({"array.chunk-size": "10MiB"}):
         x = da.ones((n, 1000, 1000), chunks=(1, 1000, 1000), dtype="uint8")
-        y = x.rechunk("auto", rechunk="p2p")
+        y = x.rechunk("auto", algorithm="p2p")
         assert y.chunks == ((10,) * (n // 10), (1000,), (1000,))
-        assert y.rechunk("auto", rechunk="p2p").chunks == y.chunks  # idempotent
+        assert y.rechunk("auto", algorithm="p2p").chunks == y.chunks  # idempotent
 
     with dask.config.set({"array.chunk-size": "7MiB"}):
-        z = x.rechunk("auto", rechunk="p2p")
+        z = x.rechunk("auto", algorithm="p2p")
         if n == 100:
             assert z.chunks == ((7,) * 14 + (2,), (1000,), (1000,))
         else:
@@ -705,7 +703,7 @@ async def test_rechunk_auto_image_stack(c, s, *ws, n):
 
     with dask.config.set({"array.chunk-size": "1MiB"}):
         x = da.ones((n, 1000, 1000), chunks=(1, 1000, 1000), dtype="float64")
-        z = x.rechunk("auto", rechunk="p2p")
+        z = x.rechunk("auto", algorithm="p2p")
         assert z.chunks == ((1,) * n, (362, 362, 276), (362, 362, 276))
 
 
@@ -718,18 +716,18 @@ async def test_rechunk_down(c, s, *ws):
     """
     with dask.config.set({"array.chunk-size": "10MiB"}):
         x = da.ones((100, 1000, 1000), chunks=(1, 1000, 1000), dtype="uint8")
-        y = x.rechunk("auto", rechunk="p2p")
+        y = x.rechunk("auto", algorithm="p2p")
         assert y.chunks == ((10,) * 10, (1000,), (1000,))
 
     with dask.config.set({"array.chunk-size": "1MiB"}):
-        z = y.rechunk("auto", rechunk="p2p")
+        z = y.rechunk("auto", algorithm="p2p")
         assert z.chunks == ((4,) * 25, (511, 489), (511, 489))
 
     with dask.config.set({"array.chunk-size": "1MiB"}):
-        z = y.rechunk({0: "auto"}, rechunk="p2p")
+        z = y.rechunk({0: "auto"}, algorithm="p2p")
         assert z.chunks == ((1,) * 100, (1000,), (1000,))
 
-        z = y.rechunk({1: "auto"}, rechunk="p2p")
+        z = y.rechunk({1: "auto"}, algorithm="p2p")
         assert z.chunks == ((10,) * 10, (104,) * 9 + (64,), (1000,))
 
 
@@ -742,7 +740,7 @@ async def test_rechunk_zero(c, s, *ws):
     """
     with dask.config.set({"array.chunk-size": "1B"}):
         x = da.ones(10, chunks=(5,))
-        y = x.rechunk("auto", rechunk="p2p")
+        y = x.rechunk("auto", algorithm="p2p")
         assert y.chunks == ((1,) * 10,)
 
 
@@ -754,25 +752,25 @@ async def test_rechunk_bad_keys(c, s, *ws):
     dask.array.tests.test_rechunk.test_rechunk_bad_keys
     """
     x = da.zeros((2, 3, 4), chunks=1)
-    assert x.rechunk({-1: 4}, rechunk="p2p").chunks == ((1, 1), (1, 1, 1), (4,))
-    assert x.rechunk({-x.ndim: 2}, rechunk="p2p").chunks == (
+    assert x.rechunk({-1: 4}, algorithm="p2p").chunks == ((1, 1), (1, 1, 1), (4,))
+    assert x.rechunk({-x.ndim: 2}, algorithm="p2p").chunks == (
         (2,),
         (1, 1, 1),
         (1, 1, 1, 1),
     )
 
     with pytest.raises(TypeError) as info:
-        x.rechunk({"blah": 4}, rechunk="p2p")
+        x.rechunk({"blah": 4}, algorithm="p2p")
 
     assert "blah" in str(info.value)
 
     with pytest.raises(ValueError) as info:
-        x.rechunk({100: 4}, rechunk="p2p")
+        x.rechunk({100: 4}, algorithm="p2p")
 
     assert "100" in str(info.value)
 
     with pytest.raises(ValueError) as info:
-        x.rechunk({-100: 4}, rechunk="p2p")
+        x.rechunk({-100: 4}, algorithm="p2p")
 
     assert "-100" in str(info.value)
 
@@ -785,12 +783,12 @@ async def test_rechunk_with_zero(c, s, *ws):
     dask.array.tests.test_rechunk.test_rechunk_with_zero
     """
     a = da.ones((8, 8), chunks=(4, 4))
-    result = a.rechunk(((4, 4), (4, 0, 0, 4)), rechunk="p2p")
+    result = a.rechunk(((4, 4), (4, 0, 0, 4)), algorithm="p2p")
     expected = da.ones((8, 8), chunks=((4, 4), (4, 0, 0, 4)))
 
     # reverse:
     a, expected = expected, a
-    result = a.rechunk((4, 4), rechunk="p2p")
+    result = a.rechunk((4, 4), algorithm="p2p")
     assert_eq(await c.compute(result), await c.compute(expected))
 
 
