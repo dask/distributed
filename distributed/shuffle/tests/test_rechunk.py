@@ -147,10 +147,10 @@ def test_raise_on_fuse_optimization():
         rechunk(x, chunks=new, algorithm="p2p")
 
 
-@pytest.mark.parametrize("config", ["tasks", "p2p", None])
+@pytest.mark.parametrize("config_value", ["tasks", "p2p", None])
 @pytest.mark.parametrize("keyword", ["tasks", "p2p", None])
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
-async def test_rechunk_configuration(c, s, *ws, config, keyword):
+async def test_rechunk_configuration(c, s, *ws, config_value, keyword):
     """Try rechunking a random 1d matrix
 
     See Also
@@ -160,9 +160,12 @@ async def test_rechunk_configuration(c, s, *ws, config, keyword):
     a = np.random.uniform(0, 1, 30)
     x = da.from_array(a, chunks=((10,) * 3,))
     new = ((6,) * 5,)
-    with dask.config.set({"array.rechunk.algorithm": config}):
+    config = (
+        {"array.rechunk.algorithm": config_value} if config_value is not None else {}
+    )
+    with dask.config.set(config):
         x2 = rechunk(x, chunks=new, algorithm=keyword)
-    expected_algorithm = keyword if keyword is not None else config
+    expected_algorithm = keyword if keyword is not None else config_value
     if expected_algorithm == "p2p":
         assert all(key[0].startswith("rechunk-p2p") for key in x2.__dask_keys__())
     else:
