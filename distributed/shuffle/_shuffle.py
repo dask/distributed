@@ -99,8 +99,8 @@ def rearrange_by_column_p2p(
 
     if dask.config.get("optimization.fuse.active"):
         raise RuntimeError(
-            "P2P shuffling requires the fuse optimization to be inactive. "
-            "Set the 'optimization.fuse.active' config to False to inactivate."
+            "P2P shuffling requires the fuse optimization to be turned off. "
+            "Set the 'optimization.fuse.active' config to False to deactivate."
         )
 
     check_dtype_support(df._meta)
