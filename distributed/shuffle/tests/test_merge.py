@@ -174,7 +174,7 @@ async def test_merge(c, s, a, b, how):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True)
+@gen_cluster(client=True, timeout=120)
 @pytest.mark.parametrize("how", ["inner", "outer", "left", "right"])
 async def test_merge_by_multiple_columns(c, s, a, b, how):
     # warnings here from pandas
