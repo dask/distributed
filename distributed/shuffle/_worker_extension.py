@@ -341,8 +341,11 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
             """Return a mapping of worker addresses to a list of tuples of shard IDs
             and shard data.
 
-            As shard data, we serialize the data together with the sub-index of the
-            slice within the new chunk to assemble the new chunk from its pieces.
+            As shard data, we serialize the payload together with the sub-index of the
+            slice within the new chunk. To assemble the new chunk from its shards, it
+            needs the sub-index to know where each shard belongs within the chunk.
+            Adding the sub-index into the serialized payload on the sender allows us to
+            write the serialized payload directly to disk on the receiver.
             """
             out: dict[str, list[tuple[ArrayRechunkShardID, bytes]]] = defaultdict(list)
             for id, nslice in self._slicing[input_partition]:
