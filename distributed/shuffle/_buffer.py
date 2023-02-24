@@ -14,12 +14,11 @@ from distributed.sizeof import sizeof
 logger = logging.getLogger("distributed.shuffle")
 
 ShardType = TypeVar("ShardType", bound=Sized)
-T = TypeVar("T")
 
 
-class SubList(List[T]):
-    def __init__(self, *args: Any, **kwargs: Any):
-        super().__init__(*args, **kwargs)
+class SubList(list):
+    # This ensures that the distributed.protocol will not iterate over this collection
+    pass
 
 
 class ShardsBuffer(Generic[ShardType]):
