@@ -102,7 +102,7 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
 
 
 # TODO: Use slots keyword (requires Python >=3.10)
-# See: https://bugs.python.org/issue36424
+# See: https://github.com/python/cpython/issues/80605
 @dataclass(frozen=True)
 class ShardID:
     """Unique identifier of an individual shard within an array rechunk"""
