@@ -1117,13 +1117,17 @@ async def test_shuffling(c, s, a, b):
     dd = pytest.importorskip("dask.dataframe")
     ss = Shuffling(s)
 
-    df = dask.datasets.timeseries()
-    df["name"] = df["name"].astype("string[python]")
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-02-01",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
     df2 = dd.shuffle.shuffle(df, "x", shuffle="p2p").persist()
     start = time()
-    while not ss.source.data["disk_read"]:
+    while not ss.source.data["comm_written"]:
         ss.update()
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0)
         assert time() < start + 5
     await df2
 
