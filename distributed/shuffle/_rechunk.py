@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
 from itertools import product
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, NamedTuple
 
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
@@ -101,27 +100,13 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
         return da.Array(graph, name, chunks, meta=x)
 
 
-# TODO: Use slots keyword (requires Python >=3.10)
-# See: https://github.com/python/cpython/issues/80605
-@dataclass(frozen=True)
-class ShardID:
+class ShardID(NamedTuple):
     """Unique identifier of an individual shard within an array rechunk"""
 
     #: Index of the new chunk the shard belongs
     new_index: NIndex
     #: Sub-index of the shard within the new chunk
     sub_index: NIndex
-
-    __slots__ = tuple(__annotations__)
-
-    def __getstate__(self) -> Any:
-        return {
-            slot: getattr(self, slot) for slot in self.__slots__ if hasattr(self, slot)
-        }
-
-    def __setstate__(self, state: Any) -> None:
-        for slot, value in state.items():
-            object.__setattr__(self, slot, value)
 
 
 def rechunk_slicing(
