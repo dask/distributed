@@ -139,6 +139,14 @@ async def test_lowlevel_rechunk(
     )
 
 
+def test_raise_on_fuse_optimization():
+    a = np.random.uniform(0, 1, 30)
+    x = da.from_array(a, chunks=((10,) * 3,))
+    new = ((6,) * 5,)
+    with pytest.raises(RuntimeError, match="fuse optimization"):
+        rechunk(x, chunks=new, algorithm="p2p")
+
+
 @pytest.mark.parametrize("rechunk_config", ["tasks", "p2p", None])
 @pytest.mark.parametrize("rechunk_keyword", ["tasks", "p2p", None])
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
