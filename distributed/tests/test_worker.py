@@ -759,7 +759,7 @@ async def test_restrictions(c, s, a, b):
     await x
     ts = a.state.tasks[x.key]
     assert ts.resource_restrictions == {"A": 1}
-    c.cancel([x])
+    await c.cancel([x])
 
     while ts.state == "executing":
         # Resource should be unavailable while task isn't finished

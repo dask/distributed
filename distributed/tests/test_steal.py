@@ -1339,7 +1339,7 @@ async def test_steal_stimulus_id_unique(c, s, a, b):
         # Therefore all stimulus IDs are stored here and must be unique
         stimulus_ids = {dct["stimulus_id"] for dct in steal.in_flight.values()}
         assert len(stimulus_ids) == num_futs
-        c.cancel(futures)
+        await c.cancel(futures)
 
 
 def test_steal_worker_state(ws_with_running_task):

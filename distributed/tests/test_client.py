@@ -2251,7 +2251,7 @@ async def test_cancel(c, s, a, b):
     while y.key not in s.tasks:
         await asyncio.sleep(0.01)
 
-    c.cancel([x])
+    await c.cancel([x])
 
     assert x.cancelled()
     assert "cancel" in str(x)
@@ -2268,7 +2268,7 @@ async def test_cancel(c, s, a, b):
 async def test_cancel_tuple_key(c, s, a, b):
     x = c.submit(inc, 1, key=("x", 0, 1))
     await x
-    c.cancel(x)
+    await c.cancel(x)
     with pytest.raises(CancelledError):
         await x
 
@@ -2286,7 +2286,7 @@ async def test_cancel_multi_client(s, a, b):
             await y
             await x
 
-            c.cancel([x])
+            await c.cancel([x])
 
             # Give the scheduler time to pass messages
             await asyncio.sleep(0.1)
@@ -2304,7 +2304,7 @@ async def test_cancel_multi_client(s, a, b):
 @gen_cluster(nthreads=[("", 1)], client=True)
 async def test_cancel_before_known_to_scheduler(c, s, a, caplog):
     f = c.submit(inc, 1)
-    c.cancel([f])
+    await c.cancel([f])
 
     with pytest.raises(CancelledError):
         await f
@@ -2317,8 +2317,8 @@ async def test_cancel_collection(c, s, a, b):
     L = c.map(double, [[1], [2], [3]])
     x = db.Bag({("b", i): f for i, f in enumerate(L)}, "b", 3)
 
-    c.cancel(x)
-    c.cancel([x])
+    await c.cancel(x)
+    await c.cancel([x])
     assert all(f.cancelled() for f in L)
     while s.tasks:
         await asyncio.sleep(0.01)
@@ -2506,7 +2506,7 @@ def test_futures_of_class():
 @gen_cluster(client=True)
 async def test_futures_of_cancelled_raises(c, s, a, b):
     x = c.submit(inc, 1)
-    c.cancel([x])
+    await c.cancel([x])
 
     with pytest.raises(CancelledError):
         await x
@@ -2988,7 +2988,7 @@ async def test_submit_on_cancelled_future(c, s, a, b):
     x = c.submit(inc, 1)
     await x
 
-    c.cancel(x)
+    await c.cancel(x)
 
     with pytest.raises(CancelledError):
         c.submit(inc, x)
@@ -3249,7 +3249,7 @@ async def test_cancel_clears_processing(c, s, *workers):
     while not s.tasks:
         await asyncio.sleep(0.01)
 
-    c.cancel(x)
+    await c.cancel(x)
 
     while any(v for w in s.workers.values() for v in w.processing):
         await asyncio.sleep(0.01)
@@ -6418,7 +6418,7 @@ async def test_as_completed_async_for_cancel(c, s, a, b):
     ac = as_completed([x, y])
 
     await x
-    y.cancel()
+    await y.cancel()
 
     futs = [future async for future in ac]
     assert futs == [x, y]

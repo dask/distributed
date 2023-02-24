@@ -2530,14 +2530,21 @@ class Client(SyncMethodMixin):
             hash=hash,
         )
 
-    def cancel(self, futures, force=False):
+    async def _cancel(self, futures, force=False):
+        # FIXME: This method is asynchronous since interacting with the FutureState below requires an event loop.
+        keys = list({stringify(f.key) for f in futures_of(futures)})
+        self._send_to_scheduler({"op": "cancel-keys", "keys": keys, "force": force})
+        for k in keys:
+            st = self.futures.pop(k, None)
+            if st is not None:
+                st.cancel()
+
+    def cancel(self, futures, asynchronous=None, force=False):
         """
         Cancel running futures
-
         This stops future tasks from being scheduled if they have not yet run
         and deletes them if they have already run.  After calling, this result
         and all dependent results will no longer be accessible
-
         Parameters
         ----------
         futures : List[Future]
@@ -2547,12 +2554,7 @@ class Client(SyncMethodMixin):
         force : boolean (False)
             Cancel this future even if other clients desire it
         """
-        keys = list({stringify(f.key) for f in futures_of(futures)})
-        self._send_to_scheduler({"op": "cancel-keys", "keys": keys, "force": force})
-        for k in keys:
-            st = self.futures.pop(k, None)
-            if st is not None:
-                st.cancel()
+        return self.sync(self._cancel, futures, asynchronous=asynchronous, force=force)
 
     async def _retry(self, futures):
         keys = list({stringify(f.key) for f in futures_of(futures)})
