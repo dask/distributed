@@ -109,6 +109,18 @@ async def test_basic_integration(c, s, a, b):
     await clean_scheduler(s)
 
 
+def test_raise_on_fuse_optimization():
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    with dask.config.set({"optimization.fuse.active": True}):
+        with pytest.raises(RuntimeError, match="fuse optimization"):
+            dd.shuffle.shuffle(df, "x", shuffle="p2p")
+
+
 @gen_cluster(client=True)
 async def test_concurrent(c, s, a, b):
     df = dask.datasets.timeseries(
