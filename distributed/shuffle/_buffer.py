@@ -5,7 +5,7 @@ import contextlib
 import logging
 from collections import defaultdict
 from collections.abc import Iterator
-from typing import Any, Generic, List, Sized, TypeVar
+from typing import Any, Generic, Sized, TypeVar
 
 from distributed.metrics import time
 from distributed.shuffle._limiter import ResourceLimiter
