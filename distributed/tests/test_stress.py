@@ -74,7 +74,7 @@ async def test_cancel_stress(c, s, *workers):
             > (random.random() + 1) * 0.5 * n_todo
         ):
             await asyncio.sleep(0.01)
-        await c.cancel(f)
+        c.cancel(f)
 
 
 def test_cancel_stress_sync(loop):

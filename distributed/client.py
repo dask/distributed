@@ -953,7 +953,7 @@ class Client(SyncMethodMixin):
         self._stream_handlers = {
             "key-in-memory": self._handle_key_in_memory,
             "lost-data": self._handle_lost_data,
-            "cancelled-key": self._handle_cancelled_key,
+            "cancelled-keys": self._handle_cancelled_keys,
             "task-retried": self._handle_retried_key,
             "task-erred": self._handle_task_erred,
             "restart": self._handle_restart,
@@ -1568,10 +1568,11 @@ class Client(SyncMethodMixin):
         if state is not None:
             state.lose()
 
-    def _handle_cancelled_key(self, key=None):
-        state = self.futures.get(key)
-        if state is not None:
-            state.cancel()
+    def _handle_cancelled_keys(self, keys=None):
+        for key in keys:
+            state = self.futures.get(key)
+            if state is not None:
+                state.cancel()
 
     def _handle_retried_key(self, key=None):
         state = self.futures.get(key)
@@ -2529,15 +2530,7 @@ class Client(SyncMethodMixin):
             hash=hash,
         )
 
-    async def _cancel(self, futures, force=False):
-        keys = list({stringify(f.key) for f in futures_of(futures)})
-        await self.scheduler.cancel(keys=keys, client=self.id, force=force)
-        for k in keys:
-            st = self.futures.pop(k, None)
-            if st is not None:
-                st.cancel()
-
-    def cancel(self, futures, asynchronous=None, force=False):
+    def cancel(self, futures, force=False):
         """
         Cancel running futures
 
@@ -2554,7 +2547,12 @@ class Client(SyncMethodMixin):
         force : boolean (False)
             Cancel this future even if other clients desire it
         """
-        return self.sync(self._cancel, futures, asynchronous=asynchronous, force=force)
+        keys = list({stringify(f.key) for f in futures_of(futures)})
+        self._send_to_scheduler({"op": "cancel-keys", "keys": keys, "force": force})
+        for k in keys:
+            st = self.futures.pop(k, None)
+            if st is not None:
+                st.cancel()
 
     async def _retry(self, futures):
         keys = list({stringify(f.key) for f in futures_of(futures)})

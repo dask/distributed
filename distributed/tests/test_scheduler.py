@@ -3871,7 +3871,7 @@ async def test_worker_heartbeat_after_cancel(c, s, *workers):
     while sum(w.state.executing_count for w in workers) < len(workers):
         await asyncio.sleep(0.001)
 
-    await c.cancel(futs)
+    c.cancel(futs)
 
     while any(w.state.tasks for w in workers):
         await asyncio.gather(*(w.heartbeat() for w in workers))
