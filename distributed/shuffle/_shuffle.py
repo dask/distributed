@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from enum import Enum
 from typing import TYPE_CHECKING, Any, NewType
 
 import dask
@@ -20,6 +21,11 @@ if TYPE_CHECKING:
     from distributed.shuffle._worker_extension import ShuffleWorkerExtension
 
 ShuffleId = NewType("ShuffleId", str)
+
+
+class ShuffleType(Enum):
+    DATAFRAME = "DataFrameShuffle"
+    ARRAY_RECHUNK = "ArrayRechunk"
 
 
 def _get_worker_extension() -> ShuffleWorkerExtension:
@@ -51,7 +57,8 @@ def shuffle_transfer(
     try:
         return _get_worker_extension().add_partition(
             input,
-            id,
+            shuffle_id=id,
+            type=ShuffleType.DATAFRAME,
             input_partition=input_partition,
             npartitions=npartitions,
             column=column,

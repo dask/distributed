@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from io import BytesIO
-from typing import TYPE_CHECKING, BinaryIO
+from typing import TYPE_CHECKING
 
 from packaging.version import parse
 
@@ -43,41 +43,6 @@ def check_minimal_arrow_version() -> None:
         raise RuntimeError(
             f"P2P shuffling requires pyarrow>={minversion} but only found {pa.__version__}"
         )
-
-
-def dump_shards(shards: list[bytes], file: BinaryIO) -> None:
-    """
-    Write multiple shard tables to the file
-
-    Note: This function appends to the file and dumps each table as an individual stream.
-    This results in multiple end-of-stream signals in the file.
-
-    See Also
-    --------
-    load_partition
-    """
-    for shard in shards:
-        file.write(shard)
-
-
-def load_partition(file: BinaryIO) -> list[bytes]:
-    """Load partition data written to file back out into a single table
-
-    Example
-    -------
-    >>> tables = [pa.Table.from_pandas(df), pa.Table.from_pandas(df2)]  # doctest: +SKIP
-    >>> with open("myfile", mode="wb") as f:  # doctest: +SKIP
-    ...     for table in tables:  # doctest: +SKIP
-    ...         dump_shards(tables, f)  # doctest: +SKIP
-
-    >>> with open("myfile", mode="rb") as f:  # doctest: +SKIP
-    ...     t = load_partition(f)  # doctest: +SKIP
-
-    See Also
-    --------
-    dump_shards
-    """
-    return [file.read()]
 
 
 def convert_partition(data: bytes) -> pa.Table:

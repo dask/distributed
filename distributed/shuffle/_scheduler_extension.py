@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import abc
 import contextlib
 import itertools
 import logging
@@ -8,7 +9,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from distributed.diagnostics.plugin import SchedulerPlugin
-from distributed.shuffle._shuffle import ShuffleId, barrier_key, id_from_key
+from distributed.shuffle._rechunk import ChunkedAxes, NIndex
+from distributed.shuffle._shuffle import (
+    ShuffleId,
+    ShuffleType,
+    barrier_key,
+    id_from_key,
+)
 
 if TYPE_CHECKING:
     from distributed.scheduler import Recs, Scheduler, TaskStateState, WorkerState
@@ -17,16 +24,55 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class ShuffleState:
+class ShuffleState(abc.ABC):
     _run_id_iterator: ClassVar[itertools.count] = itertools.count()
 
     id: ShuffleId
     run_id: int
+    output_workers: set[str]
+    participating_workers: set[str]
+
+    @abc.abstractmethod
+    def to_msg(self) -> dict[str, Any]:
+        """Transform the shuffle state into a JSON-serializable message"""
+
+
+@dataclass
+class DataFrameShuffleState(ShuffleState):
+    type: ClassVar[ShuffleType] = ShuffleType.DATAFRAME
     worker_for: dict[int, str]
     schema: bytes
     column: str
-    output_workers: set[str]
-    participating_workers: set[str]
+
+    def to_msg(self) -> dict[str, Any]:
+        return {
+            "status": "OK",
+            "type": DataFrameShuffleState.type,
+            "run_id": self.run_id,
+            "worker_for": self.worker_for,
+            "column": self.column,
+            "schema": self.schema,
+            "output_workers": self.output_workers,
+        }
+
+
+@dataclass
+class ArrayRechunkState(ShuffleState):
+    type: ClassVar[ShuffleType] = ShuffleType.ARRAY_RECHUNK
+    worker_for: dict[NIndex, str]
+    old: ChunkedAxes
+    new: ChunkedAxes
+
+    def to_msg(self) -> dict[str, Any]:
+        return {
+            "status": "OK",
+            "type": ArrayRechunkState.type,
+            "run_id": self.run_id,
+            "worker_for": self.worker_for,
+            "old": self.old,
+            "new": self.new,
+            "output_workers": self.output_workers,
+        }
 
 
 class ShuffleSchedulerExtension(SchedulerPlugin):
@@ -52,6 +98,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             {
                 "shuffle_barrier": self.barrier,
                 "shuffle_get": self.get,
+                "shuffle_get_or_create": self.get_or_create,
             }
         )
         self.heartbeats = defaultdict(lambda: defaultdict(dict))
@@ -74,58 +121,105 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             if shuffle_id in self.shuffle_ids():
                 self.heartbeats[shuffle_id][ws.address].update(d)
 
-    def get(
-        self,
-        id: ShuffleId,
-        schema: bytes | None,
-        column: str | None,
-        npartitions: int | None,
-        worker: str,
-    ) -> dict:
+    def get(self, id: ShuffleId, worker: str) -> dict[str, Any]:
         if exception := self.erred_shuffles.get(id):
             return {"status": "ERROR", "message": str(exception)}
-
-        if id not in self.states:
-            assert schema is not None
-            assert column is not None
-            assert npartitions is not None
-            workers = list(self.scheduler.workers)
-            output_workers = set()
-
-            name = barrier_key(id)
-            mapping = {}
-
-            for ts in self.scheduler.tasks[name].dependents:
-                part = ts.annotations["shuffle"]
-                if ts.worker_restrictions:
-                    output_worker = list(ts.worker_restrictions)[0]
-                else:
-                    output_worker = get_worker_for(part, workers, npartitions)
-                mapping[part] = output_worker
-                output_workers.add(output_worker)
-                self.scheduler.set_restrictions({ts.key: {output_worker}})
-
-            state = ShuffleState(
-                id=id,
-                run_id=next(ShuffleState._run_id_iterator),
-                worker_for=mapping,
-                schema=schema,
-                column=column,
-                output_workers=output_workers,
-                participating_workers=output_workers.copy(),
-            )
-            self.states[id] = state
-
         state = self.states[id]
         state.participating_workers.add(worker)
-        return {
-            "status": "OK",
-            "run_id": state.run_id,
-            "worker_for": state.worker_for,
-            "column": state.column,
-            "schema": state.schema,
-            "output_workers": state.output_workers,
-        }
+        return state.to_msg()
+
+    def get_or_create(
+        self,
+        id: ShuffleId,
+        type: str,
+        worker: str,
+        spec: dict[str, Any],
+    ) -> dict:
+        try:
+            return self.get(id, worker)
+        except KeyError:
+            state: ShuffleState
+            if type == ShuffleType.DATAFRAME:
+                state = self._create_dataframe_shuffle_state(id, spec)
+            elif type == ShuffleType.ARRAY_RECHUNK:
+                state = self._create_array_rechunk_state(id, spec)
+            else:  # pragma: no cover
+                raise TypeError(type)
+            self.states[id] = state
+            state.participating_workers.add(worker)
+            return state.to_msg()
+
+    def _create_dataframe_shuffle_state(
+        self, id: ShuffleId, spec: dict[str, Any]
+    ) -> DataFrameShuffleState:
+        schema = spec["schema"]
+        column = spec["column"]
+        npartitions = spec["npartitions"]
+        assert schema is not None
+        assert column is not None
+        assert npartitions is not None
+
+        workers = list(self.scheduler.workers)
+        output_workers = set()
+
+        name = barrier_key(id)
+        mapping = {}
+
+        for ts in self.scheduler.tasks[name].dependents:
+            part = ts.annotations["shuffle"]
+            if ts.worker_restrictions:
+                output_worker = list(ts.worker_restrictions)[0]
+            else:
+                output_worker = get_worker_for_range_sharding(
+                    part, workers, npartitions
+                )
+            mapping[part] = output_worker
+            output_workers.add(output_worker)
+            self.scheduler.set_restrictions({ts.key: {output_worker}})
+
+        return DataFrameShuffleState(
+            id=id,
+            run_id=next(ShuffleState._run_id_iterator),
+            worker_for=mapping,
+            schema=schema,
+            column=column,
+            output_workers=output_workers,
+            participating_workers=output_workers.copy(),
+        )
+
+    def _create_array_rechunk_state(
+        self, id: ShuffleId, spec: dict[str, Any]
+    ) -> ArrayRechunkState:
+        old = spec["old"]
+        new = spec["new"]
+        assert old is not None
+        assert new is not None
+
+        workers = list(self.scheduler.workers)
+        output_workers = set()
+
+        name = barrier_key(id)
+        mapping = {}
+
+        for ts in self.scheduler.tasks[name].dependents:
+            part = ts.annotations["shuffle"]
+            if ts.worker_restrictions:
+                output_worker = list(ts.worker_restrictions)[0]
+            else:
+                output_worker = get_worker_for_hash_sharding(part, workers)
+            mapping[part] = output_worker
+            output_workers.add(output_worker)
+            self.scheduler.set_restrictions({ts.key: {output_worker}})
+
+        return ArrayRechunkState(
+            id=id,
+            run_id=next(ShuffleState._run_id_iterator),
+            worker_for=mapping,
+            output_workers=output_workers,
+            old=old,
+            new=new,
+            participating_workers=output_workers.copy(),
+        )
 
     def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
         from time import time
@@ -199,7 +293,15 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self.erred_shuffles.clear()
 
 
-def get_worker_for(output_partition: int, workers: list[str], npartitions: int) -> str:
-    "Get the address of the worker which should hold this output partition number"
+def get_worker_for_range_sharding(
+    output_partition: int, workers: list[str], npartitions: int
+) -> str:
+    """Get address of target worker for this output partition using range sharding"""
     i = len(workers) * output_partition // npartitions
+    return workers[i]
+
+
+def get_worker_for_hash_sharding(output_partition: NIndex, workers: list[str]) -> str:
+    """Get address of target worker for this output partition using hash sharding"""
+    i = hash(output_partition) % len(workers)
     return workers[i]

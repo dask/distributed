@@ -9,7 +9,7 @@ dd = pytest.importorskip("dask.dataframe")
 
 from distributed.shuffle._scheduler_extension import (
     ShuffleSchedulerExtension,
-    get_worker_for,
+    get_worker_for_range_sharding,
 )
 from distributed.shuffle._worker_extension import (
     ShuffleWorkerExtension,
@@ -53,7 +53,9 @@ def test_split_by_worker():
     worker_for_mapping = {}
     npartitions = 3
     for part in range(npartitions):
-        worker_for_mapping[part] = get_worker_for(part, workers, npartitions)
+        worker_for_mapping[part] = get_worker_for_range_sharding(
+            part, workers, npartitions
+        )
     worker_for = pd.Series(worker_for_mapping, name="_workers").astype("category")
     out = split_by_worker(df, "_partition", worker_for)
     assert set(out) == {"alice", "bob"}
@@ -89,13 +91,15 @@ def test_split_by_worker_many_workers():
     npartitions = 10
     worker_for_mapping = {}
     for part in range(npartitions):
-        worker_for_mapping[part] = get_worker_for(part, workers, npartitions)
+        worker_for_mapping[part] = get_worker_for_range_sharding(
+            part, workers, npartitions
+        )
     worker_for = pd.Series(worker_for_mapping, name="_workers").astype("category")
     out = split_by_worker(df, "_partition", worker_for)
-    assert get_worker_for(5, workers, npartitions) in out
-    assert get_worker_for(0, workers, npartitions) in out
-    assert get_worker_for(7, workers, npartitions) in out
-    assert get_worker_for(1, workers, npartitions) in out
+    assert get_worker_for_range_sharding(5, workers, npartitions) in out
+    assert get_worker_for_range_sharding(0, workers, npartitions) in out
+    assert get_worker_for_range_sharding(7, workers, npartitions) in out
+    assert get_worker_for_range_sharding(1, workers, npartitions) in out
 
     assert sum(map(len, out.values())) == len(df)
 
