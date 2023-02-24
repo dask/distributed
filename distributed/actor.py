@@ -97,23 +97,23 @@ class Actor(WrappedKey):
         self._address = address
         self._key = key
         self._future = None
-        if worker:
-            self._worker = worker
-            self._client = None
-        else:
-            self._try_bind_worker_client()
+        self._worker = worker
+        self._client = None
+        self._try_bind_worker_client()
 
     def _try_bind_worker_client(self):
-        try:
-            self._worker = get_worker()
-        except ValueError:
-            self._worker = None
-        try:
-            self._client = get_client()
-            self._future = Future(self._key, inform=self._worker is None)
-            # ^ When running on a worker, only hold a weak reference to the key, otherwise the key could become unreleasable.
-        except ValueError:
-            self._client = None
+        if not self._worker:
+            try:
+                self._worker = get_worker()
+            except ValueError:
+                self._worker = None
+        if not self._client:
+            try:
+                self._client = get_client()
+                self._future = Future(self._key, inform=False)
+                # ^ When running on a worker, only hold a weak reference to the key, otherwise the key could become unreleasable.
+            except ValueError:
+                self._client = None
 
     def __repr__(self):
         return f"<Actor: {self._cls.__name__}, key={self.key}>"
