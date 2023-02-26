@@ -1303,9 +1303,6 @@ class TaskState:
     #: be rejected.
     run_id: int | None
 
-    #: Cached hash of :attr:`~TaskState.client_key`
-    _hash: int
-
     # Support for weakrefs to a class with __slots__
     __weakref__: Any = None
     __slots__ = tuple(__annotations__)
@@ -1323,7 +1320,6 @@ class TaskState:
         state: TaskStateState,
     ):
         self.key = key
-        self._hash = hash(key)
         self.run_spec = run_spec
         self._state = state
         self.exception = None
@@ -1357,12 +1353,6 @@ class TaskState:
         self.erred_on = set()
         self.run_id = None
         TaskState._instances.add(self)
-
-    def __hash__(self) -> int:
-        return self._hash
-
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, TaskState) and self.key == other.key
 
     @property
     def state(self) -> TaskStateState:

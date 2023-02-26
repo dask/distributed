@@ -41,7 +41,13 @@ from distributed.compatibility import LINUX, MACOS, WINDOWS, PeriodicCallback
 from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps, loads
-from distributed.scheduler import KilledWorker, MemoryState, Scheduler, WorkerState
+from distributed.scheduler import (
+    KilledWorker,
+    MemoryState,
+    Scheduler,
+    TaskState,
+    WorkerState,
+)
 from distributed.utils import TimeoutError
 from distributed.utils_test import (
     NO_AMM,
@@ -637,6 +643,40 @@ async def test_bad_saturation_factor():
         with dask.config.set({"distributed.scheduler.worker-saturation": "foo"}):
             async with Scheduler(dashboard_address=":0"):
                 pass
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    config={"distributed.scheduler.worker-saturation": 1.0},
+)
+async def test_queued_resubmitted_key_collision(c, s, a):
+    """
+    Tests a very specific case where a queued task is cancelled, then re-submitted (with
+    the same priority), while the stale `TaskState` object on the scheduler hasn't been
+    GC'd. The old and new `TaskState` must not have the same hash.
+
+    See https://github.com/dask/distributed/issues/7510
+    """
+    ev = Event()
+    ds = [delayed(Event.wait, pure=False)(ev) for _ in range(3)]
+
+    fs = {f.key: f for f in c.compute(ds)}
+    await async_wait_for(lambda: s.queued, 5)
+
+    ts = s.queued.peek()
+    # We keep the reference to `ts` so it can't be GC'd. We want the stale `TaskState`
+    # to remain in the `HeapSet`'s internal heap, and the weakref to be valid.
+    assert ts.state == "queued"
+
+    del fs[ts.key]
+    await async_wait_for(lambda: len(s.queued) == 1, 5)
+
+    fs2 = c.compute(ds)
+    await async_wait_for(lambda: len(s.queued) == 2, 5)
+
+    await ev.set()
+    await c.gather(fs2)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
@@ -3984,6 +4024,17 @@ async def test_TaskState__to_dict(c, s):
     assert isinstance(tasks["z"], dict)
     assert tasks["x"]["dependents"] == ["<TaskState 'y' waiting>"]
     assert tasks["y"]["dependencies"] == ["<TaskState 'x' queued>"]
+
+
+def test_TaskState_hash_eq_by_identity():
+    "See https://github.com/dask/distributed/issues/7510"
+    ts1 = TaskState("ts", None, "released")
+    ts2 = TaskState("ts", None, "released")
+    assert ts1 != ts2
+    assert hash(ts1) != hash(ts2)
+
+    assert ts1 == ts1
+    assert hash(ts1) == hash(ts1)
 
 
 def _verify_cluster_state(
