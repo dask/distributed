@@ -77,12 +77,12 @@ async def test_expect_ssl_context():
 
 
 @gen_test()
-async def test_expect_scheduler_ssl_when_sharing_server(tmpdir):
+async def test_expect_scheduler_ssl_when_sharing_server(tmp_path):
     xfail_ssl_issue5601()
     pytest.importorskip("cryptography")
     security = Security.temporary()
-    key_path = os.path.join(str(tmpdir), "dask.pem")
-    cert_path = os.path.join(str(tmpdir), "dask.crt")
+    key_path = os.path.join(str(tmp_path), "dask.pem")
+    cert_path = os.path.join(str(tmp_path), "dask.crt")
     with open(key_path, "w") as f:
         f.write(security.tls_scheduler_key)
     with open(cert_path, "w") as f:

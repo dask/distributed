@@ -49,7 +49,7 @@ async def test_exceptions(tmp_path):
 
 
 @gen_test()
-async def test_slow_send(tmpdir):
+async def test_slow_send(tmp_path):
     block_send = asyncio.Event()
     block_send.set()
     sending_first = asyncio.Event()
