@@ -376,7 +376,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
             subdims = tuple(len(self._old_to_new[dim][ix]) for dim, ix in enumerate(i))
             return convert_chunk(data, subdims)
 
-        return await self.offload(convert_chunk, _)
+        return await self.offload(_)
 
 
 class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
