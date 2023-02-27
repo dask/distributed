@@ -521,9 +521,9 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
 
         await self.flush_receive()
         try:
-            data = self._read_from_disk((i,))
 
             def _() -> pd.DataFrame:
+                data = self._read_from_disk((i,))
                 df = convert_partition(data)
                 return df.to_pandas()
 
