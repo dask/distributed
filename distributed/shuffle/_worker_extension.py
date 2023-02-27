@@ -370,11 +370,13 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
         # data in the case something has gone very wrong
 
         await self.flush_receive()
-        data = self._read_from_disk(i)
-        subdims = tuple(len(self._old_to_new[dim][ix]) for dim, ix in enumerate(i))
-        with self.time("cpu"):
-            arr = convert_chunk(data, subdims)
-        return arr
+
+        def _() -> np.ndarray:
+            data = self._read_from_disk(i)
+            subdims = tuple(len(self._old_to_new[dim][ix]) for dim, ix in enumerate(i))
+            return convert_chunk(data, subdims)
+
+        return await self.offload(convert_chunk, _)
 
 
 class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
