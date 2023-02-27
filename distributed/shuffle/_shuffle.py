@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+from enum import Enum
 from typing import TYPE_CHECKING, Any, NewType
 
+import dask
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import SimpleShuffleLayer
@@ -19,6 +21,11 @@ if TYPE_CHECKING:
     from distributed.shuffle._worker_extension import ShuffleWorkerExtension
 
 ShuffleId = NewType("ShuffleId", str)
+
+
+class ShuffleType(Enum):
+    DATAFRAME = "DataFrameShuffle"
+    ARRAY_RECHUNK = "ArrayRechunk"
 
 
 def _get_worker_extension() -> ShuffleWorkerExtension:
@@ -50,7 +57,8 @@ def shuffle_transfer(
     try:
         return _get_worker_extension().add_partition(
             input,
-            id,
+            shuffle_id=id,
+            type=ShuffleType.DATAFRAME,
             input_partition=input_partition,
             npartitions=npartitions,
             column=column,
@@ -95,6 +103,12 @@ def rearrange_by_column_p2p(
     npartitions: int | None = None,
 ) -> DataFrame:
     from dask.dataframe import DataFrame
+
+    if dask.config.get("optimization.fuse.active"):
+        raise RuntimeError(
+            "P2P shuffling requires the fuse optimization to be turned off. "
+            "Set the 'optimization.fuse.active' config to False to deactivate."
+        )
 
     check_dtype_support(df._meta)
     npartitions = npartitions or df.npartitions

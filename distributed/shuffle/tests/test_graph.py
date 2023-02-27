@@ -40,7 +40,10 @@ def test_raise_on_complex_numbers(dtype):
         df.shuffle("x", shuffle="p2p")
 
 
-def test_raise_on_custom_objects():
+@pytest.mark.xfail(
+    reason="Ordinary string columns are also objects and we can't distinguish them from custom objects from meta alone."
+)
+def test_raise_on_custom_objects(c, s, a, b):
     class Stub:
         def __init__(self, value: int) -> None:
             self.value = value

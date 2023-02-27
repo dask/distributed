@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 from dask.utils import parse_bytes
 
@@ -19,7 +19,7 @@ class CommShardsBuffer(ShardsBuffer):
 
     **State**
 
-    -   shards: dict[str, list[bytes]]
+    -   shards: dict[str, list[ShardType]]
 
         This is our in-memory buffer of data waiting to be sent to other workers.
 
@@ -50,7 +50,7 @@ class CommShardsBuffer(ShardsBuffer):
 
     def __init__(
         self,
-        send: Callable[[str, list[tuple[int, bytes]]], Awaitable[None]],
+        send: Callable[[str, list[tuple[Any, bytes]]], Awaitable[None]],
         memory_limiter: ResourceLimiter | None = None,
         concurrency_limit: int = 10,
     ):
@@ -61,7 +61,7 @@ class CommShardsBuffer(ShardsBuffer):
         )
         self.send = send
 
-    async def _process(self, address: str, shards: list[tuple[int, bytes]]) -> None:
+    async def _process(self, address: str, shards: list[tuple[Any, bytes]]) -> None:
         """Send one message off to a neighboring worker"""
         with log_errors():
             # Consider boosting total_size a bit here to account for duplication

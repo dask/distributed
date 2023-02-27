@@ -258,7 +258,7 @@ def serialize(  # type: ignore[no-untyped-def]
     if serializers is None:
         serializers = ("dask", "pickle")  # TODO: get from configuration
 
-    # Handle obects that are marked as `Serialize`, or that are
+    # Handle objects that are marked as `Serialize`, or that are
     # already `Serialized` objects (don't want to serialize them twice)
     if isinstance(x, Serialized):
         return x.header, x.frames
