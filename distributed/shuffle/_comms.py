@@ -29,24 +29,23 @@ class CommShardsBuffer(ShardsBuffer):
 
     State
     -----
-    memory_limit: str
-        A maximum amount of memory to use across the process, like "1 GiB"
-        This includes both data in shards and also in network communications
-    max_connections: int
-        The maximum number of connections to have out at once
-    max_message_size: str
-        The maximum size of a single message that we want to send
+    max_message_size: int
+        The maximum size in bytes of a single message that we want to send
 
     Parameters
     ----------
-    send: callable
+    send : callable
         How to send a list of shards to a worker
         Expects an address of the target worker (string)
         and a payload of shards (list of bytes) to send to that worker
+    memory_limiter : ResourceLimiter, optional
+        Limiter for memory usage (in bytes), or None if no limiting
+        should be applied.
+    concurrency_limit : int
+        Number of background tasks to run.
     """
 
     max_message_size = parse_bytes("2 MiB")
-    memory_limit = parse_bytes("100 MiB")
 
     def __init__(
         self,

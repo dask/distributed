@@ -74,8 +74,8 @@ async def test_slow_send(tmpdir):
     assert [b"2" not in shard for shard in d["x"]]
 
 
-def gen_bytes(percentage: float) -> bytes:
-    num_bytes = int(math.floor(percentage * CommShardsBuffer.memory_limit))
+def gen_bytes(percentage: float, memory_limit: int) -> bytes:
+    num_bytes = int(math.floor(percentage * memory_limit))
     return b"0" * num_bytes
 
 
@@ -89,9 +89,13 @@ async def test_concurrent_puts():
     frac = 0.1
     nshards = 10
     nputs = 20
-    payload = {x: [gen_bytes(frac)] for x in range(nshards)}
+    comm_buffer = CommShardsBuffer(send=send)
+    payload = {
+        x: [gen_bytes(frac, comm_buffer.memory_limiter._maxvalue)]
+        for x in range(nshards)
+    }
 
-    async with CommShardsBuffer(send=send) as mc:
+    async with comm_buffer as mc:
         futs = [asyncio.create_task(mc.write(payload)) for _ in range(nputs)]
 
         await asyncio.gather(*futs)
@@ -103,7 +107,10 @@ async def test_concurrent_puts():
     assert not mc.shards
     assert not mc.sizes
     assert len(d) == 10
-    assert sum(map(len, d[0])) == len(gen_bytes(frac)) * nputs
+    assert (
+        sum(map(len, d[0]))
+        == len(gen_bytes(frac, comm_buffer.memory_limiter._maxvalue)) * nputs
+    )
 
 
 @gen_test()
@@ -122,9 +129,13 @@ async def test_concurrent_puts_error():
     frac = 0.1
     nshards = 10
     nputs = 20
-    payload = {x: [gen_bytes(frac)] for x in range(nshards)}
+    comm_buffer = CommShardsBuffer(send=send)
+    payload = {
+        x: [gen_bytes(frac, comm_buffer.memory_limiter._maxvalue)]
+        for x in range(nshards)
+    }
 
-    async with CommShardsBuffer(send=send) as mc:
+    async with comm_buffer as mc:
         futs = [asyncio.create_task(mc.write(payload)) for _ in range(nputs)]
 
         await asyncio.gather(*futs)

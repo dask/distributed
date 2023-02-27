@@ -26,24 +26,18 @@ class DiskShardsBuffer(ShardsBuffer):
 
         The size of each list of shards.  We find the largest and write data from that buffer
 
-    State
-    -----
-    memory_limit: str
-        A maximum amount of memory to use, like "1 GiB"
-
     Parameters
     ----------
-    directory: pathlib.Path
+    directory : str or pathlib.Path
         Where to write and read data.  Ideally points to fast disk.
-    sizeof: callable
-        Measures the size of an object in memory
+    memory_limiter : ResourceLimiter, optional
+        Limiter for in-memory buffering (at most this much data)
+        before writes to disk occur.
     """
-
-    concurrency_limit = 2
 
     def __init__(
         self,
-        directory: str,
+        directory: str | pathlib.Path,
         memory_limiter: ResourceLimiter | None = None,
     ):
         super().__init__(
