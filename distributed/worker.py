@@ -79,7 +79,7 @@ from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import _get_plugin_name
 from distributed.diskutils import WorkDir, WorkSpace
 from distributed.http import get_handlers
-from distributed.metrics import time
+from distributed.metrics import context_meter, meter, thread_time, time
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
 from distributed.protocol import pickle, to_serialize
@@ -1719,8 +1719,6 @@ class Worker(BaseWorker, ServerNode):
         serializers: list[str] | None = None,
         max_connections: int | None = None,
     ) -> GetDataBusy | Literal[Status.dont_reply]:
-        start = time()
-
         if max_connections is None:
             max_connections = self.transfer_outgoing_count_limit
 
@@ -1760,67 +1758,72 @@ class Worker(BaseWorker, ServerNode):
 
         self.transfer_outgoing_count += 1
         self.transfer_outgoing_count_total += 1
-        data = {k: self.data[k] for k in keys if k in self.data}
 
-        if len(data) < len(keys):
-            for k in set(keys) - set(data):
-                if k in self.state.actors:
-                    from distributed.actor import Actor
+        loop = asyncio.get_running_loop()
 
-                    data[k] = Actor(
-                        type(self.state.actors[k]), self.address, k, worker=self
-                    )
-
-        msg = {"status": "OK", "data": {k: to_serialize(v) for k, v in data.items()}}
-        # Note: `if k in self.data` above guarantees that
-        # k is in self.state.tasks too and that nbytes is non-None
-        bytes_per_task = {k: self.state.tasks[k].nbytes or 0 for k in data}
-        total_bytes = sum(bytes_per_task.values())
-        self.transfer_outgoing_bytes += total_bytes
-        self.transfer_outgoing_bytes_total += total_bytes
-        stop = time()
-
-        # Don't log metrics if all keys are in memory
-        if stop - start > 0.005:
-            # See metrics:
-            # - disk-load-duration
-            # - get-data-load-duration
-            # - disk-write-target-duration
-            # - disk-write-spill-duration
-            self.digest_metric("get-data-load-duration", stop - start)
-
-        start = time()
-
-        try:
-            compressed = await comm.write(msg, serializers=serializers)
-            response = await comm.read(deserializers=serializers)
-            assert response == "OK", response
-        except OSError:
-            logger.exception(
-                "failed during get data with %s -> %s",
-                self.address,
-                who,
+        def metrics_callback(label: str, value: float, unit: str) -> None:
+            # This callback could be called from another thread through offload()
+            loop.call_soon_threadsafe(
+                self.digest_metric,
+                f"get-data-{label}-{unit}",
+                value,
             )
-            comm.abort()
-            raise
-        finally:
-            self.transfer_outgoing_bytes -= total_bytes
-            self.transfer_outgoing_count -= 1
-        stop = time()
-        self.digest_metric("get-data-send-duration", stop - start)
 
-        duration = (stop - start) or 0.5  # windows
+        with context_meter.add_callback(metrics_callback):
+            # This may potentially take many seconds if it involves unspilling
+            data = {k: self.data[k] for k in keys if k in self.data}
+
+            if len(data) < len(keys):
+                for k in set(keys) - data.keys():
+                    if k in self.state.actors:
+                        from distributed.actor import Actor
+
+                        data[k] = Actor(
+                            type(self.state.actors[k]), self.address, k, worker=self
+                        )
+
+            msg = {
+                "status": "OK",
+                "data": {k: to_serialize(v) for k, v in data.items()},
+            }
+            # Note: `if k in self.data` above guarantees that
+            # k is in self.state.tasks too and that nbytes is non-None
+            bytes_per_task = {k: self.state.tasks[k].nbytes or 0 for k in data}
+            total_bytes = sum(bytes_per_task.values())
+            self.transfer_outgoing_bytes += total_bytes
+            self.transfer_outgoing_bytes_total += total_bytes
+
+            try:
+                # Note: context_meter.meter() will automatically subtract time spent
+                # serializing/deserializing and compressing/decompressing, while
+                # the plain call to meter() won't
+                with context_meter.meter("network"), meter(time, floor=0.001) as m:
+                    compressed = await comm.write(msg, serializers=serializers)
+                    response = await comm.read(deserializers=serializers)
+                assert response == "OK", response
+            except OSError:
+                logger.exception(
+                    "failed during get data with %s -> %s",
+                    self.address,
+                    who,
+                )
+                comm.abort()
+                raise
+            finally:
+                self.transfer_outgoing_bytes -= total_bytes
+                self.transfer_outgoing_count -= 1
+
         self.transfer_outgoing_log.append(
             {
-                "start": start + self.scheduler_delay,
-                "stop": stop + self.scheduler_delay,
-                "middle": (start + stop) / 2,
-                "duration": duration,
+                "start": m.start + self.scheduler_delay,
+                "stop": m.stop + self.scheduler_delay,
+                "middle": (m.start + m.stop) / 2,
+                "duration": m.delta,
                 "who": who,
                 "keys": bytes_per_task,
                 "total": total_bytes,
                 "compressed": compressed,
-                "bandwidth": total_bytes / duration,
+                "bandwidth": total_bytes / m.delta,
             }
         )
 
@@ -2017,7 +2020,7 @@ class Worker(BaseWorker, ServerNode):
                 "source": worker,
             }
         )
-        duration = (stop - start) or 0.010
+        duration = max(1e-6, stop - start)
         bandwidth = total_bytes / duration
         self.transfer_incoming_log.append(
             {
@@ -2051,8 +2054,9 @@ class Worker(BaseWorker, ServerNode):
         self,
         worker: str,
         to_gather: Collection[str],
-        total_nbytes: int,
         *,
+        total_nbytes: int,
+        start: float,
         stimulus_id: str,
     ) -> StateMachineEvent:
         """Implements BaseWorker abstract method
@@ -2068,63 +2072,52 @@ class Worker(BaseWorker, ServerNode):
                 RuntimeError("Worker is shutting down"),
                 worker=worker,
                 total_nbytes=total_nbytes,
+                start=start,
+                metrics=[],
                 stimulus_id=f"worker-closing-{time()}",
             )
 
+        self.state.log.append(("request-dep", worker, to_gather, stimulus_id, time()))
+        logger.debug("Request %d keys from %s", len(to_gather), worker)
+
+        metrics = []
+
+        def metrics_callback(label: str, value: float, unit: str) -> None:
+            metrics.append((label, value, unit))
+
         try:
-            self.state.log.append(
-                ("request-dep", worker, to_gather, stimulus_id, time())
-            )
-            logger.debug("Request %d keys from %s", len(to_gather), worker)
-
-            start = time()
-            response = await get_data_from_worker(
-                rpc=self.rpc, keys=to_gather, worker=worker, who=self.address
-            )
-            stop = time()
-            if response["status"] == "busy":
-                self.state.log.append(
-                    ("busy-gather", worker, to_gather, stimulus_id, time())
+            # Note: context_meter.meter() will automatically subtract time spent
+            # serializing/deserializing and compressing/decompressing, while
+            # the plain call to meter() won't.
+            # TODO add parenthesis for readability (requires Python >=3.9)
+            with context_meter.add_callback(metrics_callback), context_meter.meter(
+                "network"
+            ), meter(time) as m:
+                response = await get_data_from_worker(
+                    rpc=self.rpc, keys=to_gather, worker=worker, who=self.address
                 )
-                return GatherDepBusyEvent(
-                    worker=worker,
-                    total_nbytes=total_nbytes,
-                    stimulus_id=f"gather-dep-busy-{time()}",
-                )
-
-            assert response["status"] == "OK"
-            cause = self._get_cause(to_gather)
-            self._update_metrics_received_data(
-                start=start,
-                stop=stop,
-                data=response["data"],
-                cause=cause,
-                worker=worker,
-            )
-            self.state.log.append(
-                ("receive-dep", worker, set(response["data"]), stimulus_id, time())
-            )
-            return GatherDepSuccessEvent(
-                worker=worker,
-                total_nbytes=total_nbytes,
-                data=response["data"],
-                stimulus_id=f"gather-dep-success-{time()}",
-            )
 
         except OSError:
             logger.exception("Worker stream died during communication: %s", worker)
             self.state.log.append(
-                ("receive-dep-failed", worker, to_gather, stimulus_id, time())
+                ("gather-dep-failed", worker, to_gather, stimulus_id, m.stop)
             )
             return GatherDepNetworkFailureEvent(
                 worker=worker,
                 total_nbytes=total_nbytes,
-                stimulus_id=f"gather-dep-network-failure-{time()}",
+                start=start,
+                stop=None,
+                metrics=metrics,
+                stimulus_id=f"gather-dep-network-failure-{m.stop}",
             )
 
         except Exception as e:
             # e.g. data failed to deserialize
             logger.exception(e)
+            self.state.log.append(
+                ("gather-dep-failed", worker, to_gather, stimulus_id, m.stop)
+            )
+
             if self.batched_stream and LOG_PDB:
                 import pdb
 
@@ -2134,7 +2127,46 @@ class Worker(BaseWorker, ServerNode):
                 e,
                 worker=worker,
                 total_nbytes=total_nbytes,
-                stimulus_id=f"gather-dep-failure-{time()}",
+                start=start,
+                metrics=metrics,
+                stimulus_id=f"gather-dep-failed-{m.stop}",
+            )
+
+        else:
+            if response["status"] == "busy":
+                self.state.log.append(
+                    ("gather-dep-busy", worker, to_gather, stimulus_id, m.stop)
+                )
+                return GatherDepBusyEvent(
+                    worker=worker,
+                    total_nbytes=total_nbytes,
+                    start=start,
+                    stop=None,
+                    metrics=metrics,
+                    stimulus_id=f"gather-dep-busy-{m.stop}",
+                )
+
+            assert response["status"] == "OK"
+            cause = self._get_cause(to_gather)
+            self._update_metrics_received_data(
+                start=m.start,
+                stop=m.stop,
+                data=response["data"],
+                cause=cause,
+                worker=worker,
+            )
+            self.state.log.append(
+                ("receive-dep", worker, set(response["data"]), stimulus_id, m.stop)
+            )
+
+            return GatherDepSuccessEvent(
+                worker=worker,
+                total_nbytes=total_nbytes,
+                data=response["data"],
+                start=start,
+                stop=None,
+                metrics=metrics,
+                stimulus_id=f"gather-dep-success-{m.stop}",
             )
 
     async def retry_busy_worker_later(self, worker: str) -> StateMachineEvent:
@@ -2219,22 +2251,23 @@ class Worker(BaseWorker, ServerNode):
         self, ts: TaskState
     ) -> tuple[Callable, tuple, dict[str, Any]]:
         assert ts.run_spec is not None
-        start = time()
-        # Offload deserializing large tasks
-        if sizeof(ts.run_spec) > OFFLOAD_THRESHOLD:
-            function, args, kwargs = await offload(_deserialize, *ts.run_spec)
-        else:
-            function, args, kwargs = _deserialize(*ts.run_spec)
-        stop = time()
+        with meter(time) as m:
+            # Offload deserializing large tasks
+            if sizeof(ts.run_spec) > OFFLOAD_THRESHOLD:
+                function, args, kwargs = await offload(_deserialize, *ts.run_spec)
+            else:
+                function, args, kwargs = _deserialize(*ts.run_spec)
 
-        if stop - start > 0.010:
+        if m.delta > 0.01:
             ts.startstops.append(
-                {"action": "deserialize", "start": start, "stop": stop}
+                {"action": "deserialize", "start": m.start, "stop": m.stop}
             )
         return function, args, kwargs
 
     @fail_hard
-    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
+    async def execute(
+        self, key: str, *, start: float, stimulus_id: str
+    ) -> StateMachineEvent:
         """Execute a task. Implements BaseWorker abstract method.
 
         See also
@@ -2245,163 +2278,200 @@ class Worker(BaseWorker, ServerNode):
             # This is just for internal coherence of the WorkerState; the reschedule
             # message should not ever reach the Scheduler.
             # It is still OK if it does though.
-            return RescheduleEvent(key=key, stimulus_id=f"worker-closing-{time()}")
+            return RescheduleEvent(
+                key=key,
+                start=start,
+                stop=None,
+                metrics=[],
+                stimulus_id=f"worker-closing-{time()}",
+            )
 
         # The key *must* be in the worker state thanks to the cancelled state
         ts = self.state.tasks[key]
         run_id = ts.run_id
 
-        try:
-            function, args, kwargs = await self._maybe_deserialize_task(ts)
-        except Exception as exc:
-            logger.error("Could not deserialize task %s", key, exc_info=True)
-            return ExecuteFailureEvent.from_exception(
-                exc,
-                key=key,
-                stimulus_id=f"run-spec-deserialize-failed-{time()}",
-            )
+        metrics = []
 
-        try:
-            if self.state.validate:
-                assert not ts.waiting_for_data
-                assert ts.state in ("executing", "cancelled", "resumed"), ts
-                assert ts.run_spec is not None
+        def metrics_callback(label: str, value: float, unit: str) -> None:
+            # Time metrics are disaggregated only for successful tasks
+            metrics.append((label, value, unit))
 
-            args2, kwargs2 = self._prepare_args_for_execution(ts, args, kwargs)
-
-            assert ts.annotations is not None
-            executor = ts.annotations.get("executor", "default")
+        with context_meter.add_callback(metrics_callback):
             try:
-                e = self.executors[executor]
-            except KeyError:
-                raise ValueError(
-                    f"Invalid executor {executor!r}; "
-                    f"expected one of: {sorted(self.executors)}"
-                )
-
-            self.active_keys.add(key)
-            try:
-                ts.start_time = time()
-                if iscoroutinefunction(function):
-                    result = await apply_function_async(
-                        function,
-                        args2,
-                        kwargs2,
-                        self.scheduler_delay,
-                    )
-                elif "ThreadPoolExecutor" in str(type(e)):
-                    result = await self.loop.run_in_executor(
-                        e,
-                        apply_function,
-                        function,
-                        args2,
-                        kwargs2,
-                        self.execution_state,
-                        key,
-                        self.active_threads,
-                        self.active_threads_lock,
-                        self.scheduler_delay,
-                    )
-                else:
-                    result = await self.loop.run_in_executor(
-                        e,
-                        apply_function_simple,
-                        function,
-                        args2,
-                        kwargs2,
-                        self.scheduler_delay,
-                    )
-            finally:
-                self.active_keys.discard(key)
-
-            self.threads[key] = result["thread"]
-
-            if result["op"] == "task-finished":
-                if self.digests is not None:
-                    self.digests["task-duration"].add(result["stop"] - result["start"])
-                return ExecuteSuccessEvent(
+                function, args, kwargs = await self._maybe_deserialize_task(ts)
+            except Exception as exc:
+                logger.error("Could not deserialize task %s", key, exc_info=True)
+                return ExecuteFailureEvent.from_exception(
+                    exc,
                     key=key,
-                    run_id=run_id,
-                    value=result["result"],
-                    start=result["start"],
-                    stop=result["stop"],
-                    nbytes=result["nbytes"],
-                    type=result["type"],
-                    stimulus_id=f"task-finished-{time()}",
+                    start=start,
+                    metrics=metrics,
+                    stimulus_id=f"run-spec-deserialize-failed-{time()}",
                 )
 
-            task_exc = result["actual-exception"]
-            if isinstance(task_exc, Reschedule):
-                return RescheduleEvent(key=ts.key, stimulus_id=f"reschedule-{time()}")
-            if (
-                self.status == Status.closing
-                and isinstance(task_exc, asyncio.CancelledError)
-                and iscoroutinefunction(function)
-            ):
-                # `Worker.cancel` will cause async user tasks to raise `CancelledError`.
-                # Since we cancelled those tasks, we shouldn't treat them as failures.
-                # This is just a heuristic; it's _possible_ the task happened to
-                # fail independently with `CancelledError`.
-                logger.info(
-                    f"Async task {key!r} cancelled during worker close; rescheduling."
+            try:
+                if self.state.validate:
+                    assert not ts.waiting_for_data
+                    assert ts.state in ("executing", "cancelled", "resumed"), ts
+                    assert ts.run_spec is not None
+
+                args2, kwargs2 = self._prepare_args_for_execution(ts, args, kwargs)
+
+                assert ts.annotations is not None
+                executor = ts.annotations.get("executor", "default")
+                try:
+                    e = self.executors[executor]
+                except KeyError:
+                    raise ValueError(
+                        f"Invalid executor {executor!r}; "
+                        f"expected one of: {sorted(self.executors)}"
+                    )
+
+                self.active_keys.add(key)
+                try:
+                    ts.start_time = time()
+                    if iscoroutinefunction(function):
+                        result = await apply_function_async(
+                            function,
+                            args2,
+                            kwargs2,
+                            self.scheduler_delay,
+                        )
+                    elif "ThreadPoolExecutor" in str(type(e)):
+                        result = await self.loop.run_in_executor(
+                            e,
+                            apply_function,
+                            function,
+                            args2,
+                            kwargs2,
+                            self.execution_state,
+                            key,
+                            self.active_threads,
+                            self.active_threads_lock,
+                            self.scheduler_delay,
+                        )
+                    else:
+                        result = await self.loop.run_in_executor(
+                            e,
+                            apply_function_simple,
+                            function,
+                            args2,
+                            kwargs2,
+                            self.scheduler_delay,
+                        )
+                finally:
+                    self.active_keys.discard(key)
+
+                self.threads[key] = result["thread"]
+
+                if result["op"] == "task-finished":
+                    if self.digests is not None:
+                        self.digests["task-duration"].add(result["wall-duration"])
+                    context_meter.digest_metric(
+                        "thread-cpu", result["thread-duration"], "seconds"
+                    )
+                    context_meter.digest_metric(
+                        "thread-noncpu",
+                        result["wall-duration"] - result["thread-duration"],
+                        "seconds",
+                    )
+
+                    return ExecuteSuccessEvent(
+                        key=key,
+                        run_id=run_id,
+                        value=result["result"],
+                        nbytes=result["nbytes"],
+                        type=result["type"],
+                        start=start,
+                        stop=None,
+                        metrics=metrics,
+                        stimulus_id=f"task-finished-{time()}",
+                    )
+
+                task_exc = result["actual-exception"]
+                if isinstance(task_exc, Reschedule):
+                    return RescheduleEvent(
+                        key=ts.key,
+                        start=start,
+                        stop=None,
+                        metrics=metrics,
+                        stimulus_id=f"reschedule-{time()}",
+                    )
+
+                if (
+                    self.status == Status.closing
+                    and isinstance(task_exc, asyncio.CancelledError)
+                    and iscoroutinefunction(function)
+                ):
+                    # `Worker.cancel` will cause async user tasks to raise
+                    # `CancelledError`. Since we cancelled those tasks, we shouldn't
+                    # treat them as failures. This is just a heuristic; it's _possible_
+                    # the task happened to fail independently with `CancelledError`.
+                    logger.info(
+                        f"Async task {key!r} cancelled during worker close; rescheduling."
+                    )
+                    return RescheduleEvent(
+                        key=ts.key,
+                        start=start,
+                        stop=None,
+                        metrics=metrics,
+                        stimulus_id=f"cancelled-by-worker-close-{time()}",
+                    )
+
+                logger.warning(
+                    "Compute Failed\n"
+                    "Key:       %s\n"
+                    "Function:  %s\n"
+                    "args:      %s\n"
+                    "kwargs:    %s\n"
+                    "Exception: %r\n",
+                    key,
+                    str(funcname(function))[:1000],
+                    convert_args_to_str(args2, max_len=1000),
+                    convert_kwargs_to_str(kwargs2, max_len=1000),
+                    result["exception_text"],
                 )
-                return RescheduleEvent(
-                    key=ts.key, stimulus_id=f"cancelled-by-worker-close-{time()}"
+                return ExecuteFailureEvent.from_exception(
+                    result,
+                    key=key,
+                    start=start,
+                    metrics=metrics,
+                    stimulus_id=f"task-erred-{time()}",
                 )
 
-            logger.warning(
-                "Compute Failed\n"
-                "Key:       %s\n"
-                "Function:  %s\n"
-                "args:      %s\n"
-                "kwargs:    %s\n"
-                "Exception: %r\n",
-                key,
-                str(funcname(function))[:1000],
-                convert_args_to_str(args2, max_len=1000),
-                convert_kwargs_to_str(kwargs2, max_len=1000),
-                result["exception_text"],
-            )
-            return ExecuteFailureEvent.from_exception(
-                result,
-                key=key,
-                start=result["start"],
-                stop=result["stop"],
-                stimulus_id=f"task-erred-{time()}",
-            )
-
-        except Exception as exc:
-            logger.error("Exception during execution of task %s.", key, exc_info=True)
-            return ExecuteFailureEvent.from_exception(
-                exc,
-                key=key,
-                stimulus_id=f"execute-unknown-error-{time()}",
-            )
+            except Exception as exc:
+                logger.error(
+                    "Exception during execution of task %s.", key, exc_info=True
+                )
+                return ExecuteFailureEvent.from_exception(
+                    exc,
+                    key=key,
+                    start=start,
+                    metrics=metrics,
+                    stimulus_id=f"execute-unknown-error-{time()}",
+                )
 
     def _prepare_args_for_execution(
         self, ts: TaskState, args: tuple, kwargs: dict[str, Any]
     ) -> tuple[tuple, dict[str, Any]]:
-        start = time()
-        data = {}
-        for dep in ts.dependencies:
-            k = dep.key
-            try:
-                data[k] = self.data[k]
-            except KeyError:
-                from distributed.actor import Actor  # TODO: create local actor
+        with meter(time) as m:
+            data = {}
+            for dep in ts.dependencies:
+                k = dep.key
+                try:
+                    data[k] = self.data[k]
+                except KeyError:
+                    from distributed.actor import Actor  # TODO: create local actor
 
-                data[k] = Actor(type(self.state.actors[k]), self.address, k, self)
-        args2 = pack_data(args, data, key_types=(bytes, str))
-        kwargs2 = pack_data(kwargs, data, key_types=(bytes, str))
-        stop = time()
-        if stop - start > 0.005:
-            ts.startstops.append({"action": "disk-read", "start": start, "stop": stop})
-            # See metrics:
-            # - disk-load-duration
-            # - get-data-load-duration
-            # - disk-write-target-duration
-            # - disk-write-spill-duration
-            self.digest_metric("disk-load-duration", stop - start)
+                    data[k] = Actor(type(self.state.actors[k]), self.address, k, self)
+            args2 = pack_data(args, data, key_types=(bytes, str))
+            kwargs2 = pack_data(kwargs, data, key_types=(bytes, str))
+
+        if m.delta > 0.005:
+            ts.startstops.append(
+                {"action": "disk-read", "start": m.start, "stop": m.stop}
+            )
+
         return args2, kwargs2
 
     ##################
@@ -2941,12 +3011,13 @@ def loads_function(bytes_object):
 
 def _deserialize(function=None, args=None, kwargs=None, task=NO_VALUE):
     """Deserialize task inputs and regularize to func, args, kwargs"""
-    if function is not None:
-        function = loads_function(function)
-    if args and isinstance(args, bytes):
-        args = pickle.loads(args)
-    if kwargs and isinstance(kwargs, bytes):
-        kwargs = pickle.loads(kwargs)
+    with context_meter.meter("deserialize"):
+        if function is not None:
+            function = loads_function(function)
+        if args and isinstance(args, bytes):
+            args = pickle.loads(args)
+        if kwargs and isinstance(kwargs, bytes):
+            kwargs = pickle.loads(kwargs)
 
     if task is not NO_VALUE:
         assert not function and not args and not kwargs
@@ -3093,13 +3164,14 @@ def apply_function_simple(
     msg: dictionary with status, result/error, timings, etc..
     """
     ident = threading.get_ident()
-    start = time()
+
     try:
-        result = function(*args, **kwargs)
+        with meter(time) as wall_meter, meter(thread_time) as thread_meter:
+            result = function(*args, **kwargs)
     except (SystemExit, KeyboardInterrupt):
-        # Special-case these, just like asyncio does all over the place. They will pass
-        # through `fail_hard` and `_handle_stimulus_from_task`, and eventually be caught
-        # by special-case logic in asyncio:
+        # Special-case these, just like asyncio does all over the place. They will
+        # pass through `fail_hard` and `_handle_stimulus_from_task`, and eventually
+        # be caught by special-case logic in asyncio:
         # https://github.com/python/cpython/blob/v3.9.4/Lib/asyncio/events.py#L81-L82
         # Any other `BaseException` types would ultimately be ignored by asyncio if
         # raised here, after messing up the worker state machine along their way.
@@ -3119,10 +3191,11 @@ def apply_function_simple(
             "nbytes": sizeof(result),
             "type": type(result) if result is not None else None,
         }
-    finally:
-        end = time()
-    msg["start"] = start + time_delay
-    msg["stop"] = end + time_delay
+
+    msg["start"] = wall_meter.start + time_delay
+    msg["stop"] = wall_meter.stop + time_delay
+    msg["wall-duration"] = wall_meter.delta
+    msg["thread-duration"] = min(wall_meter.delta, thread_meter.delta)
     msg["thread"] = ident
     return msg
 
@@ -3140,38 +3213,39 @@ async def apply_function_async(
     msg: dictionary with status, result/error, timings, etc..
     """
     ident = threading.get_ident()
-    start = time()
-    try:
-        result = await function(*args, **kwargs)
-    except (SystemExit, KeyboardInterrupt):
-        # Special-case these, just like asyncio does all over the place. They will pass
-        # through `fail_hard` and `_handle_stimulus_from_task`, and eventually be caught
-        # by special-case logic in asyncio:
-        # https://github.com/python/cpython/blob/v3.9.4/Lib/asyncio/events.py#L81-L82
-        # Any other `BaseException` types would ultimately be ignored by asyncio if
-        # raised here, after messing up the worker state machine along their way.
-        raise
-    except BaseException as e:
-        # NOTE: this includes `CancelledError`! Since it's a user task, that's _not_ a
-        # reason to shut down the worker.
-        # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they
-        # aren't a reason to shut down the whole system (since we allow the
-        # system-shutting-down `SystemExit` and `KeyboardInterrupt` to pass through)
-        msg = error_message(e)
-        msg["op"] = "task-erred"
-        msg["actual-exception"] = e
-    else:
-        msg = {
-            "op": "task-finished",
-            "status": "OK",
-            "result": result,
-            "nbytes": sizeof(result),
-            "type": type(result) if result is not None else None,
-        }
-    finally:
-        end = time()
-    msg["start"] = start + time_delay
-    msg["stop"] = end + time_delay
+    with meter(time) as m:
+        try:
+            result = await function(*args, **kwargs)
+        except (SystemExit, KeyboardInterrupt):
+            # Special-case these, just like asyncio does all over the place. They will
+            # pass through `fail_hard` and `_handle_stimulus_from_task`, and eventually
+            # be caught by special-case logic in asyncio:
+            # https://github.com/python/cpython/blob/v3.9.4/Lib/asyncio/events.py#L81-L82
+            # Any other `BaseException` types would ultimately be ignored by asyncio if
+            # raised here, after messing up the worker state machine along their way.
+            raise
+        except BaseException as e:
+            # NOTE: this includes `CancelledError`! Since it's a user task, that's _not_
+            # a reason to shut down the worker.
+            # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they
+            # aren't a reason to shut down the whole system (since we allow the
+            # system-shutting-down `SystemExit` and `KeyboardInterrupt` to pass through)
+            msg = error_message(e)
+            msg["op"] = "task-erred"
+            msg["actual-exception"] = e
+        else:
+            msg = {
+                "op": "task-finished",
+                "status": "OK",
+                "result": result,
+                "nbytes": sizeof(result),
+                "type": type(result) if result is not None else None,
+            }
+
+    msg["start"] = m.start + time_delay
+    msg["stop"] = m.stop + time_delay
+    msg["wall-duration"] = m.delta
+    msg["thread-duration"] = 0
     msg["thread"] = ident
     return msg
 

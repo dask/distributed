@@ -26,6 +26,9 @@ async def test_prometheus_api_doc(c, s, a):
     # Some metrics only appear if there are tasks on the cluster
     fut = c.submit(inc, 1)
     await fut
+
+    a.data.evict()
+
     # Semaphore metrics only appear after semaphores are used
     sem = await Semaphore()
     await sem.acquire()

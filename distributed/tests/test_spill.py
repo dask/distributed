@@ -3,6 +3,7 @@ from __future__ import annotations
 import array
 import os
 import random
+import secrets
 import uuid
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from dask.sizeof import sizeof
 
 from distributed import profile
 from distributed.compatibility import WINDOWS
+from distributed.metrics import meter
 from distributed.spill import SpillBuffer, has_zict_220
 from distributed.utils import RateLimiterFilter
 from distributed.utils_test import captured_logger
@@ -383,49 +385,58 @@ def test_weakref_cache(tmp_path, cls, expect_cached, size):
 
 
 def test_metrics(tmp_path):
-    buf = SpillBuffer(str(tmp_path), target=1000)
-    assert buf.get_metrics() == {
-        "disk_bytes": 0,
-        "disk_count": 0,
-        "disk_read_bytes_total": 0,
-        "disk_read_count_total": 0,
-        "disk_read_time_total": 0,
-        "disk_write_bytes_total": 0,
-        "disk_write_count_total": 0,
-        "disk_write_time_total": 0,
-        "memory_bytes": 0,
-        "memory_count": 0,
-        "memory_read_bytes_total": 0,
-        "memory_read_count_total": 0,
-        "pickle_time_total": 0,
-        "unpickle_time_total": 0,
+    buf = SpillBuffer(str(tmp_path), target=39_000)
+    assert buf.cumulative_metrics == {}
+
+    a = "a" * 20_000  # <target, highly compressible
+    b = "b"
+    c = secrets.token_bytes(30_000)  # <target, uncompressible
+    d = "d" * 40_000  # >target, highly compressible
+
+    with meter() as m:
+        buf["a"] = a
+        buf["b"] = b
+        del buf["b"]  # No effect
+        _ = buf["a"]  # Cache hit
+        buf["c"] = c  # Auto evict a (c < target; pushes older keys to slow)
+        buf.evict()  # Manual evict c
+        buf["d"] = d  # Auto evict d (d > target; goes to slow)
+
+        a_size = psize(tmp_path, a=a)
+        c_size = psize(tmp_path, c=c)
+        d_size = psize(tmp_path, d=d)
+
+        _ = buf["c"]  # Unspill / cache miss (c < target, goes back to fast)
+        _ = buf["d"]  # Unspill / cache miss (d > target, stays in slow)
+
+    assert (buf.fast.keys(), buf.slow.keys()) == ({"c"}, {"a", "d"})
+
+    assert {
+        (label, unit): v
+        for (label, unit), v in buf.cumulative_metrics.items()
+        if unit != "seconds"
+    } == {
+        ("disk-read", "bytes"): c_size[1] + d_size[1],
+        ("disk-read", "count"): 2,
+        ("disk-write", "bytes"): a_size[1] + c_size[1] + d_size[1],
+        ("disk-write", "count"): 3,
+        ("memory-read", "bytes"): a_size[0],
+        ("memory-read", "count"): 1,
     }
 
-    a, b, c = "a" * 200, "b" * 150, "c" * 100
-
-    buf["a"] = a
-    buf["b"] = b
-    del buf["b"]
-
-    metrics = buf.get_metrics()
-    assert 200 < metrics["memory_bytes"] < 350
-    assert metrics["memory_count"] == 1
-    for k, v in metrics.items():
-        if "disk" in k or "pickle" in k:
-            assert v == 0, f"{k}={v}"
-
-    assert metrics["memory_read_bytes_total"] == 0
-    assert metrics["memory_read_count_total"] == 0
-    _ = buf["a"]  # Cache hit
-    metrics = buf.get_metrics()
-    assert metrics["memory_read_bytes_total"] > 0
-    assert metrics["memory_read_count_total"] == 1
-
-    buf.evict()
-    buf["c"] = c
-    buf.evict()
-    _ = buf["c"]  # Unspill / cache miss
-
-    metrics = buf.get_metrics()
-    for k, v in metrics.items():
-        assert v > 0, f"{k}={v}"
+    time_metrics = {
+        (label, unit): v
+        for (label, unit), v in buf.cumulative_metrics.items()
+        if unit == "seconds"
+    }
+    assert all(v > 0 for v in time_metrics.values())
+    assert time_metrics.keys() == {
+        ("compress", "seconds"),
+        ("decompress", "seconds"),
+        ("deserialize", "seconds"),
+        ("disk-read", "seconds"),
+        ("disk-write", "seconds"),
+        ("serialize", "seconds"),
+    }
+    if not WINDOWS:  # Fiddly rounding; see distributed.metrics._WindowsTime
+        assert sum(time_metrics.values()) <= m.delta

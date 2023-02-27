@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import collections
 import time as timemod
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from functools import wraps
+from math import nan
+from typing import Literal
 
 import psutil
 
@@ -103,3 +108,149 @@ try:
     thread_time = timemod.thread_time
 except (AttributeError, OSError):  # pragma: no cover
     thread_time = process_time
+
+
+@dataclass
+class MeterOutput:
+    start: float
+    stop: float
+    delta: float
+    __slots__ = tuple(__annotations__)
+
+
+@contextmanager
+def meter(
+    func: Callable[[], float] = timemod.perf_counter,
+    floor: float | Literal[False] = 0.0,
+) -> Iterator[MeterOutput]:
+    """Convenience context manager which calls func() before and after the wrapped
+    code and calculates the delta.
+
+    Parameters
+    ----------
+    label: str
+        label to pass to the callback
+    func: callable
+        function to call before and after, which must return a number.
+        Besides time, it could return e.g. cumulative network traffic or disk usage.
+        Default: :func:`timemod.perf_counter`
+    floor: float or False, optional
+        Floor the delta to the given value (default: 0). This is useful for strictly
+        cumulative functions that can occasionally glitch and go backwards.
+        Set to False to disable.
+    """
+    out = MeterOutput(func(), nan, nan)
+    try:
+        yield out
+    finally:
+        out.stop = func()
+        out.delta = out.stop - out.start
+        if floor is not False:
+            out.delta = max(floor, out.delta)
+
+
+class ContextMeter:
+    """Context-based general purpose meter.
+
+    Usage
+    -----
+    1. In high level code, call :meth:`add_callback` to install a hook that defines an
+       activity
+    2. In low level code, typically many stack levels below, log quantitative events
+       (e.g. elapsed time, transferred bytes, etc.) so that they will be attributed to
+       the high-level code calling it, either with :meth:`meter` or
+       :meth:`digest_metric`.
+
+    Examples
+    --------
+    In the code that e.g. sends a Python object from A to B over the network:
+    >>> from distributed.metrics import context_meter
+    >>> with context_meter.add_callback(partial(print, "A->B comms:")):
+    ...     await send_over_the_network(obj)
+
+    In the serialization utilities, called many stack levels below:
+    >>> with context_meter.meter("dumps"):
+    ...     pik = pickle.dumps(obj)
+    >>> with context_meter.meter("compress"):
+    ...     pik = lz4.compress(pik)
+
+    And finally, elsewhere, deep into the TCP stack:
+    >>> with context_meter.meter("network-write"):
+    ...     await comm.write(frames)
+
+    When you call the top-level code, you'll get::
+      A->B comms: dumps 0.012 seconds
+      A->B comms: compress 0.034 seconds
+      A->B comms: network-write 0.567 seconds
+    """
+
+    _callbacks: ContextVar[list[Callable[[str, float, str], None]]]
+
+    def __init__(self):
+        self._callbacks = ContextVar(f"MetricHook<{id(self)}>._callbacks", default=[])
+
+    @contextmanager
+    def add_callback(
+        self, callback: Callable[[str, float, str], None]
+    ) -> Iterator[None]:
+        """Add a callback when entering the context and remove it when exiting it.
+        The callback must accept the same parameters as :meth:`digest_metric`.
+        """
+        cbs = self._callbacks.get()
+        tok = self._callbacks.set(cbs + [callback])
+        try:
+            yield
+        finally:
+            tok.var.reset(tok)
+
+    def digest_metric(self, label: str, value: float, unit: str) -> None:
+        """Invoke the currently set context callbacks for an arbitrary quantitative
+        metric.
+        """
+        cbs = self._callbacks.get()
+        for cb in cbs:
+            cb(label, value, unit)
+
+    @contextmanager
+    def meter(
+        self,
+        label: str,
+        unit: str = "seconds",
+        func: Callable[[], float] = timemod.perf_counter,
+        floor: float | Literal[False] = 0.0,
+    ) -> Iterator[None]:
+        """Convenience context manager which calls func() before and after the wrapped
+        code, calculates the delta, and finally calls :meth:`digest_metric`. It also
+        subtracts any other calls to :meth:`meter` or :meth:`digest_metric` with the
+        same unit performed within the context, so that the total is strictly additive.
+
+        Parameters
+        ----------
+        label: str
+            label to pass to the callback
+        unit: str, optional
+            unit to pass to the callback. Default: seconds
+        func: callable
+            see :func:`meter`
+        floor: bool, optional
+            see :func:`meter`
+        """
+        offsets = []
+
+        def cb(label2: str, value2: float, unit2: str) -> None:
+            if unit2 == unit:
+                # This must be threadsafe to support when callbacks are invoked from
+                # distributed.utils.offload; '+=' on a float would not be threadsafe!
+                offsets.append(value2)
+
+        try:
+            with self.add_callback(cb), meter(func, floor=False) as m:
+                yield
+        finally:
+            delta = m.delta - sum(offsets)
+            if floor is not False:
+                delta = max(floor, delta)
+            self.digest_metric(label, delta, unit)
+
+
+context_meter = ContextMeter()

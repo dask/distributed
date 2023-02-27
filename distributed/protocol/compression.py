@@ -17,6 +17,7 @@ from tlz import identity
 
 import dask
 
+from distributed.metrics import context_meter
 from distributed.utils import ensure_memoryview, nbytes, no_default
 
 compressions: dict[
@@ -184,20 +185,23 @@ def maybe_compress(
     # Take a view of payload for efficient usage
     mv = ensure_memoryview(payload)
 
-    # Try compressing a sample to see if it compresses well
-    sample = byte_sample(mv, sample_size, nsamples)
-    if len(compress(sample)) <= 0.9 * sample.nbytes:
-        # Try compressing the real thing and check how compressed it is
-        compressed = compress(mv)
-        if len(compressed) <= 0.9 * mv.nbytes:
-            return compression, compressed
+    with context_meter.meter("compress"):
+        # Try compressing a sample to see if it compresses well
+        sample = byte_sample(mv, sample_size, nsamples)
+        if len(compress(sample)) <= 0.9 * sample.nbytes:
+            # Try compressing the real thing and check how compressed it is
+            compressed = compress(mv)
+            if len(compressed) <= 0.9 * mv.nbytes:
+                return compression, compressed
+
     # Skip compression as the sample or the data didn't compress well
     return None, payload
 
 
 def decompress(header, frames):
     """Decompress frames according to information in the header"""
-    return [
-        compressions[c]["decompress"](frame)
-        for c, frame in zip(header["compression"], frames)
-    ]
+    with context_meter.meter("decompress"):
+        return [
+            compressions[c]["decompress"](frame)
+            for c, frame in zip(header["compression"], frames)
+        ]

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import gc
 import pickle
+import sys
 from collections import defaultdict
 from collections.abc import Iterator
 from time import sleep
@@ -32,6 +33,7 @@ from distributed.worker_state_machine import (
     AcquireReplicasEvent,
     AddKeysMsg,
     ComputeTaskEvent,
+    DigestMetric,
     Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
@@ -279,18 +281,23 @@ def traverse_subclasses(cls: type) -> Iterator[type]:
 @pytest.mark.parametrize(
     "cls",
     [
+        pytest.param(
+            TaskState,
+            marks=pytest.mark.skipif(
+                sys.version_info < (3, 10), reason="Requires @dataclass(slots=True)"
+            ),
+        ),
         *traverse_subclasses(Instruction),
         *traverse_subclasses(StateMachineEvent),
     ],
 )
 def test_slots(cls):
     params = [
-        k
-        for k in dir(cls)
-        if not k.startswith("_")
-        and k not in ("op", "handled")
-        and not callable(getattr(cls, k))
+        name
+        for name, field in cls.__dataclass_fields__.items()
+        if field.init and not field.type.startswith("ClassVar")
     ]
+
     inst = cls(**dict.fromkeys(params))
     assert not hasattr(inst, "__dict__")
 
@@ -331,12 +338,17 @@ def test_event_to_dict_with_annotations():
     """Test recursive_to_dict(ev), where ev is a subclass of StateMachineEvent that
     defines its own annotations
     """
-    ev = RescheduleEvent(stimulus_id="test", key="x")
+    ev = RescheduleEvent(
+        stimulus_id="test", start=123.4, stop=None, metrics=[], key="x"
+    )
     ev2 = ev.to_loggable(handled=11.22)
     assert ev2 == ev
     d = recursive_to_dict(ev2)
     assert d == {
         "cls": "RescheduleEvent",
+        "start": 123.4,
+        "stop": None,
+        "metrics": [],
         "stimulus_id": "test",
         "handled": 11.22,
         "key": "x",
@@ -464,6 +476,7 @@ def test_executesuccess_to_dict():
         value=123,
         start=123.4,
         stop=456.7,
+        metrics=[],
         nbytes=890,
         type=int,
     )
@@ -481,6 +494,7 @@ def test_executesuccess_to_dict():
         "nbytes": 890,
         "start": 123.4,
         "stop": 456.7,
+        "metrics": [],
         "type": "<class 'int'>",
     }
     ev3 = StateMachineEvent.from_dict(d)
@@ -503,7 +517,8 @@ def test_executesuccess_dummy():
         run_id=1,
         value=None,
         start=0.0,
-        stop=1.0,
+        stop=None,
+        metrics=[],
         nbytes=1,
         type=None,
         stimulus_id="s",
@@ -519,6 +534,7 @@ def test_executefailure_to_dict():
         key="x",
         start=123.4,
         stop=456.7,
+        metrics=[],
         exception=Serialize(ValueError("foo")),
         traceback=Serialize("lose me"),
         exception_text="exc text",
@@ -534,6 +550,7 @@ def test_executefailure_to_dict():
         "key": "x",
         "start": 123.4,
         "stop": 456.7,
+        "metrics": [],
         "exception": "<Serialize: foo>",
         "traceback": "<Serialize: lose me>",
         "exception_text": "exc text",
@@ -557,8 +574,9 @@ def test_executefailure_dummy():
     ev = ExecuteFailureEvent.dummy("x", stimulus_id="s")
     assert ev == ExecuteFailureEvent(
         key="x",
-        start=None,
+        start=0.0,
         stop=None,
+        metrics=[],
         exception=Serialize(None),
         traceback=None,
         exception_text="",
@@ -726,7 +744,7 @@ async def test_fetch_to_missing_on_busy(c, s, a, b):
             ("gather-dependencies", b.address, {"x"}),
             ("x", "fetch", "flight", "flight", {}),
             ("request-dep", b.address, {"x"}),
-            ("busy-gather", b.address, {"x"}),
+            ("gather-dep-busy", b.address, {"x"}),
             ("x", "flight", "fetch", "fetch", {}),
             ("x", "fetch", "missing", "missing", {}),
         ],
@@ -770,13 +788,13 @@ def test_new_replica_while_all_workers_in_flight(ws):
         ),
     )
     assert instructions == [
-        GatherDep(
+        GatherDep.match(
             worker=ws2,
             to_gather={"x"},
             total_nbytes=1,
             stimulus_id="s1",
         ),
-        GatherDep(
+        GatherDep.match(
             worker=ws3,
             to_gather={"y"},
             total_nbytes=1,
@@ -1121,21 +1139,21 @@ def test_gather_priority(ws):
     assert instructions == [
         # Highest-priority task first. Lower priority tasks from the same worker are
         # shoved into the same instruction (up to 50MB worth)
-        GatherDep(
+        GatherDep.match(
             stimulus_id="unpause",
             worker="127.0.0.7:1",
             to_gather={"y", "x8"},
             total_nbytes=1 + 4 * 2**20,
         ),
         # Followed by local workers
-        GatherDep(
+        GatherDep.match(
             stimulus_id="unpause",
             worker="127.0.0.1:2",
             to_gather={"x1"},
             total_nbytes=4 * 2**20,
         ),
         # Followed by remote workers with the most tasks
-        GatherDep(
+        GatherDep.match(
             stimulus_id="unpause",
             worker="127.0.0.3:1",
             to_gather={"x3", "x4"},
@@ -1146,7 +1164,7 @@ def test_gather_priority(ws):
         # FIXME It would have not been deterministic if we instead of multiple keys we
         #       had used a single key with multiple workers, because sets
         #       (like TaskState.who_has) change order at every interpreter restart.
-        GatherDep(
+        GatherDep.match(
             stimulus_id="unpause",
             worker="127.0.0.4:1",
             to_gather={"x5"},
@@ -1202,13 +1220,12 @@ def test_task_with_dependencies_acquires_resources(ws):
     assert ws.available_resources == {"R": 1}
 
     instructions = ws.handle_stimulus(
-        GatherDepSuccessEvent(
-            worker=ws2, data={"x": 123}, total_nbytes=8, stimulus_id="s2"
-        )
+        GatherDepSuccessEvent.dummy(ws2, {"x": 123}, total_nbytes=8, stimulus_id="s2")
     )
     assert instructions == [
+        DigestMetric.match(name="gather-dep-other-seconds", stimulus_id="s2"),
         AddKeysMsg(keys=["x"], stimulus_id="s2"),
-        Execute(key="y", stimulus_id="s2"),
+        Execute.match(key="y", stimulus_id="s2"),
     ]
     assert ws.tasks["y"].state == "executing"
     assert ws.available_resources == {"R": 0}
@@ -1331,9 +1348,7 @@ def test_transfer_incoming_metrics(ws):
     assert ws.transfer_incoming_count_total == 1
 
     ws.handle_stimulus(
-        GatherDepSuccessEvent(
-            worker=ws2, data={"a": 123}, total_nbytes=7, stimulus_id="s2"
-        )
+        GatherDepSuccessEvent.dummy(ws2, {"a": 123}, total_nbytes=7, stimulus_id="s2")
     )
     assert ws.transfer_incoming_bytes == 0
     assert ws.transfer_incoming_count == 0
@@ -1352,8 +1367,8 @@ def test_transfer_incoming_metrics(ws):
     assert ws.transfer_incoming_count_total == 2
 
     ws.handle_stimulus(
-        GatherDepSuccessEvent(
-            worker=ws2, data={"c": 123, "d": 234}, total_nbytes=24, stimulus_id="s3"
+        GatherDepSuccessEvent.dummy(
+            ws2, {"c": 123, "d": 234}, total_nbytes=24, stimulus_id="s3"
         )
     )
     assert ws.transfer_incoming_bytes == 0
@@ -1374,18 +1389,14 @@ def test_transfer_incoming_metrics(ws):
     assert ws.transfer_incoming_count_total == 4
 
     ws.handle_stimulus(
-        GatherDepSuccessEvent(
-            worker=ws3, data={"g": 345}, total_nbytes=19, stimulus_id="s5"
-        )
+        GatherDepSuccessEvent.dummy(ws3, {"g": 345}, total_nbytes=19, stimulus_id="s5")
     )
     assert ws.transfer_incoming_bytes == 17
     assert ws.transfer_incoming_count == 1
     assert ws.transfer_incoming_count_total == 4
 
     ws.handle_stimulus(
-        GatherDepSuccessEvent(
-            worker=ws2, data={"g": 456}, total_nbytes=17, stimulus_id="s6"
-        )
+        GatherDepSuccessEvent.dummy(ws2, {"g": 456}, total_nbytes=17, stimulus_id="s6")
     )
     assert ws.transfer_incoming_bytes == 0
     assert ws.transfer_incoming_count == 0
@@ -1452,9 +1463,9 @@ def test_throttle_incoming_transfers_on_count_limit(ws):
 
     in_flight_task = tasks_by_state["flight"][0]
     ws.handle_stimulus(
-        GatherDepSuccessEvent(
-            worker=who_has[in_flight_task.key][0],
-            data={in_flight_task.key: 123},
+        GatherDepSuccessEvent.dummy(
+            who_has[in_flight_task.key][0],
+            {in_flight_task.key: 123},
             total_nbytes=100,
             stimulus_id="s2",
         )
@@ -1485,9 +1496,9 @@ def test_throttling_incoming_transfer_on_transfer_bytes_same_worker(ws):
     assert len(tasks_by_state["fetch"]) == 1
 
     ws.handle_stimulus(
-        GatherDepSuccessEvent(
-            worker=ws2,
-            data={ts.key: 123 for ts in tasks_by_state["flight"]},
+        GatherDepSuccessEvent.dummy(
+            ws2,
+            {ts.key: 123 for ts in tasks_by_state["flight"]},
             total_nbytes=200,
             stimulus_id="s2",
         )
@@ -1520,9 +1531,9 @@ def test_throttling_incoming_transfer_on_transfer_bytes_different_workers(ws):
 
     in_flight_task = tasks_by_state["flight"][0]
     ws.handle_stimulus(
-        GatherDepSuccessEvent(
-            worker=who_has[in_flight_task.key][0],
-            data={in_flight_task.key: 123},
+        GatherDepSuccessEvent.dummy(
+            who_has[in_flight_task.key][0],
+            {in_flight_task.key: 123},
             total_nbytes=100,
             stimulus_id="s2",
         )
@@ -1613,11 +1624,8 @@ def test_worker_nbytes(ws_with_running_task):
     )
     assert ws.nbytes == 12
     ws.handle_stimulus(
-        GatherDepSuccessEvent(
-            worker=ws2,
-            data={"y": "foo"},
-            total_nbytes=13,
-            stimulus_id="s3",
+        GatherDepSuccessEvent.dummy(
+            ws2, {"y": "foo"}, total_nbytes=13, stimulus_id="s3"
         )
     )
     assert ws.nbytes == 12 + 13
@@ -1675,7 +1683,7 @@ def test_fetch_count(ws):
 
     # flight->missing
     ws.handle_stimulus(
-        GatherDepSuccessEvent(worker=ws2, data={}, total_nbytes=0, stimulus_id="s5")
+        GatherDepSuccessEvent.dummy(ws2, {}, total_nbytes=0, stimulus_id="s5")
     )
     assert ws.tasks["a"].state == "missing"
     print(ws.tasks)
@@ -1687,7 +1695,7 @@ def test_fetch_count(ws):
         ComputeTaskEvent.dummy(
             "clog", who_has={"clog_dep": [ws2]}, priority=(-1,), stimulus_id="s6"
         ),
-        GatherDepSuccessEvent(worker=ws3, data={}, total_nbytes=0, stimulus_id="s7"),
+        GatherDepSuccessEvent.dummy(ws3, {}, total_nbytes=0, stimulus_id="s7"),
     )
     assert ws.tasks["b"].state == "fetch"
     assert ws.fetch_count == 1

@@ -44,18 +44,18 @@ from distributed._stories import worker_story
 from distributed.collections import HeapSet
 from distributed.comm import get_address_host
 from distributed.core import ErrorMessage, error_message
-from distributed.metrics import monotonic, time
+from distributed.metrics import context_meter, meter, monotonic, time
 from distributed.protocol import pickle
 from distributed.protocol.serialize import Serialize
 from distributed.sizeof import safe_sizeof as sizeof
-from distributed.utils import recursive_to_dict
+from distributed.utils import empty_context, recursive_to_dict
 
 logger = logging.getLogger("distributed.worker.state_machine")
 
 if TYPE_CHECKING:
     # TODO import from typing (TypeAlias requires Python >=3.10)
-    # TODO import from typing (NotRequired requires Python >=3.11)
-    from typing_extensions import NotRequired, TypeAlias
+    # TODO import from typing (NotRequired and Self require Python >=3.11)
+    from typing_extensions import NotRequired, Self, TypeAlias
 
     # Circular imports
     from distributed.diagnostics.plugin import WorkerPlugin
@@ -418,16 +418,18 @@ class _InstructionMatch:
 
 @dataclass
 class GatherDep(Instruction):
-    __slots__ = ("worker", "to_gather", "total_nbytes")
     worker: str
     to_gather: set[str]
     total_nbytes: int
+    start: float
+    __slots__ = tuple(__annotations__)
 
 
 @dataclass
 class Execute(Instruction):
-    __slots__ = ("key",)
+    __slots__ = ("key", "start")
     key: str
+    start: float
 
 
 @dataclass
@@ -621,6 +623,8 @@ class StateMachineEvent:
         for k in dir(self):
             if k in exclude or k.startswith("_"):
                 continue
+            if isinstance(getattr(type(self), k, None), property):
+                continue
             v = getattr(self, k)
             if not callable(v):
                 info[k] = v
@@ -661,12 +665,91 @@ class RetryBusyWorkerEvent(StateMachineEvent):
 
 
 @dataclass
-class GatherDepDoneEvent(StateMachineEvent):
+class ExecuteGatherDepDoneEvent(StateMachineEvent):
+    """Abstract base event for all the possible outcomes of a :class:`Compute` or
+    :class:`GatherDep` instruction
+    """
+
+    _digest_tag: ClassVar[str]
+
+    #: When the :class:`WorkerStateMachine` emitted the :class:`Instruction`
+    start: float
+    #: When the :class:`WorkerStateMachine` processed the final
+    #: :class:`StateMachineEvent`
+    stop: float | None
+    #: ``(label, value, unit)``; see :class:`distributed.metrics.ContextMeter`
+    metrics: list[tuple[str, float, str]]
+    __slots__ = ("start", "stop", "metrics")
+
+    def done(self) -> None:
+        """Populate :ivar:`stop` and make sure that :ivar:`metrics` add up to the actual
+        end-to-end execution time of the instruction
+        """
+        self.stop = time()
+        metered = sum(value for _, value, units in self.metrics if units == "seconds")
+        self.metrics.append(("other", max(0.0, self.duration - metered), "seconds"))
+
+    @property
+    def duration(self) -> float:
+        if self.stop is None:
+            return math.nan
+        return max(0.0, self.stop - self.start)
+
+    def digests(self, coarse_time: str | Literal[False]) -> Instructions:
+        """Generate :class:`DigestMetric` objects out of :ivar:`metrics`"""
+        assert self.stop is not None, "Did not call done()"
+
+        instructions: Instructions = []
+        for label, value, unit in self.metrics:
+            if unit != "seconds" or not coarse_time:
+                instructions.append(
+                    DigestMetric(
+                        name=f"{self._digest_tag}-{label}-{unit}",
+                        value=value,
+                        stimulus_id=self.stimulus_id,
+                    )
+                )
+        if coarse_time:
+            instructions.append(
+                DigestMetric(
+                    name=f"{self._digest_tag}-{coarse_time}-seconds",
+                    value=self.duration,
+                    stimulus_id=self.stimulus_id,
+                )
+            )
+        return instructions
+
+    @classmethod
+    def dummy(cls, *, stimulus_id: str, **kwargs: Any) -> Self:
+        """Build a dummy event, with most attributes set to a reasonable default.
+        This is a convenience method to be used in unit testing only.
+        """
+        return cls(
+            start=0.0,
+            stop=None,
+            metrics=[],
+            stimulus_id=stimulus_id,
+            **kwargs,
+        )
+
+
+@dataclass
+class GatherDepDoneEvent(ExecuteGatherDepDoneEvent):
     """:class:`GatherDep` instruction terminated (abstract base class)"""
 
-    __slots__ = ("worker", "total_nbytes")
+    _digest_tag = "gather-dep"
+
     worker: str
     total_nbytes: int  # Must be the same as in GatherDep instruction
+
+    __slots__ = tuple(__annotations__)
+
+    @classmethod
+    def dummy(cls, worker: str, **kwargs: Any) -> Self:  # type: ignore[override]
+        """Build a dummy event, with most attributes set to a reasonable default.
+        This is a convenience method to be used in unit testing only.
+        """
+        return super().dummy(worker=worker, **kwargs)
 
 
 @dataclass
@@ -677,7 +760,7 @@ class GatherDepSuccessEvent(GatherDepDoneEvent):
 
     __slots__ = ("data",)
 
-    data: dict[str, object]  # There may be less keys than in GatherDep
+    data: dict[str, object]  # There may be fewer keys than in GatherDep
 
     def to_loggable(self, *, handled: float) -> StateMachineEvent:
         out = copy(self)
@@ -687,6 +770,20 @@ class GatherDepSuccessEvent(GatherDepDoneEvent):
 
     def _after_from_dict(self) -> None:
         self.data = {k: None for k in self.data}
+
+    @classmethod
+    def dummy(  # type: ignore[override]
+        cls,
+        worker: str,
+        data: Collection[str],
+        **kwargs: Any,
+    ) -> Self:
+        """Build a dummy event, with most attributes set to a reasonable default.
+        This is a convenience method to be used in unit testing only.
+        """
+        if not isinstance(data, dict):
+            data = dict.fromkeys(data)
+        return super().dummy(worker=worker, data=data, **kwargs)
 
 
 @dataclass
@@ -717,6 +814,7 @@ class GatherDepFailureEvent(GatherDepDoneEvent):
     traceback: Serialize | None
     exception_text: str
     traceback_text: str
+
     __slots__ = tuple(__annotations__)
 
     def _after_from_dict(self) -> None:
@@ -730,8 +828,10 @@ class GatherDepFailureEvent(GatherDepDoneEvent):
         *,
         worker: str,
         total_nbytes: int,
+        start: float,
+        metrics: list[tuple[str, float, str]],
         stimulus_id: str,
-    ) -> GatherDepFailureEvent:
+    ) -> Self:
         msg = error_message(err)
         return cls(
             worker=worker,
@@ -740,6 +840,29 @@ class GatherDepFailureEvent(GatherDepDoneEvent):
             traceback=msg["traceback"],
             exception_text=msg["exception_text"],
             traceback_text=msg["traceback_text"],
+            start=start,
+            stop=None,
+            metrics=metrics,
+            stimulus_id=stimulus_id,
+        )
+
+    @classmethod
+    def dummy(  # type: ignore[override]
+        cls,
+        worker: str,
+        total_nbytes: int,
+        *,
+        stimulus_id: str,
+    ) -> Self:
+        """Build a dummy event, with most attributes set to a reasonable default.
+        This is a convenience method to be used in unit testing only.
+        """
+        return cls.from_exception(
+            Exception(),
+            worker=worker,
+            total_nbytes=total_nbytes,
+            start=0.0,
+            metrics=[],
             stimulus_id=stimulus_id,
         )
 
@@ -830,21 +953,20 @@ class ComputeTaskEvent(StateMachineEvent):
 
 
 @dataclass
-class ExecuteDoneEvent(StateMachineEvent):
+class ExecuteDoneEvent(ExecuteGatherDepDoneEvent):
     """Abstract base event for all the possible outcomes of a :class:`Compute`
     instruction
     """
 
-    key: str
     __slots__ = ("key",)
+    _digest_tag = "execute"
+    key: str
 
 
 @dataclass
 class ExecuteSuccessEvent(ExecuteDoneEvent):
     run_id: int  # FIXME: Utilize the run ID in all ExecuteDoneEvents
     value: object
-    start: float
-    stop: float
     nbytes: int
     type: type | None
     __slots__ = tuple(__annotations__)
@@ -866,24 +988,23 @@ class ExecuteSuccessEvent(ExecuteDoneEvent):
         self.value = None
         self.type = None
 
-    @staticmethod
-    def dummy(
+    @classmethod
+    def dummy(  # type: ignore[override]
+        cls,
         key: str,
         value: object = None,
         *,
         run_id: int = 1,
         nbytes: int = 1,
         stimulus_id: str,
-    ) -> ExecuteSuccessEvent:
+    ) -> Self:
         """Build a dummy event, with most attributes set to a reasonable default.
         This is a convenience method to be used in unit testing only.
         """
-        return ExecuteSuccessEvent(
+        return super().dummy(
             key=key,
             run_id=run_id,
             value=value,
-            start=0.0,
-            stop=1.0,
             nbytes=nbytes,
             type=None,
             stimulus_id=stimulus_id,
@@ -892,8 +1013,6 @@ class ExecuteSuccessEvent(ExecuteDoneEvent):
 
 @dataclass
 class ExecuteFailureEvent(ExecuteDoneEvent):
-    start: float | None
-    stop: float | None
     exception: Serialize
     traceback: Serialize | None
     exception_text: str
@@ -910,10 +1029,10 @@ class ExecuteFailureEvent(ExecuteDoneEvent):
         err_or_msg: BaseException | ErrorMessage,
         *,
         key: str,
-        start: float | None = None,
-        stop: float | None = None,
+        start: float,
+        metrics: list[tuple[str, float, str]],
         stimulus_id: str,
-    ) -> ExecuteFailureEvent:
+    ) -> Self:
         if isinstance(err_or_msg, dict):
             msg = err_or_msg
         else:
@@ -922,27 +1041,27 @@ class ExecuteFailureEvent(ExecuteDoneEvent):
         return cls(
             key=key,
             start=start,
-            stop=stop,
+            stop=None,
             exception=msg["exception"],
             traceback=msg["traceback"],
             exception_text=msg["exception_text"],
             traceback_text=msg["traceback_text"],
+            metrics=metrics,
             stimulus_id=stimulus_id,
         )
 
-    @staticmethod
-    def dummy(
+    @classmethod
+    def dummy(  # type: ignore[override]
+        cls,
         key: str,
         *,
         stimulus_id: str,
-    ) -> ExecuteFailureEvent:
+    ) -> Self:
         """Build a dummy event, with most attributes set to a reasonable default.
         This is a convenience method to be used in unit testing only.
         """
-        return ExecuteFailureEvent(
+        return super().dummy(
             key=key,
-            start=None,
-            stop=None,
             exception=Serialize(None),
             traceback=None,
             exception_text="",
@@ -956,12 +1075,17 @@ class ExecuteFailureEvent(ExecuteDoneEvent):
 class RescheduleEvent(ExecuteDoneEvent):
     __slots__ = ()
 
-    @staticmethod
-    def dummy(key: str, *, stimulus_id: str) -> RescheduleEvent:
-        """Build an event. This method exists for compatibility with the other
-        ExecuteDoneEvent subclasses.
+    @classmethod
+    def dummy(  # type: ignore[override]
+        cls,
+        key: str,
+        *,
+        stimulus_id: str,
+    ) -> Self:
+        """Build a dummy event, with most attributes set to a reasonable default.
+        This is a convenience method to be used in unit testing only.
         """
-        return RescheduleEvent(key=key, stimulus_id=stimulus_id)
+        return super().dummy(key=key, stimulus_id=stimulus_id)
 
 
 @dataclass
@@ -1349,7 +1473,36 @@ class WorkerState:
                 self.stimulus_log.append(stim.to_loggable(handled=handled))
             recs, instr = self._handle_event(stim)
             instructions += instr
-            instructions += self._transitions(recs, stimulus_id=stim.stimulus_id)
+
+            if isinstance(stim, (GatherDepSuccessEvent, ExecuteSuccessEvent)):
+                # _transition_to_memory() may block on spilling
+                # TODO We'll be able to remove this hack after implementing asynchronous
+                #      spilling (https://github.com/dask/distributed/issues/4424)
+                def metrics_callback(
+                    ev: ExecuteGatherDepDoneEvent,
+                    instructions: Instructions,
+                    label: str,
+                    value: float,
+                    unit: str,
+                ) -> None:
+                    ev.metrics.append((label, value, unit))
+                    instructions.append(
+                        DigestMetric(
+                            name=f"{ev._digest_tag}-{label}-{unit}",
+                            value=value,
+                            stimulus_id=ev.stimulus_id,
+                        )
+                    )
+
+                ctx = context_meter.add_callback(
+                    partial(metrics_callback, stim, instructions)
+                )
+            else:
+                ctx = empty_context  # type: ignore
+
+            with ctx:
+                instructions += self._transitions(recs, stimulus_id=stim.stimulus_id)
+
         return instructions
 
     #############
@@ -1591,6 +1744,7 @@ class WorkerState:
                     worker=worker,
                     to_gather=to_gather_keys,
                     total_nbytes=message_nbytes,
+                    start=time(),
                     stimulus_id=stimulus_id,
                 )
             )
@@ -2232,7 +2386,7 @@ class WorkerState:
                 assert dep.key in self.data or dep.key in self.actors
 
         ts.state = "executing"
-        instr = Execute(key=ts.key, stimulus_id=stimulus_id)
+        instr = Execute(key=ts.key, start=time(), stimulus_id=stimulus_id)
         return {}, [instr]
 
     def _transition_ready_executing(
@@ -2250,7 +2404,7 @@ class WorkerState:
             )
 
         ts.state = "executing"
-        instr = Execute(key=ts.key, stimulus_id=stimulus_id)
+        instr = Execute(key=ts.key, start=time(), stimulus_id=stimulus_id)
         return {}, [instr]
 
     def _transition_flight_fetch(
@@ -2415,41 +2569,26 @@ class WorkerState:
         if ts.key in self.actors:
             self.actors[ts.key] = value
         else:
-            start = time()
+            with meter(time) as m:
+                try:
+                    self.data[ts.key] = value
+                except Exception as e:
+                    # distributed.worker.memory.target is enabled and the value is
+                    # individually larger than target * memory_limit. Inserting this
+                    # task in the SpillBuffer caused it to immediately spilled to disk,
+                    # and it failed to serialize. Third-party MutableMappings (dask-cuda
+                    # etc.) may have other use cases for this.
+                    msg = error_message(e)
+                    return {ts: tuple(msg.values())}, []
 
-            try:
-                self.data[ts.key] = value
-            except Exception as e:
-                # distributed.worker.memory.target is enabled and the value is
-                # individually larger than target * memory_limit.
-                # Inserting this task in the SpillBuffer caused it to immediately
-                # spilled to disk, and it failed to serialize.
-                # Third-party MutableMappings (dask-cuda etc.) may have other use cases
-                # for this.
-                msg = error_message(e)
-                return {ts: tuple(msg.values())}, []
-
-            stop = time()
-            if stop - start > 0.005:
+            if m.delta > 0.005:
                 # The SpillBuffer has spilled this task (if larger than target) or other
                 # tasks (if smaller than target) to disk.
                 # Alternatively, a third-party MutableMapping may have spent time in
                 # other activities, e.g. transferring data between GPGPU and system
                 # memory.
                 ts.startstops.append(
-                    {"action": "disk-write", "start": start, "stop": stop}
-                )
-                instructions.append(
-                    DigestMetric(
-                        # See metrics:
-                        # - disk-load-duration
-                        # - get-data-load-duration
-                        # - disk-write-target-duration
-                        # - disk-write-spill-duration
-                        name="disk-write-target-duration",
-                        value=stop - start,
-                        stimulus_id=stimulus_id,
-                    )
+                    {"action": "disk-write", "start": m.start, "stop": m.stop}
                 )
 
         ts.state = "memory"
@@ -2933,6 +3072,7 @@ class WorkerState:
         --------
         _execute_done_common
         """
+        ev.done()
         self.transfer_incoming_bytes -= ev.total_nbytes
         keys = self.in_flight_workers.pop(ev.worker)
         for key in keys:
@@ -2948,8 +3088,11 @@ class WorkerState:
         The response may contain fewer keys than the request.
         """
         recommendations: Recs = {}
+        all_cancelled = True
+
         for ts in self._gather_dep_done_common(ev):
             if ts.key in ev.data:
+                all_cancelled = all_cancelled and ts.state == "cancelled"
                 recommendations[ts] = ("memory", ev.data[ts.key], ts.run_id)
             else:
                 self.log.append((ts.key, "missing-dep", ev.stimulus_id, time()))
@@ -2960,7 +3103,19 @@ class WorkerState:
                 self.has_what[ev.worker].discard(ts.key)
                 recommendations[ts] = "fetch"
 
-        return recommendations, []
+        # Log granular time metrics about times and bytes during network transfer,
+        # decompression, and deserialization. If all keys are missing or cancelled,
+        # clump time metrics together in a single reading. Note that, if only *some*
+        # keys are missing, this may hide latency issues for hard-to-find keys.
+        if not ev.data:
+            coarse_time: str | Literal[False] = "missing"
+        elif all_cancelled:
+            coarse_time = "cancelled"
+        else:
+            coarse_time = False
+        instructions = ev.digests(coarse_time=coarse_time)
+
+        return recommendations, instructions
 
     @_handle_event.register
     def _handle_gather_dep_busy(self, ev: GatherDepBusyEvent) -> RecsInstrs:
@@ -2970,16 +3125,17 @@ class WorkerState:
         self.busy_workers.add(ev.worker)
 
         recommendations: Recs = {}
+
         refresh_who_has = []
         for ts in self._gather_dep_done_common(ev):
             recommendations[ts] = "fetch"
             if not ts.who_has - self.busy_workers:
                 refresh_who_has.append(ts.key)
 
-        instructions: Instructions = [
+        instructions = ev.digests(coarse_time="busy")
+        instructions.append(
             RetryBusyWorkerLater(worker=ev.worker, stimulus_id=ev.stimulus_id),
-        ]
-
+        )
         if refresh_who_has:
             # All workers that hold known replicas of our tasks are busy.
             # Try querying the scheduler for unknown ones.
@@ -3024,7 +3180,8 @@ class WorkerState:
             ts = self.tasks[key]
             ts.who_has.remove(ev.worker)
 
-        return recommendations, []
+        instructions = ev.digests(coarse_time="failed")
+        return recommendations, instructions
 
     @_handle_event.register
     def _handle_gather_dep_failure(self, ev: GatherDepFailureEvent) -> RecsInstrs:
@@ -3041,8 +3198,9 @@ class WorkerState:
             )
             for ts in self._gather_dep_done_common(ev)
         }
+        instructions = ev.digests(coarse_time="failed")
 
-        return recommendations, []
+        return recommendations, instructions
 
     @_handle_event.register
     def _handle_secede(self, ev: SecedeEvent) -> RecsInstrs:
@@ -3104,7 +3262,7 @@ class WorkerState:
         return {ts: "released"}, []
 
     def _execute_done_common(
-        self, ev: ExecuteDoneEvent
+        self, ev: ExecuteDoneEvent, coarse_time: str | Literal[False]
     ) -> tuple[TaskState, Recs, Instructions]:
         """Common code for the handlers of all subclasses of ExecuteDoneEvent.
 
@@ -3115,6 +3273,7 @@ class WorkerState:
         --------
         _gather_dep_done_common
         """
+        ev.done()
         # key *must* be still in tasks - see _transition_released_forgotten
         ts = self.tasks.get(ev.key)
         assert ts, self.story(ev.key)
@@ -3128,18 +3287,22 @@ class WorkerState:
         self.long_running.discard(ts)
 
         recs, instr = self._ensure_computing()
+        instr += ev.digests(
+            coarse_time="cancelled" if ts.state == "cancelled" else coarse_time
+        )
         assert ts not in recs
         return ts, recs, instr
 
     @_handle_event.register
     def _handle_execute_success(self, ev: ExecuteSuccessEvent) -> RecsInstrs:
         """Task completed successfully"""
-        ts, recs, instr = self._execute_done_common(ev)
+        ts, recs, instr = self._execute_done_common(ev, coarse_time=False)
+        assert ev.stop is not None
         ts.startstops.append({"action": "compute", "start": ev.start, "stop": ev.stop})
         instr.append(
-            DigestMetric(
+            DigestMetric(  # TODO cleanup
                 name="compute-duration",
-                value=ev.stop - ev.start,
+                value=ev.duration,
                 stimulus_id=ev.stimulus_id,
             )
         )
@@ -3151,11 +3314,9 @@ class WorkerState:
     @_handle_event.register
     def _handle_execute_failure(self, ev: ExecuteFailureEvent) -> RecsInstrs:
         """Task execution failed"""
-        ts, recs, instr = self._execute_done_common(ev)
-        if ev.start is not None and ev.stop is not None:
-            ts.startstops.append(
-                {"action": "compute", "start": ev.start, "stop": ev.stop}
-            )
+        ts, recs, instr = self._execute_done_common(ev, coarse_time="failed")
+        assert ev.stop is not None
+        ts.startstops.append({"action": "compute", "start": ev.start, "stop": ev.stop})
         recs[ts] = (
             "error",
             ev.exception,
@@ -3172,7 +3333,7 @@ class WorkerState:
         Note: this has nothing to do with work stealing, which instead causes a
         FreeKeysEvent.
         """
-        ts, recs, instr = self._execute_done_common(ev)
+        ts, recs, instr = self._execute_done_common(ev, coarse_time="rescheduled")
         recs[ts] = "rescheduled"
         return recs, instr
 
@@ -3633,6 +3794,7 @@ class BaseWorker(abc.ABC):
                         inst.worker,
                         inst.to_gather,
                         total_nbytes=inst.total_nbytes,
+                        start=inst.start,
                         stimulus_id=inst.stimulus_id,
                     ),
                     name=f"gather_dep({inst.worker}, {{{keys_str}}})",
@@ -3640,7 +3802,11 @@ class BaseWorker(abc.ABC):
 
             elif isinstance(inst, Execute):
                 task = asyncio.create_task(
-                    self.execute(inst.key, stimulus_id=inst.stimulus_id),
+                    self.execute(
+                        inst.key,
+                        start=inst.start,
+                        stimulus_id=inst.stimulus_id,
+                    ),
                     name=f"execute({inst.key})",
                 )
 
@@ -3687,8 +3853,9 @@ class BaseWorker(abc.ABC):
         self,
         worker: str,
         to_gather: Collection[str],
-        total_nbytes: int,
         *,
+        total_nbytes: int,
+        start: float,
         stimulus_id: str,
     ) -> StateMachineEvent:
         """Gather dependencies for a task from a worker who has them
@@ -3702,12 +3869,27 @@ class BaseWorker(abc.ABC):
             necessarily equivalent to the full list of dependencies of ``dep``
             as some dependencies may already be present on this worker.
         total_nbytes : int
-            Total number of bytes for all the dependencies in to_gather combined
+            Total number of bytes for all the dependencies in to_gather combined.
+            To be passed verbatim to the returned :class:`GatherDepDoneEvent`.
+        start : float
+            When the instruction was emitted.
+            To be passed verbatim to the returned :class:`GatherDepDoneEvent`.
         """
 
     @abc.abstractmethod
-    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
-        """Execute a task"""
+    async def execute(
+        self, key: str, *, start: float, stimulus_id: str
+    ) -> StateMachineEvent:
+        """Execute a task
+
+        Parameters
+        ----------
+        key : str
+            Task key
+        start: float
+            When the instruction was emitted.
+            To be passed verbatim to the returned :class:`ExecuteDoneEvent`.
+        """
 
     @abc.abstractmethod
     async def retry_busy_worker_later(self, worker: str) -> StateMachineEvent:

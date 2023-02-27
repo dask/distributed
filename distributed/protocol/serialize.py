@@ -15,6 +15,7 @@ import dask
 from dask.base import normalize_token
 from dask.utils import typename
 
+from distributed.metrics import context_meter
 from distributed.protocol import pickle
 from distributed.protocol.compression import decompress, maybe_compress
 from distributed.protocol.utils import (
@@ -441,33 +442,34 @@ def serialize_and_split(
     serialize
     merge_and_deserialize
     """
-    header, frames = serialize(x, serializers, on_error, context)
-    num_sub_frames = []
-    offsets = []
-    out_frames = []
-    out_compression = []
-    for frame, compression in zip(
-        frames, header.get("compression") or [None] * len(frames)
-    ):
-        if compression is None:  # default behavior
-            sub_frames = frame_split_size(frame, n=size)
-            num_sub_frames.append(len(sub_frames))
-            offsets.append(len(out_frames))
-            out_frames.extend(sub_frames)
-            out_compression.extend([None] * len(sub_frames))
-        else:
-            num_sub_frames.append(1)
-            offsets.append(len(out_frames))
-            out_frames.append(frame)
-            out_compression.append(compression)
-    assert len(out_compression) == len(out_frames)
+    with context_meter.meter("serialize"):
+        header, frames = serialize(x, serializers, on_error, context)
+        num_sub_frames = []
+        offsets = []
+        out_frames = []
+        out_compression = []
+        for frame, compression in zip(
+            frames, header.get("compression") or [None] * len(frames)
+        ):
+            if compression is None:  # default behavior
+                sub_frames = frame_split_size(frame, n=size)
+                num_sub_frames.append(len(sub_frames))
+                offsets.append(len(out_frames))
+                out_frames.extend(sub_frames)
+                out_compression.extend([None] * len(sub_frames))
+            else:
+                num_sub_frames.append(1)
+                offsets.append(len(out_frames))
+                out_frames.append(frame)
+                out_compression.append(compression)
+        assert len(out_compression) == len(out_frames)
 
-    # Notice, in order to match msgpack's implicit conversion to tuples,
-    # we convert to tuples here as well.
-    header["split-num-sub-frames"] = tuple(num_sub_frames)
-    header["split-offsets"] = tuple(offsets)
-    header["compression"] = tuple(out_compression)
-    return header, out_frames
+        # Notice, in order to match msgpack's implicit conversion to tuples,
+        # we convert to tuples here as well.
+        header["split-num-sub-frames"] = tuple(num_sub_frames)
+        header["split-offsets"] = tuple(offsets)
+        header["compression"] = tuple(out_compression)
+        return header, out_frames
 
 
 def merge_and_deserialize(header, frames, deserializers=None):
@@ -481,20 +483,23 @@ def merge_and_deserialize(header, frames, deserializers=None):
     deserialize
     serialize_and_split
     """
-    if "split-num-sub-frames" not in header:
-        merged_frames = frames
-    else:
-        merged_frames = []
-        for n, offset in zip(header["split-num-sub-frames"], header["split-offsets"]):
-            subframes = frames[offset : offset + n]
-            try:
-                merged = merge_memoryviews(subframes)
-            except (ValueError, TypeError):
-                merged = bytearray().join(subframes)
+    with context_meter.meter("deserialize"):
+        if "split-num-sub-frames" not in header:
+            merged_frames = frames
+        else:
+            merged_frames = []
+            for n, offset in zip(
+                header["split-num-sub-frames"], header["split-offsets"]
+            ):
+                subframes = frames[offset : offset + n]
+                try:
+                    merged = merge_memoryviews(subframes)
+                except (ValueError, TypeError):
+                    merged = bytearray().join(subframes)
 
-            merged_frames.append(merged)
+                merged_frames.append(merged)
 
-    return deserialize(header, merged_frames, deserializers=deserializers)
+        return deserialize(header, merged_frames, deserializers=deserializers)
 
 
 class Serialize:

@@ -39,7 +39,7 @@ from dask.utils import format_bytes, parse_bytes, parse_timedelta
 from distributed import system
 from distributed.compatibility import WINDOWS, PeriodicCallback
 from distributed.core import Status
-from distributed.metrics import monotonic
+from distributed.metrics import context_meter, monotonic
 from distributed.spill import ManualEvictProto, SpillBuffer
 from distributed.utils import RateLimiterFilter, has_arg, log_errors
 from distributed.utils_perf import ThrottledGC
@@ -264,62 +264,57 @@ class WorkerMemoryManager:
         need = memory - target
         last_checked_for_pause = last_yielded = monotonic()
 
-        while memory > target:
-            if not data.fast:
-                worker_logger.warning(
-                    "Unmanaged memory use is high. This may indicate a memory leak "
-                    "or the memory may not be released to the OS; see "
-                    "https://distributed.dask.org/en/latest/worker-memory.html#memory-not-released-back-to-the-os "
-                    "for more information. "
-                    "-- Unmanaged memory: %s -- Worker memory limit: %s",
-                    format_bytes(memory),
-                    format_bytes(self.memory_limit),
-                )
-                break
+        def metrics_callback(label: str, value: float, unit: str) -> None:
+            worker.digest_metric(f"memory-monitor-{label}-{unit}", value)
 
-            weight = data.evict()
-            if weight == -1:
-                # Failed to evict:
-                # disk full, spill size limit exceeded, or pickle error
-                break
+        with context_meter.add_callback(metrics_callback):
+            while memory > target:
+                if not data.fast:
+                    worker_logger.warning(
+                        "Unmanaged memory use is high. This may indicate a memory leak "
+                        "or the memory may not be released to the OS; see "
+                        "https://distributed.dask.org/en/latest/worker-memory.html#memory-not-released-back-to-the-os "
+                        "for more information. "
+                        "-- Unmanaged memory: %s -- Worker memory limit: %s",
+                        format_bytes(memory),
+                        format_bytes(self.memory_limit),
+                    )
+                    break
 
-            total_spilled += weight
-            count += 1
+                weight = data.evict()
+                if weight == -1:
+                    # Failed to evict:
+                    # disk full, spill size limit exceeded, or pickle error
+                    break
 
-            memory = worker.monitor.get_process_memory()
-            if total_spilled > need and memory > target:
-                # Issue a GC to ensure that the evicted data is actually
-                # freed from memory and taken into account by the monitor
-                # before trying to evict even more data.
-                self._throttled_gc.collect()
+                total_spilled += weight
+                count += 1
+
                 memory = worker.monitor.get_process_memory()
+                if total_spilled > need and memory > target:
+                    # Issue a GC to ensure that the evicted data is actually
+                    # freed from memory and taken into account by the monitor
+                    # before trying to evict even more data.
+                    self._throttled_gc.collect()
+                    memory = worker.monitor.get_process_memory()
 
-            now = monotonic()
+                now = monotonic()
 
-            # Spilling may potentially take multiple seconds; we may pass the pause
-            # threshold in the meantime.
-            if now - last_checked_for_pause > self.memory_monitor_interval:
-                self._maybe_pause_or_unpause(worker, memory)
-                last_checked_for_pause = now
+                # Spilling may potentially take multiple seconds; we may pass the pause
+                # threshold in the meantime.
+                if now - last_checked_for_pause > self.memory_monitor_interval:
+                    self._maybe_pause_or_unpause(worker, memory)
+                    last_checked_for_pause = now
 
-            # Increase spilling aggressiveness when the fast buffer is filled with a lot
-            # of small values. This artificially chokes the rest of the event loop -
-            # namely, the reception of new data from other workers. While this is
-            # somewhat of an ugly hack,  DO NOT tweak this without a thorough cycle of
-            # stress testing. See: https://github.com/dask/distributed/issues/6110.
-            if now - last_yielded > 0.5:
-                # See metrics:
-                # - disk-load-duration
-                # - get-data-load-duration
-                # - disk-write-target-duration
-                # - disk-write-spill-duration
-                worker.digest_metric("disk-write-spill-duration", now - last_yielded)
-                await asyncio.sleep(0)
-                last_yielded = monotonic()
-
-        now = monotonic()
-        if now - last_yielded > 0.005:
-            worker.digest_metric("disk-write-spill-duration", now - last_yielded)
+                # Increase spilling aggressiveness when the fast buffer is filled with a
+                # lot of small values. This artificially chokes the rest of the event
+                # loop - namely, the reception of new data from other workers. While
+                # this is somewhat of an ugly hack,  DO NOT tweak this without a
+                # thorough cycle of stress testing. See:
+                # https://github.com/dask/distributed/issues/6110.
+                if now - last_yielded > 0.5:
+                    await asyncio.sleep(0)
+                    last_yielded = monotonic()
 
         if count:
             worker_logger.debug(

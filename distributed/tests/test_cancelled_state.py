@@ -148,7 +148,7 @@ async def test_worker_stream_died_during_comm(c, s, a, b):
     write_event.set()
 
     await res
-    assert any("receive-dep-failed" in msg for msg in b.state.log)
+    assert any("gather-dep-failed" in msg for msg in b.state.log)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -193,7 +193,7 @@ async def test_flight_to_executing_via_cancelled_resumed(c, s, b):
         assert await fut2 == 3
 
         b_story = b.state.story(fut1.key)
-        assert any("receive-dep-failed" in msg for msg in b_story)
+        assert any("gather-dep-failed" in msg for msg in b_story)
         assert any("cancelled" in msg for msg in b_story)
         assert any("resumed" in msg for msg in b_story)
 
@@ -254,12 +254,15 @@ def test_flight_cancelled_error(ws):
     instructions = ws.handle_stimulus(
         ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s1"),
         FreeKeysEvent(keys=["y", "x"], stimulus_id="s2"),
-        GatherDepFailureEvent.from_exception(
-            Exception(), worker=ws2, total_nbytes=1, stimulus_id="s3"
+        GatherDepFailureEvent.dummy(
+            worker=ws2,
+            total_nbytes=1,
+            stimulus_id="s3",
         ),
     )
     assert instructions == [
-        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1")
+        GatherDep.match(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
+        DigestMetric.match(stimulus_id="s3", name="gather-dep-failed-seconds"),
     ]
     assert not ws.tasks
 
@@ -439,11 +442,14 @@ def test_cancelled_resumed_after_flight_with_dependencies_workerstate(ws):
         ComputeTaskEvent.dummy("x", stimulus_id="s3"),
         # After ~30s, the TCP socket with ws2 finally times out and collapses.
         # This triggers the Execute instruction.
-        GatherDepNetworkFailureEvent(worker=ws2, total_nbytes=1, stimulus_id="s4"),
+        GatherDepNetworkFailureEvent.dummy(
+            worker=ws2, total_nbytes=1, stimulus_id="s4"
+        ),
     )
     assert instructions == [
-        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
-        Execute(key="x", stimulus_id="s4"),  # Note the stimulus_id!
+        GatherDep.match(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
+        DigestMetric.match(stimulus_id="s4", name="gather-dep-failed-seconds"),
+        Execute.match(key="x", stimulus_id="s4"),  # Note the stimulus_id!
     ]
     assert ws.tasks["x"].state == "executing"
 
@@ -779,7 +785,7 @@ def test_workerstate_flight_to_flight(ws):
         ComputeTaskEvent.dummy("z", who_has={"x": [ws2]}, stimulus_id="s3"),
     )
     assert instructions == [
-        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1")
+        GatherDep.match(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1")
     ]
     assert ws.tasks["x"].state == "flight"
 
@@ -803,9 +809,10 @@ def test_workerstate_executing_skips_fetch_on_success(ws_with_running_task):
         ExecuteSuccessEvent.dummy("x", 123, stimulus_id="s3"),
     )
     assert instructions == [
-        DigestMetric(name="compute-duration", value=1.0, stimulus_id="s3"),
+        DigestMetric.match(stimulus_id="s3", name="execute-other-seconds"),
+        DigestMetric.match(name="compute-duration", stimulus_id="s3"),
         AddKeysMsg(keys=["x"], stimulus_id="s3"),
-        Execute(key="y", stimulus_id="s3"),
+        Execute.match(key="y", stimulus_id="s3"),
     ]
     assert ws.tasks["x"].state == "memory"
     assert ws.data["x"] == 123
@@ -835,7 +842,8 @@ def test_workerstate_executing_failure_to_fetch(ws_with_running_task):
         ExecuteFailureEvent.dummy("x", stimulus_id="s3"),
     )
     assert instructions == [
-        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s3")
+        DigestMetric.match(stimulus_id="s3", name="execute-failed-seconds"),
+        GatherDep.match(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s3"),
     ]
     assert ws.tasks["x"].state == "flight"
 
@@ -853,12 +861,13 @@ def test_workerstate_flight_skips_executing_on_success(ws):
         ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s1"),
         FreeKeysEvent(keys=["y", "x"], stimulus_id="s2"),
         ComputeTaskEvent.dummy("x", stimulus_id="s3"),
-        GatherDepSuccessEvent(
+        GatherDepSuccessEvent.dummy(
             worker=ws2, total_nbytes=1, data={"x": 123}, stimulus_id="s4"
         ),
     )
     assert instructions == [
-        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
+        GatherDep.match(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
+        DigestMetric.match(stimulus_id="s4", name="gather-dep-other-seconds"),
         TaskFinishedMsg.match(key="x", stimulus_id="s4"),
     ]
     assert ws.tasks["x"].state == "memory"
@@ -881,21 +890,25 @@ def test_workerstate_flight_failure_to_executing(ws, block_queue):
         ComputeTaskEvent.dummy("x", stimulus_id="s3"),
     )
     assert instructions == [
-        GatherDep(stimulus_id="s1", worker=ws2, to_gather={"x"}, total_nbytes=1),
+        GatherDep.match(stimulus_id="s1", worker=ws2, to_gather={"x"}, total_nbytes=1),
     ]
     assert ws.tasks["x"].state == "resumed"
 
     if block_queue:
         instructions = ws.handle_stimulus(
             ComputeTaskEvent.dummy(key="z", stimulus_id="s4"),
-            GatherDepNetworkFailureEvent(worker=ws2, total_nbytes=1, stimulus_id="s5"),
+            GatherDepNetworkFailureEvent.dummy(
+                worker=ws2, total_nbytes=1, stimulus_id="s5"
+            ),
             ExecuteSuccessEvent.dummy(key="z", stimulus_id="s6"),
         )
         assert instructions == [
-            Execute(key="z", stimulus_id="s4"),
-            DigestMetric(name="compute-duration", value=1.0, stimulus_id="s6"),
+            Execute.match(key="z", stimulus_id="s4"),
+            DigestMetric.match(stimulus_id="s5", name="gather-dep-failed-seconds"),
+            DigestMetric.match(stimulus_id="s6", name="execute-other-seconds"),
+            DigestMetric.match(name="compute-duration", stimulus_id="s6"),
             TaskFinishedMsg.match(key="z", stimulus_id="s6"),
-            Execute(key="x", stimulus_id="s6"),
+            Execute.match(key="x", stimulus_id="s6"),
         ]
         assert_story(
             ws.story("x"),
@@ -908,10 +921,13 @@ def test_workerstate_flight_failure_to_executing(ws, block_queue):
 
     else:
         instructions = ws.handle_stimulus(
-            GatherDepNetworkFailureEvent(worker=ws2, total_nbytes=1, stimulus_id="s5"),
+            GatherDepNetworkFailureEvent.dummy(
+                worker=ws2, total_nbytes=1, stimulus_id="s5"
+            ),
         )
         assert instructions == [
-            Execute(key="x", stimulus_id="s5"),
+            DigestMetric.match(stimulus_id="s5", name="gather-dep-failed-seconds"),
+            Execute.match(key="x", stimulus_id="s5"),
         ]
         assert_story(
             ws.story("x"),
@@ -994,7 +1010,7 @@ def test_workerstate_resumed_waiting_to_flight(ws):
         ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s5"),
     )
     assert instructions == [
-        GatherDep(worker=ws2, to_gather={"x"}, stimulus_id="s1", total_nbytes=1),
+        GatherDep.match(worker=ws2, to_gather={"x"}, stimulus_id="s1", total_nbytes=1),
     ]
     assert ws.tasks["x"].state == "flight"
 
@@ -1213,7 +1229,7 @@ def test_workerstate_remove_replica_of_cancelled_task_dependency(ws):
     ws2 = "127.0.0.1:2"
     instructions = ws.handle_stimulus(
         ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s1"),
-        GatherDepSuccessEvent(
+        GatherDepSuccessEvent.dummy(
             worker=ws2, total_nbytes=1, data={"x": 123}, stimulus_id="s2"
         ),
         FreeKeysEvent(keys=["y"], stimulus_id="s3"),

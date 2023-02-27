@@ -2267,11 +2267,13 @@ class BlockedExecute(Worker):
 
         super().__init__(*args, **kwargs)
 
-    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
+    async def execute(
+        self, key: str, start: float, *, stimulus_id: str
+    ) -> StateMachineEvent:
         self.in_execute.set()
         await self.block_execute.wait()
         try:
-            return await super().execute(key, stimulus_id=stimulus_id)
+            return await super().execute(key, start=start, stimulus_id=stimulus_id)
         finally:
             self.in_execute_exit.set()
             await self.block_execute_exit.wait()
@@ -2427,7 +2429,7 @@ def ws_with_running_task(ws, request):
             key="x", resource_restrictions={"R": 1}, stimulus_id="compute"
         )
     )
-    assert instructions == [Execute(key="x", stimulus_id="compute")]
+    assert instructions == [Execute.match(key="x", stimulus_id="compute")]
     if request.param == "long-running":
         ws.handle_stimulus(
             SecedeEvent(key="x", compute_duration=1.0, stimulus_id="secede")
