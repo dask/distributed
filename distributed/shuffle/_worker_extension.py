@@ -522,9 +522,12 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         await self.flush_receive()
         try:
             data = self._read_from_disk((i,))
-            df = convert_partition(data)
-            with self.time("cpu"):
-                out = df.to_pandas()
+
+            def _() -> pd.DataFrame:
+                df = convert_partition(data)
+                return df.to_pandas()
+
+            out = await self.offload(_)
         except KeyError:
             out = self.schema.empty_table().to_pandas()
         return out
