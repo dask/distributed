@@ -371,8 +371,9 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
 
         await self.flush_receive()
 
+        data = self._read_from_disk(i)
+
         def _() -> np.ndarray:
-            data = self._read_from_disk(i)
             subdims = tuple(len(self._old_to_new[dim][ix]) for dim, ix in enumerate(i))
             return convert_chunk(data, subdims)
 
@@ -523,9 +524,9 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
 
         await self.flush_receive()
         try:
+            data = self._read_from_disk((i,))
 
             def _() -> pd.DataFrame:
-                data = self._read_from_disk((i,))
                 df = convert_partition(data)
                 return df.to_pandas()
 
