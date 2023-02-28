@@ -32,7 +32,10 @@ class DiskShardsBuffer(ShardsBuffer):
         Where to write and read data.  Ideally points to fast disk.
     memory_limiter : ResourceLimiter, optional
         Limiter for in-memory buffering (at most this much data)
-        before writes to disk occur.
+        before writes to disk occur. If the incoming data that has yet
+        to be processed exceeds this limit, then the buffer will block
+        until below the threshold. See :meth:`.write` for the
+        implementation of this scheme.
     """
 
     def __init__(
