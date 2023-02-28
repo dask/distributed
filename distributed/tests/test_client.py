@@ -3258,11 +3258,18 @@ async def test_cancel_clears_processing(c, s, *workers):
 
 
 def test_default_get(loop_in_thread):
+    has_pyarrow = False
+    try:
+        import pyarrow  # noqa: F401
+
+        has_pyarrow = True
+    except ImportError:
+        pass
     loop = loop_in_thread
     with cluster() as (s, [a, b]):
         pre_get = dask.base.get_scheduler()
         # These may change in the future but the selection below should not
-        distributed_default = "p2p"
+        distributed_default = "p2p" if has_pyarrow else "tasks"
         local_default = "disk"
         assert get_default_shuffle_algorithm() == local_default
         with Client(s["address"], set_as_default=True, loop=loop) as c:
