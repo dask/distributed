@@ -33,7 +33,6 @@ from distributed.worker_state_machine import (
     AcquireReplicasEvent,
     AddKeysMsg,
     ComputeTaskEvent,
-    DigestMetric,
     Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
@@ -1223,7 +1222,6 @@ def test_task_with_dependencies_acquires_resources(ws):
         GatherDepSuccessEvent.dummy(ws2, {"x": 123}, total_nbytes=8, stimulus_id="s2")
     )
     assert instructions == [
-        DigestMetric.match(name="gather-dep-other-seconds", stimulus_id="s2"),
         AddKeysMsg(keys=["x"], stimulus_id="s2"),
         Execute.match(key="y", stimulus_id="s2"),
     ]

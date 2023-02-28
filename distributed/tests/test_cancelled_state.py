@@ -22,7 +22,6 @@ from distributed.utils_test import (
 from distributed.worker_state_machine import (
     AddKeysMsg,
     ComputeTaskEvent,
-    DigestMetric,
     Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
@@ -258,7 +257,6 @@ def test_flight_cancelled_error(ws):
     )
     assert instructions == [
         GatherDep.match(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
-        DigestMetric.match(stimulus_id="s3", name="gather-dep-failed-seconds"),
     ]
     assert not ws.tasks
 
@@ -444,7 +442,6 @@ def test_cancelled_resumed_after_flight_with_dependencies_workerstate(ws):
     )
     assert instructions == [
         GatherDep.match(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
-        DigestMetric.match(stimulus_id="s4", name="gather-dep-failed-seconds"),
         Execute.match(key="x", stimulus_id="s4"),  # Note the stimulus_id!
     ]
     assert ws.tasks["x"].state == "executing"
@@ -805,8 +802,6 @@ def test_workerstate_executing_skips_fetch_on_success(ws_with_running_task):
         ExecuteSuccessEvent.dummy("x", 123, stimulus_id="s3"),
     )
     assert instructions == [
-        DigestMetric.match(stimulus_id="s3", name="execute-other-seconds"),
-        DigestMetric.match(name="compute-duration", stimulus_id="s3"),
         AddKeysMsg(keys=["x"], stimulus_id="s3"),
         Execute.match(key="y", stimulus_id="s3"),
     ]
@@ -838,7 +833,6 @@ def test_workerstate_executing_failure_to_fetch(ws_with_running_task):
         ExecuteFailureEvent.dummy("x", stimulus_id="s3"),
     )
     assert instructions == [
-        DigestMetric.match(stimulus_id="s3", name="execute-failed-seconds"),
         GatherDep.match(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s3"),
     ]
     assert ws.tasks["x"].state == "flight"
@@ -863,7 +857,6 @@ def test_workerstate_flight_skips_executing_on_success(ws):
     )
     assert instructions == [
         GatherDep.match(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
-        DigestMetric.match(stimulus_id="s4", name="gather-dep-other-seconds"),
         TaskFinishedMsg.match(key="x", stimulus_id="s4"),
     ]
     assert ws.tasks["x"].state == "memory"
@@ -900,9 +893,6 @@ def test_workerstate_flight_failure_to_executing(ws, block_queue):
         )
         assert instructions == [
             Execute.match(key="z", stimulus_id="s4"),
-            DigestMetric.match(stimulus_id="s5", name="gather-dep-failed-seconds"),
-            DigestMetric.match(stimulus_id="s6", name="execute-other-seconds"),
-            DigestMetric.match(name="compute-duration", stimulus_id="s6"),
             TaskFinishedMsg.match(key="z", stimulus_id="s6"),
             Execute.match(key="x", stimulus_id="s6"),
         ]
@@ -921,10 +911,7 @@ def test_workerstate_flight_failure_to_executing(ws, block_queue):
                 worker=ws2, total_nbytes=1, stimulus_id="s5"
             ),
         )
-        assert instructions == [
-            DigestMetric.match(stimulus_id="s5", name="gather-dep-failed-seconds"),
-            Execute.match(key="x", stimulus_id="s5"),
-        ]
+        assert instructions == [Execute.match(key="x", stimulus_id="s5")]
         assert_story(
             ws.story("x"),
             [

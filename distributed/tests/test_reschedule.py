@@ -14,7 +14,6 @@ from distributed import Event, Reschedule, get_worker, secede, wait
 from distributed.utils_test import captured_logger, gen_cluster, slowinc
 from distributed.worker_state_machine import (
     ComputeTaskEvent,
-    DigestMetric,
     FreeKeysEvent,
     GatherDep,
     RescheduleEvent,
@@ -93,9 +92,7 @@ def test_cancelled_reschedule_worker_state(ws_with_running_task):
 
     instructions = ws.handle_stimulus(RescheduleEvent.dummy(key="x", stimulus_id="s2"))
     # There's no RescheduleMsg
-    assert instructions == [
-        DigestMetric.match(name="execute-cancelled-seconds", stimulus_id="s2"),
-    ]
+    assert not instructions
     assert not ws.tasks  # The task has been forgotten
     assert ws.available_resources == {"R": 1}
 
@@ -104,10 +101,7 @@ def test_reschedule_releases(ws_with_running_task):
     ws = ws_with_running_task
 
     instructions = ws.handle_stimulus(RescheduleEvent.dummy(key="x", stimulus_id="s1"))
-    assert instructions == [
-        DigestMetric.match(stimulus_id="s1", name="execute-rescheduled-seconds"),
-        RescheduleMsg(stimulus_id="s1", key="x"),
-    ]
+    assert instructions == [RescheduleMsg(stimulus_id="s1", key="x")]
     assert ws.available_resources == {"R": 1}
     assert "x" not in ws.tasks
 
@@ -123,9 +117,7 @@ def test_reschedule_cancelled(ws_with_running_task):
         FreeKeysEvent(keys=["x"], stimulus_id="s1"),
         RescheduleEvent.dummy(key="x", stimulus_id="s2"),
     )
-    assert instructions == [
-        DigestMetric.match(stimulus_id="s2", name="execute-cancelled-seconds")
-    ]
+    assert not instructions
     assert "x" not in ws.tasks
 
 
@@ -144,7 +136,6 @@ def test_reschedule_resumed(ws_with_running_task):
         RescheduleEvent.dummy(key="x", stimulus_id="s3"),
     )
     assert instructions == [
-        DigestMetric.match(stimulus_id="s3", name="execute-rescheduled-seconds"),
         GatherDep.match(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s3"),
     ]
     assert ws.tasks["x"].state == "flight"

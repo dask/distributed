@@ -753,8 +753,6 @@ class MeteredEvent(StateMachineEvent):
 class GatherDepDoneEvent(MeteredEvent):
     """:class:`GatherDep` instruction terminated (abstract base class)"""
 
-    _digest_tag = "gather-dep"
-
     worker: str
     total_nbytes: int  # Must be the same as in GatherDep instruction
 
@@ -973,7 +971,6 @@ class ExecuteDoneEvent(MeteredEvent):
     """
 
     __slots__ = ("key",)
-    _digest_tag = "execute"
     key: str
 
 
@@ -3283,8 +3280,6 @@ class WorkerState:
         ts, recs, instr = self._execute_done_common(ev, coarse_time=False)
         assert ev.stop is not None
         ts.startstops.append({"action": "compute", "start": ev.start, "stop": ev.stop})
-        # TODO cleanup
-        context_meter.digest_metric("compute-duration", ev.duration, "seconds")
         ts.nbytes = ev.nbytes
         ts.type = ev.type
         recs[ts] = ("memory", ev.value, ev.run_id)
@@ -3757,15 +3752,10 @@ class BaseWorker(abc.ABC):
         def metrics_callback(
             stim: StateMachineEvent, label: str, value: float, unit: str
         ) -> None:
-            if label == "compute-duration":
-                name = label
-            elif isinstance(stim, GatherDepDoneEvent):
-                name = f"gather-dep-{label}-{unit}"
+            if isinstance(stim, GatherDepDoneEvent):
+                self.digest_metric(f"gather-dep-{label}-{unit}", value)
             elif isinstance(stim, ExecuteDoneEvent):
-                name = f"execute-{label}-{unit}"
-            else:
-                return
-            self.digest_metric(name, value)
+                self.digest_metric(f"execute-{label}-{unit}", value)
 
         for stim in stims:
             with context_meter.add_callback(partial(metrics_callback, stim)):
