@@ -76,10 +76,7 @@ from distributed.utils import (
 from distributed.worker import WORKER_ANY_RUNNING, Worker
 from distributed.worker_state_machine import (
     ComputeTaskEvent,
-    DigestMetric,
     Execute,
-    Instruction,
-    InstructionMatch,
     InvalidTransition,
     MeteredEvent,
     SecedeEvent,
@@ -2551,14 +2548,3 @@ class SizeOf:
 def gen_nbytes(nbytes: int) -> SizeOf:
     """A function that emulates exactly nbytes on the worker data structure."""
     return SizeOf(nbytes)
-
-
-def assert_instructions(
-    actual: list[Instruction],
-    *expect: Instruction | InstructionMatch,
-) -> None:
-    """Compare instructions emitted by the worker state machine to an expected list.
-    Ignore digests.
-    """
-    actual = [i for i in actual if not isinstance(i, DigestMetric)]
-    assert actual == list(expect)

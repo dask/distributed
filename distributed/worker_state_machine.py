@@ -366,7 +366,7 @@ class Instruction:
     stimulus_id: str
 
     @classmethod
-    def match(cls, **kwargs: Any) -> InstructionMatch:
+    def match(cls, **kwargs: Any) -> _InstructionMatch:
         """Generate a partial match to compare against an Instruction instance.
         The typical usage is to compare a list of instructions returned by
         :meth:`WorkerState.handle_stimulus` or in :attr:`WorkerState.stimulus_log` vs.
@@ -378,34 +378,24 @@ class Instruction:
         .. code-block:: python
 
             instructions = ws.handle_stimulus(...)
-            assert_instructions(
-                instructions,
+            assert instructions == [
                 TaskFinishedMsg.match(key="x"),
                 ...
-            )
-
-        See also
-        --------
-        InstructionMatch
-        distributed.utils_test.assert_instructions
+            ]
         """
-        return InstructionMatch(cls, **kwargs)
+        return _InstructionMatch(cls, **kwargs)
 
     def __eq__(self, other: object) -> bool:
-        if isinstance(other, InstructionMatch):
+        if isinstance(other, _InstructionMatch):
             return other == self
         else:
             # Revert to default dataclass behaviour
             return super().__eq__(other)
 
 
-class InstructionMatch:
+class _InstructionMatch:
     """Utility class, to be used to test an instructions list.
-
-    See also
-    --------
-    Instruction.match
-    distributed.utils_test.assert_instructions
+    See :meth:`Instruction.match`.
     """
 
     cls: type[Instruction]

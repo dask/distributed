@@ -37,7 +37,6 @@ from distributed.system import MEMORY_LIMIT
 from distributed.utils_test import (
     NO_AMM,
     BlockedGetData,
-    assert_instructions,
     captured_logger,
     freeze_batched_send,
     gen_cluster,
@@ -51,6 +50,7 @@ from distributed.utils_test import (
     wait_for_state,
 )
 from distributed.worker_state_machine import (
+    DigestMetric,
     ExecuteSuccessEvent,
     FreeKeysEvent,
     StealRequestEvent,
@@ -1350,7 +1350,10 @@ def test_steal_worker_state(ws_with_running_task):
     assert ws.tasks["x"].state == "cancelled"
 
     instructions = ws.handle_stimulus(ExecuteSuccessEvent.dummy("x", stimulus_id="s2"))
-    assert_instructions(instructions)  # No instructions
+    assert instructions == [
+        DigestMetric.match(stimulus_id="s2", name="execute-cancelled-seconds"),
+        DigestMetric.match(stimulus_id="s2", name="compute-duration"),
+    ]
     assert "x" not in ws.tasks
     assert "x" not in ws.data
     assert ws.available_resources == {"R": 1}

@@ -10,17 +10,10 @@ from dask.utils import stringify
 
 from distributed import Lock, Worker
 from distributed.client import wait
-from distributed.utils_test import (
-    NO_AMM,
-    assert_instructions,
-    gen_cluster,
-    inc,
-    lock_inc,
-    slowadd,
-    slowinc,
-)
+from distributed.utils_test import NO_AMM, gen_cluster, inc, lock_inc, slowadd, slowinc
 from distributed.worker_state_machine import (
     ComputeTaskEvent,
+    DigestMetric,
     Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
@@ -272,11 +265,12 @@ def test_constrained_vs_ready_priority_1(ws, p1, p2, expect_key, swap):
         *stimuli,
         ExecuteSuccessEvent.dummy("clog", stimulus_id="s3"),
     )
-    assert_instructions(
-        instructions,
+    assert instructions == [
+        DigestMetric.match(name="execute-other-seconds", stimulus_id="s3"),
+        DigestMetric.match(name="compute-duration", stimulus_id="s3"),
         TaskFinishedMsg.match(key="clog", stimulus_id="s3"),
         Execute.match(key=expect_key, stimulus_id="s3"),
-    )
+    ]
 
 
 @pytest.mark.parametrize("swap", [False, True])
@@ -307,11 +301,12 @@ def test_constrained_vs_ready_priority_2(ws, p1, p2, expect_key, swap):
         *stimuli,
         ExecuteSuccessEvent.dummy("clog1", stimulus_id="s3"),
     )
-    assert_instructions(
-        instructions,
+    assert instructions == [
+        DigestMetric.match(name="execute-other-seconds", stimulus_id="s3"),
+        DigestMetric.match(name="compute-duration", stimulus_id="s3"),
         TaskFinishedMsg.match(key="clog1", stimulus_id="s3"),
         Execute.match(key="x", stimulus_id="s3"),
-    )
+    ]
 
 
 def test_constrained_tasks_respect_priority(ws):
@@ -328,16 +323,21 @@ def test_constrained_tasks_respect_priority(ws):
         ExecuteSuccessEvent.dummy(key="x3", stimulus_id="s5"),  # start x1
         ExecuteSuccessEvent.dummy(key="x1", stimulus_id="s6"),  # start x2
     )
-    assert_instructions(
-        instructions,
+    assert instructions == [
         Execute.match(key="clog", stimulus_id="clog"),
+        DigestMetric.match(name="execute-other-seconds", stimulus_id="s4"),
+        DigestMetric.match(name="compute-duration", stimulus_id="s4"),
         TaskFinishedMsg.match(key="clog", stimulus_id="s4"),
         Execute.match(key="x3", stimulus_id="s4"),
+        DigestMetric.match(name="execute-other-seconds", stimulus_id="s5"),
+        DigestMetric.match(name="compute-duration", stimulus_id="s5"),
         TaskFinishedMsg.match(key="x3", stimulus_id="s5"),
         Execute.match(key="x1", stimulus_id="s5"),
+        DigestMetric.match(name="execute-other-seconds", stimulus_id="s6"),
+        DigestMetric.match(name="compute-duration", stimulus_id="s6"),
         TaskFinishedMsg.match(key="x1", stimulus_id="s6"),
         Execute.match(key="x2", stimulus_id="s6"),
-    )
+    ]
 
 
 def test_task_cancelled_and_readded_with_resources(ws):
