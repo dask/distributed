@@ -254,11 +254,7 @@ def test_flight_cancelled_error(ws):
     instructions = ws.handle_stimulus(
         ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s1"),
         FreeKeysEvent(keys=["y", "x"], stimulus_id="s2"),
-        GatherDepFailureEvent.dummy(
-            worker=ws2,
-            total_nbytes=1,
-            stimulus_id="s3",
-        ),
+        GatherDepFailureEvent.dummy(worker=ws2, total_nbytes=1, stimulus_id="s3"),
     )
     assert instructions == [
         GatherDep.match(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),

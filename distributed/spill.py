@@ -204,7 +204,7 @@ class SpillBuffer(zict.Buffer):
         This method never raises.
         """
         try:
-            with self._handle_errors(None), self._capture_metrics():
+            with self._capture_metrics(), self._handle_errors(None):
                 _, _, weight = self.fast.evict()
                 return cast(int, weight)
         except HandledError:
