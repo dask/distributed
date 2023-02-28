@@ -2097,10 +2097,45 @@ class Worker(BaseWorker, ServerNode):
                     rpc=self.rpc, keys=to_gather, worker=worker, who=self.address
                 )
 
+            if response["status"] == "busy":
+                self.state.log.append(
+                    ("gather-dep-busy", worker, to_gather, stimulus_id, time())
+                )
+                return GatherDepBusyEvent(
+                    worker=worker,
+                    total_nbytes=total_nbytes,
+                    start=start,
+                    stop=None,
+                    metrics=metrics,
+                    stimulus_id=f"gather-dep-busy-{time()}",
+                )
+
+            assert response["status"] == "OK"
+            cause = self._get_cause(to_gather)
+            self._update_metrics_received_data(
+                start=m.start,
+                stop=m.stop,
+                data=response["data"],
+                cause=cause,
+                worker=worker,
+            )
+            self.state.log.append(
+                ("receive-dep", worker, set(response["data"]), stimulus_id, time())
+            )
+            return GatherDepSuccessEvent(
+                worker=worker,
+                total_nbytes=total_nbytes,
+                data=response["data"],
+                start=start,
+                stop=None,
+                metrics=metrics,
+                stimulus_id=f"gather-dep-success-{time()}",
+            )
+
         except OSError:
             logger.exception("Worker stream died during communication: %s", worker)
             self.state.log.append(
-                ("gather-dep-failed", worker, to_gather, stimulus_id, m.stop)
+                ("gather-dep-failed", worker, to_gather, stimulus_id, time())
             )
             return GatherDepNetworkFailureEvent(
                 worker=worker,
@@ -2108,14 +2143,14 @@ class Worker(BaseWorker, ServerNode):
                 start=start,
                 stop=None,
                 metrics=metrics,
-                stimulus_id=f"gather-dep-network-failure-{m.stop}",
+                stimulus_id=f"gather-dep-network-failure-{time()}",
             )
 
         except Exception as e:
             # e.g. data failed to deserialize
             logger.exception(e)
             self.state.log.append(
-                ("gather-dep-failed", worker, to_gather, stimulus_id, m.stop)
+                ("gather-dep-failed", worker, to_gather, stimulus_id, time())
             )
 
             if self.batched_stream and LOG_PDB:
@@ -2129,44 +2164,7 @@ class Worker(BaseWorker, ServerNode):
                 total_nbytes=total_nbytes,
                 start=start,
                 metrics=metrics,
-                stimulus_id=f"gather-dep-failed-{m.stop}",
-            )
-
-        else:
-            if response["status"] == "busy":
-                self.state.log.append(
-                    ("gather-dep-busy", worker, to_gather, stimulus_id, m.stop)
-                )
-                return GatherDepBusyEvent(
-                    worker=worker,
-                    total_nbytes=total_nbytes,
-                    start=start,
-                    stop=None,
-                    metrics=metrics,
-                    stimulus_id=f"gather-dep-busy-{m.stop}",
-                )
-
-            assert response["status"] == "OK"
-            cause = self._get_cause(to_gather)
-            self._update_metrics_received_data(
-                start=m.start,
-                stop=m.stop,
-                data=response["data"],
-                cause=cause,
-                worker=worker,
-            )
-            self.state.log.append(
-                ("receive-dep", worker, set(response["data"]), stimulus_id, m.stop)
-            )
-
-            return GatherDepSuccessEvent(
-                worker=worker,
-                total_nbytes=total_nbytes,
-                data=response["data"],
-                start=start,
-                stop=None,
-                metrics=metrics,
-                stimulus_id=f"gather-dep-success-{m.stop}",
+                stimulus_id=f"gather-dep-failed-{time()}",
             )
 
     async def retry_busy_worker_later(self, worker: str) -> StateMachineEvent:
@@ -3009,15 +3007,15 @@ def loads_function(bytes_object):
     return pickle.loads(bytes_object)
 
 
+@context_meter.meter("deserialize")
 def _deserialize(function=None, args=None, kwargs=None, task=NO_VALUE):
     """Deserialize task inputs and regularize to func, args, kwargs"""
-    with context_meter.meter("deserialize"):
-        if function is not None:
-            function = loads_function(function)
-        if args and isinstance(args, bytes):
-            args = pickle.loads(args)
-        if kwargs and isinstance(kwargs, bytes):
-            kwargs = pickle.loads(kwargs)
+    if function is not None:
+        function = loads_function(function)
+    if args and isinstance(args, bytes):
+        args = pickle.loads(args)
+    if kwargs and isinstance(kwargs, bytes):
+        kwargs = pickle.loads(kwargs)
 
     if task is not NO_VALUE:
         assert not function and not args and not kwargs
@@ -3164,7 +3162,6 @@ def apply_function_simple(
     msg: dictionary with status, result/error, timings, etc..
     """
     ident = threading.get_ident()
-
     try:
         with meter(time) as wall_meter, meter(thread_time) as thread_meter:
             result = function(*args, **kwargs)
