@@ -6,7 +6,10 @@ from collections import defaultdict
 
 import pytest
 
+from dask.utils import parse_bytes
+
 from distributed.shuffle._comms import CommShardsBuffer
+from distributed.shuffle._limiter import ResourceLimiter
 from distributed.utils_test import gen_test
 
 
@@ -89,7 +92,9 @@ async def test_concurrent_puts():
     frac = 0.1
     nshards = 10
     nputs = 20
-    comm_buffer = CommShardsBuffer(send=send)
+    comm_buffer = CommShardsBuffer(
+        send=send, memory_limiter=ResourceLimiter(parse_bytes("100 MiB"))
+    )
     payload = {
         x: [gen_bytes(frac, comm_buffer.memory_limiter._maxvalue)]
         for x in range(nshards)
@@ -129,7 +134,9 @@ async def test_concurrent_puts_error():
     frac = 0.1
     nshards = 10
     nputs = 20
-    comm_buffer = CommShardsBuffer(send=send)
+    comm_buffer = CommShardsBuffer(
+        send=send, memory_limiter=ResourceLimiter(parse_bytes("100 MiB"))
+    )
     payload = {
         x: [gen_bytes(frac, comm_buffer.memory_limiter._maxvalue)]
         for x in range(nshards)
