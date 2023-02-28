@@ -130,6 +130,7 @@ from distributed.worker_state_machine import (
     GatherDepFailureEvent,
     GatherDepNetworkFailureEvent,
     GatherDepSuccessEvent,
+    MeteredEvent,
     PauseEvent,
     RefreshWhoHasEvent,
     RemoveReplicasEvent,
@@ -2050,6 +2051,7 @@ class Worker(BaseWorker, ServerNode):
         self.counters["transfer-count"].add(len(data))
 
     @fail_hard
+    @MeteredEvent.meter
     async def gather_dep(
         self,
         worker: str,
@@ -2058,7 +2060,7 @@ class Worker(BaseWorker, ServerNode):
         total_nbytes: int,
         start: float,
         stimulus_id: str,
-    ) -> StateMachineEvent:
+    ) -> MeteredEvent:
         """Implements BaseWorker abstract method
 
         See also
@@ -2073,26 +2075,17 @@ class Worker(BaseWorker, ServerNode):
                 worker=worker,
                 total_nbytes=total_nbytes,
                 start=start,
-                metrics=[],
                 stimulus_id=f"worker-closing-{time()}",
             )
 
         self.state.log.append(("request-dep", worker, to_gather, stimulus_id, time()))
         logger.debug("Request %d keys from %s", len(to_gather), worker)
 
-        metrics = []
-
-        def metrics_callback(label: str, value: float, unit: str) -> None:
-            metrics.append((label, value, unit))
-
         try:
             # Note: context_meter.meter() will automatically subtract time spent
             # serializing/deserializing and compressing/decompressing, while
             # the plain call to meter() won't.
-            # TODO add parenthesis for readability (requires Python >=3.9)
-            with context_meter.add_callback(metrics_callback), context_meter.meter(
-                "network"
-            ), meter(time) as m:
+            with context_meter.meter("network"), meter(time) as m:
                 response = await get_data_from_worker(
                     rpc=self.rpc, keys=to_gather, worker=worker, who=self.address
                 )
@@ -2106,7 +2099,7 @@ class Worker(BaseWorker, ServerNode):
                     total_nbytes=total_nbytes,
                     start=start,
                     stop=None,
-                    metrics=metrics,
+                    metrics=[],
                     stimulus_id=f"gather-dep-busy-{time()}",
                 )
 
@@ -2128,7 +2121,7 @@ class Worker(BaseWorker, ServerNode):
                 data=response["data"],
                 start=start,
                 stop=None,
-                metrics=metrics,
+                metrics=[],
                 stimulus_id=f"gather-dep-success-{time()}",
             )
 
@@ -2142,7 +2135,7 @@ class Worker(BaseWorker, ServerNode):
                 total_nbytes=total_nbytes,
                 start=start,
                 stop=None,
-                metrics=metrics,
+                metrics=[],
                 stimulus_id=f"gather-dep-network-failure-{time()}",
             )
 
@@ -2163,7 +2156,6 @@ class Worker(BaseWorker, ServerNode):
                 worker=worker,
                 total_nbytes=total_nbytes,
                 start=start,
-                metrics=metrics,
                 stimulus_id=f"gather-dep-failed-{time()}",
             )
 
@@ -2263,9 +2255,10 @@ class Worker(BaseWorker, ServerNode):
         return function, args, kwargs
 
     @fail_hard
+    @MeteredEvent.meter
     async def execute(
         self, key: str, *, start: float, stimulus_id: str
-    ) -> StateMachineEvent:
+    ) -> MeteredEvent:
         """Execute a task. Implements BaseWorker abstract method.
 
         See also
@@ -2288,166 +2281,154 @@ class Worker(BaseWorker, ServerNode):
         ts = self.state.tasks[key]
         run_id = ts.run_id
 
-        metrics = []
+        try:
+            function, args, kwargs = await self._maybe_deserialize_task(ts)
+        except Exception as exc:
+            logger.error("Could not deserialize task %s", key, exc_info=True)
+            return ExecuteFailureEvent.from_exception(
+                exc,
+                key=key,
+                start=start,
+                stimulus_id=f"run-spec-deserialize-failed-{time()}",
+            )
 
-        def metrics_callback(label: str, value: float, unit: str) -> None:
-            # Time metrics are disaggregated only for successful tasks
-            metrics.append((label, value, unit))
+        try:
+            if self.state.validate:
+                assert not ts.waiting_for_data
+                assert ts.state in ("executing", "cancelled", "resumed"), ts
+                assert ts.run_spec is not None
 
-        with context_meter.add_callback(metrics_callback):
+            args2, kwargs2 = self._prepare_args_for_execution(ts, args, kwargs)
+
+            assert ts.annotations is not None
+            executor = ts.annotations.get("executor", "default")
             try:
-                function, args, kwargs = await self._maybe_deserialize_task(ts)
-            except Exception as exc:
-                logger.error("Could not deserialize task %s", key, exc_info=True)
-                return ExecuteFailureEvent.from_exception(
-                    exc,
-                    key=key,
-                    start=start,
-                    metrics=metrics,
-                    stimulus_id=f"run-spec-deserialize-failed-{time()}",
+                e = self.executors[executor]
+            except KeyError:
+                raise ValueError(
+                    f"Invalid executor {executor!r}; "
+                    f"expected one of: {sorted(self.executors)}"
                 )
 
+            self.active_keys.add(key)
             try:
-                if self.state.validate:
-                    assert not ts.waiting_for_data
-                    assert ts.state in ("executing", "cancelled", "resumed"), ts
-                    assert ts.run_spec is not None
-
-                args2, kwargs2 = self._prepare_args_for_execution(ts, args, kwargs)
-
-                assert ts.annotations is not None
-                executor = ts.annotations.get("executor", "default")
-                try:
-                    e = self.executors[executor]
-                except KeyError:
-                    raise ValueError(
-                        f"Invalid executor {executor!r}; "
-                        f"expected one of: {sorted(self.executors)}"
+                ts.start_time = time()
+                if iscoroutinefunction(function):
+                    result = await apply_function_async(
+                        function,
+                        args2,
+                        kwargs2,
+                        self.scheduler_delay,
                     )
-
-                self.active_keys.add(key)
-                try:
-                    ts.start_time = time()
-                    if iscoroutinefunction(function):
-                        result = await apply_function_async(
-                            function,
-                            args2,
-                            kwargs2,
-                            self.scheduler_delay,
-                        )
-                    elif "ThreadPoolExecutor" in str(type(e)):
-                        result = await self.loop.run_in_executor(
-                            e,
-                            apply_function,
-                            function,
-                            args2,
-                            kwargs2,
-                            self.execution_state,
-                            key,
-                            self.active_threads,
-                            self.active_threads_lock,
-                            self.scheduler_delay,
-                        )
-                    else:
-                        result = await self.loop.run_in_executor(
-                            e,
-                            apply_function_simple,
-                            function,
-                            args2,
-                            kwargs2,
-                            self.scheduler_delay,
-                        )
-                finally:
-                    self.active_keys.discard(key)
-
-                self.threads[key] = result["thread"]
-
-                if result["op"] == "task-finished":
-                    if self.digests is not None:
-                        self.digests["task-duration"].add(result["wall-duration"])
-                    context_meter.digest_metric(
-                        "thread-cpu", result["thread-duration"], "seconds"
+                elif "ThreadPoolExecutor" in str(type(e)):
+                    result = await self.loop.run_in_executor(
+                        e,
+                        apply_function,
+                        function,
+                        args2,
+                        kwargs2,
+                        self.execution_state,
+                        key,
+                        self.active_threads,
+                        self.active_threads_lock,
+                        self.scheduler_delay,
                     )
-                    context_meter.digest_metric(
-                        "thread-noncpu",
-                        result["wall-duration"] - result["thread-duration"],
-                        "seconds",
+                else:
+                    result = await self.loop.run_in_executor(
+                        e,
+                        apply_function_simple,
+                        function,
+                        args2,
+                        kwargs2,
+                        self.scheduler_delay,
                     )
+            finally:
+                self.active_keys.discard(key)
 
-                    return ExecuteSuccessEvent(
-                        key=key,
-                        run_id=run_id,
-                        value=result["result"],
-                        nbytes=result["nbytes"],
-                        type=result["type"],
-                        start=start,
-                        stop=None,
-                        metrics=metrics,
-                        stimulus_id=f"task-finished-{time()}",
-                    )
+            self.threads[key] = result["thread"]
 
-                task_exc = result["actual-exception"]
-                if isinstance(task_exc, Reschedule):
-                    return RescheduleEvent(
-                        key=ts.key,
-                        start=start,
-                        stop=None,
-                        metrics=metrics,
-                        stimulus_id=f"reschedule-{time()}",
-                    )
-
-                if (
-                    self.status == Status.closing
-                    and isinstance(task_exc, asyncio.CancelledError)
-                    and iscoroutinefunction(function)
-                ):
-                    # `Worker.cancel` will cause async user tasks to raise
-                    # `CancelledError`. Since we cancelled those tasks, we shouldn't
-                    # treat them as failures. This is just a heuristic; it's _possible_
-                    # the task happened to fail independently with `CancelledError`.
-                    logger.info(
-                        f"Async task {key!r} cancelled during worker close; rescheduling."
-                    )
-                    return RescheduleEvent(
-                        key=ts.key,
-                        start=start,
-                        stop=None,
-                        metrics=metrics,
-                        stimulus_id=f"cancelled-by-worker-close-{time()}",
-                    )
-
-                logger.warning(
-                    "Compute Failed\n"
-                    "Key:       %s\n"
-                    "Function:  %s\n"
-                    "args:      %s\n"
-                    "kwargs:    %s\n"
-                    "Exception: %r\n",
-                    key,
-                    str(funcname(function))[:1000],
-                    convert_args_to_str(args2, max_len=1000),
-                    convert_kwargs_to_str(kwargs2, max_len=1000),
-                    result["exception_text"],
+            if result["op"] == "task-finished":
+                if self.digests is not None:
+                    self.digests["task-duration"].add(result["wall-duration"])
+                context_meter.digest_metric(
+                    "thread-cpu", result["thread-duration"], "seconds"
                 )
-                return ExecuteFailureEvent.from_exception(
-                    result,
+                context_meter.digest_metric(
+                    "thread-noncpu",
+                    result["wall-duration"] - result["thread-duration"],
+                    "seconds",
+                )
+
+                return ExecuteSuccessEvent(
                     key=key,
+                    run_id=run_id,
+                    value=result["result"],
+                    nbytes=result["nbytes"],
+                    type=result["type"],
                     start=start,
-                    metrics=metrics,
-                    stimulus_id=f"task-erred-{time()}",
+                    stop=None,
+                    metrics=[],
+                    stimulus_id=f"task-finished-{time()}",
                 )
 
-            except Exception as exc:
-                logger.error(
-                    "Exception during execution of task %s.", key, exc_info=True
-                )
-                return ExecuteFailureEvent.from_exception(
-                    exc,
-                    key=key,
+            task_exc = result["actual-exception"]
+            if isinstance(task_exc, Reschedule):
+                return RescheduleEvent(
+                    key=ts.key,
                     start=start,
-                    metrics=metrics,
-                    stimulus_id=f"execute-unknown-error-{time()}",
+                    stop=None,
+                    metrics=[],
+                    stimulus_id=f"reschedule-{time()}",
                 )
+
+            if (
+                self.status == Status.closing
+                and isinstance(task_exc, asyncio.CancelledError)
+                and iscoroutinefunction(function)
+            ):
+                # `Worker.cancel` will cause async user tasks to raise
+                # `CancelledError`. Since we cancelled those tasks, we shouldn't
+                # treat them as failures. This is just a heuristic; it's _possible_
+                # the task happened to fail independently with `CancelledError`.
+                logger.info(
+                    f"Async task {key!r} cancelled during worker close; rescheduling."
+                )
+                return RescheduleEvent(
+                    key=ts.key,
+                    start=start,
+                    stop=None,
+                    metrics=[],
+                    stimulus_id=f"cancelled-by-worker-close-{time()}",
+                )
+
+            logger.warning(
+                "Compute Failed\n"
+                "Key:       %s\n"
+                "Function:  %s\n"
+                "args:      %s\n"
+                "kwargs:    %s\n"
+                "Exception: %r\n",
+                key,
+                str(funcname(function))[:1000],
+                convert_args_to_str(args2, max_len=1000),
+                convert_kwargs_to_str(kwargs2, max_len=1000),
+                result["exception_text"],
+            )
+            return ExecuteFailureEvent.from_exception(
+                result,
+                key=key,
+                start=start,
+                stimulus_id=f"task-erred-{time()}",
+            )
+
+        except Exception as exc:
+            logger.error("Exception during execution of task %s.", key, exc_info=True)
+            return ExecuteFailureEvent.from_exception(
+                exc,
+                key=key,
+                start=start,
+                stimulus_id=f"execute-unknown-error-{time()}",
+            )
 
     def _prepare_args_for_execution(
         self, ts: TaskState, args: tuple, kwargs: dict[str, Any]

@@ -78,6 +78,7 @@ from distributed.worker_state_machine import (
     ComputeTaskEvent,
     Execute,
     InvalidTransition,
+    MeteredEvent,
     SecedeEvent,
     StateMachineEvent,
 )
@@ -2269,7 +2270,7 @@ class BlockedExecute(Worker):
 
     async def execute(
         self, key: str, start: float, *, stimulus_id: str
-    ) -> StateMachineEvent:
+    ) -> MeteredEvent:
         self.in_execute.set()
         await self.block_execute.wait()
         try:

@@ -22,7 +22,7 @@ from collections.abc import (
 )
 from copy import copy
 from dataclasses import dataclass, field
-from functools import lru_cache, partial, singledispatchmethod
+from functools import lru_cache, partial, singledispatchmethod, wraps
 from itertools import chain
 from typing import (
     TYPE_CHECKING,
@@ -665,9 +665,11 @@ class RetryBusyWorkerEvent(StateMachineEvent):
 
 
 @dataclass
-class ExecuteGatherDepDoneEvent(StateMachineEvent):
+class MeteredEvent(StateMachineEvent):
     """Abstract base event for all the possible outcomes of a :class:`Compute` or
-    :class:`GatherDep` instruction
+    :class:`GatherDep` instruction, and more in general for any final event that is
+    the result of an asynchronous instruction, which is metered through
+    :class:`distributed.metrics.ContextMeter`.
     """
 
     _digest_tag: ClassVar[str]
@@ -732,9 +734,34 @@ class ExecuteGatherDepDoneEvent(StateMachineEvent):
             **kwargs,
         )
 
+    @staticmethod
+    def meter(func: Callable) -> Callable:
+        """Decorator for a function that returns a MeteredEvent.
+        The function should return the MeteredEvent with ``stop=None, metrics=[]``;
+        stop will be added by :meth:`done`, whereas the metrics will be appended by
+        this decorator.
+        """
+
+        @wraps(func)
+        async def wrapper(*args: Any, **kwargs: Any) -> MeteredEvent:
+            metrics = []
+
+            def metrics_callback(label: str, value: float, unit: str) -> None:
+                # Time metrics are disaggregated only for successful tasks
+                metrics.append((label, value, unit))
+
+            with context_meter.add_callback(metrics_callback):
+                out = await func(*args, **kwargs)
+
+            assert not out.metrics
+            out.metrics = metrics
+            return out
+
+        return wrapper
+
 
 @dataclass
-class GatherDepDoneEvent(ExecuteGatherDepDoneEvent):
+class GatherDepDoneEvent(MeteredEvent):
     """:class:`GatherDep` instruction terminated (abstract base class)"""
 
     _digest_tag = "gather-dep"
@@ -829,7 +856,6 @@ class GatherDepFailureEvent(GatherDepDoneEvent):
         worker: str,
         total_nbytes: int,
         start: float,
-        metrics: list[tuple[str, float, str]],
         stimulus_id: str,
     ) -> Self:
         msg = error_message(err)
@@ -842,7 +868,7 @@ class GatherDepFailureEvent(GatherDepDoneEvent):
             traceback_text=msg["traceback_text"],
             start=start,
             stop=None,
-            metrics=metrics,
+            metrics=[],
             stimulus_id=stimulus_id,
         )
 
@@ -862,7 +888,6 @@ class GatherDepFailureEvent(GatherDepDoneEvent):
             worker=worker,
             total_nbytes=total_nbytes,
             start=0.0,
-            metrics=[],
             stimulus_id=stimulus_id,
         )
 
@@ -953,7 +978,7 @@ class ComputeTaskEvent(StateMachineEvent):
 
 
 @dataclass
-class ExecuteDoneEvent(ExecuteGatherDepDoneEvent):
+class ExecuteDoneEvent(MeteredEvent):
     """Abstract base event for all the possible outcomes of a :class:`Compute`
     instruction
     """
@@ -1030,7 +1055,6 @@ class ExecuteFailureEvent(ExecuteDoneEvent):
         *,
         key: str,
         start: float,
-        metrics: list[tuple[str, float, str]],
         stimulus_id: str,
     ) -> Self:
         if isinstance(err_or_msg, dict):
@@ -1040,13 +1064,13 @@ class ExecuteFailureEvent(ExecuteDoneEvent):
 
         return cls(
             key=key,
-            start=start,
-            stop=None,
             exception=msg["exception"],
             traceback=msg["traceback"],
             exception_text=msg["exception_text"],
             traceback_text=msg["traceback_text"],
-            metrics=metrics,
+            start=start,
+            stop=None,
+            metrics=[],
             stimulus_id=stimulus_id,
         )
 
@@ -1479,7 +1503,7 @@ class WorkerState:
                 # TODO We'll be able to remove this hack after implementing asynchronous
                 #      spilling (https://github.com/dask/distributed/issues/4424)
                 def metrics_callback(
-                    ev: ExecuteGatherDepDoneEvent,
+                    ev: MeteredEvent,
                     instructions: Instructions,
                     label: str,
                     value: float,
@@ -3857,7 +3881,7 @@ class BaseWorker(abc.ABC):
         total_nbytes: int,
         start: float,
         stimulus_id: str,
-    ) -> StateMachineEvent:
+    ) -> MeteredEvent:
         """Gather dependencies for a task from a worker who has them
 
         Parameters
@@ -3879,7 +3903,7 @@ class BaseWorker(abc.ABC):
     @abc.abstractmethod
     async def execute(
         self, key: str, *, start: float, stimulus_id: str
-    ) -> StateMachineEvent:
+    ) -> MeteredEvent:
         """Execute a task
 
         Parameters
