@@ -3768,3 +3768,29 @@ async def test_forward_output(c, s, a, b, capsys):
 
     assert "" == out
     assert "" == err
+
+
+@gen_cluster(client=True)
+async def test_offload_getdata(c, s, a, b):
+    """Test that functions wrapped by offload() are metered"""
+    import random
+    import threading
+
+    # TODO: this is not  a real test, yet
+    print("main thread", threading.get_ident())
+    n = 200_000_000
+
+    class C:
+        def __sizeof__(self):
+            return n
+
+        def __getstate__(self):
+            print("__getstate__", threading.get_ident())
+            return random.randbytes(n)
+
+        def __setstate__(self, state):
+            print("__setstate__", threading.get_ident())
+
+    x = c.submit(C, key="x", workers=[a.address])
+    y = c.submit(lambda x: None, x, key="y", workers=[b.address])
+    await y

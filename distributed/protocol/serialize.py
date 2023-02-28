@@ -13,6 +13,7 @@ import msgpack
 
 import dask
 from dask.base import normalize_token
+from dask.sizeof import sizeof
 from dask.utils import typename
 
 from distributed.protocol import pickle
@@ -637,6 +638,18 @@ def nested_deserialize(x):
         return x
 
     return replace_inner(x)
+
+
+@sizeof.register(ToPickle)
+@sizeof.register(Serialize)
+def sizeof_serialize(obj):
+    return sizeof(obj.data)
+
+
+@sizeof.register(Pickled)
+@sizeof.register(Serialized)
+def sizeof_serialized(obj):
+    return sizeof(obj.header) + sizeof(obj.frames)
 
 
 def serialize_bytelist(x, **kwargs):
