@@ -48,7 +48,7 @@ from distributed.metrics import context_meter, meter, monotonic, time
 from distributed.protocol import pickle
 from distributed.protocol.serialize import Serialize
 from distributed.sizeof import safe_sizeof as sizeof
-from distributed.utils import empty_context, recursive_to_dict
+from distributed.utils import recursive_to_dict
 
 logger = logging.getLogger("distributed.worker.state_machine")
 
@@ -438,13 +438,6 @@ class RetryBusyWorkerLater(Instruction):
     worker: str
 
 
-@dataclass
-class DigestMetric(Instruction):
-    __slots__ = ("name", "value")
-    name: str
-    value: float
-
-
 class SendMessageToScheduler(Instruction):
     #: Matches a key in Scheduler.stream_handlers
     op: ClassVar[str]
@@ -672,8 +665,6 @@ class MeteredEvent(StateMachineEvent):
     :class:`distributed.metrics.ContextMeter`.
     """
 
-    _digest_tag: ClassVar[str]
-
     #: When the :class:`WorkerStateMachine` emitted the :class:`Instruction`
     start: float
     #: When the :class:`WorkerStateMachine` processed the final
@@ -697,29 +688,27 @@ class MeteredEvent(StateMachineEvent):
             return math.nan
         return max(0.0, self.stop - self.start)
 
-    def digests(self, coarse_time: str | Literal[False]) -> Instructions:
-        """Generate :class:`DigestMetric` objects out of :ivar:`metrics`"""
+    def repeat_digests(self, coarse_time: str | Literal[False]) -> None:
+        """Repeat calls to digest_metric that were previously captured in
+        :ivar:`metrics`, potentially aggregating the time metrics into a single one.
+
+        Parameters
+        ----------
+        coarse_time: str | False
+            False
+                repeat all metrics verbatim.
+            <label>
+                Do not repeat metrics with unit='seconds'. Instead, emit a single
+                metric with label=coarse_time.
+                Repeat all non-time metrics verbatim.
+        """
         assert self.stop is not None, "Did not call done()"
 
-        instructions: Instructions = []
         for label, value, unit in self.metrics:
             if unit != "seconds" or not coarse_time:
-                instructions.append(
-                    DigestMetric(
-                        name=f"{self._digest_tag}-{label}-{unit}",
-                        value=value,
-                        stimulus_id=self.stimulus_id,
-                    )
-                )
+                context_meter.digest_metric(label, value, unit)
         if coarse_time:
-            instructions.append(
-                DigestMetric(
-                    name=f"{self._digest_tag}-{coarse_time}-seconds",
-                    value=self.duration,
-                    stimulus_id=self.stimulus_id,
-                )
-            )
-        return instructions
+            context_meter.digest_metric("coarse_time", self.duration, "seconds")
 
     @classmethod
     def dummy(cls, *, stimulus_id: str, **kwargs: Any) -> Self:
@@ -1493,39 +1482,11 @@ class WorkerState:
         instructions = []
         handled = time()
         for stim in stims:
-            if not isinstance(stim, FindMissingEvent):
-                self.stimulus_log.append(stim.to_loggable(handled=handled))
             recs, instr = self._handle_event(stim)
             instructions += instr
-
-            if isinstance(stim, (GatherDepSuccessEvent, ExecuteSuccessEvent)):
-                # _transition_to_memory() may block on spilling
-                # TODO We'll be able to remove this hack after implementing asynchronous
-                #      spilling (https://github.com/dask/distributed/issues/4424)
-                def metrics_callback(
-                    ev: MeteredEvent,
-                    instructions: Instructions,
-                    label: str,
-                    value: float,
-                    unit: str,
-                ) -> None:
-                    ev.metrics.append((label, value, unit))
-                    instructions.append(
-                        DigestMetric(
-                            name=f"{ev._digest_tag}-{label}-{unit}",
-                            value=value,
-                            stimulus_id=ev.stimulus_id,
-                        )
-                    )
-
-                ctx = context_meter.add_callback(
-                    partial(metrics_callback, stim, instructions)
-                )
-            else:
-                ctx = empty_context  # type: ignore
-
-            with ctx:
-                instructions += self._transitions(recs, stimulus_id=stim.stimulus_id)
+            instructions += self._transitions(recs, stimulus_id=stim.stimulus_id)
+            if not isinstance(stim, FindMissingEvent):
+                self.stimulus_log.append(stim.to_loggable(handled=handled))
 
         return instructions
 
@@ -3137,9 +3098,9 @@ class WorkerState:
             coarse_time = "cancelled"
         else:
             coarse_time = False
-        instructions = ev.digests(coarse_time=coarse_time)
+        ev.repeat_digests(coarse_time=coarse_time)
 
-        return recommendations, instructions
+        return recommendations, []
 
     @_handle_event.register
     def _handle_gather_dep_busy(self, ev: GatherDepBusyEvent) -> RecsInstrs:
@@ -3156,10 +3117,9 @@ class WorkerState:
             if not ts.who_has - self.busy_workers:
                 refresh_who_has.append(ts.key)
 
-        instructions = ev.digests(coarse_time="busy")
-        instructions.append(
+        instructions: Instructions = [
             RetryBusyWorkerLater(worker=ev.worker, stimulus_id=ev.stimulus_id),
-        )
+        ]
         if refresh_who_has:
             # All workers that hold known replicas of our tasks are busy.
             # Try querying the scheduler for unknown ones.
@@ -3168,7 +3128,7 @@ class WorkerState:
                     keys=refresh_who_has, stimulus_id=ev.stimulus_id
                 )
             )
-
+        ev.repeat_digests(coarse_time="busy")
         return recommendations, instructions
 
     @_handle_event.register
@@ -3204,8 +3164,8 @@ class WorkerState:
             ts = self.tasks[key]
             ts.who_has.remove(ev.worker)
 
-        instructions = ev.digests(coarse_time="failed")
-        return recommendations, instructions
+        ev.repeat_digests(coarse_time="failed")
+        return recommendations, []
 
     @_handle_event.register
     def _handle_gather_dep_failure(self, ev: GatherDepFailureEvent) -> RecsInstrs:
@@ -3222,9 +3182,9 @@ class WorkerState:
             )
             for ts in self._gather_dep_done_common(ev)
         }
-        instructions = ev.digests(coarse_time="failed")
 
-        return recommendations, instructions
+        ev.repeat_digests(coarse_time="failed")
+        return recommendations, []
 
     @_handle_event.register
     def _handle_secede(self, ev: SecedeEvent) -> RecsInstrs:
@@ -3311,10 +3271,10 @@ class WorkerState:
         self.long_running.discard(ts)
 
         recs, instr = self._ensure_computing()
-        instr += ev.digests(
+        assert ts not in recs
+        ev.repeat_digests(
             coarse_time="cancelled" if ts.state == "cancelled" else coarse_time
         )
-        assert ts not in recs
         return ts, recs, instr
 
     @_handle_event.register
@@ -3323,13 +3283,8 @@ class WorkerState:
         ts, recs, instr = self._execute_done_common(ev, coarse_time=False)
         assert ev.stop is not None
         ts.startstops.append({"action": "compute", "start": ev.start, "stop": ev.stop})
-        instr.append(
-            DigestMetric(  # TODO cleanup
-                name="compute-duration",
-                value=ev.duration,
-                stimulus_id=ev.stimulus_id,
-            )
-        )
+        # TODO cleanup
+        context_meter.digest_metric("compute-duration", ev.duration, "seconds")
         ts.nbytes = ev.nbytes
         ts.type = ev.type
         recs[ts] = ("memory", ev.value, ev.run_id)
@@ -3797,16 +3752,30 @@ class BaseWorker(abc.ABC):
         --------
         WorkerState.handle_stimulus
         """
-        instructions = self.state.handle_stimulus(*stims)
+        instructions = []
+
+        def metrics_callback(
+            stim: StateMachineEvent, label: str, value: float, unit: str
+        ) -> None:
+            if label == "compute-duration":
+                name = label
+            elif isinstance(stim, GatherDepDoneEvent):
+                name = f"gather-dep-{label}-{unit}"
+            elif isinstance(stim, ExecuteDoneEvent):
+                name = f"execute-{label}-{unit}"
+            else:
+                return
+            self.digest_metric(name, value)
+
+        for stim in stims:
+            with context_meter.add_callback(partial(metrics_callback, stim)):
+                instructions += self.state.handle_stimulus(stim)
 
         for inst in instructions:
             task: asyncio.Task | None = None
 
             if isinstance(inst, SendMessageToScheduler):
                 self.batched_send(inst.to_dict())
-
-            elif isinstance(inst, DigestMetric):
-                self.digest_metric(inst.name, inst.value)
 
             elif isinstance(inst, GatherDep):
                 assert inst.to_gather
