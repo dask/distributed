@@ -3736,6 +3736,20 @@ class BaseWorker(abc.ABC):
             return
         self.handle_stimulus(stim)
 
+    def _metrics_callback(
+        self, stim: StateMachineEvent, label: str, value: float, unit: str
+    ) -> None:
+        if isinstance(stim, GatherDepDoneEvent):
+            self.digest_metric(f"gather-dep-{label}-{unit}", value)
+        elif isinstance(stim, ExecuteDoneEvent):
+            self.digest_metric(f"execute-{label}-{unit}", value)
+        else:
+            raise AssertionError(  # pragma: nocover
+                "unexpected call to "
+                f"context_meter.digest_metric({label}, {value}, {unit}) "
+                f"while handling {stim}"
+            )
+
     def handle_stimulus(self, *stims: StateMachineEvent) -> None:
         """Forward one or more external stimuli to :meth:`WorkerState.handle_stimulus`
         and process the returned instructions, invoking the relevant Worker callbacks
@@ -3748,17 +3762,8 @@ class BaseWorker(abc.ABC):
         WorkerState.handle_stimulus
         """
         instructions = []
-
-        def metrics_callback(
-            stim: StateMachineEvent, label: str, value: float, unit: str
-        ) -> None:
-            if isinstance(stim, GatherDepDoneEvent):
-                self.digest_metric(f"gather-dep-{label}-{unit}", value)
-            elif isinstance(stim, ExecuteDoneEvent):
-                self.digest_metric(f"execute-{label}-{unit}", value)
-
         for stim in stims:
-            with context_meter.add_callback(partial(metrics_callback, stim)):
+            with context_meter.add_callback(partial(self._metrics_callback, stim)):
                 instructions += self.state.handle_stimulus(stim)
 
         for inst in instructions:
