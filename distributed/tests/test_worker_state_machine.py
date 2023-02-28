@@ -22,6 +22,7 @@ from distributed.utils import recursive_to_dict
 from distributed.utils_test import (
     NO_AMM,
     _LockedCommPool,
+    assert_instructions,
     assert_story,
     async_wait_for,
     freeze_data_fetching,
@@ -33,7 +34,6 @@ from distributed.worker_state_machine import (
     AcquireReplicasEvent,
     AddKeysMsg,
     ComputeTaskEvent,
-    DigestMetric,
     Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
@@ -1222,11 +1222,11 @@ def test_task_with_dependencies_acquires_resources(ws):
     instructions = ws.handle_stimulus(
         GatherDepSuccessEvent.dummy(ws2, {"x": 123}, total_nbytes=8, stimulus_id="s2")
     )
-    assert instructions == [
-        DigestMetric.match(name="gather-dep-other-seconds", stimulus_id="s2"),
+    assert_instructions(
+        instructions,
         AddKeysMsg(keys=["x"], stimulus_id="s2"),
         Execute.match(key="y", stimulus_id="s2"),
-    ]
+    )
     assert ws.tasks["y"].state == "executing"
     assert ws.available_resources == {"R": 0}
 
