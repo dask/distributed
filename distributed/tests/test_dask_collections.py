@@ -174,12 +174,12 @@ def test_dataframe_groupby_tasks(client):
     for ind in [lambda x: "A", lambda x: x.A]:
         a = df.groupby(ind(df)).apply(len)
         b = ddf.groupby(ind(ddf)).apply(len, meta=(None, int))
-        assert_equal(a, b.compute(scheduler="sync").sort_index())
+        assert_equal(a, b.compute().sort_index())
         assert not any("partd" in k[0] for k in b.dask)
 
         a = df.groupby(ind(df)).B.apply(len)
         b = ddf.groupby(ind(ddf)).B.apply(len, meta=("B", int))
-        assert_equal(a, b.compute(scheduler="sync").sort_index())
+        assert_equal(a, b.compute().sort_index())
         assert not any("partd" in k[0] for k in b.dask)
 
     with pytest.raises((NotImplementedError, ValueError)):
@@ -188,7 +188,7 @@ def test_dataframe_groupby_tasks(client):
     a = df.groupby(["A", "B"]).apply(len)
     b = ddf.groupby(["A", "B"]).apply(len, meta=(None, int))
 
-    assert_equal(a, b.compute(scheduler="sync").sort_index())
+    assert_equal(a, b.compute().sort_index())
 
 
 @gen_cluster(client=True)
