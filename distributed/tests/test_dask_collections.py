@@ -5,6 +5,7 @@ import pytest
 np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
 
+from packaging.version import parse as parse_version
 from pandas.testing import assert_frame_equal, assert_index_equal, assert_series_equal
 
 import dask
@@ -109,6 +110,13 @@ async def test_dask_array_collections(c, s, a, b):
         np.testing.assert_equal(o_local, o_remote)
 
 
+@pytest.mark.skipif(
+    (
+        parse_version(dask.__version__) < parse_version("2023.2.2")
+        and parse_version(dask.__version__) >= parse_version("2023.2.1")
+    ),
+    reason="https://github.com/dask/dask/pull/10005",
+)
 @gen_cluster(client=True)
 async def test_bag_groupby_tasks_default(c, s, a, b):
     b = db.range(100, npartitions=10)
