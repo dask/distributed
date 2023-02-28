@@ -13,7 +13,7 @@ import weakref
 from collections import defaultdict, deque
 from collections.abc import Callable, Container, Coroutine, Generator
 from enum import Enum
-from functools import partial
+from functools import partial, wraps
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, TypeVar, final
 
 import tblib
@@ -34,7 +34,7 @@ from distributed.comm import (
     unparse_host_port,
 )
 from distributed.compatibility import PeriodicCallback
-from distributed.metrics import time
+from distributed.metrics import context_meter, time
 from distributed.system_monitor import SystemMonitor
 from distributed.utils import (
     NoOpAwaitable,
@@ -951,6 +951,34 @@ class Server:
         self.digests_total[name] += value
         # Local maximums (reset by Prometheus poll)
         self.digests_max[name] = max(self.digests_max[name], value)
+
+
+def context_meter_to_server_digest(digest_tag: str) -> Callable:
+    """Decorator for an async method of a Server subclass that calls
+    ``distributed.metrics.context_meter.meter`` and/or ``digest_metric``.
+    It routes the calls to ``context_meter.digest_metric(label, value, unit)`` to
+    ``Server.digest_metric({digest_tag}-{label}-{unit}, value)``.
+    """
+
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        async def wrapper(self: Server, *args: Any, **kwargs: Any) -> Any:
+            loop = asyncio.get_running_loop()
+
+            def metrics_callback(label: str, value: float, unit: str) -> None:
+                # This callback could be called from another thread through offload()
+                loop.call_soon_threadsafe(
+                    self.digest_metric,
+                    f"get-data-{label}-{unit}",
+                    value,
+                )
+
+            with context_meter.add_callback(metrics_callback):
+                return await func(self, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 def pingpong(comm):

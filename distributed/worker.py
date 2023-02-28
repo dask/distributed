@@ -4,7 +4,6 @@ import asyncio
 import bisect
 import builtins
 import errno
-import functools
 import logging
 import math
 import os
@@ -27,6 +26,7 @@ from collections.abc import (
 from concurrent.futures import Executor
 from contextlib import suppress
 from datetime import timedelta
+from functools import wraps
 from inspect import isawaitable
 from typing import (
     TYPE_CHECKING,
@@ -70,6 +70,7 @@ from distributed.core import (
     PooledRPCCall,
     Status,
     coerce_to_address,
+    context_meter_to_server_digest,
     error_message,
     pingpong,
 )
@@ -193,7 +194,7 @@ def fail_hard(method: Callable[P, T]) -> Callable[P, T]:
     reason = f"worker-{method.__name__}-fail-hard"
     if iscoroutinefunction(method):
 
-        @functools.wraps(method)
+        @wraps(method)
         async def wrapper(self, *args: P.args, **kwargs: P.kwargs) -> Any:
             try:
                 return await method(self, *args, **kwargs)  # type: ignore
@@ -206,7 +207,7 @@ def fail_hard(method: Callable[P, T]) -> Callable[P, T]:
 
     else:
 
-        @functools.wraps(method)
+        @wraps(method)
         def wrapper(self, *args: P.args, **kwargs: P.kwargs) -> T:
             try:
                 return method(self, *args, **kwargs)
@@ -1712,6 +1713,7 @@ class Worker(BaseWorker, ServerNode):
 
         self.stream_comms[address].send(msg)
 
+    @context_meter_to_server_digest("get-data")
     async def get_data(
         self,
         comm: Comm,
@@ -1760,59 +1762,45 @@ class Worker(BaseWorker, ServerNode):
         self.transfer_outgoing_count += 1
         self.transfer_outgoing_count_total += 1
 
-        loop = asyncio.get_running_loop()
+        # This may potentially take many seconds if it involves unspilling
+        data = {k: self.data[k] for k in keys if k in self.data}
 
-        def metrics_callback(label: str, value: float, unit: str) -> None:
-            # This callback could be called from another thread through offload()
-            loop.call_soon_threadsafe(
-                self.digest_metric,
-                f"get-data-{label}-{unit}",
-                value,
+        if len(data) < len(keys):
+            for k in set(keys) - data.keys():
+                if k in self.state.actors:
+                    from distributed.actor import Actor
+
+                    data[k] = Actor(
+                        type(self.state.actors[k]), self.address, k, worker=self
+                    )
+
+        msg = {"status": "OK", "data": {k: to_serialize(v) for k, v in data.items()}}
+        # Note: `if k in self.data` above guarantees that
+        # k is in self.state.tasks too and that nbytes is non-None
+        bytes_per_task = {k: self.state.tasks[k].nbytes or 0 for k in data}
+        total_bytes = sum(bytes_per_task.values())
+        self.transfer_outgoing_bytes += total_bytes
+        self.transfer_outgoing_bytes_total += total_bytes
+
+        try:
+            # Note: context_meter.meter() will automatically subtract time spent
+            # serializing/deserializing and compressing/decompressing, while
+            # the plain call to meter() won't
+            with context_meter.meter("network"), meter(time, floor=0.001) as m:
+                compressed = await comm.write(msg, serializers=serializers)
+                response = await comm.read(deserializers=serializers)
+            assert response == "OK", response
+        except OSError:
+            logger.exception(
+                "failed during get data with %s -> %s",
+                self.address,
+                who,
             )
-
-        with context_meter.add_callback(metrics_callback):
-            # This may potentially take many seconds if it involves unspilling
-            data = {k: self.data[k] for k in keys if k in self.data}
-
-            if len(data) < len(keys):
-                for k in set(keys) - data.keys():
-                    if k in self.state.actors:
-                        from distributed.actor import Actor
-
-                        data[k] = Actor(
-                            type(self.state.actors[k]), self.address, k, worker=self
-                        )
-
-            msg = {
-                "status": "OK",
-                "data": {k: to_serialize(v) for k, v in data.items()},
-            }
-            # Note: `if k in self.data` above guarantees that
-            # k is in self.state.tasks too and that nbytes is non-None
-            bytes_per_task = {k: self.state.tasks[k].nbytes or 0 for k in data}
-            total_bytes = sum(bytes_per_task.values())
-            self.transfer_outgoing_bytes += total_bytes
-            self.transfer_outgoing_bytes_total += total_bytes
-
-            try:
-                # Note: context_meter.meter() will automatically subtract time spent
-                # serializing/deserializing and compressing/decompressing, while
-                # the plain call to meter() won't
-                with context_meter.meter("network"), meter(time, floor=0.001) as m:
-                    compressed = await comm.write(msg, serializers=serializers)
-                    response = await comm.read(deserializers=serializers)
-                assert response == "OK", response
-            except OSError:
-                logger.exception(
-                    "failed during get data with %s -> %s",
-                    self.address,
-                    who,
-                )
-                comm.abort()
-                raise
-            finally:
-                self.transfer_outgoing_bytes -= total_bytes
-                self.transfer_outgoing_count -= 1
+            comm.abort()
+            raise
+        finally:
+            self.transfer_outgoing_bytes -= total_bytes
+            self.transfer_outgoing_count -= 1
 
         self.transfer_outgoing_log.append(
             {
