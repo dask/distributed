@@ -91,8 +91,7 @@ def test_cancelled_reschedule_worker_state(ws_with_running_task):
     assert ws.available_resources == {"R": 0}
 
     instructions = ws.handle_stimulus(RescheduleEvent.dummy(key="x", stimulus_id="s2"))
-    # There's no RescheduleMsg
-    assert not instructions
+    assert not instructions  # There's no RescheduleMsg
     assert not ws.tasks  # The task has been forgotten
     assert ws.available_resources == {"R": 1}
 

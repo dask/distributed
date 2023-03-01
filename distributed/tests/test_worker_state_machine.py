@@ -296,7 +296,6 @@ def test_slots(cls):
         for name, field in cls.__dataclass_fields__.items()
         if field.init and not field.type.startswith("ClassVar")
     ]
-
     inst = cls(**dict.fromkeys(params))
     assert not hasattr(inst, "__dict__")
 

@@ -708,7 +708,7 @@ class MeteredEvent(StateMachineEvent):
             if unit != "seconds" or not coarse_time:
                 context_meter.digest_metric(label, value, unit)
         if coarse_time:
-            context_meter.digest_metric("coarse_time", self.duration, "seconds")
+            context_meter.digest_metric(coarse_time, self.duration, "seconds")
 
     @classmethod
     def dummy(cls, *, stimulus_id: str, **kwargs: Any) -> Self:
@@ -3744,6 +3744,8 @@ class BaseWorker(abc.ABC):
             self.digest_metric(f"gather-dep-{label}-{unit}", value)
         elif isinstance(stim, ExecuteDoneEvent):
             self.digest_metric(f"execute-{label}-{unit}", value)
+        elif isinstance(stim, UpdateDataEvent):
+            self.digest_metric(f"scatter-{label}-{unit}", value)
         else:
             raise AssertionError(  # pragma: nocover
                 "unexpected call to "

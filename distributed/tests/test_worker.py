@@ -6,7 +6,6 @@ import importlib
 import itertools
 import logging
 import os
-import secrets
 import sys
 import tempfile
 import threading
@@ -17,7 +16,7 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from numbers import Number
 from operator import add
-from time import perf_counter, sleep
+from time import sleep
 from unittest import mock
 
 import psutil
@@ -43,7 +42,6 @@ from distributed import (
     wait,
 )
 from distributed.comm.registry import backends
-from distributed.comm.utils import OFFLOAD_THRESHOLD
 from distributed.compatibility import LINUX, WINDOWS, to_thread
 from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
@@ -53,8 +51,8 @@ from distributed.diagnostics.plugin import (
     PackageInstall,
     PipInstall,
 )
-from distributed.metrics import meter, time
-from distributed.protocol import default_compression, pickle
+from distributed.metrics import time
+from distributed.protocol import pickle
 from distributed.scheduler import KilledWorker, Scheduler
 from distributed.utils_test import (
     NO_AMM,
@@ -958,13 +956,11 @@ async def test_priorities(c, s, w):
 @gen_cluster(client=True)
 async def test_heartbeats(c, s, a, b):
     x = s.workers[a.address].last_seen
-    with meter() as m:
-        await asyncio.sleep(
-            a.periodic_callbacks["heartbeat"].callback_time / 1000 + 0.1
-        )
-        while s.workers[a.address].last_seen == x:
-            await asyncio.sleep(0.01)
-    assert m.delta < 2
+    start = time()
+    await asyncio.sleep(a.periodic_callbacks["heartbeat"].callback_time / 1000 + 0.1)
+    while s.workers[a.address].last_seen == x:
+        await asyncio.sleep(0.01)
+        assert time() < start + 2
     assert a.periodic_callbacks["heartbeat"].callback_time < 1000
 
 
@@ -1252,10 +1248,10 @@ def test_get_worker_name(client):
     def func(dask_scheduler):
         return list(dask_scheduler.clients)
 
-    start = perf_counter()
+    start = time()
     while not any("worker" in n for n in client.run_on_scheduler(func)):
         sleep(0.1)
-        assert perf_counter() < start + 10
+        assert time() < start + 10
 
 
 @gen_cluster(nthreads=[], client=True)
@@ -3759,144 +3755,3 @@ async def test_forward_output(c, s, a, b, capsys):
 
     assert "" == out
     assert "" == err
-
-
-@gen_cluster(client=True, config={"distributed.worker.memory.target": 1e-9})
-async def test_digest_metrics(c, s, a, b):
-    x = (await c.scatter({"x": "x" * 20_000}, workers=[a.address]))["x"]
-    y = (await c.scatter({"y": "y" * 20_000}, workers=[b.address]))["y"]
-    with meter() as m:
-        z = await c.submit("".join, [x, y], key="z", workers=[a.address])
-        assert z == "x" * 20_000 + "y" * 20_000
-        # The call to Worker.get_data will terminate after the fetch of z returns
-        await async_wait_for(
-            lambda: "get-data-network-seconds" in a.digests_total, timeout=5
-        )
-
-    digests = {
-        k: v
-        for k, v in a.digests_total.items()
-        if any(k.startswith(prefix) for prefix in ("gather-dep", "execute", "get-data"))
-    }
-    # import pprint; pprint.pprint(digests)
-
-    expect = [
-        # a.gather_dep(worker=b.address, keys=["z"])
-        "gather-dep-decompress-seconds",
-        "gather-dep-deserialize-seconds",
-        "gather-dep-network-seconds",
-        # Delta to end-to-end runtime as seen from the worker state machine
-        "gather-dep-other-seconds",
-        # Spill output; added by _transition_to_memory
-        "gather-dep-serialize-seconds",
-        "gather-dep-compress-seconds",
-        "gather-dep-disk-write-seconds",
-        "gather-dep-disk-write-count",
-        "gather-dep-disk-write-bytes",
-        # a.execute()
-        # -> Deserialize run_spec
-        "execute-deserialize-seconds",
-        # -> Unspill inputs
-        # (There's also another execute-deserialize-seconds entry)
-        "execute-disk-read-seconds",
-        "execute-disk-read-count",
-        "execute-disk-read-bytes",
-        "execute-decompress-seconds",
-        # -> Run in thread
-        "execute-thread-cpu-seconds",
-        "execute-thread-noncpu-seconds",
-        # Delta to end-to-end runtime as seen from the worker state machine
-        "execute-other-seconds",
-        # Spill output; added by _transition_to_memory
-        "execute-serialize-seconds",
-        "execute-compress-seconds",
-        "execute-disk-write-seconds",
-        "execute-disk-write-count",
-        "execute-disk-write-bytes",
-        # a.get_data() (triggered by the client retrieving the Future for z)
-        # Unspill
-        "get-data-disk-read-seconds",
-        "get-data-disk-read-count",
-        "get-data-disk-read-bytes",
-        "get-data-decompress-seconds",
-        "get-data-deserialize-seconds",
-        # Send over the network
-        "get-data-serialize-seconds",
-        "get-data-compress-seconds",
-        "get-data-network-seconds",
-    ]
-
-    if not default_compression:
-        expect = [k for k in expect if k != "get-data-compress-seconds"]
-    assert list(digests) == expect
-
-    assert {k: v for k, v in digests.items() if k.endswith("-count")} == {
-        "execute-disk-read-count": 2,
-        "execute-disk-write-count": 1,
-        "gather-dep-disk-write-count": 1,
-        "get-data-disk-read-count": 1,
-    }
-    if not WINDOWS:  # Fiddly rounding; see distributed.metrics._WindowsTime
-        assert sum(v for k, v in digests.items() if k.endswith("-seconds")) <= m.delta
-
-
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_digest_metrics_async_task(c, s, a):
-    """Test that async tasks are metered"""
-    await c.submit(asyncio.sleep, 0.1)
-    assert a.digests_total["execute-thread-cpu-seconds"] == 0
-    assert 0 < a.digests_total["execute-thread-noncpu-seconds"] < 0.5
-
-
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_digest_metrics_run_spec_deserialization(c, s, a):
-    """Test that deserialization of run_spec is metered"""
-    await c.submit(inc, 1, key="x")
-    assert a.digests_total["execute-deserialize-seconds"] > 0
-
-
-@gen_cluster(client=True)
-async def test_digest_metrics_offload(c, s, a, b):
-    """Test that functions wrapped by offload() are metered"""
-    nbytes = int(OFFLOAD_THRESHOLD * 1.1)
-    x = c.submit(secrets.token_bytes, nbytes, key="x", workers=[a.address])
-    y = c.submit(lambda x: None, x, key="y", workers=[b.address])
-    await y
-
-    assert a.digests_total["get-data-serialize-seconds"] > 0
-    assert b.digests_total["gather-dep-deserialize-seconds"] > 0
-
-
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_digest_metrics_failed_execute(c, s, a):
-    """Tasks that failed to execute are metered as a separate lump total"""
-    x = c.submit(lambda: 1 / 0)
-    await wait(x)
-
-    digests = {k: v for k, v in a.digests_total.items() if k.startswith("execute")}
-    assert list(digests) == ["execute-failed-seconds"]
-    assert 0 < digests["execute-failed-seconds"] < 1
-
-
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_digest_metrics_gather_dep_busy(c, s, a):
-    """gather_dep() calls that failed because the remote peer is busy
-    are metered as a separate lump total
-    """
-    raise NotImplementedError("TODO")
-
-
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_digest_metrics_gather_dep_no_task(c, s, a):
-    """gather_dep() calls where the remote peer answers that it doesn't have any of the
-    requested keys are metered as a separate lump total
-    """
-    raise NotImplementedError("TODO")
-
-
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_digest_metrics_gather_dep_network_error(c, s, a):
-    """gather_dep() calls where the remote peer fails to respond are metered as a
-    separate lump total
-    """
-    raise NotImplementedError("TODO")
