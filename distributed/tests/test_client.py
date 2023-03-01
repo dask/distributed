@@ -81,6 +81,7 @@ from distributed.core import Status
 from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.metrics import time
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
+from distributed.shuffle import check_minimal_arrow_version
 from distributed.sizeof import sizeof
 from distributed.utils import (
     NoOpAwaitable,
@@ -3260,10 +3261,9 @@ async def test_cancel_clears_processing(c, s, *workers):
 def test_default_get(loop_in_thread):
     has_pyarrow = False
     try:
-        import pyarrow  # noqa: F401
-
+        check_minimal_arrow_version()
         has_pyarrow = True
-    except ImportError:
+    except RuntimeError:
         pass
     loop = loop_in_thread
     with cluster() as (s, [a, b]):
