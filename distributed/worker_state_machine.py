@@ -1478,16 +1478,17 @@ class WorkerState:
         This is idempotent
         """
         logger.debug("Purge task: %s", ts)
-        key = ts.key
-        self.data.pop(key, None)
-        self.actors.pop(key, None)
+
+        # Do not use self.data.pop(key, None), as it could unspill the data from disk!
+        if ts.key in self.data:
+            del self.data[ts.key]
+        self.actors.pop(ts.key, None)
+        self.threads.pop(ts.key, None)
 
         for worker in ts.who_has:
             self.has_what[worker].discard(ts.key)
             self.data_needed[worker].discard(ts)
         ts.who_has.clear()
-
-        self.threads.pop(key, None)
 
         for d in ts.dependencies:
             ts.waiting_for_data.discard(d)
