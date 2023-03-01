@@ -95,7 +95,7 @@ class EventuallyBrokenDiskShardsBuffer(DiskShardsBuffer):
 
     async def _process(self, *args: Any, **kwargs: Any) -> None:
         # We only want to raise if this was queued up before
-        if self.counter > DiskShardsBuffer.concurrency_limit:
+        if self.counter > self.concurrency_limit:
             raise Exception(123)
         self.counter += 1
         return await super()._process(*args, **kwargs)
