@@ -742,14 +742,14 @@ class ShuffleWorkerExtension:
         type: ShuffleType | None = None,
         kwargs: dict | None = None,
     ) -> ShuffleRun:
-        import pyarrow as pa
-
         if type is None:
             result = await self.worker.scheduler.shuffle_get(
                 id=shuffle_id,
                 worker=self.worker.address,
             )
         elif type == ShuffleType.DATAFRAME:
+            import pyarrow as pa
+
             assert kwargs is not None
             result = await self.worker.scheduler.shuffle_get_or_create(
                 id=shuffle_id,

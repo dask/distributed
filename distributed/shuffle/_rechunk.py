@@ -47,7 +47,7 @@ def rechunk_transfer(
             old=old,
         )
     except Exception as e:
-        raise RuntimeError("rechunk_transfer failed during shuffle {id}") from e
+        raise RuntimeError(f"rechunk_transfer failed during shuffle {id}") from e
 
 
 def rechunk_unpack(
