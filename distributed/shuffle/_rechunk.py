@@ -58,7 +58,7 @@ def rechunk_unpack(
             id, barrier_run_id, output_chunk
         )
     except Exception as e:
-        raise RuntimeError("rechunk_unpack failed during shuffle {id}") from e
+        raise RuntimeError(f"rechunk_unpack failed during shuffle {id}") from e
 
 
 def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:

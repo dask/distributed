@@ -81,6 +81,7 @@ from distributed.core import Status
 from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.metrics import time
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
+from distributed.shuffle import check_minimal_arrow_version
 from distributed.sizeof import sizeof
 from distributed.utils import (
     NoOpAwaitable,
@@ -3258,11 +3259,17 @@ async def test_cancel_clears_processing(c, s, *workers):
 
 
 def test_default_get(loop_in_thread):
+    has_pyarrow = False
+    try:
+        check_minimal_arrow_version()
+        has_pyarrow = True
+    except RuntimeError:
+        pass
     loop = loop_in_thread
     with cluster() as (s, [a, b]):
         pre_get = dask.base.get_scheduler()
-        # These may change in the future but the selection below shoul dnot
-        distributed_default = "tasks"
+        # These may change in the future but the selection below should not
+        distributed_default = "p2p" if has_pyarrow else "tasks"
         local_default = "disk"
         assert get_default_shuffle_algorithm() == local_default
         with Client(s["address"], set_as_default=True, loop=loop) as c:
