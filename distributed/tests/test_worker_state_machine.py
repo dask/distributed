@@ -39,6 +39,7 @@ from distributed.worker_state_machine import (
     FreeKeysEvent,
     GatherDep,
     GatherDepFailureEvent,
+    GatherDepNetworkFailureEvent,
     GatherDepSuccessEvent,
     Instruction,
     InvalidTaskState,
@@ -48,6 +49,7 @@ from distributed.worker_state_machine import (
     RefreshWhoHasEvent,
     ReleaseWorkerDataMsg,
     RemoveReplicasEvent,
+    RemoveWorkerEvent,
     RescheduleEvent,
     RescheduleMsg,
     SecedeEvent,
@@ -1761,3 +1763,21 @@ def test_task_counter(ws):
     assert_time(elapsed["x", "cancelled"], 0.15)
     assert_time(elapsed["y", "waiting"], 0.1)
     assert_time(elapsed["z", "flight"], 0.25)
+
+
+def test_remove_worker_while_in_flight(ws):
+    ws2 = "127.0.0.1:2"
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s1"),
+        RemoveWorkerEvent(worker=ws2, stimulus_id="s2"),
+    )
+    ts = ws.tasks["x"]
+    assert ts.state == "flight"
+    assert not ws.data_needed
+    assert not ws.tasks["y"].who_has
+    assert not ws.has_what
+
+    ws.handle_stimulus(
+        GatherDepNetworkFailureEvent(worker=ws2, total_nbytes=1, stimulus_id="s3")
+    )
+    assert ts.state == "missing"
