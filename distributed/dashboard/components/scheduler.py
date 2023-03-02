@@ -4257,16 +4257,22 @@ def status_doc(scheduler, extra, doc):
 
     doc.add_root(workers_memory.root)
 
-    tab1 = TabPanel(child=processing_root, title="Processing")
-    tab2 = TabPanel(child=cpu_root, title="CPU")
-    tab3 = TabPanel(child=occupancy_root, title="Occupancy")
-    tab4 = TabPanel(child=workers_transfer_bytes.root, title="Data Transfer")
+    tabs = [
+        TabPanel(child=processing_root, title="Processing"),
+        TabPanel(child=cpu_root, title="CPU"),
+        TabPanel(child=occupancy_root, title="Occupancy"),
+        TabPanel(child=workers_transfer_bytes.root, title="Data Transfer"),
+    ]
 
-    proc_tabs = Tabs(
-        tabs=[tab1, tab2, tab3, tab4],
-        name="processing_tabs",
-        sizing_mode="stretch_both",
+    help_ = HelpTool(
+        redirect="https://docs.dask.org/en/stable/dashboard.html#task-processing-cpu-utilization-occupancy",
+        description="A description of Task Processing/CPU/Utilization/Occupancy",
     )
+    for tab in tabs:
+        tab.child.toolbar_location = "above"
+        tab.child.add_tools(help_)
+
+    proc_tabs = Tabs(tabs=tabs, name="processing_tabs", sizing_mode="stretch_both")
     doc.add_root(proc_tabs)
 
     task_stream = TaskStream(
