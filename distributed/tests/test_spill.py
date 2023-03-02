@@ -311,6 +311,12 @@ def test_spillbuffer_evict(tmp_path):
     assert_buf(buf, tmp_path, {"bad": bad}, {"a": a})
 
 
+def test_no_pop(tmp_path):
+    buf = SpillBuffer(str(tmp_path), target=100)
+    with pytest.raises(NotImplementedError):
+        buf.pop("x", None)
+
+
 class NoWeakRef:
     """A class which
     1. reports an arbitrary managed memory usage

@@ -1209,3 +1209,24 @@ async def test_high_unmanaged_memory_warning(s, caplog):
         sum("Unmanaged memory use is high" in record.msg for record in caplog.records)
         == 1
     )  # Message is rate limited
+
+
+class WriteOnlyBuffer(UserDict):
+    def __getitem__(self, k):
+        raise AssertionError()
+
+
+@gen_cluster(client=True, nthreads=[("", 1)], worker_kwargs={"data": WriteOnlyBuffer})
+async def test_delete_spilled_keys(c, s, a):
+    """Test that freeing an in-memory key that has been spilled to disk does not
+    accidentally unspill it
+    """
+    x = c.submit(inc, 1, key="x")
+    await wait_for_state("x", "memory", a)
+    assert a.data.keys() == {"x"}
+    with pytest.raises(AssertionError):
+        a.data["x"]
+
+    x.release()
+    await async_wait_for(lambda: not a.data, timeout=2)
+    assert not a.state.tasks
