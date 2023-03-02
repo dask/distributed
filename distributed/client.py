@@ -1439,8 +1439,9 @@ class Client(SyncMethodMixin):
 
     def _heartbeat(self):
         # Don't send heartbeat if scheduler comm or cluster are already closed
-        if (self.scheduler_comm and not self.scheduler_comm.comm.closed()) or (
-            self.cluster and self.cluster.status not in (Status.closed, Status.closing)
+        if self.scheduler_comm is not None and not (
+            self.scheduler_comm.comm.closed()
+            or (self.cluster and self.cluster.status in (Status.closed, Status.closing))
         ):
             self.scheduler_comm.send({"op": "heartbeat-client"})
 
