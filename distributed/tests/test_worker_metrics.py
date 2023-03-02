@@ -10,7 +10,6 @@ from distributed import Event, Worker, wait
 from distributed.comm.utils import OFFLOAD_THRESHOLD
 from distributed.compatibility import WINDOWS
 from distributed.metrics import meter
-from distributed.protocol import default_compression
 from distributed.utils_test import (
     BlockedGatherDep,
     BlockedGetData,
@@ -104,9 +103,6 @@ async def test_task_lifecycle(c, s, a, b):
         "get-data-compress-seconds",
         "get-data-network-seconds",
     ]
-
-    if not default_compression:
-        expect = [k for k in expect if k != "get-data-compress-seconds"]
     assert list(get_digests(a)) == expect
 
     assert get_digests(a, allow=".*-count") == {
