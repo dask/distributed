@@ -234,6 +234,9 @@ class WorkerMemoryManager:
             worker.status = Status.running
 
     async def _maybe_spill(self, worker: Worker, memory: int) -> None:
+        """If process memory is above the ``spill`` threshold, evict keys until it goes
+        below the ``target`` threshold
+        """
         if self.memory_spill_fraction is False:
             return
 
@@ -241,18 +244,31 @@ class WorkerMemoryManager:
         # fast property and evict() methods. Dask-CUDA uses this.
         if not hasattr(self.data, "fast") or not hasattr(self.data, "evict"):
             return
-        data = cast(ManualEvictProto, self.data)
 
         assert self.memory_limit
         frac = memory / self.memory_limit
         if frac <= self.memory_spill_fraction:
             return
 
-        total_spilled = 0
         worker_logger.debug(
             "Worker is at %.0f%% memory usage. Start spilling data to disk.",
             frac * 100,
         )
+
+        def metrics_callback(label: str, value: float, unit: str) -> None:
+            worker.digest_metric(f"memory-monitor-spill-{label}-{unit}", value)
+
+        with context_meter.add_callback(metrics_callback):
+            # Measure delta between the measures from the SpillBuffer and the total
+            # end-to-end duration of _spill
+            with context_meter.meter("evloop-released"):
+                await self._spill(worker, memory)
+
+    async def _spill(self, worker: Worker, memory: int) -> None:
+        """Evict keys until the process memory goes below the ``target`` threshold"""
+        assert self.memory_limit
+        total_spilled = 0
+
         # Implement hysteresis cycle where spilling starts at the spill threshold and
         # stops at the target threshold. Normally that here the target threshold defines
         # process memory, whereas normally it defines reported managed memory (e.g.
@@ -264,57 +280,54 @@ class WorkerMemoryManager:
         need = memory - target
         last_checked_for_pause = last_yielded = monotonic()
 
-        def metrics_callback(label: str, value: float, unit: str) -> None:
-            worker.digest_metric(f"memory-monitor-{label}-{unit}", value)
+        data = cast(ManualEvictProto, self.data)
 
-        with context_meter.add_callback(metrics_callback):
-            while memory > target:
-                if not data.fast:
-                    worker_logger.warning(
-                        "Unmanaged memory use is high. This may indicate a memory leak "
-                        "or the memory may not be released to the OS; see "
-                        "https://distributed.dask.org/en/latest/worker-memory.html#memory-not-released-back-to-the-os "
-                        "for more information. "
-                        "-- Unmanaged memory: %s -- Worker memory limit: %s",
-                        format_bytes(memory),
-                        format_bytes(self.memory_limit),
-                    )
-                    break
+        while memory > target:
+            if not data.fast:
+                worker_logger.warning(
+                    "Unmanaged memory use is high. This may indicate a memory leak "
+                    "or the memory may not be released to the OS; see "
+                    "https://distributed.dask.org/en/latest/worker-memory.html#memory-not-released-back-to-the-os "
+                    "for more information. "
+                    "-- Unmanaged memory: %s -- Worker memory limit: %s",
+                    format_bytes(memory),
+                    format_bytes(self.memory_limit),
+                )
+                break
 
-                weight = data.evict()
-                if weight == -1:
-                    # Failed to evict:
-                    # disk full, spill size limit exceeded, or pickle error
-                    break
+            weight = data.evict()
+            if weight == -1:
+                # Failed to evict:
+                # disk full, spill size limit exceeded, or pickle error
+                break
 
-                total_spilled += weight
-                count += 1
+            total_spilled += weight
+            count += 1
 
+            memory = worker.monitor.get_process_memory()
+            if total_spilled > need and memory > target:
+                # Issue a GC to ensure that the evicted data is actually
+                # freed from memory and taken into account by the monitor
+                # before trying to evict even more data.
+                self._throttled_gc.collect()
                 memory = worker.monitor.get_process_memory()
-                if total_spilled > need and memory > target:
-                    # Issue a GC to ensure that the evicted data is actually
-                    # freed from memory and taken into account by the monitor
-                    # before trying to evict even more data.
-                    self._throttled_gc.collect()
-                    memory = worker.monitor.get_process_memory()
 
-                now = monotonic()
+            now = monotonic()
 
-                # Spilling may potentially take multiple seconds; we may pass the pause
-                # threshold in the meantime.
-                if now - last_checked_for_pause > self.memory_monitor_interval:
-                    self._maybe_pause_or_unpause(worker, memory)
-                    last_checked_for_pause = now
+            # Spilling may potentially take multiple seconds; we may pass the pause
+            # threshold in the meantime.
+            if now - last_checked_for_pause > self.memory_monitor_interval:
+                self._maybe_pause_or_unpause(worker, memory)
+                last_checked_for_pause = now
 
-                # Increase spilling aggressiveness when the fast buffer is filled with a
-                # lot of small values. This artificially chokes the rest of the event
-                # loop - namely, the reception of new data from other workers. While
-                # this is somewhat of an ugly hack,  DO NOT tweak this without a
-                # thorough cycle of stress testing. See:
-                # https://github.com/dask/distributed/issues/6110.
-                if now - last_yielded > 0.5:
-                    await asyncio.sleep(0)
-                    last_yielded = monotonic()
+            # Increase spilling aggressiveness when the fast buffer is filled with a lot
+            # of small values. This artificially chokes the rest of the event loop -
+            # namely, the reception of new data from other workers. While this is
+            # somewhat of an ugly hack,  DO NOT tweak this without a thorough cycle of
+            # stress testing. See: https://github.com/dask/distributed/issues/6110.
+            if now - last_yielded > 0.5:
+                await asyncio.sleep(0)
+                last_yielded = monotonic()
 
         if count:
             worker_logger.debug(

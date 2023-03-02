@@ -281,3 +281,39 @@ async def test_gather_dep_network_error(c, s, a):
         b.block_gather_dep.set()
         await wait(y)
         assert list(get_digests(b, "gather-dep-")) == ["gather-dep-failed-seconds"]
+
+
+@gen_cluster(
+    nthreads=[("", 1)],
+    client=True,
+    worker_kwargs={"memory_limit": "1000 MB"},
+    config={
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": 0.7,
+        "distributed.worker.memory.pause": False,
+        "distributed.worker.memory.monitor-interval": "10ms",
+    },
+)
+async def test_memory_monitor(c, s, a):
+    a.monitor.get_process_memory = lambda: 800_000_000 if a.data.fast else 0
+    x = c.submit(inc, 1, key="x")
+    await async_wait_for(lambda: a.data.disk, timeout=5)
+
+    # The call to WorkerMemoryMonitor._spill will terminate after SpillBuffer.evict()
+    await async_wait_for(
+        lambda: "memory-monitor-spill-evloop-released-seconds" in a.digests_total,
+        timeout=5,
+    )
+
+    assert list(get_digests(a)) == [
+        "execute-deserialize-seconds",
+        "execute-thread-cpu-seconds",
+        "execute-thread-noncpu-seconds",
+        "execute-other-seconds",
+        "memory-monitor-spill-serialize-seconds",
+        "memory-monitor-spill-compress-seconds",
+        "memory-monitor-spill-disk-write-seconds",
+        "memory-monitor-spill-disk-write-count",
+        "memory-monitor-spill-disk-write-bytes",
+        "memory-monitor-spill-evloop-released-seconds",
+    ]
