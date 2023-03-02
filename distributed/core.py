@@ -969,7 +969,7 @@ def context_meter_to_server_digest(digest_tag: str) -> Callable:
                 # This callback could be called from another thread through offload()
                 loop.call_soon_threadsafe(
                     self.digest_metric,
-                    f"get-data-{label}-{unit}",
+                    f"{digest_tag}-{label}-{unit}",
                     value,
                 )
 
