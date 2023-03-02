@@ -663,6 +663,51 @@ class MeteredEvent(StateMachineEvent):
     :class:`GatherDep` instruction, and more in general for any final event that is
     the result of an asynchronous instruction, which is metered through
     :class:`distributed.metrics.ContextMeter`.
+
+    Methods that return MeteredEvent's work slightly differently from general purpose
+    metered functions. In e.g. Worker.get_data you'll have (simplified pseudocode)::
+
+        async def get_data(...):
+            with context_meter.add_callback(self.digest_metric):
+                ...
+                context_meter.digest_metric(...)
+
+    In other words, all metrics collected by
+    :meth:`distributed.metrics.ContextMeter.digest_metric` are immediately forwarded to
+    :meth:`distributed.core.Server.digest_metric`.
+
+    In Worker.execute and Worker.gather_dep, we have additional goals:
+    - Measure the time spent in unknown portions of the code, e.g. waiting for the event
+      loop to unblock before and after the call, or the overhead from the thread pool
+    - Measure time spent in failed work separately from successful work
+    - Log per-call timings in the :ivar:`WorkerStateMachine.stimulus_log`.
+
+    The worflow is as follows:
+
+    #. The :class:`WorkerStateMachine` emits a :class:`Execute` or :class:`GatherDep`
+       :class:`Instruction`, passing ``start=time()`` as a parameter
+    #. The instruction is served by :meth:`distributed.Worker.execute`, which accepts a
+       ``start: float`` parameter which is the same as the instruction and is wrapped by
+       :meth:`MeteredEvent.append_to_event_metrics`
+    #. :meth:`distributed.Worker.execute` returns a :class:`MeteredEvent` with no stop
+       nor metrics, e.g.::
+
+         return ExecuteSuccessfulEvent(start=start, stop=None, metrics=[], ...)
+
+    #. The decorator fills up :ivar:`metrics` with all the metrics collected so far
+    #. When the :class:`MeteredEvent` is eventually ingested by the
+       :class:`WorkerStateMachine`, it calls :meth:`done` to add unmetered time as a
+       final delta to :ivar:`metrics`. Then, if ``execute``/``gather_dep`` terminated
+       successfully, the WorkerStateMachine calls ``repeat_digests(coarse_time=False)``
+       which will forward all digests verbatim to
+       :meth:`distributed.core.Server.digest_metric`, just like in
+       :meth:`distributed.Worker.get_data`. However, if the call failed, it will instead
+       call e.g. ``repeat_digests(coarse_time='execute-failed')`` which will generate a
+       single time metric *instead* of the granular time metrics, so that wasted time
+       done in failed attempts can be tracked separately and time spent doing "good"
+       work retains the original breakdown.
+    #. The original metrics (not aggregated in case of failures) are archived together
+       with the event in :ivar:`WorkerStateMachine.stimulus_log`.
     """
 
     #: When the :class:`WorkerStateMachine` emitted the :class:`Instruction`
@@ -724,7 +769,7 @@ class MeteredEvent(StateMachineEvent):
         )
 
     @staticmethod
-    def meter(func: Callable) -> Callable:
+    def append_to_event_metrics(func: Callable) -> Callable:
         """Decorator for a function that returns a MeteredEvent.
         The function should return the MeteredEvent with ``stop=None, metrics=[]``;
         stop will be added by :meth:`done`, whereas the metrics will be appended by

@@ -2039,7 +2039,7 @@ class Worker(BaseWorker, ServerNode):
         self.counters["transfer-count"].add(len(data))
 
     @fail_hard
-    @MeteredEvent.meter
+    @MeteredEvent.append_to_event_metrics
     async def gather_dep(
         self,
         worker: str,
@@ -2244,7 +2244,7 @@ class Worker(BaseWorker, ServerNode):
         return function, args, kwargs
 
     @fail_hard
-    @MeteredEvent.meter
+    @MeteredEvent.append_to_event_metrics
     async def execute(
         self, key: str, *, start: float, stimulus_id: str
     ) -> MeteredEvent:
