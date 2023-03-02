@@ -8,7 +8,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import wraps
 from math import nan
-from typing import Any, Literal
+from typing import Literal
 
 import psutil
 
@@ -138,6 +138,11 @@ def meter(
         Floor the delta to the given value (default: 0). This is useful for strictly
         cumulative functions that can occasionally glitch and go backwards.
         Set to False to disable.
+
+    Yields
+    ------
+    :class:`MeterOutput` where the ``start`` attribute is populated straight away, while
+    ``stop`` and ``delta`` are nan until context exit.
     """
     out = MeterOutput(func(), nan, nan)
     try:
@@ -226,7 +231,7 @@ class ContextMeter:
         unit: str = "seconds",
         func: Callable[[], float] = timemod.perf_counter,
         floor: float | Literal[False] = 0.0,
-    ) -> Any:
+    ) -> Iterator[MeterOutput]:
         """Convenience context manager or decorator which calls func() before and after
         the wrapped code, calculates the delta, and finally calls :meth:`digest_metric`.
         It also subtracts any other calls to :meth:`meter` or :meth:`digest_metric` with
@@ -243,22 +248,30 @@ class ContextMeter:
             see :func:`meter`
         floor: bool, optional
             see :func:`meter`
+
+        Yields
+        ------
+        :class:`MeterOutput` where the ``start`` attribute is populated straight away,
+        while ``stop`` and ``delta`` are nan until context exit. In case of multiple
+        nested calls to :meth:`meter`, then delta (for seconds only) is reduced by the
+        inner metrics, to a minimum of ``floor``.
         """
         offsets = []
 
         def callback(label2: str, value2: float, unit2: str) -> None:
-            if unit2 == unit:
+            if unit2 == unit == "seconds":
                 # This must be threadsafe to support callbacks invoked from
                 # distributed.utils.offload; '+=' on a float would not be threadsafe!
                 offsets.append(value2)
 
         try:
             with self.add_callback(callback), meter(func, floor=False) as m:
-                yield
+                yield m
         finally:
             delta = m.delta - sum(offsets)
             if floor is not False:
                 delta = max(floor, delta)
+            m.delta = delta
             self.digest_metric(label, delta, unit)
 
 

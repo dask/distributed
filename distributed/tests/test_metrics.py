@@ -81,14 +81,19 @@ def test_context_meter():
     cbs = []
 
     with metrics.context_meter.add_callback(lambda l, v, u: cbs.append((l, v, u))):
-        with metrics.context_meter.meter("m1", func=lambda: next(it)):
-            pass
+        with metrics.context_meter.meter("m1", func=lambda: next(it)) as m:
+            assert m.start == 123
+            assert math.isnan(m.stop)
+            assert math.isnan(m.delta)
         metrics.context_meter.digest_metric("m1", 2, "seconds")
         metrics.context_meter.digest_metric("m1", 1, "foo")
 
     # Not recorded - out of context
     metrics.context_meter.digest_metric("m1", 123, "foo")
 
+    assert m.start == 123
+    assert m.stop == 124
+    assert m.delta == 1
     assert cbs == [
         ("m1", 1, "seconds"),
         ("m1", 2, "seconds"),
@@ -102,27 +107,36 @@ def test_context_meter_raise():
 
     with pytest.raises(ValueError):
         with metrics.context_meter.add_callback(lambda l, v, u: cbs.append((l, v, u))):
-            with metrics.context_meter.meter("m1", func=lambda: next(it)):
+            with metrics.context_meter.meter("m1", func=lambda: next(it)) as m:
                 raise ValueError()
 
     # Not recorded - out of context
     metrics.context_meter.digest_metric("m1", 123, "foo")
 
+    assert m.start == 123
+    assert m.stop == 124
+    assert m.delta == 1
     assert cbs == [("m1", 1, "seconds")]
 
 
 def test_context_meter_nested():
     it1 = iter([123, 126])
-    it2 = iter([123, 124])
+    it2 = iter([12, 13])
     cbs1 = []
     cbs2 = []
 
     with metrics.context_meter.add_callback(lambda l, v, u: cbs1.append((l, v, u))):
         with metrics.context_meter.add_callback(lambda l, v, u: cbs2.append((l, v, u))):
-            with metrics.context_meter.meter("m1", func=lambda: next(it1)):
-                with metrics.context_meter.meter("m2", func=lambda: next(it2)):
+            with metrics.context_meter.meter("m1", func=lambda: next(it1)) as m1:
+                with metrics.context_meter.meter("m2", func=lambda: next(it2)) as m2:
                     pass
 
+    assert m1.start == 123
+    assert m1.stop == 126
+    assert m1.delta == 2  # (126 - 123) - (124 - 123)
+    assert m2.start == 12
+    assert m2.stop == 13
+    assert m2.delta == 1
     assert cbs1 == cbs2 == [("m2", 1, "seconds"), ("m1", 2, "seconds")]
 
 
@@ -152,10 +166,11 @@ def test_context_meter_nested_floor():
     cbs = []
 
     with metrics.context_meter.add_callback(lambda l, v, u: cbs.append((l, v, u))):
-        with metrics.context_meter.meter("m1", func=lambda: next(it1), floor=0.1):
+        with metrics.context_meter.meter("m1", func=lambda: next(it1), floor=0.1) as m1:
             with metrics.context_meter.meter("m2", func=lambda: next(it2)):
                 pass
 
+    assert m1.delta == 0.1
     assert cbs == [("m2", 4, "seconds"), ("m1", 0.1, "seconds")]
 
 

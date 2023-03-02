@@ -80,7 +80,7 @@ from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import _get_plugin_name
 from distributed.diskutils import WorkDir, WorkSpace
 from distributed.http import get_handlers
-from distributed.metrics import context_meter, meter, thread_time, time
+from distributed.metrics import context_meter, thread_time, time
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
 from distributed.protocol import pickle, to_serialize
@@ -1783,10 +1783,7 @@ class Worker(BaseWorker, ServerNode):
         self.transfer_outgoing_bytes_total += total_bytes
 
         try:
-            # Note: context_meter.meter() will automatically subtract time spent
-            # serializing/deserializing and compressing/decompressing, while
-            # the plain call to meter() won't
-            with context_meter.meter("network"), meter(time, floor=0.001) as m:
+            with context_meter.meter("network", func=time) as m:
                 compressed = await comm.write(msg, serializers=serializers)
                 response = await comm.read(deserializers=serializers)
             assert response == "OK", response
@@ -1802,17 +1799,20 @@ class Worker(BaseWorker, ServerNode):
             self.transfer_outgoing_bytes -= total_bytes
             self.transfer_outgoing_count -= 1
 
+        # Not the same as m.delta, which doesn't include time spent
+        # serializing/deserializing
+        duration = max(0.001, m.stop - m.start)
         self.transfer_outgoing_log.append(
             {
                 "start": m.start + self.scheduler_delay,
                 "stop": m.stop + self.scheduler_delay,
                 "middle": (m.start + m.stop) / 2,
-                "duration": m.delta,
+                "duration": duration,
                 "who": who,
                 "keys": bytes_per_task,
                 "total": total_bytes,
                 "compressed": compressed,
-                "bandwidth": total_bytes / m.delta,
+                "bandwidth": total_bytes / duration,
             }
         )
 
@@ -2009,7 +2009,7 @@ class Worker(BaseWorker, ServerNode):
                 "source": worker,
             }
         )
-        duration = max(1e-6, stop - start)
+        duration = max(0.001, stop - start)
         bandwidth = total_bytes / duration
         self.transfer_incoming_log.append(
             {
@@ -2070,10 +2070,7 @@ class Worker(BaseWorker, ServerNode):
         logger.debug("Request %d keys from %s", len(to_gather), worker)
 
         try:
-            # Note: context_meter.meter() will automatically subtract time spent
-            # serializing/deserializing and compressing/decompressing, while
-            # the plain call to meter() won't.
-            with context_meter.meter("network"), meter(time) as m:
+            with context_meter.meter("network") as m:
                 response = await get_data_from_worker(
                     rpc=self.rpc, keys=to_gather, worker=worker, who=self.address
                 )
@@ -2341,7 +2338,8 @@ class Worker(BaseWorker, ServerNode):
 
             if result["op"] == "task-finished":
                 if self.digests is not None:
-                    self.digests["task-duration"].add(result["duration"])
+                    duration = max(0, result["stop"] - result["start"])
+                    self.digests["task-duration"].add(duration)
 
                 return ExecuteSuccessEvent(
                     key=key,
@@ -3140,14 +3138,13 @@ def apply_function_simple(
             # execute-thread-noncpu-seconds
             #   difference in wall time before and after function call, minus
             #   thread-non-cpu, minus user calls to context_meter
-            # m.delta
+            # m.stop - m.start
             #   difference in wall time before and after function call, without
             #   subtracting anything. This is used in scheduler heuristics,
             #   e.g. task stealing.
-            with context_meter.meter("thread-noncpu"):
+            with context_meter.meter("thread-noncpu", func=time) as m:
                 with context_meter.meter("thread-cpu", func=thread_time):
-                    with meter(time) as m:
-                        result = function(*args, **kwargs)
+                    result = function(*args, **kwargs)
     except (SystemExit, KeyboardInterrupt):
         # Special-case these, just like asyncio does all over the place. They will
         # pass through `fail_hard` and `_handle_stimulus_from_task`, and eventually
@@ -3174,7 +3171,6 @@ def apply_function_simple(
 
     msg["start"] = m.start + time_delay
     msg["stop"] = m.stop + time_delay
-    msg["duration"] = m.delta
     msg["thread"] = ident
     msg["metrics"] = metrics
     return msg
@@ -3194,8 +3190,7 @@ async def apply_function_async(
     """
     ident = threading.get_ident()
     try:
-        # See notes about metering in apply_function_simple
-        with context_meter.meter("thread-noncpu"), meter(time) as m:
+        with context_meter.meter("thread-noncpu", func=time) as m:
             result = await function(*args, **kwargs)
     except (SystemExit, KeyboardInterrupt):
         # Special-case these, just like asyncio does all over the place. They will pass
@@ -3225,7 +3220,6 @@ async def apply_function_async(
 
     msg["start"] = m.start + time_delay
     msg["stop"] = m.stop + time_delay
-    msg["duration"] = m.delta
     msg["thread"] = ident
     msg["metrics"] = []  # Already captured by execute()
     return msg
