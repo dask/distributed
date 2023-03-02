@@ -15,6 +15,7 @@ from collections.abc import (
     Callable,
     Collection,
     Container,
+    Hashable,
     Iterator,
     Mapping,
     MutableMapping,
@@ -702,10 +703,10 @@ class MeteredEvent(StateMachineEvent):
        which will forward all digests verbatim to
        :meth:`distributed.core.Server.digest_metric`, just like in
        :meth:`distributed.Worker.get_data`. However, if the call failed, it will instead
-       call e.g. ``repeat_digests(coarse_time='execute-failed')`` which will generate a
-       single time metric *instead* of the granular time metrics, so that wasted time
-       done in failed attempts can be tracked separately and time spent doing "good"
-       work retains the original breakdown.
+       call e.g. ``repeat_digests(coarse_time='failed')`` which will generate a single
+       time metric *instead* of the granular time metrics, so that wasted time done in
+       failed attempts can be tracked separately and time spent doing "good" work
+       retains the original breakdown.
     #. The original metrics (not aggregated in case of failures) are archived together
        with the event in :ivar:`WorkerStateMachine.stimulus_log`.
     """
@@ -716,7 +717,7 @@ class MeteredEvent(StateMachineEvent):
     #: :class:`StateMachineEvent`
     stop: float | None
     #: ``(label, value, unit)``; see :class:`distributed.metrics.ContextMeter`
-    metrics: list[tuple[str, float, str]]
+    metrics: list[tuple[Hashable, float, str]]
     __slots__ = ("start", "stop", "metrics")
 
     def done(self) -> None:
@@ -780,7 +781,7 @@ class MeteredEvent(StateMachineEvent):
         async def wrapper(*args: Any, **kwargs: Any) -> MeteredEvent:
             metrics = []
 
-            def metrics_callback(label: str, value: float, unit: str) -> None:
+            def metrics_callback(label: Hashable, value: float, unit: str) -> None:
                 # Time metrics are disaggregated only for successful tasks
                 metrics.append((label, value, unit))
 
@@ -3798,20 +3799,24 @@ class BaseWorker(abc.ABC):
         self.handle_stimulus(stim)
 
     def _metrics_callback(
-        self, stim: StateMachineEvent, label: str, value: float, unit: str
+        self, stim: StateMachineEvent, label: Hashable, value: float, unit: str
     ) -> None:
         if isinstance(stim, GatherDepDoneEvent):
-            self.digest_metric(f"gather-dep-{label}-{unit}", value)
+            activity = "gather-dep"
         elif isinstance(stim, ExecuteDoneEvent):
-            self.digest_metric(f"execute-{label}-{unit}", value)
+            activity = "execute"
         elif isinstance(stim, UpdateDataEvent):
-            self.digest_metric(f"scatter-{label}-{unit}", value)
+            activity = "scatter"
         else:
             raise AssertionError(  # pragma: nocover
                 "unexpected call to "
                 f"context_meter.digest_metric({label}, {value}, {unit}) "
                 f"while handling {stim}"
             )
+
+        if not isinstance(label, tuple):
+            label = (label,)
+        self.digest_metric((activity, *label, unit), value)
 
     def handle_stimulus(self, *stims: StateMachineEvent) -> None:
         """Forward one or more external stimuli to :meth:`WorkerState.handle_stimulus`
@@ -3947,7 +3952,7 @@ class BaseWorker(abc.ABC):
         """Wait some time, then take a peer worker out of busy state"""
 
     @abc.abstractmethod
-    def digest_metric(self, name: str, value: float) -> None:
+    def digest_metric(self, name: Hashable, value: float, detail: bool = False) -> None:
         """Log an arbitrary numerical metric"""
 
 

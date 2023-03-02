@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from collections.abc import Iterator, Mapping, MutableMapping, Sized
+from collections.abc import Hashable, Iterator, Mapping, MutableMapping, Sized
 from contextlib import contextmanager
 from functools import partial
 from typing import Any, Literal, NamedTuple, Protocol, cast
@@ -116,7 +116,8 @@ class SpillBuffer(zict.Buffer):
         comms.
         """
 
-        def metrics_callback(label: str, value: float, unit: str) -> None:
+        def metrics_callback(label: Hashable, value: float, unit: str) -> None:
+            assert isinstance(label, str)
             self.cumulative_metrics[label, unit] += value
 
         with context_meter.add_callback(metrics_callback):

@@ -25,7 +25,7 @@ import logging
 import os
 import sys
 import warnings
-from collections.abc import Callable, MutableMapping
+from collections.abc import Callable, Hashable, MutableMapping
 from contextlib import suppress
 from functools import partial
 from typing import TYPE_CHECKING, Any, Container, Literal, cast
@@ -255,8 +255,10 @@ class WorkerMemoryManager:
             frac * 100,
         )
 
-        def metrics_callback(label: str, value: float, unit: str) -> None:
-            worker.digest_metric(f"memory-monitor-spill-{label}-{unit}", value)
+        def metrics_callback(label: Hashable, value: float, unit: str) -> None:
+            if not isinstance(label, tuple):
+                label = (label,)
+            worker.digest_metric(("memory-monitor-spill", *label, unit), value)
 
         with context_meter.add_callback(metrics_callback):
             # Measure delta between the measures from the SpillBuffer and the total

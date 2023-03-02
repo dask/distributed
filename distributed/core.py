@@ -11,7 +11,7 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict, deque
-from collections.abc import Callable, Container, Coroutine, Generator
+from collections.abc import Callable, Container, Coroutine, Generator, Hashable
 from enum import Enum
 from functools import partial, wraps
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, TypeVar, final
@@ -600,7 +600,7 @@ class Server:
                 type(self).__name__,
                 tick_duration,
             )
-        self.digest_metric("tick-duration", tick_duration)
+        self.digest_metric("tick-duration", tick_duration, detail=True)
 
     def _cycle_ticks(self):
         if not self._tick_counter:
@@ -943,9 +943,9 @@ class Server:
         finally:
             self._event_finished.set()
 
-    def digest_metric(self, name: str, value: float) -> None:
+    def digest_metric(self, name: Hashable, value: float, detail: bool = False) -> None:
         # Granular data (requires crick)
-        if self.digests is not None:
+        if detail and self.digests is not None:
             self.digests[name].add(value)
         # Cumulative data (reset by server restart)
         self.digests_total[name] += value
@@ -957,7 +957,7 @@ def context_meter_to_server_digest(digest_tag: str) -> Callable:
     """Decorator for an async method of a Server subclass that calls
     ``distributed.metrics.context_meter.meter`` and/or ``digest_metric``.
     It routes the calls to ``context_meter.digest_metric(label, value, unit)`` to
-    ``Server.digest_metric({digest_tag}-{label}-{unit}, value)``.
+    ``Server.digest_metric((digest_tag, label, unit), value)``.
     """
 
     def decorator(func: Callable) -> Callable:
@@ -965,13 +965,12 @@ def context_meter_to_server_digest(digest_tag: str) -> Callable:
         async def wrapper(self: Server, *args: Any, **kwargs: Any) -> Any:
             loop = asyncio.get_running_loop()
 
-            def metrics_callback(label: str, value: float, unit: str) -> None:
+            def metrics_callback(label: Hashable, value: float, unit: str) -> None:
+                if not isinstance(label, tuple):
+                    label = (label,)
+                name = (digest_tag, *label, unit)
                 # This callback could be called from another thread through offload()
-                loop.call_soon_threadsafe(
-                    self.digest_metric,
-                    f"{digest_tag}-{label}-{unit}",
-                    value,
-                )
+                loop.call_soon_threadsafe(self.digest_metric, name, value)
 
             with context_meter.add_callback(metrics_callback):
                 return await func(self, *args, **kwargs)

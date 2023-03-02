@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import collections
 import time as timemod
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Hashable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -189,7 +189,7 @@ class ContextMeter:
       A->B comms: network-write 0.567 seconds
     """
 
-    _callbacks: ContextVar[list[Callable[[str, float, str], None]]]
+    _callbacks: ContextVar[list[Callable[[Hashable, float, str], None]]]
 
     def __init__(self):
         self._callbacks = ContextVar(f"MetricHook<{id(self)}>._callbacks", default=[])
@@ -204,7 +204,7 @@ class ContextMeter:
 
     @contextmanager
     def add_callback(
-        self, callback: Callable[[str, float, str], None]
+        self, callback: Callable[[Hashable, float, str], None]
     ) -> Iterator[None]:
         """Add a callback when entering the context and remove it when exiting it.
         The callback must accept the same parameters as :meth:`digest_metric`.
@@ -216,7 +216,7 @@ class ContextMeter:
         finally:
             tok.var.reset(tok)
 
-    def digest_metric(self, label: str, value: float, unit: str) -> None:
+    def digest_metric(self, label: Hashable, value: float, unit: str) -> None:
         """Invoke the currently set context callbacks for an arbitrary quantitative
         metric.
         """
@@ -227,7 +227,7 @@ class ContextMeter:
     @contextmanager
     def meter(
         self,
-        label: str,
+        label: Hashable,
         unit: str = "seconds",
         func: Callable[[], float] = timemod.perf_counter,
         floor: float | Literal[False] = 0.0,
@@ -240,7 +240,7 @@ class ContextMeter:
 
         Parameters
         ----------
-        label: str
+        label: Hashable
             label to pass to the callback
         unit: str, optional
             unit to pass to the callback. Default: seconds
@@ -258,7 +258,7 @@ class ContextMeter:
         """
         offsets = []
 
-        def callback(label2: str, value2: float, unit2: str) -> None:
+        def callback(label2: Hashable, value2: float, unit2: str) -> None:
             if unit2 == unit == "seconds":
                 # This must be threadsafe to support callbacks invoked from
                 # distributed.utils.offload; '+=' on a float would not be threadsafe!
