@@ -120,7 +120,7 @@ jobs:
 
       # P2P rechunking - requires numpy and nothing else beyond mindeps (no pyarrow)
       - name: MinDeps+Numpy
-        if: ${{ matrix.environment == "mindeps+numpy" }}
+        if: ${{ matrix.environment == 'mindeps+numpy' }}
         shell: bash -l {0}
         run: mamba install -y numpy
 
