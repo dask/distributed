@@ -23,7 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        environment: [mindeps, "3.8", "3.9", "3.10", "3.11"]
+        environment: [mindeps, mindeps+numpy, "3.8", "3.9", "3.10", "3.11"]
         queuing: [queue]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
@@ -117,6 +117,12 @@ jobs:
         shell: bash -l {0}
         run: |
           python -m pip install --no-deps -e .
+
+      # P2P rechunking - requires numpy and nothing else beyond mindeps (no pyarrow)
+      - name: MinDeps+Numpy
+        if: ${{ matrix.environment == "mindeps+numpy" }}
+        shell: bash -l {0}
+        run: mamba install -y numpy
 
       - name: mamba list
         shell: bash -l {0}
