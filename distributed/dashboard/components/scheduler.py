@@ -345,7 +345,7 @@ class ClusterMemory(DashboardComponent, MemoryColor):
         self.root.yaxis.visible = False
         self.root.ygrid.visible = False
 
-        self.root.toolbar_location = None
+        self.root.toolbar_location = "above"
         self.root.yaxis.visible = False
 
         hover = HoverTool(
@@ -373,7 +373,11 @@ class ClusterMemory(DashboardComponent, MemoryColor):
                             </div>
                             """,
         )
-        self.root.add_tools(hover)
+        help_ = HelpTool(
+            redirect="https://docs.dask.org/en/stable/dashboard.html#bytes-stored-and-bytes-per-worker",
+            description="Description of bytes stored plots",
+        )
+        self.root.add_tools(hover, help_)
 
     def _cluster_memory_color(self) -> str:
         colors = {
