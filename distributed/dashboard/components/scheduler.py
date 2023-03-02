@@ -3165,7 +3165,7 @@ class TaskProgress(DashboardComponent):
             name="task_progress",
             x_range=x_range,
             y_range=y_range,
-            toolbar_location=None,
+            toolbar_location="above",
             tools="",
             min_border_bottom=50,
             **kwargs,
@@ -3305,7 +3305,11 @@ class TaskProgress(DashboardComponent):
                 </div>
                 """,
         )
-        self.root.add_tools(hover)
+        help_ = HelpTool(
+            redirect="https://docs.dask.org/en/stable/dashboard.html#progress",
+            description="A description of the progress bars plot.",
+        )
+        self.root.add_tools(hover, help_)
 
     @without_property_validation
     @log_errors
