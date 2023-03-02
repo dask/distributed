@@ -1289,7 +1289,6 @@ def test_done_resumed_task_not_in_all_running_tasks(ws_with_running_task, done_e
     assert ts not in ws.all_running_tasks
 
 
-@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/6705")
 def test_gather_dep_failure(ws):
     """Simulate a task failing to unpickle when it reaches the destination worker after
     a flight.
@@ -1313,6 +1312,9 @@ def test_gather_dep_failure(ws):
     assert ws.transfer_incoming_bytes == 0
     assert ws.transfer_incoming_count == 0
     assert ws.transfer_incoming_count_total == 1
+
+    # FIXME https://github.com/dask/distributed/issues/6705
+    ws.validate = False
 
 
 def test_transfer_incoming_metrics(ws):
