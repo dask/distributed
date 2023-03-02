@@ -2336,17 +2336,12 @@ class Worker(BaseWorker, ServerNode):
 
             self.threads[key] = result["thread"]
 
+            for label, value, unit in result["metrics"]:
+                context_meter.digest_metric(label, value, unit)
+
             if result["op"] == "task-finished":
                 if self.digests is not None:
-                    self.digests["task-duration"].add(result["wall-duration"])
-                context_meter.digest_metric(
-                    "thread-cpu", result["thread-duration"], "seconds"
-                )
-                context_meter.digest_metric(
-                    "thread-noncpu",
-                    result["wall-duration"] - result["thread-duration"],
-                    "seconds",
-                )
+                    self.digests["task-duration"].add(result["duration"])
 
                 return ExecuteSuccessEvent(
                     key=key,
@@ -3132,9 +3127,27 @@ def apply_function_simple(
     msg: dictionary with status, result/error, timings, etc..
     """
     ident = threading.get_ident()
+    metrics = []
+
+    def metrics_callback(label: str, value: float, unit: str) -> None:
+        metrics.append((label, value, unit))
+
     try:
-        with meter(time) as wall_meter, meter(thread_time) as thread_meter:
-            result = function(*args, **kwargs)
+        with context_meter.add_callback(metrics_callback):
+            # execute-thread-cpu-seconds
+            #   difference in thread_time() before and after function call,
+            #   minus user calls to context_meter inside the function
+            # execute-thread-noncpu-seconds
+            #   difference in wall time before and after function call, minus
+            #   thread-non-cpu, minus user calls to context_meter
+            # m.delta
+            #   difference in wall time before and after function call, without
+            #   subtracting anything. This is used in scheduler heuristics,
+            #   e.g. task stealing.
+            with context_meter.meter("thread-noncpu"):
+                with context_meter.meter("thread-cpu", func=thread_time):
+                    with meter(time) as m:
+                        result = function(*args, **kwargs)
     except (SystemExit, KeyboardInterrupt):
         # Special-case these, just like asyncio does all over the place. They will
         # pass through `fail_hard` and `_handle_stimulus_from_task`, and eventually
@@ -3159,11 +3172,11 @@ def apply_function_simple(
             "type": type(result) if result is not None else None,
         }
 
-    msg["start"] = wall_meter.start + time_delay
-    msg["stop"] = wall_meter.stop + time_delay
-    msg["wall-duration"] = wall_meter.delta
-    msg["thread-duration"] = min(wall_meter.delta, thread_meter.delta)
+    msg["start"] = m.start + time_delay
+    msg["stop"] = m.stop + time_delay
+    msg["duration"] = m.delta
     msg["thread"] = ident
+    msg["metrics"] = metrics
     return msg
 
 
@@ -3181,7 +3194,8 @@ async def apply_function_async(
     """
     ident = threading.get_ident()
     try:
-        with meter(time) as m:
+        # See notes about metering in apply_function_simple
+        with context_meter.meter("thread-noncpu"), meter(time) as m:
             result = await function(*args, **kwargs)
     except (SystemExit, KeyboardInterrupt):
         # Special-case these, just like asyncio does all over the place. They will pass
@@ -3211,9 +3225,9 @@ async def apply_function_async(
 
     msg["start"] = m.start + time_delay
     msg["stop"] = m.stop + time_delay
-    msg["wall-duration"] = m.delta
-    msg["thread-duration"] = 0
+    msg["duration"] = m.delta
     msg["thread"] = ident
+    msg["metrics"] = []  # Already captured by execute()
     return msg
 
 

@@ -3,13 +3,15 @@ from __future__ import annotations
 import asyncio
 import re
 import secrets
+import time
+from time import sleep
 
 import pytest
 
 from distributed import Event, Worker, wait
 from distributed.comm.utils import OFFLOAD_THRESHOLD
 from distributed.compatibility import WINDOWS
-from distributed.metrics import meter
+from distributed.metrics import context_meter, meter
 from distributed.utils_test import (
     BlockedGatherDep,
     BlockedGetData,
@@ -313,3 +315,63 @@ async def test_memory_monitor(c, s, a):
         "memory-monitor-spill-disk-write-bytes",
         "memory-monitor-spill-evloop-released-seconds",
     ]
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_user_metrics_sync(c, s, a):
+    def f():
+        t1 = time.perf_counter() + 0.1
+        while time.perf_counter() < t1:
+            pass
+        sleep(0.1)
+        context_meter.digest_metric("I/O", 5, "seconds")
+
+    await wait(c.submit(f))
+
+    assert list(get_digests(a)) == [
+        "execute-deserialize-seconds",
+        "execute-I/O-seconds",
+        "execute-thread-cpu-seconds",
+        "execute-thread-noncpu-seconds",
+        "execute-other-seconds",
+    ]
+    assert get_digests(a)["execute-I/O-seconds"] == 5
+    assert get_digests(a)["execute-thread-cpu-seconds"] == 0
+    assert get_digests(a)["execute-thread-noncpu-seconds"] == 0
+    assert get_digests(a)["execute-other-seconds"] == 0
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_user_metrics_async(c, s, a):
+    async def f():
+        await asyncio.sleep(0.1)
+        context_meter.digest_metric("I/O", 5, "seconds")
+
+    await wait(c.submit(f))
+
+    assert list(get_digests(a)) == [
+        "execute-deserialize-seconds",
+        "execute-I/O-seconds",
+        "execute-thread-noncpu-seconds",
+        "execute-other-seconds",
+    ]
+    assert get_digests(a)["execute-I/O-seconds"] == 5
+    assert get_digests(a)["execute-thread-noncpu-seconds"] == 0
+    assert get_digests(a)["execute-other-seconds"] == 0
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_user_metrics_fail(c, s, a):
+    def f():
+        context_meter.digest_metric("I/O", 5, "seconds")
+        context_meter.digest_metric("I/O", 100, "bytes")
+        raise ValueError("foo")
+
+    await wait(c.submit(f))
+
+    assert list(get_digests(a)) == [
+        "execute-I/O-bytes",
+        "execute-failed-seconds",
+    ]
+    assert get_digests(a)["execute-I/O-bytes"] == 100
+    assert get_digests(a)["execute-failed-seconds"] < 1

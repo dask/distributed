@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import pickle
 import time
 
 import pytest
@@ -156,3 +157,7 @@ def test_context_meter_nested_floor():
                 pass
 
     assert cbs == [("m2", 4, "seconds"), ("m1", 0.1, "seconds")]
+
+
+def test_context_meter_pickle():
+    assert pickle.loads(pickle.dumps(metrics.context_meter)) is metrics.context_meter

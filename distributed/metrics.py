@@ -189,6 +189,14 @@ class ContextMeter:
     def __init__(self):
         self._callbacks = ContextVar(f"MetricHook<{id(self)}>._callbacks", default=[])
 
+    def __reduce__(self):
+        assert self is context_meter, "Found copy of singleton"
+        return self._unpickle_singleton, ()
+
+    @staticmethod
+    def _unpickle_singleton():
+        return context_meter
+
     @contextmanager
     def add_callback(
         self, callback: Callable[[str, float, str], None]
