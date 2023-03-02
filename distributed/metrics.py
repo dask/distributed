@@ -227,10 +227,11 @@ class ContextMeter:
         func: Callable[[], float] = timemod.perf_counter,
         floor: float | Literal[False] = 0.0,
     ) -> Any:
-        """Convenience context manager which calls func() before and after the wrapped
-        code, calculates the delta, and finally calls :meth:`digest_metric`. It also
-        subtracts any other calls to :meth:`meter` or :meth:`digest_metric` with the
-        same unit performed within the context, so that the total is strictly additive.
+        """Convenience context manager or decorator which calls func() before and after
+        the wrapped code, calculates the delta, and finally calls :meth:`digest_metric`.
+        It also subtracts any other calls to :meth:`meter` or :meth:`digest_metric` with
+        the same unit performed within the context, so that the total is strictly
+        additive.
 
         Parameters
         ----------
@@ -259,25 +260,6 @@ class ContextMeter:
             if floor is not False:
                 delta = max(floor, delta)
             self.digest_metric(label, delta, unit)
-
-    def meter_function(
-        self,
-        label: str,
-        unit: str = "seconds",
-        func: Callable[[], float] = timemod.perf_counter,
-        floor: float | Literal[False] = 0.0,
-    ) -> Callable[[Callable], Callable]:
-        """Same as :meth:`meter`, but as a function decorator"""
-
-        def decorator(f2):
-            @wraps(f2)
-            def wrapper(*args, **kwargs):
-                with self.meter(label, unit, func, floor):
-                    return f2(*args, **kwargs)
-
-            return wrapper
-
-        return decorator
 
 
 context_meter = ContextMeter()

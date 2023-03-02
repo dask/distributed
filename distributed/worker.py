@@ -2972,7 +2972,7 @@ def loads_function(bytes_object):
     return pickle.loads(bytes_object)
 
 
-@context_meter.meter_function("deserialize")
+@context_meter.meter("deserialize")
 def _deserialize(function=None, args=None, kwargs=None, task=NO_VALUE):
     """Deserialize task inputs and regularize to func, args, kwargs"""
     if function is not None:

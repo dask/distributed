@@ -130,7 +130,7 @@ def test_context_meter_decorator():
     it = iter([123, 124, 130, 135, 150, 160])
     cbs = []
 
-    @metrics.context_meter.meter_function("m1", func=lambda: next(it))
+    @metrics.context_meter.meter("m1", func=lambda: next(it))
     def f():
         pass
 
