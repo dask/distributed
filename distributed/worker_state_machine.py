@@ -44,7 +44,7 @@ from distributed._stories import worker_story
 from distributed.collections import HeapSet
 from distributed.comm import get_address_host
 from distributed.core import ErrorMessage, error_message
-from distributed.metrics import context_meter, meter, monotonic, time
+from distributed.metrics import context_meter, monotonic, time
 from distributed.protocol import pickle
 from distributed.protocol.serialize import Serialize
 from distributed.sizeof import safe_sizeof as sizeof
@@ -2552,26 +2552,29 @@ class WorkerState:
         if ts.key in self.actors:
             self.actors[ts.key] = value
         else:
-            with meter(time) as m:
-                try:
-                    self.data[ts.key] = value
-                except Exception as e:
-                    # distributed.worker.memory.target is enabled and the value is
-                    # individually larger than target * memory_limit. Inserting this
-                    # task in the SpillBuffer caused it to immediately spilled to disk,
-                    # and it failed to serialize. Third-party MutableMappings (dask-cuda
-                    # etc.) may have other use cases for this.
-                    msg = error_message(e)
-                    return {ts: tuple(msg.values())}, []
+            start = time()
 
-            if m.delta > 0.005:
+            try:
+                self.data[ts.key] = value
+            except Exception as e:
+                # distributed.worker.memory.target is enabled and the value is
+                # individually larger than target * memory_limit.
+                # Inserting this task in the SpillBuffer caused it to immediately
+                # spilled to disk, and it failed to serialize.
+                # Third-party MutableMappings (dask-cuda etc.) may have other use cases
+                # for this.
+                msg = error_message(e)
+                return {ts: tuple(msg.values())}, []
+
+            stop = time()
+            if stop - start > 0.005:
                 # The SpillBuffer has spilled this task (if larger than target) or other
                 # tasks (if smaller than target) to disk.
                 # Alternatively, a third-party MutableMapping may have spent time in
                 # other activities, e.g. transferring data between GPGPU and system
                 # memory.
                 ts.startstops.append(
-                    {"action": "disk-write", "start": m.start, "stop": m.stop}
+                    {"action": "disk-write", "start": start, "stop": stop}
                 )
 
         ts.state = "memory"

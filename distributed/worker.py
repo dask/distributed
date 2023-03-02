@@ -2229,16 +2229,17 @@ class Worker(BaseWorker, ServerNode):
         self, ts: TaskState
     ) -> tuple[Callable, tuple, dict[str, Any]]:
         assert ts.run_spec is not None
-        with meter(time) as m:
-            # Offload deserializing large tasks
-            if sizeof(ts.run_spec) > OFFLOAD_THRESHOLD:
-                function, args, kwargs = await offload(_deserialize, *ts.run_spec)
-            else:
-                function, args, kwargs = _deserialize(*ts.run_spec)
+        start = time()
+        # Offload deserializing large tasks
+        if sizeof(ts.run_spec) > OFFLOAD_THRESHOLD:
+            function, args, kwargs = await offload(_deserialize, *ts.run_spec)
+        else:
+            function, args, kwargs = _deserialize(*ts.run_spec)
+        stop = time()
 
-        if m.delta > 0.01:
+        if stop - start > 0.010:
             ts.startstops.append(
-                {"action": "deserialize", "start": m.start, "stop": m.stop}
+                {"action": "deserialize", "start": start, "stop": stop}
             )
         return function, args, kwargs
 
@@ -2421,23 +2422,21 @@ class Worker(BaseWorker, ServerNode):
     def _prepare_args_for_execution(
         self, ts: TaskState, args: tuple, kwargs: dict[str, Any]
     ) -> tuple[tuple, dict[str, Any]]:
-        with meter(time) as m:
-            data = {}
-            for dep in ts.dependencies:
-                k = dep.key
-                try:
-                    data[k] = self.data[k]
-                except KeyError:
-                    from distributed.actor import Actor  # TODO: create local actor
+        start = time()
+        data = {}
+        for dep in ts.dependencies:
+            k = dep.key
+            try:
+                data[k] = self.data[k]
+            except KeyError:
+                from distributed.actor import Actor  # TODO: create local actor
 
-                    data[k] = Actor(type(self.state.actors[k]), self.address, k, self)
-            args2 = pack_data(args, data, key_types=(bytes, str))
-            kwargs2 = pack_data(kwargs, data, key_types=(bytes, str))
-
-        if m.delta > 0.005:
-            ts.startstops.append(
-                {"action": "disk-read", "start": m.start, "stop": m.stop}
-            )
+                data[k] = Actor(type(self.state.actors[k]), self.address, k, self)
+        args2 = pack_data(args, data, key_types=(bytes, str))
+        kwargs2 = pack_data(kwargs, data, key_types=(bytes, str))
+        stop = time()
+        if stop - start > 0.005:
+            ts.startstops.append({"action": "disk-read", "start": start, "stop": stop})
 
         return args2, kwargs2
 
@@ -3179,34 +3178,34 @@ async def apply_function_async(
     msg: dictionary with status, result/error, timings, etc..
     """
     ident = threading.get_ident()
-    with meter(time) as m:
-        try:
+    try:
+        with meter(time) as m:
             result = await function(*args, **kwargs)
-        except (SystemExit, KeyboardInterrupt):
-            # Special-case these, just like asyncio does all over the place. They will
-            # pass through `fail_hard` and `_handle_stimulus_from_task`, and eventually
-            # be caught by special-case logic in asyncio:
-            # https://github.com/python/cpython/blob/v3.9.4/Lib/asyncio/events.py#L81-L82
-            # Any other `BaseException` types would ultimately be ignored by asyncio if
-            # raised here, after messing up the worker state machine along their way.
-            raise
-        except BaseException as e:
-            # NOTE: this includes `CancelledError`! Since it's a user task, that's _not_
-            # a reason to shut down the worker.
-            # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they
-            # aren't a reason to shut down the whole system (since we allow the
-            # system-shutting-down `SystemExit` and `KeyboardInterrupt` to pass through)
-            msg = error_message(e)
-            msg["op"] = "task-erred"
-            msg["actual-exception"] = e
-        else:
-            msg = {
-                "op": "task-finished",
-                "status": "OK",
-                "result": result,
-                "nbytes": sizeof(result),
-                "type": type(result) if result is not None else None,
-            }
+    except (SystemExit, KeyboardInterrupt):
+        # Special-case these, just like asyncio does all over the place. They will pass
+        # through `fail_hard` and `_handle_stimulus_from_task`, and eventually be caught
+        # by special-case logic in asyncio:
+        # https://github.com/python/cpython/blob/v3.9.4/Lib/asyncio/events.py#L81-L82
+        # Any other `BaseException` types would ultimately be ignored by asyncio if
+        # raised here, after messing up the worker state machine along their way.
+        raise
+    except BaseException as e:
+        # NOTE: this includes `CancelledError`! Since it's a user task, that's _not_ a
+        # reason to shut down the worker.
+        # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they
+        # aren't a reason to shut down the whole system (since we allow the
+        # system-shutting-down `SystemExit` and `KeyboardInterrupt` to pass through)
+        msg = error_message(e)
+        msg["op"] = "task-erred"
+        msg["actual-exception"] = e
+    else:
+        msg = {
+            "op": "task-finished",
+            "status": "OK",
+            "result": result,
+            "nbytes": sizeof(result),
+            "type": type(result) if result is not None else None,
+        }
 
     msg["start"] = m.start + time_delay
     msg["stop"] = m.stop + time_delay
