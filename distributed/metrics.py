@@ -158,8 +158,8 @@ class ContextMeter:
        activity
     2. In low level code, typically many stack levels below, log quantitative events
        (e.g. elapsed time, transferred bytes, etc.) so that they will be attributed to
-       the high-level code calling it, either with :meth:`meter` or
-       :meth:`digest_metric`.
+       the high-level code calling it, either with :meth:`meter`,
+       :meth:`meter_function`, or :meth:`digest_metric`.
 
     Examples
     --------
@@ -211,6 +211,7 @@ class ContextMeter:
         for cb in cbs:
             cb(label, value, unit)
 
+    @contextmanager
     def meter(
         self,
         label: str,
@@ -218,11 +219,10 @@ class ContextMeter:
         func: Callable[[], float] = timemod.perf_counter,
         floor: float | Literal[False] = 0.0,
     ) -> Any:
-        """Convenience context manager or function decorator which calls func() before
-        and after the wrapped code, calculates the delta, and finally calls
-        :meth:`digest_metric`. It also subtracts any other calls to :meth:`meter` or
-        :meth:`digest_metric` with the same unit performed within the context, so that
-        the total is strictly additive.
+        """Convenience context manager which calls func() before and after the wrapped
+        code, calculates the delta, and finally calls :meth:`digest_metric`. It also
+        subtracts any other calls to :meth:`meter` or :meth:`digest_metric` with the
+        same unit performed within the context, so that the total is strictly additive.
 
         Parameters
         ----------
@@ -235,43 +235,41 @@ class ContextMeter:
         floor: bool, optional
             see :func:`meter`
         """
-        parent = self
+        offsets = []
 
-        class _ContextMeter_meter:
-            def __call__(self, f2):
-                @wraps(f2)
-                def wrapper(*args, **kwargs):
-                    with self:
-                        return f2(*args, **kwargs)
+        def callback(label2: str, value2: float, unit2: str) -> None:
+            if unit2 == unit:
+                # This must be threadsafe to support callbacks invoked from
+                # distributed.utils.offload; '+=' on a float would not be threadsafe!
+                offsets.append(value2)
 
-                return wrapper
+        try:
+            with self.add_callback(callback), meter(func, floor=False) as m:
+                yield
+        finally:
+            delta = m.delta - sum(offsets)
+            if floor is not False:
+                delta = max(floor, delta)
+            self.digest_metric(label, delta, unit)
 
-            def _callback(self, label2: str, value2: float, unit2: str) -> None:
-                if unit2 == unit:
-                    # This must be threadsafe to support when callbacks are invoked from
-                    # distributed.utils.offload; '+=' on a float would not be
-                    # threadsafe!
-                    self.offsets.append(value2)
+    def meter_function(
+        self,
+        label: str,
+        unit: str = "seconds",
+        func: Callable[[], float] = timemod.perf_counter,
+        floor: float | Literal[False] = 0.0,
+    ) -> Callable[[Callable], Callable]:
+        """Same as :meth:`meter`, but as a function decorator"""
 
-            def __enter__(self):
-                self.offsets = []
-                self.cb_ctx = parent.add_callback(self._callback)
-                self.cb_ctx.__enter__()
-                self.meter_ctx = meter(func, floor=False)
-                self.meter_output = self.meter_ctx.__enter__()
+        def decorator(f2):
+            @wraps(f2)
+            def wrapper(*args, **kwargs):
+                with self.meter(label, unit, func, floor):
+                    return f2(*args, **kwargs)
 
-            def __exit__(self, exc_type, exc_val, exc_tb):
-                self.cb_ctx.__exit__(exc_type, exc_val, exc_tb)
-                self.meter_ctx.__exit__(exc_type, exc_val, exc_tb)
-                delta = self.meter_output.delta - sum(self.offsets)
-                if floor is not False:
-                    delta = max(floor, delta)
-                parent.digest_metric(label, delta, unit)
-                del self.offsets
-                del self.cb_ctx
-                del self.meter_ctx
+            return wrapper
 
-        return _ContextMeter_meter()
+        return decorator
 
 
 context_meter = ContextMeter()

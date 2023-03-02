@@ -427,7 +427,7 @@ def deserialize(header, frames, deserializers=None):
     return loads(header, frames)
 
 
-@context_meter.meter("serialize")
+@context_meter.meter_function("serialize")
 def serialize_and_split(
     x, serializers=None, on_error="message", context=None, size=None
 ):
@@ -472,7 +472,7 @@ def serialize_and_split(
     return header, out_frames
 
 
-@context_meter.meter("deserialize")
+@context_meter.meter_function("deserialize")
 def merge_and_deserialize(header, frames, deserializers=None):
     """Merge and deserialize frames
 
