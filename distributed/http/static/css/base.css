@@ -52,6 +52,10 @@ body {
   background-color: #eaaa6d;
 }
 
+.navbar .pull-right {
+  float: right;
+}
+
 #dask-logo img {
   height: 28px;
   padding: 5px 15px;
