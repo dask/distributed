@@ -42,7 +42,7 @@ def assert_buf(
         assert buf[k] is v
 
     # assertions on slow
-    assert set(buf.slow) == expect_slow.keys()
+    assert set(buf.slow) == set(expect_slow)
     slow = buf.slow.data if has_zict_220 else buf.slow  # type: ignore
     assert slow.weight_by_key == {
         k: psize(tmp_path, **{k: v}) for k, v in expect_slow.items()
@@ -385,7 +385,7 @@ def test_weakref_cache(tmp_path, cls, expect_cached, size):
 
 
 def test_metrics(tmp_path):
-    buf = SpillBuffer(str(tmp_path), target=39_000)
+    buf = SpillBuffer(str(tmp_path), target=35_000)
     assert buf.cumulative_metrics == {}
 
     a = "a" * 20_000  # <target, highly compressible
@@ -409,7 +409,7 @@ def test_metrics(tmp_path):
         _ = buf["c"]  # Unspill / cache miss (c < target, goes back to fast)
         _ = buf["d"]  # Unspill / cache miss (d > target, stays in slow)
 
-    assert (buf.fast.keys(), buf.slow.keys()) == ({"c"}, {"a", "d"})
+    assert (set(buf.fast), set(buf.slow)) == ({"c"}, {"a", "d"})
 
     assert {
         (label, unit): v
@@ -430,13 +430,13 @@ def test_metrics(tmp_path):
         if unit == "seconds"
     }
     assert all(v > 0 for v in time_metrics.values())
-    assert time_metrics.keys() == {
+    assert list(time_metrics) == [
+        ("serialize", "seconds"),
         ("compress", "seconds"),
+        ("disk-write", "seconds"),
+        ("disk-read", "seconds"),
         ("decompress", "seconds"),
         ("deserialize", "seconds"),
-        ("disk-read", "seconds"),
-        ("disk-write", "seconds"),
-        ("serialize", "seconds"),
-    }
+    ]
     if not WINDOWS:  # Fiddly rounding; see distributed.metrics._WindowsTime
         assert sum(time_metrics.values()) <= m.delta
