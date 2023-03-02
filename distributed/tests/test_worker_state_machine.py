@@ -474,6 +474,8 @@ def test_executesuccess_to_dict():
         value=123,
         start=123.4,
         stop=456.7,
+        user_code_start=89.1,
+        user_code_stop=91.2,
         metrics=[],
         nbytes=890,
         type=int,
@@ -492,6 +494,8 @@ def test_executesuccess_to_dict():
         "nbytes": 890,
         "start": 123.4,
         "stop": 456.7,
+        "user_code_start": 89.1,
+        "user_code_stop": 91.2,
         "metrics": [],
         "type": "<class 'int'>",
     }
@@ -516,6 +520,8 @@ def test_executesuccess_dummy():
         value=None,
         start=0.0,
         stop=None,
+        user_code_start=0.0,
+        user_code_stop=1.0,
         metrics=[],
         nbytes=1,
         type=None,
@@ -1303,7 +1309,6 @@ def test_done_resumed_task_not_in_all_running_tasks(ws_with_running_task, done_e
     assert ts not in ws.all_running_tasks
 
 
-@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/6705")
 def test_gather_dep_failure(ws):
     """Simulate a task failing to unpickle when it reaches the destination worker after
     a flight.
@@ -1315,11 +1320,11 @@ def test_gather_dep_failure(ws):
     instructions = ws.handle_stimulus(
         ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s1"),
         GatherDepFailureEvent.from_exception(
-            Exception(), worker=ws2, total_nbytes=1, stimulus_id="s2"
+            Exception(), worker=ws2, total_nbytes=1, start=0, stimulus_id="s2"
         ),
     )
     assert instructions == [
-        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
+        GatherDep.match(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
         TaskErredMsg.match(key="x", stimulus_id="s2"),
     ]
     assert ws.tasks["x"].state == "error"
@@ -1327,6 +1332,9 @@ def test_gather_dep_failure(ws):
     assert ws.transfer_incoming_bytes == 0
     assert ws.transfer_incoming_count == 0
     assert ws.transfer_incoming_count_total == 1
+
+    # FIXME https://github.com/dask/distributed/issues/6705
+    ws.validate = False
 
 
 def test_transfer_incoming_metrics(ws):

@@ -1023,6 +1023,8 @@ class ExecuteDoneEvent(MeteredEvent):
 class ExecuteSuccessEvent(ExecuteDoneEvent):
     run_id: int  # FIXME: Utilize the run ID in all ExecuteDoneEvents
     value: object
+    user_code_start: float
+    user_code_stop: float
     nbytes: int
     type: type | None
     __slots__ = tuple(__annotations__)
@@ -1061,6 +1063,8 @@ class ExecuteSuccessEvent(ExecuteDoneEvent):
             key=key,
             run_id=run_id,
             value=value,
+            user_code_start=0.0,
+            user_code_stop=1.0,
             nbytes=nbytes,
             type=None,
             stimulus_id=stimulus_id,
@@ -3327,8 +3331,16 @@ class WorkerState:
     def _handle_execute_success(self, ev: ExecuteSuccessEvent) -> RecsInstrs:
         """Task completed successfully"""
         ts, recs, instr = self._execute_done_common(ev, coarse_time=False)
-        assert ev.stop is not None
-        ts.startstops.append({"action": "compute", "start": ev.start, "stop": ev.stop})
+        # This is used for scheduler-side heuristics such as work stealing; it's
+        # important that it does not contain overhead from the thread pool or the
+        # worker's event loop (which are not the task's fault and are unpredictable).
+        ts.startstops.append(
+            {
+                "action": "compute",
+                "start": ev.user_code_start,
+                "stop": ev.user_code_stop,
+            }
+        )
         ts.nbytes = ev.nbytes
         ts.type = ev.type
         recs[ts] = ("memory", ev.value, ev.run_id)

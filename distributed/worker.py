@@ -2356,6 +2356,8 @@ class Worker(BaseWorker, ServerNode):
                     type=result["type"],
                     start=start,
                     stop=None,
+                    user_code_start=result["start"],
+                    user_code_stop=result["stop"],
                     metrics=[],
                     stimulus_id=f"task-finished-{time()}",
                 )
