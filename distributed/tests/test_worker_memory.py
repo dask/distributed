@@ -210,7 +210,6 @@ def test_workerstate_fail_to_pickle_execute_1(ws_with_running_task):
     assert ws.tasks["x"].state == "error"
 
 
-@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/6705")
 def test_workerstate_fail_to_pickle_flight(ws):
     """Same as test_workerstate_fail_to_pickle_execute_1, but the task was
     computed on another host and for whatever reason it did not fail to pickle when it
@@ -246,6 +245,9 @@ def test_workerstate_fail_to_pickle_flight(ws):
     ]
     assert ws.tasks["x"].state == "error"
     assert ws.tasks["y"].state == "waiting"  # Not constrained
+
+    # FIXME https://github.com/dask/distributed/issues/6705
+    ws.validate = False
 
 
 @gen_cluster(

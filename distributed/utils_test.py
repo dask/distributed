@@ -2411,7 +2411,8 @@ def ws():
     """An empty WorkerState"""
     state = WorkerState(address="127.0.0.1:1", transition_counter_max=50_000)
     yield state
-    state.validate_state()
+    if state.validate:
+        state.validate_state()
 
 
 @pytest.fixture(params=["executing", "long-running"])
