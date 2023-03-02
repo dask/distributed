@@ -228,6 +228,12 @@ class SpillBuffer(zict.Buffer):
         super().__delitem__(key)
         self.logged_pickle_errors.discard(key)
 
+    def pop(self, key: str, default: Any = None) -> Any:
+        raise NotImplementedError(
+            "Are you calling .pop(key, None) as a way to discard a key if it exists?"
+            "It may cause data to be read back from disk! Please use `del` instead."
+        )
+
     @property
     def memory(self) -> Mapping[str, Any]:
         """Key/value pairs stored in RAM. Alias of zict.Buffer.fast.

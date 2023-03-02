@@ -4810,7 +4810,9 @@ async def test_restart_workers(c, s, a, b):
     assert await c.compute(x.sum()) == size
 
     # Restart a single worker
-    await c.restart_workers(workers=[a.worker_address])
+    a_worker_addr = a.worker_address
+    results = await c.restart_workers(workers=[a.worker_address])
+    assert results[a_worker_addr] == "OK"
     assert set(s.workers) == {a.worker_address, b.worker_address}
 
     # Make sure worker start times are as expected

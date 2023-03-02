@@ -3500,8 +3500,8 @@ class Client(SyncMethodMixin):
 
     async def _restart_workers(
         self, workers: list[str], timeout: int | float | None = None
-    ):
-        results = await self.scheduler.broadcast(
+    ) -> dict[str, str]:
+        results: dict[str, str] = await self.scheduler.broadcast(
             msg={"op": "restart", "timeout": timeout}, workers=workers, nanny=True
         )
         timeout_workers = {
@@ -3511,8 +3511,11 @@ class Client(SyncMethodMixin):
             raise TimeoutError(
                 f"The following workers failed to restart with {timeout} seconds: {list(timeout_workers.keys())}"
             )
+        return results
 
-    def restart_workers(self, workers: list[str], timeout: int | float | None = None):
+    def restart_workers(
+        self, workers: list[str], timeout: int | float | None = None
+    ) -> dict[str, str]:
         """Restart a specified set of workers
 
         .. note::
@@ -3527,6 +3530,11 @@ class Client(SyncMethodMixin):
             Workers to restart.
         timeout : int | float | None
             Number of seconds to wait
+
+        Returns
+        -------
+        dict[str, str]
+            Mapping of worker and restart status.
 
         Notes
         -----
