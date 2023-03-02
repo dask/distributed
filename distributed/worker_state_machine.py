@@ -3802,11 +3802,11 @@ class BaseWorker(abc.ABC):
         self, stim: StateMachineEvent, label: Hashable, value: float, unit: str
     ) -> None:
         if isinstance(stim, GatherDepDoneEvent):
-            activity = "gather-dep"
+            activity: tuple[str, ...] = ("gather-dep",)
         elif isinstance(stim, ExecuteDoneEvent):
-            activity = "execute"
+            activity = ("execute", key_split(stim.key))
         elif isinstance(stim, UpdateDataEvent):
-            activity = "scatter"
+            activity = ("scatter",)
         else:
             raise AssertionError(  # pragma: nocover
                 "unexpected call to "
@@ -3816,7 +3816,7 @@ class BaseWorker(abc.ABC):
 
         if not isinstance(label, tuple):
             label = (label,)
-        self.digest_metric((activity, *label, unit), value)
+        self.digest_metric((*activity, *label, unit), value)
 
     def handle_stimulus(self, *stims: StateMachineEvent) -> None:
         """Forward one or more external stimuli to :meth:`WorkerState.handle_stimulus`

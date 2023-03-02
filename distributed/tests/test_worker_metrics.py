@@ -42,7 +42,7 @@ async def test_task_lifecycle(c, s, a, b):
     assert a.state.tasks["x"].state == "memory"
     assert b.state.tasks["y"].state == "memory"
     with meter() as m:
-        z = c.submit("".join, [x, y], key="z", workers=[a.address])
+        z = c.submit("".join, [x, y], key=("z-123", 0), workers=[a.address])
         assert (await z) == "x" * 20_000 + "y" * 20_000
         # The call to Worker.get_data will terminate after the fetch of z returns
         await async_wait_for(
@@ -73,24 +73,24 @@ async def test_task_lifecycle(c, s, a, b):
         ("gather-dep", "disk-write", "bytes"),
         # a.execute()
         # -> Deserialize run_spec
-        ("execute", "deserialize", "seconds"),
+        ("execute", "z", "deserialize", "seconds"),
         # -> Unspill inputs
         # (There's also another execute-deserialize-seconds entry)
-        ("execute", "disk-read", "seconds"),
-        ("execute", "disk-read", "count"),
-        ("execute", "disk-read", "bytes"),
-        ("execute", "decompress", "seconds"),
+        ("execute", "z", "disk-read", "seconds"),
+        ("execute", "z", "disk-read", "count"),
+        ("execute", "z", "disk-read", "bytes"),
+        ("execute", "z", "decompress", "seconds"),
         # -> Run in thread
-        ("execute", "thread-cpu", "seconds"),
-        ("execute", "thread-noncpu", "seconds"),
+        ("execute", "z", "thread-cpu", "seconds"),
+        ("execute", "z", "thread-noncpu", "seconds"),
         # Delta to end-to-end runtime as seen from the worker state machine
-        ("execute", "other", "seconds"),
+        ("execute", "z", "other", "seconds"),
         # Spill output; added by _transition_to_memory
-        ("execute", "serialize", "seconds"),
-        ("execute", "compress", "seconds"),
-        ("execute", "disk-write", "seconds"),
-        ("execute", "disk-write", "count"),
-        ("execute", "disk-write", "bytes"),
+        ("execute", "z", "serialize", "seconds"),
+        ("execute", "z", "compress", "seconds"),
+        ("execute", "z", "disk-write", "seconds"),
+        ("execute", "z", "disk-write", "count"),
+        ("execute", "z", "disk-write", "bytes"),
         # a.get_data() (triggered by the client retrieving the Future for z)
         # Unspill
         ("get-data", "disk-read", "seconds"),
@@ -107,8 +107,8 @@ async def test_task_lifecycle(c, s, a, b):
 
     assert get_digests(a, allow="count") == {
         ("scatter", "disk-write", "count"): 1,
-        ("execute", "disk-read", "count"): 2,
-        ("execute", "disk-write", "count"): 1,
+        ("execute", "z", "disk-read", "count"): 2,
+        ("execute", "z", "disk-write", "count"): 1,
         ("gather-dep", "disk-write", "count"): 1,
         ("get-data", "disk-read", "count"): 1,
     }
@@ -119,16 +119,16 @@ async def test_task_lifecycle(c, s, a, b):
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_async_task(c, s, a):
     """Test that async tasks are metered"""
-    await c.submit(asyncio.sleep, 0.1)
-    assert a.digests_total["execute", "thread-cpu", "seconds"] == 0
-    assert 0 < a.digests_total["execute", "thread-noncpu", "seconds"] < 1
+    await c.submit(asyncio.sleep, 0.1, key=("x-123", 0))
+    assert a.digests_total["execute", "x" "thread-cpu", "seconds"] == 0
+    assert 0 < a.digests_total["execute", "x", "thread-noncpu", "seconds"] < 1
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_run_spec_deserialization(c, s, a):
     """Test that deserialization of run_spec is metered"""
     await c.submit(inc, 1, key="x")
-    assert 0 < a.digests_total["execute", "deserialize", "seconds"] < 1
+    assert 0 < a.digests_total["execute", "x", "deserialize", "seconds"] < 1
 
 
 @gen_cluster(client=True)
@@ -146,10 +146,10 @@ async def test_offload(c, s, a, b):
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_execute_failed(c, s, a):
     """Tasks that failed to execute are metered as a separate lump total"""
-    x = c.submit(lambda: 1 / 0)
+    x = c.submit(lambda: 1 / 0, key="x")
     await wait(x)
 
-    assert list(get_digests(a)) == [("execute", "failed", "seconds")]
+    assert list(get_digests(a)) == [("execute", "x", "failed", "seconds")]
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -163,7 +163,7 @@ async def test_cancelled_execute(c, s, a):
     await ev.set()
     await async_wait_for(lambda: not a.state.tasks, timeout=5)
 
-    assert list(get_digests(a)) == [("execute", "cancelled", "seconds")]
+    assert list(get_digests(a)) == [("execute", "x", "cancelled", "seconds")]
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -305,10 +305,10 @@ async def test_memory_monitor(c, s, a):
     )
 
     assert list(get_digests(a)) == [
-        ("execute", "deserialize", "seconds"),
-        ("execute", "thread-cpu", "seconds"),
-        ("execute", "thread-noncpu", "seconds"),
-        ("execute", "other", "seconds"),
+        ("execute", "x", "deserialize", "seconds"),
+        ("execute", "x", "thread-cpu", "seconds"),
+        ("execute", "x", "thread-noncpu", "seconds"),
+        ("execute", "x", "other", "seconds"),
         ("memory-monitor-spill", "serialize", "seconds"),
         ("memory-monitor-spill", "compress", "seconds"),
         ("memory-monitor-spill", "disk-write", "seconds"),
@@ -327,19 +327,19 @@ async def test_user_metrics_sync(c, s, a):
         sleep(0.1)
         context_meter.digest_metric("I/O", 5, "seconds")
 
-    await wait(c.submit(f))
+    await wait(c.submit(f, key="x"))
 
     assert list(get_digests(a)) == [
-        ("execute", "deserialize", "seconds"),
-        ("execute", "I/O", "seconds"),
-        ("execute", "thread-cpu", "seconds"),
-        ("execute", "thread-noncpu", "seconds"),
-        ("execute", "other", "seconds"),
+        ("execute", "x", "deserialize", "seconds"),
+        ("execute", "x", "I/O", "seconds"),
+        ("execute", "x", "thread-cpu", "seconds"),
+        ("execute", "x", "thread-noncpu", "seconds"),
+        ("execute", "x", "other", "seconds"),
     ]
-    assert get_digests(a)["execute", "I/O", "seconds"] == 5
-    assert get_digests(a)["execute", "thread-cpu", "seconds"] == 0
-    assert get_digests(a)["execute", "thread-noncpu", "seconds"] == 0
-    assert get_digests(a)["execute", "other", "seconds"] == 0
+    assert get_digests(a)["execute", "x", "I/O", "seconds"] == 5
+    assert get_digests(a)["execute", "x", "thread-cpu", "seconds"] == 0
+    assert get_digests(a)["execute", "x", "thread-noncpu", "seconds"] == 0
+    assert get_digests(a)["execute", "x", "other", "seconds"] == 0
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -348,17 +348,17 @@ async def test_user_metrics_async(c, s, a):
         await asyncio.sleep(0.1)
         context_meter.digest_metric("I/O", 5, "seconds")
 
-    await wait(c.submit(f))
+    await wait(c.submit(f, key="x"))
 
     assert list(get_digests(a)) == [
-        ("execute", "deserialize", "seconds"),
-        ("execute", "I/O", "seconds"),
-        ("execute", "thread-noncpu", "seconds"),
-        ("execute", "other", "seconds"),
+        ("execute", "x", "deserialize", "seconds"),
+        ("execute", "x", "I/O", "seconds"),
+        ("execute", "x", "thread-noncpu", "seconds"),
+        ("execute", "x", "other", "seconds"),
     ]
-    assert get_digests(a)["execute", "I/O", "seconds"] == 5
-    assert get_digests(a)["execute", "thread-noncpu", "seconds"] == 0
-    assert get_digests(a)["execute", "other", "seconds"] == 0
+    assert get_digests(a)["execute", "x", "I/O", "seconds"] == 5
+    assert get_digests(a)["execute", "x", "thread-noncpu", "seconds"] == 0
+    assert get_digests(a)["execute", "x", "other", "seconds"] == 0
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -368,11 +368,11 @@ async def test_user_metrics_fail(c, s, a):
         context_meter.digest_metric("I/O", 100, "bytes")
         raise ValueError("foo")
 
-    await wait(c.submit(f))
+    await wait(c.submit(f, key="x"))
 
     assert list(get_digests(a)) == [
-        ("execute", "I/O", "bytes"),
-        ("execute", "failed", "seconds"),
+        ("execute", "x", "I/O", "bytes"),
+        ("execute", "x", "failed", "seconds"),
     ]
-    assert get_digests(a)["execute", "I/O", "bytes"] == 100
-    assert get_digests(a)["execute", "failed", "seconds"] < 1
+    assert get_digests(a)["execute", "x", "I/O", "bytes"] == 100
+    assert get_digests(a)["execute", "x", "failed", "seconds"] < 1
