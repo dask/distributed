@@ -284,7 +284,7 @@ async def test_gather_dep_network_error(c, s, a):
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,
-    worker_kwargs={"memory_limit": "1000 MB"},
+    worker_kwargs={"memory_limit": "10 GiB"},
     config={
         "distributed.worker.memory.target": False,
         "distributed.worker.memory.spill": 0.7,
@@ -293,7 +293,7 @@ async def test_gather_dep_network_error(c, s, a):
     },
 )
 async def test_memory_monitor(c, s, a):
-    a.monitor.get_process_memory = lambda: 800_000_000 if a.data.fast else 0
+    a.monitor.get_process_memory = lambda: 800_000_000_000 if a.data.fast else 0
     x = c.submit(inc, 1, key="x")
     await async_wait_for(lambda: a.data.disk, timeout=5)
 
