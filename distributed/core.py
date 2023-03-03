@@ -13,7 +13,7 @@ import weakref
 from collections import defaultdict, deque
 from collections.abc import Callable, Container, Coroutine, Generator, Hashable
 from enum import Enum
-from functools import partial, wraps
+from functools import wraps
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, TypeVar, final
 
 import tblib
@@ -34,6 +34,7 @@ from distributed.comm import (
     unparse_host_port,
 )
 from distributed.compatibility import PeriodicCallback
+from distributed.counter import Counter
 from distributed.metrics import context_meter, time
 from distributed.system_monitor import SystemMonitor
 from distributed.utils import (
@@ -346,7 +347,6 @@ class Server:
         self._comms = {}
         self.deserialize = deserialize
         self.monitor = SystemMonitor()
-        self.counters = None
         self._ongoing_background_tasks = AsyncTaskGroup()
         self._event_finished = asyncio.Event()
 
@@ -370,11 +370,13 @@ class Server:
             else:
                 self.io_loop.profile = deque()
 
+        self.periodic_callbacks = {}
+
         # Statistics counters for various events
         try:
             from distributed.counter import Digest
 
-            self.digests = defaultdict(partial(Digest, loop=self.io_loop))
+            self.digests = defaultdict(Digest)
         except ImportError:
             self.digests = None
 
@@ -383,11 +385,9 @@ class Server:
         self.digests_total = defaultdict(float)
         self.digests_max = defaultdict(float)
 
-        from distributed.counter import Counter
-
-        self.counters = defaultdict(partial(Counter, loop=self.io_loop))
-
-        self.periodic_callbacks = {}
+        self.counters = defaultdict(Counter)
+        pc = PeriodicCallback(self._shift_counters, 5000)
+        self.periodic_callbacks["shift_counters"] = pc
 
         pc = PeriodicCallback(
             self.monitor.update,
@@ -434,6 +434,13 @@ class Server:
         )
 
         self.__stopped = False
+
+    def _shift_counters(self):
+        for counter in self.counters.values():
+            counter.shift()
+        if self.digests is not None:
+            for digest in self.digests.values():
+                digest.shift()
 
     @property
     def status(self) -> Status:
