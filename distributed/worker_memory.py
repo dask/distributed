@@ -258,13 +258,12 @@ class WorkerMemoryManager:
         def metrics_callback(label: Hashable, value: float, unit: str) -> None:
             if not isinstance(label, tuple):
                 label = (label,)
-            worker.digest_metric(("memory-monitor-spill", *label, unit), value)
+            worker.digest_metric(("memory-monitor", *label, unit), value)
 
         with context_meter.add_callback(metrics_callback):
             # Measure delta between the measures from the SpillBuffer and the total
             # end-to-end duration of _spill
-            with context_meter.meter("evloop-released"):
-                await self._spill(worker, memory)
+            await self._spill(worker, memory)
 
     async def _spill(self, worker: Worker, memory: int) -> None:
         """Evict keys until the process memory goes below the ``target`` threshold"""

@@ -297,24 +297,16 @@ async def test_memory_monitor(c, s, a):
     x = c.submit(inc, 1, key="x")
     await async_wait_for(lambda: a.data.disk, timeout=5)
 
-    # The call to WorkerMemoryMonitor._spill will terminate after SpillBuffer.evict()
-    await async_wait_for(
-        lambda: ("memory-monitor-spill", "evloop-released", "seconds")
-        in a.digests_total,
-        timeout=5,
-    )
-
     assert list(get_digests(a)) == [
         ("execute", "x", "deserialize", "seconds"),
         ("execute", "x", "thread-cpu", "seconds"),
         ("execute", "x", "thread-noncpu", "seconds"),
         ("execute", "x", "other", "seconds"),
-        ("memory-monitor-spill", "serialize", "seconds"),
-        ("memory-monitor-spill", "compress", "seconds"),
-        ("memory-monitor-spill", "disk-write", "seconds"),
-        ("memory-monitor-spill", "disk-write", "count"),
-        ("memory-monitor-spill", "disk-write", "bytes"),
-        ("memory-monitor-spill", "evloop-released", "seconds"),
+        ("memory-monitor", "serialize", "seconds"),
+        ("memory-monitor", "compress", "seconds"),
+        ("memory-monitor", "disk-write", "seconds"),
+        ("memory-monitor", "disk-write", "count"),
+        ("memory-monitor", "disk-write", "bytes"),
     ]
 
 
