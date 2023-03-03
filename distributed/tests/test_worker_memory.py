@@ -210,7 +210,6 @@ def test_workerstate_fail_to_pickle_execute_1(ws_with_running_task):
     assert ws.tasks["x"].state == "error"
 
 
-@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/6705")
 def test_workerstate_fail_to_pickle_flight(ws):
     """Same as test_workerstate_fail_to_pickle_execute_1, but the task was
     computed on another host and for whatever reason it did not fail to pickle when it
@@ -246,6 +245,9 @@ def test_workerstate_fail_to_pickle_flight(ws):
     ]
     assert ws.tasks["x"].state == "error"
     assert ws.tasks["y"].state == "waiting"  # Not constrained
+
+    # FIXME https://github.com/dask/distributed/issues/6705
+    ws.validate = False
 
 
 @gen_cluster(
@@ -1207,3 +1209,24 @@ async def test_high_unmanaged_memory_warning(s, caplog):
         sum("Unmanaged memory use is high" in record.msg for record in caplog.records)
         == 1
     )  # Message is rate limited
+
+
+class WriteOnlyBuffer(UserDict):
+    def __getitem__(self, k):
+        raise AssertionError()
+
+
+@gen_cluster(client=True, nthreads=[("", 1)], worker_kwargs={"data": WriteOnlyBuffer})
+async def test_delete_spilled_keys(c, s, a):
+    """Test that freeing an in-memory key that has been spilled to disk does not
+    accidentally unspill it
+    """
+    x = c.submit(inc, 1, key="x")
+    await wait_for_state("x", "memory", a)
+    assert a.data.keys() == {"x"}
+    with pytest.raises(AssertionError):
+        a.data["x"]
+
+    x.release()
+    await async_wait_for(lambda: not a.data, timeout=2)
+    assert not a.state.tasks

@@ -175,6 +175,14 @@ class ShardsBuffer(Generic[ShardType]):
         data: dict
             A dictionary mapping destinations to lists of objects that should
             be written to that destination
+
+        Notes
+        -----
+        If this buffer has a memory limiter configured, then it will
+        apply back-pressure to the sender (blocking further receives)
+        if local resource usage hits the limit, until such time as the
+        resource usage drops.
+
         """
 
         if self._exception:

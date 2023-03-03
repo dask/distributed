@@ -1,6 +1,25 @@
 Changelog
 =========
 
+.. _v2023.3.0:
+
+2023.3.0
+--------
+
+Released on March 1, 2023
+
+Bug Fixes
+^^^^^^^^^
+- Remove ``pyarrow`` dependency for rechunking (:pr:`7604`) `Florian Jetter`_
+- Update ``rechunk_transfer`` and ``rechunk_unpack`` errors (:pr:`7600`) `James Bourbeau`_
+
+Maintenance
+^^^^^^^^^^^
+- Remove dead code and document arguments to ``ShardBuffer`` constructors (:pr:`7590`) `Lawrence Mitchell`_
+- Fix tests for p2p by default (:pr:`7595`) `Florian Jetter`_
+- Remove obsolete cast (:pr:`7596`) `Florian Jetter`_
+
+
 .. _v2023.2.1:
 
 2023.2.1
