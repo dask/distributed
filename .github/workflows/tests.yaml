@@ -23,8 +23,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        environment: [mindeps, mindeps+numpy, "3.8", "3.9", "3.10", "3.11"]
+        environment: [mindeps, "3.8", "3.9", "3.10", "3.11"]
         queuing: [queue]
+        extra_packages: [null]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
         exclude:
@@ -45,6 +46,10 @@ jobs:
             environment: "3.9"
             queuing: no_queue
             partition: "not ci1"
+          # P2P rechunking - requires numpy and nothing else beyond mindeps (no pyarrow)
+          - os: ubuntu-latest
+            environment: mindeps
+            extra_packages: [numpy]
 
         # Uncomment to stress-test the test suite for random failures.
         # Must also change `export TEST_ID` in first step below.
@@ -118,11 +123,10 @@ jobs:
         run: |
           python -m pip install --no-deps -e .
 
-      # P2P rechunking - requires numpy and nothing else beyond mindeps (no pyarrow)
-      - name: MinDeps+Numpy
-        if: ${{ matrix.environment == 'mindeps+numpy' }}
+      - name: Extra Installs
+        if: ${{ matrix.extra_packages }}
         shell: bash -l {0}
-        run: mamba install -y numpy
+        run: mamba install -y ${{ join(matrix.extra_packages, ' ') }}
 
       - name: mamba list
         shell: bash -l {0}
