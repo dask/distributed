@@ -4583,7 +4583,7 @@ class Scheduler(SchedulerState, ServerNode):
                 self.report_on_key(ts=ts, client=client)
 
         end = time()
-        self.digest_metric("update-graph-duration", end - start, detail=True)
+        self.digest_metric("update-graph-duration", end - start)
 
         # TODO: balance workers
 

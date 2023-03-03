@@ -3952,7 +3952,7 @@ class BaseWorker(abc.ABC):
         """Wait some time, then take a peer worker out of busy state"""
 
     @abc.abstractmethod
-    def digest_metric(self, name: Hashable, value: float, detail: bool = False) -> None:
+    def digest_metric(self, name: Hashable, value: float) -> None:
         """Log an arbitrary numerical metric"""
 
 

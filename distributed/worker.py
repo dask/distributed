@@ -1231,7 +1231,7 @@ class Worker(BaseWorker, ServerNode):
 
     def _update_latency(self, latency: float) -> None:
         self.latency = latency * 0.05 + self.latency * 0.95
-        self.digest_metric("latency", latency, detail=True)
+        self.digest_metric("latency", latency)
 
     async def heartbeat(self) -> None:
         logger.debug("Heartbeat: %s", self.address)
@@ -2035,8 +2035,8 @@ class Worker(BaseWorker, ServerNode):
                 bw, cnt = self.bandwidth_types[typ]
                 self.bandwidth_types[typ] = (bw + bandwidth, cnt + 1)
 
-        self.digest_metric("transfer-bandwidth", total_bytes / duration, detail=True)
-        self.digest_metric("transfer-duration", duration, detail=True)
+        self.digest_metric("transfer-bandwidth", total_bytes / duration)
+        self.digest_metric("transfer-duration", duration)
         self.counters["transfer-count"].add(len(data))
 
     @fail_hard
@@ -2158,9 +2158,9 @@ class Worker(BaseWorker, ServerNode):
             worker=worker, stimulus_id=f"retry-busy-worker-{time()}"
         )
 
-    def digest_metric(self, name: Hashable, value: float, detail: bool = False) -> None:
+    def digest_metric(self, name: Hashable, value: float) -> None:
         """Implement BaseWorker.digest_metric by calling Server.digest_metric"""
-        ServerNode.digest_metric(self, name, value, detail=detail)
+        ServerNode.digest_metric(self, name, value)
 
     @log_errors
     def find_missing(self) -> None:
@@ -2477,7 +2477,7 @@ class Worker(BaseWorker, ServerNode):
                 )
 
         stop = time()
-        self.digest_metric("profile-duration", stop - start, detail=True)
+        self.digest_metric("profile-duration", stop - start)
 
     async def get_profile(
         self,

@@ -600,7 +600,7 @@ class Server:
                 type(self).__name__,
                 tick_duration,
             )
-        self.digest_metric("tick-duration", tick_duration, detail=True)
+        self.digest_metric("tick-duration", tick_duration)
 
     def _cycle_ticks(self):
         if not self._tick_counter:
@@ -943,9 +943,9 @@ class Server:
         finally:
             self._event_finished.set()
 
-    def digest_metric(self, name: Hashable, value: float, detail: bool = False) -> None:
+    def digest_metric(self, name: Hashable, value: float) -> None:
         # Granular data (requires crick)
-        if detail and self.digests is not None:
+        if self.digests is not None:
             self.digests[name].add(value)
         # Cumulative data (reset by server restart)
         self.digests_total[name] += value
