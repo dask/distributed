@@ -963,7 +963,7 @@ class Server:
 def context_meter_to_server_digest(digest_tag: str) -> Callable:
     """Decorator for an async method of a Server subclass that calls
     ``distributed.metrics.context_meter.meter`` and/or ``digest_metric``.
-    It routes the calls to ``context_meter.digest_metric(label, value, unit)`` to
+    It routes the calls from ``context_meter.digest_metric(label, value, unit)`` to
     ``Server.digest_metric((digest_tag, label, unit), value)``.
     """
 

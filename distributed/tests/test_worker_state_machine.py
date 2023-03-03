@@ -38,7 +38,9 @@ from distributed.worker_state_machine import (
     ExecuteSuccessEvent,
     FreeKeysEvent,
     GatherDep,
+    GatherDepBusyEvent,
     GatherDepFailureEvent,
+    GatherDepNetworkFailureEvent,
     GatherDepSuccessEvent,
     Instruction,
     InvalidTaskState,
@@ -586,6 +588,50 @@ def test_executefailure_dummy():
         exception_text="",
         traceback_text="",
         stimulus_id="s",
+    )
+
+
+def test_gather_dep_success_dummy():
+    ev = GatherDepSuccessEvent.dummy(
+        "x", data={"k": 1}, total_nbytes=1, stimulus_id="s"
+    )
+    assert ev == GatherDepSuccessEvent(
+        stimulus_id="s",
+        start=0.0,
+        stop=None,
+        metrics=[],
+        worker="x",
+        total_nbytes=1,
+        data={"k": 1},
+    )
+
+
+def test_gather_dep_failure_dummy():
+    ev = GatherDepFailureEvent.dummy("x", total_nbytes=1, stimulus_id="s")
+    assert ev == GatherDepFailureEvent(
+        stimulus_id="s",
+        start=0.0,
+        stop=None,
+        metrics=[],
+        worker="x",
+        total_nbytes=1,
+        exception=Serialize(None),
+        traceback=None,
+        exception_text="",
+        traceback_text="",
+    )
+
+
+@pytest.mark.parametrize("cls", [GatherDepBusyEvent, GatherDepNetworkFailureEvent])
+def test_gather_dep_done_dummy(cls):
+    ev = cls.dummy("x", total_nbytes=1, stimulus_id="s")
+    assert ev == cls(
+        stimulus_id="s",
+        start=0.0,
+        stop=None,
+        metrics=[],
+        worker="x",
+        total_nbytes=1,
     )
 
 

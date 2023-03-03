@@ -3147,9 +3147,9 @@ def apply_function_simple(
                 with context_meter.meter("thread-cpu", func=thread_time):
                     result = function(*args, **kwargs)
     except (SystemExit, KeyboardInterrupt):
-        # Special-case these, just like asyncio does all over the place. They will
-        # pass through `fail_hard` and `_handle_stimulus_from_task`, and eventually
-        # be caught by special-case logic in asyncio:
+        # Special-case these, just like asyncio does all over the place. They will pass
+        # through `fail_hard` and `_handle_stimulus_from_task`, and eventually be caught
+        # by special-case logic in asyncio:
         # https://github.com/python/cpython/blob/v3.9.4/Lib/asyncio/events.py#L81-L82
         # Any other `BaseException` types would ultimately be ignored by asyncio if
         # raised here, after messing up the worker state machine along their way.

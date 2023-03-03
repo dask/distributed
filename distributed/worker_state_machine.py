@@ -916,11 +916,13 @@ class GatherDepFailureEvent(GatherDepDoneEvent):
         """Build a dummy event, with most attributes set to a reasonable default.
         This is a convenience method to be used in unit testing only.
         """
-        return cls.from_exception(
-            Exception(),
+        return super().dummy(
             worker=worker,
             total_nbytes=total_nbytes,
-            start=0.0,
+            exception=Serialize(None),
+            traceback=None,
+            exception_text="",
+            traceback_text="",
             stimulus_id=stimulus_id,
         )
 
@@ -3144,12 +3146,11 @@ class WorkerState:
         # clump time metrics together in a single reading. Note that, if only *some*
         # keys are missing, this may hide latency issues for hard-to-find keys.
         if not ev.data:
-            coarse_time: str | Literal[False] = "missing"
+            ev.repeat_digests(coarse_time="missing")
         elif all_cancelled:
-            coarse_time = "cancelled"
+            ev.repeat_digests(coarse_time="cancelled")
         else:
-            coarse_time = False
-        ev.repeat_digests(coarse_time=coarse_time)
+            ev.repeat_digests(coarse_time=False)
 
         return recommendations, []
 
@@ -3161,7 +3162,6 @@ class WorkerState:
         self.busy_workers.add(ev.worker)
 
         recommendations: Recs = {}
-
         refresh_who_has = []
         for ts in self._gather_dep_done_common(ev):
             recommendations[ts] = "fetch"
@@ -3171,6 +3171,7 @@ class WorkerState:
         instructions: Instructions = [
             RetryBusyWorkerLater(worker=ev.worker, stimulus_id=ev.stimulus_id),
         ]
+
         if refresh_who_has:
             # All workers that hold known replicas of our tasks are busy.
             # Try querying the scheduler for unknown ones.
@@ -3859,9 +3860,7 @@ class BaseWorker(abc.ABC):
             elif isinstance(inst, Execute):
                 task = asyncio.create_task(
                     self.execute(
-                        inst.key,
-                        start=inst.start,
-                        stimulus_id=inst.stimulus_id,
+                        inst.key, start=inst.start, stimulus_id=inst.stimulus_id
                     ),
                     name=f"execute({inst.key})",
                 )

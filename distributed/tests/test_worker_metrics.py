@@ -368,3 +368,28 @@ async def test_user_metrics_fail(c, s, a):
     ]
     assert get_digests(a)["execute", "x", "I/O", "bytes"] == 100
     assert get_digests(a)["execute", "x", "failed", "seconds"] < 1
+
+
+@gen_cluster(client=True, nthreads=[("", 3)])
+async def test_do_not_leak_metrics(c, s, a, b):
+    def f(k):
+        for _ in range(10):
+            sleep(0.05)
+            context_meter.digest_metric(("ping", k), 1, "count")
+
+    async def g(k):
+        for _ in range(10):
+            await asyncio.sleep(0.05)
+            context_meter.digest_metric(("ping", k), 1, "count")
+
+    x = c.submit(f, "x", key="x")
+    y = c.submit(f, "y", key="y")
+    z = c.submit(g, "z", key="z")
+    await c.run(g, "w")
+    await wait([x, y, z])
+
+    assert get_digests(a, "ping") == {
+        ("execute", "x", "ping", "x", "count"): 10,
+        ("execute", "y", "ping", "y", "count"): 10,
+        ("execute", "z", "ping", "z", "count"): 10,
+    }

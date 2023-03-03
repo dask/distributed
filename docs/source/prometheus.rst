@@ -163,13 +163,6 @@ dask_worker_spill_time_seconds_total
     Total amount of time that was spent spilling/unspilling since the worker was
     started, broken down by activity: (de)serialize, (de)compress, (un)spill.
 
-    .. note::
-       This metric overlaps with matching activities in
-       ``dask_worker_execute_seconds_total``, ``dask_worker_gather_dep_seconds_total``
-       and ``dask_worker_get_data_seconds_total``. However, it also includes spilling
-       triggered asynchronously because the ``spill`` threshold was exceeded, and
-       excludes any (de)serialize and (de)compress time caused by network activity.
-
 If the crick_ package is installed, the worker additionally exposes:
 
 dask_worker_tick_duration_median_seconds
