@@ -21,8 +21,8 @@ except ImportError:
         ),
     ],
 )
-def test_digest(loop, CD, size):
-    c = CD(loop=loop)
+def test_digest(CD, size):
+    c = CD()
     c.add(1)
     c.add(2)
     assert size(c.components[0]) == 2
@@ -40,8 +40,8 @@ def test_digest(loop, CD, size):
     assert sum(size(d) for d in c.components) == c.size()
 
 
-def test_counter(loop):
-    c = Counter(loop=loop)
+def test_counter():
+    c = Counter()
     c.add(1)
 
     for _ in range(5):
