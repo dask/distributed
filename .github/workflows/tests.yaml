@@ -25,6 +25,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         environment: [mindeps, "3.8", "3.9", "3.10", "3.11"]
         queuing: [queue]
+        extra_packages: [null]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
         exclude:
@@ -44,6 +45,15 @@ jobs:
           - os: ubuntu-latest
             environment: "3.9"
             queuing: no_queue
+            partition: "not ci1"
+          # P2P rechunking - requires numpy and nothing else beyond mindeps (no pyarrow)
+          - os: ubuntu-latest
+            environment: mindeps
+            extra_packages: [numpy]
+            partition: "ci1"
+          - os: ubuntu-latest
+            environment: mindeps
+            extra_packages: [numpy]
             partition: "not ci1"
 
         # Uncomment to stress-test the test suite for random failures.
@@ -117,6 +127,11 @@ jobs:
         shell: bash -l {0}
         run: |
           python -m pip install --no-deps -e .
+
+      - name: Extra Installs
+        if: ${{ matrix.extra_packages }}
+        shell: bash -l {0}
+        run: mamba install -y ${{ join(matrix.extra_packages, ' ') }}
 
       - name: mamba list
         shell: bash -l {0}
