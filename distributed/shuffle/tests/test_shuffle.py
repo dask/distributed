@@ -1145,7 +1145,7 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
 @pytest.mark.parametrize("barrier_first_worker", [True, False])
 @gen_test()
 async def test_basic_lowlevel_shuffle(
-    tmpdir,
+    tmp_path,
     loop_in_thread,
     n_workers,
     n_input_partitions,
@@ -1180,7 +1180,7 @@ async def test_basic_lowlevel_shuffle(
                 name=workers[ix],
                 worker_for_mapping=worker_for_mapping,
                 schema=schema,
-                directory=tmpdir,
+                directory=tmp_path,
                 loop=loop_in_thread,
             )
         )
@@ -1223,7 +1223,7 @@ async def test_basic_lowlevel_shuffle(
 
 
 @gen_test()
-async def test_error_offload(tmpdir, loop_in_thread):
+async def test_error_offload(tmp_path, loop_in_thread):
     pa = pytest.importorskip("pyarrow")
 
     dfs = []
@@ -1257,7 +1257,7 @@ async def test_error_offload(tmpdir, loop_in_thread):
         name="A",
         worker_for_mapping=worker_for_mapping,
         schema=schema,
-        directory=tmpdir,
+        directory=tmp_path,
         loop=loop_in_thread,
         Shuffle=ErrorOffload,
     )
@@ -1265,7 +1265,7 @@ async def test_error_offload(tmpdir, loop_in_thread):
         name="B",
         worker_for_mapping=worker_for_mapping,
         schema=schema,
-        directory=tmpdir,
+        directory=tmp_path,
         loop=loop_in_thread,
     )
     try:
@@ -1278,7 +1278,7 @@ async def test_error_offload(tmpdir, loop_in_thread):
 
 
 @gen_test()
-async def test_error_send(tmpdir, loop_in_thread):
+async def test_error_send(tmp_path, loop_in_thread):
     pa = pytest.importorskip("pyarrow")
 
     dfs = []
@@ -1312,7 +1312,7 @@ async def test_error_send(tmpdir, loop_in_thread):
         name="A",
         worker_for_mapping=worker_for_mapping,
         schema=schema,
-        directory=tmpdir,
+        directory=tmp_path,
         loop=loop_in_thread,
         Shuffle=ErrorSend,
     )
@@ -1320,7 +1320,7 @@ async def test_error_send(tmpdir, loop_in_thread):
         name="B",
         worker_for_mapping=worker_for_mapping,
         schema=schema,
-        directory=tmpdir,
+        directory=tmp_path,
         loop=loop_in_thread,
     )
     try:
@@ -1332,7 +1332,7 @@ async def test_error_send(tmpdir, loop_in_thread):
 
 
 @gen_test()
-async def test_error_receive(tmpdir, loop_in_thread):
+async def test_error_receive(tmp_path, loop_in_thread):
     pa = pytest.importorskip("pyarrow")
 
     dfs = []
@@ -1366,7 +1366,7 @@ async def test_error_receive(tmpdir, loop_in_thread):
         name="A",
         worker_for_mapping=worker_for_mapping,
         schema=schema,
-        directory=tmpdir,
+        directory=tmp_path,
         loop=loop_in_thread,
         Shuffle=ErrorReceive,
     )
@@ -1374,7 +1374,7 @@ async def test_error_receive(tmpdir, loop_in_thread):
         name="B",
         worker_for_mapping=worker_for_mapping,
         schema=schema,
-        directory=tmpdir,
+        directory=tmp_path,
         loop=loop_in_thread,
     )
     try:

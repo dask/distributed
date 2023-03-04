@@ -64,7 +64,7 @@ from itertools import product
 @pytest.mark.parametrize("barrier_first_worker", [True, False])
 @gen_test()
 async def test_lowlevel_rechunk(
-    tmpdir, loop_in_thread, n_workers, barrier_first_worker
+    tmp_path, loop_in_thread, n_workers, barrier_first_worker
 ):
     old = ((1, 2, 3, 4), (5,) * 6)
     new = ((5, 5), (12, 18))
@@ -94,7 +94,7 @@ async def test_lowlevel_rechunk(
                 worker_for_mapping=worker_for_mapping,
                 old=old,
                 new=new,
-                directory=tmpdir,
+                directory=tmp_path,
                 loop=loop_in_thread,
             )
         )
