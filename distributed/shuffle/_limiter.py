@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 
 from distributed.metrics import time
 
@@ -70,3 +71,29 @@ class ResourceLimiter:
         self._acquired -= value
         async with self._condition:
             self._condition.notify_all()
+
+
+# Used to simplify code in shardsbuffer
+class NoopLimiter:
+    """A no-op resource limiter."""
+
+    _maxvalue = math.inf
+
+    def __repr__(self) -> str:
+        return f"<NoopLimiter maxvalue: {math.inf} available: {math.inf}>"
+
+    def free(self) -> bool:
+        return True
+
+    def available(self) -> float:
+        return math.inf
+
+    def increase(self, value: int) -> None:
+        pass
+
+    async def decrease(self, value: int) -> None:
+        pass
+
+    async def wait_for_available(self) -> None:
+        """Don't block and return immediately"""
+        pass
