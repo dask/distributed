@@ -2308,8 +2308,7 @@ class Worker(BaseWorker, ServerNode):
                         self.scheduler_delay,
                     )
                 elif "ThreadPoolExecutor" in str(type(e)):
-                    result = await self.loop.run_in_executor(
-                        e,
+                    result = await offload(
                         apply_function,
                         function,
                         args2,
@@ -2319,23 +2318,23 @@ class Worker(BaseWorker, ServerNode):
                         self.active_threads,
                         self.active_threads_lock,
                         self.scheduler_delay,
+                        executor=e,
                     )
                 else:
-                    result = await self.loop.run_in_executor(
-                        e,
-                        apply_function_simple,
-                        function,
-                        args2,
-                        kwargs2,
-                        self.scheduler_delay,
-                    )
+                    # Can't capture contextvars across processes
+                    with context_meter.meter("executor"):
+                        result = await self.loop.run_in_executor(
+                            e,
+                            apply_function_simple,
+                            function,
+                            args2,
+                            kwargs2,
+                            self.scheduler_delay,
+                        )
             finally:
                 self.active_keys.discard(key)
 
             self.threads[key] = result["thread"]
-
-            for label, value, unit in result["metrics"]:
-                context_meter.digest_metric(label, value, unit)
 
             if result["op"] == "task-finished":
                 if self.digests is not None:
@@ -3126,26 +3125,20 @@ def apply_function_simple(
     msg: dictionary with status, result/error, timings, etc..
     """
     ident = threading.get_ident()
-    metrics = []
-
-    def metrics_callback(label: str, value: float, unit: str) -> None:
-        metrics.append((label, value, unit))
 
     try:
-        with context_meter.add_callback(metrics_callback):
-            # (execute, thread-cpu, seconds)
-            #   difference in thread_time() before and after function call,
-            #   minus user calls to context_meter inside the function
-            # (execute, thread-noncpu, seconds)
-            #   difference in wall time before and after function call, minus
-            #   thread-non-cpu, minus user calls to context_meter
-            # m.stop - m.start
-            #   difference in wall time before and after function call, without
-            #   subtracting anything. This is used in scheduler heuristics,
-            #   e.g. task stealing.
-            with context_meter.meter("thread-noncpu", func=time) as m:
-                with context_meter.meter("thread-cpu", func=thread_time):
-                    result = function(*args, **kwargs)
+        # (execute, thread-cpu, seconds)
+        #   difference in thread_time() before and after function call, minus user calls
+        #   to context_meter inside the function
+        # (execute, thread-noncpu, seconds)
+        #   difference in wall time before and after function call, minus
+        #   thread-non-cpu, minus user calls to context_meter
+        # m.stop - m.start
+        #   difference in wall time before and after function call, without subtracting
+        #   anything. This is used in scheduler heuristics, e.g. task stealing.
+        with context_meter.meter("thread-noncpu", func=time) as m:
+            with context_meter.meter("thread-cpu", func=thread_time):
+                result = function(*args, **kwargs)
     except (SystemExit, KeyboardInterrupt):
         # Special-case these, just like asyncio does all over the place. They will pass
         # through `fail_hard` and `_handle_stimulus_from_task`, and eventually be caught
@@ -3173,7 +3166,6 @@ def apply_function_simple(
     msg["start"] = m.start + time_delay
     msg["stop"] = m.stop + time_delay
     msg["thread"] = ident
-    msg["metrics"] = metrics
     return msg
 
 
@@ -3222,7 +3214,6 @@ async def apply_function_async(
     msg["start"] = m.start + time_delay
     msg["stop"] = m.stop + time_delay
     msg["thread"] = ident
-    msg["metrics"] = []  # Already captured by execute()
     return msg
 
 

@@ -14,7 +14,7 @@ import warnings
 import xml
 from array import array
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from time import sleep
 
 import pytest
@@ -679,6 +679,23 @@ async def test_offload_preserves_contextvars():
         assert r == v
 
     await asyncio.gather(set_var("foo"), set_var("bar"))
+
+
+@gen_test()
+async def test_offload_custom_executor():
+    class MyExecutor(Executor):
+        call_count = 0
+
+        def submit(self, __fn, *args, **kwargs):
+            self.call_count += 1
+            f = Future()
+            f.set_result(__fn(*args, **kwargs))
+            return f
+
+    ex = MyExecutor()
+    out = await offload(inc, 1, executor=ex)
+    assert out == 2
+    assert ex.call_count == 1
 
 
 def test_serialize_for_cli_deprecated():

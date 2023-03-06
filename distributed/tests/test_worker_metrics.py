@@ -4,9 +4,12 @@ import asyncio
 import secrets
 import time
 from collections.abc import Hashable
+from concurrent.futures import ProcessPoolExecutor
 from time import sleep
 
 import pytest
+
+import dask
 
 from distributed import Event, Worker, wait
 from distributed.comm.utils import OFFLOAD_THRESHOLD
@@ -122,6 +125,28 @@ async def test_async_task(c, s, a):
     await c.submit(asyncio.sleep, 0.1, key=("x-123", 0))
     assert a.digests_total["execute", "x" "thread-cpu", "seconds"] == 0
     assert 0 < a.digests_total["execute", "x", "thread-noncpu", "seconds"] < 1
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_custom_executor(c, s, a):
+    """Don't try to acquire in-thread metrics when the executor is a ProcessPoolExecutor
+    or a custom, arbitrary executor.
+    """
+    with ProcessPoolExecutor(1) as e:
+        # Warm up executor - this can take up to 2s in Windows and MacOSX
+        e.submit(inc, 1).result()
+
+        a.executors["processes"] = e
+        with dask.annotate(executor="processes"):
+            await c.submit(sleep, 0.1)
+
+    assert list(get_digests(a, "execute")) == [
+        ("execute", "sleep", "deserialize", "seconds"),
+        ("execute", "sleep", "executor", "seconds"),
+        ("execute", "sleep", "other", "seconds"),
+    ]
+
+    assert 0 < a.digests_total["execute", "sleep", "executor", "seconds"] < 1
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
