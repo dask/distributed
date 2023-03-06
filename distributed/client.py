@@ -1844,6 +1844,15 @@ class Client(SyncMethodMixin):
         --------
         >>> c = client.submit(add, a, b)  # doctest: +SKIP
 
+        Notes
+        -----
+        The current implementation of a task graph resolution searches for occurrences of ``key``
+        and replaces it with a corresponding ``Future`` result. That can lead to unwanted
+        substitution of strings passed as arguments to a task if these strings match some ``key``
+        that already exists on a cluster. To avoid these situations it is required to use unique
+        values if a ``key`` is set manually.
+        See https://github.com/dask/dask/issues/9969 to track progress on resolving this issue.
+
         Returns
         -------
         Future
@@ -1984,6 +1993,15 @@ class Client(SyncMethodMixin):
         Examples
         --------
         >>> L = client.map(func, sequence)  # doctest: +SKIP
+
+        Notes
+        -----
+        The current implementation of a task graph resolution searches for occurrences of ``key``
+        and replaces it with a corresponding ``Future`` result. That can lead to unwanted
+        substitution of strings passed as arguments to a task if these strings match some ``key``
+        that already exists on a cluster. To avoid these situations it is required to use unique
+        values if a ``key`` is set manually.
+        See https://github.com/dask/dask/issues/9969 to track progress on resolving this issue.
 
         Returns
         -------
@@ -2501,6 +2519,16 @@ class Client(SyncMethodMixin):
 
         >>> data = c.scatter(data, broadcast=True)  # doctest: +SKIP
         >>> res = [c.submit(func, data, i) for i in range(100)]
+
+        Notes
+        -----
+        Scattering a dictionary uses ``dict`` keys to create ``Future`` keys.
+        The current implementation of a task graph resolution searches for occurrences of ``key``
+        and replaces it with a corresponding ``Future`` result. That can lead to unwanted
+        substitution of strings passed as arguments to a task if these strings match some ``key``
+        that already exists on a cluster. To avoid these situations it is required to use unique
+        values if a ``key`` is set manually.
+        See https://github.com/dask/dask/issues/9969 to track progress on resolving this issue.
 
         See Also
         --------
