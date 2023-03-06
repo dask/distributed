@@ -56,24 +56,18 @@ async def test_task_lifecycle(c, s, a, b):
     await async_wait_for(lambda: not a.state.tasks, timeout=5)  # For hygene only
 
     expect = [
-        # scatter x
-        ("scatter", "serialize", "seconds"),
-        ("scatter", "compress", "seconds"),
-        ("scatter", "disk-write", "seconds"),
-        ("scatter", "disk-write", "count"),
-        ("scatter", "disk-write", "bytes"),
         # a.gather_dep(worker=b.address, keys=["z"])
         ("gather-dep", "decompress", "seconds"),
         ("gather-dep", "deserialize", "seconds"),
         ("gather-dep", "network", "seconds"),
-        # Delta to end-to-end runtime as seen from the worker state machine
-        ("gather-dep", "other", "seconds"),
         # Spill output; added by _transition_to_memory
         ("gather-dep", "serialize", "seconds"),
         ("gather-dep", "compress", "seconds"),
         ("gather-dep", "disk-write", "seconds"),
         ("gather-dep", "disk-write", "count"),
         ("gather-dep", "disk-write", "bytes"),
+        # Delta to end-to-end runtime as seen from the worker state machine
+        ("gather-dep", "other", "seconds"),
         # a.execute()
         # -> Deserialize run_spec
         ("execute", "z", "deserialize", "seconds"),
@@ -86,14 +80,14 @@ async def test_task_lifecycle(c, s, a, b):
         # -> Run in thread
         ("execute", "z", "thread-cpu", "seconds"),
         ("execute", "z", "thread-noncpu", "seconds"),
-        # Delta to end-to-end runtime as seen from the worker state machine
-        ("execute", "z", "other", "seconds"),
         # Spill output; added by _transition_to_memory
         ("execute", "z", "serialize", "seconds"),
         ("execute", "z", "compress", "seconds"),
         ("execute", "z", "disk-write", "seconds"),
         ("execute", "z", "disk-write", "count"),
         ("execute", "z", "disk-write", "bytes"),
+        # Delta to end-to-end runtime as seen from the worker state machine
+        ("execute", "z", "other", "seconds"),
         # a.get_data() (triggered by the client retrieving the Future for z)
         # Unspill
         ("get-data", "disk-read", "seconds"),
@@ -109,7 +103,6 @@ async def test_task_lifecycle(c, s, a, b):
     assert list(get_digests(a)) == expect
 
     assert get_digests(a, allow="count") == {
-        ("scatter", "disk-write", "count"): 1,
         ("execute", "z", "disk-read", "count"): 2,
         ("execute", "z", "disk-write", "count"): 1,
         ("gather-dep", "disk-write", "count"): 1,

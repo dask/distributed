@@ -253,10 +253,12 @@ def test_flight_cancelled_error(ws):
     instructions = ws.handle_stimulus(
         ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s1"),
         FreeKeysEvent(keys=["y", "x"], stimulus_id="s2"),
-        GatherDepFailureEvent.dummy(worker=ws2, total_nbytes=1, stimulus_id="s3"),
+        GatherDepFailureEvent.from_exception(
+            Exception(), worker=ws2, total_nbytes=1, stimulus_id="s3"
+        ),
     )
     assert instructions == [
-        GatherDep.match(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1")
     ]
     assert not ws.tasks
 
@@ -436,13 +438,11 @@ def test_cancelled_resumed_after_flight_with_dependencies_workerstate(ws):
         ComputeTaskEvent.dummy("x", stimulus_id="s3"),
         # After ~30s, the TCP socket with ws2 finally times out and collapses.
         # This triggers the Execute instruction.
-        GatherDepNetworkFailureEvent.dummy(
-            worker=ws2, total_nbytes=1, stimulus_id="s4"
-        ),
+        GatherDepNetworkFailureEvent(worker=ws2, total_nbytes=1, stimulus_id="s4"),
     )
     assert instructions == [
-        GatherDep.match(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
-        Execute.match(key="x", stimulus_id="s4"),  # Note the stimulus_id!
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
+        Execute(key="x", stimulus_id="s4"),  # Note the stimulus_id!
     ]
     assert ws.tasks["x"].state == "executing"
 
@@ -778,7 +778,7 @@ def test_workerstate_flight_to_flight(ws):
         ComputeTaskEvent.dummy("z", who_has={"x": [ws2]}, stimulus_id="s3"),
     )
     assert instructions == [
-        GatherDep.match(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1")
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1")
     ]
     assert ws.tasks["x"].state == "flight"
 
@@ -803,7 +803,7 @@ def test_workerstate_executing_skips_fetch_on_success(ws_with_running_task):
     )
     assert instructions == [
         AddKeysMsg(keys=["x"], stimulus_id="s3"),
-        Execute.match(key="y", stimulus_id="s3"),
+        Execute(key="y", stimulus_id="s3"),
     ]
     assert ws.tasks["x"].state == "memory"
     assert ws.data["x"] == 123
@@ -833,7 +833,7 @@ def test_workerstate_executing_failure_to_fetch(ws_with_running_task):
         ExecuteFailureEvent.dummy("x", stimulus_id="s3"),
     )
     assert instructions == [
-        GatherDep.match(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s3"),
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s3")
     ]
     assert ws.tasks["x"].state == "flight"
 
@@ -851,12 +851,12 @@ def test_workerstate_flight_skips_executing_on_success(ws):
         ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s1"),
         FreeKeysEvent(keys=["y", "x"], stimulus_id="s2"),
         ComputeTaskEvent.dummy("x", stimulus_id="s3"),
-        GatherDepSuccessEvent.dummy(
+        GatherDepSuccessEvent(
             worker=ws2, total_nbytes=1, data={"x": 123}, stimulus_id="s4"
         ),
     )
     assert instructions == [
-        GatherDep.match(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
         TaskFinishedMsg.match(key="x", stimulus_id="s4"),
     ]
     assert ws.tasks["x"].state == "memory"
@@ -879,22 +879,20 @@ def test_workerstate_flight_failure_to_executing(ws, block_queue):
         ComputeTaskEvent.dummy("x", stimulus_id="s3"),
     )
     assert instructions == [
-        GatherDep.match(stimulus_id="s1", worker=ws2, to_gather={"x"}, total_nbytes=1),
+        GatherDep(stimulus_id="s1", worker=ws2, to_gather={"x"}, total_nbytes=1),
     ]
     assert ws.tasks["x"].state == "resumed"
 
     if block_queue:
         instructions = ws.handle_stimulus(
             ComputeTaskEvent.dummy(key="z", stimulus_id="s4"),
-            GatherDepNetworkFailureEvent.dummy(
-                worker=ws2, total_nbytes=1, stimulus_id="s5"
-            ),
+            GatherDepNetworkFailureEvent(worker=ws2, total_nbytes=1, stimulus_id="s5"),
             ExecuteSuccessEvent.dummy(key="z", stimulus_id="s6"),
         )
         assert instructions == [
-            Execute.match(key="z", stimulus_id="s4"),
+            Execute(key="z", stimulus_id="s4"),
             TaskFinishedMsg.match(key="z", stimulus_id="s6"),
-            Execute.match(key="x", stimulus_id="s6"),
+            Execute(key="x", stimulus_id="s6"),
         ]
         assert_story(
             ws.story("x"),
@@ -907,11 +905,11 @@ def test_workerstate_flight_failure_to_executing(ws, block_queue):
 
     else:
         instructions = ws.handle_stimulus(
-            GatherDepNetworkFailureEvent.dummy(
-                worker=ws2, total_nbytes=1, stimulus_id="s5"
-            ),
+            GatherDepNetworkFailureEvent(worker=ws2, total_nbytes=1, stimulus_id="s5"),
         )
-        assert instructions == [Execute.match(key="x", stimulus_id="s5")]
+        assert instructions == [
+            Execute(key="x", stimulus_id="s5"),
+        ]
         assert_story(
             ws.story("x"),
             [
@@ -993,7 +991,7 @@ def test_workerstate_resumed_waiting_to_flight(ws):
         ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s5"),
     )
     assert instructions == [
-        GatherDep.match(worker=ws2, to_gather={"x"}, stimulus_id="s1", total_nbytes=1),
+        GatherDep(worker=ws2, to_gather={"x"}, stimulus_id="s1", total_nbytes=1),
     ]
     assert ws.tasks["x"].state == "flight"
 
@@ -1212,7 +1210,7 @@ def test_workerstate_remove_replica_of_cancelled_task_dependency(ws):
     ws2 = "127.0.0.1:2"
     instructions = ws.handle_stimulus(
         ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s1"),
-        GatherDepSuccessEvent.dummy(
+        GatherDepSuccessEvent(
             worker=ws2, total_nbytes=1, data={"x": 123}, stimulus_id="s2"
         ),
         FreeKeysEvent(keys=["y"], stimulus_id="s3"),

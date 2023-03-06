@@ -1420,9 +1420,9 @@ async def offload(  # type: ignore[valid-type]
     executor: Executor | None = None,
     **kwargs: P.kwargs,
 ) -> T:
-    """Wrapper around :meth:`~asyncio.AbstractEventLoop.run_in_executor`, which
+    """Variant of :meth:`~asyncio.AbstractEventLoop.run_in_executor`, which
     propagates contextvars.
-    By default, it offloads to a thread pool with a single worker.
+    By default, it offloads to an ad-hoc thread pool with a single worker.
 
     See also
     --------

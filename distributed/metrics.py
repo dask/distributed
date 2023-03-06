@@ -276,3 +276,83 @@ class ContextMeter:
 
 
 context_meter = ContextMeter()
+
+
+class DelayedMetricsLedger:
+    """Add-on to :class:`ContextMeter` that helps in the case where:
+
+    - The code to be metered is not easily expressed as a self-contained code block
+      e.g. you want to measure latency in the asyncio event loop before and after
+      running a task
+    - You want to alter the metrics depending on how the code ends; e.g. you want to
+      post them differently in case of failure.
+
+    Examples
+    --------
+    >>> ledger = DelayedMetricsLedger()
+    >>> task = asyncio.create_task(ledger.record()(metered_function)())
+    >>> # (later, elsewhere)
+    >>> try:
+    ...     await task
+    ...     coarse_time = False
+    ... except Exception:
+    ...     coarse_time = "failed"
+    ...     raise
+    ... finally:
+    ...     for label, value, unit in ledger.finalize(coarse_time):
+    ...         # actually log metrics
+    """
+
+    func: Callable[[], float]
+    start: float
+    metrics: list[tuple[Hashable, float, str]]  # (label, value, unit)
+
+    def __init__(self, func: Callable[[], float] = timemod.perf_counter):
+        self.func = func
+        self.start = func()
+        self.metrics = []
+
+    @contextmanager
+    def record(self) -> Iterator[None]:
+        """Ingest metrics logged with :meth:`ContextMeter.digest_metric` or
+        :meth:`ContextMeter.meter` and temporarily store them in :ivar:`metrics`.
+        """
+        with context_meter.add_callback(
+            lambda label, value, unit: self.metrics.append((label, value, unit))
+        ):
+            yield
+
+    def finalize(
+        self,
+        coarse_time: str | Literal[False] = False,
+        floor: float | Literal[False] = 0.0,
+    ) -> Iterator[tuple[Hashable, float, str]]:
+        """The metered code is terminated, and we now know how to log it.
+
+        Parameters
+        ----------
+        coarse_time: str | False, optional
+            False
+                Yield all acquired metrics, plus an extra time metric, labelled "other",
+                which is the time between creating the DelayedMetricsLedger and
+                calling this method, minus any time logged in the metrics.
+            label
+                Yield all acquired non-time metrics.
+                Yield a single metric, labelled <coarse_time>, which is the time
+                between creating the DelayedMetricsLedger and calling this method.
+        floor: float | False, optional
+            Floor either the "other" or the <coarse_time> metric to this value
+             (default: 0). Set to False to disable.
+        """
+        stop = self.func()
+        delta = stop - self.start
+
+        for label, value, unit in self.metrics:
+            if unit != "seconds" or not coarse_time:
+                yield label, value, unit
+            if unit == "seconds" and not coarse_time:
+                delta -= value
+
+        if floor is not False:
+            delta = max(floor, delta)
+        yield coarse_time or "other", delta, "seconds"

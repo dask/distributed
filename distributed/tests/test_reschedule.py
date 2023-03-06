@@ -90,7 +90,7 @@ def test_cancelled_reschedule_worker_state(ws_with_running_task):
     assert ws.tasks["x"].state == "cancelled"
     assert ws.available_resources == {"R": 0}
 
-    instructions = ws.handle_stimulus(RescheduleEvent.dummy(key="x", stimulus_id="s2"))
+    instructions = ws.handle_stimulus(RescheduleEvent(key="x", stimulus_id="s2"))
     assert not instructions  # There's no RescheduleMsg
     assert not ws.tasks  # The task has been forgotten
     assert ws.available_resources == {"R": 1}
@@ -99,7 +99,7 @@ def test_cancelled_reschedule_worker_state(ws_with_running_task):
 def test_reschedule_releases(ws_with_running_task):
     ws = ws_with_running_task
 
-    instructions = ws.handle_stimulus(RescheduleEvent.dummy(key="x", stimulus_id="s1"))
+    instructions = ws.handle_stimulus(RescheduleEvent(key="x", stimulus_id="s1"))
     assert instructions == [RescheduleMsg(stimulus_id="s1", key="x")]
     assert ws.available_resources == {"R": 1}
     assert "x" not in ws.tasks
@@ -114,7 +114,7 @@ def test_reschedule_cancelled(ws_with_running_task):
     ws = ws_with_running_task
     instructions = ws.handle_stimulus(
         FreeKeysEvent(keys=["x"], stimulus_id="s1"),
-        RescheduleEvent.dummy(key="x", stimulus_id="s2"),
+        RescheduleEvent(key="x", stimulus_id="s2"),
     )
     assert not instructions
     assert "x" not in ws.tasks
@@ -132,9 +132,9 @@ def test_reschedule_resumed(ws_with_running_task):
     instructions = ws.handle_stimulus(
         FreeKeysEvent(keys=["x"], stimulus_id="s1"),
         ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s2"),
-        RescheduleEvent.dummy(key="x", stimulus_id="s3"),
+        RescheduleEvent(key="x", stimulus_id="s3"),
     )
     assert instructions == [
-        GatherDep.match(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s3"),
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s3")
     ]
     assert ws.tasks["x"].state == "flight"

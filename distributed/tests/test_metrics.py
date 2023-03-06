@@ -176,3 +176,26 @@ def test_context_meter_nested_floor():
 
 def test_context_meter_pickle():
     assert pickle.loads(pickle.dumps(metrics.context_meter)) is metrics.context_meter
+
+
+def test_delayed_metrics_ledger():
+    it = iter([120, 130, 130, 130])
+    ledger = metrics.DelayedMetricsLedger(func=lambda: next(it))
+    with ledger.record():
+        metrics.context_meter.digest_metric("foo", 3, "seconds")
+        metrics.context_meter.digest_metric("foo", 10, "bytes")
+
+    assert list(ledger.finalize()) == [
+        ("foo", 3, "seconds"),
+        ("foo", 10, "bytes"),
+        ("other", 7, "seconds"),
+    ]
+    assert list(ledger.finalize(coarse_time="error")) == [
+        ("foo", 10, "bytes"),
+        ("error", 10, "seconds"),
+    ]
+    assert list(ledger.finalize(floor=20)) == [
+        ("foo", 3, "seconds"),
+        ("foo", 10, "bytes"),
+        ("other", 20, "seconds"),
+    ]

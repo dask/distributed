@@ -132,7 +132,6 @@ from distributed.worker_state_machine import (
     GatherDepFailureEvent,
     GatherDepNetworkFailureEvent,
     GatherDepSuccessEvent,
-    MeteredEvent,
     PauseEvent,
     RefreshWhoHasEvent,
     RemoveReplicasEvent,
@@ -1931,16 +1930,6 @@ class Worker(BaseWorker, ServerNode):
         return _
 
     @fail_hard
-    def _handle_stimulus_from_task(self, task: asyncio.Task[StateMachineEvent]) -> None:
-        """Override BaseWorker method for added validation
-
-        See also
-        --------
-        distributed.worker_state_machine.BaseWorker._handle_stimulus_from_task
-        """
-        super()._handle_stimulus_from_task(task)
-
-    @fail_hard
     def handle_stimulus(self, *stims: StateMachineEvent) -> None:
         """Override BaseWorker method for added validation
 
@@ -2040,16 +2029,14 @@ class Worker(BaseWorker, ServerNode):
         self.counters["transfer-count"].add(len(data))
 
     @fail_hard
-    @MeteredEvent.append_to_event_metrics
     async def gather_dep(
         self,
         worker: str,
         to_gather: Collection[str],
-        *,
         total_nbytes: int,
-        start: float,
+        *,
         stimulus_id: str,
-    ) -> MeteredEvent:
+    ) -> StateMachineEvent:
         """Implements BaseWorker abstract method
 
         See also
@@ -2063,7 +2050,6 @@ class Worker(BaseWorker, ServerNode):
                 RuntimeError("Worker is shutting down"),
                 worker=worker,
                 total_nbytes=total_nbytes,
-                start=start,
                 stimulus_id=f"worker-closing-{time()}",
             )
 
@@ -2083,9 +2069,6 @@ class Worker(BaseWorker, ServerNode):
                 return GatherDepBusyEvent(
                     worker=worker,
                     total_nbytes=total_nbytes,
-                    start=start,
-                    stop=None,
-                    metrics=[],
                     stimulus_id=f"gather-dep-busy-{time()}",
                 )
 
@@ -2105,9 +2088,6 @@ class Worker(BaseWorker, ServerNode):
                 worker=worker,
                 total_nbytes=total_nbytes,
                 data=response["data"],
-                start=start,
-                stop=None,
-                metrics=[],
                 stimulus_id=f"gather-dep-success-{time()}",
             )
 
@@ -2119,9 +2099,6 @@ class Worker(BaseWorker, ServerNode):
             return GatherDepNetworkFailureEvent(
                 worker=worker,
                 total_nbytes=total_nbytes,
-                start=start,
-                stop=None,
-                metrics=[],
                 stimulus_id=f"gather-dep-network-failure-{time()}",
             )
 
@@ -2141,7 +2118,6 @@ class Worker(BaseWorker, ServerNode):
                 e,
                 worker=worker,
                 total_nbytes=total_nbytes,
-                start=start,
                 stimulus_id=f"gather-dep-failed-{time()}",
             )
 
@@ -2242,10 +2218,7 @@ class Worker(BaseWorker, ServerNode):
         return function, args, kwargs
 
     @fail_hard
-    @MeteredEvent.append_to_event_metrics
-    async def execute(
-        self, key: str, *, start: float, stimulus_id: str
-    ) -> MeteredEvent:
+    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
         """Execute a task. Implements BaseWorker abstract method.
 
         See also
@@ -2256,13 +2229,7 @@ class Worker(BaseWorker, ServerNode):
             # This is just for internal coherence of the WorkerState; the reschedule
             # message should not ever reach the Scheduler.
             # It is still OK if it does though.
-            return RescheduleEvent(
-                key=key,
-                start=start,
-                stop=None,
-                metrics=[],
-                stimulus_id=f"worker-closing-{time()}",
-            )
+            return RescheduleEvent(key=key, stimulus_id=f"worker-closing-{time()}")
 
         # The key *must* be in the worker state thanks to the cancelled state
         ts = self.state.tasks[key]
@@ -2275,7 +2242,6 @@ class Worker(BaseWorker, ServerNode):
             return ExecuteFailureEvent.from_exception(
                 exc,
                 key=key,
-                start=start,
                 stimulus_id=f"run-spec-deserialize-failed-{time()}",
             )
 
@@ -2345,44 +2311,30 @@ class Worker(BaseWorker, ServerNode):
                     key=key,
                     run_id=run_id,
                     value=result["result"],
+                    start=result["start"],
+                    stop=result["stop"],
                     nbytes=result["nbytes"],
                     type=result["type"],
-                    start=start,
-                    stop=None,
-                    user_code_start=result["start"],
-                    user_code_stop=result["stop"],
-                    metrics=[],
                     stimulus_id=f"task-finished-{time()}",
                 )
 
             task_exc = result["actual-exception"]
             if isinstance(task_exc, Reschedule):
-                return RescheduleEvent(
-                    key=ts.key,
-                    start=start,
-                    stop=None,
-                    metrics=[],
-                    stimulus_id=f"reschedule-{time()}",
-                )
-
+                return RescheduleEvent(key=ts.key, stimulus_id=f"reschedule-{time()}")
             if (
                 self.status == Status.closing
                 and isinstance(task_exc, asyncio.CancelledError)
                 and iscoroutinefunction(function)
             ):
-                # `Worker.cancel` will cause async user tasks to raise
-                # `CancelledError`. Since we cancelled those tasks, we shouldn't
-                # treat them as failures. This is just a heuristic; it's _possible_
-                # the task happened to fail independently with `CancelledError`.
+                # `Worker.cancel` will cause async user tasks to raise `CancelledError`.
+                # Since we cancelled those tasks, we shouldn't treat them as failures.
+                # This is just a heuristic; it's _possible_ the task happened to
+                # fail independently with `CancelledError`.
                 logger.info(
                     f"Async task {key!r} cancelled during worker close; rescheduling."
                 )
                 return RescheduleEvent(
-                    key=ts.key,
-                    start=start,
-                    stop=None,
-                    metrics=[],
-                    stimulus_id=f"cancelled-by-worker-close-{time()}",
+                    key=ts.key, stimulus_id=f"cancelled-by-worker-close-{time()}"
                 )
 
             logger.warning(
@@ -2401,7 +2353,8 @@ class Worker(BaseWorker, ServerNode):
             return ExecuteFailureEvent.from_exception(
                 result,
                 key=key,
-                start=start,
+                start=result["start"],
+                stop=result["stop"],
                 stimulus_id=f"task-erred-{time()}",
             )
 
@@ -2410,7 +2363,6 @@ class Worker(BaseWorker, ServerNode):
             return ExecuteFailureEvent.from_exception(
                 exc,
                 key=key,
-                start=start,
                 stimulus_id=f"execute-unknown-error-{time()}",
             )
 
@@ -3125,14 +3077,15 @@ def apply_function_simple(
     msg: dictionary with status, result/error, timings, etc..
     """
     ident = threading.get_ident()
-
     try:
-        # (execute, thread-cpu, seconds)
+        # meter("thread-cpu").delta
         #   difference in thread_time() before and after function call, minus user calls
-        #   to context_meter inside the function
-        # (execute, thread-noncpu, seconds)
-        #   difference in wall time before and after function call, minus
-        #   thread-non-cpu, minus user calls to context_meter
+        #   to context_meter inside the function. Published to Server.digests as
+        #   {("execute", <prefix>, "thread-cpu", "seconds"): <value>}
+        # m.delta
+        #   difference in wall time before and after function call, minus thread-cpu,
+        #   minus user calls to context_meter. Published to Server.digests as
+        #   {("execute", <prefix>, "thread-noncpu", "seconds"): <value>}
         # m.stop - m.start
         #   difference in wall time before and after function call, without subtracting
         #   anything. This is used in scheduler heuristics, e.g. task stealing.

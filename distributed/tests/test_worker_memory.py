@@ -202,7 +202,9 @@ def test_workerstate_fail_to_pickle_execute_1(ws_with_running_task):
     instructions = ws.handle_stimulus(
         ExecuteSuccessEvent.dummy("x", None, stimulus_id="s1")
     )
-    assert instructions == [TaskErredMsg.match(key="x", stimulus_id="s1")]
+    assert instructions == [
+        TaskErredMsg.match(key="x", stimulus_id="s1"),
+    ]
     assert ws.tasks["x"].state == "error"
 
 
@@ -231,12 +233,12 @@ def test_workerstate_fail_to_pickle_flight(ws):
         ComputeTaskEvent.dummy(
             "y", who_has={"x": [ws2]}, resource_restrictions={"R": 1}, stimulus_id="s1"
         ),
-        GatherDepSuccessEvent.dummy(
+        GatherDepSuccessEvent(
             worker=ws2, total_nbytes=1, data={"x": 123}, stimulus_id="s2"
         ),
     )
     assert instructions == [
-        GatherDep.match(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
+        GatherDep(worker=ws2, to_gather={"x"}, total_nbytes=1, stimulus_id="s1"),
         TaskErredMsg.match(key="x", stimulus_id="s2"),
     ]
     assert ws.tasks["x"].state == "error"
