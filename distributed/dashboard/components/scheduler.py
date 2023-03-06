@@ -4265,7 +4265,7 @@ def status_doc(scheduler, extra, doc):
     ]
 
     help_ = HelpTool(
-        redirect="https://docs.dask.org/en/stable/dashboard.html#task-processing-cpu-utilization-occupancy",
+        redirect="https://docs.dask.org/en/stable/dashboard.html#task-processing-cpu-utilization-occupancy-data-transfer",
         description="A description of Task Processing/CPU Utilization/Occupancy",
     )
     for tab in tabs:
