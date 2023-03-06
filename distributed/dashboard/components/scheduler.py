@@ -4266,7 +4266,7 @@ def status_doc(scheduler, extra, doc):
 
     help_ = HelpTool(
         redirect="https://docs.dask.org/en/stable/dashboard.html#task-processing-cpu-utilization-occupancy",
-        description="A description of Task Processing/CPU/Utilization/Occupancy",
+        description="A description of Task Processing/CPU Utilization/Occupancy",
     )
     for tab in tabs:
         tab.child.toolbar_location = "above"
