@@ -965,11 +965,11 @@ async def test_heartbeats(c, s, a, b):
 
 
 @pytest.mark.parametrize("worker", [Worker, Nanny])
-def test_worker_dir(worker, tmpdir):
-    @gen_cluster(client=True, worker_kwargs={"local_directory": str(tmpdir)})
+def test_worker_dir(worker, tmp_path):
+    @gen_cluster(client=True, worker_kwargs={"local_directory": str(tmp_path)})
     async def test_worker_dir(c, s, a, b):
         directories = [w.local_directory for w in s.workers.values()]
-        assert all(d.startswith(str(tmpdir)) for d in directories)
+        assert all(d.startswith(str(tmp_path)) for d in directories)
         assert len(set(directories)) == 2  # distinct
 
     test_worker_dir()

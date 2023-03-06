@@ -1008,8 +1008,8 @@ async def test_log_errors():
     assert caplog.getvalue().startswith("err7\n")
 
 
-def test_load_json_robust_timeout(tmpdir):
-    path = tmpdir / "foo.json"
+def test_load_json_robust_timeout(tmp_path):
+    path = tmp_path / "foo.json"
     with pytest.raises(TimeoutError):
         json_load_robust(path, timeout=0.01)
 

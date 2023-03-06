@@ -121,7 +121,7 @@ def dask_setup(worker):
 
 
 @gen_cluster(nthreads=[])
-async def test_worker_preload_click_async(s, tmpdir):
+async def test_worker_preload_click_async(s, tmp_path):
     # Ensure we allow for click commands wrapping coroutines
     # https://github.com/dask/distributed/issues/4169
     text = """

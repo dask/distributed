@@ -309,7 +309,7 @@ async def test_resources(c, s):
 @pytest.mark.slow
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 @gen_cluster(client=True, nthreads=[])
-async def test_local_directory(c, s, nanny, tmpdir):
+async def test_local_directory(c, s, nanny, tmp_path):
     with popen(
         [
             "dask",
@@ -318,13 +318,13 @@ async def test_local_directory(c, s, nanny, tmpdir):
             nanny,
             "--no-dashboard",
             "--local-directory",
-            str(tmpdir),
+            str(tmp_path),
         ]
     ):
         await c.wait_for_workers(1)
         info = c.scheduler_info()
         (d,) = info["workers"].values()
-        assert d["local_directory"].startswith(str(tmpdir))
+        assert d["local_directory"].startswith(str(tmp_path))
 
 
 @pytest.mark.slow
