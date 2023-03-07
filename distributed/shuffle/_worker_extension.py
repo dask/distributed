@@ -63,7 +63,7 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         output_workers: set[str],
         local_address: str,
         directory: str,
-        nthreads: int,
+        executor: ThreadPoolExecutor,
         rpc: Callable[[str], PooledRPCCall],
         scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
@@ -73,7 +73,7 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         self.run_id = run_id
         self.output_workers = output_workers
         self.local_address = local_address
-        self.executor = ThreadPoolExecutor(nthreads)
+        self.executor = executor
         self.rpc = rpc
         self.scheduler = scheduler
         self.closed = False
@@ -255,8 +255,8 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
         The local address this Shuffle can be contacted by using `rpc`.
     directory:
         The scratch directory to buffer data in.
-    nthreads:
-        How many background threads to use for compute.
+    executor:
+        Thread pool to use for offloading compute.
     loop:
         The event loop.
     rpc:
@@ -280,7 +280,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
         run_id: int,
         local_address: str,
         directory: str,
-        nthreads: int,
+        executor: ThreadPoolExecutor,
         rpc: Callable[[str], PooledRPCCall],
         scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
@@ -294,7 +294,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
             output_workers=output_workers,
             local_address=local_address,
             directory=directory,
-            nthreads=nthreads,
+            executor=executor,
             rpc=rpc,
             scheduler=scheduler,
             memory_limiter_comms=memory_limiter_comms,
@@ -407,8 +407,8 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         The local address this Shuffle can be contacted by using `rpc`.
     directory:
         The scratch directory to buffer data in.
-    nthreads:
-        How many background threads to use for compute.
+    executor:
+        Thread pool to use for offloading compute.
     loop:
         The event loop.
     rpc:
@@ -432,7 +432,7 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         run_id: int,
         local_address: str,
         directory: str,
-        nthreads: int,
+        executor: ThreadPoolExecutor,
         rpc: Callable[[str], PooledRPCCall],
         scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
@@ -446,7 +446,7 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
             output_workers=output_workers,
             local_address=local_address,
             directory=directory,
-            nthreads=nthreads,
+            executor=executor,
             rpc=rpc,
             scheduler=scheduler,
             memory_limiter_comms=memory_limiter_comms,
@@ -563,6 +563,7 @@ class ShuffleWorkerExtension:
         self.memory_limiter_comms = ResourceLimiter(parse_bytes("100 MiB"))
         self.memory_limiter_disk = ResourceLimiter(parse_bytes("1 GiB"))
         self.closed = False
+        self._executor = ThreadPoolExecutor(self.worker.state.nthreads)
 
     # Handlers
     ##########
@@ -809,7 +810,7 @@ class ShuffleWorkerExtension:
                     self.worker.local_directory,
                     f"shuffle-{shuffle_id}-{result['run_id']}",
                 ),
-                nthreads=self.worker.state.nthreads,
+                executor=self._executor,
                 local_address=self.worker.address,
                 rpc=self.worker.rpc,
                 scheduler=self.worker.scheduler,
@@ -828,7 +829,7 @@ class ShuffleWorkerExtension:
                     self.worker.local_directory,
                     f"shuffle-{shuffle_id}-{result['run_id']}",
                 ),
-                nthreads=self.worker.state.nthreads,
+                executor=self._executor,
                 local_address=self.worker.address,
                 rpc=self.worker.rpc,
                 scheduler=self.worker.scheduler,
