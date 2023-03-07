@@ -3112,10 +3112,10 @@ def apply_function_simple(
     """
     ident = threading.get_ident()
     start = time()
+    tstart = thread_time()
     try:
-        with meter("thread"):
-            with meter("thread-cpu", metric=thread_time):
-                result = function(*args, **kwargs)
+        with meter("thread") as span:
+            result = function(*args, **kwargs)
     except (SystemExit, KeyboardInterrupt):
         # Special-case these, just like asyncio does all over the place. They will pass
         # through `fail_hard` and `_handle_stimulus_from_task`, and eventually be caught
@@ -3141,6 +3141,7 @@ def apply_function_simple(
         }
     finally:
         end = time()
+        span.counters["thread-time"] += thread_time() - tstart
     msg["start"] = start + time_delay
     msg["stop"] = end + time_delay
     msg["thread"] = ident

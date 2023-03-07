@@ -29,9 +29,9 @@ def get_digests(w: Worker, allow: str | None = None) -> dict[Hashable, float]:
 async def test_basic_execute(c, s, a):
     await c.submit(inc, 1, key="x")
     assert list(get_digests(a)) == [
-        ("execute", "x", "thread", "thread-cpu"),
         ("execute", "x", "thread"),
         ("execute", "x"),
+        ("execute", "x", "thread", "thread-time"),
     ]
 
 
