@@ -261,7 +261,7 @@ class WorkerMemoryManager:
             worker.digest_metric(("memory-monitor", *label, unit), value)
 
         # Work around bug with Tornado PeriodicCallback, which does not properly
-        # insulate the ContextVar used by context_manager
+        # insulate contextvars
         async def _() -> None:
             with context_meter.add_callback(metrics_callback):
                 # Measure delta between the measures from the SpillBuffer and the total

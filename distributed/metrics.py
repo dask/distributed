@@ -289,8 +289,11 @@ class DelayedMetricsLedger:
 
     Examples
     --------
-    >>> ledger = DelayedMetricsLedger()
-    >>> task = asyncio.create_task(ledger.record()(metered_function)())
+    >>> ledger = DelayedMetricsLedger()  # Metering starts here
+    >>> async def wrapper():
+    ...     with ledger.record():
+    ...         return await metered_function()
+    >>> task = asyncio.create_task(wrapper())
     >>> # (later, elsewhere)
     >>> try:
     ...     await task
@@ -299,6 +302,7 @@ class DelayedMetricsLedger:
     ...     coarse_time = "failed"
     ...     raise
     ... finally:
+    ...     # Metering stops here
     ...     for label, value, unit in ledger.finalize(coarse_time):
     ...         # actually log metrics
     """
