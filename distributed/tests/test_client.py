@@ -4869,6 +4869,18 @@ async def test_restart_workers_exception(c, s, a, b):
     assert msg["exception_text"] == "ValueError()"
 
 
+@pytest.mark.slow
+@pytest.mark.parametrize("by_name", (True, False))
+@gen_cluster(client=True, Worker=Nanny)
+async def test_restart_workers_by_name(c, s, a, b, by_name):
+    a_addr = a.worker_address
+    b_addr = b.worker_address
+    results = await c.restart_workers([a.name if by_name else a_addr, b_addr])
+
+    # Same keys as those passed in, even when mixed with address and names.
+    assert results == {a.name if by_name else a_addr: "OK", b_addr: "OK"}
+
+
 class MyException(Exception):
     pass
 

@@ -3535,10 +3535,20 @@ class Client(SyncMethodMixin):
         timeout: int | float | None = None,
         raise_for_timeout: bool = True,
     ) -> dict[str, str]:
-        results: dict[str, str] = await self.scheduler.broadcast(
-            msg={"op": "restart", "timeout": timeout}, workers=workers, nanny=True
+        info = self.scheduler_info()
+        name_to_addr = {meta["name"]: addr for addr, meta in info["workers"].items()}
+        worker_addrs = [name_to_addr.get(w, w) for w in workers]
+
+        restart_out: dict[str, str] = await self.scheduler.broadcast(
+            msg={"op": "restart", "timeout": timeout},
+            workers=worker_addrs,
+            nanny=True,
         )
-        timeout_workers = [k for k, status in results.items() if status == "timed out"]
+
+        # Map keys back to original `workers` input names/addresses
+        results = {w: restart_out[w_addr] for w, w_addr in zip(workers, worker_addrs)}
+
+        timeout_workers = [w for w, status in results.items() if status == "timed out"]
         if timeout_workers and raise_for_timeout:
             raise TimeoutError(
                 f"The following workers failed to restart with {timeout} seconds: {timeout_workers}"
@@ -3562,7 +3572,7 @@ class Client(SyncMethodMixin):
         Parameters
         ----------
         workers : list[str]
-            Workers to restart.
+            Workers to restart. This can be a list of worker addresses, names, or a both.
         timeout : int | float | None
             Number of seconds to wait
         raise_for_timeout: bool (default True)
@@ -3572,7 +3582,8 @@ class Client(SyncMethodMixin):
         Returns
         -------
         dict[str, str]
-            Mapping of worker and restart status.
+            Mapping of worker and restart status, the keys will match the original
+            values passed in via ``workers``.
 
         Notes
         -----
@@ -3600,8 +3611,9 @@ class Client(SyncMethodMixin):
         Client.restart
         """
         info = self.scheduler_info()
-        for worker in workers:
-            if info["workers"][worker]["nanny"] is None:
+
+        for worker, meta in info["workers"].items():
+            if (worker in workers or meta["name"] in workers) and meta["nanny"] is None:
                 raise ValueError(
                     f"Restarting workers requires a nanny to be used. Worker {worker} has type {info['workers'][worker]['type']}."
                 )
