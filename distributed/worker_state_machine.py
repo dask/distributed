@@ -12,10 +12,10 @@ import warnings
 import weakref
 from collections import Counter, defaultdict, deque
 from collections.abc import (
+    Awaitable,
     Callable,
     Collection,
     Container,
-    Coroutine,
     Hashable,
     Iterator,
     Mapping,
@@ -24,7 +24,7 @@ from collections.abc import (
 )
 from copy import copy
 from dataclasses import dataclass, field
-from functools import lru_cache, partial, singledispatchmethod
+from functools import lru_cache, partial, singledispatchmethod, wraps
 from itertools import chain
 from typing import (
     TYPE_CHECKING,
@@ -55,9 +55,11 @@ from distributed.utils import recursive_to_dict
 logger = logging.getLogger("distributed.worker.state_machine")
 
 if TYPE_CHECKING:
-    # TODO import from typing (TypeAlias requires Python >=3.10)
+    # TODO import from typing (ParamSpec and TypeAlias requires Python >=3.10)
     # TODO import from typing (NotRequired requires Python >=3.11)
-    from typing_extensions import NotRequired, TypeAlias
+    from typing_extensions import NotRequired, ParamSpec, TypeAlias
+
+    P = ParamSpec("P")
 
     # Circular imports
     from distributed.diagnostics.plugin import WorkerPlugin
@@ -3574,17 +3576,21 @@ class BaseWorker(abc.ABC):
 
     def _start_async_instruction(
         self,
-        coro: Coroutine[None, None, StateMachineEvent],
         task_name: str,
+        func: Callable[P, Awaitable[StateMachineEvent]],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
     ) -> None:
-        """Serve an async instruction through an asyncio task"""
+        """Execute an asynchronous instruction inside an asyncio task"""
         ledger = DelayedMetricsLedger()
 
-        async def coro_wrapper() -> StateMachineEvent:
+        @wraps(func)
+        async def wrapper() -> StateMachineEvent:
             with ledger.record():
-                return await coro
+                return await func(*args, **kwargs)
 
-        task = asyncio.create_task(coro_wrapper(), name=task_name)
+        task = asyncio.create_task(wrapper(), name=task_name)
         self._async_instructions.add(task)
         task.add_done_callback(partial(self._finish_async_instruction, ledger=ledger))
 
@@ -3686,25 +3692,27 @@ class BaseWorker(abc.ABC):
                     keys_str = keys_str[:77] + "..."
 
                 self._start_async_instruction(
-                    self.gather_dep(
-                        inst.worker,
-                        inst.to_gather,
-                        total_nbytes=inst.total_nbytes,
-                        stimulus_id=inst.stimulus_id,
-                    ),
                     f"gather_dep({inst.worker}, {{{keys_str}}})",
+                    self.gather_dep,
+                    inst.worker,
+                    inst.to_gather,
+                    total_nbytes=inst.total_nbytes,
+                    stimulus_id=inst.stimulus_id,
                 )
 
             elif isinstance(inst, Execute):
                 self._start_async_instruction(
-                    self.execute(inst.key, stimulus_id=inst.stimulus_id),
                     f"execute({inst.key})",
+                    self.execute,
+                    inst.key,
+                    stimulus_id=inst.stimulus_id,
                 )
 
             elif isinstance(inst, RetryBusyWorkerLater):
                 self._start_async_instruction(
-                    self.retry_busy_worker_later(inst.worker),
                     f"retry_busy_worker_later({inst.worker})",
+                    self.retry_busy_worker_later,
+                    inst.worker,
                 )
 
             else:
