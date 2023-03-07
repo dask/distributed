@@ -4902,8 +4902,8 @@ class Scheduler(SchedulerState, ServerNode):
             self.log_event(
                 client, {"action": "cancel", "count": len(keys), "force": force}
             )
-        report = list()
-        clients = list()
+        cancelled_keys = []
+        clients = []
         for key in keys:
             ts: TaskState | None = self.tasks.get(key)
             if not ts:
@@ -4919,13 +4919,15 @@ class Scheduler(SchedulerState, ServerNode):
                         [dts.key for dts in ts.dependents], client, force=force
                     )
                 logger.info("Scheduler cancels key %s.  Force=%s", key, force)
-                report.append(key)
+                cancelled_keys.append(key)
             clients.extend(list(ts.who_wants) if force else [cs])
         for cs in clients:
             self.client_releases_keys(
-                keys=report, client=cs.client_key, stimulus_id=f"cancel-key-{time()}"
+                keys=cancelled_keys,
+                client=cs.client_key,
+                stimulus_id=f"cancel-key-{time()}",
             )
-        self.report({"op": "cancelled-keys", "keys": report})
+        self.report({"op": "cancelled-keys", "keys": cancelled_keys})
 
     def client_desires_keys(self, keys=None, client=None):
         cs: ClientState = self.clients.get(client)
