@@ -136,6 +136,7 @@ class LocalCluster(SpecCluster):
         worker_class=None,
         scheduler_kwargs=None,
         scheduler_sync_interval=1,
+        worker_passthrough=None,
         **worker_kwargs,
     ):
         if ip is not None:
@@ -227,6 +228,7 @@ class LocalCluster(SpecCluster):
                 "silence_logs": silence_logs,
             }
         )
+        worker_kwargs.update(worker_passthrough or {})
 
         scheduler = {
             "cls": Scheduler,

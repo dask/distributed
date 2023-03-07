@@ -463,6 +463,7 @@ class Worker(BaseWorker, ServerNode):
     execution_state: dict[str, Any]
     plugins: dict[str, WorkerPlugin]
     _pending_plugins: tuple[WorkerPlugin, ...]
+    shared_data: MutableMapping[str, list[bytes | memoryview]]  # or weak dict+finalize?
 
     def __init__(
         self,
@@ -554,6 +555,7 @@ class Worker(BaseWorker, ServerNode):
             )
         self.nanny = nanny
         self._lock = threading.Lock()
+        self.shared_data = {}
 
         transfer_incoming_count_limit = dask.config.get(
             "distributed.worker.connections.outgoing"

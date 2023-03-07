@@ -15,7 +15,7 @@ import dask
 from dask.base import normalize_token
 from dask.utils import typename
 
-from distributed.protocol import pickle
+from distributed.protocol import pickle, shared
 from distributed.protocol.compression import decompress, maybe_compress
 from distributed.protocol.utils import (
     frame_split_size,
@@ -929,3 +929,8 @@ def register_generic(
     object_with_dict_serializer = ObjectDictSerializer(serializer_name)
     serialize_func.register(cls)(object_with_dict_serializer.serialize)
     deserialize_func.register(cls)(object_with_dict_serializer.deserialize)
+
+
+register_serialization_family("plasma", shared.ser_plasma, shared.deser_plasma)
+register_serialization_family("lmdb", shared.ser_lmdb, shared.deser_lmdb)
+register_serialization_family("vineyard", shared.ser_vineyard, shared.deser_vineyard)

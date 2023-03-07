@@ -48,6 +48,8 @@ dependencies:
   - tornado >=6.2
   - zict
   - zstandard >=0.9.0
+  - python-lmdb
   - pip:
       - git+https://github.com/dask/dask
       - keras
+      - vineyard
