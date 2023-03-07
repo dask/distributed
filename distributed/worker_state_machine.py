@@ -657,25 +657,20 @@ class TracedEvent(StateMachineEvent):
     ) -> list[Instruction]:  # convenience, so matches `RecsInstrs`
         self.span.stop()
 
+        if coarsen_as is not False:
+            return self._to_digest_metrics_coarse(coarsen_as)
+        return self._to_digest_metrics_fine()
+
+    def _to_digest_metrics_fine(self) -> list[Instruction]:
         digests: list[Instruction] = []
         counters: Counter[Hashable] = Counter()
         for sub in self.span.flat():
             # TODO store and use fully-qualified name in `Span` so we don't
             # have to rename here
             counters.update({sub.label + (k,): v for k, v in sub.counters.items()})
-            if coarsen_as is False:
-                digests.append(
-                    DigestMetric(
-                        stimulus_id=self.stimulus_id, name=sub.label, value=sub.own_time
-                    )
-                )
-
-        if coarsen_as is not False:
             digests.append(
                 DigestMetric(
-                    stimulus_id=self.stimulus_id,
-                    name=self.span.label + (coarsen_as,),
-                    value=self.span.total_time,
+                    stimulus_id=self.stimulus_id, name=sub.label, value=sub.own_time
                 )
             )
 
@@ -684,6 +679,21 @@ class TracedEvent(StateMachineEvent):
             for k, v in counters.items()
         )
 
+        return digests
+
+    def _to_digest_metrics_coarse(self, coarsen_as: str) -> list[Instruction]:
+        label = self.span.label + (coarsen_as,)
+        digests: list[Instruction] = [
+            DigestMetric(
+                stimulus_id=self.stimulus_id,
+                name=label,
+                value=self.span.total_time,
+            )
+        ]
+        digests.extend(
+            DigestMetric(stimulus_id=self.stimulus_id, name=label + (k,), value=v)
+            for k, v in self.span.counters.items()
+        )
         return digests
 
 
