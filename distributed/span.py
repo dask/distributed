@@ -130,9 +130,9 @@ class Span:
 
             [
                 FlatSpan(("run", "execute", "fetch"), 15),
-                FlatSpan(("run", "execute"), 6),
+                FlatSpan(("run", "execute", "own-time"), 6),
                 FlatSpan(("run", "deserialize"), 19),
-                FlatSpan(("run",), 10),
+                FlatSpan(("run", "own-time"), 10),
             ]
         """
         assert self.start_time is not None
@@ -142,7 +142,11 @@ class Span:
         for sub in self.subspans:
             yield from sub.flat(prefix=label)
 
-        yield FlatSpan(label, self.own_time, self.counters)
+        yield FlatSpan(
+            label + (("own-time",) if self.subspans else ()),
+            self.own_time,
+            self.counters,
+        )
 
     def __repr__(self) -> str:
         return (
