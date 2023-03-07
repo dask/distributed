@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import contextvars
 import time
+from collections import Counter
 from contextlib import contextmanager
 from functools import cached_property
-from typing import Callable, Iterator, NamedTuple
+from typing import Callable, Hashable, Iterator, NamedTuple
 
 _current_span: contextvars.ContextVar[Span] = contextvars.ContextVar("current_span")
 
@@ -15,6 +16,9 @@ class Span:
     start_time: float | None
     stop_time: float | None
     subspans: list[Span]
+    counters: Counter[Hashable]
+    # ^ NOTE: `Counter` does support non-int values according to the docs,
+    # though type annotations don't indicate this.
     _token: contextvars.Token | None
 
     def __init__(
@@ -27,6 +31,7 @@ class Span:
         self.start_time = None
         self.stop_time = None
         self.subspans = []
+        self.counters = Counter()
         self._token = None
 
     @property
@@ -137,7 +142,7 @@ class Span:
         for sub in self.subspans:
             yield from sub.flat(prefix=label)
 
-        yield FlatSpan(label, self.own_time)
+        yield FlatSpan(label, self.own_time, self.counters)
 
     def __repr__(self) -> str:
         return (
@@ -153,6 +158,7 @@ class Span:
 class FlatSpan(NamedTuple):
     label: tuple[str, ...]
     own_time: float
+    counters: Counter[Hashable]
 
 
 def current_span() -> Span | None:

@@ -240,9 +240,11 @@ class SpillBuffer(zict.Buffer):
         if key in self.fast:
             # Note: don't log from self.fast.__getitem__, because that's called every
             # time a key is evicted, and we don't want to count those events here.
-            with meter("memory-read"):
+            with meter("memory-read") as span:
                 nbytes = cast(int, self.fast.weights[key])
                 self.fast_metrics.log_read(nbytes)
+                span.counters["count"] += 1
+                span.counters["bytes"] += nbytes
 
         return super().__getitem__(key)
 
@@ -364,8 +366,10 @@ class Slow(zict.Func):
 
     def __getitem__(self, key: str) -> Any:
         t0 = perf_counter()
-        with meter("disk-read"):
+        with meter("disk-read") as span:
             pickled = self.d[key]
+            span.counters["count"] += 1
+            span.counters["nbytes"] += len(pickled)
         assert isinstance(pickled, bytearray if has_zict_230 else bytes)
         t1 = perf_counter()
         out = self.load(pickled)
@@ -411,8 +415,10 @@ class Slow(zict.Func):
 
         # Store to disk through File.
         # This may raise OSError, which is caught by SpillBuffer above.
-        with meter("disk-write"):
+        with meter("disk-write") as span:
             self.d[key] = pickled
+            span.counters["count"] += 1
+            span.counters["nbytes"] += pickled_size
 
         t2 = perf_counter()
 
