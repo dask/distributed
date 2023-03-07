@@ -14,6 +14,7 @@ import zict
 
 from distributed.protocol import deserialize_bytes, serialize_bytelist
 from distributed.sizeof import safe_sizeof
+from distributed.span import meter
 from distributed.utils import RateLimiterFilter
 
 logger = logging.getLogger(__name__)
@@ -239,8 +240,9 @@ class SpillBuffer(zict.Buffer):
         if key in self.fast:
             # Note: don't log from self.fast.__getitem__, because that's called every
             # time a key is evicted, and we don't want to count those events here.
-            nbytes = cast(int, self.fast.weights[key])
-            self.fast_metrics.log_read(nbytes)
+            with meter("memory-read"):
+                nbytes = cast(int, self.fast.weights[key])
+                self.fast_metrics.log_read(nbytes)
 
         return super().__getitem__(key)
 
@@ -362,7 +364,8 @@ class Slow(zict.Func):
 
     def __getitem__(self, key: str) -> Any:
         t0 = perf_counter()
-        pickled = self.d[key]
+        with meter("disk-read"):
+            pickled = self.d[key]
         assert isinstance(pickled, bytearray if has_zict_230 else bytes)
         t1 = perf_counter()
         out = self.load(pickled)
@@ -408,7 +411,8 @@ class Slow(zict.Func):
 
         # Store to disk through File.
         # This may raise OSError, which is caught by SpillBuffer above.
-        self.d[key] = pickled
+        with meter("disk-write"):
+            self.d[key] = pickled
 
         t2 = perf_counter()
 

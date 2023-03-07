@@ -47,6 +47,14 @@ class Span:
         assert self.stop_time is not None
         return self.total_time - self.other_time
 
+    @property
+    def done(self) -> bool:
+        return self.start_time is not None and self.stop_time is not None
+
+    @property
+    def running(self) -> bool:
+        return self.start_time is not None and self.stop_time is None
+
     def start(self) -> None:
         assert self.start_time is None
         assert self.stop_time is None
@@ -83,14 +91,19 @@ class Span:
         _current_span.reset(self._token)
         self._token = None
 
-    def _subspan(self, label: str | tuple[str, ...]) -> Span:
+    def _subspan(
+        self,
+        label: str | tuple[str, ...],
+        metric: Callable[[], float] = time.perf_counter,
+    ) -> Span:
         assert (
             self.start_time is not None
         ), "Cannot create sub-span for a span that has not started"
         assert (
             self.stop_time is None
         ), "Cannot create sub-span for a span that has already stopped"
-        span = Span(label, self.metric)
+        # TODO allow different metrics, or always use `self.metric`?
+        span = Span(label, metric)
         self.subspans.append(span)
         return span
 
@@ -130,7 +143,7 @@ class Span:
         return (
             f"{type(self).__name__}<"
             f"{self.label!r}, "
-            f"total_time={self.total_time}, "
+            f"total_time={self.total_time if self.done else '...'}, "
             f"start_time={self.start_time}, "
             f"stop_time={self.stop_time}, "
             ">"
@@ -155,7 +168,7 @@ def get_span(
     except LookupError:
         span = Span(label, metric)
     else:
-        assert metric is parent.metric, (metric, parent.metric)
+        # assert metric is parent.metric, (metric, parent.metric)
         span = parent._subspan(label)
 
     return span
