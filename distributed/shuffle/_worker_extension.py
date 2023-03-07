@@ -191,10 +191,6 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         self.closed = True
         await self._comm_buffer.close()
         await self._disk_buffer.close()
-        try:
-            self.executor.shutdown(cancel_futures=True)
-        except Exception:  # pragma: no cover
-            self.executor.shutdown()
         self._closed_event.set()
 
     def fail(self, exception: Exception) -> None:
@@ -850,6 +846,10 @@ class ShuffleWorkerExtension:
             _, shuffle = self.shuffles.popitem()
             await shuffle.close()
             self._runs.remove(shuffle)
+        try:
+            self._executor.shutdown(cancel_futures=True)
+        except Exception:  # pragma: no cover
+            self._executor.shutdown()
 
     #############################
     # Methods for worker thread #
