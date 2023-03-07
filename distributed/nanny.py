@@ -32,6 +32,7 @@ from distributed.comm.addressing import address_from_user_args
 from distributed.core import (
     AsyncTaskGroupClosedError,
     CommClosedError,
+    ErrorMessage,
     RPCClosed,
     Status,
     coerce_to_address,
@@ -488,7 +489,7 @@ class Nanny(ServerNode):
 
     async def restart(
         self, timeout: float = 30, reason: str = "nanny-restart"
-    ) -> Literal["OK", "timed out"]:
+    ) -> Literal["OK", "timed out"] | ErrorMessage:
         async def _():
             if self.process is not None:
                 await self.kill(reason=reason)
@@ -501,6 +502,8 @@ class Nanny(ServerNode):
                 f"Restart timed out after {timeout}s; returning before finished"
             )
             return "timed out"
+        except Exception as e:
+            return error_message(e)
         else:
             return "OK"
 

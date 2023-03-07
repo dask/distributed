@@ -77,7 +77,7 @@ from distributed.client import (
 from distributed.cluster_dump import load_cluster_dump
 from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, WINDOWS
-from distributed.core import Status
+from distributed.core import ErrorMessage, Status
 from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.metrics import time
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
@@ -4853,6 +4853,20 @@ async def test_restart_workers_timeout(c, s, a, b, raise_for_timeout):
     else:
         results = await c.restart_workers(raise_for_timeout=raise_for_timeout, **kwargs)
         assert results == {a.worker_address: "timed out"}
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=Nanny)
+async def test_restart_workers_exception(c, s, a, b):
+    async def fail_instantiate(*_args, **_kwargs):
+        raise ValueError()
+
+    a.instantiate = fail_instantiate
+
+    results = await c.restart_workers(workers=[a.worker_address])
+    msg: ErrorMessage = results[a.worker_address]
+    assert msg["status"] == "error"
+    assert msg["exception_text"] == "ValueError()"
 
 
 class MyException(Exception):
