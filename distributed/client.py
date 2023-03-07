@@ -3530,22 +3530,26 @@ class Client(SyncMethodMixin):
         )
 
     async def _restart_workers(
-        self, workers: list[str], timeout: int | float | None = None
+        self,
+        workers: list[str],
+        timeout: int | float | None = None,
+        raise_for_timeout: bool = True,
     ) -> dict[str, str]:
         results: dict[str, str] = await self.scheduler.broadcast(
             msg={"op": "restart", "timeout": timeout}, workers=workers, nanny=True
         )
-        timeout_workers = {
-            key: value for key, value in results.items() if value == "timed out"
-        }
-        if timeout_workers:
+        timeout_workers = [k for k, status in results.items() if status == "timed out"]
+        if timeout_workers and raise_for_timeout:
             raise TimeoutError(
-                f"The following workers failed to restart with {timeout} seconds: {list(timeout_workers.keys())}"
+                f"The following workers failed to restart with {timeout} seconds: {timeout_workers}"
             )
         return results
 
     def restart_workers(
-        self, workers: list[str], timeout: int | float | None = None
+        self,
+        workers: list[str],
+        timeout: int | float | None = None,
+        raise_for_timeout: bool = True,
     ) -> dict[str, str]:
         """Restart a specified set of workers
 
@@ -3561,6 +3565,9 @@ class Client(SyncMethodMixin):
             Workers to restart.
         timeout : int | float | None
             Number of seconds to wait
+        raise_for_timeout: bool (default True)
+            Whether to raise a :py:class:`TimeoutError` if restarting worker(s) doesn't
+            finish within ``timeout``.
 
         Returns
         -------
@@ -3602,6 +3609,7 @@ class Client(SyncMethodMixin):
             self._restart_workers,
             workers=workers,
             timeout=timeout,
+            raise_for_timeout=raise_for_timeout,
         )
 
     async def _upload_large_file(self, local_filename, remote_filename=None):
