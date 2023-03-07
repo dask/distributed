@@ -3617,7 +3617,7 @@ class BaseWorker(abc.ABC):
             # Capture metric events in _transition_to_memory()
             self.handle_stimulus(stim)
 
-        self._finalize_metrics(task.result(), ledger)
+        self._finalize_metrics(stim, ledger)
 
     def _finalize_metrics(
         self,
