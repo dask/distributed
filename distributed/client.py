@@ -1568,7 +1568,7 @@ class Client(SyncMethodMixin):
         if state is not None:
             state.lose()
 
-    def _handle_cancelled_keys(self, keys=None):
+    def _handle_cancelled_keys(self, keys):
         for key in keys:
             state = self.futures.get(key)
             if state is not None:
