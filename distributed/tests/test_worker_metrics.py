@@ -89,18 +89,18 @@ async def test_task_lifecycle(c, s, a, b):
         # Delta to end-to-end runtime as seen from the worker state machine
         # ("execute", "z", "other"),  # TODO also don't have this, also don't know if we care
         # a.get_data() (triggered by the client retrieving the Future for z)
-        # TODO ugh `get_data` isn't part of the state machine at all, so it can't emit instructions.
-        # We'd need to trace it and then manually call `digest_metric` on `Worker` directly.
         # # Unspill
-        # ("get-data", "disk-read"),
-        # ("get-data", "disk-read", "count"),
-        # ("get-data", "disk-read", "bytes"),
-        # ("get-data", "decompress"),
-        # ("get-data", "deserialize"),
+        ("get-data", "disk-read"),
+        ("get-data", "decompress"),
+        ("get-data", "deserialize"),
         # # Send over the network
-        # ("get-data", "serialize"),
-        # ("get-data", "compress"),
-        # ("get-data", "network"),
+        ("get-data", "serialize"),
+        ("get-data", "compress"),
+        # ("get-data", "network"),  # TODO
+        ("get-data", "own-time"),
+        # Counters
+        ("get-data", "disk-read", "count"),
+        ("get-data", "disk-read", "nbytes"),
     ]
     for k, v in get_digests(a).items():
         print(f"{k!r}: {v!r}")
@@ -111,7 +111,7 @@ async def test_task_lifecycle(c, s, a, b):
         ("transition", "x", "released->memory", "disk-write", "count"): 1,
         ("transition", "y", "flight->memory", "disk-write", "count"): 1,
         ("transition", "z", "executing->memory", "disk-write", "count"): 1.0,
-        # ("get-data", "disk-read", "count"): 1,  # TODO
+        ("get-data", "disk-read", "count"): 1,
     }
     # if not WINDOWS:  # Fiddly rounding; see distributed.metrics._WindowsTime
     #     assert sum(get_digests(a, allow="seconds").values()) <= m.delta

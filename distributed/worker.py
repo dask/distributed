@@ -124,6 +124,7 @@ from distributed.worker_state_machine import (
     CancelComputeEvent,
     ComputeTaskEvent,
     DeprecatedWorkerStateAttribute,
+    DigestMetric,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
     FindMissingEvent,
@@ -145,6 +146,7 @@ from distributed.worker_state_machine import (
     UnpauseEvent,
     UpdateDataEvent,
     WorkerState,
+    span_to_digest_metrics,
 )
 
 if TYPE_CHECKING:
@@ -254,6 +256,25 @@ async def _force_close(self, reason: str):
         # use `os._exit` instead of `sys.exit` because of uncertainty
         # around propagating `SystemExit` from asyncio callbacks
         os._exit(1)
+
+
+def trace_worker(label: str):
+    def deco(func):
+        @functools.wraps(func)
+        async def wrapped(self: Worker, *args, **kwargs):
+            try:
+                with trace(label) as span:
+                    await func(self, *args, **kwargs)
+            finally:
+                for dm in span_to_digest_metrics(
+                    span, stimulus_id="", coarsen_as=False
+                ):
+                    assert isinstance(dm, DigestMetric)
+                    self.digest_metric(dm.name, dm.value)
+
+        return wrapped
+
+    return deco
 
 
 class Worker(BaseWorker, ServerNode):
@@ -1714,6 +1735,7 @@ class Worker(BaseWorker, ServerNode):
 
         self.stream_comms[address].send(msg)
 
+    @trace_worker("get-data")
     async def get_data(
         self,
         comm: Comm,
