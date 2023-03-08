@@ -1795,3 +1795,27 @@ def test_remove_worker_unknown_peer(ws):
     assert not ws.data_needed
     assert not ws.tasks["y"].who_has
     assert ws.has_what == {ws2: {"x"}}
+
+
+def test_remove_worker_in_fetch(ws):
+    ws2 = "127.0.0.1:2"
+    ws3 = "127.0.0.1:3"
+    ws.handle_stimulus(
+        AcquireReplicasEvent(
+            who_has={"x": [ws2]},
+            nbytes={"x": 1},
+            stimulus_id="s1",
+        ),
+        AcquireReplicasEvent(
+            who_has={"y": [ws2]},
+            nbytes={"y": 1},
+            stimulus_id="s2",
+        ),
+        RemoveWorkerEvent(worker=ws2, stimulus_id="s2"),
+    )
+    assert ws.tasks["x"].state == "flight"
+    y_ts = ws.tasks["y"]
+    assert y_ts.state == "missing"
+    assert not y_ts.who_has
+    assert not ws.data_needed
+    assert not ws.has_what
