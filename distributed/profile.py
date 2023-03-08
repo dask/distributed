@@ -155,7 +155,11 @@ def process(
     merge
     """
     if depth is None:
-        depth = sys.getrecursionlimit() - 50
+        # Cut off rather conservatively since the output of the profiling
+        # sometimes need to be recursed into as well, e.g. for serialization
+        # which can cause recursion errors later on since this can generate
+        # deeply nested dictionaries
+        depth = min(250, sys.getrecursionlimit() // 4)
     if depth <= 0:
         return None
     if any(frame.f_code.co_filename.endswith(o) for o in omit):

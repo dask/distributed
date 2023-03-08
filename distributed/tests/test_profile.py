@@ -370,7 +370,7 @@ def test_stack_overflow():
             else:
                 return f(i - 1)
 
-        f(sys.getrecursionlimit() - 40)
+        f(sys.getrecursionlimit() - 100)
         process(frame, None, state)
         merge(state, state, state)
 
