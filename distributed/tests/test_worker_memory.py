@@ -1228,5 +1228,5 @@ async def test_delete_spilled_keys(c, s, a):
         a.data["x"]
 
     x.release()
-    await async_wait_for(lambda: not a.data, timeout=2)
+    await async_poll_for(lambda: not a.data, timeout=2)
     assert not a.state.tasks
