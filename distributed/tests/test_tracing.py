@@ -1,4 +1,5 @@
 from __future__ import annotations
+from collections import Counter
 
 import time
 
@@ -83,7 +84,7 @@ def test_trace():
 
 def test_flat_empty():
     flat = list(make_span("root", 5).flat())
-    assert flat == [FlatSpan(("root",), 5)]
+    assert flat == [FlatSpan(("root",), 5, Counter())]
 
 
 def test_flat_basic():
@@ -102,6 +103,7 @@ def test_flat_basic():
                 "subsub11",
             ),
             2,
+            Counter()
         ),
         FlatSpan(
             (
@@ -110,8 +112,9 @@ def test_flat_basic():
                 "subsub12",
             ),
             3,
+            Counter()
         ),
-        FlatSpan(("root", "sub1"), 0),
+        FlatSpan(("root", "sub1"), 0, Counter()),
         FlatSpan(
             (
                 "root",
@@ -119,7 +122,8 @@ def test_flat_basic():
                 "subsub21",
             ),
             2,
+            Counter()
         ),
-        FlatSpan(("root", "sub2"), 2),
-        FlatSpan(("root",), 1),
+        FlatSpan(("root", "sub2"), 2, Counter()),
+        FlatSpan(("root",), 1, Counter()),
     ]
