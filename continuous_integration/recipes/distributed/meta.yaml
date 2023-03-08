@@ -27,6 +27,7 @@ requirements:
     - python >=3.8
     - pip
     - dask-core {{ dask_version }}
+    - versioneer
   run:
     - python >=3.8
     - click >=8.0

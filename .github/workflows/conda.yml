@@ -56,12 +56,14 @@ jobs:
 
           # distributed pre-release build
           conda mambabuild continuous_integration/recipes/distributed \
+                           --channel conda-forge \
                            --channel dask/label/dev \
                            --no-anaconda-upload \
                            --output-folder .
 
           # dask pre-release build
           conda mambabuild continuous_integration/recipes/dask \
+                           --channel conda-forge \
                            --channel dask/label/dev \
                            --no-anaconda-upload \
                            --output-folder .
