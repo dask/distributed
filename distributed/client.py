@@ -953,7 +953,7 @@ class Client(SyncMethodMixin):
         self._stream_handlers = {
             "key-in-memory": self._handle_key_in_memory,
             "lost-data": self._handle_lost_data,
-            "cancelled-key": self._handle_cancelled_key,
+            "cancelled-keys": self._handle_cancelled_keys,
             "task-retried": self._handle_retried_key,
             "task-erred": self._handle_task_erred,
             "restart": self._handle_restart,
@@ -1569,10 +1569,11 @@ class Client(SyncMethodMixin):
         if state is not None:
             state.lose()
 
-    def _handle_cancelled_key(self, key=None):
-        state = self.futures.get(key)
-        if state is not None:
-            state.cancel()
+    def _handle_cancelled_keys(self, keys):
+        for key in keys:
+            state = self.futures.get(key)
+            if state is not None:
+                state.cancel()
 
     def _handle_retried_key(self, key=None):
         state = self.futures.get(key)
@@ -2559,8 +2560,9 @@ class Client(SyncMethodMixin):
         )
 
     async def _cancel(self, futures, force=False):
+        # FIXME: This method is asynchronous since interacting with the FutureState below requires an event loop.
         keys = list({stringify(f.key) for f in futures_of(futures)})
-        await self.scheduler.cancel(keys=keys, client=self.id, force=force)
+        self._send_to_scheduler({"op": "cancel-keys", "keys": keys, "force": force})
         for k in keys:
             st = self.futures.pop(k, None)
             if st is not None:
@@ -2569,11 +2571,9 @@ class Client(SyncMethodMixin):
     def cancel(self, futures, asynchronous=None, force=False):
         """
         Cancel running futures
-
         This stops future tasks from being scheduled if they have not yet run
         and deletes them if they have already run.  After calling, this result
         and all dependent results will no longer be accessible
-
         Parameters
         ----------
         futures : List[Future]

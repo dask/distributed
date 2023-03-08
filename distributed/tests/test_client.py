@@ -2303,15 +2303,14 @@ async def test_cancel_multi_client(s, a, b):
 
 
 @gen_cluster(nthreads=[("", 1)], client=True)
-async def test_cancel_before_known_to_scheduler(c, s, a):
-    with captured_logger("distributed.scheduler") as slogs:
-        f = c.submit(inc, 1)
-        await c.cancel([f])
+async def test_cancel_before_known_to_scheduler(c, s, a, caplog):
+    f = c.submit(inc, 1)
+    await c.cancel([f])
 
-        with pytest.raises(CancelledError):
-            await f
-
-        assert "Scheduler cancels key" in slogs.getvalue()
+    with pytest.raises(CancelledError):
+        await f
+    while f"Scheduler cancels key {f.key}" not in caplog.text:
+        await asyncio.sleep(0.05)
 
 
 @gen_cluster(client=True)
