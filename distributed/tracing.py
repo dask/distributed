@@ -77,6 +77,10 @@ class Span:
         assert self._failure is None
         self._failure = failure
 
+    @property
+    def failure(self) -> str | None:
+        return self._failure
+
     @contextmanager
     def as_current(self) -> Iterator[None]:
         self._set_current()

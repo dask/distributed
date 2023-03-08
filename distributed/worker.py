@@ -266,9 +266,7 @@ def trace_worker(label: str):
                 with trace(label) as span:
                     await func(self, *args, **kwargs)
             finally:
-                for dm in span_to_digest_metrics(
-                    span, stimulus_id="", coarsen_as=False
-                ):
+                for dm in span_to_digest_metrics(span, stimulus_id=""):
                     assert isinstance(dm, DigestMetric)
                     self.digest_metric(dm.name, dm.value)
 

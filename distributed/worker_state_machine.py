@@ -653,12 +653,10 @@ class TracedEvent(StateMachineEvent):
     span: Span
 
     def to_digest_metrics(
-        self, *, coarsen_as: str | Literal[False] = False
+        self,
     ) -> list[Instruction]:  # convenience, so matches `RecsInstrs`
         self.span.stop()
-        return span_to_digest_metrics(
-            self.span, stimulus_id=self.stimulus_id, coarsen_as=coarsen_as
-        )
+        return span_to_digest_metrics(self.span, stimulus_id=self.stimulus_id)
 
 
 @dataclass
@@ -1090,7 +1088,7 @@ def merge_recs_instructions(*args: RecsInstrs) -> RecsInstrs:
 
 
 def span_to_digest_metrics(
-    span: Span, *, stimulus_id: str, coarsen_as: str | Literal[False] = False
+    span: Span, *, stimulus_id: str
 ) -> list[Instruction]:  # convenience, so matches `RecsInstrs`
     """
     Convert a `Span` into a list of `DigestMetric` instructions.
@@ -1105,8 +1103,10 @@ def span_to_digest_metrics(
     Then these metrics are "exported" using the normal `DigestMetric`
     instruction.
     """
-    if coarsen_as is not False:
-        return _span_to_digest_metrics_coarse(span, coarsen_as, stimulus_id=stimulus_id)
+    if span.failure is not None:
+        return _span_to_digest_metrics_coarse(
+            span, span.failure, stimulus_id=stimulus_id
+        )
     return _span_to_digest_metrics_fine(span, stimulus_id=stimulus_id)
 
 
@@ -3056,11 +3056,11 @@ class WorkerState:
         # decompression, and deserialization. If all keys are missing or cancelled,
         # clump time metrics together in a single reading. Note that, if only *some*
         # keys are missing, this may hide latency issues for hard-to-find keys.
-        instr = ev.to_digest_metrics(
-            coarsen_as=(
-                "missing" if not ev.data else "cancelled" if all_cancelled else False
-            )
-        )
+        if not ev.data:
+            ev.span.set_failed("missing")
+        elif all_cancelled:
+            ev.span.set_failed("cancelled")
+        instr = ev.to_digest_metrics()
 
         return recommendations, instr
 
@@ -3091,7 +3091,8 @@ class WorkerState:
                 )
             )
 
-        instructions.extend(ev.to_digest_metrics(coarsen_as="busy"))
+        ev.span.set_failed("busy")
+        instructions.extend(ev.to_digest_metrics())
 
         return recommendations, instructions
 
@@ -3128,7 +3129,8 @@ class WorkerState:
             ts = self.tasks[key]
             ts.who_has.remove(ev.worker)
 
-        return recommendations, ev.to_digest_metrics(coarsen_as="failed")
+        ev.span.set_failed("failed")
+        return recommendations, ev.to_digest_metrics()
 
     @_handle_event.register
     def _handle_gather_dep_failure(self, ev: GatherDepFailureEvent) -> RecsInstrs:
@@ -3146,7 +3148,8 @@ class WorkerState:
             for ts in self._gather_dep_done_common(ev)
         }
 
-        return recommendations, ev.to_digest_metrics(coarsen_as="failed")
+        ev.span.set_failed("failed")
+        return recommendations, ev.to_digest_metrics()
 
     @_handle_event.register
     def _handle_secede(self, ev: SecedeEvent) -> RecsInstrs:
@@ -3234,13 +3237,9 @@ class WorkerState:
         recs, instr = self._ensure_computing()
         assert ts not in recs
 
-        instr.extend(
-            ev.to_digest_metrics(
-                coarsen_as="cancelled"
-                if ts.state == "cancelled"
-                else coarsen_metrics_as
-            )
-        )
+        if ts.state == "cancelled":
+            ev.span.set_failed("cancelled")
+        instr.extend(ev.to_digest_metrics())
 
         return ts, recs, instr
 
