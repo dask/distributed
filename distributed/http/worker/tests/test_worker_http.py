@@ -9,7 +9,7 @@ from tornado.httpclient import AsyncHTTPClient
 from distributed import Event, Worker, wait
 from distributed.sizeof import sizeof
 from distributed.utils_test import (
-    async_wait_for,
+    async_poll_for,
     fetch_metrics,
     fetch_metrics_body,
     fetch_metrics_sample_names,
@@ -107,7 +107,7 @@ async def test_prometheus_collect_task_states(c, s, a):
 
     # submit a task which should show up in the prometheus scraping
     fut1 = c.submit(ev.wait)
-    await async_wait_for(lambda: a.state.executing, timeout=5)
+    await async_poll_for(lambda: a.state.executing, timeout=5)
 
     await assert_metrics(executing=1)
 
@@ -128,7 +128,7 @@ async def test_prometheus_collect_task_states(c, s, a):
     fut1.release()
     fut2.release()
 
-    await async_wait_for(lambda: not a.state.tasks, timeout=5)
+    await async_poll_for(lambda: not a.state.tasks, timeout=5)
     await assert_metrics()
 
 

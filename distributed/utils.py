@@ -20,7 +20,14 @@ import weakref
 import xml.etree.ElementTree
 from asyncio import TimeoutError
 from collections import deque
-from collections.abc import Callable, Collection, Container, KeysView, ValuesView
+from collections.abc import (
+    Awaitable,
+    Callable,
+    Collection,
+    Container,
+    KeysView,
+    ValuesView,
+)
 from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
@@ -332,7 +339,7 @@ class SyncMethodMixin:
         if asynchronous:
             future = func(*args, **kwargs)
             if callback_timeout is not None:
-                future = asyncio.wait_for(future, callback_timeout)
+                future = wait_for(future, callback_timeout)
             return future
         else:
             return sync(
@@ -373,7 +380,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             yield gen.moment
             future = func(*args, **kwargs)
             if callback_timeout is not None:
-                future = asyncio.wait_for(future, callback_timeout)
+                future = wait_for(future, callback_timeout)
             future = asyncio.ensure_future(future)
             result = yield future
         except Exception:
@@ -1791,3 +1798,15 @@ class RateLimiterFilter(logging.Filter):
         for filter in logger.filters:
             if isinstance(filter, cls):
                 filter._last_seen = -filter.rate
+
+
+if sys.version_info >= (3, 11):
+
+    async def wait_for(fut: Awaitable[T], timeout: float) -> T:
+        async with asyncio.timeout(timeout):
+            return await fut
+
+else:
+
+    async def wait_for(fut: Awaitable[T], timeout: float) -> T:
+        return await asyncio.wait_for(fut, timeout)

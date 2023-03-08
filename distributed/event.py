@@ -8,7 +8,7 @@ from contextlib import suppress
 
 from dask.utils import parse_timedelta
 
-from distributed.utils import TimeoutError, log_errors
+from distributed.utils import TimeoutError, log_errors, wait_for
 from distributed.worker import get_client
 
 logger = logging.getLogger(__name__)
@@ -70,7 +70,7 @@ class EventExtension:
         event = self._events[name]
         future = event.wait()
         if timeout is not None:
-            future = asyncio.wait_for(future, timeout)
+            future = wait_for(future, timeout)
 
         self._waiter_count[name] += 1
         try:

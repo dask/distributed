@@ -107,6 +107,7 @@ from distributed.utils import (
     no_default,
     recursive_to_dict,
     validate_key,
+    wait_for,
 )
 from distributed.utils_comm import (
     gather_from_workers,
@@ -5789,7 +5790,7 @@ class Scheduler(SchedulerState, ServerNode):
             start = monotonic()
             resps = await asyncio.gather(
                 *(
-                    asyncio.wait_for(
+                    wait_for(
                         # FIXME does not raise if the process fails to shut down,
                         # see https://github.com/dask/distributed/pull/6427/files#r894917424
                         # NOTE: Nanny will automatically restart worker process when it's killed

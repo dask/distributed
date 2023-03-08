@@ -12,7 +12,7 @@ from dask.utils import parse_timedelta, stringify
 
 from distributed.client import Future
 from distributed.metrics import time
-from distributed.utils import TimeoutError, log_errors
+from distributed.utils import TimeoutError, log_errors, wait_for
 from distributed.worker import get_client
 
 logger = logging.getLogger(__name__)
@@ -89,7 +89,7 @@ class VariableExtension:
                     await self.started.acquire()
                     await self.started.wait()
 
-                await asyncio.wait_for(_(), timeout=left)
+                await wait_for(_(), timeout=left)
             finally:
                 self.started.release()
 

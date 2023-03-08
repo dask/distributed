@@ -73,6 +73,7 @@ from distributed.utils import (
     log_errors,
     reset_logger_locks,
 )
+from distributed.utils import wait_for as utils_wait_for
 from distributed.worker import WORKER_ANY_RUNNING, Worker
 from distributed.worker_state_machine import (
     ComputeTaskEvent,
@@ -452,7 +453,7 @@ def check_active_rpc(loop, active_rpc_timeout=1):
         )
 
     async def wait():
-        await async_wait_for(
+        await async_poll_for(
             lambda: len(set(rpc.active) - active_before) == 0,
             timeout=active_rpc_timeout,
             fail_func=fail,
@@ -477,7 +478,7 @@ async def _acheck_active_rpc(active_rpc_timeout=1):
             "some RPCs left active by test: %s" % (set(rpc.active) - active_before)
         )
 
-    await async_wait_for(
+    await async_poll_for(
         lambda: len(set(rpc.active) - active_before) == 0,
         timeout=active_rpc_timeout,
         fail_func=fail,
@@ -723,9 +724,7 @@ def gen_test(
     async def async_fn_outer(async_fn, /, *args, **kwargs):
         with config_for_cluster_tests(**(config or {})):
             async with _acheck_active_rpc():
-                return await asyncio.wait_for(
-                    asyncio.create_task(async_fn(*args, **kwargs)), timeout
-                )
+                return await utils_wait_for(async_fn(*args, **kwargs), timeout)
 
     def _(func):
         @functools.wraps(func)
@@ -977,7 +976,7 @@ def gen_cluster(
                     yield s, workers
                 finally:
                     await end_cluster(s, workers)
-                    await asyncio.wait_for(cleanup_global_workers(), 1)
+                    await utils_wait_for(cleanup_global_workers(), 1)
 
             async def async_fn():
                 result = None
@@ -991,7 +990,7 @@ def gen_cluster(
                         try:
                             coro = func(*args, *outer_args, **kwargs)
                             task = asyncio.create_task(coro)
-                            coro2 = asyncio.wait_for(asyncio.shield(task), timeout)
+                            coro2 = utils_wait_for(asyncio.shield(task), timeout)
                             result = await coro2
                             validate_state(s, *workers)
 
@@ -1084,7 +1083,7 @@ def gen_cluster(
             async def async_fn_outer():
                 async with _acheck_active_rpc(active_rpc_timeout=active_rpc_timeout):
                     if timeout:
-                        return await asyncio.wait_for(async_fn(), timeout=timeout * 2)
+                        return await utils_wait_for(async_fn(), timeout=timeout * 2)
                     return await async_fn()
 
             return _run_and_close_tornado(async_fn_outer)
@@ -1247,7 +1246,7 @@ def popen(
                     print(err.decode() if isinstance(err, bytes) else err)
 
 
-def wait_for(predicate, timeout, fail_func=None, period=0.05):
+def poll_for(predicate, timeout, fail_func=None, period=0.05):
     deadline = time() + timeout
     while not predicate():
         sleep(period)
@@ -1257,7 +1256,7 @@ def wait_for(predicate, timeout, fail_func=None, period=0.05):
             pytest.fail(f"condition not reached until {timeout} seconds")
 
 
-async def async_wait_for(predicate, timeout, fail_func=None, period=0.05):
+async def async_poll_for(predicate, timeout, fail_func=None, period=0.05):
     deadline = time() + timeout
     while not predicate():
         await asyncio.sleep(period)
@@ -1265,6 +1264,22 @@ async def async_wait_for(predicate, timeout, fail_func=None, period=0.05):
             if fail_func is not None:
                 fail_func()
             pytest.fail(f"condition not reached until {timeout} seconds")
+
+
+def wait_for(*args, **kwargs):
+    warnings.warn(
+        "wait_for has been renamed to poll_for to avoid confusion with "
+        "asyncio.wait_for and utils.wait_for"
+    )
+    return poll_for(*args, **kwargs)
+
+
+async def async_wait_for(*args, **kwargs):
+    warnings.warn(
+        "async_wait_for has been renamed to async_poll_for to avoid confusion "
+        "with asyncio.wait_for and utils.wait_for"
+    )
+    return await async_poll_for(*args, **kwargs)
 
 
 @memoize

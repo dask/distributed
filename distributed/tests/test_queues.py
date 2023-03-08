@@ -9,7 +9,7 @@ import pytest
 
 from distributed import Client, Nanny, Queue, TimeoutError, wait, worker_client
 from distributed.metrics import time
-from distributed.utils import open_port
+from distributed.utils import open_port, wait_for
 from distributed.utils_test import div, gen_cluster, inc, popen
 
 
@@ -182,7 +182,7 @@ async def test_get_many(c, s, a, b):
     assert data == [1, 2]
 
     with pytest.raises(TimeoutError):
-        await asyncio.wait_for(xx.get(batch=2), 0.1)
+        await wait_for(xx.get(batch=2), 0.1)
 
 
 @gen_cluster(client=True)

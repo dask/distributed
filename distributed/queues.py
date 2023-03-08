@@ -8,6 +8,7 @@ from collections import defaultdict
 from dask.utils import parse_timedelta, stringify
 
 from distributed.client import Future
+from distributed.utils import wait_for
 from distributed.worker import get_client
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ class QueueExtension:
             self.scheduler.client_desires_keys(keys=[key], client="queue-%s" % name)
         else:
             record = {"type": "msgpack", "value": data}
-        await asyncio.wait_for(self.queues[name].put(record), timeout=timeout)
+        await wait_for(self.queues[name].put(record), timeout=timeout)
 
     def future_release(self, name=None, key=None, client=None):
         self.future_refcount[name, key] -= 1
@@ -116,7 +117,7 @@ class QueueExtension:
             out = [process(o) for o in out]
             return out
         else:
-            record = await asyncio.wait_for(self.queues[name].get(), timeout=timeout)
+            record = await wait_for(self.queues[name].get(), timeout=timeout)
             record = process(record)
             return record
 
