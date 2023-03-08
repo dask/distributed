@@ -523,6 +523,7 @@ async def test_dashboard_non_standard_ports(c, s, requires_default_ports):
         requests.get("http://localhost:4833/status/")
 
 
+@pytest.mark.filterwarnings("ignore:pkg_resources is deprecated")
 def test_version_option():
     runner = CliRunner()
     result = runner.invoke(main, ["--version"])
