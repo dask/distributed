@@ -20,6 +20,7 @@ class Span:
     # ^ NOTE: `Counter` does support non-int values according to the docs,
     # though type annotations don't indicate this.
     _token: contextvars.Token | None
+    _failure: str | None
 
     def __init__(
         self,
@@ -33,6 +34,7 @@ class Span:
         self.subspans = []
         self.counters = Counter()
         self._token = None
+        self._failure = None
 
     @property
     def total_time(self) -> float:
@@ -69,6 +71,11 @@ class Span:
         assert self.start_time is not None
         assert self.stop_time is None
         self.stop_time = self.metric()
+
+    def set_failed(self, failure: str) -> None:
+        assert not self.done
+        assert self._failure is None
+        self._failure = failure
 
     @contextmanager
     def as_current(self) -> Iterator[None]:
