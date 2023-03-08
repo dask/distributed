@@ -20,5 +20,4 @@ include distributed/py.typed
 exclude distributed/pytest_resourceleaks.py
 
 prune docs/_build
-include versioneer.py
 include distributed/_version.py
