@@ -526,12 +526,7 @@ async def test_dashboard_non_standard_ports(c, s, requires_default_ports):
 def test_version_option():
     runner = CliRunner()
     result = runner.invoke(main, ["--version"])
-
-    if result.exception and isinstance(result.exception, DeprecationWarning):
-        msg = f"dask-worker --version raised DeprecationWarning: {result.exception}"
-        pytest.xfail(msg)
-    else:
-        assert result.exit_code == 0
+    assert result.exit_code == 0
 
 
 @pytest.mark.slow
