@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from distributed.tracing import FlatSpan, Span, current_span, get_span, meter
+from distributed.tracing import FlatSpan, Span, current_span, get_span, trace
 
 
 def make_span(label: str, total_time: float, parent: Span | None = None) -> Span:
@@ -60,14 +60,14 @@ def test_get_span():
     assert current_span() is None
 
 
-def test_meter():
+def test_trace():
     assert current_span() is None
 
-    with meter("outer") as outer:
+    with trace("outer") as outer:
         assert current_span() is outer
         time.sleep(0.1)
 
-        with meter("inner") as inner:
+        with trace("inner") as inner:
             assert current_span() is inner
             time.sleep(0.2)
 

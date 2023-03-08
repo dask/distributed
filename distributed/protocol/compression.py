@@ -17,7 +17,7 @@ from tlz import identity
 
 import dask
 
-from distributed.tracing import meter
+from distributed.tracing import trace
 from distributed.utils import ensure_memoryview, nbytes, no_default
 
 compressions: dict[
@@ -151,7 +151,7 @@ def byte_sample(b, size, n):
         return memoryview(b"".join(parts))
 
 
-@meter("compress")
+@trace("compress")
 def maybe_compress(
     payload,
     min_size=10_000,
@@ -197,7 +197,7 @@ def maybe_compress(
     return None, payload
 
 
-@meter("decompress")
+@trace("decompress")
 def decompress(header, frames):
     """Decompress frames according to information in the header"""
     return [

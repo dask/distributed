@@ -186,7 +186,7 @@ def get_span(
 
 
 @contextmanager
-def meter(
+def trace(
     label: str | tuple[str, ...],
     metric: Callable[[], float] = time.perf_counter,
 ) -> Iterator[Span]:

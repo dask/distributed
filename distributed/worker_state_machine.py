@@ -50,7 +50,7 @@ from distributed.metrics import monotonic, time
 from distributed.protocol import pickle
 from distributed.protocol.serialize import Serialize
 from distributed.sizeof import safe_sizeof as sizeof
-from distributed.tracing import Span, get_span, meter
+from distributed.tracing import Span, get_span, trace
 from distributed.utils import recursive_to_dict
 
 logger = logging.getLogger("distributed.worker.state_machine")
@@ -2693,7 +2693,7 @@ class WorkerState:
             raise TransitionCounterMaxExceeded(ts.key, start, finish, self.story(ts))
 
         if func is not None:
-            with meter(("transition", key_split(ts.key), f"{start}->{finish}")) as span:
+            with trace(("transition", key_split(ts.key), f"{start}->{finish}")) as span:
                 recs, instructions = func(self, ts, *args, stimulus_id=stimulus_id)
                 self._notify_plugins("transition", ts.key, start, finish)
 
@@ -3693,21 +3693,21 @@ class WorkerState:
 
 
 @contextmanager
-def meter_start_only(label: str | tuple[str, ...]) -> Iterator[Span]:
+def trace_start_only(label: str | tuple[str, ...]) -> Iterator[Span]:
     """
-    Like `meter`, but does not stop the span when the contextmanager exits.
+    Like `trace`, but does not stop the span when the contextmanager exits.
 
     Creates a new span, starts it, and makes it current while within the block.
     Meant for use when creating async tasks, where the span will be stopped elsewhere::
 
-        with meter_start_only("label") as span:
+        with trace_start_only("label") as span:
             task = asyncio.create_task(func(span))
             task.add_done_callback(on_done)
 
         def func(span):
             stuff()
             # `span` is already current, because contextvars inherited from `create_task`.
-            with meter("sub-span"):
+            with trace("sub-span"):
                 other_stuff()
 
             return span
@@ -3773,7 +3773,7 @@ class BaseWorker(abc.ABC):
                 keys_str = ", ".join(peekn(27, inst.to_gather)[0])
                 if len(keys_str) > 80:
                     keys_str = keys_str[:77] + "..."
-                with meter_start_only("gather-dep") as span:
+                with trace_start_only("gather-dep") as span:
                     task = asyncio.create_task(
                         self.gather_dep(
                             inst.worker,
@@ -3786,7 +3786,7 @@ class BaseWorker(abc.ABC):
                     )
 
             elif isinstance(inst, Execute):
-                with meter_start_only(("execute", key_split(inst.key))) as span:
+                with trace_start_only(("execute", key_split(inst.key))) as span:
                     task = asyncio.create_task(
                         self.execute(
                             inst.key,

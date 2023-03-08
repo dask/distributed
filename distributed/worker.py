@@ -90,7 +90,7 @@ from distributed.shuffle import ShuffleWorkerExtension
 from distributed.sizeof import safe_sizeof as sizeof
 from distributed.threadpoolexecutor import ThreadPoolExecutor
 from distributed.threadpoolexecutor import secede as tpe_secede
-from distributed.tracing import Span, meter
+from distributed.tracing import Span, trace
 from distributed.utils import (
     TimeoutError,
     _maybe_complex,
@@ -2316,7 +2316,7 @@ class Worker(BaseWorker, ServerNode):
                     )
                 else:
                     # Can't capture contextvars across processes
-                    with meter("executor"):
+                    with trace("executor"):
                         result = await self.loop.run_in_executor(
                             e,
                             apply_function_simple,
@@ -2957,7 +2957,7 @@ def loads_function(bytes_object):
     return pickle.loads(bytes_object)
 
 
-@meter("deserialize-task")
+@trace("deserialize-task")
 def _deserialize(function=None, args=None, kwargs=None, task=NO_VALUE):
     """Deserialize task inputs and regularize to func, args, kwargs"""
     if function is not None:
@@ -3115,7 +3115,7 @@ def apply_function_simple(
     start = time()
     tstart = thread_time()
     try:
-        with meter("thread") as span:
+        with trace("thread") as span:
             result = function(*args, **kwargs)
     except (SystemExit, KeyboardInterrupt):
         # Special-case these, just like asyncio does all over the place. They will pass
