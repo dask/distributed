@@ -103,7 +103,7 @@ def test_flat_basic():
                 "subsub11",
             ),
             2,
-            Counter()
+            Counter(),
         ),
         FlatSpan(
             (
@@ -112,9 +112,9 @@ def test_flat_basic():
                 "subsub12",
             ),
             3,
-            Counter()
+            Counter(),
         ),
-        FlatSpan(("root", "sub1"), 0, Counter()),
+        FlatSpan(("root", "sub1", "own-time"), 0, Counter()),
         FlatSpan(
             (
                 "root",
@@ -122,8 +122,8 @@ def test_flat_basic():
                 "subsub21",
             ),
             2,
-            Counter()
+            Counter(),
         ),
-        FlatSpan(("root", "sub2"), 2, Counter()),
-        FlatSpan(("root",), 1, Counter()),
+        FlatSpan(("root", "sub2", "own-time"), 2, Counter()),
+        FlatSpan(("root", "own-time"), 1, Counter()),
     ]
