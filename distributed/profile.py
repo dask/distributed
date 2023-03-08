@@ -160,14 +160,15 @@ def process(
         # which can cause recursion errors later on since this can generate
         # deeply nested dictionaries
         depth = min(250, sys.getrecursionlimit() // 4)
-    if depth <= 0:
-        return None
+
     if any(frame.f_code.co_filename.endswith(o) for o in omit):
         return None
 
     prev = frame.f_back
-    if prev is not None and (
-        stop is None or not prev.f_code.co_filename.endswith(stop)
+    if (
+        depth > 0
+        and prev is not None
+        and (stop is None or not prev.f_code.co_filename.endswith(stop))
     ):
         new_state = process(prev, frame, state, stop=stop, depth=depth - 1)
         if new_state is None:
