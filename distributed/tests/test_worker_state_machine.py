@@ -1781,3 +1781,17 @@ def test_remove_worker_while_in_flight(ws):
         GatherDepNetworkFailureEvent(worker=ws2, total_nbytes=1, stimulus_id="s3")
     )
     assert ts.state == "missing"
+
+
+def test_remove_worker_unknown_peer(ws):
+    unknown_peer = "127.0.0.1:1"
+    ws2 = "127.0.0.1:2"
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s1"),
+        RemoveWorkerEvent(worker=unknown_peer, stimulus_id="s2"),
+    )
+    ts = ws.tasks["x"]
+    assert ts.state == "flight"
+    assert not ws.data_needed
+    assert not ws.tasks["y"].who_has
+    assert ws.has_what == {ws2: {"x"}}
