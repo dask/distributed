@@ -20,6 +20,7 @@ from collections.abc import (
     MutableMapping,
     Set,
 )
+from contextlib import contextmanager
 from copy import copy
 from dataclasses import dataclass, field
 from functools import lru_cache, partial, singledispatchmethod
@@ -28,6 +29,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     ClassVar,
+    Hashable,
     Literal,
     NamedTuple,
     Sequence,
@@ -48,6 +50,7 @@ from distributed.metrics import monotonic, time
 from distributed.protocol import pickle
 from distributed.protocol.serialize import Serialize
 from distributed.sizeof import safe_sizeof as sizeof
+from distributed.span import Span, get_span, meter
 from distributed.utils import recursive_to_dict
 
 logger = logging.getLogger("distributed.worker.state_machine")
@@ -439,7 +442,7 @@ class RetryBusyWorkerLater(Instruction):
 @dataclass
 class DigestMetric(Instruction):
     __slots__ = ("name", "value")
-    name: str
+    name: Hashable
     value: float
 
 
@@ -645,6 +648,20 @@ class StateMachineEvent:
 
 
 @dataclass
+class TracedEvent(StateMachineEvent):
+    __slots__ = ("span",)
+    span: Span
+
+    def to_digest_metrics(
+        self, *, coarsen_as: str | Literal[False] = False
+    ) -> list[Instruction]:  # convenience, so matches `RecsInstrs`
+        self.span.stop()
+        return span_to_digest_metrics(
+            self.span, stimulus_id=self.stimulus_id, coarsen_as=coarsen_as
+        )
+
+
+@dataclass
 class PauseEvent(StateMachineEvent):
     __slots__ = ()
 
@@ -661,7 +678,7 @@ class RetryBusyWorkerEvent(StateMachineEvent):
 
 
 @dataclass
-class GatherDepDoneEvent(StateMachineEvent):
+class GatherDepDoneEvent(TracedEvent):
     """:class:`GatherDep` instruction terminated (abstract base class)"""
 
     __slots__ = ("worker", "total_nbytes")
@@ -731,6 +748,7 @@ class GatherDepFailureEvent(GatherDepDoneEvent):
         worker: str,
         total_nbytes: int,
         stimulus_id: str,
+        span: Span,
     ) -> GatherDepFailureEvent:
         msg = error_message(err)
         return cls(
@@ -741,6 +759,7 @@ class GatherDepFailureEvent(GatherDepDoneEvent):
             exception_text=msg["exception_text"],
             traceback_text=msg["traceback_text"],
             stimulus_id=stimulus_id,
+            span=span,
         )
 
 
@@ -830,7 +849,7 @@ class ComputeTaskEvent(StateMachineEvent):
 
 
 @dataclass
-class ExecuteDoneEvent(StateMachineEvent):
+class ExecuteDoneEvent(TracedEvent):
     """Abstract base event for all the possible outcomes of a :class:`Compute`
     instruction
     """
@@ -887,6 +906,7 @@ class ExecuteSuccessEvent(ExecuteDoneEvent):
             nbytes=nbytes,
             type=None,
             stimulus_id=stimulus_id,
+            span=Span(stimulus_id),
         )
 
 
@@ -913,6 +933,7 @@ class ExecuteFailureEvent(ExecuteDoneEvent):
         start: float | None = None,
         stop: float | None = None,
         stimulus_id: str,
+        span: Span,
     ) -> ExecuteFailureEvent:
         if isinstance(err_or_msg, dict):
             msg = err_or_msg
@@ -928,6 +949,7 @@ class ExecuteFailureEvent(ExecuteDoneEvent):
             exception_text=msg["exception_text"],
             traceback_text=msg["traceback_text"],
             stimulus_id=stimulus_id,
+            span=span,
         )
 
     @staticmethod
@@ -948,6 +970,7 @@ class ExecuteFailureEvent(ExecuteDoneEvent):
             exception_text="",
             traceback_text="",
             stimulus_id=stimulus_id,
+            span=Span(stimulus_id),
         )
 
 
@@ -961,7 +984,7 @@ class RescheduleEvent(ExecuteDoneEvent):
         """Build an event. This method exists for compatibility with the other
         ExecuteDoneEvent subclasses.
         """
-        return RescheduleEvent(key=key, stimulus_id=stimulus_id)
+        return RescheduleEvent(key=key, stimulus_id=stimulus_id, span=Span(stimulus_id))
 
 
 @dataclass
@@ -1064,6 +1087,64 @@ def merge_recs_instructions(*args: RecsInstrs) -> RecsInstrs:
             recs[ts] = finish
         instr += instr_i
     return recs, instr
+
+
+def span_to_digest_metrics(
+    span: Span, *, stimulus_id: str, coarsen_as: str | Literal[False] = False
+) -> list[Instruction]:  # convenience, so matches `RecsInstrs`
+    """
+    Convert a `Span` into a list of `DigestMetric` instructions.
+
+    The `Span` is flattened, giving counts of the amount of own time spent
+    in each part. Counters are aggregated across sub-spans as well.
+
+    This is basically the "processing funcion" for converting traces
+    (trees of start-stop times) into single metrics about cumulative
+    time spent in different operations.
+
+    Then these metrics are "exported" using the normal `DigestMetric`
+    instruction.
+    """
+    if coarsen_as is not False:
+        return _span_to_digest_metrics_coarse(span, coarsen_as, stimulus_id=stimulus_id)
+    return _span_to_digest_metrics_fine(span, stimulus_id=stimulus_id)
+
+
+def _span_to_digest_metrics_fine(span: Span, *, stimulus_id: str) -> list[Instruction]:
+    digests: list[Instruction] = []
+    counters: Counter[Hashable] = Counter()
+    for sub in span.flat():
+        # TODO store and use fully-qualified name in `Span` so we don't
+        # have to rename here
+        counters.update({sub.label + (k,): v for k, v in sub.counters.items()})
+        digests.append(
+            DigestMetric(stimulus_id=stimulus_id, name=sub.label, value=sub.own_time)
+        )
+
+    digests.extend(
+        DigestMetric(stimulus_id=stimulus_id, name=k, value=v)
+        for k, v in counters.items()
+    )
+
+    return digests
+
+
+def _span_to_digest_metrics_coarse(
+    span: Span, coarsen_as: str, *, stimulus_id: str
+) -> list[Instruction]:
+    label = span.label + (coarsen_as,)
+    digests: list[Instruction] = [
+        DigestMetric(
+            stimulus_id=stimulus_id,
+            name=label,
+            value=span.total_time,
+        )
+    ]
+    digests.extend(
+        DigestMetric(stimulus_id=stimulus_id, name=label + (k,), value=v)
+        for k, v in span.counters.items()
+    )
+    return digests
 
 
 class WorkerState:
@@ -2612,8 +2693,16 @@ class WorkerState:
             raise TransitionCounterMaxExceeded(ts.key, start, finish, self.story(ts))
 
         if func is not None:
-            recs, instructions = func(self, ts, *args, stimulus_id=stimulus_id)
-            self._notify_plugins("transition", ts.key, start, finish)
+            with meter(("transition", key_split(ts.key), f"{start}->{finish}")) as span:
+                recs, instructions = func(self, ts, *args, stimulus_id=stimulus_id)
+                self._notify_plugins("transition", ts.key, start, finish)
+
+            if span.subspans:
+                # hack-ish: don't bother recording spans where nothing else happened.
+                # eventually we might remove this conditional.
+                instructions.extend(
+                    span_to_digest_metrics(span, stimulus_id=stimulus_id)
+                )
 
         elif "released" not in (start, finish):
             # start -> "released" -> finish
@@ -2949,8 +3038,10 @@ class WorkerState:
         The response may contain fewer keys than the request.
         """
         recommendations: Recs = {}
+        all_cancelled = True
         for ts in self._gather_dep_done_common(ev):
             if ts.key in ev.data:
+                all_cancelled = all_cancelled and ts.state == "cancelled"
                 recommendations[ts] = ("memory", ev.data[ts.key], ts.run_id)
             else:
                 self.log.append((ts.key, "missing-dep", ev.stimulus_id, time()))
@@ -2961,7 +3052,17 @@ class WorkerState:
                 self.has_what[ev.worker].discard(ts.key)
                 recommendations[ts] = "fetch"
 
-        return recommendations, []
+        # Log granular time metrics about times and bytes during network transfer,
+        # decompression, and deserialization. If all keys are missing or cancelled,
+        # clump time metrics together in a single reading. Note that, if only *some*
+        # keys are missing, this may hide latency issues for hard-to-find keys.
+        instr = ev.to_digest_metrics(
+            coarsen_as=(
+                "missing" if not ev.data else "cancelled" if all_cancelled else False
+            )
+        )
+
+        return recommendations, instr
 
     @_handle_event.register
     def _handle_gather_dep_busy(self, ev: GatherDepBusyEvent) -> RecsInstrs:
@@ -2989,6 +3090,8 @@ class WorkerState:
                     keys=refresh_who_has, stimulus_id=ev.stimulus_id
                 )
             )
+
+        instructions.extend(ev.to_digest_metrics(coarsen_as="busy"))
 
         return recommendations, instructions
 
@@ -3025,7 +3128,7 @@ class WorkerState:
             ts = self.tasks[key]
             ts.who_has.remove(ev.worker)
 
-        return recommendations, []
+        return recommendations, ev.to_digest_metrics(coarsen_as="failed")
 
     @_handle_event.register
     def _handle_gather_dep_failure(self, ev: GatherDepFailureEvent) -> RecsInstrs:
@@ -3043,7 +3146,7 @@ class WorkerState:
             for ts in self._gather_dep_done_common(ev)
         }
 
-        return recommendations, []
+        return recommendations, ev.to_digest_metrics(coarsen_as="failed")
 
     @_handle_event.register
     def _handle_secede(self, ev: SecedeEvent) -> RecsInstrs:
@@ -3105,7 +3208,7 @@ class WorkerState:
         return {ts: "released"}, []
 
     def _execute_done_common(
-        self, ev: ExecuteDoneEvent
+        self, ev: ExecuteDoneEvent, coarsen_metrics_as: str | Literal[False] = False
     ) -> tuple[TaskState, Recs, Instructions]:
         """Common code for the handlers of all subclasses of ExecuteDoneEvent.
 
@@ -3130,6 +3233,15 @@ class WorkerState:
 
         recs, instr = self._ensure_computing()
         assert ts not in recs
+
+        instr.extend(
+            ev.to_digest_metrics(
+                coarsen_as="cancelled"
+                if ts.state == "cancelled"
+                else coarsen_metrics_as
+            )
+        )
+
         return ts, recs, instr
 
     @_handle_event.register
@@ -3152,7 +3264,7 @@ class WorkerState:
     @_handle_event.register
     def _handle_execute_failure(self, ev: ExecuteFailureEvent) -> RecsInstrs:
         """Task execution failed"""
-        ts, recs, instr = self._execute_done_common(ev)
+        ts, recs, instr = self._execute_done_common(ev, coarsen_metrics_as="failed")
         if ev.start is not None and ev.stop is not None:
             ts.startstops.append(
                 {"action": "compute", "start": ev.start, "stop": ev.stop}
@@ -3173,7 +3285,9 @@ class WorkerState:
         Note: this has nothing to do with work stealing, which instead causes a
         FreeKeysEvent.
         """
-        ts, recs, instr = self._execute_done_common(ev)
+        ts, recs, instr = self._execute_done_common(
+            ev, coarsen_metrics_as="rescheduled"
+        )
         recs[ts] = "rescheduled"
         return recs, instr
 
@@ -3578,6 +3692,36 @@ class WorkerState:
         assert all((abs(v) < 1e-9) for v in total.values()), total
 
 
+@contextmanager
+def meter_start_only(label: str | tuple[str, ...]) -> Iterator[Span]:
+    """
+    Like `meter`, but does not stop the span when the contextmanager exits.
+
+    Creates a new span, starts it, and makes it current while within the block.
+    Meant for use when creating async tasks, where the span will be stopped elsewhere::
+
+        with meter_start_only("label") as span:
+            task = asyncio.create_task(func(span))
+            task.add_done_callback(on_done)
+
+        def func(span):
+            stuff()
+            # `span` is already current, because contextvars inherited from `create_task`.
+            with meter("sub-span"):
+                other_stuff()
+
+            return span
+
+        def on_done(span):
+            handle_done()
+            span.stop()
+    """
+    span = get_span(label)
+    span.start()
+    with span.as_current():
+        yield span
+
+
 class BaseWorker(abc.ABC):
     """Wrapper around the :class:`WorkerState` that implements instructions handling.
     This is an abstract class with several ``@abc.abstractmethod`` methods, to be
@@ -3629,21 +3773,28 @@ class BaseWorker(abc.ABC):
                 keys_str = ", ".join(peekn(27, inst.to_gather)[0])
                 if len(keys_str) > 80:
                     keys_str = keys_str[:77] + "..."
-                task = asyncio.create_task(
-                    self.gather_dep(
-                        inst.worker,
-                        inst.to_gather,
-                        total_nbytes=inst.total_nbytes,
-                        stimulus_id=inst.stimulus_id,
-                    ),
-                    name=f"gather_dep({inst.worker}, {{{keys_str}}})",
-                )
+                with meter_start_only("gather-dep") as span:
+                    task = asyncio.create_task(
+                        self.gather_dep(
+                            inst.worker,
+                            inst.to_gather,
+                            total_nbytes=inst.total_nbytes,
+                            stimulus_id=inst.stimulus_id,
+                            span=span,
+                        ),
+                        name=f"gather_dep({inst.worker}, {{{keys_str}}})",
+                    )
 
             elif isinstance(inst, Execute):
-                task = asyncio.create_task(
-                    self.execute(inst.key, stimulus_id=inst.stimulus_id),
-                    name=f"execute({inst.key})",
-                )
+                with meter_start_only(("execute", key_split(inst.key))) as span:
+                    task = asyncio.create_task(
+                        self.execute(
+                            inst.key,
+                            stimulus_id=inst.stimulus_id,
+                            span=span,
+                        ),
+                        name=f"execute({inst.key})",
+                    )
 
             elif isinstance(inst, RetryBusyWorkerLater):
                 task = asyncio.create_task(
@@ -3691,7 +3842,8 @@ class BaseWorker(abc.ABC):
         total_nbytes: int,
         *,
         stimulus_id: str,
-    ) -> StateMachineEvent:
+        span: Span,
+    ) -> TracedEvent:
         """Gather dependencies for a task from a worker who has them
 
         Parameters
@@ -3707,7 +3859,7 @@ class BaseWorker(abc.ABC):
         """
 
     @abc.abstractmethod
-    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
+    async def execute(self, key: str, *, stimulus_id: str, span: Span) -> TracedEvent:
         """Execute a task"""
 
     @abc.abstractmethod
@@ -3715,7 +3867,7 @@ class BaseWorker(abc.ABC):
         """Wait some time, then take a peer worker out of busy state"""
 
     @abc.abstractmethod
-    def digest_metric(self, name: str, value: float) -> None:
+    def digest_metric(self, name: Hashable, value: float) -> None:
         """Log an arbitrary numerical metric"""
 
 

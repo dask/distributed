@@ -63,6 +63,7 @@ from distributed.proctitle import enable_proctitle_on_children
 from distributed.protocol import deserialize
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.security import Security
+from distributed.span import Span
 from distributed.utils import (
     DequeHandler,
     _offload_executor,
@@ -82,7 +83,7 @@ from distributed.worker_state_machine import (
     StateMachineEvent,
 )
 from distributed.worker_state_machine import TaskState as WorkerTaskState
-from distributed.worker_state_machine import WorkerState
+from distributed.worker_state_machine import TracedEvent, WorkerState
 
 try:
     import dask.array  # register config
@@ -2267,11 +2268,11 @@ class BlockedExecute(Worker):
 
         super().__init__(*args, **kwargs)
 
-    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
+    async def execute(self, key: str, *, stimulus_id: str, span: Span) -> TracedEvent:
         self.in_execute.set()
         await self.block_execute.wait()
         try:
-            return await super().execute(key, stimulus_id=stimulus_id)
+            return await super().execute(key, stimulus_id=stimulus_id, span=span)
         finally:
             self.in_execute_exit.set()
             await self.block_execute_exit.wait()

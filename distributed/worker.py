@@ -32,6 +32,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     ClassVar,
+    Hashable,
     Literal,
     TextIO,
     TypedDict,
@@ -79,7 +80,7 @@ from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import _get_plugin_name
 from distributed.diskutils import WorkDir, WorkSpace
 from distributed.http import get_handlers
-from distributed.metrics import time
+from distributed.metrics import thread_time, time
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
 from distributed.protocol import pickle, to_serialize
@@ -87,6 +88,7 @@ from distributed.pubsub import PubSubWorkerExtension
 from distributed.security import Security
 from distributed.shuffle import ShuffleWorkerExtension
 from distributed.sizeof import safe_sizeof as sizeof
+from distributed.span import Span, meter
 from distributed.threadpoolexecutor import ThreadPoolExecutor
 from distributed.threadpoolexecutor import secede as tpe_secede
 from distributed.utils import (
@@ -139,6 +141,7 @@ from distributed.worker_state_machine import (
     StateMachineEvent,
     StealRequestEvent,
     TaskState,
+    TracedEvent,
     UnpauseEvent,
     UpdateDataEvent,
     WorkerState,
@@ -2054,7 +2057,8 @@ class Worker(BaseWorker, ServerNode):
         total_nbytes: int,
         *,
         stimulus_id: str,
-    ) -> StateMachineEvent:
+        span: Span,
+    ) -> TracedEvent:
         """Implements BaseWorker abstract method
 
         See also
@@ -2069,6 +2073,7 @@ class Worker(BaseWorker, ServerNode):
                 worker=worker,
                 total_nbytes=total_nbytes,
                 stimulus_id=f"worker-closing-{time()}",
+                span=span,
             )
 
         try:
@@ -2090,6 +2095,7 @@ class Worker(BaseWorker, ServerNode):
                     worker=worker,
                     total_nbytes=total_nbytes,
                     stimulus_id=f"gather-dep-busy-{time()}",
+                    span=span,
                 )
 
             assert response["status"] == "OK"
@@ -2109,6 +2115,7 @@ class Worker(BaseWorker, ServerNode):
                 total_nbytes=total_nbytes,
                 data=response["data"],
                 stimulus_id=f"gather-dep-success-{time()}",
+                span=span,
             )
 
         except OSError:
@@ -2120,6 +2127,7 @@ class Worker(BaseWorker, ServerNode):
                 worker=worker,
                 total_nbytes=total_nbytes,
                 stimulus_id=f"gather-dep-network-failure-{time()}",
+                span=span,
             )
 
         except Exception as e:
@@ -2135,6 +2143,7 @@ class Worker(BaseWorker, ServerNode):
                 worker=worker,
                 total_nbytes=total_nbytes,
                 stimulus_id=f"gather-dep-failure-{time()}",
+                span=span,
             )
 
     async def retry_busy_worker_later(self, worker: str) -> StateMachineEvent:
@@ -2150,7 +2159,7 @@ class Worker(BaseWorker, ServerNode):
             worker=worker, stimulus_id=f"retry-busy-worker-{time()}"
         )
 
-    def digest_metric(self, name: str, value: float) -> None:
+    def digest_metric(self, name: Hashable, value: float) -> None:
         """Implement BaseWorker.digest_metric by calling Server.digest_metric"""
         ServerNode.digest_metric(self, name, value)
 
@@ -2234,7 +2243,7 @@ class Worker(BaseWorker, ServerNode):
         return function, args, kwargs
 
     @fail_hard
-    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
+    async def execute(self, key: str, *, stimulus_id: str, span: Span) -> TracedEvent:
         """Execute a task. Implements BaseWorker abstract method.
 
         See also
@@ -2245,7 +2254,9 @@ class Worker(BaseWorker, ServerNode):
             # This is just for internal coherence of the WorkerState; the reschedule
             # message should not ever reach the Scheduler.
             # It is still OK if it does though.
-            return RescheduleEvent(key=key, stimulus_id=f"worker-closing-{time()}")
+            return RescheduleEvent(
+                key=key, stimulus_id=f"worker-closing-{time()}", span=span
+            )
 
         # The key *must* be in the worker state thanks to the cancelled state
         ts = self.state.tasks[key]
@@ -2259,6 +2270,7 @@ class Worker(BaseWorker, ServerNode):
                 exc,
                 key=key,
                 stimulus_id=f"run-spec-deserialize-failed-{time()}",
+                span=span,
             )
 
         try:
@@ -2290,8 +2302,7 @@ class Worker(BaseWorker, ServerNode):
                         self.scheduler_delay,
                     )
                 elif "ThreadPoolExecutor" in str(type(e)):
-                    result = await self.loop.run_in_executor(
-                        e,
+                    result = await offload(  # use offload to copy contextvars
                         apply_function,
                         function,
                         args2,
@@ -2301,16 +2312,19 @@ class Worker(BaseWorker, ServerNode):
                         self.active_threads,
                         self.active_threads_lock,
                         self.scheduler_delay,
+                        executor=e,
                     )
                 else:
-                    result = await self.loop.run_in_executor(
-                        e,
-                        apply_function_simple,
-                        function,
-                        args2,
-                        kwargs2,
-                        self.scheduler_delay,
-                    )
+                    # Can't capture contextvars across processes
+                    with meter("executor"):
+                        result = await self.loop.run_in_executor(
+                            e,
+                            apply_function_simple,
+                            function,
+                            args2,
+                            kwargs2,
+                            self.scheduler_delay,
+                        )
             finally:
                 self.active_keys.discard(key)
 
@@ -2328,11 +2342,14 @@ class Worker(BaseWorker, ServerNode):
                     nbytes=result["nbytes"],
                     type=result["type"],
                     stimulus_id=f"task-finished-{time()}",
+                    span=span,
                 )
 
             task_exc = result["actual-exception"]
             if isinstance(task_exc, Reschedule):
-                return RescheduleEvent(key=ts.key, stimulus_id=f"reschedule-{time()}")
+                return RescheduleEvent(
+                    key=ts.key, stimulus_id=f"reschedule-{time()}", span=span
+                )
             if (
                 self.status == Status.closing
                 and isinstance(task_exc, asyncio.CancelledError)
@@ -2346,7 +2363,9 @@ class Worker(BaseWorker, ServerNode):
                     f"Async task {key!r} cancelled during worker close; rescheduling."
                 )
                 return RescheduleEvent(
-                    key=ts.key, stimulus_id=f"cancelled-by-worker-close-{time()}"
+                    key=ts.key,
+                    stimulus_id=f"cancelled-by-worker-close-{time()}",
+                    span=span,
                 )
 
             logger.warning(
@@ -2368,14 +2387,13 @@ class Worker(BaseWorker, ServerNode):
                 start=result["start"],
                 stop=result["stop"],
                 stimulus_id=f"task-erred-{time()}",
+                span=span,
             )
 
         except Exception as exc:
             logger.error("Exception during execution of task %s.", key, exc_info=True)
             return ExecuteFailureEvent.from_exception(
-                exc,
-                key=key,
-                stimulus_id=f"execute-unknown-error-{time()}",
+                exc, key=key, stimulus_id=f"execute-unknown-error-{time()}", span=span
             )
 
     def _prepare_args_for_execution(
@@ -2939,6 +2957,7 @@ def loads_function(bytes_object):
     return pickle.loads(bytes_object)
 
 
+@meter("deserialize-task")
 def _deserialize(function=None, args=None, kwargs=None, task=NO_VALUE):
     """Deserialize task inputs and regularize to func, args, kwargs"""
     if function is not None:
@@ -3094,8 +3113,10 @@ def apply_function_simple(
     """
     ident = threading.get_ident()
     start = time()
+    tstart = thread_time()
     try:
-        result = function(*args, **kwargs)
+        with meter("thread") as span:
+            result = function(*args, **kwargs)
     except (SystemExit, KeyboardInterrupt):
         # Special-case these, just like asyncio does all over the place. They will pass
         # through `fail_hard` and `_handle_stimulus_from_task`, and eventually be caught
@@ -3121,6 +3142,7 @@ def apply_function_simple(
         }
     finally:
         end = time()
+        span.counters["thread-time"] += thread_time() - tstart
     msg["start"] = start + time_delay
     msg["stop"] = end + time_delay
     msg["thread"] = ident

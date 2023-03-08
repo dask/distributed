@@ -13,7 +13,7 @@ import weakref
 from collections import defaultdict, deque
 from collections.abc import Callable, Container, Coroutine, Generator
 from enum import Enum
-from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, TypeVar, final
+from typing import TYPE_CHECKING, Any, ClassVar, Hashable, TypedDict, TypeVar, final
 
 import tblib
 from tlz import merge
@@ -949,7 +949,7 @@ class Server:
         finally:
             self._event_finished.set()
 
-    def digest_metric(self, name: str, value: float) -> None:
+    def digest_metric(self, name: Hashable, value: float) -> None:
         # Granular data (requires crick)
         if self.digests is not None:
             self.digests[name].add(value)

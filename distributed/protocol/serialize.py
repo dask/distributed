@@ -24,6 +24,7 @@ from distributed.protocol.utils import (
     pack_frames_prelude,
     unpack_frames,
 )
+from distributed.span import meter
 from distributed.utils import ensure_memoryview, has_keyword
 
 dask_serialize = dask.utils.Dispatch("dask_serialize")
@@ -426,6 +427,7 @@ def deserialize(header, frames, deserializers=None):
     return loads(header, frames)
 
 
+@meter("serialize")
 def serialize_and_split(
     x, serializers=None, on_error="message", context=None, size=None
 ):
@@ -470,6 +472,7 @@ def serialize_and_split(
     return header, out_frames
 
 
+@meter("deserialize")
 def merge_and_deserialize(header, frames, deserializers=None):
     """Merge and deserialize frames
 

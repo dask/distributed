@@ -21,7 +21,11 @@ import xml.etree.ElementTree
 from asyncio import TimeoutError
 from collections import deque
 from collections.abc import Callable, Collection, Container, KeysView, ValuesView
-from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
+from concurrent.futures import (  # noqa: F401
+    CancelledError,
+    Executor,
+    ThreadPoolExecutor,
+)
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from datetime import timedelta
@@ -1410,12 +1414,28 @@ def import_term(name: str) -> AnyType:
     return getattr(module, attr_name)
 
 
-async def offload(fn, *args, **kwargs):
+async def offload(  # type: ignore[valid-type]
+    fn: Callable[P, T],  # FIXME improper use of `ParamSpec`?
+    *args: P.args,
+    executor: Executor | None = None,
+    **kwargs: P.kwargs,
+) -> T:
+    """Wrapper around :meth:`~asyncio.AbstractEventLoop.run_in_executor`, which
+    propagates contextvars.
+    By default, it offloads to a thread pool with a single worker.
+    See also
+    --------
+    https://bugs.python.org/issue34014
+    """
+    if executor is None:
+        # Not the same as defaulting to _offload_executor in the parameters, as this
+        # allows monkey-patching the _offload_executor during unit tests
+        executor = _offload_executor
+
     loop = asyncio.get_running_loop()
-    # Retain context vars while deserializing; see https://bugs.python.org/issue34014
     context = contextvars.copy_context()
     return await loop.run_in_executor(
-        _offload_executor, lambda: context.run(fn, *args, **kwargs)
+        executor, lambda: context.run(fn, *args, **kwargs)
     )
 
 
