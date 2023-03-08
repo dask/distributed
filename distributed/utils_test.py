@@ -63,7 +63,7 @@ from distributed.proctitle import enable_proctitle_on_children
 from distributed.protocol import deserialize
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.security import Security
-from distributed.span import Span
+from distributed.tracing import Span
 from distributed.utils import (
     DequeHandler,
     _offload_executor,

@@ -50,7 +50,7 @@ from distributed.metrics import monotonic, time
 from distributed.protocol import pickle
 from distributed.protocol.serialize import Serialize
 from distributed.sizeof import safe_sizeof as sizeof
-from distributed.span import Span, get_span, meter
+from distributed.tracing import Span, get_span, meter
 from distributed.utils import recursive_to_dict
 
 logger = logging.getLogger("distributed.worker.state_machine")

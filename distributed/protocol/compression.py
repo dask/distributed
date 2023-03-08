@@ -17,7 +17,7 @@ from tlz import identity
 
 import dask
 
-from distributed.span import meter
+from distributed.tracing import meter
 from distributed.utils import ensure_memoryview, nbytes, no_default
 
 compressions: dict[

@@ -88,9 +88,9 @@ from distributed.pubsub import PubSubWorkerExtension
 from distributed.security import Security
 from distributed.shuffle import ShuffleWorkerExtension
 from distributed.sizeof import safe_sizeof as sizeof
-from distributed.span import Span, meter
 from distributed.threadpoolexecutor import ThreadPoolExecutor
 from distributed.threadpoolexecutor import secede as tpe_secede
+from distributed.tracing import Span, meter
 from distributed.utils import (
     TimeoutError,
     _maybe_complex,

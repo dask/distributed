@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from distributed.span import FlatSpan, Span, current_span, get_span, meter
+from distributed.tracing import FlatSpan, Span, current_span, get_span, meter
 
 
 def make_span(label: str, total_time: float, parent: Span | None = None) -> Span:

@@ -14,7 +14,7 @@ import zict
 
 from distributed.protocol import deserialize_bytes, serialize_bytelist
 from distributed.sizeof import safe_sizeof
-from distributed.span import meter
+from distributed.tracing import meter
 from distributed.utils import RateLimiterFilter
 
 logger = logging.getLogger(__name__)
