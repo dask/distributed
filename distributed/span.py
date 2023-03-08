@@ -173,6 +173,7 @@ def get_span(
     label: str | tuple[str, ...],
     metric: Callable[[], float] = time.perf_counter,
 ) -> Span:
+    "Get a span, nested under any current span"
     try:
         parent = _current_span.get()
     except LookupError:
@@ -189,5 +190,6 @@ def meter(
     label: str | tuple[str, ...],
     metric: Callable[[], float] = time.perf_counter,
 ) -> Iterator[Span]:
+    "Contextmanager or decorator to create, start, and stop a nested span"
     with get_span(label, metric) as span:
         yield span

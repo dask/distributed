@@ -50,7 +50,7 @@ from distributed.metrics import monotonic, time
 from distributed.protocol import pickle
 from distributed.protocol.serialize import Serialize
 from distributed.sizeof import safe_sizeof as sizeof
-from distributed.span import Span, get_span
+from distributed.span import Span, get_span, meter
 from distributed.utils import recursive_to_dict
 
 logger = logging.getLogger("distributed.worker.state_machine")
@@ -656,45 +656,9 @@ class TracedEvent(StateMachineEvent):
         self, *, coarsen_as: str | Literal[False] = False
     ) -> list[Instruction]:  # convenience, so matches `RecsInstrs`
         self.span.stop()
-
-        if coarsen_as is not False:
-            return self._to_digest_metrics_coarse(coarsen_as)
-        return self._to_digest_metrics_fine()
-
-    def _to_digest_metrics_fine(self) -> list[Instruction]:
-        digests: list[Instruction] = []
-        counters: Counter[Hashable] = Counter()
-        for sub in self.span.flat():
-            # TODO store and use fully-qualified name in `Span` so we don't
-            # have to rename here
-            counters.update({sub.label + (k,): v for k, v in sub.counters.items()})
-            digests.append(
-                DigestMetric(
-                    stimulus_id=self.stimulus_id, name=sub.label, value=sub.own_time
-                )
-            )
-
-        digests.extend(
-            DigestMetric(stimulus_id=self.stimulus_id, name=k, value=v)
-            for k, v in counters.items()
+        return span_to_digest_metrics(
+            self.span, stimulus_id=self.stimulus_id, coarsen_as=coarsen_as
         )
-
-        return digests
-
-    def _to_digest_metrics_coarse(self, coarsen_as: str) -> list[Instruction]:
-        label = self.span.label + (coarsen_as,)
-        digests: list[Instruction] = [
-            DigestMetric(
-                stimulus_id=self.stimulus_id,
-                name=label,
-                value=self.span.total_time,
-            )
-        ]
-        digests.extend(
-            DigestMetric(stimulus_id=self.stimulus_id, name=label + (k,), value=v)
-            for k, v in self.span.counters.items()
-        )
-        return digests
 
 
 @dataclass
@@ -1123,6 +1087,64 @@ def merge_recs_instructions(*args: RecsInstrs) -> RecsInstrs:
             recs[ts] = finish
         instr += instr_i
     return recs, instr
+
+
+def span_to_digest_metrics(
+    span: Span, *, stimulus_id: str, coarsen_as: str | Literal[False] = False
+) -> list[Instruction]:  # convenience, so matches `RecsInstrs`
+    """
+    Convert a `Span` into a list of `DigestMetric` instructions.
+
+    The `Span` is flattened, giving counts of the amount of own time spent
+    in each part. Counters are aggregated across sub-spans as well.
+
+    This is basically the "processing funcion" for converting traces
+    (trees of start-stop times) into single metrics about cumulative
+    time spent in different operations.
+
+    Then these metrics are "exported" using the normal `DigestMetric`
+    instruction.
+    """
+    if coarsen_as is not False:
+        return _span_to_digest_metrics_coarse(span, coarsen_as, stimulus_id=stimulus_id)
+    return _span_to_digest_metrics_fine(span, stimulus_id=stimulus_id)
+
+
+def _span_to_digest_metrics_fine(span: Span, *, stimulus_id: str) -> list[Instruction]:
+    digests: list[Instruction] = []
+    counters: Counter[Hashable] = Counter()
+    for sub in span.flat():
+        # TODO store and use fully-qualified name in `Span` so we don't
+        # have to rename here
+        counters.update({sub.label + (k,): v for k, v in sub.counters.items()})
+        digests.append(
+            DigestMetric(stimulus_id=stimulus_id, name=sub.label, value=sub.own_time)
+        )
+
+    digests.extend(
+        DigestMetric(stimulus_id=stimulus_id, name=k, value=v)
+        for k, v in counters.items()
+    )
+
+    return digests
+
+
+def _span_to_digest_metrics_coarse(
+    span: Span, coarsen_as: str, *, stimulus_id: str
+) -> list[Instruction]:
+    label = span.label + (coarsen_as,)
+    digests: list[Instruction] = [
+        DigestMetric(
+            stimulus_id=stimulus_id,
+            name=label,
+            value=span.total_time,
+        )
+    ]
+    digests.extend(
+        DigestMetric(stimulus_id=stimulus_id, name=label + (k,), value=v)
+        for k, v in span.counters.items()
+    )
+    return digests
 
 
 class WorkerState:
@@ -2671,8 +2693,16 @@ class WorkerState:
             raise TransitionCounterMaxExceeded(ts.key, start, finish, self.story(ts))
 
         if func is not None:
-            recs, instructions = func(self, ts, *args, stimulus_id=stimulus_id)
-            self._notify_plugins("transition", ts.key, start, finish)
+            with meter(("transition", key_split(ts.key), f"{start}->{finish}")) as span:
+                recs, instructions = func(self, ts, *args, stimulus_id=stimulus_id)
+                self._notify_plugins("transition", ts.key, start, finish)
+
+            if span.subspans:
+                # hack-ish: don't bother recording spans where nothing else happened.
+                # eventually we might remove this conditional.
+                instructions.extend(
+                    span_to_digest_metrics(span, stimulus_id=stimulus_id)
+                )
 
         elif "released" not in (start, finish):
             # start -> "released" -> finish
