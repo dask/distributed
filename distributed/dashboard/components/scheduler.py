@@ -345,7 +345,7 @@ class ClusterMemory(DashboardComponent, MemoryColor):
         self.root.yaxis.visible = False
         self.root.ygrid.visible = False
 
-        self.root.toolbar_location = None
+        self.root.toolbar_location = "above"
         self.root.yaxis.visible = False
 
         hover = HoverTool(
@@ -373,7 +373,11 @@ class ClusterMemory(DashboardComponent, MemoryColor):
                             </div>
                             """,
         )
-        self.root.add_tools(hover)
+        help_ = HelpTool(
+            redirect="https://docs.dask.org/en/stable/dashboard.html#bytes-stored-and-bytes-per-worker",
+            description="Description of bytes stored plots",
+        )
+        self.root.add_tools(hover, help_)
 
     def _cluster_memory_color(self) -> str:
         colors = {
@@ -3165,7 +3169,7 @@ class TaskProgress(DashboardComponent):
             name="task_progress",
             x_range=x_range,
             y_range=y_range,
-            toolbar_location=None,
+            toolbar_location="above",
             tools="",
             min_border_bottom=50,
             **kwargs,
@@ -3305,7 +3309,11 @@ class TaskProgress(DashboardComponent):
                 </div>
                 """,
         )
-        self.root.add_tools(hover)
+        help_ = HelpTool(
+            redirect="https://docs.dask.org/en/stable/dashboard.html#progress",
+            description="A description of the progress bars plot.",
+        )
+        self.root.add_tools(hover, help_)
 
     @without_property_validation
     @log_errors
@@ -4249,16 +4257,22 @@ def status_doc(scheduler, extra, doc):
 
     doc.add_root(workers_memory.root)
 
-    tab1 = TabPanel(child=processing_root, title="Processing")
-    tab2 = TabPanel(child=cpu_root, title="CPU")
-    tab3 = TabPanel(child=occupancy_root, title="Occupancy")
-    tab4 = TabPanel(child=workers_transfer_bytes.root, title="Data Transfer")
+    tabs = [
+        TabPanel(child=processing_root, title="Processing"),
+        TabPanel(child=cpu_root, title="CPU"),
+        TabPanel(child=occupancy_root, title="Occupancy"),
+        TabPanel(child=workers_transfer_bytes.root, title="Data Transfer"),
+    ]
 
-    proc_tabs = Tabs(
-        tabs=[tab1, tab2, tab3, tab4],
-        name="processing_tabs",
-        sizing_mode="stretch_both",
+    help_ = HelpTool(
+        redirect="https://docs.dask.org/en/stable/dashboard.html#task-processing-cpu-utilization-occupancy-data-transfer",
+        description="A description of Task Processing/CPU Utilization/Occupancy",
     )
+    for tab in tabs:
+        tab.child.toolbar_location = "above"
+        tab.child.add_tools(help_)
+
+    proc_tabs = Tabs(tabs=tabs, name="processing_tabs", sizing_mode="stretch_both")
     doc.add_root(proc_tabs)
 
     task_stream = TaskStream(
