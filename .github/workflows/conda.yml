@@ -6,6 +6,7 @@ on:
   pull_request:
     paths:
       - setup.py
+      - setup.cfg
       - requirements.txt
       - continuous_integration/recipes/**
       - .github/workflows/conda.yml
