@@ -62,7 +62,7 @@ from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _LockedCommPool,
     assert_story,
-    async_wait_for,
+    async_poll_for,
     captured_logger,
     dec,
     div,
@@ -656,7 +656,7 @@ async def test_Executor(c, s):
 @gen_cluster(nthreads=[("127.0.0.1", 1)])
 async def test_close_on_disconnect(s, w):
     await s.close()
-    await async_wait_for(lambda: w.status == Status.closed, timeout=5)
+    await async_poll_for(lambda: w.status == Status.closed, timeout=5)
 
 
 @gen_cluster(nthreads=[])
@@ -731,7 +731,7 @@ async def test_types(c, s, a, b):
 
     await c._cancel(y)
 
-    await async_wait_for(lambda: y.key not in b.data, timeout=5)
+    await async_poll_for(lambda: y.key not in b.data, timeout=5)
     assert y.key not in b.state.tasks
 
 
@@ -926,7 +926,7 @@ async def test_stop_doing_unnecessary_work(c, s, a, b):
     await asyncio.sleep(0.1)
 
     del futures
-    await async_wait_for(lambda: a.state.executing_count == 0, timeout=0.5)
+    await async_poll_for(lambda: a.state.executing_count == 0, timeout=0.5)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
