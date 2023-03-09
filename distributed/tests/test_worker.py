@@ -2781,64 +2781,48 @@ async def test_forget_dependents_after_release(c, s, a):
     assert fut2.key not in {d.key for d in a.state.tasks[fut.key].dependents}
 
 
+@pytest.mark.filterwarnings("ignore:Large object of size")
 @gen_cluster(client=True)
 async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
     stealing_ext = s.extensions["stealing"]
     await stealing_ext.stop()
-    from distributed.utils import ThreadPoolExecutor
+    event = Event()
+    event2 = Event()
+    main_thread_id = threading.get_ident()
 
-    class CountingThreadPool(ThreadPoolExecutor):
-        counter = 0
+    class SlowDeserializeCallable:
+        def __init__(self):
+            self.data = b"0" * (OFFLOAD_THRESHOLD + 1)
 
-        def submit(self, *args, **kwargs):
-            CountingThreadPool.counter += 1
-            return super().submit(*args, **kwargs)
+        def __getstate__(self):
+            return self.data
 
-    # Ensure we're always offloading
-    monkeypatch.setattr("distributed.worker.OFFLOAD_THRESHOLD", 1)
-    threadpool = CountingThreadPool(
-        max_workers=1, thread_name_prefix="Counting-Offload-Threadpool"
-    )
-    try:
-        monkeypatch.setattr("distributed.utils._offload_executor", threadpool)
+        def __setstate__(self, state):
+            # Ensure this is actually offloaded
+            assert main_thread_id != threading.get_ident()
+            event.set()
+            event2.wait()
+            return SlowDeserializeCallable()
 
-        class SlowDeserializeCallable:
-            def __init__(self, delay=0.1):
-                self.delay = delay
+        def __sizeof__(self):
+            return OFFLOAD_THRESHOLD * 2
 
-            def __getstate__(self):
-                return self.delay
+        def __call__(self, *args, **kwargs):
+            return 41
 
-            def __setstate__(self, state):
-                delay = state
-                import time
+    obj = SlowDeserializeCallable()
+    fut = c.submit(lambda _: 41, obj, workers=[a.address], allow_other_workers=True)
 
-                time.sleep(delay)
-                return SlowDeserializeCallable(delay)
+    await event.wait()
+    ts = s.tasks[fut.key]
+    a.handle_stimulus(StealRequestEvent(key=fut.key, stimulus_id="test"))
+    stealing_ext.scheduler.send_task_to_worker(b.address, ts)
 
-            def __call__(self, *args, **kwargs):
-                return 41
-
-        slow_deserialized_func = SlowDeserializeCallable()
-        fut = c.submit(
-            slow_deserialized_func, 1, workers=[a.address], allow_other_workers=True
-        )
-
-        while CountingThreadPool.counter == 0:
-            await asyncio.sleep(0)
-
-        ts = s.tasks[fut.key]
-        a.handle_stimulus(StealRequestEvent(key=fut.key, stimulus_id="test"))
-        stealing_ext.scheduler.send_task_to_worker(b.address, ts)
-
-        fut2 = c.submit(inc, fut, workers=[a.address])
-        fut3 = c.submit(inc, fut2, workers=[a.address])
-
-        assert await fut2 == 42
-        await fut3
-
-    finally:
-        threadpool.shutdown()
+    fut2 = c.submit(inc, fut, workers=[a.address])
+    fut3 = c.submit(inc, fut2, workers=[a.address])
+    await event2.set()
+    assert await fut2 == 42
+    await fut3
 
 
 @gen_cluster(client=True)
