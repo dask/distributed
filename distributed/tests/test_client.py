@@ -4839,34 +4839,41 @@ class SlowKillNanny(Nanny):
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("raise_for_timeout", (True, False))
+@pytest.mark.parametrize("raise_for_error", (True, False))
 @gen_cluster(client=True, Worker=SlowKillNanny)
-async def test_restart_workers_timeout(c, s, a, b, raise_for_timeout):
+async def test_restart_workers_timeout(c, s, a, b, raise_for_error):
     kwargs = dict(workers=[a.worker_address], timeout=0.001)
 
-    if raise_for_timeout:  # default is to raise
+    if raise_for_error:  # default is to raise
         with pytest.raises(TimeoutError) as excinfo:
             await c.restart_workers(**kwargs)
         msg = str(excinfo.value).lower()
         assert "workers failed to restart" in msg
         assert a.worker_address in msg
     else:
-        results = await c.restart_workers(raise_for_timeout=raise_for_timeout, **kwargs)
+        results = await c.restart_workers(raise_for_error=raise_for_error, **kwargs)
         assert results == {a.worker_address: "timed out"}
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, Worker=Nanny)
-async def test_restart_workers_exception(c, s, a, b):
+@pytest.mark.parametrize("raise_for_error", (True, False))
+@gen_cluster(client=True, Worker=SlowKillNanny)
+async def test_restart_workers_exception(c, s, a, b, raise_for_error):
     async def fail_instantiate(*_args, **_kwargs):
-        raise ValueError()
+        raise ValueError("broken")
 
     a.instantiate = fail_instantiate
 
-    results = await c.restart_workers(workers=[a.worker_address])
-    msg: ErrorMessage = results[a.worker_address]
-    assert msg["status"] == "error"
-    assert msg["exception_text"] == "ValueError()"
+    if raise_for_error:  # default is to raise
+        with pytest.raises(ValueError, match="broken") as excinfo:
+            await c.restart_workers(workers=[a.worker_address])
+    else:
+        results = await c.restart_workers(
+            workers=[a.worker_address], raise_for_error=raise_for_error
+        )
+        msg: ErrorMessage = results[a.worker_address]
+        assert msg["status"] == "error"
+        assert msg["exception_text"] == "ValueError('broken')"
 
 
 @pytest.mark.slow

@@ -46,6 +46,7 @@ from dask.utils import (
 )
 from dask.widgets import get_template
 
+from distributed.core import ErrorMessage
 from distributed.utils import wait_for
 
 try:
@@ -3533,13 +3534,13 @@ class Client(SyncMethodMixin):
         self,
         workers: list[str],
         timeout: int | float | None = None,
-        raise_for_timeout: bool = True,
-    ) -> dict[str, str]:
+        raise_for_error: bool = True,
+    ) -> dict[str, str | ErrorMessage]:
         info = self.scheduler_info()
         name_to_addr = {meta["name"]: addr for addr, meta in info["workers"].items()}
         worker_addrs = [name_to_addr.get(w, w) for w in workers]
 
-        restart_out: dict[str, str] = await self.scheduler.broadcast(
+        restart_out: dict[str, str | ErrorMessage] = await self.scheduler.broadcast(
             msg={"op": "restart", "timeout": timeout},
             workers=worker_addrs,
             nanny=True,
@@ -3549,17 +3550,21 @@ class Client(SyncMethodMixin):
         results = {w: restart_out[w_addr] for w, w_addr in zip(workers, worker_addrs)}
 
         timeout_workers = [w for w, status in results.items() if status == "timed out"]
-        if timeout_workers and raise_for_timeout:
+        if timeout_workers and raise_for_error:
             raise TimeoutError(
                 f"The following workers failed to restart with {timeout} seconds: {timeout_workers}"
             )
+
+        errored: list[ErrorMessage] = [m for m in results.values() if "exception" in m]  # type: ignore
+        if errored and raise_for_error:
+            raise pickle.loads(errored[0]["exception"])  # type: ignore
         return results
 
     def restart_workers(
         self,
         workers: list[str],
         timeout: int | float | None = None,
-        raise_for_timeout: bool = True,
+        raise_for_error: bool = True,
     ) -> dict[str, str]:
         """Restart a specified set of workers
 
@@ -3575,9 +3580,10 @@ class Client(SyncMethodMixin):
             Workers to restart. This can be a list of worker addresses, names, or a both.
         timeout : int | float | None
             Number of seconds to wait
-        raise_for_timeout: bool (default True)
+        raise_for_error: bool (default True)
             Whether to raise a :py:class:`TimeoutError` if restarting worker(s) doesn't
-            finish within ``timeout``.
+            finish within ``timeout``, or another exception caused from restarting
+            worker(s).
 
         Returns
         -------
@@ -3621,7 +3627,7 @@ class Client(SyncMethodMixin):
             self._restart_workers,
             workers=workers,
             timeout=timeout,
-            raise_for_timeout=raise_for_timeout,
+            raise_for_error=raise_for_error,
         )
 
     async def _upload_large_file(self, local_filename, remote_filename=None):
