@@ -107,6 +107,7 @@ from distributed.utils import (
     recursive_to_dict,
     silence_logging,
     thread_state,
+    wait_for,
     warn_on_duration,
 )
 from distributed.utils_comm import gather_from_workers, pack_data, retry_operation
@@ -229,7 +230,7 @@ async def _force_close(self, reason: str):
     2.  If it doesn't, log and kill the process
     """
     try:
-        await asyncio.wait_for(
+        await wait_for(
             self.close(nanny=False, executor_wait=False, reason=reason),
             30,
         )

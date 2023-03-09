@@ -96,7 +96,7 @@ from distributed.utils_test import (
     BlockedGatherDep,
     TaskStateMetadataPlugin,
     _UnhashableCallable,
-    async_wait_for,
+    async_poll_for,
     asyncinc,
     block_on_event,
     captured_logger,
@@ -110,6 +110,7 @@ from distributed.utils_test import (
     inc,
     map_varying,
     nodebug,
+    poll_for,
     popen,
     randominc,
     save_sys_modules,
@@ -119,7 +120,6 @@ from distributed.utils_test import (
     throws,
     tls_only_security,
     varying,
-    wait_for,
     wait_for_state,
 )
 
@@ -475,16 +475,16 @@ def test_Future_release_sync(c):
     x = c.submit(div, 1, 1)
     x.result()
     x.release()
-    wait_for(lambda: not c.futures, timeout=0.3)
+    poll_for(lambda: not c.futures, timeout=0.3)
 
     x = c.submit(slowinc, 1, delay=0.8)
     x.release()
-    wait_for(lambda: not c.futures, timeout=0.3)
+    poll_for(lambda: not c.futures, timeout=0.3)
 
     x = c.submit(div, 1, 0)
     x.exception()
     x.release()
-    wait_for(lambda: not c.futures, timeout=0.3)
+    poll_for(lambda: not c.futures, timeout=0.3)
 
 
 def test_short_tracebacks(loop, c):
@@ -551,7 +551,7 @@ async def test_gc(s, a, b):
         await x
         assert s.tasks[x.key].who_has
         x.__del__()
-        await async_wait_for(
+        await async_poll_for(
             lambda: x.key not in s.tasks or not s.tasks[x.key].who_has, timeout=0.3
         )
 
@@ -2303,15 +2303,14 @@ async def test_cancel_multi_client(s, a, b):
 
 
 @gen_cluster(nthreads=[("", 1)], client=True)
-async def test_cancel_before_known_to_scheduler(c, s, a):
-    with captured_logger("distributed.scheduler") as slogs:
-        f = c.submit(inc, 1)
-        await c.cancel([f])
+async def test_cancel_before_known_to_scheduler(c, s, a, caplog):
+    f = c.submit(inc, 1)
+    await c.cancel([f])
 
-        with pytest.raises(CancelledError):
-            await f
-
-        assert "Scheduler cancels key" in slogs.getvalue()
+    with pytest.raises(CancelledError):
+        await f
+    while f"Scheduler cancels key {f.key}" not in caplog.text:
+        await asyncio.sleep(0.05)
 
 
 @gen_cluster(client=True)
@@ -3459,9 +3458,9 @@ def test_get_returns_early(c):
         result = c.get({"x": (throws, 1), "y": (block, event)}, ["x", "y"])
 
     # Futures should be released and forgotten
-    wait_for(lambda: not c.futures, timeout=1)
+    poll_for(lambda: not c.futures, timeout=1)
     event.set()
-    wait_for(lambda: not any(c.processing().values()), timeout=3)
+    poll_for(lambda: not any(c.processing().values()), timeout=3)
 
     x = c.submit(inc, 1)
     x.result()

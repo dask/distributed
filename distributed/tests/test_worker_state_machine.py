@@ -23,7 +23,7 @@ from distributed.utils_test import (
     NO_AMM,
     _LockedCommPool,
     assert_story,
-    async_wait_for,
+    async_poll_for,
     freeze_data_fetching,
     gen_cluster,
     inc,
@@ -667,14 +667,14 @@ async def test_lose_replica_during_fetch(c, s, w1, w2, w3, as_deps):
 
         assert len(s.tasks["x"].who_has) == 2
         await w2.close()
-        await async_wait_for(lambda: len(s.tasks["x"].who_has) == 1, timeout=5)
+        await async_poll_for(lambda: len(s.tasks["x"].who_has) == 1, timeout=5)
 
         if as_deps:
             y2 = c.submit(inc, x, key="y2", workers=[w1.address])
         else:
             s.request_acquire_replicas(w1.address, ["x"], stimulus_id="test")
 
-        await async_wait_for(
+        await async_poll_for(
             lambda: w1.state.tasks["x"].who_has == {w3.address}, timeout=5
         )
 

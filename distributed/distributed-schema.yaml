@@ -1141,6 +1141,9 @@ properties:
               host-cpu:
                 type: boolean
                 description: Should we include host-wide CPU usage, with very granular breakdown?
+              gil-contention:
+                type: boolean
+                description: Should we include GIL contention metrics, requires `gilknocker` to be installed.
 
       rmm:
         type: object

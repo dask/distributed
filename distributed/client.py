@@ -46,6 +46,8 @@ from dask.utils import (
 )
 from dask.widgets import get_template
 
+from distributed.utils import wait_for
+
 try:
     from dask.delayed import single_key
 except ImportError:
@@ -597,7 +599,7 @@ class FutureState:
             Time in seconds after which to raise a
             ``dask.distributed.TimeoutError``
         """
-        await asyncio.wait_for(self._get_event().wait(), timeout)
+        await wait_for(self._get_event().wait(), timeout)
 
     def __repr__(self):
         return f"<{self.__class__.__name__}: {self.status}>"
@@ -953,7 +955,7 @@ class Client(SyncMethodMixin):
         self._stream_handlers = {
             "key-in-memory": self._handle_key_in_memory,
             "lost-data": self._handle_lost_data,
-            "cancelled-key": self._handle_cancelled_key,
+            "cancelled-keys": self._handle_cancelled_keys,
             "task-retried": self._handle_retried_key,
             "task-erred": self._handle_task_erred,
             "restart": self._handle_restart,
@@ -1330,7 +1332,7 @@ class Client(SyncMethodMixin):
             )
             comm.name = "Client->Scheduler"
             if timeout is not None:
-                await asyncio.wait_for(self._update_scheduler_info(), timeout)
+                await wait_for(self._update_scheduler_info(), timeout)
             else:
                 await self._update_scheduler_info()
             await comm.write(
@@ -1349,7 +1351,7 @@ class Client(SyncMethodMixin):
         finally:
             self._connecting_to_scheduler = False
         if timeout is not None:
-            msg = await asyncio.wait_for(comm.read(), timeout)
+            msg = await wait_for(comm.read(), timeout)
         else:
             msg = await comm.read()
         assert len(msg) == 1
@@ -1569,10 +1571,11 @@ class Client(SyncMethodMixin):
         if state is not None:
             state.lose()
 
-    def _handle_cancelled_key(self, key=None):
-        state = self.futures.get(key)
-        if state is not None:
-            state.cancel()
+    def _handle_cancelled_keys(self, keys):
+        for key in keys:
+            state = self.futures.get(key)
+            if state is not None:
+                state.cancel()
 
     def _handle_retried_key(self, key=None):
         state = self.futures.get(key)
@@ -1608,13 +1611,13 @@ class Client(SyncMethodMixin):
         )
         if should_wait:
             with suppress(asyncio.CancelledError, TimeoutError):
-                await asyncio.wait_for(asyncio.shield(handle_report_task), 0.1)
+                await wait_for(asyncio.shield(handle_report_task), 0.1)
 
         yield
 
         if should_wait:
             with suppress(TimeoutError, asyncio.CancelledError):
-                await asyncio.wait_for(handle_report_task, 0 if fast else 2)
+                await wait_for(handle_report_task, 0 if fast else 2)
 
     async def _close(self, fast=False):
         """
@@ -1715,7 +1718,7 @@ class Client(SyncMethodMixin):
         if self.asynchronous:
             coro = self._close()
             if timeout:
-                coro = asyncio.wait_for(coro, timeout)
+                coro = wait_for(coro, timeout)
             return coro
 
         if self._start_arg is None:
@@ -2559,8 +2562,9 @@ class Client(SyncMethodMixin):
         )
 
     async def _cancel(self, futures, force=False):
+        # FIXME: This method is asynchronous since interacting with the FutureState below requires an event loop.
         keys = list({stringify(f.key) for f in futures_of(futures)})
-        await self.scheduler.cancel(keys=keys, client=self.id, force=force)
+        self._send_to_scheduler({"op": "cancel-keys", "keys": keys, "force": force})
         for k in keys:
             st = self.futures.pop(k, None)
             if st is not None:
@@ -2569,11 +2573,9 @@ class Client(SyncMethodMixin):
     def cancel(self, futures, asynchronous=None, force=False):
         """
         Cancel running futures
-
         This stops future tasks from being scheduled if they have not yet run
         and deletes them if they have already run.  After calling, this result
         and all dependent results will no longer be accessible
-
         Parameters
         ----------
         futures : List[Future]
@@ -4906,17 +4908,16 @@ async def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
         )
     fs = futures_of(fs)
     if return_when == ALL_COMPLETED:
-        wait_for = distributed.utils.All
+        future = distributed.utils.All({f._state.wait() for f in fs})
     elif return_when == FIRST_COMPLETED:
-        wait_for = distributed.utils.Any
+        future = distributed.utils.Any({f._state.wait() for f in fs})
     else:
         raise NotImplementedError(
             "Only return_when='ALL_COMPLETED' and 'FIRST_COMPLETED' are supported"
         )
 
-    future = wait_for({f._state.wait() for f in fs})
     if timeout is not None:
-        future = asyncio.wait_for(future, timeout)
+        future = wait_for(future, timeout)
     await future
 
     done, not_done = (

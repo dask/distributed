@@ -17,7 +17,7 @@ from distributed.client import wait
 from distributed.core import Status
 from distributed.utils import is_valid_xml
 from distributed.utils_test import (
-    async_wait_for,
+    async_poll_for,
     div,
     fetch_metrics,
     fetch_metrics_body,
@@ -293,7 +293,7 @@ async def test_prometheus_collect_worker_states(c, s, a, b):
 
     a.monitor.get_process_memory = lambda: 2**40
     sa = s.workers[a.address]
-    await async_wait_for(lambda: sa.status == Status.paused, timeout=2)
+    await async_poll_for(lambda: sa.status == Status.paused, timeout=2)
     assert await fetch_metrics() == {
         "idle": 1,
         "partially_saturated": 0,

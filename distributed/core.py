@@ -44,6 +44,7 @@ from distributed.utils import (
     iscoroutinefunction,
     recursive_to_dict,
     truncate_exception,
+    wait_for,
 )
 
 if TYPE_CHECKING:
@@ -532,7 +533,7 @@ class Server:
                 self.__startup_exc = exc
 
             try:
-                await asyncio.wait_for(self.start_unsafe(), timeout=timeout)
+                await wait_for(self.start_unsafe(), timeout=timeout)
             except asyncio.TimeoutError as exc:
                 await _close_on_failure(exc)
                 raise asyncio.TimeoutError(

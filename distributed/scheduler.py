@@ -107,6 +107,7 @@ from distributed.utils import (
     no_default,
     recursive_to_dict,
     validate_key,
+    wait_for,
 )
 from distributed.utils_comm import (
     gather_from_workers,
@@ -3583,6 +3584,7 @@ class Scheduler(SchedulerState, ServerNode):
             "close-client": self.remove_client,
             "subscribe-topic": self.subscribe_topic,
             "unsubscribe-topic": self.unsubscribe_topic,
+            "cancel-keys": self.stimulus_cancel,
         }
 
         self.handlers = {
@@ -3592,7 +3594,6 @@ class Scheduler(SchedulerState, ServerNode):
             "register_nanny": self.add_nanny,
             "unregister": self.remove_worker,
             "gather": self.gather,
-            "cancel": self.stimulus_cancel,
             "retry": self.stimulus_retry,
             "feed": self.feed,
             "terminate": self.close,
@@ -4893,49 +4894,41 @@ class Scheduler(SchedulerState, ServerNode):
 
         return "OK"
 
-    async def stimulus_cancel(self, keys, client, force=False):
+    def stimulus_cancel(
+        self, keys: Sequence[str], client: str, force: bool = False
+    ) -> None:
         """Stop execution on a list of keys"""
         logger.info("Client %s requests to cancel %d keys", client, len(keys))
         if client:
             self.log_event(
                 client, {"action": "cancel", "count": len(keys), "force": force}
             )
-
-        await asyncio.gather(
-            *[self._cancel_key(key, client, force=force) for key in keys]
-        )
-
-    async def _cancel_key(self, key, client, force=False):
-        """Cancel a particular key and all dependents"""
-        # TODO: this should be converted to use the transition mechanism
-        ts = self.tasks.get(key)
-        try:
-            cs = self.clients[client]
-        except KeyError:
-            return
-
-        # no key yet, lets try again in a moment
-        start = time()
-        while ts is None or not ts.who_wants:
-            await asyncio.sleep(0.1)
-            ts = self.tasks.get(key)
-            if time() - start >= 1:
+        cancelled_keys = []
+        clients = []
+        for key in keys:
+            ts: TaskState | None = self.tasks.get(key)
+            if not ts:
+                continue
+            try:
+                cs: ClientState = self.clients[client]
+            except KeyError:
                 return
 
-        if force or ts.who_wants == {cs}:  # no one else wants this key
-            await asyncio.gather(
-                *[
-                    self._cancel_key(dts.key, client, force=force)
-                    for dts in ts.dependents
-                ]
-            )
-            logger.info("Scheduler cancels key %s.  Force=%s", key, force)
-            self.report({"op": "cancelled-key", "key": key})
-        clients = list(ts.who_wants) if force else [cs]
+            if force or ts.who_wants == {cs}:  # no one else wants this key
+                if ts.dependents:
+                    self.stimulus_cancel(
+                        [dts.key for dts in ts.dependents], client, force=force
+                    )
+                logger.info("Scheduler cancels key %s.  Force=%s", key, force)
+                cancelled_keys.append(key)
+            clients.extend(list(ts.who_wants) if force else [cs])
         for cs in clients:
             self.client_releases_keys(
-                keys=[key], client=cs.client_key, stimulus_id=f"cancel-key-{time()}"
+                keys=cancelled_keys,
+                client=cs.client_key,
+                stimulus_id=f"cancel-key-{time()}",
             )
+        self.report({"op": "cancelled-keys", "keys": cancelled_keys})
 
     def client_desires_keys(self, keys=None, client=None):
         cs: ClientState = self.clients.get(client)
@@ -5797,7 +5790,7 @@ class Scheduler(SchedulerState, ServerNode):
             start = monotonic()
             resps = await asyncio.gather(
                 *(
-                    asyncio.wait_for(
+                    wait_for(
                         # FIXME does not raise if the process fails to shut down,
                         # see https://github.com/dask/distributed/pull/6427/files#r894917424
                         # NOTE: Nanny will automatically restart worker process when it's killed
@@ -6907,7 +6900,7 @@ class Scheduler(SchedulerState, ServerNode):
         if ts is not None:
             report_msg = _task_to_report_msg(ts)
         else:
-            report_msg = {"op": "cancelled-key", "key": key}
+            report_msg = {"op": "cancelled-keys", "keys": [key]}
         if report_msg is not None:
             self.report(report_msg, ts=ts, client=client)
 
@@ -7859,7 +7852,7 @@ class Scheduler(SchedulerState, ServerNode):
 
 def _task_to_report_msg(ts: TaskState) -> dict[str, Any] | None:
     if ts.state == "forgotten":
-        return {"op": "cancelled-key", "key": ts.key}
+        return {"op": "cancelled-keys", "keys": [ts.key]}
     elif ts.state == "memory":
         return {"op": "key-in-memory", "key": ts.key}
     elif ts.state == "erred":
