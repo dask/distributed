@@ -46,6 +46,7 @@ from dask.utils import (
 )
 from dask.widgets import get_template
 
+from distributed.core import ErrorMessage
 from distributed.utils import wait_for
 
 try:
@@ -3530,22 +3531,40 @@ class Client(SyncMethodMixin):
         )
 
     async def _restart_workers(
-        self, workers: list[str], timeout: int | float | None = None
-    ) -> dict[str, str]:
-        results: dict[str, str] = await self.scheduler.broadcast(
-            msg={"op": "restart", "timeout": timeout}, workers=workers, nanny=True
+        self,
+        workers: list[str],
+        timeout: int | float | None = None,
+        raise_for_error: bool = True,
+    ) -> dict[str, str | ErrorMessage]:
+        info = self.scheduler_info()
+        name_to_addr = {meta["name"]: addr for addr, meta in info["workers"].items()}
+        worker_addrs = [name_to_addr.get(w, w) for w in workers]
+
+        restart_out: dict[str, str | ErrorMessage] = await self.scheduler.broadcast(
+            msg={"op": "restart", "timeout": timeout},
+            workers=worker_addrs,
+            nanny=True,
         )
-        timeout_workers = {
-            key: value for key, value in results.items() if value == "timed out"
-        }
-        if timeout_workers:
+
+        # Map keys back to original `workers` input names/addresses
+        results = {w: restart_out[w_addr] for w, w_addr in zip(workers, worker_addrs)}
+
+        timeout_workers = [w for w, status in results.items() if status == "timed out"]
+        if timeout_workers and raise_for_error:
             raise TimeoutError(
-                f"The following workers failed to restart with {timeout} seconds: {list(timeout_workers.keys())}"
+                f"The following workers failed to restart with {timeout} seconds: {timeout_workers}"
             )
+
+        errored: list[ErrorMessage] = [m for m in results.values() if "exception" in m]  # type: ignore
+        if errored and raise_for_error:
+            raise pickle.loads(errored[0]["exception"])  # type: ignore
         return results
 
     def restart_workers(
-        self, workers: list[str], timeout: int | float | None = None
+        self,
+        workers: list[str],
+        timeout: int | float | None = None,
+        raise_for_error: bool = True,
     ) -> dict[str, str]:
         """Restart a specified set of workers
 
@@ -3558,14 +3577,19 @@ class Client(SyncMethodMixin):
         Parameters
         ----------
         workers : list[str]
-            Workers to restart.
+            Workers to restart. This can be a list of worker addresses, names, or a both.
         timeout : int | float | None
             Number of seconds to wait
+        raise_for_error: bool (default True)
+            Whether to raise a :py:class:`TimeoutError` if restarting worker(s) doesn't
+            finish within ``timeout``, or another exception caused from restarting
+            worker(s).
 
         Returns
         -------
         dict[str, str]
-            Mapping of worker and restart status.
+            Mapping of worker and restart status, the keys will match the original
+            values passed in via ``workers``.
 
         Notes
         -----
@@ -3593,8 +3617,9 @@ class Client(SyncMethodMixin):
         Client.restart
         """
         info = self.scheduler_info()
-        for worker in workers:
-            if info["workers"][worker]["nanny"] is None:
+
+        for worker, meta in info["workers"].items():
+            if (worker in workers or meta["name"] in workers) and meta["nanny"] is None:
                 raise ValueError(
                     f"Restarting workers requires a nanny to be used. Worker {worker} has type {info['workers'][worker]['type']}."
                 )
@@ -3602,6 +3627,7 @@ class Client(SyncMethodMixin):
             self._restart_workers,
             workers=workers,
             timeout=timeout,
+            raise_for_error=raise_for_error,
         )
 
     async def _upload_large_file(self, local_filename, remote_filename=None):
