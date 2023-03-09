@@ -42,7 +42,8 @@ from distributed import (
     wait,
 )
 from distributed.comm.registry import backends
-from distributed.compatibility import LINUX, WINDOWS, to_thread
+from distributed.comm.utils import OFFLOAD_THRESHOLD
+from distributed.compatibility import LINUX, WINDOWS, randbytes, to_thread
 from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import (
@@ -3770,27 +3771,28 @@ async def test_forward_output(c, s, a, b, capsys):
     assert "" == err
 
 
+class EnsureOffloaded:
+    def __init__(self, main_thread_id):
+        self.main_thread_id = main_thread_id
+        self.data = randbytes(OFFLOAD_THRESHOLD + 1)
+
+    def __sizeof__(self):
+        return len(self.data)
+
+    def __getstate__(self):
+        assert self.main_thread_id
+        assert self.main_thread_id != threading.get_ident()
+        return (self.data, self.main_thread_id, threading.get_ident())
+
+    def __setstate__(self, state):
+        _, main_thread, serialize_thread = state
+        assert main_thread != threading.get_ident()
+        return EnsureOffloaded(main_thread)
+
+
 @gen_cluster(client=True)
 async def test_offload_getdata(c, s, a, b):
     """Test that functions wrapped by offload() are metered"""
-    import random
-    import threading
-
-    # TODO: this is not  a real test, yet
-    print("main thread", threading.get_ident())
-    n = 200_000_000
-
-    class C:
-        def __sizeof__(self):
-            return n
-
-        def __getstate__(self):
-            print("__getstate__", threading.get_ident())
-            return random.randbytes(n)
-
-        def __setstate__(self, state):
-            print("__setstate__", threading.get_ident())
-
-    x = c.submit(C, key="x", workers=[a.address])
+    x = c.submit(EnsureOffloaded, threading.get_ident(), key="x", workers=[a.address])
     y = c.submit(lambda x: None, x, key="y", workers=[b.address])
     await y
