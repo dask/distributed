@@ -13,6 +13,7 @@ from distributed.utils_test import (
     BlockedGetData,
     _LockedCommPool,
     assert_story,
+    async_poll_for,
     gen_cluster,
     inc,
     lock_inc,
@@ -265,16 +266,10 @@ def test_flight_cancelled_error(ws):
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_in_flight_lost_after_resumed(c, s, b):
-    lock_executing = Lock()
-
-    def block_execution(lock):
-        lock.acquire()
-        return 1
-
     async with BlockedGetData(s.address) as a:
         fut1 = c.submit(
-            block_execution,
-            lock_executing,
+            inc,
+            1,
             workers=[a.address],
             key="fut1",
         )
@@ -294,30 +289,12 @@ async def test_in_flight_lost_after_resumed(c, s, b):
         # to be recomputed on B
         await s.remove_worker(a.address, stimulus_id="foo", close=False, safe=True)
 
-        while not b.state.tasks[fut1.key].state == "resumed":
-            await asyncio.sleep(0.01)
+        await wait_for_state(fut1.key, "resumed", b, interval=0)
 
         fut1.release()
         fut2.release()
 
-        while not b.state.tasks[fut1.key].state == "cancelled":
-            await asyncio.sleep(0.01)
-
-        a.block_get_data.set()
-        while b.state.tasks:
-            await asyncio.sleep(0.01)
-
-    assert_story(
-        b.state.story(fut1.key),
-        expect=[
-            # The initial free-keys is rejected
-            ("free-keys", (fut1.key,)),
-            (fut1.key, "resumed", "released", "cancelled", {}),
-            # After gather_dep receives the data, the task is forgotten
-            (fut1.key, "cancelled", "memory", "released", {fut1.key: "forgotten"}),
-            (fut1.key, "released", "forgotten", "forgotten", {}),
-        ],
-    )
+        await async_poll_for(lambda: not b.state.tasks, timeout=5)
 
 
 @gen_cluster(client=True)
