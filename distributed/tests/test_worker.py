@@ -25,7 +25,7 @@ from tlz import first, pluck, sliding_window
 from tornado.ioloop import IOLoop
 
 import dask
-from dask import delayed
+from dask import delayed, istask
 from dask.system import CPU_COUNT
 from dask.utils import tmpfile
 
@@ -2786,9 +2786,6 @@ async def test_forget_dependents_after_release(c, s, a):
 async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
     stealing_ext = s.extensions["stealing"]
     await stealing_ext.stop()
-    event = Event()
-    event2 = Event()
-    main_thread_id = threading.get_ident()
 
     class SlowDeserializeCallable:
         def __init__(self):
@@ -2798,10 +2795,6 @@ async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
             return self.data
 
         def __setstate__(self, state):
-            # Ensure this is actually offloaded
-            assert main_thread_id != threading.get_ident()
-            event.set()
-            event2.wait()
             return SlowDeserializeCallable()
 
         def __sizeof__(self):
@@ -2810,17 +2803,28 @@ async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
         def __call__(self, *args, **kwargs):
             return 41
 
+    in_deserialize = asyncio.Event()
+    wait_in_deserialize = asyncio.Event()
+
+    async def custom_worker_offload(func, *args):
+        res = func(*args)
+        if not istask(args) and istask(res):
+            in_deserialize.set()
+            await wait_in_deserialize.wait()
+        return res
+
+    monkeypatch.setattr("distributed.worker.offload", custom_worker_offload)
     obj = SlowDeserializeCallable()
     fut = c.submit(lambda _: 41, obj, workers=[a.address], allow_other_workers=True)
 
-    await event.wait()
+    await in_deserialize.wait()
     ts = s.tasks[fut.key]
     a.handle_stimulus(StealRequestEvent(key=fut.key, stimulus_id="test"))
     stealing_ext.scheduler.send_task_to_worker(b.address, ts)
 
     fut2 = c.submit(inc, fut, workers=[a.address])
     fut3 = c.submit(inc, fut2, workers=[a.address])
-    await event2.set()
+    wait_in_deserialize.set()
     assert await fut2 == 42
     await fut3
 
