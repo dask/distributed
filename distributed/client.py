@@ -5514,20 +5514,26 @@ class performance_report:
     mode: str, optional
         Mode parameter to pass to :func:`bokeh.io.output.output_file`. Defaults to ``None``.
 
-    Examples
-    --------
-    >>> with performance_report(filename="myfile.html", stacklevel=1):
-    ...     x.compute()
+    **storage_options:
+         Any additional arguments to :func:`fsspec.open` when writing to a URL.
+
+     Examples
+     --------
+     >>> with performance_report(filename="myfile.html", stacklevel=1):
+     ...     x.compute()
 
     $ python -m http.server
     $ open myfile.html
     """
 
-    def __init__(self, filename="dask-report.html", stacklevel=1, mode=None):
+    def __init__(
+        self, filename="dask-report.html", stacklevel=1, mode=None, storage_options=None
+    ):
         self.filename = filename
         # stacklevel 0 or less - shows dask internals which likely isn't helpful
         self._stacklevel = stacklevel if stacklevel > 0 else 1
         self.mode = mode
+        self.storage_options = storage_options or {}
 
     async def __aenter__(self):
         self.start = time()
@@ -5537,13 +5543,17 @@ class performance_report:
         await get_client().get_task_stream(start=0, stop=0)  # ensure plugin
 
     async def __aexit__(self, exc_type, exc_value, traceback, code=None):
+        import fsspec
+
         client = get_client()
         if code is None:
             code = client._get_computation_code(self._stacklevel + 1)
         data = await client.scheduler.performance_report(
             start=self.start, last_count=self.last_count, code=code, mode=self.mode
         )
-        with open(self.filename, "w") as f:
+        with fsspec.open(
+            self.filename, mode="w", compression="infer", **self.storage_options
+        ) as f:
             f.write(data)
 
     def __enter__(self):

@@ -6576,8 +6576,9 @@ async def test_run_on_scheduler_async_def_wait(c, s, a, b):
 
 @pytest.mark.slow
 @pytest.mark.skipif(WINDOWS, reason="frequently kills off the whole test suite")
+@pytest.mark.parametrize("local", [True, False])
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 2)
-async def test_performance_report(c, s, a, b):
+async def test_performance_report(c, s, a, b, local):
     pytest.importorskip("bokeh")
     da = pytest.importorskip("dask.array")
 
@@ -6590,8 +6591,16 @@ async def test_performance_report(c, s, a, b):
         """
         x = da.random.random((1000, 1000), chunks=(100, 100))
         with tmpfile(extension="html") as fn:
+            urlpath = fn
+            if not local:
+                pytest.importorskip("fsspec")
+                # Make it look like an fsspec path
+                urlpath = f"file://{fn}"
             async with performance_report(
-                filename=fn, stacklevel=stacklevel, mode=mode
+                filename=urlpath,
+                stacklevel=stacklevel,
+                mode=mode,
+                storage_options=local,
             ):
                 await c.compute((x + x.T).sum())
 
