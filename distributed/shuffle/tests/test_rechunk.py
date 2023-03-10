@@ -9,6 +9,8 @@ import pytest
 np = pytest.importorskip("numpy")
 da = pytest.importorskip("dask.array")
 
+from concurrent.futures import ThreadPoolExecutor
+
 import dask
 from dask.array.core import concatenate3
 from dask.array.rechunk import normalize_chunks, rechunk
@@ -26,6 +28,16 @@ from distributed.utils_test import gen_cluster, gen_test
 class ArrayRechunkTestPool(AbstractShuffleTestPool):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._executor = ThreadPoolExecutor(2)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            self._executor.shutdown(cancel_futures=True)
+        except Exception:  # pragma: no cover
+            self._executor.shutdown()
 
     def new_shuffle(
         self,
@@ -47,7 +59,7 @@ class ArrayRechunkTestPool(AbstractShuffleTestPool):
             id=ShuffleId(name),
             run_id=next(AbstractShuffleTestPool._shuffle_run_id_iterator),
             local_address=name,
-            nthreads=2,
+            executor=self._executor,
             rpc=self,
             scheduler=self,
             memory_limiter_disk=ResourceLimiter(10000000),
@@ -85,58 +97,60 @@ async def test_lowlevel_rechunk(
 
     assert len(set(worker_for_mapping.values())) == min(n_workers, len(new_indices))
 
-    local_shuffle_pool = ArrayRechunkTestPool()
-    shuffles = []
-    for i in range(n_workers):
-        shuffles.append(
-            local_shuffle_pool.new_shuffle(
-                name=workers[i],
-                worker_for_mapping=worker_for_mapping,
-                old=old,
-                new=new,
-                directory=tmp_path,
-                loop=loop_in_thread,
+    with ArrayRechunkTestPool() as local_shuffle_pool:
+        shuffles = []
+        for i in range(n_workers):
+            shuffles.append(
+                local_shuffle_pool.new_shuffle(
+                    name=workers[i],
+                    worker_for_mapping=worker_for_mapping,
+                    old=old,
+                    new=new,
+                    directory=tmp_path,
+                    loop=loop_in_thread,
+                )
             )
+        random.seed(42)
+        if barrier_first_worker:
+            barrier_worker = shuffles[0]
+        else:
+            barrier_worker = random.sample(shuffles, k=1)[0]
+
+        try:
+            for i, (idx, arr) in enumerate(old_chunks.items()):
+                s = shuffles[i % len(shuffles)]
+                await s.add_partition(arr, idx)
+
+            await barrier_worker.barrier()
+
+            total_bytes_sent = 0
+            total_bytes_recvd = 0
+            total_bytes_recvd_shuffle = 0
+            for s in shuffles:
+                metrics = s.heartbeat()
+                assert metrics["comm"]["total"] == metrics["comm"]["written"]
+                total_bytes_sent += metrics["comm"]["written"]
+                total_bytes_recvd += metrics["disk"]["total"]
+                total_bytes_recvd_shuffle += s.total_recvd
+
+            assert total_bytes_recvd_shuffle == total_bytes_sent
+
+            all_chunks = np.empty(tuple(len(dim) for dim in new), dtype="O")
+            for ix, worker in worker_for_mapping.items():
+                s = local_shuffle_pool.shuffles[worker]
+                all_chunks[ix] = await s.get_output_partition(ix)
+
+        finally:
+            await asyncio.gather(*[s.close() for s in shuffles])
+
+        old_cs = np.empty(tuple(len(dim) for dim in old), dtype="O")
+        for ix, arr in old_chunks.items():
+            old_cs[ix] = arr
+        np.testing.assert_array_equal(
+            concatenate3(old_cs.tolist()),
+            concatenate3(all_chunks.tolist()),
+            strict=True,
         )
-    random.seed(42)
-    if barrier_first_worker:
-        barrier_worker = shuffles[0]
-    else:
-        barrier_worker = random.sample(shuffles, k=1)[0]
-
-    try:
-        for i, (idx, arr) in enumerate(old_chunks.items()):
-            s = shuffles[i % len(shuffles)]
-            await s.add_partition(arr, idx)
-
-        await barrier_worker.barrier()
-
-        total_bytes_sent = 0
-        total_bytes_recvd = 0
-        total_bytes_recvd_shuffle = 0
-        for s in shuffles:
-            metrics = s.heartbeat()
-            assert metrics["comm"]["total"] == metrics["comm"]["written"]
-            total_bytes_sent += metrics["comm"]["written"]
-            total_bytes_recvd += metrics["disk"]["total"]
-            total_bytes_recvd_shuffle += s.total_recvd
-
-        assert total_bytes_recvd_shuffle == total_bytes_sent
-
-        all_chunks = np.empty(tuple(len(dim) for dim in new), dtype="O")
-        for ix, worker in worker_for_mapping.items():
-            s = local_shuffle_pool.shuffles[worker]
-            all_chunks[ix] = await s.get_output_partition(ix)
-
-    finally:
-        await asyncio.gather(*[s.close() for s in shuffles])
-
-    old_cs = np.empty(tuple(len(dim) for dim in old), dtype="O")
-    for ix, arr in old_chunks.items():
-        old_cs[ix] = arr
-    np.testing.assert_array_equal(
-        concatenate3(old_cs.tolist()), concatenate3(all_chunks.tolist()), strict=True
-    )
 
 
 def test_raise_on_fuse_optimization():

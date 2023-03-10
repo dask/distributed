@@ -7,6 +7,7 @@ import os
 import random
 import shutil
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from itertools import count
 from typing import Any, Mapping
 from unittest import mock
@@ -1107,6 +1108,16 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._executor = ThreadPoolExecutor(2)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            self._executor.shutdown(cancel_futures=True)
+        except Exception:  # pragma: no cover
+            self._executor.shutdown()
 
     def new_shuffle(
         self,
@@ -1127,7 +1138,7 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
             id=ShuffleId(name),
             run_id=next(AbstractShuffleTestPool._shuffle_run_id_iterator),
             local_address=name,
-            nthreads=2,
+            executor=self._executor,
             rpc=self,
             scheduler=self,
             memory_limiter_disk=ResourceLimiter(10000000),
@@ -1172,54 +1183,54 @@ async def test_basic_lowlevel_shuffle(
     assert len(set(worker_for_mapping.values())) == min(n_workers, npartitions)
     schema = pa.Schema.from_pandas(dfs[0])
 
-    local_shuffle_pool = DataFrameShuffleTestPool()
-    shuffles = []
-    for ix in range(n_workers):
-        shuffles.append(
-            local_shuffle_pool.new_shuffle(
-                name=workers[ix],
-                worker_for_mapping=worker_for_mapping,
-                schema=schema,
-                directory=tmp_path,
-                loop=loop_in_thread,
+    with DataFrameShuffleTestPool() as local_shuffle_pool:
+        shuffles = []
+        for ix in range(n_workers):
+            shuffles.append(
+                local_shuffle_pool.new_shuffle(
+                    name=workers[ix],
+                    worker_for_mapping=worker_for_mapping,
+                    schema=schema,
+                    directory=tmp_path,
+                    loop=loop_in_thread,
+                )
             )
-        )
-    random.seed(42)
-    if barrier_first_worker:
-        barrier_worker = shuffles[0]
-    else:
-        barrier_worker = random.sample(shuffles, k=1)[0]
+        random.seed(42)
+        if barrier_first_worker:
+            barrier_worker = shuffles[0]
+        else:
+            barrier_worker = random.sample(shuffles, k=1)[0]
 
-    try:
-        for ix, df in enumerate(dfs):
-            s = shuffles[ix % len(shuffles)]
-            await s.add_partition(df, ix)
+        try:
+            for ix, df in enumerate(dfs):
+                s = shuffles[ix % len(shuffles)]
+                await s.add_partition(df, ix)
 
-        await barrier_worker.barrier()
+            await barrier_worker.barrier()
 
-        total_bytes_sent = 0
-        total_bytes_recvd = 0
-        total_bytes_recvd_shuffle = 0
-        for s in shuffles:
-            metrics = s.heartbeat()
-            assert metrics["comm"]["total"] == metrics["comm"]["written"]
-            total_bytes_sent += metrics["comm"]["written"]
-            total_bytes_recvd += metrics["disk"]["total"]
-            total_bytes_recvd_shuffle += s.total_recvd
+            total_bytes_sent = 0
+            total_bytes_recvd = 0
+            total_bytes_recvd_shuffle = 0
+            for s in shuffles:
+                metrics = s.heartbeat()
+                assert metrics["comm"]["total"] == metrics["comm"]["written"]
+                total_bytes_sent += metrics["comm"]["written"]
+                total_bytes_recvd += metrics["disk"]["total"]
+                total_bytes_recvd_shuffle += s.total_recvd
 
-        assert total_bytes_recvd_shuffle == total_bytes_sent
+            assert total_bytes_recvd_shuffle == total_bytes_sent
 
-        all_parts = []
-        for part, worker in worker_for_mapping.items():
-            s = local_shuffle_pool.shuffles[worker]
-            all_parts.append(s.get_output_partition(part))
+            all_parts = []
+            for part, worker in worker_for_mapping.items():
+                s = local_shuffle_pool.shuffles[worker]
+                all_parts.append(s.get_output_partition(part))
 
-        all_parts = await asyncio.gather(*all_parts)
+            all_parts = await asyncio.gather(*all_parts)
 
-        df_after = pd.concat(all_parts)
-    finally:
-        await asyncio.gather(*[s.close() for s in shuffles])
-    assert len(df_after) == len(pd.concat(dfs))
+            df_after = pd.concat(all_parts)
+        finally:
+            await asyncio.gather(*[s.close() for s in shuffles])
+        assert len(df_after) == len(pd.concat(dfs))
 
 
 @gen_test()
@@ -1247,34 +1258,33 @@ async def test_error_offload(tmp_path, loop_in_thread):
         partitions_for_worker[w].append(part)
     schema = pa.Schema.from_pandas(dfs[0])
 
-    local_shuffle_pool = DataFrameShuffleTestPool()
-
     class ErrorOffload(DataFrameShuffleRun):
         async def offload(self, func, *args):
             raise RuntimeError("Error during deserialization")
 
-    sA = local_shuffle_pool.new_shuffle(
-        name="A",
-        worker_for_mapping=worker_for_mapping,
-        schema=schema,
-        directory=tmp_path,
-        loop=loop_in_thread,
-        Shuffle=ErrorOffload,
-    )
-    sB = local_shuffle_pool.new_shuffle(
-        name="B",
-        worker_for_mapping=worker_for_mapping,
-        schema=schema,
-        directory=tmp_path,
-        loop=loop_in_thread,
-    )
-    try:
-        await sB.add_partition(dfs[0], 0)
-        with pytest.raises(RuntimeError, match="Error during deserialization"):
-            await sB.add_partition(dfs[1], 1)
-            await sB.barrier()
-    finally:
-        await asyncio.gather(*[s.close() for s in [sA, sB]])
+    with DataFrameShuffleTestPool() as local_shuffle_pool:
+        sA = local_shuffle_pool.new_shuffle(
+            name="A",
+            worker_for_mapping=worker_for_mapping,
+            schema=schema,
+            directory=tmp_path,
+            loop=loop_in_thread,
+            Shuffle=ErrorOffload,
+        )
+        sB = local_shuffle_pool.new_shuffle(
+            name="B",
+            worker_for_mapping=worker_for_mapping,
+            schema=schema,
+            directory=tmp_path,
+            loop=loop_in_thread,
+        )
+        try:
+            await sB.add_partition(dfs[0], 0)
+            with pytest.raises(RuntimeError, match="Error during deserialization"):
+                await sB.add_partition(dfs[1], 1)
+                await sB.barrier()
+        finally:
+            await asyncio.gather(*[s.close() for s in [sA, sB]])
 
 
 @gen_test()
@@ -1302,33 +1312,32 @@ async def test_error_send(tmp_path, loop_in_thread):
         partitions_for_worker[w].append(part)
     schema = pa.Schema.from_pandas(dfs[0])
 
-    local_shuffle_pool = DataFrameShuffleTestPool()
-
     class ErrorSend(DataFrameShuffleRun):
         async def send(self, *args: Any, **kwargs: Any) -> None:
             raise RuntimeError("Error during send")
 
-    sA = local_shuffle_pool.new_shuffle(
-        name="A",
-        worker_for_mapping=worker_for_mapping,
-        schema=schema,
-        directory=tmp_path,
-        loop=loop_in_thread,
-        Shuffle=ErrorSend,
-    )
-    sB = local_shuffle_pool.new_shuffle(
-        name="B",
-        worker_for_mapping=worker_for_mapping,
-        schema=schema,
-        directory=tmp_path,
-        loop=loop_in_thread,
-    )
-    try:
-        await sA.add_partition(dfs[0], 0)
-        with pytest.raises(RuntimeError, match="Error during send"):
-            await sA.barrier()
-    finally:
-        await asyncio.gather(*[s.close() for s in [sA, sB]])
+    with DataFrameShuffleTestPool() as local_shuffle_pool:
+        sA = local_shuffle_pool.new_shuffle(
+            name="A",
+            worker_for_mapping=worker_for_mapping,
+            schema=schema,
+            directory=tmp_path,
+            loop=loop_in_thread,
+            Shuffle=ErrorSend,
+        )
+        sB = local_shuffle_pool.new_shuffle(
+            name="B",
+            worker_for_mapping=worker_for_mapping,
+            schema=schema,
+            directory=tmp_path,
+            loop=loop_in_thread,
+        )
+        try:
+            await sA.add_partition(dfs[0], 0)
+            with pytest.raises(RuntimeError, match="Error during send"):
+                await sA.barrier()
+        finally:
+            await asyncio.gather(*[s.close() for s in [sA, sB]])
 
 
 @gen_test()
@@ -1356,33 +1365,32 @@ async def test_error_receive(tmp_path, loop_in_thread):
         partitions_for_worker[w].append(part)
     schema = pa.Schema.from_pandas(dfs[0])
 
-    local_shuffle_pool = DataFrameShuffleTestPool()
-
     class ErrorReceive(DataFrameShuffleRun):
         async def receive(self, data: list[tuple[int, bytes]]) -> None:
             raise RuntimeError("Error during receive")
 
-    sA = local_shuffle_pool.new_shuffle(
-        name="A",
-        worker_for_mapping=worker_for_mapping,
-        schema=schema,
-        directory=tmp_path,
-        loop=loop_in_thread,
-        Shuffle=ErrorReceive,
-    )
-    sB = local_shuffle_pool.new_shuffle(
-        name="B",
-        worker_for_mapping=worker_for_mapping,
-        schema=schema,
-        directory=tmp_path,
-        loop=loop_in_thread,
-    )
-    try:
-        await sB.add_partition(dfs[0], 0)
-        with pytest.raises(RuntimeError, match="Error during receive"):
-            await sB.barrier()
-    finally:
-        await asyncio.gather(*[s.close() for s in [sA, sB]])
+    with DataFrameShuffleTestPool() as local_shuffle_pool:
+        sA = local_shuffle_pool.new_shuffle(
+            name="A",
+            worker_for_mapping=worker_for_mapping,
+            schema=schema,
+            directory=tmp_path,
+            loop=loop_in_thread,
+            Shuffle=ErrorReceive,
+        )
+        sB = local_shuffle_pool.new_shuffle(
+            name="B",
+            worker_for_mapping=worker_for_mapping,
+            schema=schema,
+            directory=tmp_path,
+            loop=loop_in_thread,
+        )
+        try:
+            await sB.add_partition(dfs[0], 0)
+            with pytest.raises(RuntimeError, match="Error during receive"):
+                await sB.barrier()
+        finally:
+            await asyncio.gather(*[s.close() for s in [sA, sB]])
 
 
 from distributed.worker import DEFAULT_EXTENSIONS
