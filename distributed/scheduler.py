@@ -848,6 +848,7 @@ class Computation:
     groups: set[TaskGroup]
     code: SortedSet
     id: uuid.UUID
+    annotations: dict
 
     __slots__ = tuple(__annotations__)
 
@@ -856,6 +857,7 @@ class Computation:
         self.groups = set()
         self.code = SortedSet()
         self.id = uuid.uuid4()
+        self.annotations = {}
 
     @property
     def stop(self) -> float:
@@ -4305,8 +4307,23 @@ class Scheduler(SchedulerState, ServerNode):
             self.client_releases_keys(
                 keys=lost_keys, client=client, stimulus_id=stimulus_id
             )
+
+        if self.total_occupancy > 1e-9 and self.computations:
+            # Still working on something. Assign new tasks to same computation
+            computation = self.computations[-1]
+        else:
+            computation = Computation()
+            self.computations.append(computation)
+        if code and code not in computation.code:  # add new code blocks
+            computation.code.add(code)
+        if annotations:
+            computation.annotations.update(annotations)
+
         runnable, touched_tasks, new_tasks = self._generate_taskstates(
-            keys=requested_keys, dsk=dsk, dependencies=dependencies, code=code
+            keys=requested_keys,
+            dsk=dsk,
+            dependencies=dependencies,
+            computation=computation,
         )
 
         self._parse_and_apply_annotations(
@@ -4381,18 +4398,8 @@ class Scheduler(SchedulerState, ServerNode):
         self.digest_metric("update-graph-duration", end - start)
 
     def _generate_taskstates(
-        self, keys: set[str], dsk: dict, dependencies: dict, code: str | None
+        self, keys: set[str], dsk: dict, dependencies: dict, computation
     ):
-        if self.total_occupancy > 1e-9 and self.computations:
-            # Still working on something. Assign new tasks to same computation
-            computation = self.computations[-1]
-        else:
-            computation = Computation()
-            self.computations.append(computation)
-
-        if code and code not in computation.code:  # add new code blocks
-            computation.code.add(code)
-
         # Get or create task states
         runnable = []
         new_tasks = []

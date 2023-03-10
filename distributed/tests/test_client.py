@@ -7071,6 +7071,19 @@ def test_computation_code_walk_frames():
         assert nested_call() == upper_frame_code
 
 
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_computation_store_annotations(c, s, a):
+    # We do not want to store layer annotations
+    with dask.annotate(layer="foo"):
+        f = delayed(inc)(1)
+
+    with dask.annotate(job="very-important"):
+        assert await c.compute(f) == 2
+
+    assert len(s.computations) == 1
+    assert s.computations[0].annotations == {"job": "very-important"}
+
+
 def test_computation_object_code_dask_compute(client):
     da = pytest.importorskip("dask.array")
     x = da.ones((10, 10), chunks=(3, 3))
