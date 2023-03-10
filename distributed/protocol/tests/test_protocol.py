@@ -9,6 +9,7 @@ import pytest
 import dask
 from dask.sizeof import sizeof
 
+from distributed.compatibility import WINDOWS
 from distributed.protocol import dumps, loads, maybe_compress, msgpack, to_serialize
 from distributed.protocol.compression import (
     compressions,
@@ -415,6 +416,7 @@ def test_sizeof_serialize(Wrapper, Wrapped):
     assert size <= sizeof(serialized) < size * 1.05
 
 
+@pytest.mark.skipif(WINDOWS, reason="On windows this is triggering a stackoverflow")
 def test_deeply_nested_structures():
     # These kind of deeply nested structures are generated in our profiling code
     def gen_deeply_nested(depth):

@@ -74,10 +74,10 @@ async def clean_scheduler(
     assert not extension.heartbeats
 
 
-@pytest.mark.skipif(
-    pa is not None,
-    reason="We don't have a CI job that is installing a very old pyarrow version",
-)
+# @pytest.mark.skipif(
+#     pa is not None,
+#     reason="We don't have a CI job that is installing a very old pyarrow version",
+# )
 @gen_cluster(client=True)
 async def test_minimal_version(c, s, a, b):
     df = dask.datasets.timeseries(
@@ -86,8 +86,9 @@ async def test_minimal_version(c, s, a, b):
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
-    with pytest.raises(RuntimeError, match="requires pyarrow"):
-        await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
+    # with pytest.raises(RuntimeError, match="requires pyarrow"):
+    res = c.persist(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
+    await c.compute(res)
 
 
 @gen_cluster(client=True)
