@@ -2209,13 +2209,9 @@ class Worker(BaseWorker, ServerNode):
         start = time()
         # Offload deserializing large tasks
         if sizeof(ts.run_spec) > OFFLOAD_THRESHOLD:
-            function, args, kwargs = await offload(
-                _deserialize, *ts.run_spec, execution_state=self.execution_state
-            )
+            function, args, kwargs = await offload(_deserialize, *ts.run_spec)
         else:
-            function, args, kwargs = _deserialize(
-                *ts.run_spec, execution_state=self.execution_state
-            )
+            function, args, kwargs = _deserialize(*ts.run_spec)
         stop = time()
 
         if stop - start > 0.010:
@@ -2927,26 +2923,23 @@ def loads_function(bytes_object):
 
 
 @context_meter.meter("deserialize")
-def _deserialize(
-    function=None, args=None, kwargs=None, task=NO_VALUE, execution_state=None
-):
+def _deserialize(function=None, args=None, kwargs=None, task=NO_VALUE):
     """Deserialize task inputs and regularize to func, args, kwargs"""
     # Some objects require threadlocal state during deserialization, e.g. to
     # detect the current worker
-    with set_thread_state(execution_state=execution_state):
-        if function is not None:
-            function = loads_function(function)
-        if args and isinstance(args, bytes):
-            args = pickle.loads(args)
-        if kwargs and isinstance(kwargs, bytes):
-            kwargs = pickle.loads(kwargs)
+    if function is not None:
+        function = loads_function(function)
+    if args and isinstance(args, bytes):
+        args = pickle.loads(args)
+    if kwargs and isinstance(kwargs, bytes):
+        kwargs = pickle.loads(kwargs)
 
-        if task is not NO_VALUE:
-            assert not function and not args and not kwargs
-            function = execute_task
-            args = (task,)
+    if task is not NO_VALUE:
+        assert not function and not args and not kwargs
+        function = execute_task
+        args = (task,)
 
-        return function, args or (), kwargs or {}
+    return function, args or (), kwargs or {}
 
 
 def execute_task(task):
