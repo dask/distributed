@@ -356,19 +356,25 @@ def test_call_stack_f_lineno(f_lasti: int, f_lineno: int) -> None:
 
 
 def test_stack_overflow():
-    state = create()
-    frame = None
+    old = sys.getrecursionlimit()
+    sys.setrecursionlimit(200)
+    try:
+        state = create()
+        frame = None
 
-    def f(i):
-        if i == 0:
-            nonlocal frame
-            frame = sys._current_frames()[threading.get_ident()]
-            return
-        else:
-            return f(i - 1)
+        def f(i):
+            if i == 0:
+                nonlocal frame
+                frame = sys._current_frames()[threading.get_ident()]
+                return
+            else:
+                return f(i - 1)
 
-    f(sys.getrecursionlimit() - 200)
-    process(frame, None, state)
-    assert state["children"]
-    assert state["count"]
-    assert merge(state, state, state)
+        f(sys.getrecursionlimit() - 200)
+        process(frame, None, state)
+        assert state["children"]
+        assert state["count"]
+        assert merge(state, state, state)
+
+    finally:
+        sys.setrecursionlimit(old)
