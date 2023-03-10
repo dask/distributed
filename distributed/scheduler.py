@@ -3867,7 +3867,7 @@ class Scheduler(SchedulerState, ServerNode):
                 link = format_dashboard_link(addr, server.port)
             else:
                 link = f"{listen_ip}:{server.port}"
-            logger.info("%11s at: %25s", name, link)
+            logger.info("%11s at:  %25s", name, link)
 
         if self.scheduler_file:
             with open(self.scheduler_file, "w") as f:
