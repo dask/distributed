@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Hashable
 
 from distributed import Event, Worker
-from distributed.utils_test import async_wait_for, gen_cluster, inc, wait_for_state
+from distributed.utils_test import async_wait_for, gen_cluster, inc, slowinc, wait_for_state
 
 
 def get_digests(w: Worker, allow: str | None = None) -> dict[Hashable, float]:
@@ -135,6 +135,54 @@ async def test_basic_execute(c, s, a):
         ("execute", "x", "own-time"),
         ("execute", "x", "thread", "thread-time"),
     ]
+
+@gen_cluster(client=True, nthreads=[("", 2)])
+async def test_execute_parallel(c, s, a):
+    await c.gather(c.map(slowinc, [1, 2], delay=0.1, key=["x-1", "x-2"]))
+    digests = get_digests(a)
+    assert list(digests) == [
+        ("execute", "x", "deserialize-task"),
+        ("execute", "x", "thread"),
+        ("execute", "x", "own-time"),
+        ("execute", "x", "thread", "thread-time"),
+    ]
+    assert digests[("execute", "x", "thread")] >= 0.2
+
+@gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
+async def test_multiple_workers(c, s, a, b):
+    await c.gather(c.map(slowinc, [1, 2], delay=0.1, key=["a-1", "a-2"], workers=[a.address]))
+    digests_a = get_digests(a)
+    assert list(digests_a) == [
+        ("execute", "a", "deserialize-task"),
+        ("execute", "a", "thread"),
+        ("execute", "a", "own-time"),
+        ("execute", "a", "thread", "thread-time"),
+    ]
+    assert digests_a[("execute", "a", "thread")] >= 0.2
+
+    assert not get_digests(b)
+
+    await c.gather(c.map(slowinc, [1, 2], delay=0.1, key=["b-1", "b-2"], workers=[b.address]))
+    digests_b = get_digests(b)
+    assert list(digests_b) == [
+        ("execute", "b", "deserialize-task"),
+        ("execute", "b", "thread"),
+        ("execute", "b", "own-time"),
+        ("execute", "b", "thread", "thread-time"),
+    ]
+    assert digests_b[("execute", "b", "thread")] >= 0.2
+
+    assert get_digests(a) != get_digests(b)
+
+    slow = c.submit(slowinc, 1, delay=0.1, key="slow", workers=[a.address])
+    fast = c.submit(inc, 1, key="fast", workers=[b.address])
+    await c.gather([slow, fast], direct=False)
+
+    digests_a = get_digests(a)
+    digests_b = get_digests(b)
+
+    assert digests_a[("execute", "slow", "thread")] > digests_b[("execute", "fast", "thread")]
+
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
