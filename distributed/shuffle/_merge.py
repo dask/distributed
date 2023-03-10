@@ -165,10 +165,6 @@ def merge_unpack(
 ):
     from dask.dataframe.multi import merge_chunk
 
-    from distributed.protocol import deserialize
-
-    # FIXME: This is odd.
-    result_meta = deserialize(result_meta.header, result_meta.frames)
     ext = _get_worker_extension()
     left = ext.get_output_partition(
         shuffle_id_left, barrier_left, output_partition
