@@ -52,8 +52,8 @@ body {
   background-color: #eaaa6d;
 }
 
-.navbar .pull-right {
-  float: right;
+.pull-right {
+  float: right !important;
 }
 
 #dask-logo img {
@@ -81,6 +81,7 @@ body {
   .navbar li:not(#dask-logo):not(#navbar-toggle-icon) a {
     display: none;
   }
+
   #navbar-toggle-icon a {
     display: block;
   }
@@ -90,10 +91,12 @@ body {
   .navbar.responsive li:not(#navbar-toggle-icon) {
     float: none;
   }
+
   .navbar.responsive li:not(#dask-logo):not(#navbar-toggle-icon) a {
     display: block;
     text-align: left;
   }
+
   .navbar.responsive #navbar-toggle-icon a {
     position: absolute;
     right: 0;
@@ -128,7 +131,7 @@ minimum supported version */
   top: 40px;
   background-color: #EEE;
   min-width: 160px;
-  box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+  box-shadow: 0px 8px 16px 0px rgba(0, 0, 0, 0.2);
   z-index: 2;
   max-height: 90%;
   overflow-y: scroll;
@@ -140,4 +143,10 @@ minimum supported version */
 
 .dropdown:hover .dropdown-content {
   display: block;
+}
+
+.jupyter-link img {
+  height: 1.3rem;
+  margin-bottom: -0.3rem;
+  margin-right: 0.25rem;
 }
