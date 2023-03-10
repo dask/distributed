@@ -3478,11 +3478,11 @@ class Scheduler(SchedulerState, ServerNode):
             server=self, modules=http_server_modules, prefix=http_prefix
         )
         self.start_http_server(routes, dashboard_address, default_port=8787)
+        self.jupyter = jupyter
         if show_dashboard:
             distributed.dashboard.scheduler.connect(
                 self.http_application, self.http_server, self, prefix=http_prefix
             )
-        self.jupyter = jupyter
         if self.jupyter:
             try:
                 from jupyter_server.serverapp import ServerApp
