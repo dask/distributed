@@ -3643,6 +3643,7 @@ class Scheduler(SchedulerState, ServerNode):
             "dump_cluster_state_to_url": self.dump_cluster_state_to_url,
             "benchmark_hardware": self.benchmark_hardware,
             "get_story": self.get_story,
+            "check_idle": self.check_idle,
         }
 
         connection_limit = get_fileno_limit() / 2
@@ -3675,9 +3676,8 @@ class Scheduler(SchedulerState, ServerNode):
             pc = PeriodicCallback(self.check_worker_ttl, self.worker_ttl * 1000)
             self.periodic_callbacks["worker-ttl"] = pc
 
-        if self.idle_timeout:
-            pc = PeriodicCallback(self.check_idle, self.idle_timeout * 1000 / 4)
-            self.periodic_callbacks["idle-timeout"] = pc
+        pc = PeriodicCallback(self.check_idle, (self.idle_timeout or 1) * 1000 / 4)
+        self.periodic_callbacks["idle-timeout"] = pc
 
         if extensions is None:
             extensions = DEFAULT_EXTENSIONS.copy()
@@ -7708,15 +7708,14 @@ class Scheduler(SchedulerState, ServerNode):
                 )
                 await self.remove_worker(address=ws.address, stimulus_id=stimulus_id)
 
-    def check_idle(self):
-        assert self.idle_timeout
+    def check_idle(self) -> int | None:
         if self.status in (Status.closing, Status.closed):
-            return
+            return None
 
         if self.transition_counter != self._idle_transition_counter:
             self._idle_transition_counter = self.transition_counter
             self.idle_since = None
-            return
+            return None
 
         if (
             self.queued
@@ -7724,18 +7723,21 @@ class Scheduler(SchedulerState, ServerNode):
             or any([ws.processing for ws in self.workers.values()])
         ):
             self.idle_since = None
-            return
+            return None
 
         if not self.idle_since:
             self.idle_since = time()
+            return self.idle_since
 
-        if time() > self.idle_since + self.idle_timeout:
-            assert self.idle_since
-            logger.info(
-                "Scheduler closing after being idle for %s",
-                format_time(self.idle_timeout),
-            )
-            self._ongoing_background_tasks.call_soon(self.close)
+        if self.idle_timeout:
+            if time() > self.idle_since + self.idle_timeout:
+                assert self.idle_since
+                logger.info(
+                    "Scheduler closing after being idle for %s",
+                    format_time(self.idle_timeout),
+                )
+                self._ongoing_background_tasks.call_soon(self.close)
+        return None
 
     def adaptive_target(self, target_duration=None):
         """Desired number of workers based on the current workload
