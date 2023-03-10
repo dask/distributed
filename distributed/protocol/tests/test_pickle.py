@@ -34,7 +34,7 @@ class MemoryviewHolder:
             return MemoryviewHolder, (self.mv.tobytes(),)
 
 
-@pytest.mark.parametrize("protocol", {4, HIGHEST_PROTOCOL})
+@pytest.mark.parametrize("protocol", range(4, HIGHEST_PROTOCOL + 1))
 def test_pickle_data(protocol):
     context = {"pickle-protocol": protocol}
 
@@ -44,7 +44,7 @@ def test_pickle_data(protocol):
         assert deserialize(*serialize(d, serializers=("pickle",), context=context)) == d
 
 
-@pytest.mark.parametrize("protocol", {4, HIGHEST_PROTOCOL})
+@pytest.mark.parametrize("protocol", range(4, HIGHEST_PROTOCOL + 1))
 def test_pickle_out_of_band(protocol):
     context = {"pickle-protocol": protocol}
 
@@ -83,7 +83,7 @@ def test_pickle_out_of_band(protocol):
         assert isinstance(f[0], bytes)
 
 
-@pytest.mark.parametrize("protocol", {4, HIGHEST_PROTOCOL})
+@pytest.mark.parametrize("protocol", range(4, HIGHEST_PROTOCOL + 1))
 def test_pickle_empty(protocol):
     context = {"pickle-protocol": protocol}
 
@@ -112,7 +112,7 @@ def test_pickle_empty(protocol):
     assert y.mv.readonly
 
 
-@pytest.mark.parametrize("protocol", {4, HIGHEST_PROTOCOL})
+@pytest.mark.parametrize("protocol", range(4, HIGHEST_PROTOCOL + 1))
 def test_pickle_numpy(protocol):
     np = pytest.importorskip("numpy")
     context = {"pickle-protocol": protocol}
@@ -165,7 +165,7 @@ def test_pickle_numpy(protocol):
         assert (deserialize(h, f) == x).all()
 
 
-@pytest.mark.parametrize("protocol", {4, HIGHEST_PROTOCOL})
+@pytest.mark.parametrize("protocol", range(4, HIGHEST_PROTOCOL + 1))
 def test_pickle_functions(protocol):
     context = {"pickle-protocol": protocol}
 
