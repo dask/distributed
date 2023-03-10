@@ -5,7 +5,7 @@ import time
 from collections import Counter
 from contextlib import contextmanager
 from functools import cached_property
-from typing import Callable, Hashable, Iterator, NamedTuple
+from typing import Any, Callable, Hashable, Iterator, NamedTuple
 
 _current_span: contextvars.ContextVar[Span] = contextvars.ContextVar("current_span")
 
@@ -19,6 +19,7 @@ class Span:
     counters: Counter[Hashable]
     # ^ NOTE: `Counter` does support non-int values according to the docs,
     # though type annotations don't indicate this.
+    attributes: dict[str, Any]
     _token: contextvars.Token | None
     _failure: str | None
 
@@ -26,6 +27,7 @@ class Span:
         self,
         label: str | tuple[str, ...],
         metric: Callable[[], float] = time.perf_counter,
+        **attributes: Any,
     ) -> None:
         self.label = (label,) if isinstance(label, str) else label
         self.metric = metric
@@ -33,6 +35,7 @@ class Span:
         self.stop_time = None
         self.subspans = []
         self.counters = Counter()
+        self.attributes = attributes
         self._token = None
         self._failure = None
 
@@ -111,6 +114,7 @@ class Span:
         self,
         label: str | tuple[str, ...],
         metric: Callable[[], float] = time.perf_counter,
+        **attributes: Any,
     ) -> Span:
         assert (
             self.start_time is not None
@@ -119,7 +123,7 @@ class Span:
             self.stop_time is None
         ), "Cannot create sub-span for a span that has already stopped"
         # TODO allow different metrics, or always use `self.metric`?
-        span = Span(label, metric)
+        span = Span(label, metric, **attributes)
         self.subspans.append(span)
         return span
 
@@ -157,6 +161,7 @@ class Span:
             label + (("own-time",) if self.subspans else ()),
             self.own_time,
             self.counters,
+            self.attributes,
         )
 
     def __repr__(self) -> str:
@@ -166,6 +171,8 @@ class Span:
             f"total_time={self.total_time if self.done else '...'}, "
             f"start_time={self.start_time}, "
             f"stop_time={self.stop_time}, "
+            f"counters={self.counters}, "
+            f"attributes={self.attributes}, "
             ">"
         )
 
@@ -174,6 +181,7 @@ class FlatSpan(NamedTuple):
     label: tuple[str, ...]
     own_time: float
     counters: Counter[Hashable]
+    attributes: dict[str, Any]
 
 
 def current_span() -> Span | None:
@@ -183,15 +191,16 @@ def current_span() -> Span | None:
 def get_span(
     label: str | tuple[str, ...],
     metric: Callable[[], float] = time.perf_counter,
+    **attributes: Any,
 ) -> Span:
     "Get a span, nested under any current span"
     try:
         parent = _current_span.get()
     except LookupError:
-        span = Span(label, metric)
+        span = Span(label, metric, **attributes)
     else:
         # assert metric is parent.metric, (metric, parent.metric)
-        span = parent._subspan(label)
+        span = parent._subspan(label, **attributes)
 
     return span
 
@@ -200,7 +209,8 @@ def get_span(
 def trace(
     label: str | tuple[str, ...],
     metric: Callable[[], float] = time.perf_counter,
+    **attributes: Any,
 ) -> Iterator[Span]:
     "Contextmanager or decorator to create, start, and stop a nested span"
-    with get_span(label, metric) as span:
+    with get_span(label, metric, **attributes) as span:
         yield span

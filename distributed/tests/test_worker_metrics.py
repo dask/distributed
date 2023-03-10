@@ -48,9 +48,12 @@ async def test_task_lifecycle(c, s, a, b):
         ("transition", "x", "released->memory", "serialize"),
         ("transition", "x", "released->memory", "compress"),
         ("transition", "x", "released->memory", "disk-write"),
+        ("disk-write",),  # aggregated metric
         ("transition", "x", "released->memory", "own-time"),
         ("transition", "x", "released->memory", "disk-write", "count"),
         ("transition", "x", "released->memory", "disk-write", "nbytes"),
+        ("disk-write", "count"),  # aggregated metric
+        ("disk-write", "nbytes"),  # aggregated metric
         # a.gather_dep(worker=b.address, keys=["z"])
         ("gather-dep", "decompress"),
         ("gather-dep", "deserialize"),
@@ -60,6 +63,7 @@ async def test_task_lifecycle(c, s, a, b):
         ("transition", "y", "flight->memory", "serialize"),
         ("transition", "y", "flight->memory", "compress"),
         ("transition", "y", "flight->memory", "disk-write"),
+        # note `"(disk-write,)"` doesn't show up again here because it's just incremented
         ("transition", "y", "flight->memory", "own-time"),
         ("transition", "y", "flight->memory", "disk-write", "count"),
         ("transition", "y", "flight->memory", "disk-write", "nbytes"),
@@ -70,6 +74,7 @@ async def test_task_lifecycle(c, s, a, b):
         ("execute", "z", "deserialize-task"),
         # -> Unspill inputs
         ("execute", "z", "disk-read"),
+        ("disk-read",),  # aggregated metric
         ("execute", "z", "decompress"),
         ("execute", "z", "deserialize"),
         # -> Run in thread
@@ -78,6 +83,8 @@ async def test_task_lifecycle(c, s, a, b):
         # -> Counters from un-spill and execute
         ("execute", "z", "disk-read", "count"),
         ("execute", "z", "disk-read", "nbytes"),
+        ("disk-read", "count"),  # aggregated metric
+        ("disk-read", "nbytes"),  # aggregated metric
         ("execute", "z", "thread", "thread-time"),
         # Spill output; added by _transition_to_memory
         ("transition", "z", "executing->memory", "serialize"),
@@ -107,6 +114,8 @@ async def test_task_lifecycle(c, s, a, b):
     assert list(get_digests(a)) == expect
 
     assert get_digests(a, allow="count") == {
+        ("disk-read", "count"): 3,
+        ("disk-write", "count"): 3,
         ("execute", "z", "disk-read", "count"): 2,
         ("transition", "x", "released->memory", "disk-write", "count"): 1,
         ("transition", "y", "flight->memory", "disk-write", "count"): 1,

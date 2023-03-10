@@ -1114,12 +1114,24 @@ def _span_to_digest_metrics_fine(span: Span, *, stimulus_id: str) -> list[Instru
     digests: list[Instruction] = []
     counters: Counter[Hashable] = Counter()
     for sub in span.flat():
-        # TODO store and use fully-qualified name in `Span` so we don't
-        # have to rename here
-        counters.update({sub.label + (k,): v for k, v in sub.counters.items()})
-        digests.append(
-            DigestMetric(stimulus_id=stimulus_id, name=sub.label, value=sub.own_time)
-        )
+        for label in (
+            (sub.label, sub.label[-1:])
+            # For spans that should be aggregated, also emit metrics
+            # with the non-hierarchical name.
+            # For example, we'll emit both:
+            # `("transition", "x", "released->memory", "disk-write")`
+            # and `("disk-write",)`
+            # so we get a `disk-write` metric both broken down by activity/key,
+            # and the overall aggregate.
+            if sub.attributes.get("aggregate")
+            else (sub.label,)
+        ):
+            # TODO store and use fully-qualified name in `Span` so we don't
+            # have to rename here
+            counters.update({label + (k,): v for k, v in sub.counters.items()})
+            digests.append(
+                DigestMetric(stimulus_id=stimulus_id, name=label, value=sub.own_time)
+            )
 
     digests.extend(
         DigestMetric(stimulus_id=stimulus_id, name=k, value=v)
@@ -1140,6 +1152,7 @@ def _span_to_digest_metrics_coarse(
             value=span.total_time,
         )
     ]
+    assert not span.attributes.get("aggregate"), span
     digests.extend(
         DigestMetric(stimulus_id=stimulus_id, name=label + (k,), value=v)
         for k, v in span.counters.items()

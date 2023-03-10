@@ -70,6 +70,11 @@ class ManualEvictProto(Protocol):
         ...  # pragma: nocover
 
 
+# TODO remove these, and just use tracing with `aggregate=True`.
+# Just need to understand where these metrics are used and pull from
+# digests instead.
+
+
 @dataclass
 class FastMetrics:
     """Cumulative metrics for SpillBuffer.fast since the latest worker restart"""
@@ -240,7 +245,7 @@ class SpillBuffer(zict.Buffer):
         if key in self.fast:
             # Note: don't log from self.fast.__getitem__, because that's called every
             # time a key is evicted, and we don't want to count those events here.
-            with trace("memory-read") as span:
+            with trace("memory-read", aggregate=True) as span:
                 nbytes = cast(int, self.fast.weights[key])
                 self.fast_metrics.log_read(nbytes)
                 span.counters["count"] += 1
@@ -366,13 +371,14 @@ class Slow(zict.Func):
 
     def __getitem__(self, key: str) -> Any:
         t0 = perf_counter()
-        with trace("disk-read") as span:
+        with trace("disk-read", aggregate=True) as span:
             pickled = self.d[key]
             span.counters["count"] += 1
             span.counters["nbytes"] += len(pickled)
         assert isinstance(pickled, bytearray if has_zict_230 else bytes)
         t1 = perf_counter()
         out = self.load(pickled)
+        # ^ TODO trace this
         t2 = perf_counter()
 
         # For the sake of simplicity, we're not metering failure use cases.
@@ -387,6 +393,7 @@ class Slow(zict.Func):
     def __setitem__(self, key: str, value: Any) -> None:
         t0 = perf_counter()
         try:
+            # TODO trace this
             pickled = self.dump(value)
         except Exception as e:
             # zict.LRU ensures that the key remains in fast if we raise.
@@ -415,7 +422,7 @@ class Slow(zict.Func):
 
         # Store to disk through File.
         # This may raise OSError, which is caught by SpillBuffer above.
-        with trace("disk-write") as span:
+        with trace("disk-write", aggregate=True) as span:
             self.d[key] = pickled
             span.counters["count"] += 1
             span.counters["nbytes"] += pickled_size
