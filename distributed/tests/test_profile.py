@@ -357,7 +357,7 @@ def test_call_stack_f_lineno(f_lasti: int, f_lineno: int) -> None:
 
 def test_stack_overflow():
     old = sys.getrecursionlimit()
-    sys.setrecursionlimit(200)
+    sys.setrecursionlimit(300)
     try:
         state = create()
         frame = None
@@ -370,7 +370,7 @@ def test_stack_overflow():
             else:
                 return f(i - 1)
 
-        f(sys.getrecursionlimit() - 200)
+        f(sys.getrecursionlimit() - 100)
         process(frame, None, state)
         assert state["children"]
         assert state["count"]
