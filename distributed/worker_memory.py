@@ -260,8 +260,11 @@ class WorkerMemoryManager:
                 label = (label,)
             worker.digest_metric(("memory-monitor", *label, unit), value)
 
-        # Work around bug with Tornado PeriodicCallback, which does not properly
-        # insulate contextvars
+        # Work around bug with Tornado 6.2 PeriodicCallback, which does not properly
+        # insulate contextvars. Without this hack, you would see metrics that are
+        # clearly emitted by Worker.execute labelled with 'memory-monitor'.So we're
+        # wrapping our change in contextvars (inside add_callback) inside create_task(),
+        # which copies and insulates the context.
         async def _() -> None:
             with context_meter.add_callback(metrics_callback):
                 # Measure delta between the measures from the SpillBuffer and the total
@@ -269,6 +272,7 @@ class WorkerMemoryManager:
                 await self._spill(worker, memory)
 
         await asyncio.create_task(_(), name="memory-monitor-spill")
+        # End work around
 
     async def _spill(self, worker: Worker, memory: int) -> None:
         """Evict keys until the process memory goes below the ``target`` threshold"""

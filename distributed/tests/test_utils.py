@@ -49,6 +49,7 @@ from distributed.utils import (
     parse_ports,
     read_block,
     recursive_to_dict,
+    run_in_executor_with_context,
     seek_delimiter,
     set_thread_state,
     sync,
@@ -664,6 +665,37 @@ def test_parse_ports():
 
 
 @gen_test()
+async def test_run_in_executor_with_context():
+    class MyExecutor(Executor):
+        call_count = 0
+
+        def submit(self, __fn, *args, **kwargs):
+            self.call_count += 1
+            f = Future()
+            f.set_result(__fn(*args, **kwargs))
+            return f
+
+    ex = MyExecutor()
+    out = await run_in_executor_with_context(ex, inc, 1)
+    assert out == 2
+    assert ex.call_count == 1
+
+
+@gen_test()
+async def test_run_in_executor_with_context_preserves_contextvars():
+    var = contextvars.ContextVar("var")
+
+    with ThreadPoolExecutor(2) as ex:
+
+        async def set_var(v: str) -> None:
+            var.set(v)
+            r = await run_in_executor_with_context(ex, var.get)
+            assert r == v
+
+        await asyncio.gather(set_var("foo"), set_var("bar"))
+
+
+@gen_test()
 async def test_offload():
     assert (await offload(inc, 1)) == 2
     assert (await offload(lambda x, y: x + y, 1, y=2)) == 3
@@ -679,23 +711,6 @@ async def test_offload_preserves_contextvars():
         assert r == v
 
     await asyncio.gather(set_var("foo"), set_var("bar"))
-
-
-@gen_test()
-async def test_offload_custom_executor():
-    class MyExecutor(Executor):
-        call_count = 0
-
-        def submit(self, __fn, *args, **kwargs):
-            self.call_count += 1
-            f = Future()
-            f.set_result(__fn(*args, **kwargs))
-            return f
-
-    ex = MyExecutor()
-    out = await offload(inc, 1, executor=ex)
-    assert out == 2
-    assert ex.call_count == 1
 
 
 def test_serialize_for_cli_deprecated():

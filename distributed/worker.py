@@ -105,6 +105,7 @@ from distributed.utils import (
     offload,
     parse_ports,
     recursive_to_dict,
+    run_in_executor_with_context,
     silence_logging,
     thread_state,
     wait_for,
@@ -2275,7 +2276,8 @@ class Worker(BaseWorker, ServerNode):
                         self.scheduler_delay,
                     )
                 elif "ThreadPoolExecutor" in str(type(e)):
-                    result = await offload(
+                    result = await run_in_executor_with_context(
+                        e,
                         apply_function,
                         function,
                         args2,
@@ -2285,7 +2287,6 @@ class Worker(BaseWorker, ServerNode):
                         self.active_threads,
                         self.active_threads_lock,
                         self.scheduler_delay,
-                        executor=e,
                     )
                 else:
                     # Can't capture contextvars across processes

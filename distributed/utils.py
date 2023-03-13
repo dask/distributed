@@ -1421,30 +1421,47 @@ def import_term(name: str) -> AnyType:
     return getattr(module, attr_name)
 
 
-async def offload(  # type: ignore[valid-type]
-    fn: Callable[P, T],
+async def run_in_executor_with_context(
+    executor: Executor | None,
+    func: Callable[P, T],
+    /,
     *args: P.args,
-    executor: Executor | None = None,
     **kwargs: P.kwargs,
 ) -> T:
     """Variant of :meth:`~asyncio.AbstractEventLoop.run_in_executor`, which
     propagates contextvars.
-    By default, it offloads to an ad-hoc thread pool with a single worker.
+    Note that this limits the type of Executor to those that do not pickle objects.
 
     See also
     --------
+    asyncio.AbstractEventLoop.run_in_executor
+    offload
     https://bugs.python.org/issue34014
     """
-    if executor is None:
-        # Not the same as defaulting to _offload_executor in the parameters, as this
-        # allows monkey-patching the _offload_executor during unit tests
-        executor = _offload_executor
-
     loop = asyncio.get_running_loop()
     context = contextvars.copy_context()
     return await loop.run_in_executor(
-        executor, lambda: context.run(fn, *args, **kwargs)
+        executor, lambda: context.run(func, *args, **kwargs)
     )
+
+
+def offload(
+    func: Callable[P, T],
+    /,
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> Awaitable[T]:
+    """Run a synchronous function in a separate thread.
+    Unlike :meth:`asyncio.to_thread`, this propagates contextvars and offloads to an
+    ad-hoc thread pool with a single worker.
+
+    See also
+    --------
+    asyncio.to_thread
+    run_in_executor_with_context
+    https://bugs.python.org/issue34014
+    """
+    return run_in_executor_with_context(_offload_executor, func, *args, **kwargs)
 
 
 class EmptyContext:

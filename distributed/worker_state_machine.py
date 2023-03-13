@@ -3123,9 +3123,9 @@ class WorkerState:
     def _handle_execute_success(self, ev: ExecuteSuccessEvent) -> RecsInstrs:
         """Task completed successfully"""
         ts, recs, instr = self._execute_done_common(ev)
-        # This is used for scheduler-side heuristics such as work stealing; it's
-        # important that it does not contain overhead from the thread pool or the
-        # worker's event loop (which are not the task's fault and are unpredictable).
+        # This is used for scheduler-side occupancy heuristics; it's important that it
+        # does not contain overhead from the thread pool or the worker's event loop
+        # (which are not the task's fault and are unpredictable).
         ts.startstops.append({"action": "compute", "start": ev.start, "stop": ev.stop})
         ts.nbytes = ev.nbytes
         ts.type = ev.type
