@@ -25,7 +25,7 @@ from tlz import first, pluck, sliding_window
 from tornado.ioloop import IOLoop
 
 import dask
-from dask import delayed
+from dask import delayed, istask
 from dask.system import CPU_COUNT
 from dask.utils import tmpfile
 
@@ -42,7 +42,8 @@ from distributed import (
     wait,
 )
 from distributed.comm.registry import backends
-from distributed.compatibility import LINUX, WINDOWS, to_thread
+from distributed.comm.utils import OFFLOAD_THRESHOLD
+from distributed.compatibility import LINUX, WINDOWS, randbytes, to_thread
 from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import (
@@ -2780,64 +2781,36 @@ async def test_forget_dependents_after_release(c, s, a):
     assert fut2.key not in {d.key for d in a.state.tasks[fut.key].dependents}
 
 
+@pytest.mark.filterwarnings("ignore:Large object of size")
 @gen_cluster(client=True)
 async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
     stealing_ext = s.extensions["stealing"]
     await stealing_ext.stop()
-    from distributed.utils import ThreadPoolExecutor
 
-    class CountingThreadPool(ThreadPoolExecutor):
-        counter = 0
+    in_deserialize = asyncio.Event()
+    wait_in_deserialize = asyncio.Event()
 
-        def submit(self, *args, **kwargs):
-            CountingThreadPool.counter += 1
-            return super().submit(*args, **kwargs)
+    async def custom_worker_offload(func, *args):
+        res = func(*args)
+        if not istask(args) and istask(res):
+            in_deserialize.set()
+            await wait_in_deserialize.wait()
+        return res
 
-    # Ensure we're always offloading
-    monkeypatch.setattr("distributed.worker.OFFLOAD_THRESHOLD", 1)
-    threadpool = CountingThreadPool(
-        max_workers=1, thread_name_prefix="Counting-Offload-Threadpool"
-    )
-    try:
-        monkeypatch.setattr("distributed.utils._offload_executor", threadpool)
+    monkeypatch.setattr("distributed.worker.offload", custom_worker_offload)
+    obj = randbytes(OFFLOAD_THRESHOLD + 1)
+    fut = c.submit(lambda _: 41, obj, workers=[a.address], allow_other_workers=True)
 
-        class SlowDeserializeCallable:
-            def __init__(self, delay=0.1):
-                self.delay = delay
+    await in_deserialize.wait()
+    ts = s.tasks[fut.key]
+    a.handle_stimulus(StealRequestEvent(key=fut.key, stimulus_id="test"))
+    stealing_ext.scheduler.send_task_to_worker(b.address, ts)
 
-            def __getstate__(self):
-                return self.delay
-
-            def __setstate__(self, state):
-                delay = state
-                import time
-
-                time.sleep(delay)
-                return SlowDeserializeCallable(delay)
-
-            def __call__(self, *args, **kwargs):
-                return 41
-
-        slow_deserialized_func = SlowDeserializeCallable()
-        fut = c.submit(
-            slow_deserialized_func, 1, workers=[a.address], allow_other_workers=True
-        )
-
-        while CountingThreadPool.counter == 0:
-            await asyncio.sleep(0)
-
-        ts = s.tasks[fut.key]
-        a.handle_stimulus(StealRequestEvent(key=fut.key, stimulus_id="test"))
-        stealing_ext.scheduler.send_task_to_worker(b.address, ts)
-
-        fut2 = c.submit(inc, fut, workers=[a.address])
-        fut3 = c.submit(inc, fut2, workers=[a.address])
-
-        assert await fut2 == 42
-        await fut3
-
-    finally:
-        threadpool.shutdown()
+    fut2 = c.submit(inc, fut, workers=[a.address])
+    fut3 = c.submit(inc, fut2, workers=[a.address])
+    wait_in_deserialize.set()
+    assert await fut2 == 42
+    await fut3
 
 
 @gen_cluster(client=True)
@@ -3768,3 +3741,30 @@ async def test_forward_output(c, s, a, b, capsys):
 
     assert "" == out
     assert "" == err
+
+
+class EnsureOffloaded:
+    def __init__(self, main_thread_id):
+        self.main_thread_id = main_thread_id
+        self.data = randbytes(OFFLOAD_THRESHOLD + 1)
+
+    def __sizeof__(self):
+        return len(self.data)
+
+    def __getstate__(self):
+        assert self.main_thread_id
+        assert self.main_thread_id != threading.get_ident()
+        return (self.data, self.main_thread_id, threading.get_ident())
+
+    def __setstate__(self, state):
+        _, main_thread, serialize_thread = state
+        assert main_thread != threading.get_ident()
+        return EnsureOffloaded(main_thread)
+
+
+@gen_cluster(client=True)
+async def test_offload_getdata(c, s, a, b):
+    """Test that functions wrapped by offload() are metered"""
+    x = c.submit(EnsureOffloaded, threading.get_ident(), key="x", workers=[a.address])
+    y = c.submit(lambda x: None, x, key="y", workers=[b.address])
+    await y
