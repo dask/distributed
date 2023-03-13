@@ -3425,6 +3425,7 @@ class EventLoop(DashboardComponent):
             ),
         )
 
+        self.root.x_range.group_padding = 0.25
         self.root.xaxis.minor_tick_line_alpha = 0
         self.root.ygrid.visible = True
         self.root.xgrid.visible = False
