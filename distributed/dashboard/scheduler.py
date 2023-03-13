@@ -119,7 +119,7 @@ applications = {
 
 
 @memoize
-def template_variables():
+def template_variables(scheduler):
     from distributed.diagnostics.nvml import device_get_count
 
     template_variables = {
@@ -146,6 +146,7 @@ def template_variables():
             if "individual" in x
         ]
         + [{"url": "hardware", "name": "Hardware"}],
+        "jupyter": scheduler.jupyter,
     }
     template_variables["plots"] = sorted(
         template_variables["plots"], key=lambda d: d["name"]
@@ -155,7 +156,10 @@ def template_variables():
 
 def connect(application, http_server, scheduler, prefix=""):
     bokeh_app = BokehApplication(
-        applications, scheduler, prefix=prefix, template_variables=template_variables()
+        applications,
+        scheduler,
+        prefix=prefix,
+        template_variables=template_variables(scheduler),
     )
     application.add_application(bokeh_app)
     bokeh_app.initialize(IOLoop.current())

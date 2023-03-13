@@ -1,6 +1,49 @@
 Changelog
 =========
 
+.. _v2023.3.1:
+
+2023.3.1
+--------
+
+Released on March 10, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Add Jupyter link to dashboard menu if ``--jupyter`` flag is set (:pr:`7638`) `Jacob Tomlinson`_
+- Bump minimum ``click`` version from 7.0 to 8.0 (:pr:`7637`) `Miles`_
+- Extend ``dask`` metapackage dependencies (:pr:`7630`) `James Bourbeau`_
+- Further improvements to ``Client.restart_workers`` (:pr:`7620`) `Miles`_
+- P2P offload ``get_output_partition`` (:pr:`7587`) `Florian Jetter`_
+- Initial integration of GIL contention metric (:pr:`7624`) `Miles`_
+- Add dashboard documentation links (:pr:`7610`) `Miles`_
+- Rename shuffle/rechunk config option/kwarg to method (:pr:`7623`) `Hendrik Makait`_
+- Return results in ``restart_workers`` (:pr:`7606`) `Miles`_
+- Ensure client key cancellation uses ordered messages (:pr:`7583`) `Florian Jetter`_
+
+Bug Fixes
+^^^^^^^^^
+- Fix undefined ``async_wait_for`` -> ``async_poll_for`` (:pr:`7627`) `Miles`_
+- Don't send client heartbeat without a ``scheduler_comm`` (:pr:`7612`) `James Bourbeau`_
+- Do not unspill on free-keys (:pr:`7607`) `crusaderky`_
+
+Documentation
+^^^^^^^^^^^^^
+- Add notes to ``Client.submit``, ``Client.map``, and ``Client.scatter`` with the description of the current task graph resolution algorithm limitations (:pr:`7588`) `Eugene Druzhynin`_
+
+Maintenance
+^^^^^^^^^^^
+- Use ``range`` with ``pickle`` ``protocol`` versions (:pr:`7635`) `jakirkham`_
+- Share thread pool among P2P shuffle runs (:pr:`7621`) `Hendrik Makait`_
+- Replace ``psutil`` suspend with ``BlockedGatherDep`` in ``test_failing_worker_with_additional_replicas_on_cluster`` (:pr:`7633`) `Thomas Grainger`_
+- Ignore ``pkg_resources`` ``DeprecationWarning`` for mindeps (:pr:`7626`) `Miles`_
+- Implement ``wait_for`` using ``asyncio.timeout()`` on 3.11 (:pr:`7571`) `Thomas Grainger`_
+- Use ``tmp_path`` fixture instead of  outdated ``tmpdir`` fixture (:pr:`7582`) `ypogorelova`_
+- Only one ``crick`` callback (:pr:`7614`) `crusaderky`_
+- Add mindeps + ``numpy`` job to tests CI (:pr:`7609`) `Miles`_
+- Do not ``xfail`` whole tests due to (:pr:`6705`) (:pr:`7611`) `crusaderky`_
+
+
 .. _v2023.3.0:
 
 2023.3.0
@@ -4723,3 +4766,6 @@ significantly without many new features.
 .. _`Dylan Wragge`: https://github.com/dwragge
 .. _`Nicholas R. Knezek`: https://github.com/nknezek
 .. _`antonymayi`: https://github.com/antonymayi
+.. _`Miles`: https://github.com/milesgranger
+.. _`Eugene Druzhynin`: https://github.com/eugene-graft
+.. _`ypogorelova`: https://github.com/ypogorelova

@@ -101,6 +101,7 @@ from distributed.utils import (
     All,
     TimeoutError,
     empty_context,
+    format_dashboard_link,
     get_fileno_limit,
     key_split_group,
     log_errors,
@@ -3478,11 +3479,11 @@ class Scheduler(SchedulerState, ServerNode):
             server=self, modules=http_server_modules, prefix=http_prefix
         )
         self.start_http_server(routes, dashboard_address, default_port=8787)
+        self.jupyter = jupyter
         if show_dashboard:
             distributed.dashboard.scheduler.connect(
                 self.http_application, self.http_server, self, prefix=http_prefix
             )
-        self.jupyter = jupyter
         if self.jupyter:
             try:
                 from jupyter_server.serverapp import ServerApp
@@ -3860,8 +3861,13 @@ class Scheduler(SchedulerState, ServerNode):
 
         for listener in self.listeners:
             logger.info("  Scheduler at: %25s", listener.contact_address)
-        for k, v in self.services.items():
-            logger.info("%11s at: %25s", k, "%s:%d" % (listen_ip, v.port))
+        for name, server in self.services.items():
+            if name == "dashboard":
+                addr = get_address_host(listener.contact_address)
+                link = format_dashboard_link(addr, server.port)
+            else:
+                link = f"{listen_ip}:{server.port}"
+            logger.info("%11s at:  %25s", name, link)
 
         if self.scheduler_file:
             with open(self.scheduler_file, "w") as f:
