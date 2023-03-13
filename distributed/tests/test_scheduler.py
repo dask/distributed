@@ -2288,6 +2288,8 @@ async def test_idle_timeout(c, s, a, b):
     pc.start()
     await future
     assert s.idle_since is None or s.idle_since > beginning
+    _idle_since = s.check_idle()
+    assert _idle_since == s.idle_since
 
     with captured_logger("distributed.scheduler") as logs:
         start = time()
@@ -2312,24 +2314,24 @@ async def test_idle_timeout(c, s, a, b):
     nthreads=[],
 )
 async def test_idle_timeout_no_workers(c, s):
+    # Cancel the idle check periodic timeout so we can step through manually
+    s.periodic_callbacks["idle-timeout"].stop()
+
     s.idle_timeout = 0.1
     future = c.submit(inc, 1)
     while not s.tasks:
         await asyncio.sleep(0.1)
 
-    s.check_idle()
-    assert not s.idle_since
+    assert not s.check_idle()
 
     for _ in range(10):
         await asyncio.sleep(0.01)
-        s.check_idle()
-        assert not s.idle_since
+        assert not s.check_idle()
         assert s.tasks
 
     async with Worker(s.address):
         await future
-    s.check_idle()
-    assert not s.idle_since
+    assert not s.check_idle()
     del future
 
     while s.tasks:
@@ -2337,11 +2339,9 @@ async def test_idle_timeout_no_workers(c, s):
 
     # We only set idleness once nothing happened between two consecutive
     # check_idle calls
-    s.check_idle()
-    assert not s.idle_since
+    assert not s.check_idle()
 
-    s.check_idle()
-    assert s.idle_since
+    assert s.check_idle()
 
 
 @gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})
