@@ -2787,22 +2787,6 @@ async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
     stealing_ext = s.extensions["stealing"]
     await stealing_ext.stop()
 
-    class SlowDeserializeCallable:
-        def __init__(self):
-            self.data = b"0" * (OFFLOAD_THRESHOLD + 1)
-
-        def __getstate__(self):
-            return self.data
-
-        def __setstate__(self, state):
-            return SlowDeserializeCallable()
-
-        def __sizeof__(self):
-            return OFFLOAD_THRESHOLD * 2
-
-        def __call__(self, *args, **kwargs):
-            return 41
-
     in_deserialize = asyncio.Event()
     wait_in_deserialize = asyncio.Event()
 
@@ -2814,7 +2798,7 @@ async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
         return res
 
     monkeypatch.setattr("distributed.worker.offload", custom_worker_offload)
-    obj = SlowDeserializeCallable()
+    obj = randbytes(OFFLOAD_THRESHOLD + 1)
     fut = c.submit(lambda _: 41, obj, workers=[a.address], allow_other_workers=True)
 
     await in_deserialize.wait()
