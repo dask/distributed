@@ -310,6 +310,7 @@ distributed:
       interval: 500ms
       disk: true  # Monitor host-wide disk I/O
       host-cpu: false  # Monitor host-wide CPU usage, with very granular breakdown
+      gil-contention: false  # Monitor GIL contention
     event-loop: tornado
   rmm:
     pool-size: null

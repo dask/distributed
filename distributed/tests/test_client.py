@@ -77,7 +77,7 @@ from distributed.client import (
 from distributed.cluster_dump import load_cluster_dump
 from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, WINDOWS
-from distributed.core import Status
+from distributed.core import ErrorMessage, Status
 from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.metrics import time
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
@@ -4839,13 +4839,53 @@ class SlowKillNanny(Nanny):
 
 
 @pytest.mark.slow
+@pytest.mark.parametrize("raise_for_error", (True, False))
 @gen_cluster(client=True, Worker=SlowKillNanny)
-async def test_restart_workers_timeout(c, s, a, b):
-    with pytest.raises(TimeoutError) as excinfo:
-        await c.restart_workers(workers=[a.worker_address], timeout=0.001)
-    msg = str(excinfo.value).lower()
-    assert "workers failed to restart" in msg
-    assert a.worker_address in msg
+async def test_restart_workers_timeout(c, s, a, b, raise_for_error):
+    kwargs = dict(workers=[a.worker_address], timeout=0.001)
+
+    if raise_for_error:  # default is to raise
+        with pytest.raises(TimeoutError) as excinfo:
+            await c.restart_workers(**kwargs)
+        msg = str(excinfo.value).lower()
+        assert "workers failed to restart" in msg
+        assert a.worker_address in msg
+    else:
+        results = await c.restart_workers(raise_for_error=raise_for_error, **kwargs)
+        assert results == {a.worker_address: "timed out"}
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("raise_for_error", (True, False))
+@gen_cluster(client=True, Worker=SlowKillNanny)
+async def test_restart_workers_exception(c, s, a, b, raise_for_error):
+    async def fail_instantiate(*_args, **_kwargs):
+        raise ValueError("broken")
+
+    a.instantiate = fail_instantiate
+
+    if raise_for_error:  # default is to raise
+        with pytest.raises(ValueError, match="broken") as excinfo:
+            await c.restart_workers(workers=[a.worker_address])
+    else:
+        results = await c.restart_workers(
+            workers=[a.worker_address], raise_for_error=raise_for_error
+        )
+        msg: ErrorMessage = results[a.worker_address]
+        assert msg["status"] == "error"
+        assert msg["exception_text"] == "ValueError('broken')"
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("by_name", (True, False))
+@gen_cluster(client=True, Worker=Nanny)
+async def test_restart_workers_by_name(c, s, a, b, by_name):
+    a_addr = a.worker_address
+    b_addr = b.worker_address
+    results = await c.restart_workers([a.name if by_name else a_addr, b_addr])
+
+    # Same keys as those passed in, even when mixed with address and names.
+    assert results == {a.name if by_name else a_addr: "OK", b_addr: "OK"}
 
 
 class MyException(Exception):
