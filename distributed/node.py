@@ -171,7 +171,7 @@ class ServerNode(Server):
         bound_addresses = get_tcp_server_addresses(self.http_server)
 
         # If more than one address is configured we just use the first here
-        self.http_server.port = bound_addresses[0][1]
+        self.http_server.address, self.http_server.port = bound_addresses[0]
         self.services["dashboard"] = self.http_server
 
         # Warn on port changes

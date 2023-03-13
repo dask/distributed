@@ -2870,6 +2870,7 @@ async def test_multiple_listeners():
     log = log.getvalue()
     assert re.search(r"Scheduler at:\s*tcp://", log)
     assert re.search(r"Scheduler at:\s*inproc://", log)
+    assert re.search(r"dashboard at:\s*http://", log)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)])
