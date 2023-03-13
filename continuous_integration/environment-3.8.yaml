@@ -17,7 +17,7 @@ dependencies:
   - h5py
   - ipykernel
   - ipywidgets
-  - jinja2
+  - jinja2 >=2.10.3
   - locket >=1.0
   - msgpack-python
   - netcdf4
@@ -48,3 +48,4 @@ dependencies:
       - git+https://github.com/dask/dask
       - git+https://github.com/jcrist/crick  # Only tested here
       - keras
+      - gilknocker

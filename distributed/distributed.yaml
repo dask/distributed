@@ -121,7 +121,7 @@ distributed:
         #     Managed by dask (instantaneous) + unmanaged (without any increases
         #     happened in the last <distributed.worker.memory.recent-to-old-time>).
         #     Recommended for use on CPython with large (2MiB+) numpy-based data chunks.
-        # managed_in_memory
+        # managed
         #     Only consider the data allocated by dask in RAM. Recommended if RAM is not
         #     released in a timely fashion back to the OS after the Python objects are
         #     dereferenced, but remains available for reuse by PyMalloc.
@@ -131,7 +131,7 @@ distributed:
         #     underscore) to a low value; refer to the mallopt man page and to the
         #     comments about M_TRIM_THRESHOLD on
         #     https://sourceware.org/git/?p=glibc.git;a=blob;f=malloc/malloc.c
-        # managed
+        # managed_total
         #     Only consider data allocated by dask, including that spilled to disk.
         #     Recommended if disk occupation of the spill file is an issue.
         measure: optimistic
@@ -310,6 +310,7 @@ distributed:
       interval: 500ms
       disk: true  # Monitor host-wide disk I/O
       host-cpu: false  # Monitor host-wide CPU usage, with very granular breakdown
+      gil-contention: false  # Monitor GIL contention
     event-loop: tornado
   rmm:
     pool-size: null

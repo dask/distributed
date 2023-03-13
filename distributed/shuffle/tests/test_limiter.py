@@ -6,6 +6,7 @@ import pytest
 
 from distributed.metrics import time
 from distributed.shuffle._limiter import ResourceLimiter
+from distributed.utils import wait_for
 from distributed.utils_test import gen_test
 
 
@@ -23,13 +24,13 @@ async def test_limiter_basic():
     res.increase(1)
     assert not res.available()
     with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(res.wait_for_available(), 0.1)
+        await wait_for(res.wait_for_available(), 0.1)
 
     await res.decrease(1)
     assert not res.available()
 
     with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(res.wait_for_available(), 0.1)
+        await wait_for(res.wait_for_available(), 0.1)
 
     await res.decrease(1)
     assert res.available() == 1
@@ -38,7 +39,7 @@ async def test_limiter_basic():
     res.increase(1)
     assert not res.available()
     with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(res.wait_for_available(), 0.1)
+        await wait_for(res.wait_for_available(), 0.1)
 
     await res.decrease(5)
     assert res.available() == 5
@@ -48,7 +49,7 @@ async def test_limiter_basic():
 
     res.increase(10)
     with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(res.wait_for_available(), 0.1)
+        await wait_for(res.wait_for_available(), 0.1)
 
     await res.decrease(3)
     assert not res.available()
@@ -71,7 +72,7 @@ async def test_limiter_concurrent_decrease_releases_waiter():
 
     decrease_buffer = asyncio.create_task(decrease())
     with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(asyncio.shield(wait_for_available), 0.1)
+        await wait_for(asyncio.shield(wait_for_available), 0.1)
 
     event.set()
     await wait_for_available

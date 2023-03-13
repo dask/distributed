@@ -8,6 +8,8 @@ import pytest
 
 import dask
 
+from distributed.utils import wait_for
+
 pytestmark = pytest.mark.gpu
 
 ucp = pytest.importorskip("ucp")
@@ -404,6 +406,6 @@ async def test_comm_closed_on_read_error():
     # Depending on the UCP protocol selected, it may raise either
     # `asyncio.TimeoutError` or `CommClosedError`, so validate either one.
     with pytest.raises((asyncio.TimeoutError, CommClosedError)):
-        await asyncio.wait_for(reader.read(), 0.01)
+        await wait_for(reader.read(), 0.01)
 
     assert reader.closed()

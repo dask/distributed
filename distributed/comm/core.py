@@ -18,6 +18,7 @@ from distributed.comm.addressing import parse_address
 from distributed.metrics import time
 from distributed.protocol.compression import get_default_compression
 from distributed.protocol.pickle import HIGHEST_PROTOCOL
+from distributed.utils import wait_for
 
 logger = logging.getLogger(__name__)
 
@@ -225,8 +226,8 @@ class Listener(ABC):
             # Timeout is to ensure that we'll terminate connections eventually.
             # Connector side will employ smaller timeouts and we should only
             # reach this if the comm is dead anyhow.
-            await asyncio.wait_for(comm.write(local_info), timeout=timeout)
-            handshake = await asyncio.wait_for(comm.read(), timeout=timeout)
+            await wait_for(comm.write(local_info), timeout=timeout)
+            handshake = await wait_for(comm.read(), timeout=timeout)
             # This would be better, but connections leak if worker is closed quickly
             # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
         except Exception as e:
@@ -288,7 +289,7 @@ async def connect(
     active_exception = None
     while time_left() > 0:
         try:
-            comm = await asyncio.wait_for(
+            comm = await wait_for(
                 connector.connect(loc, deserialize=deserialize, **connection_args),
                 timeout=min(intermediate_cap, time_left()),
             )
@@ -325,8 +326,8 @@ async def connect(
     try:
         # This would be better, but connections leak if worker is closed quickly
         # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
-        handshake = await asyncio.wait_for(comm.read(), time_left())
-        await asyncio.wait_for(comm.write(local_info), time_left())
+        handshake = await wait_for(comm.read(), time_left())
+        await wait_for(comm.write(local_info), time_left())
     except Exception as exc:
         with suppress(Exception):
             await comm.close()

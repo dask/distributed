@@ -143,9 +143,9 @@ async def test_get_task_stream_plot(c, s, a, b):
     assert isinstance(figure, bkm.Plot)
 
 
-def test_get_task_stream_save(client, tmpdir):
+def test_get_task_stream_save(client, tmp_path):
     bkm = pytest.importorskip("bokeh.models")
-    tmpdir = str(tmpdir)
+    tmpdir = str(tmp_path)
     fn = os.path.join(tmpdir, "foo.html")
 
     with get_task_stream(plot="save", filename=fn) as ts:

@@ -32,6 +32,7 @@ from distributed.comm.addressing import address_from_user_args
 from distributed.core import (
     AsyncTaskGroupClosedError,
     CommClosedError,
+    ErrorMessage,
     RPCClosed,
     Status,
     coerce_to_address,
@@ -52,6 +53,7 @@ from distributed.utils import (
     log_errors,
     parse_ports,
     silence_logging,
+    wait_for,
 )
 from distributed.worker import Worker, run
 from distributed.worker_memory import (
@@ -304,7 +306,7 @@ class Nanny(ServerNode):
             return
 
         try:
-            await asyncio.wait_for(
+            await wait_for(
                 self.scheduler.unregister(
                     address=self.worker_address, stimulus_id=f"nanny-close-{time()}"
                 ),
@@ -423,9 +425,7 @@ class Nanny(ServerNode):
 
         if self.death_timeout:
             try:
-                result = await asyncio.wait_for(
-                    self.process.start(), self.death_timeout
-                )
+                result = await wait_for(self.process.start(), self.death_timeout)
             except asyncio.TimeoutError:
                 logger.error(
                     "Timed out connecting Nanny '%s' to scheduler '%s'",
@@ -489,19 +489,21 @@ class Nanny(ServerNode):
 
     async def restart(
         self, timeout: float = 30, reason: str = "nanny-restart"
-    ) -> Literal["OK", "timed out"]:
+    ) -> Literal["OK", "timed out"] | ErrorMessage:
         async def _():
             if self.process is not None:
                 await self.kill(reason=reason)
                 await self.instantiate()
 
         try:
-            await asyncio.wait_for(_(), timeout)
+            await wait_for(_(), timeout)
         except asyncio.TimeoutError:
             logger.error(
                 f"Restart timed out after {timeout}s; returning before finished"
             )
             return "timed out"
+        except Exception as e:
+            return error_message(e)
         else:
             return "OK"
 
@@ -514,7 +516,9 @@ class Nanny(ServerNode):
     def _on_worker_exit_sync(self, exitcode):
         try:
             self._ongoing_background_tasks.call_soon(self._on_worker_exit, exitcode)
-        except AsyncTaskGroupClosedError:  # Async task group has already been closed, so the nanny is already clos(ed|ing).
+        except (
+            AsyncTaskGroupClosedError
+        ):  # Async task group has already been closed, so the nanny is already clos(ed|ing).
             pass
 
     @log_errors
@@ -796,8 +800,13 @@ class WorkerProcess:
         if self.status == Status.stopping:
             await self.stopped.wait()
             return
+        # If the process is not properly up it will not watch the closing queue
+        # and we may end up leaking this process
+        # Therefore wait for it to be properly started before killing it
+        if self.status == Status.starting:
+            await self.running.wait()
+
         assert self.status in (
-            Status.starting,
             Status.running,
             Status.failed,  # process failed to start, but hasn't been joined yet
         ), self.status

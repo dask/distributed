@@ -1,6 +1,261 @@
 Changelog
 =========
 
+.. _v2023.3.1:
+
+2023.3.1
+--------
+
+Released on March 10, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Add Jupyter link to dashboard menu if ``--jupyter`` flag is set (:pr:`7638`) `Jacob Tomlinson`_
+- Bump minimum ``click`` version from 7.0 to 8.0 (:pr:`7637`) `Miles`_
+- Extend ``dask`` metapackage dependencies (:pr:`7630`) `James Bourbeau`_
+- Further improvements to ``Client.restart_workers`` (:pr:`7620`) `Miles`_
+- P2P offload ``get_output_partition`` (:pr:`7587`) `Florian Jetter`_
+- Initial integration of GIL contention metric (:pr:`7624`) `Miles`_
+- Add dashboard documentation links (:pr:`7610`) `Miles`_
+- Rename shuffle/rechunk config option/kwarg to method (:pr:`7623`) `Hendrik Makait`_
+- Return results in ``restart_workers`` (:pr:`7606`) `Miles`_
+- Ensure client key cancellation uses ordered messages (:pr:`7583`) `Florian Jetter`_
+
+Bug Fixes
+^^^^^^^^^
+- Fix undefined ``async_wait_for`` -> ``async_poll_for`` (:pr:`7627`) `Miles`_
+- Don't send client heartbeat without a ``scheduler_comm`` (:pr:`7612`) `James Bourbeau`_
+- Do not unspill on free-keys (:pr:`7607`) `crusaderky`_
+
+Documentation
+^^^^^^^^^^^^^
+- Add notes to ``Client.submit``, ``Client.map``, and ``Client.scatter`` with the description of the current task graph resolution algorithm limitations (:pr:`7588`) `Eugene Druzhynin`_
+
+Maintenance
+^^^^^^^^^^^
+- Use ``range`` with ``pickle`` ``protocol`` versions (:pr:`7635`) `jakirkham`_
+- Share thread pool among P2P shuffle runs (:pr:`7621`) `Hendrik Makait`_
+- Replace ``psutil`` suspend with ``BlockedGatherDep`` in ``test_failing_worker_with_additional_replicas_on_cluster`` (:pr:`7633`) `Thomas Grainger`_
+- Ignore ``pkg_resources`` ``DeprecationWarning`` for mindeps (:pr:`7626`) `Miles`_
+- Implement ``wait_for`` using ``asyncio.timeout()`` on 3.11 (:pr:`7571`) `Thomas Grainger`_
+- Use ``tmp_path`` fixture instead of  outdated ``tmpdir`` fixture (:pr:`7582`) `ypogorelova`_
+- Only one ``crick`` callback (:pr:`7614`) `crusaderky`_
+- Add mindeps + ``numpy`` job to tests CI (:pr:`7609`) `Miles`_
+- Do not ``xfail`` whole tests due to (:pr:`6705`) (:pr:`7611`) `crusaderky`_
+
+
+.. _v2023.3.0:
+
+2023.3.0
+--------
+
+Released on March 1, 2023
+
+Bug Fixes
+^^^^^^^^^
+- Remove ``pyarrow`` dependency for rechunking (:pr:`7604`) `Florian Jetter`_
+- Update ``rechunk_transfer`` and ``rechunk_unpack`` errors (:pr:`7600`) `James Bourbeau`_
+
+Maintenance
+^^^^^^^^^^^
+- Remove dead code and document arguments to ``ShardBuffer`` constructors (:pr:`7590`) `Lawrence Mitchell`_
+- Fix tests for p2p by default (:pr:`7595`) `Florian Jetter`_
+- Remove obsolete cast (:pr:`7596`) `Florian Jetter`_
+
+
+.. _v2023.2.1:
+
+2023.2.1
+--------
+
+Released on February 24, 2023
+
+
+Enhancements
+^^^^^^^^^^^^
+- P2P for array rechunking (:pr:`7534`) `Hendrik Makait`_
+- P2P HashJoin (:pr:`7514`) `Florian Jetter`_
+- Unpickle Events, Variables, Queues and Semaphore safely without Client context (:pr:`7579`) `Florian Jetter`_
+- Allow pickle to fall back to dask_serialize (:pr:`7567`) `Florian Jetter`_
+- make ``ConnectionPool.remove`` cancel connection attempts  (:pr:`7547`) `Thomas Grainger`_
+- Meter how long each task prefix stays in each state (:pr:`7560`) `crusaderky`_
+
+Bug Fixes
+^^^^^^^^^
+- Avoid parsing ``sys.argv`` when starting ``jupyter`` server (:pr:`7573`) `Brett Naul`_
+- ``str``/``bytes`` compatibility for PyNVML device name (:pr:`7563`) `James Bourbeau`_
+- ``metrics.monotonic()`` is not monotonic on Windows (:pr:`7558`) `crusaderky`_
+- Fix for ``bytes``/``str`` discrepancy after PyNVML update (:pr:`7544`) `Peter Andreas Entschev`_
+
+Maintenance
+^^^^^^^^^^^
+- Raise when attempting P2P with active fuse optimization (:pr:`7585`) `Hendrik Makait`_
+- Fix ``test_shuffling`` (:pr:`7581`) `Hendrik Makait`_
+- P2P: raise RuntimeError if pyarrow version is not sufficient (:pr:`7578`) `Florian Jetter`_
+- Check for dtype support in p2p (:pr:`7425`) `Hendrik Makait`_
+- Update parsing of FULL_RAPIDS_VER/FULL_UCX_PY_VER (:pr:`7568`) `Charles Blackmon-Luca`_
+- move retry from get_data_from_worker to gather_from_workers  (:pr:`7546`) `Thomas Grainger`_
+- Increase ``numpy`` and ``pandas`` version pins for nightlies (:pr:`7562`) `James Bourbeau`_
+- Set validate=True in all tests (:pr:`7557`) `crusaderky`_
+- Remove dead code from _get_task_finished_msg (:pr:`7561`) `crusaderky`_
+- Mark tests that take >2s as slow (:pr:`7556`) `crusaderky`_
+- Fix test_scatter_no_workers on slow CI (:pr:`7559`) `crusaderky`_
+- Unskip ``test_delete_some_results`` (:pr:`7508`) `Hendrik Makait`_
+- scatter() should not sidestep the worker transition machinery (:pr:`7545`) `crusaderky`_
+- pre-commit bump (:pr:`7541`) `crusaderky`_
+- Better assertions in Worker.validate_state() (:pr:`7549`) `crusaderky`_
+- Bump jacobtomlinson/gha-find-replace from 2 to 3 (:pr:`7540`) `James Bourbeau`_
+- Bump ``black`` to 23.1.0 (:pr:`7542`) `crusaderky`_
+- Run GPU tests on python 3.8 & 3.10 (:pr:`7537`) `Charles Blackmon-Luca`_
+
+
+.. _v2023.2.0:
+
+2023.2.0
+--------
+
+Released on February 10, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Rate limit the worker memory logs (:pr:`7529`) `Florian Jetter`_
+- Move P2P barrier logic to scheduler extension (:pr:`7519`) `Hendrik Makait`_
+
+Maintenance
+^^^^^^^^^^^
+- Use PEP 673 ``Self`` type (:pr:`7530`) `Thomas Grainger`_
+- Tentatively fix ``test_pause_while_spilling`` (:pr:`7517`) `crusaderky`_
+- Annotate ``asyncio_tcp.py`` (:pr:`7522`) `crusaderky`_
+- Use dask git tip for ``mypy`` (:pr:`7516`) `crusaderky`_
+- Upgrade to ``mypy`` v1 (:pr:`7525`) `Thomas Grainger`_
+- Clean up calls to ``captured_logger`` (:pr:`7521`) `crusaderky`_
+- Update ``isort`` version to 5.12.0 (:pr:`7513`) `Lawrence Mitchell`_
+
+.. _v2023.1.1:
+
+2023.1.1
+--------
+
+Released on January 27, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- P2P shuffle deduplicates data and can be run several times (:pr:`7486`) `Hendrik Makait`_
+- Reverse order of ``get_logs()`` and ``get_worker_logs()`` (:pr:`7475`) `Nicholas R. Knezek`_
+- Add prometheus metric for time and memory used per task prefix (:pr:`7406`) `Thomas Grainger`_
+- Additive worker counts in Prometheus (:pr:`7468`) `crusaderky`_
+- Add help tool for taskstream (:pr:`7478`) `Florian Jetter`_
+
+Bug Fixes
+^^^^^^^^^
+- Do not allow for a worker to reject a drop replica request (:pr:`7490`) `Hendrik Makait`_
+- Fix un/packing for namedtuples with custom constructors (:pr:`7465`) `antonymayi`_
+
+Documentation
+^^^^^^^^^^^^^
+- Remove ``timeout=`` from docstring example for ``worker_client`` (:pr:`7497`) `Florian Jetter`_
+
+Maintenance
+^^^^^^^^^^^
+- Ignore get_default_shuffle_algorithm linting issue (:pr:`7506`) `Florian Jetter`_
+- Remove set_config when using default client (:pr:`7482`) `Florian Jetter`_
+- Update gpuCI ``RAPIDS_VER`` to ``23.04`` (:pr:`7501`)
+- Fix ``test_balance_expensive_tasks`` and improve helper functions in ``test_steal.py`` (:pr:`7253`) `Hendrik Makait`_
+- Sign every compute task with run ID to correlate response (:pr:`7463`) `Hendrik Makait`_
+
+
+.. _v2023.1.0:
+
+2023.1.0
+---------
+
+Released on January 13, 2023
+
+New Features
+^^^^^^^^^^^^
+- Add local ``SubprocessCluster`` that runs workers in separate processes (:pr:`7431`) `Hendrik Makait`_
+
+Enhancements
+^^^^^^^^^^^^
+- Ensure client session is quiet after ``cluster.close()`` or ``client.shutdown()`` (:pr:`7429`) `James Bourbeau`_
+- Set ``lifetime-stagger`` default value to ``None`` (:pr:`7445`) `bstadlbauer`_
+- Memory thresholds should never be exactly ``0.0`` (:pr:`7458`) `Stuart Berg`_
+- Remove the Incorrect-Sizeof-Warning (:pr:`7450`) `Mads R. B. Kristensen`_
+- Log exceptions in P2P shuffle tasks (:pr:`7442`) `Hendrik Makait`_
+- Add support for packing ``namedtuple`` and add test for future resolution in submit (:pr:`7292`) `Andrew`_
+- Avoid deep copy on ``lz4`` decompression (:pr:`7437`) `crusaderky`_
+- Avoid deep copy of ``numpy`` buffers on unspill (:pr:`7435`) `crusaderky`_
+- Don't error when clicking on empty task stream plot (:pr:`7432`) `James Bourbeau`_
+- Do not count spilled memory when comparing vs. process memory (:pr:`7430`) `crusaderky`_
+- Stop ``Client`` periodic callbacks during ``shutdown()`` (:pr:`7428`) `James Bourbeau`_
+- Add ``dask spec`` CLI (:pr:`7427`) `Matthew Rocklin`_
+- Create new ``zstd`` (de)compressor for each compression call (:pr:`7404`) `Dylan Wragge`_
+- Rename ``managed_in_memory`` etc. to match GUI (:pr:`7418`) `crusaderky`_
+- Warn users when ``sizeof()`` returns inflated output (:pr:`7419`) `crusaderky`_
+
+Bug Fixes
+^^^^^^^^^
+- Ensure dicts are properly recognized as ``msgpack`` serializable (:pr:`7473`) `Florian Jetter`_
+- Reset state of ``ShuffleSchedulerExtension`` on restart (:pr:`7446`) `Hendrik Makait`_
+- Reject non-string column names in P2P shuffle (:pr:`7447`) `Hendrik Makait`_
+- Avoid ``int32`` in dashboard (:pr:`7443`) `Matthew Rocklin`_
+- Fix ``P2PShuffle`` serialization for categorical data (:pr:`7410`) `Hendrik Makait`_
+- ``WorkerPorcess`` blocks on kill if still starting (:pr:`7424`) `Matthew Rocklin`_
+
+Documentation
+^^^^^^^^^^^^^
+- Move Prometheus docs from ``dask/dask`` (:pr:`7405`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Various cleanups in semaphore (:pr:`5885`) `Florian Jetter`_
+- ``test_rlimit`` fails on MacOSX (:pr:`7457`) `crusaderky`_
+- Bump ``actions/checkout`` from 3.2.0 to 3.3.0 (:pr:`7464`)
+- Remove conditional imports of ``psutil`` (:pr:`7462`) `crusaderky`_
+- Drop support for ``zict < 2.1.0`` (:pr:`7456`) `crusaderky`_
+- Fix flaky ``test_digests`` (:pr:`7454`) `crusaderky`_
+- Add minimum dependency testing to CI (:pr:`7285`) `Charles Blackmon-Luca`_
+- Avoid overflow in ``statitics.mean`` (:pr:`7426`) `Matthew Rocklin`_
+- Ignore ``numpy`` ``bool8`` deprecation (:pr:`7423`) `Matthew Rocklin`_
+- Add missing skips for pyarrow (:pr:`7416`) `Elliott Sales de Andrade`_
+- Be more permissive about expected ciphers in tests (:pr:`7417`) `Elliott Sales de Andrade`_
+- Revert "TST: Fetch executables from build root (:pr:`2551`)" (:pr:`7415`) `Elliott Sales de Andrade`_
+
+
+.. _v2022.12.1:
+
+2022.12.1
+---------
+
+Released on December 16, 2022
+
+Enhancements
+^^^^^^^^^^^^
+- ``SpillBuffer`` metrics (:pr:`7368`) `crusaderky`_
+- Prometheus: measure how much spilling blocks the event loop  (:pr:`7370`) `crusaderky`_
+- Add ``transfer_outgoing_bytes_total`` metric (:pr:`7388`) `Gabe Joseph`_
+- Fail ``P2PShuffle`` gracefully upon worker failure (:pr:`7326`) `Hendrik Makait`_
+
+Bug Fixes
+^^^^^^^^^
+- Select queued tasks in stimuli, not transitions (:pr:`7402`) `Gabe Joseph`_
+- Check ``ContextVar`` in ``default_client`` (:pr:`7369`) `Matthew Rocklin`_
+- Fix sending event messages to non-subscribers (:pr:`7014`) `Laurence Watts`_
+- Set sizing mode on ``Tabs`` to avoid layout collapse (:pr:`7365`) `Mateusz Paprocki`_
+
+Maintenance
+^^^^^^^^^^^
+- Restructure ``P2PShuffle`` extensions (:pr:`7390`) `Hendrik Makait`_
+- Add Python 3.11 classifier (:pr:`7408`) `James Bourbeau`_
+- Add support for Python 3.11 (:pr:`7249`) `Thomas Grainger`_
+- Add test for using annotations with ``client.submit`` and ``client.map`` (:pr:`7399`) `James Bourbeau`_
+- Bump ``actions/checkout`` from 3.1.0 to 3.2.0 (:pr:`7393`)
+- Remove  superfluous ``ShuffleSchedulerExtension.barriers`` (:pr:`7389`) `Hendrik Makait`_
+- Remove ignore annotation-unchecked (:pr:`7379`) `crusaderky`_
+- Remove ``tornado`` max version from nightly recipe (:pr:`7376`) `Charles Blackmon-Luca`_
+- Remove the experimental feature warning for ``Semaphore`` (:pr:`7373`) `Florian Jetter`_
+
+
 .. _v2022.12.0:
 
 2022.12.0
@@ -4504,3 +4759,13 @@ significantly without many new features.
 .. _`Tom Hu`: https://github.com/thomasrockhu-codecov
 .. _`Richard Pelgrim`: https://github.com/rrpelgrim
 .. _`Enrico Minack`: https://github.com/EnricoMi
+.. _`Laurence Watts`: https://github.com/lwatt
+.. _`Mateusz Paprocki`: https://github.com/mattpap
+.. _`bstadlbauer`: https://github.com/bstadlbauer
+.. _`Stuart Berg`: https://github.com/stuarteberg
+.. _`Dylan Wragge`: https://github.com/dwragge
+.. _`Nicholas R. Knezek`: https://github.com/nknezek
+.. _`antonymayi`: https://github.com/antonymayi
+.. _`Miles`: https://github.com/milesgranger
+.. _`Eugene Druzhynin`: https://github.com/eugene-graft
+.. _`ypogorelova`: https://github.com/ypogorelova

@@ -8,9 +8,8 @@ from contextlib import suppress
 
 from dask.utils import parse_timedelta
 
-from distributed.client import Client
-from distributed.utils import TimeoutError, log_errors
-from distributed.worker import get_worker
+from distributed.utils import TimeoutError, log_errors, wait_for
+from distributed.worker import get_client
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +70,7 @@ class EventExtension:
         event = self._events[name]
         future = event.wait()
         if timeout is not None:
-            future = asyncio.wait_for(future, timeout)
+            future = wait_for(future, timeout)
 
         self._waiter_count[name] += 1
         try:
@@ -180,10 +179,9 @@ class Event:
 
     def __init__(self, name=None, client=None):
         try:
-            self.client = client or Client.current()
+            self.client = client or get_client()
         except ValueError:
-            # Initialise new client
-            self.client = get_worker().client
+            self.client = None
         self.name = name or "event-" + uuid.uuid4().hex
 
     def __await__(self):
@@ -200,6 +198,14 @@ class Event:
             return self
 
         return _().__await__()
+
+    def _verify_running(self):
+        if not self.client:
+            raise RuntimeError(
+                f"{type(self)} object not properly initialized. This can happen"
+                " if the object is being deserialized outside of the context of"
+                " a Client or Worker."
+            )
 
     def wait(self, timeout=None):
         """Wait until the event is set.
@@ -221,6 +227,7 @@ class Event:
         -------
         True if the event was set of false, if a timeout happened
         """
+        self._verify_running()
         timeout = parse_timedelta(timeout)
 
         result = self.client.sync(
@@ -233,6 +240,7 @@ class Event:
 
         All waiters will now block.
         """
+        self._verify_running()
         return self.client.sync(self.client.scheduler.event_clear, name=self.name)
 
     def set(self):
@@ -240,11 +248,13 @@ class Event:
 
         All waiters will now be released.
         """
+        self._verify_running()
         result = self.client.sync(self.client.scheduler.event_set, name=self.name)
         return result
 
     def is_set(self):
         """Check if the event is set"""
+        self._verify_running()
         result = self.client.sync(self.client.scheduler.event_is_set, name=self.name)
         return result
 

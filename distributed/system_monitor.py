@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import warnings
 from collections import deque
 from typing import Any
 
@@ -23,9 +24,11 @@ class SystemMonitor:
     monitor_net_io: bool
     monitor_disk_io: bool
     monitor_host_cpu: bool
+    monitor_gil_contention: bool
     _last_net_io_counters: Any  # psutil namedtuple
     _last_disk_io_counters: Any  # psutil namedtuple
     _last_host_cpu_counters: Any  # dynamically-defined psutil namedtuple
+    _last_gil_contention: float  # 0-1 value
 
     gpu_name: str | None
     gpu_memory_total: int
@@ -37,6 +40,7 @@ class SystemMonitor:
         maxlen: int | None = 7200,
         monitor_disk_io: bool | None = None,
         monitor_host_cpu: bool | None = None,
+        monitor_gil_contention: bool | None = None,
     ):
         self.proc = psutil.Process()
         self.count = 0
@@ -65,7 +69,8 @@ class SystemMonitor:
             try:
                 disk_ioc = psutil.disk_io_counters()
             except Exception:
-                # FIXME is this possible?
+                # FIXME occurs when psutil version doesn't have handling for given platform / kernel;
+                # should we explicitly error in this case?
                 monitor_disk_io = False  # pragma: nocover
             else:
                 if disk_ioc is None:  # pragma: nocover
@@ -87,6 +92,24 @@ class SystemMonitor:
             # This is a namedtuple whose fields change based on OS and kernel version
             for k in hostcpu_c._fields:
                 self.quantities["host_cpu." + k] = deque(maxlen=maxlen)
+
+        if monitor_gil_contention is None:
+            monitor_gil_contention = dask.config.get(
+                "distributed.admin.system-monitor.gil-contention"
+            )
+        self.monitor_gil_contention = monitor_gil_contention
+        if self.monitor_gil_contention:
+            try:
+                from gilknocker import KnockKnock
+            except ImportError:
+                warnings.warn(
+                    "Monitoring GIL requires `gilknocker` to be installed. `pip install gilknocker`"
+                )
+                self.monitor_gil_contention = False
+            else:
+                self.quantities["gil_contention"] = deque(maxlen=maxlen)
+                self._gilknocker = KnockKnock(1_000)  # TODO(miles) param interval?
+                self._gilknocker.start()
 
         if not WINDOWS:
             self.quantities["num_fds"] = deque(maxlen=maxlen)
@@ -160,6 +183,11 @@ class SystemMonitor:
                 # cpu_times() has a precision of 2 decimals; suppress noise
                 result["host_cpu." + k] = round(delta / duration, 2)
             self._last_host_cpu_counters = host_cpu
+
+        if self.monitor_gil_contention:
+            self._last_gil_contention = self._gilknocker.contention_metric
+            result["gil_contention"] = self._last_gil_contention
+            self._gilknocker.reset_contention_metric()
 
         # Note: WINDOWS constant doesn't work with `mypy --platform win32`
         if sys.platform != "win32":

@@ -20,7 +20,14 @@ import weakref
 import xml.etree.ElementTree
 from asyncio import TimeoutError
 from collections import deque
-from collections.abc import Callable, Collection, Container, KeysView, ValuesView
+from collections.abc import (
+    Awaitable,
+    Callable,
+    Collection,
+    Container,
+    KeysView,
+    ValuesView,
+)
 from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
@@ -36,6 +43,7 @@ from typing import Any as AnyType
 from typing import ClassVar, Iterator, TypeVar, overload
 
 import click
+import psutil
 import tblib.pickling_support
 
 try:
@@ -55,7 +63,7 @@ from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
 from distributed.compatibility import WINDOWS
-from distributed.metrics import time
+from distributed.metrics import monotonic, time
 
 try:
     from dask.context import thread_state
@@ -200,8 +208,6 @@ def get_ip_interface(ifname):
     ValueError is raised if the interface does no have an IPv4 address
     associated with it.
     """
-    import psutil
-
     net_if_addrs = psutil.net_if_addrs()
 
     if ifname not in net_if_addrs:
@@ -333,7 +339,7 @@ class SyncMethodMixin:
         if asynchronous:
             future = func(*args, **kwargs)
             if callback_timeout is not None:
-                future = asyncio.wait_for(future, callback_timeout)
+                future = wait_for(future, callback_timeout)
             return future
         else:
             return sync(
@@ -374,7 +380,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             yield gen.moment
             future = func(*args, **kwargs)
             if callback_timeout is not None:
-                future = asyncio.wait_for(future, callback_timeout)
+                future = wait_for(future, callback_timeout)
             future = asyncio.ensure_future(future)
             result = yield future
         except Exception:
@@ -1391,7 +1397,6 @@ def is_valid_xml(text):
 
 
 _offload_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="Dask-Offload")
-weakref.finalize(_offload_executor, _offload_executor.shutdown)
 
 
 def import_term(name: str) -> AnyType:
@@ -1758,3 +1763,49 @@ class Deadline:
     def expired(self) -> bool:
         """Whether the deadline has already expired"""
         return self.remaining == 0
+
+
+class RateLimiterFilter(logging.Filter):
+    """A Logging filter that ensures a matching message is emitted at most every
+    `rate` seconds"""
+
+    pattern: re.Pattern
+    rate: float
+    _last_seen: float
+
+    def __init__(self, pattern: str, *, name: str = "", rate: str | float = "10s"):
+        super().__init__(name)
+        self.pattern = re.compile(pattern)
+        self.rate = _parse_timedelta(rate)
+        self._last_seen = -self.rate
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if self.pattern.match(record.msg):
+            now = monotonic()
+            if now - self._last_seen < self.rate:
+                return False
+            self._last_seen = now
+        return True
+
+    @classmethod
+    def reset_timer(cls, logger: logging.Logger | str) -> None:
+        """Reset the timer on all RateLimiterFilters on a logger.
+        Useful in unit testing.
+        """
+        if isinstance(logger, str):
+            logger = logging.getLogger(logger)
+        for filter in logger.filters:
+            if isinstance(filter, cls):
+                filter._last_seen = -filter.rate
+
+
+if sys.version_info >= (3, 11):
+
+    async def wait_for(fut: Awaitable[T], timeout: float) -> T:
+        async with asyncio.timeout(timeout):
+            return await fut
+
+else:
+
+    async def wait_for(fut: Awaitable[T], timeout: float) -> T:
+        return await asyncio.wait_for(fut, timeout)

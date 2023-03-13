@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import logging
+from enum import Enum
 from typing import TYPE_CHECKING, Any, NewType
 
+import dask
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import SimpleShuffleLayer
+
+from distributed.shuffle._arrow import check_dtype_support, check_minimal_arrow_version
 
 logger = logging.getLogger("distributed.shuffle")
 if TYPE_CHECKING:
@@ -17,6 +21,11 @@ if TYPE_CHECKING:
     from distributed.shuffle._worker_extension import ShuffleWorkerExtension
 
 ShuffleId = NewType("ShuffleId", str)
+
+
+class ShuffleType(Enum):
+    DATAFRAME = "DataFrameShuffle"
+    ARRAY_RECHUNK = "ArrayRechunk"
 
 
 def _get_worker_extension() -> ShuffleWorkerExtension:
@@ -41,31 +50,51 @@ def _get_worker_extension() -> ShuffleWorkerExtension:
 def shuffle_transfer(
     input: pd.DataFrame,
     id: ShuffleId,
+    input_partition: int,
     npartitions: int,
     column: str,
-) -> None:
+) -> int:
     try:
-        _get_worker_extension().add_partition(
-            input, id, npartitions=npartitions, column=column
+        return _get_worker_extension().add_partition(
+            input,
+            shuffle_id=id,
+            type=ShuffleType.DATAFRAME,
+            input_partition=input_partition,
+            npartitions=npartitions,
+            column=column,
         )
     except Exception:
-        raise RuntimeError(f"shuffle_transfer failed during shuffle {id}")
+        msg = f"shuffle_transfer failed during shuffle {id}"
+        # FIXME: Use exception chaining instead of logging the traceback.
+        #  This has previously led to spurious recursion errors
+        logger.error(msg, exc_info=True)
+        raise RuntimeError(msg)
 
 
 def shuffle_unpack(
-    id: ShuffleId, output_partition: int, barrier: object
+    id: ShuffleId, output_partition: int, barrier_run_id: int
 ) -> pd.DataFrame:
     try:
-        return _get_worker_extension().get_output_partition(id, output_partition)
+        return _get_worker_extension().get_output_partition(
+            id, barrier_run_id, output_partition
+        )
     except Exception:
-        raise RuntimeError(f"shuffle_unpack failed during shuffle {id}")
+        msg = f"shuffle_unpack failed during shuffle {id}"
+        # FIXME: Use exception chaining instead of logging the traceback.
+        #  This has previously led to spurious recursion errors
+        logger.error(msg, exc_info=True)
+        raise RuntimeError(msg)
 
 
-def shuffle_barrier(id: ShuffleId, transfers: list[None]) -> None:
+def shuffle_barrier(id: ShuffleId, run_ids: list[int]) -> int:
     try:
-        return _get_worker_extension().barrier(id)
+        return _get_worker_extension().barrier(id, run_ids)
     except Exception:
-        raise RuntimeError(f"shuffle_barrier failed during shuffle {id}")
+        msg = f"shuffle_barrier failed during shuffle {id}"
+        # FIXME: Use exception chaining instead of logging the traceback.
+        #  This has previously led to spurious recursion errors
+        logger.error(msg, exc_info=True)
+        raise RuntimeError(msg)
 
 
 def rearrange_by_column_p2p(
@@ -75,16 +104,22 @@ def rearrange_by_column_p2p(
 ) -> DataFrame:
     from dask.dataframe import DataFrame
 
+    if dask.config.get("optimization.fuse.active"):
+        raise RuntimeError(
+            "P2P shuffling requires the fuse optimization to be turned off. "
+            "Set the 'optimization.fuse.active' config to False to deactivate."
+        )
+
+    check_dtype_support(df._meta)
     npartitions = npartitions or df.npartitions
     token = tokenize(df, column, npartitions)
 
     empty = df._meta.copy()
-    for c, dt in empty.dtypes.items():
-        if dt == object:
-            empty[c] = empty[c].astype(
-                "string"
-            )  # TODO: we fail at non-string object dtypes
-    empty[column] = empty[column].astype("int64")  # TODO: this shouldn't be necesssary
+    if any(not isinstance(c, str) for c in empty.columns):
+        unsupported = {c: type(c) for c in empty.columns if not isinstance(c, str)}
+        raise TypeError(
+            f"p2p requires all column names to be str, found: {unsupported}",
+        )
 
     name = f"shuffle-p2p-{token}"
     layer = P2PShuffleLayer(
@@ -117,6 +152,7 @@ class P2PShuffleLayer(SimpleShuffleLayer):
         parts_out: list | None = None,
         annotations: dict | None = None,
     ):
+        check_minimal_arrow_version()
         annotations = annotations or {}
         annotations.update({"shuffle": lambda key: key[1]})
         super().__init__(
@@ -164,6 +200,7 @@ class P2PShuffleLayer(SimpleShuffleLayer):
                 shuffle_transfer,
                 (self.name_input, i),
                 token,
+                i,
                 self.npartitions,
                 self.column,
             )

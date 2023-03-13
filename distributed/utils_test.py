@@ -73,6 +73,7 @@ from distributed.utils import (
     log_errors,
     reset_logger_locks,
 )
+from distributed.utils import wait_for as utils_wait_for
 from distributed.worker import WORKER_ANY_RUNNING, Worker
 from distributed.worker_state_machine import (
     ComputeTaskEvent,
@@ -371,13 +372,11 @@ def _run_and_close_tornado(async_fn, /, *args, **kwargs):
 
 
 def run_scheduler(q, nputs, config, port=0, **kwargs):
-    with dask.config.set(config):
+    with config_for_cluster_tests(**config):
 
         async def _():
             try:
-                scheduler = await Scheduler(
-                    validate=True, host="127.0.0.1", port=port, **kwargs
-                )
+                scheduler = await Scheduler(host="127.0.0.1", port=port, **kwargs)
             except Exception as exc:
                 for _ in range(nputs):
                     q.put(exc)
@@ -454,7 +453,7 @@ def check_active_rpc(loop, active_rpc_timeout=1):
         )
 
     async def wait():
-        await async_wait_for(
+        await async_poll_for(
             lambda: len(set(rpc.active) - active_before) == 0,
             timeout=active_rpc_timeout,
             fail_func=fail,
@@ -479,7 +478,7 @@ async def _acheck_active_rpc(active_rpc_timeout=1):
             "some RPCs left active by test: %s" % (set(rpc.active) - active_before)
         )
 
-    await async_wait_for(
+    await async_poll_for(
         lambda: len(set(rpc.active) - active_before) == 0,
         timeout=active_rpc_timeout,
         fail_func=fail,
@@ -699,6 +698,7 @@ def cluster(
 
 def gen_test(
     timeout: float = _TEST_TIMEOUT,
+    config: dict | None = None,
     clean_kwargs: dict[str, Any] | None = None,
 ) -> Callable[[Callable], Callable]:
     """Coroutine test
@@ -722,10 +722,9 @@ def gen_test(
         timeout = 3600
 
     async def async_fn_outer(async_fn, /, *args, **kwargs):
-        async with _acheck_active_rpc():
-            return await asyncio.wait_for(
-                asyncio.create_task(async_fn(*args, **kwargs)), timeout
-            )
+        with config_for_cluster_tests(**(config or {})):
+            async with _acheck_active_rpc():
+                return await utils_wait_for(async_fn(*args, **kwargs), timeout)
 
     def _(func):
         @functools.wraps(func)
@@ -756,7 +755,6 @@ async def start_cluster(
     worker_kwargs = worker_kwargs or {}
 
     s = await Scheduler(
-        validate=True,
         security=security,
         port=0,
         host=scheduler_addr,
@@ -769,7 +767,6 @@ async def start_cluster(
             nthreads=ncore[1],
             name=i,
             security=security,
-            validate=True,
             host=ncore[0],
             **(
                 merge(worker_kwargs, ncore[2])  # type: ignore
@@ -954,7 +951,6 @@ def gen_cluster(
                 workers = []
                 s = False
                 try:
-
                     for _ in range(60):
                         try:
                             s, ws = await start_cluster(
@@ -980,7 +976,7 @@ def gen_cluster(
                     yield s, workers
                 finally:
                     await end_cluster(s, workers)
-                    await asyncio.wait_for(cleanup_global_workers(), 1)
+                    await utils_wait_for(cleanup_global_workers(), 1)
 
             async def async_fn():
                 result = None
@@ -994,7 +990,7 @@ def gen_cluster(
                         try:
                             coro = func(*args, *outer_args, **kwargs)
                             task = asyncio.create_task(coro)
-                            coro2 = asyncio.wait_for(asyncio.shield(task), timeout)
+                            coro2 = utils_wait_for(asyncio.shield(task), timeout)
                             result = await coro2
                             validate_state(s, *workers)
 
@@ -1087,7 +1083,7 @@ def gen_cluster(
             async def async_fn_outer():
                 async with _acheck_active_rpc(active_rpc_timeout=active_rpc_timeout):
                     if timeout:
-                        return await asyncio.wait_for(async_fn(), timeout=timeout * 2)
+                        return await utils_wait_for(async_fn(), timeout=timeout * 2)
                     return await async_fn()
 
             return _run_and_close_tornado(async_fn_outer)
@@ -1233,9 +1229,7 @@ def popen(
     if sys.platform.startswith("win"):
         args[0] = os.path.join(sys.prefix, "Scripts", args[0])
     else:
-        args[0] = os.path.join(
-            os.environ.get("DESTDIR", "") + sys.prefix, "bin", args[0]
-        )
+        args[0] = os.path.join(sys.prefix, "bin", args[0])
     with subprocess.Popen(args, **kwargs) as proc:
         try:
             yield proc
@@ -1252,7 +1246,7 @@ def popen(
                     print(err.decode() if isinstance(err, bytes) else err)
 
 
-def wait_for(predicate, timeout, fail_func=None, period=0.05):
+def poll_for(predicate, timeout, fail_func=None, period=0.05):
     deadline = time() + timeout
     while not predicate():
         sleep(period)
@@ -1262,7 +1256,7 @@ def wait_for(predicate, timeout, fail_func=None, period=0.05):
             pytest.fail(f"condition not reached until {timeout} seconds")
 
 
-async def async_wait_for(predicate, timeout, fail_func=None, period=0.05):
+async def async_poll_for(predicate, timeout, fail_func=None, period=0.05):
     deadline = time() + timeout
     while not predicate():
         await asyncio.sleep(period)
@@ -1270,6 +1264,22 @@ async def async_wait_for(predicate, timeout, fail_func=None, period=0.05):
             if fail_func is not None:
                 fail_func()
             pytest.fail(f"condition not reached until {timeout} seconds")
+
+
+def wait_for(*args, **kwargs):
+    warnings.warn(
+        "wait_for has been renamed to poll_for to avoid confusion with "
+        "asyncio.wait_for and utils.wait_for"
+    )
+    return poll_for(*args, **kwargs)
+
+
+async def async_wait_for(*args, **kwargs):
+    warnings.warn(
+        "async_wait_for has been renamed to async_poll_for to avoid confusion "
+        "with asyncio.wait_for and utils.wait_for"
+    )
+    return await async_poll_for(*args, **kwargs)
 
 
 @memoize
@@ -1574,7 +1584,7 @@ def bump_rlimit(limit, desired):
     try:
         soft, hard = resource.getrlimit(limit)
         if soft < desired:
-            resource.setrlimit(limit, (desired, max(hard, desired)))
+            resource.setrlimit(limit, (desired, min(hard, desired)))
     except Exception as e:
         pytest.skip(f"rlimit too low ({soft}) and can't be increased: {e}")
 
@@ -1774,6 +1784,8 @@ def config_for_cluster_tests(**extra_config):
         {
             "local_directory": tempfile.gettempdir(),
             "distributed.admin.tick.interval": "500 ms",
+            "distributed.scheduler.validate": True,
+            "distributed.worker.validate": True,
             "distributed.worker.profile.enabled": False,
         },
         **extra_config,
@@ -2176,7 +2188,7 @@ class BlockedGatherDep(Worker):
     -------
     .. code-block:: python
 
-        @gen_test()
+        @gen_cluster()
         async def test1(s, a, b):
             async with BlockedGatherDep(s.address) as x:
                 # [do something to cause x to fetch data from a or b]
@@ -2414,7 +2426,8 @@ def ws():
     """An empty WorkerState"""
     state = WorkerState(address="127.0.0.1:1", transition_counter_max=50_000)
     yield state
-    state.validate_state()
+    if state.validate:
+        state.validate_state()
 
 
 @pytest.fixture(params=["executing", "long-running"])

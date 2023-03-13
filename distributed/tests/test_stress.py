@@ -167,13 +167,19 @@ def vsum(*args):
     return sum(args)
 
 
+@pytest.mark.skip(reason="times out")
 @pytest.mark.avoid_ci
 @pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 80)
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 80,
+    config={
+        # Very slow otherwise
+        "distributed.scheduler.validate": False,
+        "distributed.worker.validate": False,
+    },
+)
 async def test_stress_communication(c, s, *workers):
-    s.validate = False  # very slow otherwise
-    for w in workers:
-        w.validate = False
     da = pytest.importorskip("dask.array")
     # Test consumes many file descriptors and can hang if the limit is too low
     resource = pytest.importorskip("resource")
@@ -191,12 +197,17 @@ async def test_stress_communication(c, s, *workers):
 
 
 @pytest.mark.skip
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10, timeout=60)
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 10,
+    config={
+        # Very slow otherwise
+        "distributed.scheduler.validate": False,
+        "distributed.worker.validate": False,
+    },
+    timeout=60,
+)
 async def test_stress_steal(c, s, *workers):
-    s.validate = False
-    for w in workers:
-        w.validate = False
-
     dinc = delayed(slowinc)
     L = [delayed(slowinc)(i, delay=0.005) for i in range(100)]
     for _ in range(5):

@@ -26,6 +26,9 @@ from distributed.security import Security
 from distributed.utils import NoOpAwaitable, TimeoutError, import_term, silence_logging
 
 if TYPE_CHECKING:
+    # TODO import from typing (requires Python >=3.11)
+    from typing_extensions import Self
+
     # Circular imports
     from distributed import Nanny, Worker
 
@@ -114,9 +117,6 @@ _T = TypeVar("_T")
 
 async def _wrap_awaitable(aw: Awaitable[_T]) -> _T:
     return await aw
-
-
-_T_spec_cluster = TypeVar("_T_spec_cluster", bound="SpecCluster")
 
 
 class SpecCluster(Cluster):
@@ -405,8 +405,8 @@ class SpecCluster(Cluster):
             asyncio.get_running_loop().call_later(delay, f)
         super()._update_worker_status(op, msg)
 
-    def __await__(self: _T_spec_cluster) -> Generator[Any, Any, _T_spec_cluster]:
-        async def _() -> _T_spec_cluster:
+    def __await__(self: Self) -> Generator[Any, Any, Self]:
+        async def _() -> Self:
             if self.status == Status.created:
                 await self._start()
             await self.scheduler

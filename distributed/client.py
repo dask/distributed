@@ -19,7 +19,7 @@ from collections import defaultdict
 from collections.abc import Collection, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
-from contextlib import contextmanager, suppress
+from contextlib import asynccontextmanager, contextmanager, suppress
 from contextvars import ContextVar
 from functools import partial
 from importlib.metadata import PackageNotFoundError, version
@@ -45,6 +45,9 @@ from dask.utils import (
     typename,
 )
 from dask.widgets import get_template
+
+from distributed.core import ErrorMessage
+from distributed.utils import wait_for
 
 try:
     from dask.delayed import single_key
@@ -597,7 +600,7 @@ class FutureState:
             Time in seconds after which to raise a
             ``dask.distributed.TimeoutError``
         """
-        await asyncio.wait_for(self._get_event().wait(), timeout)
+        await wait_for(self._get_event().wait(), timeout)
 
     def __repr__(self):
         return f"<{self.__class__.__name__}: {self.status}>"
@@ -947,16 +950,13 @@ class Client(SyncMethodMixin):
 
         self._start_arg = address
         self._set_as_default = set_as_default
-        if set_as_default:
-            self._set_config = dask.config.set(
-                scheduler="dask.distributed", shuffle="tasks"
-            )
+
         self._event_handlers = {}
 
         self._stream_handlers = {
             "key-in-memory": self._handle_key_in_memory,
             "lost-data": self._handle_lost_data,
-            "cancelled-key": self._handle_cancelled_key,
+            "cancelled-keys": self._handle_cancelled_keys,
             "task-retried": self._handle_retried_key,
             "task-erred": self._handle_task_erred,
             "restart": self._handle_restart,
@@ -1333,7 +1333,7 @@ class Client(SyncMethodMixin):
             )
             comm.name = "Client->Scheduler"
             if timeout is not None:
-                await asyncio.wait_for(self._update_scheduler_info(), timeout)
+                await wait_for(self._update_scheduler_info(), timeout)
             else:
                 await self._update_scheduler_info()
             await comm.write(
@@ -1352,7 +1352,7 @@ class Client(SyncMethodMixin):
         finally:
             self._connecting_to_scheduler = False
         if timeout is not None:
-            msg = await asyncio.wait_for(comm.read(), timeout)
+            msg = await wait_for(comm.read(), timeout)
         else:
             msg = await comm.read()
         assert len(msg) == 1
@@ -1441,7 +1441,11 @@ class Client(SyncMethodMixin):
         return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
 
     def _heartbeat(self):
-        if self.scheduler_comm:
+        # Don't send heartbeat if scheduler comm or cluster are already closed
+        if self.scheduler_comm is not None and not (
+            self.scheduler_comm.comm.closed()
+            or (self.cluster and self.cluster.status in (Status.closed, Status.closing))
+        ):
             self.scheduler_comm.send({"op": "heartbeat-client"})
 
     def __enter__(self):
@@ -1505,6 +1509,14 @@ class Client(SyncMethodMixin):
                     if is_python_shutting_down():
                         return
                     if self.status == "running":
+                        if self.cluster and self.cluster.status in (
+                            Status.closed,
+                            Status.closing,
+                        ):
+                            # Don't attempt to reconnect if cluster are already closed.
+                            # Instead close down the client.
+                            await self._close()
+                            return
                         logger.info("Client report stream closed to scheduler")
                         logger.info("Reconnecting...")
                         self.status = "connecting"
@@ -1538,7 +1550,7 @@ class Client(SyncMethodMixin):
                         logger.exception(e)
                 if breakout:
                     break
-        except CancelledError:
+        except (CancelledError, asyncio.CancelledError):
             pass
 
     def _handle_key_in_memory(self, key=None, type=None, workers=None):
@@ -1560,10 +1572,11 @@ class Client(SyncMethodMixin):
         if state is not None:
             state.lose()
 
-    def _handle_cancelled_key(self, key=None):
-        state = self.futures.get(key)
-        if state is not None:
-            state.cancel()
+    def _handle_cancelled_keys(self, keys):
+        for key in keys:
+            state = self.futures.get(key)
+            if state is not None:
+                state.cancel()
 
     def _handle_retried_key(self, key=None):
         state = self.futures.get(key)
@@ -1587,6 +1600,25 @@ class Client(SyncMethodMixin):
     def _handle_error(self, exception=None):
         logger.warning("Scheduler exception:")
         logger.exception(exception)
+
+    @asynccontextmanager
+    async def _wait_for_handle_report_task(self, fast=False):
+        current_task = asyncio.current_task()
+        handle_report_task = self._handle_report_task
+        # Give the scheduler 'stream-closed' message 100ms to come through
+        # This makes the shutdown slightly smoother and quieter
+        should_wait = (
+            handle_report_task is not None and handle_report_task is not current_task
+        )
+        if should_wait:
+            with suppress(asyncio.CancelledError, TimeoutError):
+                await wait_for(asyncio.shield(handle_report_task), 0.1)
+
+        yield
+
+        if should_wait:
+            with suppress(TimeoutError, asyncio.CancelledError):
+                await wait_for(handle_report_task, 0 if fast else 2)
 
     async def _close(self, fast=False):
         """
@@ -1613,10 +1645,6 @@ class Client(SyncMethodMixin):
         with log_errors():
             _del_global_client(self)
             self._scheduler_identity = {}
-            with suppress(AttributeError):
-                # clear the dask.config set keys
-                with self._set_config:
-                    pass
             if self.get == dask.config.get("get", None):
                 del dask.config.config["get"]
 
@@ -1627,45 +1655,27 @@ class Client(SyncMethodMixin):
             ):
                 self._send_to_scheduler({"op": "close-client"})
                 self._send_to_scheduler({"op": "close-stream"})
+            async with self._wait_for_handle_report_task(fast=fast):
+                if (
+                    self.scheduler_comm
+                    and self.scheduler_comm.comm
+                    and not self.scheduler_comm.comm.closed()
+                ):
+                    await self.scheduler_comm.close()
 
-            current_task = asyncio.current_task()
-            handle_report_task = self._handle_report_task
-            # Give the scheduler 'stream-closed' message 100ms to come through
-            # This makes the shutdown slightly smoother and quieter
-            if (
-                handle_report_task is not None
-                and handle_report_task is not current_task
-            ):
-                with suppress(asyncio.CancelledError, TimeoutError):
-                    await asyncio.wait_for(asyncio.shield(handle_report_task), 0.1)
+                for key in list(self.futures):
+                    self._release_key(key=key)
 
-            if (
-                self.scheduler_comm
-                and self.scheduler_comm.comm
-                and not self.scheduler_comm.comm.closed()
-            ):
-                await self.scheduler_comm.close()
+                if self._start_arg is None:
+                    with suppress(AttributeError):
+                        await self.cluster.close()
 
-            for key in list(self.futures):
-                self._release_key(key=key)
+                await self.rpc.close()
 
-            if self._start_arg is None:
-                with suppress(AttributeError):
-                    await self.cluster.close()
+                self.status = "closed"
 
-            await self.rpc.close()
-
-            self.status = "closed"
-
-            if _get_global_client() is self:
-                _set_global_client(None)
-
-            if (
-                handle_report_task is not None
-                and handle_report_task is not current_task
-            ):
-                with suppress(TimeoutError, asyncio.CancelledError):
-                    await asyncio.wait_for(handle_report_task, 0 if fast else 2)
+                if _get_global_client() is self:
+                    _set_global_client(None)
 
             with suppress(AttributeError):
                 await self.scheduler.close_rpc()
@@ -1709,7 +1719,7 @@ class Client(SyncMethodMixin):
         if self.asynchronous:
             coro = self._close()
             if timeout:
-                coro = asyncio.wait_for(coro, timeout)
+                coro = wait_for(coro, timeout)
             return coro
 
         if self._start_arg is None:
@@ -1731,12 +1741,19 @@ class Client(SyncMethodMixin):
 
     async def _shutdown(self):
         logger.info("Shutting down scheduler from Client")
-        if self.cluster:
-            await self.cluster.close()
-        else:
-            with suppress(CommClosedError):
-                self.status = "closing"
-                await self.scheduler.terminate()
+
+        self.status = "closing"
+        for pc in self._periodic_callbacks.values():
+            pc.stop()
+
+        async with self._wait_for_handle_report_task():
+            if self.cluster:
+                await self.cluster.close()
+            else:
+                with suppress(CommClosedError):
+                    await self.scheduler.terminate()
+
+        await self._close()
 
     def shutdown(self):
         """Shut down the connected scheduler and workers
@@ -1785,7 +1802,6 @@ class Client(SyncMethodMixin):
         pure=None,
         **kwargs,
     ):
-
         """Submit a function application to the scheduler
 
         Parameters
@@ -1831,6 +1847,15 @@ class Client(SyncMethodMixin):
         Examples
         --------
         >>> c = client.submit(add, a, b)  # doctest: +SKIP
+
+        Notes
+        -----
+        The current implementation of a task graph resolution searches for occurrences of ``key``
+        and replaces it with a corresponding ``Future`` result. That can lead to unwanted
+        substitution of strings passed as arguments to a task if these strings match some ``key``
+        that already exists on a cluster. To avoid these situations it is required to use unique
+        values if a ``key`` is set manually.
+        See https://github.com/dask/dask/issues/9969 to track progress on resolving this issue.
 
         Returns
         -------
@@ -1972,6 +1997,15 @@ class Client(SyncMethodMixin):
         Examples
         --------
         >>> L = client.map(func, sequence)  # doctest: +SKIP
+
+        Notes
+        -----
+        The current implementation of a task graph resolution searches for occurrences of ``key``
+        and replaces it with a corresponding ``Future`` result. That can lead to unwanted
+        substitution of strings passed as arguments to a task if these strings match some ``key``
+        that already exists on a cluster. To avoid these situations it is required to use unique
+        values if a ``key`` is set manually.
+        See https://github.com/dask/dask/issues/9969 to track progress on resolving this issue.
 
         Returns
         -------
@@ -2355,7 +2389,7 @@ class Client(SyncMethodMixin):
                     direct = True
 
         if local_worker:  # running within task
-            local_worker.update_data(data=data, report=False)
+            local_worker.update_data(data=data)
 
             await self.scheduler.update_data(
                 who_has={key: [local_worker.address] for key in data},
@@ -2379,7 +2413,7 @@ class Client(SyncMethodMixin):
                     raise ValueError("No valid workers found")
 
                 _, who_has, nbytes = await scatter_to_workers(
-                    nthreads, data2, report=False, rpc=self.rpc
+                    nthreads, data2, rpc=self.rpc
                 )
 
                 await self.scheduler.update_data(
@@ -2490,6 +2524,16 @@ class Client(SyncMethodMixin):
         >>> data = c.scatter(data, broadcast=True)  # doctest: +SKIP
         >>> res = [c.submit(func, data, i) for i in range(100)]
 
+        Notes
+        -----
+        Scattering a dictionary uses ``dict`` keys to create ``Future`` keys.
+        The current implementation of a task graph resolution searches for occurrences of ``key``
+        and replaces it with a corresponding ``Future`` result. That can lead to unwanted
+        substitution of strings passed as arguments to a task if these strings match some ``key``
+        that already exists on a cluster. To avoid these situations it is required to use unique
+        values if a ``key`` is set manually.
+        See https://github.com/dask/dask/issues/9969 to track progress on resolving this issue.
+
         See Also
         --------
         Client.gather : Gather data back to local process
@@ -2519,8 +2563,9 @@ class Client(SyncMethodMixin):
         )
 
     async def _cancel(self, futures, force=False):
+        # FIXME: This method is asynchronous since interacting with the FutureState below requires an event loop.
         keys = list({stringify(f.key) for f in futures_of(futures)})
-        await self.scheduler.cancel(keys=keys, client=self.id, force=force)
+        self._send_to_scheduler({"op": "cancel-keys", "keys": keys, "force": force})
         for k in keys:
             st = self.futures.pop(k, None)
             if st is not None:
@@ -2529,11 +2574,9 @@ class Client(SyncMethodMixin):
     def cancel(self, futures, asynchronous=None, force=False):
         """
         Cancel running futures
-
         This stops future tasks from being scheduled if they have not yet run
         and deletes them if they have already run.  After calling, this result
         and all dependent results will no longer be accessible
-
         Parameters
         ----------
         futures : List[Future]
@@ -3488,20 +3531,41 @@ class Client(SyncMethodMixin):
         )
 
     async def _restart_workers(
-        self, workers: list[str], timeout: int | float | None = None
-    ):
-        results = await self.scheduler.broadcast(
-            msg={"op": "restart", "timeout": timeout}, workers=workers, nanny=True
+        self,
+        workers: list[str],
+        timeout: int | float | None = None,
+        raise_for_error: bool = True,
+    ) -> dict[str, str | ErrorMessage]:
+        info = self.scheduler_info()
+        name_to_addr = {meta["name"]: addr for addr, meta in info["workers"].items()}
+        worker_addrs = [name_to_addr.get(w, w) for w in workers]
+
+        restart_out: dict[str, str | ErrorMessage] = await self.scheduler.broadcast(
+            msg={"op": "restart", "timeout": timeout},
+            workers=worker_addrs,
+            nanny=True,
         )
-        timeout_workers = {
-            key: value for key, value in results.items() if value == "timed out"
-        }
-        if timeout_workers:
+
+        # Map keys back to original `workers` input names/addresses
+        results = {w: restart_out[w_addr] for w, w_addr in zip(workers, worker_addrs)}
+
+        timeout_workers = [w for w, status in results.items() if status == "timed out"]
+        if timeout_workers and raise_for_error:
             raise TimeoutError(
-                f"The following workers failed to restart with {timeout} seconds: {list(timeout_workers.keys())}"
+                f"The following workers failed to restart with {timeout} seconds: {timeout_workers}"
             )
 
-    def restart_workers(self, workers: list[str], timeout: int | float | None = None):
+        errored: list[ErrorMessage] = [m for m in results.values() if "exception" in m]  # type: ignore
+        if errored and raise_for_error:
+            raise pickle.loads(errored[0]["exception"])  # type: ignore
+        return results
+
+    def restart_workers(
+        self,
+        workers: list[str],
+        timeout: int | float | None = None,
+        raise_for_error: bool = True,
+    ) -> dict[str, str]:
         """Restart a specified set of workers
 
         .. note::
@@ -3513,9 +3577,19 @@ class Client(SyncMethodMixin):
         Parameters
         ----------
         workers : list[str]
-            Workers to restart.
+            Workers to restart. This can be a list of worker addresses, names, or a both.
         timeout : int | float | None
             Number of seconds to wait
+        raise_for_error: bool (default True)
+            Whether to raise a :py:class:`TimeoutError` if restarting worker(s) doesn't
+            finish within ``timeout``, or another exception caused from restarting
+            worker(s).
+
+        Returns
+        -------
+        dict[str, str]
+            Mapping of worker and restart status, the keys will match the original
+            values passed in via ``workers``.
 
         Notes
         -----
@@ -3543,8 +3617,9 @@ class Client(SyncMethodMixin):
         Client.restart
         """
         info = self.scheduler_info()
-        for worker in workers:
-            if info["workers"][worker]["nanny"] is None:
+
+        for worker, meta in info["workers"].items():
+            if (worker in workers or meta["name"] in workers) and meta["nanny"] is None:
                 raise ValueError(
                     f"Restarting workers requires a nanny to be used. Worker {worker} has type {info['workers'][worker]['type']}."
                 )
@@ -3552,6 +3627,7 @@ class Client(SyncMethodMixin):
             self._restart_workers,
             workers=workers,
             timeout=timeout,
+            raise_for_error=raise_for_error,
         )
 
     async def _upload_large_file(self, local_filename, remote_filename=None):
@@ -4858,17 +4934,16 @@ async def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
         )
     fs = futures_of(fs)
     if return_when == ALL_COMPLETED:
-        wait_for = distributed.utils.All
+        future = distributed.utils.All({f._state.wait() for f in fs})
     elif return_when == FIRST_COMPLETED:
-        wait_for = distributed.utils.Any
+        future = distributed.utils.Any({f._state.wait() for f in fs})
     else:
         raise NotImplementedError(
             "Only return_when='ALL_COMPLETED' and 'FIRST_COMPLETED' are supported"
         )
 
-    future = wait_for({f._state.wait() for f in fs})
     if timeout is not None:
-        future = asyncio.wait_for(future, timeout)
+        future = wait_for(future, timeout)
     await future
 
     done, not_done = (
@@ -5218,7 +5293,6 @@ def ensure_default_client(client):
     client : Client
         The client
     """
-    dask.config.set(scheduler="dask.distributed")
     _set_global_client(client)
 
 

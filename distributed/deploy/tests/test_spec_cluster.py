@@ -141,7 +141,6 @@ async def test_scale():
 @gen_test()
 async def test_adaptive_killed_worker():
     with dask.config.set({"distributed.deploy.lost-worker-timeout": 0.1}):
-
         async with SpecCluster(
             asynchronous=True,
             worker={"cls": Nanny, "options": {"nthreads": 1}},
@@ -355,7 +354,6 @@ async def test_widget():
         asynchronous=True,
         worker={"cls": Worker, "options": {"nthreads": 1}},
     ) as cluster:
-
         start = time()  # wait for all workers
         while len(cluster.scheduler_info["workers"]) < len(cluster.worker_spec):
             await asyncio.sleep(0.01)

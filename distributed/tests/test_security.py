@@ -254,7 +254,7 @@ def test_connection_args():
     tls_12_ciphers = [c for c in supported_ciphers if "TLSv1.2" in c["description"]]
     assert len(tls_12_ciphers) == 1
     tls_13_ciphers = [c for c in supported_ciphers if "TLSv1.3" in c["description"]]
-    assert len(tls_13_ciphers) in (0, 3)
+    assert len(tls_13_ciphers) == 0 or len(tls_13_ciphers) >= 3
 
 
 def test_extra_conn_args_connection_args():
@@ -330,7 +330,7 @@ def test_listen_args():
     tls_12_ciphers = [c for c in supported_ciphers if "TLSv1.2" in c["description"]]
     assert len(tls_12_ciphers) == 1
     tls_13_ciphers = [c for c in supported_ciphers if "TLSv1.3" in c["description"]]
-    assert len(tls_13_ciphers) in (0, 3)
+    assert len(tls_13_ciphers) == 0 or len(tls_13_ciphers) >= 3
 
 
 @gen_test()

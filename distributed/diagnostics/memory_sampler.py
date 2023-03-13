@@ -4,7 +4,7 @@ import uuid
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from distributed.compatibility import PeriodicCallback
 
@@ -135,14 +135,14 @@ class MemorySampler:
         import pandas as pd
 
         ss = {}
-        for (label, s_list) in self.samples.items():
+        for label, s_list in self.samples.items():
             assert s_list  # There's always at least one sample
             s = pd.DataFrame(s_list).set_index(0)[1]
             s.index = pd.to_datetime(s.index, unit="s")
             s.name = label
             if align:
                 # convert datetime to timedelta from the first sample
-                s.index -= cast(pd.Timestamp, s.index[0])
+                s.index -= s.index[0]
             ss[label] = s
 
         df = pd.DataFrame(ss)

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from unittest import mock
 
@@ -10,6 +9,7 @@ from tornado.httpclient import AsyncHTTPClient
 from distributed import Event, Worker, wait
 from distributed.sizeof import sizeof
 from distributed.utils_test import (
+    async_poll_for,
     fetch_metrics,
     fetch_metrics_body,
     fetch_metrics_sample_names,
@@ -20,6 +20,10 @@ from distributed.utils_test import (
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_prometheus(c, s, a):
     pytest.importorskip("prometheus_client")
+
+    # We need *some* tasks or dask_worker_tasks won't appear
+    fut = c.submit(lambda: 1)
+    await wait(fut)
 
     active_metrics = await fetch_metrics_sample_names(
         a.http_server.port, prefix="dask_worker_"
@@ -88,22 +92,7 @@ async def test_metrics_when_prometheus_client_not_installed(
 async def test_prometheus_collect_task_states(c, s, a):
     pytest.importorskip("prometheus_client")
 
-    async def assert_metrics(**kwargs):
-        expect = {
-            "constrained": 0,
-            "executing": 0,
-            "fetch": 0,
-            "flight": 0,
-            "long-running": 0,
-            "memory": 0,
-            "disk": 0,
-            "missing": 0,
-            "other": 0,
-            "ready": 0,
-            "waiting": 0,
-        }
-        expect.update(kwargs)
-
+    async def assert_metrics(**expect):
         families = await fetch_metrics(a.http_server.port, prefix="dask_worker_")
         actual = {
             sample.labels["state"]: sample.value
@@ -117,24 +106,29 @@ async def test_prometheus_collect_task_states(c, s, a):
     ev = Event()
 
     # submit a task which should show up in the prometheus scraping
-    future = c.submit(ev.wait)
-    while not a.state.executing:
-        await asyncio.sleep(0.001)
+    fut1 = c.submit(ev.wait)
+    await async_poll_for(lambda: a.state.executing, timeout=5)
 
     await assert_metrics(executing=1)
 
     await ev.set()
-    await c.gather(future)
+    await wait(fut1)
 
     await assert_metrics(memory=1)
+
+    fut2 = c.submit(lambda: 1)
+    await wait(fut2)
+    await assert_metrics(memory=2)
+
     a.data.evict()
-    await assert_metrics(disk=1)
+    await assert_metrics(memory=1, disk=1)
+    a.data.evict()
+    await assert_metrics(disk=2)
 
-    future.release()
+    fut1.release()
+    fut2.release()
 
-    while future.key in a.state.tasks:
-        await asyncio.sleep(0.001)
-
+    await async_poll_for(lambda: not a.state.tasks, timeout=5)
     await assert_metrics()
 
 

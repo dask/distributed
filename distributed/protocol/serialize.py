@@ -258,7 +258,7 @@ def serialize(  # type: ignore[no-untyped-def]
     if serializers is None:
         serializers = ("dask", "pickle")  # TODO: get from configuration
 
-    # Handle obects that are marked as `Serialize`, or that are
+    # Handle objects that are marked as `Serialize`, or that are
     # already `Serialized` objects (don't want to serialize them twice)
     if isinstance(x, Serialized):
         return x.header, x.frames
@@ -817,11 +817,12 @@ def _is_msgpack_serializable(v):
         v is None
         or typ is str
         or typ is bool
+        or typ is bytes
         or typ is int
         or typ is float
         or isinstance(v, dict)
         and all(map(_is_msgpack_serializable, v.values()))
-        and all(typ is str for x in v.keys())
+        and all(type(x) is str for x in v.keys())
         or isinstance(v, (list, tuple))
         and all(map(_is_msgpack_serializable, v))
     )
