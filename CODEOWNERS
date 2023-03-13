@@ -7,7 +7,7 @@ distributed/diagnostics/*  @jacobtomlinson @fjetter
 # Deployment tooling
 distributed/deploy/*  @jacobtomlinson
 
-# Ipywidgets
+# Jupyter widgets
 distributed/widgets/*  @jacobtomlinson
 
 # GPU Support
