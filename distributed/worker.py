@@ -258,7 +258,7 @@ async def _force_close(self, reason: str):
         os._exit(1)
 
 
-def trace_worker(label: str):
+def trace_handler(label: str, **attrs: Any):
     """
     Decorator to trace async Worker methods that are external to the state machine.
 
@@ -291,7 +291,7 @@ def trace_worker(label: str):
         @functools.wraps(func)
         async def wrapped(self: Worker, *args, **kwargs):
             try:
-                with trace(label) as span:
+                with trace(label, **attrs) as span:
                     await func(self, *args, **kwargs)
             finally:
                 # HACK reusing `span_to_digest_metrics` is convenient, but
@@ -1763,7 +1763,7 @@ class Worker(BaseWorker, ServerNode):
 
         self.stream_comms[address].send(msg)
 
-    @trace_worker("get-data")
+    @trace_handler("get-data")
     async def get_data(
         self,
         comm: Comm,
