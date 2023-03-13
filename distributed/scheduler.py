@@ -3863,7 +3863,7 @@ class Scheduler(SchedulerState, ServerNode):
             logger.info("  Scheduler at: %25s", listener.contact_address)
         for name, server in self.services.items():
             if name == "dashboard":
-                addr = listener.contact_address.split("://")[1].split(":")[0]
+                addr = get_address_host(listener.contact_address)
                 link = format_dashboard_link(addr, server.port)
             else:
                 link = f"{listen_ip}:{server.port}"
