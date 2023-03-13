@@ -586,6 +586,7 @@ class Cluster(SyncMethodMixin):
 def _exponential_backoff(
     attempt: int, multiplier: float, exponential_base: float, max_interval: float
 ) -> float:
+    """Calculate the duration of an exponential backoff"""
     try:
         interval = multiplier * exponential_base**attempt
     except OverflowError:
