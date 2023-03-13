@@ -1397,6 +1397,7 @@ def is_valid_xml(text):
 
 
 _offload_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="Dask-Offload")
+weakref.finalize(_offload_executor, _offload_executor.shutdown)
 
 
 def import_term(name: str) -> AnyType:
