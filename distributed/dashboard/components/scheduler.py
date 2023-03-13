@@ -3376,56 +3376,97 @@ class TaskProgress(DashboardComponent):
 
 
 class EventLoop(DashboardComponent):
-    """Event Loop Health"""
+    """
+    Event Loop Health (and GIL Contention, if configured)
+    """
 
     @log_errors
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
-        self.source = ColumnDataSource(
-            {
-                "names": ["Scheduler", "Workers"],
-                "values": [0, 0],
-                "text": ["0", "0"],
-            }
-        )
-
-        self.root = figure(
-            title="Event Loop Health",
-            x_range=["Scheduler", "Workers"],
-            y_range=[
-                0,
-                parse_timedelta(dask.config.get("distributed.admin.tick.interval"))
-                * 25,
+        self.data = dict(
+            names=[
+                ("Scheduler", "Event Loop"),
+                ("Scheduler", "GIL Contention"),
+                ("Workers", "Event Loop"),
+                ("Workers", "GIL Contention"),
             ],
+            values=[0, 0, 0, 0],
+            text=["0s", "0%", "0s", "0%"],
+        )
+        title = "Event Loop & GIL Contention"
+
+        # Remove GIL related names/values if not monitoring GIL
+        if not self.scheduler.monitor.monitor_gil_contention:
+            title = "Event Loop"
+            for key in self.data:
+                self.data[key] = self.data[key][::2]
+
+        self.source = ColumnDataSource(data=self.data)
+        self.root = figure(
+            title=title,
+            x_range=FactorRange(*self.data["names"]),
+            y_range=(0, 1),
             tools="",
             toolbar_location="above",
             **kwargs,
         )
-        self.root.vbar(x="names", top="values", width=0.9, source=self.source)
+        self.root.vbar(
+            x="names",
+            top="values",
+            width=0.9,
+            line_color="white",
+            source=self.source,
+            fill_color=factor_cmap(
+                field_name="names",
+                palette=["#c9d9d3", "#718dbf"],
+                factors=["Event Loop", "GIL Contention"],
+                start=1,
+                end=2,
+            ),
+        )
 
         self.root.xaxis.minor_tick_line_alpha = 0
         self.root.ygrid.visible = True
         self.root.xgrid.visible = False
 
-        hover = HoverTool(tooltips=[("Interval", "@text s")], mode="vline")
+        hover = HoverTool(
+            tooltips=[("Name", "@names"), ("Value", "@text")], mode="vline"
+        )
         self.root.add_tools(hover)
 
     @without_property_validation
     @log_errors
     def update(self):
         s = self.scheduler
+        monitor_gil = s.monitor.monitor_gil_contention
 
-        data = {
-            "names": ["Scheduler", "Workers"],
-            "values": [
-                s._tick_interval_observed,
-                sum(w.metrics["event_loop_interval"] for w in s.workers.values())
-                / (len(s.workers) or 1),
-            ],
-        }
-        data["text"] = [format_time(x) for x in data["values"]]
+        self.data["values"] = [
+            s._tick_interval_observed,
+            self.gil_contention_scheduler,
+            sum(w.metrics["event_loop_interval"] for w in s.workers.values())
+            / (len(s.workers) or 1),
+            self.gil_contention_workers,
+        ][:: 1 if monitor_gil else 2]
 
-        update(self.source, data)
+        # Format event loop as time and GIL (if configured) as %
+        self.data["text"] = [
+            f"{x * 100:.1f}%" if i % 2 and monitor_gil else format_time(x)
+            for i, x in enumerate(self.data["values"])
+        ]
+        update(self.source, self.data)
+
+    @property
+    def gil_contention_workers(self) -> float:
+        workers = self.scheduler.workers
+        if workers:
+            return sum(
+                w.metrics.get("gil_contention", 0) for w in workers.values()
+            ) / len(workers)
+        return float("NaN")
+
+    @property
+    def gil_contention_scheduler(self) -> float:
+        return self.scheduler.monitor.recent().get("gil_contention", float("NaN"))
 
 
 class ExceptionsTable(DashboardComponent):
