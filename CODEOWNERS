@@ -11,4 +11,4 @@ distributed/deploy/*  @jacobtomlinson
 distributed/widgets/*  @jacobtomlinson
 
 # GPU Support
-distirbuted/diagnostics/nvml.py  @dask/gpu
+distirbuted/diagnostics/nvml.py  @jacobtomlinson @quasiben
