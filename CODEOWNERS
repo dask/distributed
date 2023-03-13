@@ -1,0 +1,14 @@
+*  @fjetter
+
+# Dashboard
+distributed/dashboard/*  @jacobtomlinson
+distributed/diagnostics/*  @jacobtomlinson @fjetter
+
+# Deployment tooling
+distributed/deploy/*  @jacobtomlinson
+
+# Ipywidgets
+distributed/widgets/*  @jacobtomlinson
+
+# GPU Support
+distirbuted/diagnostics/nvml.py  @dask/gpu
