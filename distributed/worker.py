@@ -265,54 +265,27 @@ def trace_worker(label: str):
     Does not pass go, does not send `DigestMetric` events to the state machine. Instead,
     writes metrics directly via `Server.digest_metric`.
     """
-    # TODO this is the tricky part in _any_ implementation of tracing on the worker: how
-    # do we get ingest tracing metrics into one place when there's both a pure and
-    # impure part to the worker?
-    #
-    # Particularly, can developers conveniently use one API with both the pure,
-    # beautiful, side-effect-free state machine logic and `Worker`/`Server` methods that
-    # are external to the state machine?
-    #
-    # We had an ok thing going so far that fit in decently with the state machine:
-    # explicitly create and stop `Span`s within the state machine, then just convert
-    # them to `DigestMetric` instructions, and handle those like any other
-    # `Instruction`. There's no magic at all; `Span`s are inputs and outputs of
-    # functions, and they only affect the impure world outside the state machine via
-    # instructions, just like anything else. It's a little verbose, but clear.
-    #
-    # But `get_data` breaks that. We want to trace it, but it's external to the state
-    # machine. If we're ingesting spans via the state machine, how do we get something
-    # external to the state machine to push its spans in? We'd have to create a new
-    # `MetricsEvent` and call `handle_stimulus(MetricsEvent(...))` at the end of
-    # `get_data`, just to call back _out_ of the state machine to
-    # `Server.digest_metric`. For something that otherwise wasn't involved with state
-    # machine, this feels a little unnecessarily bureaucratic.
-    #
-    # The most pleasant approach would be to have some "global exporter" registered
-    # (like a `SpanProcessor` in OTel), which handles exporting the metrics regardless
-    # of the circumstance. Then you can just throw `@trace` around anywhere in the
-    # codebase and it "just works", regardless of whether you're within or external to
-    # the state machine.
-    #
-    # This sounds like a great developer experience---but it would mean state machine
-    # functions were no longer pure! Running a state machine function might have a side
-    # effect of causing a span to be ingested on the `Server`! Maybe this is a small
-    # deal, but it could have implications for testing (you need some dummy exporter
-    # registered) and is a bit sad.
-    #
-    # On a practical level, we have many async workers running at once while testing, so
-    # we can't just have "one global exporter callback". We'd want a per-worker callback
-    # as a contextvar, but unfortunately the management of contextvars around worker
-    # lifecycle is too messy https://github.com/dask/distributed/issues/5485. You can't
-    # seem to reliably get a contextvar to be set iff a worker is running, so that
-    # crushes this dream anyway.
-    #
-    # So I think that means developers will have to be aware of whether the thing
-    # they're tracing is triggered from inside or outside of the state machine, and
-    # explicitly use different patterns/interfaces for each?
-    #
+    # Unfortunately we probably have to have two different patterns/APIs for tracing
+    # inside the pure state machine vs outside of it.
+
+    # Inside the pure state machine, when we want to trace something we have to
+    # explicitly handle the `Span` object, converting it into `DigestMetric`
+    # instructions and then returning those instructions. It's a little verbose, but
+    # this keeps state machine functions pure.
+
+    # On worker functions that are external to the state machine, such as `get_data`, we
+    # want to call `Server.digest_metric` directly when function finishes. We don't want
+    # to have to create a stimulus and push metrics into the state machine just for it
+    # to call back out to `Server.digest_metric`; that feels too bureaucratic.
+
+    # It would be cool to have a global "on span complete" export handler that just
+    # worked and let you use `@trace` anywhere you wanted. But that would make state
+    # machine functions impure! Also contextvars don't play well yet with worker
+    # lifecycle (https://github.com/dask/distributed/issues/5485), so it would be messed
+    # up in unit tests too.
+
     # This decorator is just a quick and easy way to have an "API for the impure side",
-    # though I dislike it.
+    # though I dislike having to have two different ways to do things.
 
     def deco(func):
         @functools.wraps(func)
