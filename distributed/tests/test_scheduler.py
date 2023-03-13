@@ -2314,6 +2314,9 @@ async def test_idle_timeout(c, s, a, b):
     nthreads=[],
 )
 async def test_idle_timeout_no_workers(c, s):
+    # Cancel the idle check periodic timeout so we can step through manually
+    s.periodic_callbacks["idle-timeout"].stop()
+
     s.idle_timeout = 0.1
     future = c.submit(inc, 1)
     while not s.tasks:
