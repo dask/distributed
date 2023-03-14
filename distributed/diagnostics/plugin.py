@@ -24,13 +24,11 @@ logger = logging.getLogger(__name__)
 class SchedulerPlugin:
     """Interface to extend the Scheduler
 
-    The scheduler operates by triggering and responding to events like
-    ``task_finished``, ``update_graph``, ``task_erred``, etc..
-
-    A plugin enables custom code to run at each of those same events.  The
-    scheduler will run the analogous methods on this class when each event is
-    triggered.  This runs user code within the scheduler thread that can
-    perform arbitrary operations in synchrony with the scheduler itself.
+    A plugin enables to run custom hooks when specific events occur.  The
+    scheduler will run the methods of this plugin whenever the corresponding
+    method of the scheduler is run.  This runs user code within the scheduler
+    thread that can perform arbitrary operations in synchrony with the scheduler
+    itself.
 
     Plugins are often used for diagnostics and measurement, but have full
     access to the scheduler and could in principle affect core scheduling.
@@ -96,6 +94,14 @@ class SchedulerPlugin:
     ) -> None:
         """Run whenever a task changes state
 
+        For a description of the transition mechanism and the available states,
+        see :ref:`Scheduler task states <scheduler-task-state>`.
+
+        Note::
+
+            This is an advanced feature and the transition mechanism and details
+            of task states are subject to change without deprecation cycle.
+
         Parameters
         ----------
         key : string
@@ -131,8 +137,7 @@ class WorkerPlugin:
     """Interface to extend the Worker
 
     A worker plugin enables custom code to run at different stages of the Workers'
-    lifecycle: at setup, during task state transitions, when a task or dependency
-    is released, and at teardown.
+    lifecycle.
 
     A plugin enables custom code to run at each of step of a Workers's life. Whenever such
     an event happens, the corresponding method on this class will be called. Note that the
@@ -177,12 +182,17 @@ class WorkerPlugin:
 
     def transition(self, key, start, finish, **kwargs):
         """
-        Throughout the lifecycle of a task (see :doc:`Worker <worker>`), Workers are
-        instructed by the scheduler to compute certain tasks, resulting in transitions
-        in the state of each task. The Worker owning the task is then notified of this
-        state transition.
+        Throughout the lifecycle of a task (see :doc:`Worker State
+        <worker-state>`), Workers are instructed by the scheduler to compute
+        certain tasks, resulting in transitions in the state of each task. The
+        Worker owning the task is then notified of this state transition.
 
         Whenever a task changes its state, this method will be called.
+
+        Note::
+
+            This is an advanced feature and the transition mechanism and details
+            of task states are subject to change without deprecation cycle.
 
         Parameters
         ----------
