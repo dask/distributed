@@ -4325,8 +4325,10 @@ class Scheduler(SchedulerState, ServerNode):
             dependencies=dependencies,
             computation=computation,
         )
-
-        self._parse_and_apply_annotations(
+        # FIXME: These "resolved_annotations" are a big duplication and are only
+        # required to satisfy the current plugin API. This should be
+        # reconsidered.
+        resolved_annotations = self._parse_and_apply_annotations(
             tasks=new_tasks,
             annotations=annotations,
             layer_annotations=layer_annotations,
@@ -4382,7 +4384,7 @@ class Scheduler(SchedulerState, ServerNode):
                     tasks=[ts.key for ts in touched_tasks],
                     keys=requested_keys,
                     dependencies=dependencies,
-                    annotations=annotations,
+                    annotations=resolved_annotations,
                     priority=priority,
                 )
             except Exception as e:
@@ -4449,7 +4451,7 @@ class Scheduler(SchedulerState, ServerNode):
         annotations: dict,
         layer_annotations: dict[str, dict],
         pre_stringified_keys: dict[Hashable, str],
-    ) -> None:
+    ) -> dict[str, dict[str, Any]]:
         """Apply the provided annotations to the provided `TaskState` objects.
 
         The raw annotations will be stored in the `annotations` attribute.
@@ -4464,7 +4466,21 @@ class Scheduler(SchedulerState, ServerNode):
             _description_
         layer_annotations : dict[str, dict]
             _description_
+
+        Returns
+        -------
+        resolved_annotations: dict
+            A mapping of all resolved annotations in the format::
+
+                {
+                    "annotation": {
+                        "key": value,
+                        ...
+                    },
+                    ...
+                }
         """
+        resolved_annotations: dict[str, dict[str, Any]] = defaultdict(dict)
         for ts in tasks:
             key = ts.key
             # This could be a typed dict
@@ -4477,6 +4493,8 @@ class Scheduler(SchedulerState, ServerNode):
                 if callable(value):
                     value = value(pre_stringified_keys[key])
                 out[annot] = value
+                resolved_annotations[annot][key] = value
+
                 if annot in ("restrictions", "workers"):
                     if not isinstance(value, (list, tuple, set)):
                         value = [value]
@@ -4506,6 +4524,7 @@ class Scheduler(SchedulerState, ServerNode):
                     assert isinstance(value, int)
                     ts.retries = value
             ts.annotations = out
+        return dict(resolved_annotations)
 
     def _set_priorities(
         self,
