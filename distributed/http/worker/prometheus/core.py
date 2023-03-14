@@ -59,6 +59,13 @@ class WorkerMetricCollector(PrometheusCollector):
             value=ws.transfer_incoming_count,
         )
 
+        if self.server.monitor.monitor_gil_contention:
+            yield GaugeMetricFamily(
+                self.build_name("gil_contention"),
+                "GIL contention metric",
+                value=self.server.monitor._last_gil_contention,
+            )
+
         yield GaugeMetricFamily(
             self.build_name("threads"),
             "Number of worker threads",
