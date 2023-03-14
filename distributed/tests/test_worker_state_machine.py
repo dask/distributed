@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import gc
 import pickle
+import sys
 from collections import defaultdict
 from collections.abc import Iterator
 from time import sleep
@@ -279,17 +280,21 @@ def traverse_subclasses(cls: type) -> Iterator[type]:
 @pytest.mark.parametrize(
     "cls",
     [
+        pytest.param(
+            TaskState,
+            marks=pytest.mark.skipif(
+                sys.version_info < (3, 10), reason="Requires @dataclass(slots=True)"
+            ),
+        ),
         *traverse_subclasses(Instruction),
         *traverse_subclasses(StateMachineEvent),
     ],
 )
 def test_slots(cls):
     params = [
-        k
-        for k in dir(cls)
-        if not k.startswith("_")
-        and k not in ("op", "handled")
-        and not callable(getattr(cls, k))
+        name
+        for name, field in cls.__dataclass_fields__.items()
+        if field.init and not field.type.startswith("ClassVar")
     ]
     inst = cls(**dict.fromkeys(params))
     assert not hasattr(inst, "__dict__")
@@ -726,7 +731,7 @@ async def test_fetch_to_missing_on_busy(c, s, a, b):
             ("gather-dependencies", b.address, {"x"}),
             ("x", "fetch", "flight", "flight", {}),
             ("request-dep", b.address, {"x"}),
-            ("busy-gather", b.address, {"x"}),
+            ("gather-dep-busy", b.address, {"x"}),
             ("x", "flight", "fetch", "fetch", {}),
             ("x", "fetch", "missing", "missing", {}),
         ],

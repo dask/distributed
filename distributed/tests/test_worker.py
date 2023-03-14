@@ -63,6 +63,7 @@ from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _LockedCommPool,
     assert_story,
+    async_poll_for,
     captured_logger,
     dec,
     div,
@@ -656,11 +657,7 @@ async def test_Executor(c, s):
 @gen_cluster(nthreads=[("127.0.0.1", 1)])
 async def test_close_on_disconnect(s, w):
     await s.close()
-
-    start = time()
-    while w.status != Status.closed:
-        await asyncio.sleep(0.01)
-        assert time() < start + 5
+    await async_poll_for(lambda: w.status == Status.closed, timeout=5)
 
 
 @gen_cluster(nthreads=[])
@@ -735,11 +732,7 @@ async def test_types(c, s, a, b):
 
     await c._cancel(y)
 
-    start = time()
-    while y.key in b.data:
-        await asyncio.sleep(0.01)
-        assert time() < start + 5
-
+    await async_poll_for(lambda: y.key not in b.data, timeout=5)
     assert y.key not in b.state.tasks
 
 
@@ -934,11 +927,7 @@ async def test_stop_doing_unnecessary_work(c, s, a, b):
     await asyncio.sleep(0.1)
 
     del futures
-
-    start = time()
-    while a.state.executing_count:
-        await asyncio.sleep(0.01)
-        assert time() - start < 0.5
+    await async_poll_for(lambda: a.state.executing_count == 0, timeout=0.5)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
@@ -1602,13 +1591,11 @@ async def test_close_async_task_handles_cancellation(c, s, a):
     task = next(
         task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
     )
-    start = time()
     with captured_logger(
         "distributed.worker.state_machine", level=logging.ERROR
     ) as logger:
-        await a.close(timeout=1)
+        await asyncio.wait_for(a.close(timeout=1), timeout=5)
     assert "Failed to cancel asyncio task" in logger.getvalue()
-    assert time() - start < 5
     assert not task.cancelled()
     assert s.tasks["f1"].state in ("queued", "no-worker")
     task.cancel()
@@ -2160,7 +2147,7 @@ async def test_gather_dep_one_worker_always_busy(c, s, a, b):
     with pytest.raises(asyncio.TimeoutError):
         await h.result(timeout=0.8)
 
-    story = b.state.story("busy-gather")
+    story = b.state.story("gather-dep-busy")
     # 1 busy response straight away, followed by 1 retry every 150ms for 800ms.
     # The requests for b and g are clustered together in single messages.
     # We need to be very lax in measuring as PeriodicCallback+network comms have been
@@ -2218,7 +2205,7 @@ async def test_gather_dep_from_remote_workers_if_all_local_workers_are_busy(
 
     # Tried fetching from each local worker exactly once before falling back to the
     # remote worker
-    assert sorted(ev[1] for ev in a.state.story("busy-gather")) == sorted(
+    assert sorted(ev[1] for ev in a.state.story("gather-dep-busy")) == sorted(
         w.address for w in lws
     )
     assert_story(a.state.story("receive-dep"), [("receive-dep", rw.address, {"f"})])

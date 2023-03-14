@@ -25,7 +25,7 @@ import logging
 import os
 import sys
 import warnings
-from collections.abc import Callable, MutableMapping
+from collections.abc import Callable, Hashable, MutableMapping
 from contextlib import suppress
 from functools import partial
 from typing import TYPE_CHECKING, Any, Container, Literal, cast
@@ -39,7 +39,7 @@ from dask.utils import format_bytes, parse_bytes, parse_timedelta
 from distributed import system
 from distributed.compatibility import WINDOWS, PeriodicCallback
 from distributed.core import Status
-from distributed.metrics import monotonic
+from distributed.metrics import context_meter, monotonic
 from distributed.spill import ManualEvictProto, SpillBuffer
 from distributed.utils import RateLimiterFilter, has_arg, log_errors
 from distributed.utils_perf import ThrottledGC
@@ -234,6 +234,9 @@ class WorkerMemoryManager:
             worker.status = Status.running
 
     async def _maybe_spill(self, worker: Worker, memory: int) -> None:
+        """If process memory is above the ``spill`` threshold, evict keys until it goes
+        below the ``target`` threshold
+        """
         if self.memory_spill_fraction is False:
             return
 
@@ -241,18 +244,41 @@ class WorkerMemoryManager:
         # fast property and evict() methods. Dask-CUDA uses this.
         if not hasattr(self.data, "fast") or not hasattr(self.data, "evict"):
             return
-        data = cast(ManualEvictProto, self.data)
 
         assert self.memory_limit
         frac = memory / self.memory_limit
         if frac <= self.memory_spill_fraction:
             return
 
-        total_spilled = 0
         worker_logger.debug(
             "Worker is at %.0f%% memory usage. Start spilling data to disk.",
             frac * 100,
         )
+
+        def metrics_callback(label: Hashable, value: float, unit: str) -> None:
+            if not isinstance(label, tuple):
+                label = (label,)
+            worker.digest_metric(("memory-monitor", *label, unit), value)
+
+        # Work around bug with Tornado 6.2 PeriodicCallback, which does not properly
+        # insulate contextvars. Without this hack, you would see metrics that are
+        # clearly emitted by Worker.execute labelled with 'memory-monitor'.So we're
+        # wrapping our change in contextvars (inside add_callback) inside create_task(),
+        # which copies and insulates the context.
+        async def _() -> None:
+            with context_meter.add_callback(metrics_callback):
+                # Measure delta between the measures from the SpillBuffer and the total
+                # end-to-end duration of _spill
+                await self._spill(worker, memory)
+
+        await asyncio.create_task(_(), name="memory-monitor-spill")
+        # End work around
+
+    async def _spill(self, worker: Worker, memory: int) -> None:
+        """Evict keys until the process memory goes below the ``target`` threshold"""
+        assert self.memory_limit
+        total_spilled = 0
+
         # Implement hysteresis cycle where spilling starts at the spill threshold and
         # stops at the target threshold. Normally that here the target threshold defines
         # process memory, whereas normally it defines reported managed memory (e.g.
@@ -263,6 +289,8 @@ class WorkerMemoryManager:
         count = 0
         need = memory - target
         last_checked_for_pause = last_yielded = monotonic()
+
+        data = cast(ManualEvictProto, self.data)
 
         while memory > target:
             if not data.fast:
@@ -308,18 +336,8 @@ class WorkerMemoryManager:
             # somewhat of an ugly hack,  DO NOT tweak this without a thorough cycle of
             # stress testing. See: https://github.com/dask/distributed/issues/6110.
             if now - last_yielded > 0.5:
-                # See metrics:
-                # - disk-load-duration
-                # - get-data-load-duration
-                # - disk-write-target-duration
-                # - disk-write-spill-duration
-                worker.digest_metric("disk-write-spill-duration", now - last_yielded)
                 await asyncio.sleep(0)
                 last_yielded = monotonic()
-
-        now = monotonic()
-        if now - last_yielded > 0.005:
-            worker.digest_metric("disk-write-spill-duration", now - last_yielded)
 
         if count:
             worker_logger.debug(

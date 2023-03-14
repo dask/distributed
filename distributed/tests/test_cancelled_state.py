@@ -22,7 +22,6 @@ from distributed.utils_test import (
 from distributed.worker_state_machine import (
     AddKeysMsg,
     ComputeTaskEvent,
-    DigestMetric,
     Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
@@ -148,7 +147,7 @@ async def test_worker_stream_died_during_comm(c, s, a, b):
     write_event.set()
 
     await res
-    assert any("receive-dep-failed" in msg for msg in b.state.log)
+    assert any("gather-dep-failed" in msg for msg in b.state.log)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -193,7 +192,7 @@ async def test_flight_to_executing_via_cancelled_resumed(c, s, b):
         assert await fut2 == 3
 
         b_story = b.state.story(fut1.key)
-        assert any("receive-dep-failed" in msg for msg in b_story)
+        assert any("gather-dep-failed" in msg for msg in b_story)
         assert any("cancelled" in msg for msg in b_story)
         assert any("resumed" in msg for msg in b_story)
 
@@ -803,7 +802,6 @@ def test_workerstate_executing_skips_fetch_on_success(ws_with_running_task):
         ExecuteSuccessEvent.dummy("x", 123, stimulus_id="s3"),
     )
     assert instructions == [
-        DigestMetric(name="compute-duration", value=1.0, stimulus_id="s3"),
         AddKeysMsg(keys=["x"], stimulus_id="s3"),
         Execute(key="y", stimulus_id="s3"),
     ]
@@ -893,7 +891,6 @@ def test_workerstate_flight_failure_to_executing(ws, block_queue):
         )
         assert instructions == [
             Execute(key="z", stimulus_id="s4"),
-            DigestMetric(name="compute-duration", value=1.0, stimulus_id="s6"),
             TaskFinishedMsg.match(key="z", stimulus_id="s6"),
             Execute(key="x", stimulus_id="s6"),
         ]

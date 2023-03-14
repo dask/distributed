@@ -16,6 +16,7 @@ from dask.base import normalize_token
 from dask.sizeof import sizeof
 from dask.utils import typename
 
+from distributed.metrics import context_meter
 from distributed.protocol import pickle
 from distributed.protocol.compression import decompress, maybe_compress
 from distributed.protocol.utils import (
@@ -427,6 +428,7 @@ def deserialize(header, frames, deserializers=None):
     return loads(header, frames)
 
 
+@context_meter.meter("serialize")
 def serialize_and_split(
     x, serializers=None, on_error="message", context=None, size=None
 ):
@@ -471,6 +473,7 @@ def serialize_and_split(
     return header, out_frames
 
 
+@context_meter.meter("deserialize")
 def merge_and_deserialize(header, frames, deserializers=None):
     """Merge and deserialize frames
 

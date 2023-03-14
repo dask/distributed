@@ -4,7 +4,6 @@ import asyncio
 import bisect
 import builtins
 import errno
-import functools
 import logging
 import math
 import os
@@ -20,6 +19,7 @@ from collections.abc import (
     Callable,
     Collection,
     Container,
+    Hashable,
     Iterable,
     Mapping,
     MutableMapping,
@@ -27,6 +27,7 @@ from collections.abc import (
 from concurrent.futures import Executor
 from contextlib import suppress
 from datetime import timedelta
+from functools import wraps
 from inspect import isawaitable
 from typing import (
     TYPE_CHECKING,
@@ -70,6 +71,7 @@ from distributed.core import (
     PooledRPCCall,
     Status,
     coerce_to_address,
+    context_meter_to_server_digest,
     error_message,
     pingpong,
 )
@@ -79,7 +81,7 @@ from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import _get_plugin_name
 from distributed.diskutils import WorkDir, WorkSpace
 from distributed.http import get_handlers
-from distributed.metrics import time
+from distributed.metrics import context_meter, thread_time, time
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
 from distributed.protocol import pickle, to_serialize
@@ -103,6 +105,7 @@ from distributed.utils import (
     offload,
     parse_ports,
     recursive_to_dict,
+    run_in_executor_with_context,
     silence_logging,
     thread_state,
     wait_for,
@@ -193,7 +196,7 @@ def fail_hard(method: Callable[P, T]) -> Callable[P, T]:
     reason = f"worker-{method.__name__}-fail-hard"
     if iscoroutinefunction(method):
 
-        @functools.wraps(method)
+        @wraps(method)
         async def wrapper(self, *args: P.args, **kwargs: P.kwargs) -> Any:
             try:
                 return await method(self, *args, **kwargs)  # type: ignore
@@ -206,7 +209,7 @@ def fail_hard(method: Callable[P, T]) -> Callable[P, T]:
 
     else:
 
-        @functools.wraps(method)
+        @wraps(method)
         def wrapper(self, *args: P.args, **kwargs: P.kwargs) -> T:
             try:
                 return method(self, *args, **kwargs)
@@ -1712,6 +1715,7 @@ class Worker(BaseWorker, ServerNode):
 
         self.stream_comms[address].send(msg)
 
+    @context_meter_to_server_digest("get-data")
     async def get_data(
         self,
         comm: Comm,
@@ -1720,8 +1724,6 @@ class Worker(BaseWorker, ServerNode):
         serializers: list[str] | None = None,
         max_connections: int | None = None,
     ) -> GetDataBusy | Literal[Status.dont_reply]:
-        start = time()
-
         if max_connections is None:
             max_connections = self.transfer_outgoing_count_limit
 
@@ -1761,10 +1763,12 @@ class Worker(BaseWorker, ServerNode):
 
         self.transfer_outgoing_count += 1
         self.transfer_outgoing_count_total += 1
+
+        # This may potentially take many seconds if it involves unspilling
         data = {k: self.data[k] for k in keys if k in self.data}
 
         if len(data) < len(keys):
-            for k in set(keys) - set(data):
+            for k in set(keys) - data.keys():
                 if k in self.state.actors:
                     from distributed.actor import Actor
 
@@ -1779,22 +1783,11 @@ class Worker(BaseWorker, ServerNode):
         total_bytes = sum(bytes_per_task.values())
         self.transfer_outgoing_bytes += total_bytes
         self.transfer_outgoing_bytes_total += total_bytes
-        stop = time()
-
-        # Don't log metrics if all keys are in memory
-        if stop - start > 0.005:
-            # See metrics:
-            # - disk-load-duration
-            # - get-data-load-duration
-            # - disk-write-target-duration
-            # - disk-write-spill-duration
-            self.digest_metric("get-data-load-duration", stop - start)
-
-        start = time()
 
         try:
-            compressed = await comm.write(msg, serializers=serializers)
-            response = await comm.read(deserializers=serializers)
+            with context_meter.meter("network", func=time) as m:
+                compressed = await comm.write(msg, serializers=serializers)
+                response = await comm.read(deserializers=serializers)
             assert response == "OK", response
         except OSError:
             logger.exception(
@@ -1807,15 +1800,15 @@ class Worker(BaseWorker, ServerNode):
         finally:
             self.transfer_outgoing_bytes -= total_bytes
             self.transfer_outgoing_count -= 1
-        stop = time()
-        self.digest_metric("get-data-send-duration", stop - start)
 
-        duration = (stop - start) or 0.5  # windows
+        # Not the same as m.delta, which doesn't include time spent
+        # serializing/deserializing
+        duration = max(0.001, m.stop - m.start)
         self.transfer_outgoing_log.append(
             {
-                "start": start + self.scheduler_delay,
-                "stop": stop + self.scheduler_delay,
-                "middle": (start + stop) / 2,
+                "start": m.start + self.scheduler_delay,
+                "stop": m.stop + self.scheduler_delay,
+                "middle": (m.start + m.stop) / 2,
                 "duration": duration,
                 "who": who,
                 "keys": bytes_per_task,
@@ -1939,16 +1932,6 @@ class Worker(BaseWorker, ServerNode):
         return _
 
     @fail_hard
-    def _handle_stimulus_from_task(self, task: asyncio.Task[StateMachineEvent]) -> None:
-        """Override BaseWorker method for added validation
-
-        See also
-        --------
-        distributed.worker_state_machine.BaseWorker._handle_stimulus_from_task
-        """
-        super()._handle_stimulus_from_task(task)
-
-    @fail_hard
     def handle_stimulus(self, *stims: StateMachineEvent) -> None:
         """Override BaseWorker method for added validation
 
@@ -2018,7 +2001,7 @@ class Worker(BaseWorker, ServerNode):
                 "source": worker,
             }
         )
-        duration = (stop - start) or 0.010
+        duration = max(0.001, stop - start)
         bandwidth = total_bytes / duration
         self.transfer_incoming_log.append(
             {
@@ -2072,20 +2055,18 @@ class Worker(BaseWorker, ServerNode):
                 stimulus_id=f"worker-closing-{time()}",
             )
 
-        try:
-            self.state.log.append(
-                ("request-dep", worker, to_gather, stimulus_id, time())
-            )
-            logger.debug("Request %d keys from %s", len(to_gather), worker)
+        self.state.log.append(("request-dep", worker, to_gather, stimulus_id, time()))
+        logger.debug("Request %d keys from %s", len(to_gather), worker)
 
-            start = time()
-            response = await get_data_from_worker(
-                rpc=self.rpc, keys=to_gather, worker=worker, who=self.address
-            )
-            stop = time()
+        try:
+            with context_meter.meter("network") as m:
+                response = await get_data_from_worker(
+                    rpc=self.rpc, keys=to_gather, worker=worker, who=self.address
+                )
+
             if response["status"] == "busy":
                 self.state.log.append(
-                    ("busy-gather", worker, to_gather, stimulus_id, time())
+                    ("gather-dep-busy", worker, to_gather, stimulus_id, time())
                 )
                 return GatherDepBusyEvent(
                     worker=worker,
@@ -2096,8 +2077,8 @@ class Worker(BaseWorker, ServerNode):
             assert response["status"] == "OK"
             cause = self._get_cause(to_gather)
             self._update_metrics_received_data(
-                start=start,
-                stop=stop,
+                start=m.start,
+                stop=m.stop,
                 data=response["data"],
                 cause=cause,
                 worker=worker,
@@ -2115,7 +2096,7 @@ class Worker(BaseWorker, ServerNode):
         except OSError:
             logger.exception("Worker stream died during communication: %s", worker)
             self.state.log.append(
-                ("receive-dep-failed", worker, to_gather, stimulus_id, time())
+                ("gather-dep-failed", worker, to_gather, stimulus_id, time())
             )
             return GatherDepNetworkFailureEvent(
                 worker=worker,
@@ -2126,6 +2107,10 @@ class Worker(BaseWorker, ServerNode):
         except Exception as e:
             # e.g. data failed to deserialize
             logger.exception(e)
+            self.state.log.append(
+                ("gather-dep-failed", worker, to_gather, stimulus_id, time())
+            )
+
             if self.batched_stream and LOG_PDB:
                 import pdb
 
@@ -2135,7 +2120,7 @@ class Worker(BaseWorker, ServerNode):
                 e,
                 worker=worker,
                 total_nbytes=total_nbytes,
-                stimulus_id=f"gather-dep-failure-{time()}",
+                stimulus_id=f"gather-dep-failed-{time()}",
             )
 
     async def retry_busy_worker_later(self, worker: str) -> StateMachineEvent:
@@ -2151,7 +2136,7 @@ class Worker(BaseWorker, ServerNode):
             worker=worker, stimulus_id=f"retry-busy-worker-{time()}"
         )
 
-    def digest_metric(self, name: str, value: float) -> None:
+    def digest_metric(self, name: Hashable, value: float) -> None:
         """Implement BaseWorker.digest_metric by calling Server.digest_metric"""
         ServerNode.digest_metric(self, name, value)
 
@@ -2291,7 +2276,7 @@ class Worker(BaseWorker, ServerNode):
                         self.scheduler_delay,
                     )
                 elif "ThreadPoolExecutor" in str(type(e)):
-                    result = await self.loop.run_in_executor(
+                    result = await run_in_executor_with_context(
                         e,
                         apply_function,
                         function,
@@ -2304,14 +2289,16 @@ class Worker(BaseWorker, ServerNode):
                         self.scheduler_delay,
                     )
                 else:
-                    result = await self.loop.run_in_executor(
-                        e,
-                        apply_function_simple,
-                        function,
-                        args2,
-                        kwargs2,
-                        self.scheduler_delay,
-                    )
+                    # Can't capture contextvars across processes
+                    with context_meter.meter("executor"):
+                        result = await self.loop.run_in_executor(
+                            e,
+                            apply_function_simple,
+                            function,
+                            args2,
+                            kwargs2,
+                            self.scheduler_delay,
+                        )
             finally:
                 self.active_keys.discard(key)
 
@@ -2319,7 +2306,9 @@ class Worker(BaseWorker, ServerNode):
 
             if result["op"] == "task-finished":
                 if self.digests is not None:
-                    self.digests["task-duration"].add(result["stop"] - result["start"])
+                    duration = max(0, result["stop"] - result["start"])
+                    self.digests["task-duration"].add(duration)
+
                 return ExecuteSuccessEvent(
                     key=key,
                     run_id=run_id,
@@ -2397,12 +2386,7 @@ class Worker(BaseWorker, ServerNode):
         stop = time()
         if stop - start > 0.005:
             ts.startstops.append({"action": "disk-read", "start": start, "stop": stop})
-            # See metrics:
-            # - disk-load-duration
-            # - get-data-load-duration
-            # - disk-write-target-duration
-            # - disk-write-spill-duration
-            self.digest_metric("disk-load-duration", stop - start)
+
         return args2, kwargs2
 
     ##################
@@ -2940,6 +2924,7 @@ def loads_function(bytes_object):
     return pickle.loads(bytes_object)
 
 
+@context_meter.meter("deserialize")
 def _deserialize(function=None, args=None, kwargs=None, task=NO_VALUE):
     """Deserialize task inputs and regularize to func, args, kwargs"""
     if function is not None:
@@ -3094,9 +3079,21 @@ def apply_function_simple(
     msg: dictionary with status, result/error, timings, etc..
     """
     ident = threading.get_ident()
-    start = time()
     try:
-        result = function(*args, **kwargs)
+        # meter("thread-cpu").delta
+        #   difference in thread_time() before and after function call, minus user calls
+        #   to context_meter inside the function. Published to Server.digests as
+        #   {("execute", <prefix>, "thread-cpu", "seconds"): <value>}
+        # m.delta
+        #   difference in wall time before and after function call, minus thread-cpu,
+        #   minus user calls to context_meter. Published to Server.digests as
+        #   {("execute", <prefix>, "thread-noncpu", "seconds"): <value>}
+        # m.stop - m.start
+        #   difference in wall time before and after function call, without subtracting
+        #   anything. This is used in scheduler heuristics, e.g. task stealing.
+        with context_meter.meter("thread-noncpu", func=time) as m:
+            with context_meter.meter("thread-cpu", func=thread_time):
+                result = function(*args, **kwargs)
     except (SystemExit, KeyboardInterrupt):
         # Special-case these, just like asyncio does all over the place. They will pass
         # through `fail_hard` and `_handle_stimulus_from_task`, and eventually be caught
@@ -3120,10 +3117,9 @@ def apply_function_simple(
             "nbytes": sizeof(result),
             "type": type(result) if result is not None else None,
         }
-    finally:
-        end = time()
-    msg["start"] = start + time_delay
-    msg["stop"] = end + time_delay
+
+    msg["start"] = m.start + time_delay
+    msg["stop"] = m.stop + time_delay
     msg["thread"] = ident
     return msg
 
@@ -3141,9 +3137,9 @@ async def apply_function_async(
     msg: dictionary with status, result/error, timings, etc..
     """
     ident = threading.get_ident()
-    start = time()
     try:
-        result = await function(*args, **kwargs)
+        with context_meter.meter("thread-noncpu", func=time) as m:
+            result = await function(*args, **kwargs)
     except (SystemExit, KeyboardInterrupt):
         # Special-case these, just like asyncio does all over the place. They will pass
         # through `fail_hard` and `_handle_stimulus_from_task`, and eventually be caught
@@ -3169,10 +3165,9 @@ async def apply_function_async(
             "nbytes": sizeof(result),
             "type": type(result) if result is not None else None,
         }
-    finally:
-        end = time()
-    msg["start"] = start + time_delay
-    msg["stop"] = end + time_delay
+
+    msg["start"] = m.start + time_delay
+    msg["stop"] = m.stop + time_delay
     msg["thread"] = ident
     return msg
 
