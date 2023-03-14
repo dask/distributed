@@ -3375,7 +3375,7 @@ class TaskProgress(DashboardComponent):
         )
 
 
-class EventLoop(DashboardComponent):
+class Contention(DashboardComponent):
     """
     Event Loop Health (and GIL Contention, if configured)
     """
@@ -4113,7 +4113,7 @@ def shuffling_doc(scheduler, extra, doc):
     timeseries = SystemTimeseries(
         scheduler, width=1600, height=200, follow_interval=3000
     )
-    event_loop = EventLoop(scheduler, width=200, height=400)
+    event_loop = Contention(scheduler, width=200, height=400)
 
     add_periodic_callback(doc, shuffling, 200)
     add_periodic_callback(doc, workers_memory, 200)

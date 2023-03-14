@@ -25,8 +25,8 @@ from distributed.dashboard.components.scheduler import (
     AggregateAction,
     ClusterMemory,
     ComputePerKey,
+    Contention,
     CurrentLoad,
-    EventLoop,
     Events,
     Hardware,
     MemoryByKey,
@@ -108,7 +108,7 @@ async def test_basic(c, s, a, b):
         SystemMonitor,
         Occupancy,
         StealingTimeSeries,
-        EventLoop,
+        Contention,
     ]:
         ss = component(s)
 
