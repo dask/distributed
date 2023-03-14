@@ -3418,7 +3418,7 @@ class EventLoop(DashboardComponent):
             source=self.source,
             fill_color=factor_cmap(
                 field_name="names",
-                palette=["#c9d9d3", "#718dbf"],
+                palette=["#b8e0ce", "#81aae4"],
                 factors=["Event Loop", "GIL Contention"],
                 start=1,
                 end=2,
