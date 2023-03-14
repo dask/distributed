@@ -125,7 +125,7 @@ dask_worker_tasks
     Number of tasks at worker
 dask_worker_threads
     Number of worker threads
-dask_worker_gil_contention:
+dask_worker_gil_contention
     0-1 value representing GIL contention on worker
 
     .. note::
