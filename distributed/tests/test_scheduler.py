@@ -870,6 +870,27 @@ async def test_feed_setup_teardown(s, a, b):
         assert time() - start < 5
 
 
+@gen_cluster(nthreads=[("127.0.0.1", 1)])
+async def test_scheduler_close_closes_monitor(s, w):
+    did_close_monitor = False
+
+    def assert_did_call():
+        nonlocal did_close_monitor
+        did_close_monitor = True
+        original_close()
+
+    original_close = s.monitor.close
+    s.monitor.close = assert_did_call
+    await s.close()
+
+    start = time()
+    while s.status != Status.closed:
+        await asyncio.sleep(0.01)
+        assert time() < start + 5
+
+    assert did_close_monitor
+
+
 @gen_cluster()
 async def test_feed_large_bytestring(s, a, b):
     np = pytest.importorskip("numpy")

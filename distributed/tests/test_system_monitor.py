@@ -113,3 +113,17 @@ def test_gil_contention():
         sm = SystemMonitor()
         a = sm.update()
         assert "gil_contention" in a
+
+    sm.close()
+    sm.close()  # Idempotent
+
+    # Closing SystemMonitor will stop gilknocker thread
+    class FakeGilKnocker:
+        stopped = False
+
+        def stop(self):
+            self.stopped = True
+
+    sm._gilknocker = FakeGilKnocker()
+    sm.close()
+    assert sm._gilknocker.stopped

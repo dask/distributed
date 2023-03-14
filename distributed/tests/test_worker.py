@@ -663,6 +663,27 @@ async def test_close_on_disconnect(s, w):
         assert time() < start + 5
 
 
+@gen_cluster(nthreads=[("127.0.0.1", 1)])
+async def test_worker_close_closes_monitor(s, w):
+    did_close_monitor = False
+
+    def assert_did_call():
+        nonlocal did_close_monitor
+        did_close_monitor = True
+        original_close()
+
+    original_close = w.monitor.close
+    w.monitor.close = assert_did_call
+    await s.close()
+
+    start = time()
+    while w.status != Status.closed:
+        await asyncio.sleep(0.01)
+        assert time() < start + 5
+
+    assert did_close_monitor
+
+
 @gen_cluster(nthreads=[])
 async def test_memory_limit_auto(s):
     async with Worker(s.address, nthreads=1) as a, Worker(

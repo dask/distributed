@@ -3980,6 +3980,8 @@ class Scheduler(SchedulerState, ServerNode):
         self.stop()
         await super().close()
 
+        self.monitor.close()
+
         setproctitle("dask scheduler [closed]")
         disable_gc_diagnosis()
 

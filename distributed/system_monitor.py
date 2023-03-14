@@ -221,3 +221,10 @@ class SystemMonitor:
             k: [v[i] if -i <= len(v) else None for i in range(istart, 0)]
             for k, v in self.quantities.items()
         }
+
+    def close(self) -> None:
+        if self.monitor_gil_contention:
+            try:
+                self._gilknocker.stop()
+            except ValueError:  # Wasn't started or already stopped
+                pass
