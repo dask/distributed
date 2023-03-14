@@ -97,7 +97,7 @@ class SchedulerPlugin:
         For a description of the transition mechanism and the available states,
         see :ref:`Scheduler task states <scheduler-task-state>`.
 
-        Note::
+        Warning::
 
             This is an advanced feature and the transition mechanism and details
             of task states are subject to change without deprecation cycle.
@@ -189,7 +189,7 @@ class WorkerPlugin:
 
         Whenever a task changes its state, this method will be called.
 
-        Note::
+        Warning::
 
             This is an advanced feature and the transition mechanism and details
             of task states are subject to change without deprecation cycle.
