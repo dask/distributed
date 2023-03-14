@@ -95,7 +95,7 @@ class SystemMonitor:
 
         if monitor_gil_contention is None:
             monitor_gil_contention = dask.config.get(
-                "distributed.admin.system-monitor.gil-contention"
+                "distributed.admin.system-monitor.gil-contention.enabled"
             )
         self.monitor_gil_contention = monitor_gil_contention
         if self.monitor_gil_contention:
@@ -108,7 +108,10 @@ class SystemMonitor:
                 self.monitor_gil_contention = False
             else:
                 self.quantities["gil_contention"] = deque(maxlen=maxlen)
-                self._gilknocker = KnockKnock(1_000)  # TODO(miles) param interval?
+                interval = dask.config.get(
+                    "distributed.admin.system-monitor.gil-contention.interval-microseconds",
+                )
+                self._gilknocker = KnockKnock(interval)
                 self._gilknocker.start()
 
         if not WINDOWS:

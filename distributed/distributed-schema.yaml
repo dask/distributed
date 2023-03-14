@@ -1142,8 +1142,18 @@ properties:
                 type: boolean
                 description: Should we include host-wide CPU usage, with very granular breakdown?
               gil-contention:
-                type: boolean
-                description: Should we include GIL contention metrics, requires `gilknocker` to be installed.
+                type: object
+                description: |
+                  Should we include GIL contention metrics, requires `gilknocker` to be installed.
+                properties:
+                  enabled:
+                    type: boolean
+                    description: Enable monitoring of GIL contention
+                  interval-microseconds:
+                    type: integer
+                    description: |
+                      GIL polling interval. More frequent polling will reflect a more accurate GIL
+                      contention metric but will be more likely to impact runtime performance.
 
       rmm:
         type: object
