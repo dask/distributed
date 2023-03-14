@@ -45,7 +45,6 @@ class SchedulerMetricCollector(PrometheusCollector):
             len(self.server.running)
             - len(self.server.idle)
             - len(self.server.saturated),
-            timestamp=time(),
         )
         worker_states.add_metric(["saturated"], len(self.server.saturated))
         worker_states.add_metric(
