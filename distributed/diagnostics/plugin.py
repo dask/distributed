@@ -24,8 +24,7 @@ logger = logging.getLogger(__name__)
 class SchedulerPlugin:
     """Interface to extend the Scheduler
 
-    A plugin enables to run custom hooks when specific events occur.  The
-    scheduler will run the methods of this plugin whenever the corresponding
+    A plugin enables custom hooks to run when specific events occur.  The    scheduler will run the methods of this plugin whenever the corresponding
     method of the scheduler is run.  This runs user code within the scheduler
     thread that can perform arbitrary operations in synchrony with the scheduler
     itself.
@@ -97,7 +96,7 @@ class SchedulerPlugin:
         For a description of the transition mechanism and the available states,
         see :ref:`Scheduler task states <scheduler-task-state>`.
 
-        Warning::
+        .. warning::
 
             This is an advanced feature and the transition mechanism and details
             of task states are subject to change without deprecation cycle.
@@ -189,7 +188,7 @@ class WorkerPlugin:
 
         Whenever a task changes its state, this method will be called.
 
-        Warning::
+        .. warning::
 
             This is an advanced feature and the transition mechanism and details
             of task states are subject to change without deprecation cycle.
