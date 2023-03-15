@@ -26,7 +26,7 @@
 
 <details>
 <summary style="margin-bottom": 20px><h4 style="display:inline">Code</h4></summary>
-{% for frames in code %}
+{% for frames in code if frames %}
 <h5>Code segment {{ loop.index }} / {{ code | length }}</h5>
 <pre><code>{{ frames[-1] }}</code></pre>
 {% endfor %}
