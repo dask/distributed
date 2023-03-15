@@ -258,6 +258,16 @@ async def test_server_status_compare_enum_is_quiet():
     server.status == Status.running  # noqa: B015
 
 
+@gen_test(config={"distributed.admin.system-monitor.gil-contention": True})
+async def test_server_close_stops_gil_monitoring():
+    pytest.importorskip("gilknocker")
+
+    server = Server({})
+    assert server.monitor._gilknocker.is_running
+    await server.close()
+    assert not server.monitor._gilknocker.is_running
+
+
 @gen_test()
 async def test_server():
     """

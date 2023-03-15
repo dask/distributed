@@ -113,3 +113,8 @@ def test_gil_contention():
         sm = SystemMonitor()
         a = sm.update()
         assert "gil_contention" in a
+
+    assert sm._gilknocker.is_running
+    sm.close()
+    sm.close()  # Idempotent
+    assert not sm._gilknocker.is_running

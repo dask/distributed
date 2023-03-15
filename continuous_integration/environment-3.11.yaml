@@ -48,4 +48,4 @@ dependencies:
       - git+https://github.com/dask/zict
       - git+https://github.com/fsspec/filesystem_spec
       - keras
-      - gilknocker
+      - gilknocker>=0.3.0
