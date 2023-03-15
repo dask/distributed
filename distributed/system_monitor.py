@@ -95,7 +95,7 @@ class SystemMonitor:
 
         if monitor_gil_contention is None:
             monitor_gil_contention = dask.config.get(
-                "distributed.admin.system-monitor.gil-contention.enabled"
+                "distributed.admin.system-monitor.gil.enabled"
             )
         self.monitor_gil_contention = monitor_gil_contention
         if self.monitor_gil_contention:
@@ -109,7 +109,7 @@ class SystemMonitor:
             else:
                 self.quantities["gil_contention"] = deque(maxlen=maxlen)
                 raw_interval = dask.config.get(
-                    "distributed.admin.system-monitor.gil-contention.interval",
+                    "distributed.admin.system-monitor.gil.interval",
                 )
                 interval = dask.utils.parse_timedelta(raw_interval, default="us") * 1e6
 
