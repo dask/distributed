@@ -1654,8 +1654,6 @@ class Worker(BaseWorker, ServerNode):
         self.status = Status.closed
         await ServerNode.close(self)
 
-        self.monitor.close()
-
         setproctitle("dask worker [closed]")
         return "OK"
 
