@@ -7107,8 +7107,8 @@ def test_computation_object_code_dask_compute(client):
         computations = list(dask_scheduler.computations)
         assert len(computations) == 1
         comp = computations[0]
-        assert len(comp.code_frames) == 1
-        return comp.code_frames[0]
+        assert len(comp.code) == 1
+        return comp.code[0]
 
     code = client.run_on_scheduler(fetch_comp_code)
 
@@ -7126,7 +7126,7 @@ def test_computation_object_code_dask_compute_no_frames_default(client):
         computations = list(dask_scheduler.computations)
         assert len(computations) == 1
         comp = computations[0]
-        assert not comp.code_frames
+        assert not comp.code
 
     client.run_on_scheduler(fetch_comp_code)
 
@@ -7144,7 +7144,7 @@ def test_computation_object_code_not_available(client):
         computations = list(dask_scheduler.computations)
         assert len(computations) == 1
         comp = computations[0]
-        assert not comp.code_frames
+        assert not comp.code
 
     client.run_on_scheduler(fetch_comp_code)
 
@@ -7162,11 +7162,11 @@ async def test_computation_object_code_dask_persist(c, s, a, b):
     computations = list(s.computations)
     assert len(computations) == 1
     comp = computations[0]
-    assert len(comp.code_frames) == 1
+    assert len(comp.code) == 1
 
-    assert len(comp.code_frames[0]) == 2
-    assert comp.code_frames[0][-1] == test_function_code
-    assert comp.code_frames[0][-2] == inspect.getsource(sys._getframe(1))
+    assert len(comp.code[0]) == 2
+    assert comp.code[0][-1] == test_function_code
+    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
 
 
 @gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
@@ -7185,11 +7185,11 @@ async def test_computation_object_code_client_submit_simple(c, s, a, b):
     assert len(computations) == 1
     comp = computations[0]
 
-    assert len(comp.code_frames) == 1
+    assert len(comp.code) == 1
 
-    assert len(comp.code_frames[0]) == 2
-    assert comp.code_frames[0][-1] == test_function_code
-    assert comp.code_frames[0][-2] == inspect.getsource(sys._getframe(1))
+    assert len(comp.code[0]) == 2
+    assert comp.code[0][-1] == test_function_code
+    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
 
 
 @gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
@@ -7209,11 +7209,11 @@ async def test_computation_object_code_client_submit_list_comp(c, s, a, b):
     comp = computations[0]
 
     # Code is deduplicated
-    assert len(comp.code_frames) == 1
+    assert len(comp.code) == 1
 
-    assert len(comp.code_frames[0]) == 2
-    assert comp.code_frames[0][-1] == test_function_code
-    assert comp.code_frames[0][-2] == inspect.getsource(sys._getframe(1))
+    assert len(comp.code[0]) == 2
+    assert comp.code[0][-1] == test_function_code
+    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
 
 
 @gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
@@ -7233,11 +7233,11 @@ async def test_computation_object_code_client_submit_dict_comp(c, s, a, b):
     comp = computations[0]
 
     # Code is deduplicated
-    assert len(comp.code_frames) == 1
+    assert len(comp.code) == 1
 
-    assert len(comp.code_frames[0]) == 2
-    assert comp.code_frames[0][-1] == test_function_code
-    assert comp.code_frames[0][-2] == inspect.getsource(sys._getframe(1))
+    assert len(comp.code[0]) == 2
+    assert comp.code[0][-1] == test_function_code
+    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
 
 
 @gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
@@ -7254,11 +7254,11 @@ async def test_computation_object_code_client_map(c, s, a, b):
     computations = list(s.computations)
     assert len(computations) == 1
     comp = computations[0]
-    assert len(comp.code_frames) == 1
+    assert len(comp.code) == 1
 
-    assert len(comp.code_frames[0]) == 2
-    assert comp.code_frames[0][-1] == test_function_code
-    assert comp.code_frames[0][-2] == inspect.getsource(sys._getframe(1))
+    assert len(comp.code[0]) == 2
+    assert comp.code[0][-1] == test_function_code
+    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
 
 
 @gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
@@ -7274,11 +7274,11 @@ async def test_computation_object_code_client_compute(c, s, a, b):
     computations = list(s.computations)
     assert len(computations) == 1
     comp = computations[0]
-    assert len(comp.code_frames) == 1
+    assert len(comp.code) == 1
 
-    assert len(comp.code_frames[0]) == 2
-    assert comp.code_frames[0][-1] == test_function_code
-    assert comp.code_frames[0][-2] == inspect.getsource(sys._getframe(1))
+    assert len(comp.code[0]) == 2
+    assert comp.code[0][-1] == test_function_code
+    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
 
 
 @pytest.mark.slow

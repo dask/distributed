@@ -844,7 +844,7 @@ class Computation:
 
     start: float
     groups: set[TaskGroup]
-    code_frames: SortedSet
+    code: SortedSet
     id: uuid.UUID
 
     __slots__ = tuple(__annotations__)
@@ -852,7 +852,7 @@ class Computation:
     def __init__(self):
         self.start = time()
         self.groups = set()
-        self.code_frames = SortedSet()
+        self.code = SortedSet()
         self.id = uuid.uuid4()
 
     @property
@@ -883,7 +883,7 @@ class Computation:
             stop=self.stop,
             groups=self.groups,
             states=self.states,
-            code_frames=self.code_frames,
+            code=self.code,
         )
 
 
@@ -4351,7 +4351,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.computations.append(computation)
 
         if code:  # add new code blocks
-            computation.code_frames.add(code)
+            computation.code.add(code)
 
         n = 0
         while len(tasks) != n:  # walk through new tasks, cancel any bad deps
