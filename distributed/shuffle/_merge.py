@@ -4,15 +4,10 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Iterable, Sequence
 
-import toolz
-
 from dask.base import is_dask_collection, tokenize
-from dask.core import keys_in_tasks
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
-from dask.utils import stringify, stringify_collection_keys
 
-from distributed.protocol.serialize import to_serialize
 from distributed.shuffle._shuffle import (
     ShuffleId,
     _get_worker_extension,
@@ -377,59 +372,3 @@ class HashJoinP2PLayer(Layer):
                 self.suffixes,
             )
         return dsk
-
-    @classmethod
-    def __dask_distributed_unpack__(
-        cls, state: dict, dsk: dict, dependecies: dict
-    ) -> dict:
-        from distributed.worker import dumps_task
-
-        to_list = [
-            "left_on",
-            "suffixes",
-            "right_on",
-        ]
-        # msgpack will convert lists into tuples, here
-        # we convert them back to lists
-        for attr in to_list:
-            if isinstance(state[attr], tuple):
-                state[attr] = list(state[attr])
-
-        # Materialize the layer
-        layer_dsk = cls(**state)._construct_graph()
-
-        # Convert all keys to strings and dump tasks
-        layer_dsk = {
-            stringify(k): stringify_collection_keys(v) for k, v in layer_dsk.items()
-        }
-        keys = layer_dsk.keys() | dsk.keys()
-        deps = {}
-        for k, v in layer_dsk.items():
-            deps[k] = d = keys_in_tasks(keys, [v])
-            assert d
-        return {"dsk": toolz.valmap(dumps_task, layer_dsk), "deps": deps}
-
-    def __dask_distributed_pack__(
-        self,
-        all_hlg_keys: Any,
-        known_key_dependencies: Any,
-        client: Any,
-        client_keys: Any,
-    ) -> dict:
-        return {
-            "name": self.name,
-            "name_input_left": self.name_input_left,
-            "left_on": self.left_on,
-            "name_input_right": self.name_input_right,
-            "right_on": self.right_on,
-            "meta_output": to_serialize(self.meta_output),
-            "how": self.how,
-            "npartitions": self.npartitions,
-            "suffixes": self.suffixes,
-            "indicator": self.indicator,
-            "parts_out": self.parts_out,
-            "n_partitions_left": self.n_partitions_left,
-            "n_partitions_right": self.n_partitions_right,
-            "left_index": self.left_index,
-            "right_index": self.right_index,
-        }
