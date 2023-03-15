@@ -4381,7 +4381,8 @@ async def test_tell_workers_when_peers_have_left(c, s, a, b):
         async def gather_dep(self, worker, *args, **kwargs):
             w = workers.pop(worker, None)
             if w is not None and workers:
-                await w.close()
+                w.listener.stop()
+                s.stream_comms[worker].abort()
 
             return await super().gather_dep(worker, *args, **kwargs)
 
