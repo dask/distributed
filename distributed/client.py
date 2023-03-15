@@ -2956,7 +2956,9 @@ class Client(SyncMethodMixin):
         )
 
     @staticmethod
-    def _get_computation_code(stacklevel: int | None = None) -> str:
+    def _get_computation_code(
+        stacklevel: int | None = None, nframes: int = 1
+    ) -> tuple[str, ...]:
         """Walk up the stack to the user code and extract the code surrounding
         the compute/submit/persist call. All modules encountered which are
         ignored through the option
@@ -2967,6 +2969,8 @@ class Client(SyncMethodMixin):
         ``stacklevel`` may be used to explicitly indicate from which frame on
         the stack to get the source code.
         """
+        if nframes <= 0:
+            return ()
         ignore_modules = dask.config.get(
             "distributed.diagnostics.computations.ignore-modules"
         )
@@ -2985,7 +2989,10 @@ class Client(SyncMethodMixin):
             # stacklevel 0 or less - shows dask internals which likely isn't helpful
             stacklevel = stacklevel if stacklevel > 0 else 1
 
+        code: list[str] = []
         for i, (fr, _) in enumerate(traceback.walk_stack(sys._getframe().f_back), 1):
+            if len(code) >= nframes:
+                break
             if stacklevel is not None:
                 if i != stacklevel:
                     continue
@@ -2995,7 +3002,7 @@ class Client(SyncMethodMixin):
             ):
                 continue
             try:
-                return inspect.getsource(fr)
+                code.append(inspect.getsource(fr))
             except OSError:
                 # Try to fine the source if we are in %%time or %%timeit magic.
                 if (
@@ -3007,9 +3014,10 @@ class Client(SyncMethodMixin):
                     ip = get_ipython()
                     if ip is not None:
                         # The current cell
-                        return ip.history_manager._i00
+                        code.append(ip.history_manager._i00)
                 break
-        return "<Code not available>"
+
+        return tuple(reversed(code))
 
     def _graph_to_futures(
         self,
@@ -3067,7 +3075,11 @@ class Client(SyncMethodMixin):
                     "submitting_task": getattr(thread_state, "key", None),
                     "fifo_timeout": fifo_timeout,
                     "actors": actors,
-                    "code": self._get_computation_code(),
+                    "code": self._get_computation_code(
+                        nframes=dask.config.get(
+                            "distributed.diagnostics.computations.nframes"
+                        )
+                    ),
                 }
             )
             return futures
@@ -5539,7 +5551,8 @@ class performance_report:
     async def __aexit__(self, exc_type, exc_value, traceback, code=None):
         client = get_client()
         if code is None:
-            code = client._get_computation_code(self._stacklevel + 1)
+            frames = client._get_computation_code(self._stacklevel + 1, nframes=1)
+            code = frames[0] if frames else "<Code not available>"
         data = await client.scheduler.performance_report(
             start=self.start, last_count=self.last_count, code=code, mode=self.mode
         )
@@ -5551,7 +5564,8 @@ class performance_report:
 
     def __exit__(self, exc_type, exc_value, traceback):
         client = get_client()
-        code = client._get_computation_code(self._stacklevel + 1)
+        frames = client._get_computation_code(self._stacklevel + 1, nframes=1)
+        code = frames[0] if frames else "<Code not available>"
         client.sync(self.__aexit__, exc_type, exc_value, traceback, code=code)
 
 
