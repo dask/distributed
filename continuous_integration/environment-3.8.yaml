@@ -49,4 +49,4 @@ dependencies:
       - git+https://github.com/dask/dask
       - git+https://github.com/jcrist/crick  # Only tested here
       - keras
-      - gilknocker
+      - gilknocker>=0.3.0
