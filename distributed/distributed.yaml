@@ -312,7 +312,7 @@ distributed:
       host-cpu: false  # Monitor host-wide CPU usage, with very granular breakdown
       gil-contention: 
         enabled: false  # Monitor GIL contention
-        interval-microseconds: 1000  # Time in microseconds to poll GIL
+        interval: "1ms"  # Frequency to poll GIL
     event-loop: tornado
   rmm:
     pool-size: null

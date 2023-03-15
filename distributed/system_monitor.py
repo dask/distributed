@@ -108,10 +108,12 @@ class SystemMonitor:
                 self.monitor_gil_contention = False
             else:
                 self.quantities["gil_contention"] = deque(maxlen=maxlen)
-                interval = dask.config.get(
-                    "distributed.admin.system-monitor.gil-contention.interval-microseconds",
+                raw_interval = dask.config.get(
+                    "distributed.admin.system-monitor.gil-contention.interval",
                 )
-                self._gilknocker = KnockKnock(interval)
+                interval = dask.utils.parse_timedelta(raw_interval, default="us") * 1e6
+
+                self._gilknocker = KnockKnock(polling_interval_micros=int(interval))
                 self._gilknocker.start()
 
         if not WINDOWS:

@@ -1149,8 +1149,8 @@ properties:
                   enabled:
                     type: boolean
                     description: Enable monitoring of GIL contention
-                  interval-microseconds:
-                    type: integer
+                  interval:
+                    type: string
                     description: |
                       GIL polling interval. More frequent polling will reflect a more accurate GIL
                       contention metric but will be more likely to impact runtime performance.
