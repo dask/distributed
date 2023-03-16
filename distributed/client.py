@@ -5514,7 +5514,7 @@ class performance_report:
     mode: str, optional
         Mode parameter to pass to :func:`bokeh.io.output.output_file`. Defaults to ``None``.
 
-    **storage_options:
+    storage_options: dict, optional
          Any additional arguments to :func:`fsspec.open` when writing to a URL.
 
      Examples
