@@ -96,7 +96,7 @@ tag_prefix = ""
 parentdir_prefix = "distributed-"
 
 [tool.pytest.ini_options]
-addopts = """
+addopts = '''
 -v -rsxfE
 --durations=20
 --color=yes
@@ -106,41 +106,41 @@ addopts = """
 --strict-markers
 --strict-config
 -p no:asyncio
--p no:legacypath"""
+-p no:legacypath'''
 filterwarnings = [
     "error",
-    "ignore:Please", "use", "`dok_matrix`", "from", "the", '`scipy\.sparse`', "namespace,", "the", '`scipy\.sparse\.dok`', "namespace", "is", "deprecated.:DeprecationWarning",
-    "ignore:elementwise", "comparison", "failed.", "this", "will", "raise", "an", "error", "in", "the", "future:DeprecationWarning",
-    "ignore:unclosed", '<socket\.socket.*:ResourceWarning',
-    "ignore:unclosed", "context", '<zmq\.asyncio\.Context\(\).*:ResourceWarning',
-    "ignore:unclosed", "event", "loop", "<_(Unix|Windows)SelectorEventLoop.*:ResourceWarning",
-    "ignore:unclosed", "file", "<_io.BufferedWriter.*:ResourceWarning",
-    "ignore:unclosed", "file", "<_io.TextIOWrapper.*:ResourceWarning",
-    "ignore:unclosed", "transport", "<_SelectorSocketTransport.*:ResourceWarning",
-    "ignore:unclosed", "transport", '<asyncio\.sslproto\..*:ResourceWarning',
-    "ignore:unclosed", "cluster", "SSHCluster.*:ResourceWarning",
-    "ignore:Couldn't", "detect", "a", "suitable", "IP", "address", "for", "reaching", "'2001.4860.4860..8888',", "defaulting", "to", "hostname.", '\[Errno', '65\]', "No", "route", "to", "host:RuntimeWarning",
-    "ignore:Dashboard", "and", "Scheduler", "are", "using", "the", "same", "server", "on", "port.*:RuntimeWarning",
-    "ignore:coroutine", "'BaseTCPConnector.connect'", "was", "never", "awaited:RuntimeWarning",
-    "ignore:coroutine", "'Client\\._start'", "was", "never", "awaited:RuntimeWarning",
-    "ignore:coroutine", "'ConnectionPool._connect'", "was", "never", "awaited:RuntimeWarning",
-    "ignore:coroutine", "'PooledRPCCall\\.__getattr__\\.<locals>\\.send_recv_from_rpc'", "was", "never", "awaited:RuntimeWarning",
-    "ignore:coroutine", "'Scheduler\\.restart'", "was", "never", "awaited:RuntimeWarning",
-    "ignore:coroutine", "'Semaphore._refresh_leases'", "was", "never", "awaited:RuntimeWarning",
-    "ignore:coroutine", "'ServerSession\\.with_document_locked'", "was", "never", "awaited",
-    "ignore:overflow", "encountered", "in", "long_scalars:RuntimeWarning",
-    "ignore:Creating", "scratch", "directories", "is", "taking", "a", "surprisingly", "long", "time.*:UserWarning",
-    "ignore:Scheduler", "already", "contains", "a", "plugin", "with", "name", "nonidempotentplugin.", "overwriting:UserWarning",
-    "ignore:Increasing", "number", "of", "chunks", "by", "factor", "of", "20::dask.array.core.PerformanceWarning",
-    "ignore::distributed.versions.VersionMismatchWarning",
-    "ignore:(?s)Exception", "in", 'thread.*old_ssh.*channel\.send\(b"\\x03"\).*Socket', "is", "closed:pytest.PytestUnhandledThreadExceptionWarning",
-    "ignore:(?s)Exception", "in", 'thread.*paramiko\.ssh_exception\.NoValidConnectionsError:pytest.PytestUnhandledThreadExceptionWarning',
-    "ignore:(?s)Exception", "ignored", "in.", "<Finalize", "object,", "dead>.*sem_unlink.*FileNotFoundError:pytest.PytestUnraisableExceptionWarning",
-    "ignore:(?s)Exception", "ignored", "in.", "<coroutine", "object", 'Scheduler\.add_worker.*in', "handle_worker.*Event", "loop", "is", "closed:pytest.PytestUnraisableExceptionWarning",
-    "ignore:(?s)Exception", "ignored", "in.", "<function", 'Client\.__del__.*RuntimeError.', "IOLoop", "is", "closed:pytest.PytestUnraisableExceptionWarning",
-    'ignore:notifyAll\(\)', "is", "deprecated,", "use", 'notify_all\(\)', "instead:DeprecationWarning:paramiko",
-    'ignore:setDaemon\(\)', "is", "deprecated,", "set", "the", "daemon", "attribute", "instead:DeprecationWarning:paramiko",
-    "ignore:`np.bool8`", "is", "a", "deprecated", "alias", "for", "`np.bool_`",
+    '''ignore:Please use `dok_matrix` from the `scipy\.sparse` namespace, the `scipy\.sparse\.dok` namespace is deprecated.:DeprecationWarning''',
+    '''ignore:elementwise comparison failed. this will raise an error in the future:DeprecationWarning''',
+    '''ignore:unclosed <socket\.socket.*:ResourceWarning''',
+    '''ignore:unclosed context <zmq\.asyncio\.Context\(\).*:ResourceWarning''',
+    '''ignore:unclosed event loop <_(Unix|Windows)SelectorEventLoop.*:ResourceWarning''',
+    '''ignore:unclosed file <_io.BufferedWriter.*:ResourceWarning''',
+    '''ignore:unclosed file <_io.TextIOWrapper.*:ResourceWarning''',
+    '''ignore:unclosed transport <_SelectorSocketTransport.*:ResourceWarning''',
+    '''ignore:unclosed transport <asyncio\.sslproto\..*:ResourceWarning''',
+    '''ignore:unclosed cluster SSHCluster.*:ResourceWarning''',
+    '''ignore:Couldn't detect a suitable IP address for reaching '2001.4860.4860..8888', defaulting to hostname. \[Errno 65\] No route to host:RuntimeWarning''',
+    '''ignore:Dashboard and Scheduler are using the same server on port.*:RuntimeWarning''',
+    '''ignore:coroutine 'BaseTCPConnector.connect' was never awaited:RuntimeWarning''',
+    '''ignore:coroutine 'Client\._start' was never awaited:RuntimeWarning''',
+    '''ignore:coroutine 'ConnectionPool._connect' was never awaited:RuntimeWarning''',
+    '''ignore:coroutine 'PooledRPCCall\.__getattr__\.<locals>\.send_recv_from_rpc' was never awaited:RuntimeWarning''',
+    '''ignore:coroutine 'Scheduler\.restart' was never awaited:RuntimeWarning''',
+    '''ignore:coroutine 'Semaphore._refresh_leases' was never awaited:RuntimeWarning''',
+    '''ignore:coroutine 'ServerSession\.with_document_locked' was never awaited''',
+    '''ignore:overflow encountered in long_scalars:RuntimeWarning''',
+    '''ignore:Creating scratch directories is taking a surprisingly long time.*:UserWarning''',
+    '''ignore:Scheduler already contains a plugin with name nonidempotentplugin. overwriting:UserWarning''',
+    '''ignore:Increasing number of chunks by factor of 20::dask.array.core.PerformanceWarning''',
+    '''ignore::distributed.versions.VersionMismatchWarning''',
+    '''ignore:(?s)Exception in thread.*old_ssh.*channel\.send\(b"\x03"\).*Socket is closed:pytest.PytestUnhandledThreadExceptionWarning''',
+    '''ignore:(?s)Exception in thread.*paramiko\.ssh_exception\.NoValidConnectionsError:pytest.PytestUnhandledThreadExceptionWarning''',
+    '''ignore:(?s)Exception ignored in. <Finalize object, dead>.*sem_unlink.*FileNotFoundError:pytest.PytestUnraisableExceptionWarning''',
+    '''ignore:(?s)Exception ignored in. <coroutine object Scheduler\.add_worker.*in handle_worker.*Event loop is closed:pytest.PytestUnraisableExceptionWarning''',
+    '''ignore:(?s)Exception ignored in. <function Client\.__del__.*RuntimeError. IOLoop is closed:pytest.PytestUnraisableExceptionWarning''',
+    '''ignore:notifyAll\(\) is deprecated, use notify_all\(\) instead:DeprecationWarning:paramiko''',
+    '''ignore:setDaemon\(\) is deprecated, set the daemon attribute instead:DeprecationWarning:paramiko''',
+    '''ignore:`np.bool8` is a deprecated alias for `np.bool_`''',
 ]
 minversion = "6"
 markers = [
