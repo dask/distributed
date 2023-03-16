@@ -571,6 +571,8 @@ class Server:
         if self.__stopped:
             return
 
+        self.monitor.close()
+
         self.__stopped = True
         _stops = set()
         for listener in self.listeners:
@@ -929,6 +931,7 @@ class Server:
                 pc.stop()
 
             if not self.__stopped:
+                self.monitor.close()
                 self.__stopped = True
                 _stops = set()
                 for listener in self.listeners:

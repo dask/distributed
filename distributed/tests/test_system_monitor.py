@@ -109,7 +109,12 @@ def test_gil_contention():
     a = sm.update()
     assert "gil_contention" in a
 
-    with dask.config.set({"distributed.admin.system-monitor.gil-contention": True}):
+    with dask.config.set({"distributed.admin.system-monitor.gil.enabled": True}):
         sm = SystemMonitor()
         a = sm.update()
         assert "gil_contention" in a
+
+    assert sm._gilknocker.is_running
+    sm.close()
+    sm.close()  # Idempotent
+    assert not sm._gilknocker.is_running
