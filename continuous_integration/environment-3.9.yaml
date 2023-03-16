@@ -50,4 +50,4 @@ dependencies:
   - pip:
       - git+https://github.com/dask/dask
       - keras
-      - gilknocker>=0.3.0
+      - gilknocker>=0.4.0
