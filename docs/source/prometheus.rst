@@ -31,7 +31,7 @@ dask_scheduler_gil_contention
 
     .. note::
        Requires ``gilknocker`` to be installed, and 
-       ``distributed.admin.system-monitor.gil-contention.enabled``
+       ``distributed.admin.system-monitor.gil.enabled``
        configuration to be set.
 
 dask_scheduler_workers
@@ -130,7 +130,7 @@ dask_worker_gil_contention
 
     .. note::
        Requires ``gilknocker`` to be installed, and 
-       ``distributed.admin.system-monitor.gil-contention.enabled``
+       ``distributed.admin.system-monitor.gil.enabled``
        configuration to be set.
 
 dask_worker_latency_seconds

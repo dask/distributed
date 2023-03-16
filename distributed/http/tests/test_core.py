@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pathlib
 from unittest import mock
+
 import pytest
 from tornado.httpclient import AsyncHTTPClient
 
@@ -16,11 +17,11 @@ async def test_scheduler(c, s, a, b):
     assert response.code == 200
 
 
-@mock.patch('warnings.warn', return_value=None)
+@mock.patch("warnings.warn", return_value=None)
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
-    config={"distributed.admin.system-monitor.gil-contention": True},
+    config={"distributed.admin.system-monitor.gil.enabled": True},
 )
 async def test_prometheus_api_doc(c, s, a, _):
     """Test that the Sphinx documentation of Prometheus endpoints matches the
