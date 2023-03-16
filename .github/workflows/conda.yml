@@ -9,6 +9,7 @@ on:
       - setup.cfg
       - continuous_integration/recipes/**
       - .github/workflows/conda.yml
+      - pyproject.toml
 
 # When this workflow is queued, automatically cancel any previous running
 # or pending jobs from the same branch
