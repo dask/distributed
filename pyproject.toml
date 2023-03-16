@@ -88,7 +88,7 @@ known_distributed = ["dask", "zict"]
 add_imports = ["from __future__ import annotations"]
 
 [tool.versioneer]
-vcs = "git"
+VCS = "git"
 style = "pep440"
 versionfile_source = "distributed/_version.py"
 versionfile_build = "distributed/_version.py"
