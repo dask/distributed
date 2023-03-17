@@ -28,7 +28,11 @@ from collections.abc import (
     KeysView,
     ValuesView,
 )
-from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
+from concurrent.futures import (  # noqa: F401
+    CancelledError,
+    Executor,
+    ThreadPoolExecutor,
+)
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from datetime import timedelta
@@ -1416,13 +1420,47 @@ def import_term(name: str) -> AnyType:
     return getattr(module, attr_name)
 
 
-async def offload(fn, *args, **kwargs):
+async def run_in_executor_with_context(
+    executor: Executor | None,
+    func: Callable[P, T],
+    /,
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> T:
+    """Variant of :meth:`~asyncio.AbstractEventLoop.run_in_executor`, which
+    propagates contextvars.
+    Note that this limits the type of Executor to those that do not pickle objects.
+
+    See also
+    --------
+    asyncio.AbstractEventLoop.run_in_executor
+    offload
+    https://bugs.python.org/issue34014
+    """
     loop = asyncio.get_running_loop()
-    # Retain context vars while deserializing; see https://bugs.python.org/issue34014
     context = contextvars.copy_context()
     return await loop.run_in_executor(
-        _offload_executor, lambda: context.run(fn, *args, **kwargs)
+        executor, lambda: context.run(func, *args, **kwargs)
     )
+
+
+def offload(
+    func: Callable[P, T],
+    /,
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> Awaitable[T]:
+    """Run a synchronous function in a separate thread.
+    Unlike :meth:`asyncio.to_thread`, this propagates contextvars and offloads to an
+    ad-hoc thread pool with a single worker.
+
+    See also
+    --------
+    asyncio.to_thread
+    run_in_executor_with_context
+    https://bugs.python.org/issue34014
+    """
+    return run_in_executor_with_context(_offload_executor, func, *args, **kwargs)
 
 
 class EmptyContext:

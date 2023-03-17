@@ -12,9 +12,11 @@ import warnings
 import weakref
 from collections import Counter, defaultdict, deque
 from collections.abc import (
+    Awaitable,
     Callable,
     Collection,
     Container,
+    Hashable,
     Iterator,
     Mapping,
     MutableMapping,
@@ -22,7 +24,7 @@ from collections.abc import (
 )
 from copy import copy
 from dataclasses import dataclass, field
-from functools import lru_cache, partial, singledispatchmethod
+from functools import lru_cache, partial, singledispatchmethod, wraps
 from itertools import chain
 from typing import (
     TYPE_CHECKING,
@@ -44,7 +46,7 @@ from distributed._stories import worker_story
 from distributed.collections import HeapSet
 from distributed.comm import get_address_host
 from distributed.core import ErrorMessage, error_message
-from distributed.metrics import monotonic, time
+from distributed.metrics import DelayedMetricsLedger, monotonic, time
 from distributed.protocol import pickle
 from distributed.protocol.serialize import Serialize
 from distributed.sizeof import safe_sizeof as sizeof
@@ -53,9 +55,11 @@ from distributed.utils import recursive_to_dict
 logger = logging.getLogger("distributed.worker.state_machine")
 
 if TYPE_CHECKING:
-    # TODO import from typing (TypeAlias requires Python >=3.10)
+    # TODO import from typing (ParamSpec and TypeAlias requires Python >=3.10)
     # TODO import from typing (NotRequired requires Python >=3.11)
-    from typing_extensions import NotRequired, TypeAlias
+    from typing_extensions import NotRequired, ParamSpec, TypeAlias
+
+    P = ParamSpec("P")
 
     # Circular imports
     from distributed.diagnostics.plugin import WorkerPlugin
@@ -436,13 +440,6 @@ class RetryBusyWorkerLater(Instruction):
     worker: str
 
 
-@dataclass
-class DigestMetric(Instruction):
-    __slots__ = ("name", "value")
-    name: str
-    value: float
-
-
 class SendMessageToScheduler(Instruction):
     #: Matches a key in Scheduler.stream_handlers
     op: ClassVar[str]
@@ -621,6 +618,8 @@ class StateMachineEvent:
         for k in dir(self):
             if k in exclude or k.startswith("_"):
                 continue
+            if isinstance(getattr(type(self), k, None), property):
+                continue
             v = getattr(self, k)
             if not callable(v):
                 info[k] = v
@@ -677,7 +676,7 @@ class GatherDepSuccessEvent(GatherDepDoneEvent):
 
     __slots__ = ("data",)
 
-    data: dict[str, object]  # There may be less keys than in GatherDep
+    data: dict[str, object]  # There may be fewer keys than in GatherDep
 
     def to_loggable(self, *, handled: float) -> StateMachineEvent:
         out = copy(self)
@@ -2440,18 +2439,6 @@ class WorkerState:
                 ts.startstops.append(
                     {"action": "disk-write", "start": start, "stop": stop}
                 )
-                instructions.append(
-                    DigestMetric(
-                        # See metrics:
-                        # - disk-load-duration
-                        # - get-data-load-duration
-                        # - disk-write-target-duration
-                        # - disk-write-spill-duration
-                        name="disk-write-target-duration",
-                        value=stop - start,
-                        stimulus_id=stimulus_id,
-                    )
-                )
 
         ts.state = "memory"
         if ts.nbytes is None:
@@ -3136,14 +3123,10 @@ class WorkerState:
     def _handle_execute_success(self, ev: ExecuteSuccessEvent) -> RecsInstrs:
         """Task completed successfully"""
         ts, recs, instr = self._execute_done_common(ev)
+        # This is used for scheduler-side occupancy heuristics; it's important that it
+        # does not contain overhead from the thread pool or the worker's event loop
+        # (which are not the task's fault and are unpredictable).
         ts.startstops.append({"action": "compute", "start": ev.start, "stop": ev.stop})
-        instr.append(
-            DigestMetric(
-                name="compute-duration",
-                value=ev.stop - ev.start,
-                stimulus_id=ev.stimulus_id,
-            )
-        )
         ts.nbytes = ev.nbytes
         ts.type = ev.type
         recs[ts] = ("memory", ev.value, ev.run_id)
@@ -3591,8 +3574,34 @@ class BaseWorker(abc.ABC):
         self.state = state
         self._async_instructions = set()
 
-    def _handle_stimulus_from_task(self, task: asyncio.Task[StateMachineEvent]) -> None:
-        """An asynchronous instruction just completed; process the returned stimulus."""
+    def _start_async_instruction(
+        self,
+        task_name: str,
+        func: Callable[P, Awaitable[StateMachineEvent]],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> None:
+        """Execute an asynchronous instruction inside an asyncio task"""
+        ledger = DelayedMetricsLedger()
+
+        @wraps(func)
+        async def wrapper() -> StateMachineEvent:
+            with ledger.record():
+                return await func(*args, **kwargs)
+
+        task = asyncio.create_task(wrapper(), name=task_name)
+        self._async_instructions.add(task)
+        task.add_done_callback(partial(self._finish_async_instruction, ledger=ledger))
+
+    def _finish_async_instruction(
+        self,
+        task: asyncio.Task[StateMachineEvent],
+        ledger: DelayedMetricsLedger,
+    ) -> None:
+        """The asynchronous instruction just completed; process the returned
+        stimulus.
+        """
         self._async_instructions.remove(task)
         try:
             # This *should* never raise any other exceptions
@@ -3600,7 +3609,64 @@ class BaseWorker(abc.ABC):
         except asyncio.CancelledError:
             # This should exclusively happen in Worker.close()
             return
-        self.handle_stimulus(stim)
+        except BaseException:  # pragma: nocover
+            logger.exception("async instruction handlers should never raise!")
+            raise
+
+        with ledger.record():
+            # Capture metric events in _transition_to_memory()
+            self.handle_stimulus(stim)
+
+        self._finalize_metrics(stim, ledger)
+
+    def _finalize_metrics(
+        self,
+        stim: StateMachineEvent,
+        ledger: DelayedMetricsLedger,
+    ) -> None:
+        activity: tuple[str, ...]
+        coarse_time: str | Literal[False]
+
+        if isinstance(stim, GatherDepSuccessEvent):
+            activity = ("gather-dep",)
+            for key in stim.data:
+                ts = self.state.tasks.get(key)
+                if ts and ts.state == "memory":
+                    # At least one key was fetched and stored in memory
+                    coarse_time = False
+                    break
+            else:
+                coarse_time = "cancelled" if stim.data else "missing"
+
+        elif isinstance(stim, (GatherDepFailureEvent, GatherDepNetworkFailureEvent)):
+            activity = ("gather-dep",)
+            coarse_time = "failed"
+
+        elif isinstance(stim, GatherDepBusyEvent):
+            activity = ("gather-dep",)
+            coarse_time = "busy"
+
+        elif isinstance(stim, ExecuteSuccessEvent):
+            activity = ("execute", key_split(stim.key))
+            ts = self.state.tasks.get(stim.key)
+            coarse_time = False if ts and ts.state == "memory" else "cancelled"
+
+        elif isinstance(stim, ExecuteFailureEvent):
+            activity = ("execute", key_split(stim.key))
+            coarse_time = "failed"
+
+        elif isinstance(stim, RescheduleEvent):
+            activity = ("execute", key_split(stim.key))
+            coarse_time = "cancelled"
+
+        else:
+            assert isinstance(stim, RetryBusyWorkerEvent), stim
+            return
+
+        for label, value, unit in ledger.finalize(coarse_time=coarse_time):
+            if not isinstance(label, tuple):
+                label = (label,)
+            self.digest_metric((*activity, *label, unit), value)
 
     def handle_stimulus(self, *stims: StateMachineEvent) -> None:
         """Forward one or more external stimuli to :meth:`WorkerState.handle_stimulus`
@@ -3616,47 +3682,41 @@ class BaseWorker(abc.ABC):
         instructions = self.state.handle_stimulus(*stims)
 
         for inst in instructions:
-            task: asyncio.Task | None = None
-
             if isinstance(inst, SendMessageToScheduler):
                 self.batched_send(inst.to_dict())
-
-            elif isinstance(inst, DigestMetric):
-                self.digest_metric(inst.name, inst.value)
 
             elif isinstance(inst, GatherDep):
                 assert inst.to_gather
                 keys_str = ", ".join(peekn(27, inst.to_gather)[0])
                 if len(keys_str) > 80:
                     keys_str = keys_str[:77] + "..."
-                task = asyncio.create_task(
-                    self.gather_dep(
-                        inst.worker,
-                        inst.to_gather,
-                        total_nbytes=inst.total_nbytes,
-                        stimulus_id=inst.stimulus_id,
-                    ),
-                    name=f"gather_dep({inst.worker}, {{{keys_str}}})",
+
+                self._start_async_instruction(
+                    f"gather_dep({inst.worker}, {{{keys_str}}})",
+                    self.gather_dep,
+                    inst.worker,
+                    inst.to_gather,
+                    total_nbytes=inst.total_nbytes,
+                    stimulus_id=inst.stimulus_id,
                 )
 
             elif isinstance(inst, Execute):
-                task = asyncio.create_task(
-                    self.execute(inst.key, stimulus_id=inst.stimulus_id),
-                    name=f"execute({inst.key})",
+                self._start_async_instruction(
+                    f"execute({inst.key})",
+                    self.execute,
+                    inst.key,
+                    stimulus_id=inst.stimulus_id,
                 )
 
             elif isinstance(inst, RetryBusyWorkerLater):
-                task = asyncio.create_task(
-                    self.retry_busy_worker_later(inst.worker),
-                    name=f"retry_busy_worker_later({inst.worker})",
+                self._start_async_instruction(
+                    f"retry_busy_worker_later({inst.worker})",
+                    self.retry_busy_worker_later,
+                    inst.worker,
                 )
 
             else:
                 raise TypeError(inst)  # pragma: nocover
-
-            if task is not None:
-                self._async_instructions.add(task)
-                task.add_done_callback(self._handle_stimulus_from_task)
 
     async def close(self, timeout: float = 30) -> None:
         """Cancel all asynchronous instructions"""
@@ -3715,7 +3775,7 @@ class BaseWorker(abc.ABC):
         """Wait some time, then take a peer worker out of busy state"""
 
     @abc.abstractmethod
-    def digest_metric(self, name: str, value: float) -> None:
+    def digest_metric(self, name: Hashable, value: float) -> None:
         """Log an arbitrary numerical metric"""
 
 

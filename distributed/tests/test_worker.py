@@ -25,7 +25,7 @@ from tlz import first, pluck, sliding_window
 from tornado.ioloop import IOLoop
 
 import dask
-from dask import delayed
+from dask import delayed, istask
 from dask.system import CPU_COUNT
 from dask.utils import tmpfile
 
@@ -42,7 +42,8 @@ from distributed import (
     wait,
 )
 from distributed.comm.registry import backends
-from distributed.compatibility import LINUX, WINDOWS, to_thread
+from distributed.comm.utils import OFFLOAD_THRESHOLD
+from distributed.compatibility import LINUX, WINDOWS, randbytes, to_thread
 from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import (
@@ -62,6 +63,7 @@ from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _LockedCommPool,
     assert_story,
+    async_poll_for,
     captured_logger,
     dec,
     div,
@@ -655,11 +657,7 @@ async def test_Executor(c, s):
 @gen_cluster(nthreads=[("127.0.0.1", 1)])
 async def test_close_on_disconnect(s, w):
     await s.close()
-
-    start = time()
-    while w.status != Status.closed:
-        await asyncio.sleep(0.01)
-        assert time() < start + 5
+    await async_poll_for(lambda: w.status == Status.closed, timeout=5)
 
 
 @gen_cluster(nthreads=[])
@@ -734,11 +732,7 @@ async def test_types(c, s, a, b):
 
     await c._cancel(y)
 
-    start = time()
-    while y.key in b.data:
-        await asyncio.sleep(0.01)
-        assert time() < start + 5
-
+    await async_poll_for(lambda: y.key not in b.data, timeout=5)
     assert y.key not in b.state.tasks
 
 
@@ -933,11 +927,7 @@ async def test_stop_doing_unnecessary_work(c, s, a, b):
     await asyncio.sleep(0.1)
 
     del futures
-
-    start = time()
-    while a.state.executing_count:
-        await asyncio.sleep(0.01)
-        assert time() - start < 0.5
+    await async_poll_for(lambda: a.state.executing_count == 0, timeout=0.5)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
@@ -1601,13 +1591,11 @@ async def test_close_async_task_handles_cancellation(c, s, a):
     task = next(
         task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
     )
-    start = time()
     with captured_logger(
         "distributed.worker.state_machine", level=logging.ERROR
     ) as logger:
-        await a.close(timeout=1)
+        await asyncio.wait_for(a.close(timeout=1), timeout=5)
     assert "Failed to cancel asyncio task" in logger.getvalue()
-    assert time() - start < 5
     assert not task.cancelled()
     assert s.tasks["f1"].state in ("queued", "no-worker")
     task.cancel()
@@ -2159,7 +2147,7 @@ async def test_gather_dep_one_worker_always_busy(c, s, a, b):
     with pytest.raises(asyncio.TimeoutError):
         await h.result(timeout=0.8)
 
-    story = b.state.story("busy-gather")
+    story = b.state.story("gather-dep-busy")
     # 1 busy response straight away, followed by 1 retry every 150ms for 800ms.
     # The requests for b and g are clustered together in single messages.
     # We need to be very lax in measuring as PeriodicCallback+network comms have been
@@ -2217,7 +2205,7 @@ async def test_gather_dep_from_remote_workers_if_all_local_workers_are_busy(
 
     # Tried fetching from each local worker exactly once before falling back to the
     # remote worker
-    assert sorted(ev[1] for ev in a.state.story("busy-gather")) == sorted(
+    assert sorted(ev[1] for ev in a.state.story("gather-dep-busy")) == sorted(
         w.address for w in lws
     )
     assert_story(a.state.story("receive-dep"), [("receive-dep", rw.address, {"f"})])
@@ -2780,64 +2768,36 @@ async def test_forget_dependents_after_release(c, s, a):
     assert fut2.key not in {d.key for d in a.state.tasks[fut.key].dependents}
 
 
+@pytest.mark.filterwarnings("ignore:Large object of size")
 @gen_cluster(client=True)
 async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
     stealing_ext = s.extensions["stealing"]
     await stealing_ext.stop()
-    from distributed.utils import ThreadPoolExecutor
 
-    class CountingThreadPool(ThreadPoolExecutor):
-        counter = 0
+    in_deserialize = asyncio.Event()
+    wait_in_deserialize = asyncio.Event()
 
-        def submit(self, *args, **kwargs):
-            CountingThreadPool.counter += 1
-            return super().submit(*args, **kwargs)
+    async def custom_worker_offload(func, *args):
+        res = func(*args)
+        if not istask(args) and istask(res):
+            in_deserialize.set()
+            await wait_in_deserialize.wait()
+        return res
 
-    # Ensure we're always offloading
-    monkeypatch.setattr("distributed.worker.OFFLOAD_THRESHOLD", 1)
-    threadpool = CountingThreadPool(
-        max_workers=1, thread_name_prefix="Counting-Offload-Threadpool"
-    )
-    try:
-        monkeypatch.setattr("distributed.utils._offload_executor", threadpool)
+    monkeypatch.setattr("distributed.worker.offload", custom_worker_offload)
+    obj = randbytes(OFFLOAD_THRESHOLD + 1)
+    fut = c.submit(lambda _: 41, obj, workers=[a.address], allow_other_workers=True)
 
-        class SlowDeserializeCallable:
-            def __init__(self, delay=0.1):
-                self.delay = delay
+    await in_deserialize.wait()
+    ts = s.tasks[fut.key]
+    a.handle_stimulus(StealRequestEvent(key=fut.key, stimulus_id="test"))
+    stealing_ext.scheduler.send_task_to_worker(b.address, ts)
 
-            def __getstate__(self):
-                return self.delay
-
-            def __setstate__(self, state):
-                delay = state
-                import time
-
-                time.sleep(delay)
-                return SlowDeserializeCallable(delay)
-
-            def __call__(self, *args, **kwargs):
-                return 41
-
-        slow_deserialized_func = SlowDeserializeCallable()
-        fut = c.submit(
-            slow_deserialized_func, 1, workers=[a.address], allow_other_workers=True
-        )
-
-        while CountingThreadPool.counter == 0:
-            await asyncio.sleep(0)
-
-        ts = s.tasks[fut.key]
-        a.handle_stimulus(StealRequestEvent(key=fut.key, stimulus_id="test"))
-        stealing_ext.scheduler.send_task_to_worker(b.address, ts)
-
-        fut2 = c.submit(inc, fut, workers=[a.address])
-        fut3 = c.submit(inc, fut2, workers=[a.address])
-
-        assert await fut2 == 42
-        await fut3
-
-    finally:
-        threadpool.shutdown()
+    fut2 = c.submit(inc, fut, workers=[a.address])
+    fut3 = c.submit(inc, fut2, workers=[a.address])
+    wait_in_deserialize.set()
+    assert await fut2 == 42
+    await fut3
 
 
 @gen_cluster(client=True)
@@ -3768,3 +3728,30 @@ async def test_forward_output(c, s, a, b, capsys):
 
     assert "" == out
     assert "" == err
+
+
+class EnsureOffloaded:
+    def __init__(self, main_thread_id):
+        self.main_thread_id = main_thread_id
+        self.data = randbytes(OFFLOAD_THRESHOLD + 1)
+
+    def __sizeof__(self):
+        return len(self.data)
+
+    def __getstate__(self):
+        assert self.main_thread_id
+        assert self.main_thread_id != threading.get_ident()
+        return (self.data, self.main_thread_id, threading.get_ident())
+
+    def __setstate__(self, state):
+        _, main_thread, serialize_thread = state
+        assert main_thread != threading.get_ident()
+        return EnsureOffloaded(main_thread)
+
+
+@gen_cluster(client=True)
+async def test_offload_getdata(c, s, a, b):
+    """Test that functions wrapped by offload() are metered"""
+    x = c.submit(EnsureOffloaded, threading.get_ident(), key="x", workers=[a.address])
+    y = c.submit(lambda x: None, x, key="y", workers=[b.address])
+    await y

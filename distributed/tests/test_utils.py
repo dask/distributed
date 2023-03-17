@@ -14,7 +14,7 @@ import warnings
 import xml
 from array import array
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from time import sleep
 
 import pytest
@@ -49,6 +49,7 @@ from distributed.utils import (
     parse_ports,
     read_block,
     recursive_to_dict,
+    run_in_executor_with_context,
     seek_delimiter,
     set_thread_state,
     sync,
@@ -661,6 +662,37 @@ def test_parse_ports():
         parse_ports("foo")
     with pytest.raises(ValueError):
         parse_ports("100.5")
+
+
+@gen_test()
+async def test_run_in_executor_with_context():
+    class MyExecutor(Executor):
+        call_count = 0
+
+        def submit(self, __fn, *args, **kwargs):
+            self.call_count += 1
+            f = Future()
+            f.set_result(__fn(*args, **kwargs))
+            return f
+
+    ex = MyExecutor()
+    out = await run_in_executor_with_context(ex, inc, 1)
+    assert out == 2
+    assert ex.call_count == 1
+
+
+@gen_test()
+async def test_run_in_executor_with_context_preserves_contextvars():
+    var = contextvars.ContextVar("var")
+
+    with ThreadPoolExecutor(2) as ex:
+
+        async def set_var(v: str) -> None:
+            var.set(v)
+            r = await run_in_executor_with_context(ex, var.get)
+            assert r == v
+
+        await asyncio.gather(set_var("foo"), set_var("bar"))
 
 
 @gen_test()
