@@ -58,7 +58,6 @@ class SchedulerMetricCollector(PrometheusCollector):
                 "GIL contention metric",
                 value=self.server.monitor._cumulative_gil_contention,
             )
-            self.server.monitor._cumulative_gil_contention = 0.0
 
         tasks = GaugeMetricFamily(
             self.build_name("tasks"),
