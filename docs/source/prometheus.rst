@@ -34,6 +34,14 @@ dask_scheduler_gil_contention
        ``distributed.admin.system-monitor.gil.enabled``
        configuration to be set.
 
+dask_scheduler_gil_contention_total
+    Value representing cumulative total of GIL contention metrics since last scrape.
+
+    .. note::
+       Requires ``gilknocker`` to be installed, and 
+       ``distributed.admin.system-monitor.gil.enabled``
+       configuration to be set.
+
 dask_scheduler_workers
     Number of workers known by scheduler
 dask_scheduler_tasks

@@ -68,7 +68,11 @@ async def test_prometheus_api_doc(c, s, a, _):
         }
 
     # Optional GIL monitoring metrics, config set and gilknocker installed.
-    gil_metrics = {"dask_scheduler_gil_contention", "dask_worker_gil_contention"}
+    gil_metrics = {
+        "dask_scheduler_gil_contention",
+        "dask_scheduler_gil_contention_total",
+        "dask_worker_gil_contention",
+    }
     try:
         import gilknocker  # noqa: F401
     except ImportError:
