@@ -37,6 +37,8 @@ repos:
     rev: v2.2.2
     hooks:
       -   id: codespell
+          additional_dependencies:
+            - tomli
           types_or: [rst, markdown]
           files: docs
   - repo: https://github.com/pre-commit/mirrors-mypy
