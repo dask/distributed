@@ -3755,3 +3755,25 @@ async def test_offload_getdata(c, s, a, b):
     x = c.submit(EnsureOffloaded, threading.get_ident(), key="x", workers=[a.address])
     y = c.submit(lambda x: None, x, key="y", workers=[b.address])
     await y
+
+
+@gen_cluster(client=True)
+async def test_startstops(c, s, a, b):
+    t0 = time()
+    x = c.submit(inc, 1, key="x", workers=[a.address])
+    y = c.submit(inc, x, key="y", workers=[b.address])
+    await wait(y)
+    t1 = time()
+    ss = b.state.tasks["y"].startstops
+    assert len(ss) == 2
+    assert ss[0]["action"] == "transfer"
+    assert ss[0]["source"] == a.address
+    assert ss[1]["action"] == "compute"
+    assert (
+        t0 + b.scheduler_delay
+        < ss[0]["start"]
+        < ss[0]["stop"]
+        < ss[1]["start"]
+        < ss[1]["stop"]
+        < t1 + b.scheduler_delay
+    )
