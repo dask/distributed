@@ -68,6 +68,7 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
+        worker_memory_limit: int | None,
     ):
         self.id = id
         self.run_id = run_id
@@ -81,6 +82,10 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         self._disk_buffer = DiskShardsBuffer(
             directory=directory,
             memory_limiter=memory_limiter_disk,
+            # If not given, then zero corresponds to no in-memory buffering (eager writes to disk)
+            max_in_memory_buffer_size=worker_memory_limit // 4
+            if worker_memory_limit
+            else 0,
         )
 
         self._comm_buffer = CommShardsBuffer(
@@ -281,6 +286,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
         scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
+        worker_memory_limit: int | None,
     ):
         from dask.array.rechunk import _old_to_new
 
@@ -295,6 +301,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
             scheduler=scheduler,
             memory_limiter_comms=memory_limiter_comms,
             memory_limiter_disk=memory_limiter_disk,
+            worker_memory_limit=worker_memory_limit,
         )
         self.old = old
         self.new = new
@@ -436,6 +443,7 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
+        worker_memory_limit: int | None,
     ):
         import pandas as pd
 
@@ -450,6 +458,7 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
             scheduler=scheduler,
             memory_limiter_comms=memory_limiter_comms,
             memory_limiter_disk=memory_limiter_disk,
+            worker_memory_limit=worker_memory_limit,
         )
         self.column = column
         self.schema = schema
@@ -818,6 +827,7 @@ class ShuffleWorkerExtension:
                 scheduler=self.worker.scheduler,
                 memory_limiter_disk=self.memory_limiter_disk,
                 memory_limiter_comms=self.memory_limiter_comms,
+                worker_memory_limit=self.worker.memory_manager.memory_limit,
             )
         elif result["type"] == ShuffleType.ARRAY_RECHUNK:
             shuffle = ArrayRechunkRun(
@@ -837,6 +847,7 @@ class ShuffleWorkerExtension:
                 scheduler=self.worker.scheduler,
                 memory_limiter_disk=self.memory_limiter_disk,
                 memory_limiter_comms=self.memory_limiter_comms,
+                worker_memory_limit=self.worker.memory_manager.memory_limit,
             )
         else:  # pragma: no cover
             raise TypeError(result["type"])
