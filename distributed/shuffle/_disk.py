@@ -91,8 +91,8 @@ class DiskShardsBuffer(ShardsBuffer):
                             # This could be offloaded to a background
                             # task at the cost of going further over
                             # the soft memory limit.
-                            for id, bufs in self._memory_buf.items():
-                                self._write(id, bufs)
+                            for k, v in self._memory_buf.items():
+                                self._write(k, v)
                             self._memory_buf.clear()
                             self._in_memory = 0
 
@@ -114,7 +114,7 @@ class DiskShardsBuffer(ShardsBuffer):
             raise RuntimeError("Tried to read from file before done.")
 
         id = str(id)
-        data = self._memory_buf[id]
+        data = self._memory_buf.pop(id, [])
         try:
             with self.time("read"):
                 with open(
