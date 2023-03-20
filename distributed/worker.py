@@ -2059,7 +2059,7 @@ class Worker(BaseWorker, ServerNode):
         logger.debug("Request %d keys from %s", len(to_gather), worker)
 
         try:
-            with context_meter.meter("network") as m:
+            with context_meter.meter("network", func=time) as m:
                 response = await get_data_from_worker(
                     rpc=self.rpc, keys=to_gather, worker=worker, who=self.address
                 )
