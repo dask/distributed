@@ -286,7 +286,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
         scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
-        worker_memory_limit: int | None,
+        worker_memory_limit: int | None = None,
     ):
         from dask.array.rechunk import _old_to_new
 
@@ -443,7 +443,7 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
-        worker_memory_limit: int | None,
+        worker_memory_limit: int | None = None,
     ):
         import pandas as pd
 
