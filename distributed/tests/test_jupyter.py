@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from time import perf_counter
 
 import pytest
@@ -66,17 +66,15 @@ async def test_jupyter_idle_timeout():
         # https://github.com/jupyter-server/jupyter_server/blob/e582e555/jupyter_server/serverapp.py#L385-L387
         extension_last_activty = web_app.settings["last_activity_times"]
 
-        tz = web_app.last_activity().tzinfo
-        # ^ Jupyter's datetime objects are tz-aware, using a custom timezone
-        # class implemented in an internal module. This is an easy way to grab it.
-        # https://github.com/jupyter-server/jupyter_server/blob/e582e555/jupyter_server/_tz.py#L40
-
         for _ in range(10):
             last = perf_counter()
-            extension_last_activty["test"] = datetime.utcnow().replace(tzinfo=tz)
+            extension_last_activty["test"] = datetime.now(timezone.utc)
 
             await asyncio.sleep(s.idle_timeout / 2)
             if (d := perf_counter() - last) >= s.idle_timeout:
                 pytest.fail(f"Event loop too slow to test idle timeout: {d:.4f}s")
 
             assert s.status not in (Status.closed, Status.closing)
+
+        await asyncio.sleep(s.idle_timeout)
+        assert s.status in (Status.closed, Status.closing)
