@@ -79,7 +79,7 @@ jobs:
         shell: bash
 
       - name: Checkout source
-        uses: actions/checkout@v3.3.0
+        uses: actions/checkout@v3.4.0
         with:
           fetch-depth: 0
 
