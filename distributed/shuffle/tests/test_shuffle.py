@@ -739,7 +739,19 @@ def test_processing_chain():
 
 
 @gen_cluster(client=True)
-async def test_head(c, s, a, b):
+@pytest.mark.parametrize(
+    "disk_buffer_size",
+    [
+        0,  # No in-memory buffering
+        128,  # Small enough to hit disk
+        "1GiB",  # Won't hit disk
+    ],
+)
+async def test_head(c, s, a, b, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     a_files = list(os.walk(a.local_directory))
     b_files = list(os.walk(b.local_directory))
 
