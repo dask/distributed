@@ -167,20 +167,6 @@ class P2PShuffleLayer(SimpleShuffleLayer):
             annotations=annotations,
         )
 
-    def __reduce__(self) -> tuple:
-        attrs = [
-            "name",
-            "column",
-            "npartitions",
-            "npartitions_input",
-            "ignore_index",
-            "name_input",
-            "meta_input",
-            "parts_out",
-            "annotations",
-        ]
-        return (P2PShuffleLayer, tuple(getattr(self, attr) for attr in attrs))
-
     def get_split_keys(self) -> list:
         # TODO: This is doing some funky stuff to set priorities but we don't need this
         return []
