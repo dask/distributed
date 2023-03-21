@@ -178,11 +178,17 @@ class Event:
     """
 
     def __init__(self, name=None, client=None):
-        try:
-            self.client = client or get_client()
-        except ValueError:
-            self.client = None
+        self._client = client
         self.name = name or "event-" + uuid.uuid4().hex
+
+    @property
+    def client(self):
+        if not self._client:
+            try:
+                self._client = get_client()
+            except ValueError:
+                pass
+        return self._client
 
     def __await__(self):
         """async constructor

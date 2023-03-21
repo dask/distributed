@@ -136,10 +136,6 @@ class Variable:
     it is wise not to send too much.  If you want to share a large amount of
     data then ``scatter`` it and share the future instead.
 
-    .. warning::
-
-       This object is experimental and has known issues in Python 2
-
     Parameters
     ----------
     name: string (optional)
@@ -166,11 +162,17 @@ class Variable:
     """
 
     def __init__(self, name=None, client=None):
-        try:
-            self.client = client or get_client()
-        except ValueError:
-            self.client = None
+        self._client = client
         self.name = name or "variable-" + uuid.uuid4().hex
+
+    @property
+    def client(self):
+        if not self._client:
+            try:
+                self._client = get_client()
+            except ValueError:
+                pass
+        return self._client
 
     def _verify_running(self):
         if not self.client:

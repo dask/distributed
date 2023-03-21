@@ -198,32 +198,58 @@ class Future(WrappedKey):
     def __init__(self, key, client=None, inform=True, state=None):
         self.key = key
         self._cleared = False
-        tkey = stringify(key)
-        self.client = client or Client.current()
-        self.client._inc_ref(tkey)
-        self._generation = self.client.generation
+        self._tkey = stringify(key)
+        self._client = client
+        self._input_state = state
+        self._inform = inform
+        self._state = None
+        self._bind_late()
 
-        if tkey in self.client.futures:
-            self._state = self.client.futures[tkey]
-        else:
-            self._state = self.client.futures[tkey] = FutureState()
+    @property
+    def client(self):
+        self._bind_late()
+        return self._client
 
-        if inform:
-            self.client._send_to_scheduler(
-                {
-                    "op": "client-desires-keys",
-                    "keys": [stringify(key)],
-                    "client": self.client.id,
-                }
-            )
-
-        if state is not None:
+    def _bind_late(self):
+        if not self._client:
             try:
-                handler = self.client._state_handlers[state]
-            except KeyError:
-                pass
+                client = get_client()
+            except ValueError:
+                client = None
+            self._client = client
+        if self._client and not self._state:
+            self._client._inc_ref(self._tkey)
+            self._generation = self._client.generation
+
+            if self._tkey in self._client.futures:
+                self._state = self._client.futures[self._tkey]
             else:
-                handler(key=key)
+                self._state = self._client.futures[self._tkey] = FutureState()
+
+            if self._inform:
+                self._client._send_to_scheduler(
+                    {
+                        "op": "client-desires-keys",
+                        "keys": [self._tkey],
+                        "client": self._client.id,
+                    }
+                )
+
+            if self._input_state is not None:
+                try:
+                    handler = self._client._state_handlers[self._input_state]
+                except KeyError:
+                    pass
+                else:
+                    handler(key=self.key)
+
+    def _verify_initialized(self):
+        if not self.client or not self._state:
+            raise RuntimeError(
+                f"{type(self)} object not properly initialized. This can happen"
+                " if the object is being deserialized outside of the context of"
+                " a Client or Worker."
+            )
 
     @property
     def executor(self):
@@ -277,6 +303,7 @@ class Future(WrappedKey):
         result
             The result of the computation. Or a coroutine if the client is asynchronous.
         """
+        self._verify_initialized()
         if self.client.asynchronous:
             return self.client.sync(self._result, callback_timeout=timeout)
 
@@ -338,6 +365,7 @@ class Future(WrappedKey):
         --------
         Future.traceback
         """
+        self._verify_initialized()
         return self.client.sync(self._exception, callback_timeout=timeout, **kwargs)
 
     def add_done_callback(self, fn):
@@ -354,6 +382,7 @@ class Future(WrappedKey):
         fn : callable
             The method or function to be called
         """
+        self._verify_initialized()
         cls = Future
         if cls._cb_executor is None or cls._cb_executor_pid != os.getpid():
             try:
@@ -381,6 +410,7 @@ class Future(WrappedKey):
         --------
         Client.cancel
         """
+        self._verify_initialized()
         return self.client.cancel([self], **kwargs)
 
     def retry(self, **kwargs):
@@ -390,6 +420,7 @@ class Future(WrappedKey):
         --------
         Client.retry
         """
+        self._verify_initialized()
         return self.client.retry([self], **kwargs)
 
     def cancelled(self):
@@ -440,6 +471,7 @@ class Future(WrappedKey):
         --------
         Future.exception
         """
+        self._verify_initialized()
         return self.client.sync(self._traceback, callback_timeout=timeout, **kwargs)
 
     @property
@@ -454,6 +486,7 @@ class Future(WrappedKey):
         This method can be called from different threads
         (see e.g. Client.get() or Future.__del__())
         """
+        self._verify_initialized()
         if not self._cleared and self.client.generation == self._generation:
             self._cleared = True
             try:
@@ -461,24 +494,8 @@ class Future(WrappedKey):
             except TypeError:  # pragma: no cover
                 pass  # Shutting down, add_callback may be None
 
-    def __getstate__(self):
-        return self.key, self.client.scheduler.address
-
-    def __setstate__(self, state):
-        key, address = state
-        try:
-            c = Client.current(allow_global=False)
-        except ValueError:
-            c = get_client(address)
-        self.__init__(key, c)
-        c._send_to_scheduler(
-            {
-                "op": "update-graph",
-                "tasks": {},
-                "keys": [stringify(self.key)],
-                "client": c.id,
-            }
-        )
+    def __reduce__(self) -> str | tuple[Any, ...]:
+        return Future, (self.key,)
 
     def __del__(self):
         try:

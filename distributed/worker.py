@@ -41,7 +41,7 @@ from typing import (
     overload,
 )
 
-from tlz import first, keymap, pluck
+from tlz import keymap, pluck
 from tornado.ioloop import IOLoop
 
 import dask
@@ -106,6 +106,7 @@ from distributed.utils import (
     parse_ports,
     recursive_to_dict,
     run_in_executor_with_context,
+    set_thread_state,
     silence_logging,
     thread_state,
     wait_for,
@@ -2704,10 +2705,7 @@ def get_worker() -> Worker:
     try:
         return thread_state.execution_state["worker"]
     except AttributeError:
-        try:
-            return first(w for w in Worker._instances if w.status in WORKER_ANY_RUNNING)
-        except StopIteration:
-            raise ValueError("No workers found")
+        raise ValueError("No worker found") from None
 
 
 def get_client(address=None, timeout=None, resolve_address=True) -> Client:
@@ -2927,6 +2925,8 @@ def loads_function(bytes_object):
 @context_meter.meter("deserialize")
 def _deserialize(function=None, args=None, kwargs=None, task=NO_VALUE):
     """Deserialize task inputs and regularize to func, args, kwargs"""
+    # Some objects require threadlocal state during deserialization, e.g. to
+    # detect the current worker
     if function is not None:
         function = loads_function(function)
     if args and isinstance(args, bytes):
@@ -3055,11 +3055,12 @@ def apply_function(
     ident = threading.get_ident()
     with active_threads_lock:
         active_threads[ident] = key
-    thread_state.start_time = time()
-    thread_state.execution_state = execution_state
-    thread_state.key = key
-
-    msg = apply_function_simple(function, args, kwargs, time_delay)
+    with set_thread_state(
+        start_time=time(),
+        execution_state=execution_state,
+        key=key,
+    ):
+        msg = apply_function_simple(function, args, kwargs, time_delay)
 
     with active_threads_lock:
         del active_threads[ident]
@@ -3186,16 +3187,18 @@ def apply_function_actor(
     with active_threads_lock:
         active_threads[ident] = key
 
-    thread_state.execution_state = execution_state
-    thread_state.key = key
-    thread_state.actor = True
+    with set_thread_state(
+        start_time=time(),
+        execution_state=execution_state,
+        key=key,
+        actor=True,
+    ):
+        result = function(*args, **kwargs)
 
-    result = function(*args, **kwargs)
+        with active_threads_lock:
+            del active_threads[ident]
 
-    with active_threads_lock:
-        del active_threads[ident]
-
-    return result
+        return result
 
 
 def get_msg_safe_str(msg):
@@ -3273,6 +3276,7 @@ async def run(server, comm, function, args=(), kwargs=None, wait=True):
     if has_arg(function, "dask_scheduler"):
         kwargs["dask_scheduler"] = server
     logger.info("Run out-of-band function %r", funcname(function))
+
     try:
         if not is_coro:
             result = function(*args, **kwargs)

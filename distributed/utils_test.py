@@ -312,6 +312,14 @@ class _ModuleSlot:
         return getattr(sys.modules[self.modname], self.slotname)
 
 
+@contextmanager
+def ensure_no_new_clients():
+    before = set(Client._instances)
+    yield
+    after = set(Client._instances)
+    assert after.issubset(before)
+
+
 def varying(items):
     """
     Return a function that returns a result (or raises an exception)
