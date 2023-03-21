@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 
 import toolz
 
+from dask import config
 from dask.utils import parse_bytes
 
 from distributed.core import PooledRPCCall
@@ -79,13 +80,23 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         self.scheduler = scheduler
         self.closed = False
 
+        buffer_size: int | str | None = config.get(
+            "distributed.shuffle.output_max_buffer_size"
+        )
+        if buffer_size is None:
+            if worker_memory_limit is None:
+                # No configuration and no known worker memory limit
+                # Safe default is "no in-memory buffering"
+                buffer_size = 0
+            else:
+                buffer_size = worker_memory_limit // 4
+        else:
+            buffer_size = parse_bytes(buffer_size)
+
         self._disk_buffer = DiskShardsBuffer(
             directory=directory,
             memory_limiter=memory_limiter_disk,
-            # If not given, then zero corresponds to no in-memory buffering (eager writes to disk)
-            max_in_memory_buffer_size=worker_memory_limit // 4
-            if worker_memory_limit
-            else 0,
+            max_in_memory_buffer_size=buffer_size,
         )
 
         self._comm_buffer = CommShardsBuffer(
