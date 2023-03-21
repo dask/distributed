@@ -60,10 +60,10 @@ class WorkerMetricCollector(PrometheusCollector):
         )
 
         if self.server.monitor.monitor_gil_contention:
-            yield GaugeMetricFamily(
+            yield CounterMetricFamily(
                 self.build_name("gil_contention"),
                 "GIL contention metric",
-                value=self.server.monitor._last_gil_contention,
+                value=self.server.monitor._cumulative_gil_contention,
             )
 
         yield GaugeMetricFamily(
