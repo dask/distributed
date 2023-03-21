@@ -30,7 +30,6 @@ from collections.abc import (
     Set,
 )
 from contextlib import suppress
-from datetime import datetime
 from functools import partial
 from numbers import Number
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, cast, overload
@@ -7715,7 +7714,7 @@ class Scheduler(SchedulerState, ServerNode):
                 )
                 await self.remove_worker(address=ws.address, stimulus_id=stimulus_id)
 
-    def check_idle(self) -> int | None:
+    def check_idle(self) -> float | None:
         if self.status in (Status.closing, Status.closed):
             return None
 
@@ -7727,7 +7726,7 @@ class Scheduler(SchedulerState, ServerNode):
         if (
             self.queued
             or self.unrunnable
-            or any([ws.processing for ws in self.workers.values()])
+            or any(ws.processing for ws in self.workers.values())
         ):
             self.idle_since = None
             return None
@@ -7736,30 +7735,23 @@ class Scheduler(SchedulerState, ServerNode):
             self.idle_since = time()
             return self.idle_since
 
+        if self.jupyter:
+            last_activity = (
+                self._jupyter_server_application.web_app.last_activity().timestamp()
+            )
+            if last_activity > self.idle_since:
+                self.idle_since = last_activity
+                return self.idle_since
+
         if self.idle_timeout:
-            if (
-                time() > self.idle_since + self.idle_timeout
-                and self.check_idle_jupyter()
-            ):
+            if time() > self.idle_since + self.idle_timeout:
                 assert self.idle_since
                 logger.info(
                     "Scheduler closing after being idle for %s",
                     format_time(self.idle_timeout),
                 )
                 self._ongoing_background_tasks.call_soon(self.close)
-        return None
-
-    def check_idle_jupyter(self) -> bool:
-        if not self.jupyter:
-            return True
-
-        assert self.idle_timeout is not None
-        # Based on:
-        # https://github.com/jupyter-server/jupyter_server/blob/e582e555/jupyter_server/serverapp.py#L2315
-        last_activity = self._jupyter_server_application.web_app.last_activity()
-        utcnow = datetime.utcnow().replace(tzinfo=last_activity.tzinfo)
-        jupyter_seconds_since_active = (utcnow - last_activity).total_seconds()
-        return jupyter_seconds_since_active > self.idle_timeout
+        return self.idle_since
 
     def adaptive_target(self, target_duration=None):
         """Desired number of workers based on the current workload

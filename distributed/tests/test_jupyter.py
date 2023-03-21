@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from time import perf_counter
 
 import pytest
@@ -78,3 +78,23 @@ async def test_jupyter_idle_timeout():
 
         await asyncio.sleep(s.idle_timeout)
         assert s.status in (Status.closed, Status.closing)
+
+
+@gen_test()
+async def test_jupyter_idle_timeout_returned():
+    "`check_idle` should return the last Jupyter idle time. Used in dask-kubernetes."
+    async with Scheduler(jupyter=True) as s:
+        web_app = s._jupyter_server_application.web_app
+        extension_last_activty = web_app.settings["last_activity_times"]
+
+        extension_last_activty["test"] = datetime.now(timezone.utc)
+        last_idle = s.check_idle()
+        assert last_idle is not None
+        extension_last_activty["test"] = datetime.now(timezone.utc) + timedelta(
+            seconds=1
+        )
+        next_idle = s.check_idle()
+        assert next_idle is not None
+        assert next_idle > last_idle
+
+        assert s.check_idle() == next_idle
