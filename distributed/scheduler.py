@@ -30,6 +30,7 @@ from collections.abc import (
     Set,
 )
 from contextlib import suppress
+from datetime import datetime
 from functools import partial
 from numbers import Number
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, cast, overload
@@ -7736,7 +7737,10 @@ class Scheduler(SchedulerState, ServerNode):
             return self.idle_since
 
         if self.idle_timeout:
-            if time() > self.idle_since + self.idle_timeout:
+            if (
+                time() > self.idle_since + self.idle_timeout
+                and self.check_idle_jupyter()
+            ):
                 assert self.idle_since
                 logger.info(
                     "Scheduler closing after being idle for %s",
@@ -7744,6 +7748,17 @@ class Scheduler(SchedulerState, ServerNode):
                 )
                 self._ongoing_background_tasks.call_soon(self.close)
         return None
+
+    def check_idle_jupyter(self) -> bool:
+        if not self.jupyter or not self.idle_timeout:
+            return False
+
+        # Based on:
+        # https://github.com/jupyter-server/jupyter_server/blob/e582e555/jupyter_server/serverapp.py#L2315
+        last_activity = self._jupyter_server_application.web_app.last_activity()
+        utcnow = datetime.utcnow().replace(tzinfo=last_activity.tzinfo)
+        jupyter_seconds_since_active = (utcnow - last_activity).total_seconds()
+        return jupyter_seconds_since_active > self.idle_timeout
 
     def adaptive_target(self, target_duration=None):
         """Desired number of workers based on the current workload
