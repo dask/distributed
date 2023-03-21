@@ -7750,9 +7750,10 @@ class Scheduler(SchedulerState, ServerNode):
         return None
 
     def check_idle_jupyter(self) -> bool:
-        if not self.jupyter or not self.idle_timeout:
-            return False
+        if not self.jupyter:
+            return True
 
+        assert self.idle_timeout is not None
         # Based on:
         # https://github.com/jupyter-server/jupyter_server/blob/e582e555/jupyter_server/serverapp.py#L2315
         last_activity = self._jupyter_server_application.web_app.last_activity()
