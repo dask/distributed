@@ -1137,7 +1137,7 @@ class TaskState:
     #: within a large graph that may be important, such as if they are on the critical
     #: path, or good to run in order to release many dependencies.  This is explained
     #: further in :doc:`Scheduling Policy <scheduling-policies>`.
-    priority: tuple[int | float, ...] | None
+    priority: tuple[float, ...] | None
 
     # Attribute underlying the state property
     _state: TaskStateState
@@ -4653,7 +4653,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         dependencies, _ = get_deps(dsk)
 
-        # Remove `Future` objects from graph and note any future     dependencies
+        # Remove `Future` objects from graph and note any future dependencies
         dsk2 = {}
         fut_deps = {}
         for k, v in dsk.items():
