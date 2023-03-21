@@ -76,8 +76,6 @@ class DiskShardsBuffer(ShardsBuffer):
         dropping the write into communicate above.
         """
 
-        # Normalisation for safety
-        id = str(id)
         with log_errors():
             # Consider boosting total_size a bit here to account for duplication
             with self.time("write"):
@@ -104,14 +102,13 @@ class DiskShardsBuffer(ShardsBuffer):
             for s in shards:
                 f.write(s)
 
-    def read(self, id: int | str) -> bytes:
+    def read(self, id: str) -> bytes:
         """Read a complete file back into memory, concatting with any
         in memory parts"""
         self.raise_on_exception()
         if not self._inputs_done:
             raise RuntimeError("Tried to read from file before done.")
 
-        id = str(id)
         data = self._memory_buf.pop(id, [])
         try:
             with self.time("read"):
