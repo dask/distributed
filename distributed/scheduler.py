@@ -4266,6 +4266,7 @@ class Scheduler(SchedulerState, ServerNode):
     ) -> None:
         start = time()
         try:
+            # TODO: deserialization + materialization should be offloaded
             from distributed.protocol import deserialize
 
             graph = deserialize(graph_header, graph_frames).data
