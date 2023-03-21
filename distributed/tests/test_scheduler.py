@@ -23,6 +23,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 from dask import delayed
+from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 from dask.utils import apply, parse_timedelta, stringify, tmpfile, typename
 
 from distributed import (
@@ -40,7 +41,9 @@ from distributed.comm.addressing import parse_host_port
 from distributed.compatibility import LINUX, MACOS, WINDOWS, PeriodicCallback
 from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
+from distributed.protocol import serialize
 from distributed.protocol.pickle import dumps, loads
+from distributed.protocol.serialize import ToPickle
 from distributed.scheduler import KilledWorker, MemoryState, Scheduler, WorkerState
 from distributed.utils import TimeoutError, wait_for
 from distributed.utils_test import (
@@ -1326,18 +1329,35 @@ async def test_file_descriptors_dont_leak(s):
         await asyncio.sleep(0.01)
 
 
-@pytest.mark.xfail(reason="API no longer exists.")
 @gen_cluster()
 async def test_update_graph_culls(s, a, b):
-    s._update_graph(
-        tasks={
-            "x": dumps_task((inc, 1)),
-            "y": dumps_task((inc, "x")),
-            "z": dumps_task((inc, 2)),
+    # This is a rather low level API but the fact that update_graph actually
+    # culls is worth testing and hard to do so with high level user API. Most
+    # but not all HLGs are implementing culling themselves already, i.e. a graph
+    # like the one written here will rarely exist in reality. It's worth to
+    # consider dropping this from the scheduler iff graph materialization
+    # actually ensure this
+    dsk = HighLevelGraph(
+        layers={
+            "foo": MaterializedLayer(
+                {
+                    "x": dumps_task((inc, 1)),
+                    "y": dumps_task((inc, "x")),
+                    "z": dumps_task((inc, 2)),
+                }
+            )
         },
+        dependencies={"foo": set()},
+    )
+
+    header, frames = serialize(ToPickle(dsk), on_error="raise")
+    s.update_graph(
+        graph_header=header,
+        graph_frames=frames,
         keys=["y"],
-        dependencies={"y": "x", "x": [], "z": []},
         client="client",
+        internal_priority={k: 0 for k in "xyz"},
+        submitting_task=None,
     )
     assert "z" not in s.tasks
 
