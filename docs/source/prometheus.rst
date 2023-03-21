@@ -141,6 +141,14 @@ dask_worker_gil_contention
        ``distributed.admin.system-monitor.gil.enabled``
        configuration to be set.
 
+dask_worker_gil_contention_total
+    Value representing cumulative total GIL contention on worker
+
+    .. note::
+       Requires ``gilknocker`` to be installed, and
+       ``distributed.admin.system-monitor.gil.enabled``
+       configuration to be set.
+
 dask_worker_latency_seconds
     Latency of worker connection
 dask_worker_memory_bytes

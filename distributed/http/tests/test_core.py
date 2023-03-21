@@ -72,6 +72,7 @@ async def test_prometheus_api_doc(c, s, a, _):
         "dask_scheduler_gil_contention",
         "dask_scheduler_gil_contention_total",
         "dask_worker_gil_contention",
+        "dask_worker_gil_contention_total",
     }
     try:
         import gilknocker  # noqa: F401
