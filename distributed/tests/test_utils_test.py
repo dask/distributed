@@ -1095,5 +1095,7 @@ async def test_ensure_no_new_clients():
         with pytest.raises(AssertionError):
             with ensure_no_new_clients():
                 async with Client(s.address, asynchronous=True):
-                    with ensure_no_new_clients():
-                        pass
+                    pass
+        async with Client(s.address, asynchronous=True):
+            with ensure_no_new_clients():
+                pass
