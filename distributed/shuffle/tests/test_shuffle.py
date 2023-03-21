@@ -143,6 +143,7 @@ async def test_concurrent(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_bad_disk(c, s, a, b):
+    await c.run(dask.config.set, {"distributed.shuffle.output_max_buffer_size": 0})
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
