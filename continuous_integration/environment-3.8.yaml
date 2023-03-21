@@ -16,7 +16,7 @@ dependencies:
   - dask  # overridden by git tip below
   - filesystem-spec
   - h5py
-  - ipykernel
+  - ipykernel <6.22.0  # https://github.com/dask/distributed/issues/7688
   - ipywidgets
   - jinja2 >=2.10.3
   - locket >=1.0
