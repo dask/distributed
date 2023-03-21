@@ -104,11 +104,6 @@ class DiskShardsBuffer(ShardsBuffer):
             for s in shards:
                 f.write(s)
 
-    async def close(self) -> None:
-        await super().close()
-        with contextlib.suppress(FileNotFoundError):
-            shutil.rmtree(self.directory)
-
     def read(self, id: int | str) -> bytes:
         """Read a complete file back into memory, concatting with any
         in memory parts"""
@@ -135,3 +130,8 @@ class DiskShardsBuffer(ShardsBuffer):
             return buf
         else:
             raise KeyError(id)
+
+    async def close(self) -> None:
+        await super().close()
+        with contextlib.suppress(FileNotFoundError):
+            shutil.rmtree(self.directory)
