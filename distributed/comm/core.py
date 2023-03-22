@@ -263,8 +263,7 @@ class Listener(ABC):
     ) -> None:
         local_info = {**comm.handshake_info(), **(handshake_overrides or {})}
 
-        await comm.write(local_info)
-        handshake = await comm.read()
+        _, handshake = await asyncio.gather(comm.write(local_info), comm.read())
 
         comm.remote_info = handshake
         comm.remote_info["address"] = comm.peer_address
