@@ -215,10 +215,6 @@ def suite_from_name(name: str) -> str:
     just lop off the front of the name to get the suite.
     """
     parts = name.split("-")
-    if len(parts) == 4:  # [OS, 'latest', py_version, $PARTITION_LABEL]
-        # Migration: handle older jobs without the `queuing` configuration.
-        # This branch can be removed after 2022-12-07.
-        parts.insert(3, "no_queue")
     return "-".join(parts[:4])
 
 
