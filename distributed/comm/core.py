@@ -264,14 +264,12 @@ class Listener(ABC):
     ) -> None:
         local_info = {**comm.handshake_info(), **(handshake_overrides or {})}
 
-        timeout = dask.config.get("distributed.comm.timeouts.connect")
-        timeout = parse_timedelta(timeout, default="seconds")
         try:
             # Timeout is to ensure that we'll terminate connections eventually.
             # Connector side will employ smaller timeouts and we should only
             # reach this if the comm is dead anyhow.
-            await wait_for(comm.write(local_info), timeout=timeout)
-            handshake = await wait_for(comm.read(), timeout=timeout)
+            await comm.write(local_info)
+            handshake = await comm.read()
             # This would be better, but connections leak if worker is closed quickly
             # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
         except Exception as e:
@@ -370,8 +368,8 @@ async def connect(
     try:
         # This would be better, but connections leak if worker is closed quickly
         # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
-        handshake = await wait_for(comm.read(), time_left())
-        await wait_for(comm.write(local_info), time_left())
+        handshake = await comm.read()
+        await comm.write(local_info)
     except Exception as exc:
         with suppress(Exception):
             await comm.close()
