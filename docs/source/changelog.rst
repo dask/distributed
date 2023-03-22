@@ -1125,7 +1125,7 @@ Released on May 2, 2022
 
 Highlights
 ^^^^^^^^^^
-This is a bugfix release for `this issue <https://github.com/dask/distributed/issues/6255>`_.
+This is a bugfix release for :issue:`this issue<6255>`.
 
 Enhancements
 ^^^^^^^^^^^^
