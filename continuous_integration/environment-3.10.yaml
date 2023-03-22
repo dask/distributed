@@ -16,7 +16,7 @@ dependencies:
   - filesystem-spec  # overridden by git tip below
   - h5py
   - ipykernel <6.22.0  # https://github.com/dask/distributed/issues/7688
-  - ipywidgets
+  - ipywidgets <8.0.5  # https://github.com/dask/distributed/issues/7688
   - jinja2 >=2.10.3
   - locket >=1.0
   - msgpack-python
