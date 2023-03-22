@@ -2594,6 +2594,7 @@ class Client(SyncMethodMixin):
         This stops future tasks from being scheduled if they have not yet run
         and deletes them if they have already run.  After calling, this result
         and all dependent results will no longer be accessible
+
         Parameters
         ----------
         futures : List[Future]
