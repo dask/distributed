@@ -45,7 +45,8 @@ dependencies:
   - pip:
       - git+https://github.com/dask/dask
       - git+https://github.com/dask/s3fs
-      - git+https://github.com/dask/zict
+      # DO NOT MERGE
+      - git+https://github.com/crusaderky/zict@File_threadsafe
       - git+https://github.com/fsspec/filesystem_spec
       - keras
       - gilknocker>=0.3.0

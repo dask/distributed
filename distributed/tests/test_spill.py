@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import array
+import glob
 import os
 import random
 import secrets
@@ -14,7 +15,7 @@ from dask.sizeof import sizeof
 from distributed import profile
 from distributed.compatibility import WINDOWS
 from distributed.metrics import meter
-from distributed.spill import SpillBuffer, has_zict_220
+from distributed.spill import SpillBuffer, has_zict_220, has_zict_230
 from distributed.utils import RateLimiterFilter
 from distributed.utils_test import captured_logger
 
@@ -24,10 +25,20 @@ requires_zict_220 = pytest.mark.skipif(
 )
 
 
+def key_to_fname(tmp_path: Path, key: str) -> str:
+    if has_zict_230:
+        fmatch = f"{tmp_path / key}#*"
+        fresults = glob.glob(fmatch)
+        assert len(fresults) == 1, f"{fmatch}: expected 1 result; got {fresults}"
+        return fresults[0]
+    else:
+        return str(tmp_path / key)
+
+
 def psize(tmp_path: Path, **objs: object) -> tuple[int, int]:
     return (
         sum(sizeof(o) for o in objs.values()),
-        sum(os.stat(tmp_path / k).st_size for k in objs),
+        sum(os.stat(key_to_fname(tmp_path, k)).st_size for k in objs),
     )
 
 
