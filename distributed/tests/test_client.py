@@ -6600,7 +6600,6 @@ async def test_performance_report(c, s, a, b, local):
                 filename=urlpath,
                 stacklevel=stacklevel,
                 mode=mode,
-                storage_options={"local": local},
             ):
                 await c.compute((x + x.T).sum())
 
