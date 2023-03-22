@@ -299,7 +299,13 @@ class PackageInstall(WorkerPlugin, abc.ABC):
         from distributed.semaphore import Semaphore
 
         async with (
-            await Semaphore(max_leases=1, name=socket.gethostname(), register=True)
+            await Semaphore(
+                max_leases=1,
+                name=socket.gethostname(),
+                register=True,
+                scheduler_rpc=worker.scheduler,
+                loop=worker.loop,
+            )
         ):
             if not await self._is_installed(worker):
                 logger.info(

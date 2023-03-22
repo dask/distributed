@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from threading import Thread
 from time import sleep
 
@@ -8,6 +9,7 @@ import pytest
 import dask
 from dask.sizeof import sizeof
 
+from distributed.compatibility import WINDOWS
 from distributed.protocol import dumps, loads, maybe_compress, msgpack, to_serialize
 from distributed.protocol.compression import (
     compressions,
@@ -412,3 +414,22 @@ def test_sizeof_serialize(Wrapper, Wrapped):
     assert size <= sizeof(ser_obj) < size * 1.05
     serialized = Wrapped(*serialize(ser_obj))
     assert size <= sizeof(serialized) < size * 1.05
+
+
+@pytest.mark.skipif(WINDOWS, reason="On windows this is triggering a stackoverflow")
+def test_deeply_nested_structures():
+    # These kind of deeply nested structures are generated in our profiling code
+    def gen_deeply_nested(depth):
+        msg = {}
+        d = msg
+        while depth:
+            depth -= 1
+            d["children"] = d = {}
+        return msg
+
+    msg = gen_deeply_nested(sys.getrecursionlimit() - 100)
+    with pytest.raises(TypeError, match="Could not serialize object"):
+        serialize(msg, on_error="raise")
+
+    msg = gen_deeply_nested(sys.getrecursionlimit() // 4)
+    assert isinstance(serialize(msg), tuple)
