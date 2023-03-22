@@ -74,6 +74,14 @@ async def clean_scheduler(
     assert not extension.heartbeats
 
 
+@pytest.fixture(
+    params=["0B", "128B", "1GiB"],
+    ids=lambda x: f"{x} output buffer",
+)
+def disk_buffer_size(request):
+    return request.param
+
+
 @pytest.mark.skipif(
     pa is not None,
     reason="We don't have a CI job that is installing a very old pyarrow version",
@@ -91,7 +99,11 @@ async def test_minimal_version(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_basic_integration(c, s, a, b):
+async def test_basic_integration(c, s, a, b, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -122,7 +134,11 @@ def test_raise_on_fuse_optimization():
 
 
 @gen_cluster(client=True)
-async def test_concurrent(c, s, a, b):
+async def test_concurrent(c, s, a, b, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -143,6 +159,7 @@ async def test_concurrent(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_bad_disk(c, s, a, b):
+    # This only fails when there is no output memory buffering for the shuffle
     await c.run(dask.config.set, {"distributed.shuffle.output_max_buffer_size": 0})
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -222,7 +239,11 @@ async def wait_until_new_shuffle_is_initialized(
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
-async def test_closed_worker_during_transfer(c, s, a, b):
+async def test_closed_worker_during_transfer(c, s, a, b, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-03-01",
@@ -245,7 +266,11 @@ async def test_closed_worker_during_transfer(c, s, a, b):
 
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)])
-async def test_crashed_worker_during_transfer(c, s, a):
+async def test_crashed_worker_during_transfer(c, s, a, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     async with Nanny(s.address, nthreads=1) as n:
         killed_worker_address = n.worker_address
         df = dask.datasets.timeseries(
@@ -271,7 +296,12 @@ async def test_crashed_worker_during_transfer(c, s, a):
 
 # TODO: Deduplicate instead of failing: distributed#7324
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
-async def test_closed_input_only_worker_during_transfer(c, s, a, b):
+async def test_closed_input_only_worker_during_transfer(c, s, a, b, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
+
     def mock_get_worker_for_range_sharding(
         output_partition: int, workers: list[str], npartitions: int
     ) -> str:
@@ -339,7 +369,13 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
 
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)
-async def test_closed_bystanding_worker_during_shuffle(c, s, w1, w2, w3):
+async def test_closed_bystanding_worker_during_shuffle(
+    c, s, w1, w2, w3, disk_buffer_size
+):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     with dask.annotate(workers=[w1.address, w2.address], allow_other_workers=False):
         df = dask.datasets.timeseries(
             start="2000-01-01",
@@ -379,7 +415,11 @@ class BlockedInputsDoneShuffle(DataFrameShuffleRun):
     BlockedInputsDoneShuffle,
 )
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
-async def test_closed_worker_during_barrier(c, s, a, b):
+async def test_closed_worker_during_barrier(c, s, a, b, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -423,7 +463,11 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     BlockedInputsDoneShuffle,
 )
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
-async def test_closed_other_worker_during_barrier(c, s, a, b):
+async def test_closed_other_worker_during_barrier(c, s, a, b, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -470,7 +514,11 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
     BlockedInputsDoneShuffle,
 )
 @gen_cluster(client=True, nthreads=[("", 1)])
-async def test_crashed_other_worker_during_barrier(c, s, a):
+async def test_crashed_other_worker_during_barrier(c, s, a, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     async with Nanny(s.address, nthreads=1) as n:
         df = dask.datasets.timeseries(
             start="2000-01-01",
@@ -522,7 +570,11 @@ async def test_closed_worker_during_unpack(c, s, a, b):
 
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)])
-async def test_crashed_worker_during_unpack(c, s, a):
+async def test_crashed_worker_during_unpack(c, s, a, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     async with Nanny(s.address, nthreads=2) as n:
         killed_worker_address = n.worker_address
         df = dask.datasets.timeseries(
@@ -546,7 +598,11 @@ async def test_crashed_worker_during_unpack(c, s, a):
 
 
 @gen_cluster(client=True)
-async def test_heartbeat(c, s, a, b):
+async def test_heartbeat(c, s, a, b, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     await a.heartbeat()
     await clean_scheduler(s)
     df = dask.datasets.timeseries(
@@ -739,14 +795,6 @@ def test_processing_chain():
 
 
 @gen_cluster(client=True)
-@pytest.mark.parametrize(
-    "disk_buffer_size",
-    [
-        0,  # No in-memory buffering
-        128,  # Small enough to hit disk
-        "1GiB",  # Won't hit disk
-    ],
-)
 async def test_head(c, s, a, b, disk_buffer_size):
     await c.run(
         dask.config.set,
@@ -783,7 +831,11 @@ def test_split_by_worker():
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
-async def test_clean_after_forgotten_early(c, s, a, b):
+async def test_clean_after_forgotten_early(c, s, a, b, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-03-01",
@@ -801,7 +853,11 @@ async def test_clean_after_forgotten_early(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_tail(c, s, a, b):
+async def test_tail(c, s, a, b, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -826,13 +882,19 @@ async def test_tail(c, s, a, b):
 
 @pytest.mark.parametrize("wait_until_forgotten", [True, False])
 @gen_cluster(client=True)
-async def test_repeat_shuffle_instance(c, s, a, b, wait_until_forgotten):
+async def test_repeat_shuffle_instance(
+    c, s, a, b, wait_until_forgotten, disk_buffer_size
+):
     """Tests repeating the same instance of a shuffle-based task graph.
 
     See Also
     --------
     test_repeat_shuffle_operation
     """
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -855,7 +917,9 @@ async def test_repeat_shuffle_instance(c, s, a, b, wait_until_forgotten):
 
 @pytest.mark.parametrize("wait_until_forgotten", [True, False])
 @gen_cluster(client=True)
-async def test_repeat_shuffle_operation(c, s, a, b, wait_until_forgotten):
+async def test_repeat_shuffle_operation(
+    c, s, a, b, wait_until_forgotten, disk_buffer_size
+):
     """Tests repeating the same shuffle operation using two distinct instances of the
     task graph.
 
@@ -863,6 +927,10 @@ async def test_repeat_shuffle_operation(c, s, a, b, wait_until_forgotten):
     --------
     test_repeat_shuffle_instance
     """
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -883,7 +951,11 @@ async def test_repeat_shuffle_operation(c, s, a, b, wait_until_forgotten):
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
-async def test_crashed_worker_after_shuffle(c, s, a):
+async def test_crashed_worker_after_shuffle(c, s, a, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     in_event = Event()
     block_event = Event()
 
@@ -944,7 +1016,11 @@ async def test_crashed_worker_after_shuffle_persisted(c, s, a):
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)
-async def test_closed_worker_between_repeats(c, s, w1, w2, w3):
+async def test_closed_worker_between_repeats(c, s, w1, w2, w3, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -974,7 +1050,11 @@ async def test_closed_worker_between_repeats(c, s, w1, w2, w3):
 
 
 @gen_cluster(client=True)
-async def test_new_worker(c, s, a, b):
+async def test_new_worker(c, s, a, b, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-20",
@@ -997,7 +1077,11 @@ async def test_new_worker(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_multi(c, s, a, b):
+async def test_multi(c, s, a, b, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     left = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-20",
@@ -1023,7 +1107,11 @@ async def test_multi(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_restrictions(c, s, a, b):
+async def test_restrictions(c, s, a, b, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -1047,7 +1135,11 @@ async def test_restrictions(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_delete_some_results(c, s, a, b):
+async def test_delete_some_results(c, s, a, b, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -1068,7 +1160,11 @@ async def test_delete_some_results(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_add_some_results(c, s, a, b):
+async def test_add_some_results(c, s, a, b, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -1094,7 +1190,11 @@ async def test_add_some_results(c, s, a, b):
 
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
-async def test_clean_after_close(c, s, a, b):
+async def test_clean_after_close(c, s, a, b, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2001-01-01",
@@ -1427,7 +1527,13 @@ class BlockedShuffleReceiveShuffleWorkerExtension(ShuffleWorkerExtension):
     {"shuffle": BlockedShuffleReceiveShuffleWorkerExtension},
 )
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
-async def test_deduplicate_stale_transfer(c, s, a, b, wait_until_forgotten):
+async def test_deduplicate_stale_transfer(
+    c, s, a, b, wait_until_forgotten, disk_buffer_size
+):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -1481,7 +1587,11 @@ class BlockedBarrierShuffleWorkerExtension(ShuffleWorkerExtension):
     {"shuffle": BlockedBarrierShuffleWorkerExtension},
 )
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
-async def test_handle_stale_barrier(c, s, a, b, wait_until_forgotten):
+async def test_handle_stale_barrier(c, s, a, b, wait_until_forgotten, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -1527,7 +1637,7 @@ async def test_handle_stale_barrier(c, s, a, b, wait_until_forgotten):
     {"shuffle": BlockedBarrierShuffleWorkerExtension},
 )
 @gen_cluster(client=True, nthreads=[("", 1)])
-async def test_shuffle_run_consistency(c, s, a):
+async def test_shuffle_run_consistency(c, s, a, disk_buffer_size):
     """This test checks the correct creation of shuffle run IDs through the scheduler
     as well as the correct handling through the workers.
 
@@ -1538,6 +1648,10 @@ async def test_shuffle_run_consistency(c, s, a):
         The P2P implementation relies on the correctness of this behavior,
         but it is an implementation detail that users should not rely upon.
     """
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     worker_ext = a.extensions["shuffle"]
     scheduler_ext = s.extensions["shuffle"]
 
@@ -1629,7 +1743,11 @@ class BlockedShuffleAccessAndFailWorkerExtension(ShuffleWorkerExtension):
     {"shuffle": BlockedShuffleAccessAndFailWorkerExtension},
 )
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
-async def test_replace_stale_shuffle(c, s, a, b):
+async def test_replace_stale_shuffle(c, s, a, b, disk_buffer_size):
+    await c.run(
+        dask.config.set,
+        {"distributed.shuffle.output_max_buffer_size": disk_buffer_size},
+    )
     ext_A = a.extensions["shuffle"]
     ext_B = b.extensions["shuffle"]
 
