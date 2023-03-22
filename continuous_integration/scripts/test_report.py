@@ -359,6 +359,10 @@ def download_and_parse_artifacts(
                 if xml is None:
                     continue
                 df = dataframe_from_jxml(cast(Iterable, xml))
+
+                # Needed until *-*-mindeps-numpy shows up in TEST_ID
+                a["name"] = a["name"].replace("--", "-numpy-")
+
                 # Note: we assign a column with the workflow run timestamp rather
                 # than the artifact timestamp so that artifacts triggered under
                 # the same workflow run can be aligned according to the same trigger
