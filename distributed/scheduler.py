@@ -4670,10 +4670,13 @@ class Scheduler(SchedulerState, ServerNode):
         # Annotation callables are evaluated on the non-stringified version of
         # the keys
         pre_stringified_keys = {}
+        exclusive = set(hlg)
         for k, v in dsk.items():
             new_k = stringify(k)
             pre_stringified_keys[new_k] = k
-            new_dsk[new_k] = stringify(v, exclusive=hlg)
+            # FIXME: This stringification is surprisingly costly. We should get
+            # rid of it
+            new_dsk[new_k] = stringify(v, exclusive=exclusive)
         assert len(new_dsk) == len(pre_stringified_keys)
         dsk = new_dsk
         dependencies = {
