@@ -112,6 +112,7 @@ from distributed.utils_test import (
     nodebug,
     poll_for,
     popen,
+    raises_with_cause,
     randominc,
     save_sys_modules,
     slowadd,
@@ -1876,23 +1877,6 @@ class BadlySerializedObject:
 
     def __setstate__(self, state):
         raise TypeError("hello!")
-
-
-@gen_cluster(client=True)
-async def test_badly_serialized_input(c, s, a, b):
-    o = BadlySerializedObject()
-
-    future = c.submit(inc, o)
-    futures = c.map(inc, range(10))
-
-    L = await c.gather(futures)
-    assert list(L) == list(map(inc, range(10)))
-    assert future.status == "error"
-
-    with pytest.raises(Exception) as info:
-        await future
-
-    assert "hello!" in str(info.value)
 
 
 @pytest.mark.skip
@@ -4891,7 +4875,9 @@ async def test_robust_undeserializable(c, s, a, b):
             raise MyException("hello")
 
     future = c.submit(identity, Foo())
-    with pytest.raises(MyException):
+    await wait(future)
+    assert future.status == "error"
+    with raises_with_cause(RuntimeError, "deserialization", MyException, "hello"):
         await future
 
     futures = c.map(inc, range(10))
@@ -4914,7 +4900,9 @@ async def test_robust_undeserializable_function(c, s, a, b):
             return 1
 
     future = c.submit(Foo(), 1)
-    with pytest.raises(MyException):
+    await wait(future)
+    assert future.status == "error"
+    with raises_with_cause(RuntimeError, "deserialization", MyException, "hello"):
         await future
 
     futures = c.map(inc, range(10))

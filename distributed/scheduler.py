@@ -14,6 +14,7 @@ import os
 import pickle
 import random
 import sys
+import textwrap
 import uuid
 import warnings
 import weakref
@@ -3587,7 +3588,6 @@ class Scheduler(SchedulerState, ServerNode):
             "heartbeat-client": self.client_heartbeat,
             "close-client": self.remove_client,
             "subscribe-topic": self.subscribe_topic,
-            "cancel": self.stimulus_cancel,
             "unsubscribe-topic": self.unsubscribe_topic,
             "cancel-keys": self.stimulus_cancel,
         }
@@ -4266,21 +4266,31 @@ class Scheduler(SchedulerState, ServerNode):
     ) -> None:
         start = time()
         try:
-            # TODO: deserialization + materialization should be offloaded
+            # TODO: deserialization + materialization should be offloaded to a
+            # thread since this is non-trivial compute time that blocks the
+            # event loop. This likely requires us to use a lock since we need to
+            # guarantee ordering of update_graph calls (as long as there is just
+            # a single offload thread, this is not a problem)
             from distributed.protocol import deserialize
 
             graph = deserialize(graph_header, graph_frames).data
         except Exception as e:
-            err = error_message(e)
-            for key in keys:
-                self.report(
-                    {
-                        "op": "task-erred",
-                        "key": key,
-                        "exception": err["exception"],
-                        "traceback": err["traceback"],
-                    }
-                )
+            msg = """\
+                Error during deserialization of the task graph. This frequently occurs if the Scheduler and Client have different environments. For more information, see https://docs.dask.org/en/stable/deployment-considerations.html#consistent-software-environments
+            """
+            try:
+                raise RuntimeError(textwrap.dedent(msg)) from e
+            except RuntimeError as e:
+                err = error_message(e)
+                for key in keys:
+                    self.report(
+                        {
+                            "op": "task-erred",
+                            "key": key,
+                            "exception": err["exception"],
+                            "traceback": err["traceback"],
+                        }
+                    )
 
             return
         annotations = annotations or {}
@@ -4674,8 +4684,6 @@ class Scheduler(SchedulerState, ServerNode):
         for k, v in dsk.items():
             new_k = stringify(k)
             pre_stringified_keys[new_k] = k
-            # FIXME: This stringification is surprisingly costly. We should get
-            # rid of it
             new_dsk[new_k] = stringify(v, exclusive=exclusive)
         assert len(new_dsk) == len(pre_stringified_keys)
         dsk = new_dsk
