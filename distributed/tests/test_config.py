@@ -3,9 +3,11 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
+import textwrap
 
 import pytest
 import yaml
@@ -30,8 +32,11 @@ def test_logging_default(caplog, config):
     else:
         ctx = new_config(config)
     with ctx:
+        root = logging.getLogger(None)
+        assert isinstance(root.handlers[0], logging.StreamHandler)
+
         d = logging.getLogger("distributed")
-        assert isinstance(d.handlers[0], logging.StreamHandler)
+        assert d.handlers == []
 
         dfb = logging.getLogger("distributed.foo.bar")
         dfc = logging.getLogger("distributed.client")
@@ -78,12 +83,13 @@ def test_logging_simple_under_distributed():
             from distributed.utils_test import captured_handler
 
             d = logging.getLogger('distributed')
-            assert len(d.handlers) == 1
-            assert isinstance(d.handlers[0], logging.StreamHandler)
+            assert not d.handlers
+            root = logging.getLogger(None)
+            assert isinstance(root.handlers[0], logging.StreamHandler)
             df = logging.getLogger('distributed.foo')
             dfb = logging.getLogger('distributed.foo.bar')
 
-            with captured_handler(d.handlers[0]) as distributed_log:
+            with captured_handler(root.handlers[0]) as distributed_log:
                 df.info("1: info")
                 dfb.warning("2: warning")
                 dfb.error("3: error")
@@ -110,12 +116,13 @@ def test_logging_simple():
             from distributed.utils_test import captured_handler
 
             d = logging.getLogger('distributed')
-            assert len(d.handlers) == 1
-            assert isinstance(d.handlers[0], logging.StreamHandler)
+            assert not d.handlers
+            root = logging.getLogger(None)
+            assert isinstance(root.handlers[0], logging.StreamHandler)
             df = logging.getLogger('distributed.foo')
             dfb = logging.getLogger('distributed.foo.bar')
 
-            with captured_handler(d.handlers[0]) as distributed_log:
+            with captured_handler(root.handlers[0]) as distributed_log:
                 df.info("1: info")
                 dfb.warning("2: warning")
                 dfb.error("3: error")
@@ -188,6 +195,42 @@ def test_logging_extended():
             """
 
         subprocess.check_call([sys.executable, "-c", code])
+
+
+def test_default_logging_does_not_override_basic_config():
+    code = textwrap.dedent(
+        """\
+        import logging
+        logging.basicConfig()
+        import distributed
+        logging.getLogger("distributed").warning("hello")
+        """
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code], check=True, capture_output=True, encoding="utf8"
+    )
+    assert proc.stdout == ""
+    assert proc.stderr == "WARNING:distributed:hello\n"
+
+
+def test_basic_config_does_not_override_default_logging():
+    code = textwrap.dedent(
+        """\
+        import logging
+        import distributed
+
+        logging.basicConfig()
+        logging.getLogger("distributed").warning("hello")
+        """
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code], check=True, capture_output=True, encoding="utf8"
+    )
+    assert proc.stdout == ""
+    assert re.match(
+        r"\A\d+-\d+-\d+ \d+:\d+:\d+,\d+ - distributed - WARNING - hello\n\Z",
+        proc.stderr,
+    )
 
 
 def test_logging_mutual_exclusive():

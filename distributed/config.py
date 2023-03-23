@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import logging.config
 import os
 import sys
@@ -89,33 +88,15 @@ def _initialize_logging_old_style(config):
     base_config = _find_logging_config(config)
     loggers.update(base_config.get("logging", {}))
 
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(
-        logging.Formatter(
-            dask.config.get("distributed.admin.log-format", config=config)
-        )
+    logging.basicConfig(
+        format=dask.config.get("distributed.admin.log-format", config=config),
+        stream=sys.stderr,
     )
+
     for name, level in loggers.items():
         if isinstance(level, str):
             level = logging_names[level.upper()]
-        logger = logging.getLogger(name)
-        logger.setLevel(level)
-
-        # Ensure that we're not registering the logger twice in this hierarchy.
-        anc = None
-        already_registered = False
-        for ancestor in name.split("."):
-            if anc is None:
-                anc = logging.getLogger(ancestor)
-            else:
-                anc.getChild(ancestor)
-
-            if handler in anc.handlers:
-                already_registered = True
-                break
-
-        if not already_registered:
-            logger.addHandler(handler)
+        logging.getLogger(name).setLevel(level)
 
 
 def _initialize_logging_new_style(config):
