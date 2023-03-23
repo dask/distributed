@@ -2951,7 +2951,8 @@ class WorkerState:
                     assert ts.state != "fetch"
                     assert ts not in self.data_needed[ev.worker]
                 ts.who_has.discard(ev.worker)
-                self.has_what[ev.worker].discard(ts.key)
+                if ev.worker in self.has_what:
+                    self.has_what[ev.worker].discard(ts.key)
                 recommendations[ts] = "fetch"
 
         return recommendations, []
