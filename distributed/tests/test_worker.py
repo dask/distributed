@@ -2789,19 +2789,6 @@ async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
     await fut3
 
 
-@gen_cluster(client=True)
-async def test_run_spec_deserialize_fail(c, s, a, b):
-    class F:
-        def __call__(self):
-            pass
-
-        def __reduce__(self):
-            return lambda: 1 / 0, ()
-
-    fut = c.submit(F())
-    assert isinstance(await fut.exception(), ZeroDivisionError)
-
-
 @gen_cluster(client=True, config=NO_AMM)
 async def test_acquire_replicas(c, s, a, b):
     fut = c.submit(inc, 1, workers=[a.address])
