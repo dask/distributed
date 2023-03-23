@@ -21,7 +21,7 @@ from tornado import gen
 import dask.config
 from dask.sizeof import sizeof
 
-from distributed import Client, Event, Nanny, Scheduler, Worker, config, default_client
+from distributed import Client, Event, Nanny, Scheduler, Worker, default_client
 from distributed.batched import BatchedSend
 from distributed.comm.core import connect
 from distributed.compatibility import WINDOWS
@@ -45,7 +45,6 @@ from distributed.utils_test import (
     gen_nbytes,
     gen_test,
     inc,
-    new_config,
     popen,
     raises_with_cause,
     tls_only_security,
@@ -295,15 +294,6 @@ def _listen(delay=0):
         yield serv
     finally:
         t.join(5.0)
-
-
-def test_new_config():
-    c = config.copy()
-    with new_config({"xyzzy": 5}):
-        assert config["xyzzy"] == 5
-
-    assert config == c
-    assert "xyzzy" not in config
 
 
 def test_lingering_client():

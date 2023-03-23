@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import io
 import logging
 import os
 import subprocess
@@ -11,7 +12,58 @@ import pytest
 import yaml
 
 from distributed.config import initialize_logging
-from distributed.utils_test import new_config, new_config_file
+from distributed.utils import get_mp_context
+from distributed.utils_test import new_config_file
+
+
+def _run_in_process(fn, /, *args):
+    pool = None
+    try:
+        with get_mp_context().Pool(1) as pool:
+            return pool.apply(fn, args=args)
+    finally:
+        if pool is not None:
+            pool.join()
+
+
+class LogCaptureHandler(logging.StreamHandler):
+    def __init__(self):
+        super().__init__(io.StringIO())
+        self.records = []
+
+    def emit(self, record):
+        self.records.append(record)
+        super().emit(record)
+
+    @property
+    def record_tuples(self):
+        return [(r.name, r.levelno, r.getMessage()) for r in self.records]
+
+
+def _check_logging():
+    d = logging.getLogger("distributed")
+    assert isinstance(d.handlers[0], logging.StreamHandler)
+
+    # we can't pass pytests' caplog to a child process so we make our own one
+    caplog = LogCaptureHandler()
+    logging.getLogger(None).addHandler(caplog)
+
+    dfb = logging.getLogger("distributed.foo.bar")
+    dfc = logging.getLogger("distributed.client")
+    f = logging.getLogger("foo")
+    fb = logging.getLogger("foo.bar")
+
+    d.debug("1: debug")
+    d.info("2: info")
+    dfb.info("3: info")
+    fb.info("4: info")
+    fb.error("5: error")
+    f.info("6: info")
+    f.error("7: error")
+    dfc.info("8: ignore me")
+    dfc.warning("9: important")
+
+    return caplog.record_tuples
 
 
 @pytest.mark.parametrize(
@@ -25,30 +77,8 @@ def test_logging_default(caplog, config):
     """
     Test default logging configuration.
     """
-    if config is None:
-        ctx = contextlib.nullcontext()
-    else:
-        ctx = new_config(config)
-    with ctx:
-        d = logging.getLogger("distributed")
-        assert isinstance(d.handlers[0], logging.StreamHandler)
-
-        dfb = logging.getLogger("distributed.foo.bar")
-        dfc = logging.getLogger("distributed.client")
-        f = logging.getLogger("foo")
-        fb = logging.getLogger("foo.bar")
-
-        d.debug("1: debug")
-        d.info("2: info")
-        dfb.info("3: info")
-        fb.info("4: info")
-        fb.error("5: error")
-        f.info("6: info")
-        f.error("7: error")
-        dfc.info("8: ignore me")
-        dfc.warning("9: important")
-
-        expected_logs = [
+    with contextlib.nullcontext() if config is None else new_config_file(config):
+        assert _run_in_process(_check_logging) == [
             ("distributed", logging.INFO, "2: info"),
             ("distributed.foo.bar", logging.INFO, "3: info"),
             # Info logs of foreign libraries are not logged because default is
@@ -57,7 +87,6 @@ def test_logging_default(caplog, config):
             ("foo", logging.ERROR, "7: error"),
             ("distributed.client", logging.WARN, "9: important"),
         ]
-        assert expected_logs == caplog.record_tuples
 
 
 def test_logging_simple_under_distributed():

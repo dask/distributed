@@ -1465,6 +1465,12 @@ def new_config(new_config):
     """
     Temporarily change configuration dictionary.
     """
+    warnings.warn(
+        "new_config is deprecated - use new_config_file and run your test in a"
+        " subprocess",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     from distributed.config import defaults
 
     config = dask.config.config
