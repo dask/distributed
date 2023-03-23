@@ -267,12 +267,7 @@ def test_flight_cancelled_error(ws):
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_in_flight_lost_after_resumed(c, s, b):
     async with BlockedGetData(s.address) as a:
-        fut1 = c.submit(
-            inc,
-            1,
-            workers=[a.address],
-            key="fut1",
-        )
+        fut1 = c.submit(inc, 1, workers=[a.address], key="fut1")
         # Ensure fut1 is in memory but block any further execution afterwards to
         # ensure we control when the recomputation happens
         await wait(fut1)
@@ -281,7 +276,6 @@ async def test_in_flight_lost_after_resumed(c, s, b):
         # This ensures that B already fetches the task, i.e. after this the task
         # is guaranteed to be in flight
         await a.in_get_data.wait()
-        assert fut1.key in b.state.tasks
         assert b.state.tasks[fut1.key].state == "flight"
 
         s.set_restrictions({fut1.key: [a.address, b.address]})
