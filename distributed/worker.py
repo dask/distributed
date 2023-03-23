@@ -1042,6 +1042,7 @@ class Worker(BaseWorker, ServerNode):
                 "workers": dict(self.bandwidth_workers),
                 "types": keymap(typename, self.bandwidth_types),
             },
+            digests_total_since_heartbeat=dict(self.digests_total_since_heartbeat),
             managed_bytes=self.state.nbytes,
             spilled_bytes={
                 "memory": spilled_memory,
@@ -1057,6 +1058,8 @@ class Worker(BaseWorker, ServerNode):
             },
             event_loop_interval=self._tick_interval_observed,
         )
+
+        self.digests_total_since_heartbeat.clear()
 
         monitor_recent = self.monitor.recent()
         # Convert {foo.bar: 123} to {foo: {bar: 123}}
