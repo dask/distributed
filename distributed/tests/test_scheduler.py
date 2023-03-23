@@ -4369,7 +4369,7 @@ async def test_submit_dependency_of_erred_task(c, s, a, b):
 
 
 @pytest.mark.skipif(
-    condition=sys.version_info <= (3, 8),
+    condition=sys.version_info < (3, 9),
     reason="flaky on python 3.8",
 )  # seems related to https://github.com/python/cpython/issues/86296
 @gen_cluster(client=True)
