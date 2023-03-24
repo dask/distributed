@@ -2001,7 +2001,9 @@ class Client(SyncMethodMixin):
             Alias for `actor`
         pure : bool (defaults to True)
             Whether or not the function is pure.  Set ``pure=False`` for
-            impure functions like ``np.random.random``.
+            impure functions like ``np.random.random``. Note that if both
+            ``actor`` and ``pure`` kwargs are set to True, then the value
+            of ``pure`` will be reverted to False, since an actor is stateful.
             See :ref:`pure functions` for more details.
         batch_size : int, optional
             Submit tasks to the scheduler in batches of (at most)
