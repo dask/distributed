@@ -4366,3 +4366,32 @@ async def test_submit_dependency_of_erred_task(c, s, a, b):
     y = c.submit(inc, x, key="y")
     with pytest.raises(ZeroDivisionError):
         await y
+
+
+@pytest.mark.skipif(
+    condition=sys.version_info < (3, 9),
+    reason="flaky on python 3.8",
+)  # seems related to https://github.com/python/cpython/issues/86296
+@gen_cluster(client=True)
+async def test_tell_workers_when_peers_have_left(c, s, a, b):
+    f = (await c.scatter({"f": 1}, workers=[a.address, b.address], broadcast=True))["f"]
+
+    workers = {a.address: a, b.address: b}
+    connect_timeout = parse_timedelta(
+        dask.config.get("distributed.comm.timeouts.connect"), default="seconds"
+    )
+
+    class BrokenGatherDep(Worker):
+        async def gather_dep(self, worker, *args, **kwargs):
+            w = workers.pop(worker, None)
+            if w is not None and workers:
+                w.listener.stop()
+                s.stream_comms[worker].abort()
+
+            return await super().gather_dep(worker, *args, **kwargs)
+
+    async with BrokenGatherDep(s.address, nthreads=1) as w3:
+        start = time()
+        g = await c.submit(inc, f, key="g", workers=[w3.address])
+        # fails over to the second worker in less than the connect timeout
+        assert time() < start + connect_timeout
