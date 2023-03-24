@@ -1957,7 +1957,7 @@ class Client(SyncMethodMixin):
         fifo_timeout="100 ms",
         actor=False,
         actors=False,
-        pure=None,
+        pure=True,
         batch_size=None,
         **kwargs,
     ):
@@ -2079,7 +2079,7 @@ class Client(SyncMethodMixin):
 
         key = key or funcname(func)
         actor = actor or actors
-        if pure is None:
+        if actor:
             pure = not actor
 
         if allow_other_workers and workers is None:
