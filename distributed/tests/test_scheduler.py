@@ -2323,6 +2323,7 @@ async def test_cumulative_worker_metrics(c, s, a, b):
 
     # Subset of expected keys
     assert "latency" in metrics
+    breakpoint()
     assert ("execute", "do_work", "deserialize", "seconds") in metrics
 
     assert all(isinstance(value, float) for value in metrics.values())

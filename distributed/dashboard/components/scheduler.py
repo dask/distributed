@@ -30,6 +30,7 @@ from bokeh.models import (
     HelpTool,
     HoverTool,
     HTMLTemplateFormatter,
+    MultiChoice,
     NumberFormatter,
     NumeralTickFormatter,
     OpenURL,
@@ -39,6 +40,7 @@ from bokeh.models import (
     Tabs,
     TapTool,
     Title,
+    Toggle,
     VeeHead,
     WheelZoomTool,
 )
@@ -3373,6 +3375,209 @@ class TaskProgress(DashboardComponent):
             "no-worker: %(no_worker)s, "
             "erred: %(erred)s" % totals
         )
+
+
+class _FinePerformanceMetricsGetData(DashboardComponent):
+    @log_errors
+    def __init__(self, scheduler, **kwargs):
+        self.scheduler = scheduler
+        self.data = defaultdict(list)
+        self.source = ColumnDataSource(data=dict())
+        self.substantial_change = False
+        self.init_root()
+
+    def init_root(self):
+        self.fig = figure()
+        self.root = row([self.fig])
+
+    @without_property_validation
+    @log_errors
+    def update(self):
+        items = self.scheduler.cumulative_worker_metrics.items()
+        items = (
+            (k, v) for k, v in items if isinstance(k, tuple) and k[0] == "get-data"
+        )
+        for (_type, operation, freq), value in items:
+            if operation not in self.data["operation"]:
+                self.substantial_change = True
+                self.data["operation"].append(operation)
+
+            idx = self.data["operation"].index(operation)
+            while idx >= len(self.data["operation_val"]):
+                self.data["operation_val"].append(float("NaN"))
+                self.data["operation_log"].append(float("NaN"))
+                self.data[f"operation_text"].append("")
+
+            self.data["operation_val"][idx] = value
+            self.data["operation_log"][idx] = np.log(value)
+
+            text = format_time(value) if freq == "seconds" else f"{value} {freq}"
+            self.data[f"operation_text"][idx] = text
+
+        if self.data:
+            from bokeh.palettes import small_palettes
+
+            self.source.data = dict(self.data)
+            fig = figure(x_range=self.data['operation'], title='Get Data')
+            renderers = fig.vbar(
+                x="operation",
+                top="operation_log",
+                width=0.9,
+                source=self.source,
+                legend_field="operation",
+                line_color="white",
+                fill_color=factor_cmap(
+                    "operation",
+                    palette=small_palettes["YlGnBu"][9][: len(self.data["operation"])],
+                    factors=self.data["operation"],
+                ),
+            )
+            hover = HoverTool(
+                tooltips=[("Name", "@operation"), ("Value", "@operation_text")], mode="vline"
+            )
+            fig.add_tools(hover)
+
+            if self.substantial_change:
+                self.root.children[0] = fig
+                self.substantial_change = False
+            else:
+                self.fig = fig
+
+
+class _FinePerformanceMetricsByExecution(DashboardComponent):
+    """
+    Stacked bar-chart displaying breakdown of function execution times
+    between de/serialization, thread-non/cpu, etc.
+    """
+
+    @log_errors
+    def __init__(self, scheduler, **kwargs):
+        self.scheduler = scheduler
+        self.data = defaultdict(list)
+        self.source = ColumnDataSource(data=dict())
+        self.substantial_change = False
+        self.operations = []
+        self.init_root()
+
+    def init_root(self):
+        from bokeh.palettes import small_palettes
+        from bokeh.layouts import column
+
+        def handle_toggle(_toggle):
+            self.toggle.label = (
+                "Bytes (Toggle for Values)"
+                if self.toggle.active
+                else "Timing (Toggle for Bytes)"
+            )
+            self.substantial_change = True
+
+        self.function_selector = MultiChoice(value=[], options=[])
+        self.toggle = Toggle(label="Timing (Toggle for Bytes)")
+        self.toggle.on_click(handle_toggle)
+        self.fig = figure()
+        self.root = column(self.function_selector, self.toggle, self.fig, sizing_mode='scale_width')
+
+
+    @without_property_validation
+    @log_errors
+    def update(self):
+        items = self.scheduler.cumulative_worker_metrics.items()
+        items = ((k, v) for k, v in items if isinstance(k, tuple) and k[0] == "execute" and k[-1] in ("bytes", "seconds"))
+        for (_type, function_name, operation, freq), value in items:
+            if function_name not in self.data["functions"]:
+                self.substantial_change = True
+                self.function_selector.options.append(function_name)
+                self.function_selector.value.append(function_name)
+                self.data["functions"].append(function_name)
+            idx = self.data["functions"].index(function_name)
+
+            while len(self.data[f"{operation}_value"]) != len(self.data['functions']):
+                self.data[f"{operation}_value"].append(0)
+                self.data[f"{operation}_bytes"].append(0)
+                self.data[f"{operation}_text"].append("")
+
+            if freq == "seconds":
+                self.data[f"{operation}_text"][idx] = format_time(value)
+                self.data[f"{operation}_value"][idx] = value
+            elif freq == "bytes":
+                self.data[f"{operation}_text"][idx] = format_bytes(value)
+                self.data[f"{operation}_bytes"][idx] = value
+                
+            if operation not in self.operations:
+                self.substantial_change = True
+                self.operations.append(operation)
+
+        self.source.data = dict(self.data)
+
+        from bokeh.palettes import small_palettes
+
+        fig = figure(
+            x_range=self.data["functions"],
+            height=500,
+            width=1000,
+            title="Fine Performance Metrics by execution",
+            tools="pan,wheel_zoom,box_zoom,reset",
+            sizing_mode="scale_width",
+        )
+        fig.yaxis.visible = False
+        fig.xaxis.major_label_orientation = 0.2
+        renderers = fig.vbar_stack(
+            [
+                name
+                for name in self.data.keys()
+                if name.endswith("bytes" if self.toggle.active else "value") and len(self.data[name])
+            ],
+            x="functions",
+            width=0.9,
+            source=self.source,
+            color=small_palettes["YlGnBu"][5][: len(self.operations)],
+            legend_label=self.operations,
+        )
+        for vbar in renderers:
+            tooltips = [
+                (vbar.name, "@$name"),
+                ("Text", f"@{{{vbar.name.replace('_bytes', '').replace('_value', '')}_text}}"),
+                ("function", "@functions"),
+            ]
+            fig.add_tools(HoverTool(tooltips=tooltips, renderers=[vbar]))
+
+        # replacing the child causes small blips if done every iteration vs updating renderers
+        # but it's needed when new functions and/or operations show up to rerender plot
+        if self.substantial_change:
+            self.root.children[-1] = fig
+            self.substantial_change = False
+        else:
+            self.fig.renderers = renderers
+
+
+class FinePerformanceMetrics(DashboardComponent):
+    """
+    The main overview of the Fine Performance Metrics page.
+    """
+
+    @log_errors
+    def __init__(self, scheduler, **kwargs):
+        self.scheduler = scheduler
+
+        self.fine_perf_metrics_by_execution = _FinePerformanceMetricsByExecution(
+            scheduler, **kwargs
+        )
+        self.fine_perf_metrics_get_data = _FinePerformanceMetricsGetData(
+            scheduler, **kwargs
+        )
+        self.root = column(
+            [
+                self.fine_perf_metrics_by_execution.root,
+                self.fine_perf_metrics_get_data.root,
+            ]
+        )
+        self.source = ColumnDataSource(dict())
+
+    @without_property_validation
+    @log_errors
+    def update(self):
+        self.fine_perf_metrics_by_execution.update()
+        self.fine_perf_metrics_get_data.update()
 
 
 class Contention(DashboardComponent):
