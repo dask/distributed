@@ -1859,7 +1859,7 @@ class Client(SyncMethodMixin):
             Whether or not the function is pure.  Set ``pure=False`` for
             impure functions like ``np.random.random``. Note that if both
             ``actor`` and ``pure`` kwargs are set to True, then the value
-            of ``pure`` will be reverted to False, since an actor is stateful. 
+            of ``pure`` will be reverted to False, since an actor is stateful.
             See :ref:`pure functions` for more details.
         **kwargs
 
