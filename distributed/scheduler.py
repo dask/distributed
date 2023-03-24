@@ -616,7 +616,7 @@ class WorkerState:
            goes back down, and spilled goes down by 100MB as it should have to
            begin with.
 
-        https://github.com/dask/distributed/issues/6002 will let us solve this.
+        :issue:`6002` will let us solve this.
         """
         return MemoryState(
             process=self.metrics["memory"],
