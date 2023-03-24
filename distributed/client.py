@@ -1898,7 +1898,7 @@ class Client(SyncMethodMixin):
             raise TypeError("First input to submit must be a callable function")
 
         actor = actor or actors
-        if pure:
+        if actor:
             pure = not actor
 
         if allow_other_workers not in (True, False, None):
