@@ -1816,7 +1816,7 @@ class Client(SyncMethodMixin):
         allow_other_workers=False,
         actor=False,
         actors=False,
-        pure=None,
+        pure=True,
         **kwargs,
     ):
         """Submit a function application to the scheduler
@@ -1857,7 +1857,9 @@ class Client(SyncMethodMixin):
             Alias for `actor`
         pure : bool (defaults to True)
             Whether or not the function is pure.  Set ``pure=False`` for
-            impure functions like ``np.random.random``.
+            impure functions like ``np.random.random``. Note that if both
+            ``actor`` and ``pure`` kwargs are set to True, then the value
+            of ``pure`` will be reverted to False, since an actor is stateful. 
             See :ref:`pure functions` for more details.
         **kwargs
 
@@ -1896,7 +1898,7 @@ class Client(SyncMethodMixin):
             raise TypeError("First input to submit must be a callable function")
 
         actor = actor or actors
-        if pure is None:
+        if pure:
             pure = not actor
 
         if allow_other_workers not in (True, False, None):
