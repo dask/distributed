@@ -66,12 +66,8 @@ def shuffle_transfer(
             npartitions=npartitions,
             column=column,
         )
-    except Exception:
-        msg = f"shuffle_transfer failed during shuffle {id}"
-        # FIXME: Use exception chaining instead of logging the traceback.
-        #  This has previously led to spurious recursion errors
-        logger.error(msg, exc_info=True)
-        raise RuntimeError(msg)
+    except Exception as e:
+        raise RuntimeError(f"shuffle_transfer failed during shuffle {id}") from e
 
 
 def shuffle_unpack(
@@ -81,23 +77,15 @@ def shuffle_unpack(
         return _get_worker_extension().get_output_partition(
             id, barrier_run_id, output_partition
         )
-    except Exception:
-        msg = f"shuffle_unpack failed during shuffle {id}"
-        # FIXME: Use exception chaining instead of logging the traceback.
-        #  This has previously led to spurious recursion errors
-        logger.error(msg, exc_info=True)
-        raise RuntimeError(msg)
+    except Exception as e:
+        raise RuntimeError(f"shuffle_unpack failed during shuffle {id}") from e
 
 
 def shuffle_barrier(id: ShuffleId, run_ids: list[int]) -> int:
     try:
         return _get_worker_extension().barrier(id, run_ids)
-    except Exception:
-        msg = f"shuffle_barrier failed during shuffle {id}"
-        # FIXME: Use exception chaining instead of logging the traceback.
-        #  This has previously led to spurious recursion errors
-        logger.error(msg, exc_info=True)
-        raise RuntimeError(msg)
+    except Exception as e:
+        raise RuntimeError(f"shuffle_barrier failed during shuffle {id}") from e
 
 
 def rearrange_by_column_p2p(
