@@ -305,7 +305,7 @@ def get_partition_id(ts: TaskState) -> Any:
         return ts.annotations["shuffle"]
     except KeyError:
         raise RuntimeError(
-            "{ts} has lost ``shuffle`` annotation. This may be caused by graph "
+            f"{ts} has lost ``shuffle`` annotation. This may be caused by graph "
             "optimization. Please report this error with a minimal reproducer."
         )
 
