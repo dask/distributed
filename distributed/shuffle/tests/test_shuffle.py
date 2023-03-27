@@ -19,8 +19,9 @@ dd = pytest.importorskip("dask.dataframe")
 
 import dask
 from dask.distributed import Event, Nanny, Worker
-from dask.utils import stringify
+from dask.utils import stringify, tmpfile
 
+from distributed.client import Client
 from distributed.scheduler import Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._arrow import serialize_table
@@ -38,7 +39,7 @@ from distributed.shuffle._worker_extension import (
 )
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
 from distributed.utils import Deadline
-from distributed.utils_test import gen_cluster, gen_test, wait_for_state
+from distributed.utils_test import cluster, gen_cluster, gen_test, wait_for_state
 from distributed.worker_state_machine import TaskState as WorkerTaskState
 
 try:
@@ -119,6 +120,19 @@ def test_raise_on_fuse_optimization():
     with dask.config.set({"optimization.fuse.active": True}):
         with pytest.raises(RuntimeError, match="fuse optimization"):
             dd.shuffle.shuffle(df, "x", shuffle="p2p")
+
+
+def test_shuffle_before_categorize(loop_in_thread):
+    with cluster() as (s, [a, b]), Client(s["address"], loop=loop_in_thread) as c:
+        df = dask.datasets.timeseries(
+            start="2000-01-01",
+            end="2000-01-10",
+            dtypes={"x": float, "y": str},
+            freq="10 s",
+        )
+        df = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+        df.categorize(columns=["y"])
+        c.compute(df)
 
 
 @gen_cluster(client=True)
