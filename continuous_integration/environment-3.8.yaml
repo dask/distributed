@@ -46,7 +46,7 @@ dependencies:
   - zict
   - zstandard >=0.9.0
   - pip:
-      - git+https://github.com/hendrikmakait/dask@categorize-keeps-annotations
+      - git+https://github.com/dask/dask
       - git+https://github.com/jcrist/crick  # Only tested here
       - keras
       - gilknocker>=0.3.0
