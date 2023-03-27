@@ -123,6 +123,7 @@ def test_raise_on_fuse_optimization():
 
 
 def test_shuffle_before_categorize(loop_in_thread):
+    """Regression test for https://github.com/dask/distributed/issues/7615"""
     with cluster() as (s, [a, b]), Client(s["address"], loop=loop_in_thread) as c:
         df = dask.datasets.timeseries(
             start="2000-01-01",
