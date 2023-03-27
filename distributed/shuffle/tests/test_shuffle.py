@@ -19,7 +19,7 @@ dd = pytest.importorskip("dask.dataframe")
 
 import dask
 from dask.distributed import Event, Nanny, Worker
-from dask.utils import stringify, tmpfile
+from dask.utils import stringify
 
 from distributed.client import Client
 from distributed.scheduler import Scheduler
