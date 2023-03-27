@@ -12,4 +12,4 @@ tblib >= 1.6.0
 toolz >= 0.10.0
 tornado >= 6.0.3
 urllib3 >= 1.24.3
-zict >= 2.1.0
+zict >= 2.2.0
