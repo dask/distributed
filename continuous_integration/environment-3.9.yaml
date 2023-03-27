@@ -8,52 +8,47 @@ dependencies:
   - packaging
   - pip
   - asyncssh
-  - bokeh
+  # Temporary restriction until https://github.com/dask/distributed/issues/7173 is resolved
+  - bokeh<3
   - click
   - cloudpickle
   - coverage
   - dask  # overridden by git tip below
-  - filesystem-spec  # overridden by git tip below
+  - filesystem-spec
   - h5py
-  - ipykernel
-  - ipywidgets
-  - jinja2
-  - joblib  # overridden by git tip below
-  - jupyter_client
-  - lz4  # Only tested here
+  - ipykernel <6.22.0  # https://github.com/dask/distributed/issues/7688
+  - ipywidgets <8.0.5  # https://github.com/dask/distributed/issues/7688
+  - jinja2 >=2.10.3
+  - locket >=1.0
+  - lz4 >=0.23.1  # Only tested here
   - msgpack-python
   - netcdf4
   - paramiko
   - pre-commit
   - prometheus_client
   - psutil
+  - pyarrow=7
   - pynvml  # Only tested here
   - pytest
-  - pytest-asyncio<0.14.0
   - pytest-cov
   - pytest-faulthandler
   - pytest-repeat
   - pytest-rerunfailures
   - pytest-timeout
-  - python-blosc  # Only tested here
-  - python-snappy  # Only tested here
+  - python-snappy >=0.5.3  # Only tested here
   - pytorch  # Only tested here
   - requests
-  - s3fs  # overridden by git tip below
+  - s3fs
   - scikit-learn
   - scipy
   - sortedcollections
   - tblib
   - toolz
   - torchvision  # Only tested here
-  - tornado=6
-  - zict  # overridden by git tip below
-  - zstandard
+  - tornado >=6.2
+  - zict
+  - zstandard >=0.9.0
   - pip:
       - git+https://github.com/dask/dask
-      - git+https://github.com/dask/s3fs
-      - git+https://github.com/dask/zict
-      # FIXME https://github.com/dask/distributed/issues/5345
-      # - git+https://github.com/intake/filesystem_spec
-      - git+https://github.com/joblib/joblib
       - keras
+      - gilknocker>=0.3.0

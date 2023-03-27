@@ -39,7 +39,7 @@ class TestMergeMemroyviews:
             [slice(1, 2), slice(2, 5), slice(5, 8), slice(8, None)],
         ],
     )
-    def test_parts(self, slices: list[slice]):
+    def test_parts(self, slices):
         base = bytearray(range(10))
         base_mv = memoryview(base)
 
@@ -66,6 +66,7 @@ class TestMergeMemroyviews:
         assert result == base
 
     def test_catch_non_memoryview(self):
+        pytest.importorskip("numpy")
         with pytest.raises(TypeError, match="Expected memoryview"):
             merge_memoryviews([b"1234", memoryview(b"4567")])
 
@@ -80,7 +81,7 @@ class TestMergeMemroyviews:
             [slice(1, 3), slice(3, 6), slice(9, None)],
         ],
     )
-    def test_catch_gaps(self, slices: list[slice]):
+    def test_catch_gaps(self, slices):
         base = bytearray(range(10))
         base_mv = memoryview(base)
 

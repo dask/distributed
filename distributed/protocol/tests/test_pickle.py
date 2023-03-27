@@ -1,13 +1,26 @@
-import gc
+from __future__ import annotations
+
 import pickle
+import sys
 import weakref
 from functools import partial
 from operator import add
 
+import cloudpickle
 import pytest
 
+from dask.utils import tmpdir
+
+from distributed import profile
 from distributed.protocol import deserialize, serialize
-from distributed.protocol.pickle import HIGHEST_PROTOCOL, dumps, loads
+from distributed.protocol.pickle import (
+    CLOUDPICKLE_GTE_20,
+    HIGHEST_PROTOCOL,
+    dumps,
+    loads,
+)
+from distributed.protocol.serialize import dask_deserialize, dask_serialize
+from distributed.utils_test import save_sys_modules
 
 
 class MemoryviewHolder:
@@ -21,7 +34,7 @@ class MemoryviewHolder:
             return MemoryviewHolder, (self.mv.tobytes(),)
 
 
-@pytest.mark.parametrize("protocol", {4, HIGHEST_PROTOCOL})
+@pytest.mark.parametrize("protocol", range(4, HIGHEST_PROTOCOL + 1))
 def test_pickle_data(protocol):
     context = {"pickle-protocol": protocol}
 
@@ -31,7 +44,7 @@ def test_pickle_data(protocol):
         assert deserialize(*serialize(d, serializers=("pickle",), context=context)) == d
 
 
-@pytest.mark.parametrize("protocol", {4, HIGHEST_PROTOCOL})
+@pytest.mark.parametrize("protocol", range(4, HIGHEST_PROTOCOL + 1))
 def test_pickle_out_of_band(protocol):
     context = {"pickle-protocol": protocol}
 
@@ -70,7 +83,7 @@ def test_pickle_out_of_band(protocol):
         assert isinstance(f[0], bytes)
 
 
-@pytest.mark.parametrize("protocol", {4, HIGHEST_PROTOCOL})
+@pytest.mark.parametrize("protocol", range(4, HIGHEST_PROTOCOL + 1))
 def test_pickle_empty(protocol):
     context = {"pickle-protocol": protocol}
 
@@ -99,7 +112,7 @@ def test_pickle_empty(protocol):
     assert y.mv.readonly
 
 
-@pytest.mark.parametrize("protocol", {4, HIGHEST_PROTOCOL})
+@pytest.mark.parametrize("protocol", range(4, HIGHEST_PROTOCOL + 1))
 def test_pickle_numpy(protocol):
     np = pytest.importorskip("numpy")
     context = {"pickle-protocol": protocol}
@@ -152,7 +165,7 @@ def test_pickle_numpy(protocol):
         assert (deserialize(h, f) == x).all()
 
 
-@pytest.mark.parametrize("protocol", {4, HIGHEST_PROTOCOL})
+@pytest.mark.parametrize("protocol", range(4, HIGHEST_PROTOCOL + 1))
 def test_pickle_functions(protocol):
     context = {"pickle-protocol": protocol}
 
@@ -181,7 +194,87 @@ def test_pickle_functions(protocol):
         assert func3(1) == func(1)
 
         del func, func2, func3
-        gc.collect()
-        assert wr() is None
-        assert wr2() is None
-        assert wr3() is None
+        with profile.lock:
+            assert wr() is None
+            assert wr2() is None
+            assert wr3() is None
+
+
+@pytest.mark.skipif(
+    not CLOUDPICKLE_GTE_20, reason="Pickle by value registration not supported"
+)
+def test_pickle_by_value_when_registered():
+    with save_sys_modules():
+        with tmpdir() as d:
+            try:
+                sys.path.insert(0, d)
+                module = f"{d}/mymodule.py"
+                with open(module, "w") as f:
+                    f.write("def myfunc(x):\n    return x + 1")
+                import mymodule  # noqa
+
+                assert dumps(mymodule.myfunc) == pickle.dumps(
+                    mymodule.myfunc, protocol=HIGHEST_PROTOCOL
+                )
+                cloudpickle.register_pickle_by_value(mymodule)
+                assert len(dumps(mymodule.myfunc)) > len(pickle.dumps(mymodule.myfunc))
+
+            finally:
+                sys.path.pop(0)
+
+
+class NoPickle:
+    def __getstate__(self):
+        raise TypeError("nope")
+
+
+def _serialize_nopickle(x):
+    return {}, ["hooray"]
+
+
+def _deserialize_nopickle(header, frames):
+    assert header == {}
+    assert frames == ["hooray"]
+    return NoPickle()
+
+
+def test_allow_pickle_if_registered_in_dask_serialize():
+    with pytest.raises(TypeError, match="nope"):
+        dumps(NoPickle())
+
+    dask_serialize.register(NoPickle)(_serialize_nopickle)
+    dask_deserialize.register(NoPickle)(_deserialize_nopickle)
+
+    try:
+        assert isinstance(loads(dumps(NoPickle())), NoPickle)
+    finally:
+        del dask_serialize._lookup[NoPickle]
+        del dask_deserialize._lookup[NoPickle]
+
+
+class NestedNoPickle:
+    def __init__(self) -> None:
+        self.stuff = {"foo": NoPickle()}
+
+
+def test_nopickle_nested():
+    nested_obj = [NoPickle()]
+    with pytest.raises(TypeError, match="nope"):
+        dumps(nested_obj)
+    with pytest.raises(TypeError, match="nope"):
+        dumps(NestedNoPickle())
+
+    dask_serialize.register(NoPickle)(_serialize_nopickle)
+    dask_deserialize.register(NoPickle)(_deserialize_nopickle)
+
+    try:
+        obj = NestedNoPickle()
+        roundtrip = loads(dumps(obj))
+        assert roundtrip is not obj
+        assert isinstance(roundtrip.stuff["foo"], NoPickle)
+        roundtrip = loads(dumps(nested_obj))
+        assert roundtrip is not nested_obj
+        assert isinstance(roundtrip[0], NoPickle)
+    finally:
+        del dask_serialize._lookup[NoPickle]
+        del dask_deserialize._lookup[NoPickle]

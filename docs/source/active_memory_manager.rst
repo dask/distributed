@@ -1,7 +1,8 @@
 Active Memory Manager
 =====================
 The Active Memory Manager, or *AMM*, is an experimental daemon that optimizes memory
-usage of workers across the Dask cluster. It is disabled by default.
+usage of workers across the Dask cluster. It is enabled by default but can be
+disabled/configured.  See `Enabling the Active Memory Manager`_ for details.
 
 
 Memory imbalance and duplication
@@ -27,7 +28,8 @@ causes increased overall memory usage across the cluster.
 
 Enabling the Active Memory Manager
 ----------------------------------
-The AMM can be enabled through the :doc:`Dask configuration file <configuration>`:
+The AMM is enabled by default. It can be disabled or tweaked through the :doc:`Dask
+configuration file <configuration>`:
 
 .. code-block:: yaml
 
@@ -36,6 +38,7 @@ The AMM can be enabled through the :doc:`Dask configuration file <configuration>
        active-memory-manager:
          start: true
          interval: 2s
+         measure: optimistic
 
 The above is the recommended setup and will run all enabled *AMM policies* (see below)
 every two seconds. Alternatively, you can manually start/stop the AMM from the
@@ -79,6 +82,7 @@ Individual policies are enabled, disabled, and configured through the Dask confi
        active-memory-manager:
          start: true
          interval: 2s
+         measure: optimistic
          policies:
          - class: distributed.active_memory_manager.ReduceReplicas
          - class: my_package.MyPolicy
@@ -94,6 +98,9 @@ config and see if it is fit for purpose for you before you tweak individual poli
 
 Built-in policies
 -----------------
+
+.. _ReduceReplicas:
+
 ReduceReplicas
 ++++++++++++++
 class
@@ -112,6 +119,30 @@ computation, this policy drops all excess replicas.
    run this policy, it will delete all replicas but one (but not necessarily the new
    ones).
 
+RetireWorker
+++++++++++++
+class
+    :class:`distributed.active_memory_manager.RetireWorker`
+parameters
+    address : str
+        The address of the worker being retired.
+
+This is a special policy, which should never appear in the Dask configuration file.
+
+It is injected on the fly by :meth:`distributed.Client.retire_workers` and whenever
+an adaptive cluster is being scaled down.
+This policy supervises moving all tasks, that are in memory exclusively on the worker
+being retired, to different workers. Once the worker does not uniquely hold the data for
+any task, this policy uninstalls itself automatically from the Active Memory Manager and
+the worker is shut down.
+
+If multiple workers are being retired at the same time, there will be multiple instances
+of this policy installed in the AMM.
+
+If the Active Memory Manager is disabled, :meth:`distributed.Client.retire_workers` and
+adaptive scaling will start a temporary one, install this policy into it, and then shut
+it down once it's finished.
+
 
 Custom policies
 ---------------
@@ -126,19 +157,20 @@ define two methods:
 ``run``
     This method accepts no parameters and is invoked by the AMM every 2 seconds (or
     whatever the AMM interval is).
-    It must yield zero or more of the following *suggestion* tuples:
+    It must yield zero or more of the following
+    :class:`~distributed.active_memory_manager.Suggestion` namedtuples:
 
-    ``yield "replicate", <TaskState>, None``
+    ``yield Suggestion("replicate", <TaskState>)``
         Create one replica of the target task on the worker with the lowest memory usage
         that doesn't hold a replica yet. To create more than one replica, you need to
         yield the same command more than once.
-    ``yield "replicate", <TaskState>, {<WorkerState>, <WorkerState>, ...}``
+    ``yield Suggestion("replicate", <TaskState>, {<WorkerState>, <WorkerState>, ...})``
         Create one replica of the target task on the worker with the lowest memory among
         the listed candidates.
-    ``yield "drop", <TaskState>, None``
+    ``yield Suggestion("drop", <TaskState>)``
         Delete one replica of the target task on the worker with the highest memory
         usage across the whole cluster.
-    ``yield "drop", <TaskState>, {<WorkerState>, <WorkerState>, ...}``
+    ``yield Suggestion("drop", <TaskState>, {<WorkerState>, <WorkerState>, ...})``
         Delete one replica of the target task on the worker with the highest memory
         among the listed candidates.
 
@@ -160,7 +192,7 @@ define two methods:
 
     .. code-block:: python
 
-        ws = (yield "drop", ts, None)
+        ws = (yield Suggestion("drop", ts))
 
 The ``run`` method can access the following attributes:
 
@@ -201,7 +233,7 @@ In mymodule.py (it must be accessible by the scheduler):
 
 .. code-block:: python
 
-    from distributed.active_memory_manager import ActiveMemoryManagerPolicy
+    from distributed.active_memory_manager import ActiveMemoryManagerPolicy, Suggestion
 
 
     class EnsureBroadcast(ActiveMemoryManagerPolicy):
@@ -213,7 +245,7 @@ In mymodule.py (it must be accessible by the scheduler):
             if not ts:
                 return
             for _ in range(len(self.manager.scheduler.workers) - len(ts.who_has)):
-                yield "replicate", ts, None
+                yield Suggestion("replicate", ts)
 
 Note that the policy doesn't bother testing for edge cases such as paused workers or
 other policies also requesting replicas; the AMM takes care of it. In theory you could
@@ -222,7 +254,7 @@ rewrite the last two lines as follows (at the cost of some wasted CPU cycles):
 .. code-block:: python
 
     for _ in range(1000):
-        yield "replicate", ts, None
+        yield Suggestion("replicate", ts)
 
 In distributed.yaml:
 
@@ -250,6 +282,9 @@ API reference
    :members:
 
 .. autoclass:: distributed.active_memory_manager.ActiveMemoryManagerPolicy
+   :members:
+
+.. autoclass:: distributed.active_memory_manager.Suggestion
    :members:
 
 .. autoclass:: distributed.active_memory_manager.AMMClientProxy

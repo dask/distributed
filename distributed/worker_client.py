@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import warnings
 from contextlib import contextmanager
 
@@ -6,6 +8,7 @@ import dask
 from distributed.metrics import time
 from distributed.threadpoolexecutor import rejoin, secede
 from distributed.worker import get_client, get_worker, thread_state
+from distributed.worker_state_machine import SecedeEvent
 
 
 @contextmanager
@@ -28,7 +31,7 @@ def worker_client(timeout=None, separate_thread=True):
     Examples
     --------
     >>> def func(x):
-    ...     with worker_client(timeout="10s") as c:  # connect from worker back to scheduler
+    ...     with worker_client() as c:  # connect from worker back to scheduler
     ...         a = c.submit(inc, x)     # this task can submit more tasks
     ...         b = c.submit(dec, x)
     ...         result = c.gather([a, b])  # and gather results
@@ -54,11 +57,12 @@ def worker_client(timeout=None, separate_thread=True):
         duration = time() - thread_state.start_time
         secede()  # have this thread secede from the thread pool
         worker.loop.add_callback(
-            worker.transition,
-            worker.tasks[thread_state.key],
-            "long-running",
-            stimulus_id=f"worker-client-secede-{time()}",
-            compute_duration=duration,
+            worker.handle_stimulus,
+            SecedeEvent(
+                key=thread_state.key,
+                compute_duration=duration,
+                stimulus_id=f"worker-client-secede-{time()}",
+            ),
         )
 
     yield client

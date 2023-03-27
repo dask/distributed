@@ -43,6 +43,17 @@ properties:
 
               For a list of handlers see the `dask.distributed.Scheduler.handlers` attribute.
 
+          contact-address:
+            type:
+            - string
+            - "null"
+            description: |
+              The address that the scheduler advertises to workers for communication with it.
+
+              To be specified when the address to which the scheduler binds cannot be the same
+              as the address that workers use to contact the scheduler (e.g. because the former
+              is private and the scheduler is in a different network than the workers).
+
           default-data-size:
             type:
             - string
@@ -63,7 +74,7 @@ properties:
             - string
             - "null"
             description: |
-              Shut down the scheduler after this duration if no activity has occured
+              Shut down the scheduler after this duration if no activity has occurred
 
               This can be helpful to reduce costs and stop zombie processes from roaming the earth.
 
@@ -105,6 +116,35 @@ properties:
             type: string
             description: |
               How frequently to balance worker loads
+
+          worker-saturation:
+            oneOf:
+              - type: number
+                exclusiveMinimum: 0
+              # String "inf", not to be confused with .inf which in YAML means float
+              # infinity. This is necessary because there's no way to parse a float
+              # infinity from a DASK_* environment variable.
+              - enum: [inf]
+            description: |
+              Controls how many root tasks are sent to workers (like a `readahead`).
+
+              Up to worker-saturation * nthreads root tasks are sent to a
+              worker at a time. If `.inf`, all runnable tasks are immediately sent to workers.
+              The target number is rounded up, so any `worker-saturation` value > 1.0 guarantees
+              at least one extra task will be sent to workers.
+
+              Allowing oversaturation (> 1.0) means a worker may start running a new root task as
+              soon as it completes the previous, even if there is a higher-priority downstream task
+              to run. This reduces worker idleness, by letting workers do something while waiting for
+              further instructions from the scheduler, even if it's not the most efficient
+              thing to do.
+
+              This generally comes  at the expense of increased memory usage. It leads to "wider"
+              (more breadth-first) execution of the graph.
+
+              Compute-bound workloads may benefit from oversaturation. Memory-bound workloads should
+              generally leave `worker-saturation` at 1.0, though 1.25-1.5 could slightly improve
+              performance if ample memory is available.
 
           worker-ttl:
             type:
@@ -244,7 +284,7 @@ properties:
 
           active-memory-manager:
             type: object
-            required: [start, interval, policies]
+            required: [start, interval, measure, policies]
             additionalProperties: false
             properties:
               start:
@@ -254,6 +294,14 @@ properties:
                 type: string
                 description:
                   Time expression, e.g. "2s". Run the AMM cycle every <interval>.
+              measure:
+                enum:
+                  - process
+                  - optimistic
+                  - managed
+                  - managed_total
+                description:
+                  One of the attributes of distributed.scheduler.MemoryState
               policies:
                 type: array
                 items:
@@ -306,6 +354,22 @@ properties:
               To avoid this, Dask usually used a file-based lock.
               However, on some systems file-based locks don't work.
               This is particularly common on HPC NFS systems, where users may want to set this to false.
+          transfer:
+            type: object
+            description: |
+              Configuration setting for data transfer between workers
+            properties:
+              message-bytes-limit:
+                type:
+                  - string
+                  - integer
+                description: |
+                  The maximum amount of data for a worker to request from another in a single gather operation
+
+                  Tasks are gathered in batches, and if the first task in a batch is larger than this value,
+                  the task will still be gathered to ensure progress. Hence, this limit is not absolute.
+                  Note that this limit applies to a single gather operation and a worker may gather data from
+                  multiple workers in parallel.
           connections:
             type: object
             description: |
@@ -394,6 +458,10 @@ properties:
               This data gets collected into statistical profiling information,
               which is then periodically bundled together and sent along to the scheduler.
             properties:
+              enabled:
+                type: boolean
+                description: |
+                  Whether or not to enable profiling
               interval:
                 type: string
                 description: |
@@ -440,7 +508,7 @@ properties:
                       - process
                       - optimistic
                       - managed
-                      - managed_in_memory
+                      - managed_total
                     description: >-
                       Which of the properties of distributed.scheduler.MemoryState
                       should be used for measuring worker memory usage
@@ -471,34 +539,45 @@ properties:
                       donate data and only nodes below 45% will receive them. This helps
                       avoid data from bouncing around the cluster repeatedly.
 
+              transfer:
+                oneOf:
+                  - {type: number, exclusiveMinimum: 0, maximum: 1}
+                  - {enum: [false]}
+                description: >-
+                  When the total size of incoming data transfers gets above this amount,
+                  we start throttling incoming data transfers
+
               target:
                 oneOf:
-                  - {type: number, minimum: 0, maximum: 1}
+                  - {type: number, exclusiveMinimum: 0, maximum: 1}
                   - {enum: [false]}
                 description: >-
                   When the process memory (as observed by the operating system) gets
-                  above this amount we start spilling the dask keys holding the largest
+                  above this amount, we start spilling the dask keys holding the oldest
                   chunks of data to disk
 
               spill:
                 oneOf:
-                  - {type: number, minimum: 0, maximum: 1}
+                  - {type: number, exclusiveMinimum: 0, maximum: 1}
                   - {enum: [false]}
                 description: >-
                   When the process memory (as observed by the operating system) gets
-                  above this amount we spill all data to disk.
+                  above this amount, we spill data to disk, starting from the dask keys
+                  holding the oldest chunks of data, until the process memory falls below
+                  the target threshold.
 
               pause:
                 oneOf:
-                  - {type: number, minimum: 0, maximum: 1}
+                  - {type: number, exclusiveMinimum: 0, maximum: 1}
                   - {enum: [false]}
                 description: >-
                   When the process memory (as observed by the operating system) gets
-                  above this amount we no longer start new tasks on this worker.
+                  above this amount, we no longer start new tasks or fetch new
+                  data on the worker.
 
               terminate:
                 oneOf:
-                  - {type: number, minimum: 0, maximum: 1}
+                  - {type: number, exclusiveMinimum: 0, maximum: 1}
                   - {enum: [false]}
                 description: >-
                   When the process memory reaches this level the nanny process will kill
@@ -510,7 +589,12 @@ properties:
                   - {type: number, minimum: 0}
                   - enum: [false]
                 description: >-
-                  Limit of number of bytes to be spilled on disk. 
+                  Limit of number of bytes to be spilled on disk.
+
+              monitor-interval:
+                type: string
+                description: >-
+                  Interval between checks for the spill, pause, and terminate thresholds
 
           http:
             type: object
@@ -548,7 +632,17 @@ properties:
           environ:
             type: object
             description: |
-              Environment variables to set on all worker processes started by nannies
+              Environment variables to set on all worker processes started by nannies.
+              These variables are set in the worker process after it has started.
+
+          pre-spawn-environ:
+            type: object
+            description: |
+              Environment variables to set on all worker processes started by nannies.
+              These variables are set within the Nanny process,
+              before spawning the worker process.
+              Should be used for variables that must be set before
+              process startup, interpreter startup, or imports.
 
       client:
         type: object
@@ -682,7 +776,7 @@ properties:
             description: |
               The compression algorithm to use
 
-              This could be one of lz4, snappy, zstd, or blosc
+              This could be one of lz4, snappy, zstd
 
           offload:
             type:
@@ -872,7 +966,21 @@ properties:
                   additional variables for each transport, while ensuring optimal connectivity. When
                   ``True``, a CUDA context will be created on the first device listed in
                   ``CUDA_VISIBLE_DEVICES``.
+              environment:
+                type: object
+                description: |
+                  Mapping for setting arbitrary UCX environment variables.
+                  Names here are translated via the following rules to
+                  map to the relevant UCX environment variable:
+                    - hyphens are replaced with underscores
+                    - words are uppercased
+                    - UCX_ is prepended
+                  So, for example, setting ``some-option=value`` is
+                  equivalent to setting ``UCX_SOME_OPTION=value`` in
+                  the calling environment.
 
+                  For a full list of supported UCX environment
+                  variables, run ``ucx_info -f``.
           tcp:
             type: object
             properties:
@@ -891,7 +999,7 @@ properties:
                   The maximum size of a websocket frame to send through a comm.
 
                   This is somewhat duplicative of distributed.comm.shard, but websockets
-                  often have much smaller maximum message sizes than othe protocols, so
+                  often have much smaller maximum message sizes than other protocols, so
                   this attribute is used to set a smaller default shard size and to
                   allow separate control of websocket message sharding.
 
@@ -919,6 +1027,14 @@ properties:
                   A list of modules which are ignored when trying to collect the
                   code context when submitting a computation. Accepts regular
                   expressions.
+          erred-tasks:
+            type: object
+            properties:
+              max-history:
+                type: integer
+                minimum: 0
+                description: |
+                  The maximum number of erred tasks to remember.
 
       dashboard:
         type: object
@@ -971,6 +1087,9 @@ properties:
               limit :
                 type: string
                 description: The time allowed before triggering a warning
+              cycle :
+                type: string
+                description: The time in between verifying event loop speed
 
           max-error-length:
             type: integer
@@ -1016,6 +1135,25 @@ properties:
               interval:
                 type: string
                 description: Polling time to query cpu/memory statistics default 500ms
+              disk:
+                type: boolean
+                description: Should we include disk metrics?  (they can cause issues in some systems)
+              host-cpu:
+                type: boolean
+                description: Should we include host-wide CPU usage, with very granular breakdown?
+              gil:
+                type: object
+                description: |
+                  Should we include GIL contention metrics, requires `gilknocker` to be installed.
+                properties:
+                  enabled:
+                    type: boolean
+                    description: Enable monitoring of GIL contention
+                  interval:
+                    type: string
+                    description: |
+                      GIL polling interval. More frequent polling will reflect a more accurate GIL
+                      contention metric but will be more likely to impact runtime performance.
 
       rmm:
         type: object

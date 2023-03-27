@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import uuid
@@ -6,9 +8,8 @@ from contextlib import suppress
 
 from dask.utils import parse_timedelta
 
-from distributed.client import Client
-from distributed.utils import TimeoutError, log_errors
-from distributed.worker import get_worker
+from distributed.utils import TimeoutError, log_errors, wait_for
+from distributed.worker import get_client
 
 logger = logging.getLogger(__name__)
 
@@ -58,80 +59,78 @@ class EventExtension:
             }
         )
 
-        self.scheduler.extensions["events"] = self
-
+    @log_errors
     async def event_wait(self, name=None, timeout=None):
         """Wait until the event is set to true.
         Returns false, when this did not happen in the given time
         and true otherwise.
         """
-        with log_errors():
-            name = self._normalize_name(name)
+        name = self._normalize_name(name)
 
-            event = self._events[name]
-            future = event.wait()
-            if timeout is not None:
-                future = asyncio.wait_for(future, timeout)
+        event = self._events[name]
+        future = event.wait()
+        if timeout is not None:
+            future = wait_for(future, timeout)
 
-            self._waiter_count[name] += 1
-            try:
-                await future
-            except TimeoutError:
-                return False
-            finally:
-                self._waiter_count[name] -= 1
+        self._waiter_count[name] += 1
+        try:
+            await future
+        except TimeoutError:
+            return False
+        finally:
+            self._waiter_count[name] -= 1
 
-                if not self._waiter_count[name] and not event.is_set():
-                    # No one is waiting for this
-                    # and as the default flag for an event is false
-                    # we can safely remove it
-                    self._delete_event(name)
-
-            return True
-
-    def event_set(self, name=None):
-        """Set the event with the given name to true.
-
-        All waiters on this event will be notified.
-        """
-        with log_errors():
-            name = self._normalize_name(name)
-            # No matter if someone is listening or not,
-            # we set the event to true
-            self._events[name].set()
-
-    def event_clear(self, name=None):
-        """Set the event with the given name to false."""
-        with log_errors():
-            name = self._normalize_name(name)
-            if not self._waiter_count[name]:
+            if not self._waiter_count[name] and not event.is_set():
                 # No one is waiting for this
                 # and as the default flag for an event is false
                 # we can safely remove it
                 self._delete_event(name)
 
-            else:
-                # There are waiters
-                # This can happen if an event is "double-cleared"
-                # In principle, the event should be unset at this point
-                # (because if it is set, all waiters should have been
-                # notified). But to prevent race conditions
-                # due to unlucky timing, we clear anyways
-                assert name in self._events
-                event = self._events[name]
-                event.clear()
+        return True
 
+    @log_errors
+    def event_set(self, name=None):
+        """Set the event with the given name to true.
+
+        All waiters on this event will be notified.
+        """
+        name = self._normalize_name(name)
+        # No matter if someone is listening or not,
+        # we set the event to true
+        self._events[name].set()
+
+    @log_errors
+    def event_clear(self, name=None):
+        """Set the event with the given name to false."""
+        name = self._normalize_name(name)
+        if not self._waiter_count[name]:
+            # No one is waiting for this
+            # and as the default flag for an event is false
+            # we can safely remove it
+            self._delete_event(name)
+
+        else:
+            # There are waiters
+            # This can happen if an event is "double-cleared"
+            # In principle, the event should be unset at this point
+            # (because if it is set, all waiters should have been
+            # notified). But to prevent race conditions
+            # due to unlucky timing, we clear anyways
+            assert name in self._events
+            event = self._events[name]
+            event.clear()
+
+    @log_errors
     def event_is_set(self, name=None):
-        with log_errors():
-            name = self._normalize_name(name)
-            # the default flag value is false
-            # we could also let the defaultdict
-            # create a new event for us, but that
-            # could produce many unused events
-            if name not in self._events:
-                return False
+        name = self._normalize_name(name)
+        # the default flag value is false
+        # we could also let the defaultdict
+        # create a new event for us, but that
+        # could produce many unused events
+        if name not in self._events:
+            return False
 
-            return self._events[name].is_set()
+        return self._events[name].is_set()
 
     def _normalize_name(self, name):
         """Helper function to normalize an event name"""
@@ -179,12 +178,17 @@ class Event:
     """
 
     def __init__(self, name=None, client=None):
-        try:
-            self.client = client or Client.current()
-        except ValueError:
-            # Initialise new client
-            self.client = get_worker().client
+        self._client = client
         self.name = name or "event-" + uuid.uuid4().hex
+
+    @property
+    def client(self):
+        if not self._client:
+            try:
+                self._client = get_client()
+            except ValueError:
+                pass
+        return self._client
 
     def __await__(self):
         """async constructor
@@ -200,6 +204,14 @@ class Event:
             return self
 
         return _().__await__()
+
+    def _verify_running(self):
+        if not self.client:
+            raise RuntimeError(
+                f"{type(self)} object not properly initialized. This can happen"
+                " if the object is being deserialized outside of the context of"
+                " a Client or Worker."
+            )
 
     def wait(self, timeout=None):
         """Wait until the event is set.
@@ -219,8 +231,9 @@ class Event:
 
         Returns
         -------
-        True if the event was set of false, if a timeout happend
+        True if the event was set of false, if a timeout happened
         """
+        self._verify_running()
         timeout = parse_timedelta(timeout)
 
         result = self.client.sync(
@@ -233,6 +246,7 @@ class Event:
 
         All waiters will now block.
         """
+        self._verify_running()
         return self.client.sync(self.client.scheduler.event_clear, name=self.name)
 
     def set(self):
@@ -240,11 +254,13 @@ class Event:
 
         All waiters will now be released.
         """
+        self._verify_running()
         result = self.client.sync(self.client.scheduler.event_set, name=self.name)
         return result
 
     def is_set(self):
         """Check if the event is set"""
+        self._verify_running()
         result = self.client.sync(self.client.scheduler.event_is_set, name=self.name)
         return result
 

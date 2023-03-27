@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import itertools
 import logging
@@ -88,6 +90,13 @@ class QueueEmpty(Exception):
     pass
 
 
+def _set_result_unless_cancelled(fut, result):
+    """Helper setting the result only if the future was not cancelled."""
+    if fut.cancelled():
+        return
+    fut.set_result(result)
+
+
 class Queue:
     """
     A single-reader, single-writer, non-threadsafe, peekable queue.
@@ -119,7 +128,7 @@ class Queue:
         if fut is not None:
             assert len(q) == 0
             self._read_future = None
-            fut.set_result(value)
+            _set_result_unless_cancelled(fut, value)
         else:
             q.append(value)
 
@@ -153,7 +162,7 @@ class InProc(Comm):
 
     _initialized = False
 
-    def __init__(
+    def __init__(  # type: ignore[no-untyped-def]
         self,
         local_addr: str,
         peer_addr: str,
@@ -175,7 +184,9 @@ class InProc(Comm):
         self._initialized = True
 
     def _get_finalizer(self):
-        def finalize(write_q=self._write_q, write_loop=self._write_loop, r=repr(self)):
+        r = repr(self)
+
+        def finalize(write_q=self._write_q, write_loop=self._write_loop, r=r):
             logger.warning(f"Closing dangling queue in {r}")
             write_loop.add_callback(write_q.put_nowait, _EOF)
 

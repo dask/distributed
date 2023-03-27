@@ -1,17 +1,23 @@
 codecov:
   require_ci_to_pass: yes
 
+ignore:
+  # Files that exercise GPU-only functionality or are only tested by gpuCI
+  # but don't interact with codecov are ignored.
+  - "distributed/comm/ucx.py"
+
 coverage:
   precision: 2
   round: down
-  range: "85...100"
+  range: "92...100"
 
   status:
     project:
       default:
-        target: 85%
-        threshold: 1%
-    patch: no
-    changes: no
+        target: auto
+        threshold: 0.5%
+    patch:
+      default:
+        target: 100%
 
 comment: off

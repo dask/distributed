@@ -6,13 +6,14 @@ on:
   pull_request:
     paths:
       - setup.py
+      - requirements.txt
       - continuous_integration/recipes/**
       - .github/workflows/conda.yml
 
 # When this workflow is queued, automatically cancel any previous running
 # or pending jobs from the same branch
 concurrency:
-  group: conda-${{ github.head_ref }}
+  group: conda-${{ github.ref }}
   cancel-in-progress: true
 
 # Required shell entrypoint to have properly activated conda environments
@@ -25,11 +26,11 @@ jobs:
     name: Build (and upload)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3.4.0
         with:
           fetch-depth: 0
       - name: Set up Python
-        uses: conda-incubator/setup-miniconda@v2
+        uses: conda-incubator/setup-miniconda@v2.2.0
         with:
           miniforge-variant: Mambaforge
           use-mamba: true
@@ -73,6 +74,4 @@ jobs:
         run: |
           # install anaconda for upload
           mamba install anaconda-client
-
           anaconda upload --label dev noarch/*.tar.bz2
-          anaconda upload --label dev linux-64/*.tar.bz2

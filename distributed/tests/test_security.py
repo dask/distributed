@@ -1,9 +1,7 @@
-from contextlib import contextmanager
+from __future__ import annotations
 
-try:
-    import ssl
-except ImportError:
-    ssl = None  # type: ignore
+import ssl
+from contextlib import contextmanager
 
 import pytest
 
@@ -108,6 +106,14 @@ def test_min_max_version_config_errors(field):
     with dask.config.set({f"distributed.comm.tls.{field}": "bad"}):
         with pytest.raises(ValueError, match="'bad' is not supported, expected one of"):
             sec = Security()
+
+
+def test_invalid_min_version_from_config_errors():
+    with dask.config.set({"distributed.comm.tls.min-version": None}):
+        with pytest.raises(
+            ValueError, match=r"tls_min_version=.* is not supported, expected one of .*"
+        ):
+            Security(tls_min_version=ssl.TLSVersion.MINIMUM_SUPPORTED)
 
 
 def test_kwargs():
@@ -248,7 +254,7 @@ def test_connection_args():
     tls_12_ciphers = [c for c in supported_ciphers if "TLSv1.2" in c["description"]]
     assert len(tls_12_ciphers) == 1
     tls_13_ciphers = [c for c in supported_ciphers if "TLSv1.3" in c["description"]]
-    assert len(tls_13_ciphers) in (0, 3)
+    assert len(tls_13_ciphers) == 0 or len(tls_13_ciphers) >= 3
 
 
 def test_extra_conn_args_connection_args():
@@ -324,7 +330,7 @@ def test_listen_args():
     tls_12_ciphers = [c for c in supported_ciphers if "TLSv1.2" in c["description"]]
     assert len(tls_12_ciphers) == 1
     tls_13_ciphers = [c for c in supported_ciphers if "TLSv1.3" in c["description"]]
-    assert len(tls_13_ciphers) in (0, 3)
+    assert len(tls_13_ciphers) == 0 or len(tls_13_ciphers) >= 3
 
 
 @gen_test()

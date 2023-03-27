@@ -1,49 +1,66 @@
+# NOTE: autoupdate does not pick up flake8-bugbear since it is a transitive
+#  dependency. Make sure to update flake8-bugbear manually on a regular basis.
 repos:
-  -   repo: https://github.com/MarcoGorelli/absolufy-imports
-      rev: v0.3.1
-      hooks:
+  - repo: https://github.com/MarcoGorelli/absolufy-imports
+    rev: v0.3.1
+    hooks:
       - id: absolufy-imports
         name: absolufy-imports
-  -   repo: https://github.com/pycqa/isort
-      rev: 5.10.1
-      hooks:
+  - repo: https://github.com/pycqa/isort
+    rev: 5.12.0
+    hooks:
       - id: isort
         language_version: python3
   - repo: https://github.com/asottile/pyupgrade
-    # Do not upgrade: there's a bug in Cython that causes sum(... for ...) to fail;
-    # it needs sum([... for ...])
-    rev: v2.13.0
+    rev: v3.3.1
     hooks:
       - id: pyupgrade
         args:
           - --py38-plus
-  -   repo: https://github.com/psf/black
-      rev: 22.1.0
-      hooks:
+  - repo: https://github.com/psf/black
+    rev: 23.1.0
+    hooks:
       - id: black
         language_version: python3
         exclude: versioneer.py
         args:
           - --target-version=py38
-  -   repo: https://gitlab.com/pycqa/flake8
-      rev: 3.9.2
-      hooks:
+  - repo: https://github.com/pycqa/flake8
+    rev: 6.0.0
+    hooks:
       - id: flake8
         language_version: python3
+        additional_dependencies:
+        # NOTE: autoupdate does not pick up flake8-bugbear since it is a transitive
+        #  dependency. Make sure to update flake8-bugbear manually on a regular basis.
+          - flake8-bugbear==23.2.13
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.2.2
+    hooks:
+      -   id: codespell
+          types_or: [rst, markdown]
+          files: docs
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v0.931
+    rev: v1.0.0
     hooks:
       - id: mypy
+        # Override default --ignore-missing-imports
+        # Use setup.cfg if possible instead of adding command line parameters here
+        args: [--warn-unused-configs]
         additional_dependencies:
           # Type stubs
+          - pandas-stubs
           - types-docutils
           - types-requests
           - types-paramiko
           - types-PyYAML
-          - types-setuptools
           - types-psutil
+          - types-setuptools
           # Typed libraries
+          - click
           - numpy
-          - dask
+          - pytest
           - tornado
-          - zict
+          - pyarrow
+          - git+https://github.com/dask/dask
+          - git+https://github.com/dask/zict

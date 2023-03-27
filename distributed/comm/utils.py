@@ -1,12 +1,14 @@
+from __future__ import annotations
+
 import logging
 import math
 import socket
 
 import dask
-from dask.sizeof import sizeof
 from dask.utils import parse_bytes
 
 from distributed import protocol
+from distributed.sizeof import safe_sizeof as sizeof
 from distributed.utils import get_ip, get_ipv6, nbytes, offload
 
 logger = logging.getLogger(__name__)
@@ -27,7 +29,7 @@ try:
     import numpy
 
     def numpy_host_array(n: int) -> memoryview:
-        return memoryview(numpy.empty((n,), dtype="u1"))  # type: ignore
+        return numpy.empty((n,), dtype="u1").data
 
     host_array = numpy_host_array
 except ImportError:

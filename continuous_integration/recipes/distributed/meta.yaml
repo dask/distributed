@@ -2,12 +2,10 @@
 {% set new_patch = major_minor_patch[2] | int + 1 %}
 {% set version = (major_minor_patch[:2] + [new_patch]) | join('.') + environ.get('VERSION_SUFFIX', '') %}
 {% set dask_version = environ.get('DASK_CORE_VERSION', '0.0.0.dev') %}
-{% set build_ext = "cython" %}  # [cython_enabled]
-{% set build_ext = "python" %}  # [not cython_enabled]
 
 
 package:
-  name: distributed-split
+  name: distributed
   version: {{ version }}
 
 source:
@@ -15,95 +13,71 @@ source:
 
 build:
   number: {{ GIT_DESCRIBE_NUMBER }}
+  string: py_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}
+  noarch: python
+  script: {{ PYTHON }} -m pip install . -vv --no-deps
+  entry_points:
+    # Old style CLI
+    - dask-scheduler = distributed.cli.dask_scheduler:main
+    - dask-ssh = distributed.cli.dask_ssh:main
+    - dask-worker = distributed.cli.dask_worker:main
 
-outputs:
-  - name: distributed-impl
-    version: {{ version }}
-    build:
-      number: {{ GIT_DESCRIBE_NUMBER }}
-      string: {{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}_{{ build_ext }}
-      noarch: generic
-    test:
-      commands:
-        - exit 0
-    about:
-      home: https://distributed.dask.org
-      summary: A meta-package to select Distributed pre-release build variant
-      license: BSD-3-Clause
-      license_family: BSD
-      license_file: LICENSE.txt
+requirements:
+  host:
+    - python >=3.8
+    - pip
+    - dask-core {{ dask_version }}
+  run:
+    - python >=3.8
+    - click >=8.0
+    - cloudpickle >=1.5.0
+    - cytoolz >=0.10.1
+    - {{ pin_compatible('dask-core', max_pin='x.x.x.x') }}
+    - jinja2 >=2.10.3
+    - locket >=1.0.0
+    - msgpack-python >=1.0.0
+    - packaging >=20.0
+    - psutil >=5.7.0
+    - pyyaml >=5.3.1
+    - sortedcontainers >=2.0.5
+    - tblib >=1.6.0
+    - toolz >=0.10.0
+    - tornado >=6.0.3
+    - urllib3 >=1.24.3
+    - zict >=2.1.0
+  run_constrained:
+    - openssl !=1.1.1e
 
-  - name: distributed
-    version: {{ version }}
-    build:
-      number: {{ GIT_DESCRIBE_NUMBER }}
-      string: py_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}_{{ build_ext }}  # [not cython_enabled]
-      string: py{{ python | replace(".", "") }}_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}_{{ build_ext }}  # [cython_enabled]
-      noarch: python                              # [not cython_enabled]
-      skip: True                                  # [cython_enabled and py<38]
-      script: >
-        python -m pip install . -vv --no-deps
-        --install-option="--with-cython=profile"  # [cython_enabled]
-      track_features:             # [cython_enabled]
-        - cythonized-scheduler    # [cython_enabled]
-      entry_points:
-        - dask-scheduler = distributed.cli.dask_scheduler:go
-        - dask-ssh = distributed.cli.dask_ssh:go
-        - dask-worker = distributed.cli.dask_worker:go
-    requirements:
-      build:
-        - {{ compiler('c') }}                     # [cython_enabled]
-      host:
-        - python
-        - pip
-        - cython                                  # [cython_enabled]
-      run:
-        - python
-        - click >=6.6
-        - cloudpickle >=1.5.0
-        - cytoolz >=0.8.2
-        - dask-core >={{ dask_version }}
-        - jinja2
-        - msgpack-python >=0.6.0
-        - packaging >=20.0
-        - psutil >=5.0
-        - pyyaml
-        - sortedcontainers !=2.0.0,!=2.0.1
-        - tblib >=1.6.0
-        - toolz >=0.8.2
-        - tornado >=6.0.3
-        - zict >=0.1.3
-        - setuptools <60.0.0
-      run_constrained:
-        - distributed-impl >={{ version }} *{{ build_ext }}
-        - openssl !=1.1.1e
-    test:
-      imports:
-        - distributed
-        - distributed.cli
-        - distributed.comm
-        - distributed.deploy
-        - distributed.diagnostics
-        - distributed.protocol
-      commands:
-        - pip check
-        - dask-scheduler --help
-        - dask-ssh --help
-        - dask-worker --help
-        - python -c "from distributed.scheduler import COMPILED; assert COMPILED is {{ cython_enabled }}"
-      requires:
-        - pip
-        - distributed-impl >={{ version }} *{{ build_ext }}
-    about:
-      home: https://distributed.dask.org
-      summary: Distributed scheduler for Dask
-      license: BSD-3-Clause
-      license_family: BSD
-      license_file: LICENSE.txt
-      description: |
-        Distributed is a lightweight library for distributed computing in Python.
-        It extends both the concurrent.futures and dask APIs to moderate sized
-        clusters.
-      doc_url: https://distributed.dask.org
-      doc_source_url: https://github.com/dask/distributed/blob/main/docs/source/index.rst
-      dev_url: https://github.com/dask/distributed
+test:
+  imports:
+    - distributed
+    - distributed.cli
+    - distributed.comm
+    - distributed.deploy
+    - distributed.diagnostics
+    - distributed.protocol
+  commands:
+    - pip check
+    - dask-scheduler --help
+    - dask-ssh --help
+    - dask-worker --help
+    - dask scheduler --help
+    - dask ssh --help
+    - dask worker --help
+    - dask spec --help
+  requires:
+    - pip
+
+about:
+  home: https://distributed.dask.org
+  summary: Distributed scheduler for Dask
+  license: BSD-3-Clause
+  license_family: BSD
+  license_file: LICENSE.txt
+  description: |
+    Distributed is a lightweight library for distributed computing in Python.
+    It extends both the concurrent.futures and dask APIs to moderate sized
+    clusters.
+  doc_url: https://distributed.dask.org
+  doc_source_url: https://github.com/dask/distributed/blob/main/docs/source/index.rst
+  dev_url: https://github.com/dask/distributed

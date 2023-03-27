@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import math
 
 import numpy as np
@@ -23,7 +25,10 @@ def serialize_numpy_ndarray(x, context=None):
     if x.dtype.hasobject or (x.dtype.flags & np.core.multiarray.LIST_PICKLE):
         header = {"pickle": True}
         frames = [None]
-        buffer_callback = lambda f: frames.append(memoryview(f))
+
+        def buffer_callback(f):
+            frames.append(memoryview(f))
+
         frames[0] = pickle.dumps(
             x,
             buffer_callback=buffer_callback,
@@ -107,32 +112,42 @@ def serialize_numpy_ndarray(x, context=None):
 
 
 @dask_deserialize.register(np.ndarray)
+@log_errors
 def deserialize_numpy_ndarray(header, frames):
-    with log_errors():
-        if header.get("pickle"):
-            return pickle.loads(frames[0], buffers=frames[1:])
+    if header.get("pickle"):
+        return pickle.loads(frames[0], buffers=frames[1:])
 
-        (frame,) = frames
-        (writeable,) = header["writeable"]
+    (frame,) = frames
+    (writeable,) = header["writeable"]
 
-        is_custom, dt = header["dtype"]
-        if is_custom:
-            dt = pickle.loads(dt)
-        else:
-            dt = np.dtype(dt)
+    is_custom, dt = header["dtype"]
+    if is_custom:
+        dt = pickle.loads(dt)
+    else:
+        dt = np.dtype(dt)
 
-        if header.get("broadcast_to"):
-            shape = header["broadcast_to"]
-        else:
-            shape = header["shape"]
+    if header.get("broadcast_to"):
+        shape = header["broadcast_to"]
+    else:
+        shape = header["shape"]
 
-        x = np.ndarray(shape, dtype=dt, buffer=frame, strides=header["strides"])
-        if not writeable:
-            x.flags.writeable = False
-        else:
-            x = np.require(x, requirements=["W"])
+    x = np.ndarray(shape, dtype=dt, buffer=frame, strides=header["strides"])
+    if not writeable:
+        x.flags.writeable = False
+    elif not x.flags.writeable:
+        # This should exclusively happen when the underlying buffer is read-only, e.g.
+        # a read-only mmap.mmap or a bytes object.
+        # Specifically, these are the known use cases:
+        # 1. decompression with a library that does not support output to bytearray
+        #    (lz4 does; snappy, zlib, and zstd don't).
+        #    Note that this only applies to buffers whose uncompressed size was small
+        #    enough that they weren't sharded (distributed.comm.shard); for larger
+        #    buffers the decompressed output is deep-copied beforehand into a bytearray
+        #    in order to merge it.
+        # 2. unspill with zict <2.3.0 (https://github.com/dask/zict/pull/74)
+        x = np.require(x, requirements=["W"])
 
-        return x
+    return x
 
 
 @dask_serialize.register(np.ma.core.MaskedConstant)

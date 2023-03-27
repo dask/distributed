@@ -1,9 +1,8 @@
+from __future__ import annotations
+
 import pytest
 
 pytestmark = pytest.mark.gpu
-
-from dask.dataframe.utils import assert_eq
-
 from distributed.protocol import deserialize, serialize
 
 
@@ -44,6 +43,7 @@ def test_serialize_cupy(collection, y, y_serializer):
 def test_serialize_pandas_pandas(collection, df2, df2_serializer):
     cudf = pytest.importorskip("cudf")
     pd = pytest.importorskip("pandas")
+    dd = pytest.importorskip("dask.dataframe")
     df1 = cudf.DataFrame({"A": [1, 2, None], "B": [1.0, 2.0, None]})
     if df2 is not None:
         df2 = cudf.from_pandas(pd.DataFrame(df2))
@@ -61,8 +61,8 @@ def test_serialize_pandas_pandas(collection, df2, df2_serializer):
     assert sub_headers[1]["serializer"] == df2_serializer
     assert isinstance(t, collection)
 
-    assert_eq(t["df1"] if isinstance(t, dict) else t[0], df1)
+    dd.assert_eq(t["df1"] if isinstance(t, dict) else t[0], df1)
     if df2 is None:
         assert (t["df2"] if isinstance(t, dict) else t[1]) is None
     else:
-        assert_eq(t["df2"] if isinstance(t, dict) else t[1], df2)
+        dd.assert_eq(t["df2"] if isinstance(t, dict) else t[1], df2)

@@ -3,6 +3,7 @@ behind. Parse the stdout of pytest to generate one.
 """
 from __future__ import annotations
 
+import html
 import re
 import sys
 from collections import Counter, defaultdict
@@ -70,6 +71,8 @@ def build_xml(rows: list[tuple[str, str, set[str | None]]]) -> None:
     )
 
     for clsname, tname, outcomes in rows:
+        clsname = html.escape(clsname)
+        tname = html.escape(tname)
         print(f'<testcase classname="{clsname}" name="{tname}" time="0.0"', end="")
         if outcomes == {"PASSED"}:
             print(" />")

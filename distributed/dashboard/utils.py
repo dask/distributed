@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 from numbers import Number
 
 import bokeh
 from bokeh.core.properties import without_property_validation
 from bokeh.io import curdoc
-from packaging.version import parse as parse_version
+from packaging.version import Version
 from tlz.curried import first
 
 try:
@@ -11,9 +13,22 @@ try:
 except ImportError:
     np = None  # type: ignore
 
-BOKEH_VERSION = parse_version(bokeh.__version__)
+BOKEH_VERSION = Version(bokeh.__version__)
 
 PROFILING = False
+
+if BOKEH_VERSION.major < 3:
+    _DATATABLE_STYLESHEETS_KWARGS = {}
+else:
+    _DATATABLE_STYLESHEETS_KWARGS = {
+        "stylesheets": [
+            """
+    .bk-data-table {
+    z-index: 0;
+    }
+    """
+        ]
+    }
 
 
 def transpose(lod):
@@ -39,6 +54,8 @@ def update(source, data):
         for k, v in data.items():
             if type(v) is not np.ndarray and isinstance(v[0], Number):
                 d[k] = np.array(v)
+                if d[k].dtype == np.int32:  # avoid int32 (Windows default)
+                    d[k] = d[k].astype("int64")
             else:
                 d[k] = v
     else:

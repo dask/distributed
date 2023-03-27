@@ -1,25 +1,20 @@
-import multiprocessing
+from __future__ import annotations
+
 import os
+import re
 import shutil
 import sys
 import tempfile
-import urllib.error
-import urllib.request
 from textwrap import dedent
-from time import sleep
+from unittest import mock
 
 import pytest
-import tornado
-from tornado import web
 
 import dask
 
 from distributed import Client, Nanny, Scheduler, Worker
-from distributed.compatibility import MACOS
-from distributed.metrics import time
+from distributed.utils import open_port
 from distributed.utils_test import captured_logger, cluster, gen_cluster, gen_test
-
-PY_VERSION = sys.version_info[:2]
 
 PRELOAD_TEXT = """
 _worker_info = {}
@@ -47,7 +42,6 @@ def test_worker_preload_file(loop):
         with cluster(worker_kwargs={"preload": [path]}) as (s, workers), Client(
             s["address"], loop=loop
         ) as c:
-
             assert c.run(check_worker) == {
                 worker["address"]: worker["address"] for worker in workers
             }
@@ -104,7 +98,6 @@ def test_worker_preload_module(loop):
             s,
             workers,
         ), Client(s["address"], loop=loop) as c:
-
             assert c.run(check_worker) == {
                 worker["address"]: worker["address"] for worker in workers
             }
@@ -128,7 +121,7 @@ def dask_setup(worker):
 
 
 @gen_cluster(nthreads=[])
-async def test_worker_preload_click_async(s, tmpdir):
+async def test_worker_preload_click_async(s, tmp_path):
     # Ensure we allow for click commands wrapping coroutines
     # https://github.com/dask/distributed/issues/4169
     text = """
@@ -142,8 +135,8 @@ async def dask_setup(worker):
         assert w.foo == "setup"
 
 
-@pytest.mark.asyncio
-async def test_preload_import_time(cleanup):
+@gen_test()
+async def test_preload_import_time():
     text = """
 from distributed.comm.registry import backends
 from distributed.comm.tcp import TCPBackend
@@ -161,61 +154,32 @@ backends["foo"] = TCPBackend()
         del backends["foo"]
 
 
-class MyHandler(web.RequestHandler):
-    def get(self):
-        self.write(
-            """
-def dask_setup(dask_server):
-    dask_server.foo = 1
-""".strip()
-        )
-
-
-def create_preload_application():
-    app = web.Application([(r"/preload", MyHandler)])
-    server = app.listen(12345, address="127.0.0.1")
-    tornado.ioloop.IOLoop.instance().start()
-
-
-@pytest.fixture
-def scheduler_preload():
-    p = multiprocessing.Process(target=create_preload_application)
-    p.start()
-    start = time()
-    while not p.is_alive():
-        if time() > start + 5:
-            raise AssertionError("Process didn't come up")
-        sleep(0.5)
-    # Make sure we can query the server
-    start = time()
-    request = urllib.request.Request("http://127.0.0.1:12345/preload", method="GET")
-    while True:
-        try:
-            response = urllib.request.urlopen(request)
-            if response.status == 200:
-                break
-        except urllib.error.URLError as e:
-            if time() > start + 10:
-                raise AssertionError("Webserver didn't come up", e)
-            sleep(0.5)
-
-    yield
-    p.kill()
-    p.join(timeout=5)
-
-
-@pytest.mark.skipif(
-    MACOS and PY_VERSION == (3, 7), reason="HTTP Server doesn't come up"
-)
-@pytest.mark.asyncio
-async def test_web_preload(cleanup, scheduler_preload):
-    with captured_logger("distributed.preloading") as log:
+@gen_test()
+async def test_web_preload():
+    with mock.patch(
+        "urllib3.PoolManager.request",
+        **{
+            "return_value.data": b"def dask_setup(dask_server):"
+            b"\n    dask_server.foo = 1"
+            b"\n"
+        },
+    ) as request, captured_logger("distributed.preloading") as log:
         async with Scheduler(
-            host="localhost",
-            preload=["http://127.0.0.1:12345/preload"],
+            host="localhost", preload=["http://example.com/preload"]
         ) as s:
             assert s.foo == 1
-    assert "12345/preload" in log.getvalue()
+        assert (
+            re.match(
+                r"(?s).*Downloading preload at http://example.com/preload\n"
+                r".*Run preload setup: http://example.com/preload\n"
+                r".*",
+                log.getvalue(),
+            )
+            is not None
+        )
+    assert request.mock_calls == [
+        mock.call(method="GET", url="http://example.com/preload", retries=mock.ANY)
+    ]
 
 
 @gen_cluster(nthreads=[])
@@ -238,57 +202,25 @@ dask.config.set(scheduler_address="{s.address}")
         assert w.scheduler.address == s.address
 
 
-class WorkerPreloadHandler(web.RequestHandler):
-    def get(self):
-        self.write(
-            """
-import dask
-dask.config.set(scheduler_address="tcp://127.0.0.1:8786")
-""".strip()
-        )
-
-
-def create_worker_preload_application():
-    application = web.Application([(r"/preload", WorkerPreloadHandler)])
-    server = application.listen(12346, address="127.0.0.1")
-    tornado.ioloop.IOLoop.instance().start()
-
-
-@pytest.fixture
-def worker_preload():
-    p = multiprocessing.Process(target=create_worker_preload_application)
-    p.start()
-    start = time()
-    while not p.is_alive():
-        if time() > start + 5:
-            raise AssertionError("Process didn't come up")
-        sleep(0.5)
-    # Make sure we can query the server
-    request = urllib.request.Request("http://127.0.0.1:12346/preload", method="GET")
-    start = time()
-    while True:
-        try:
-            response = urllib.request.urlopen(request)
-            if response.status == 200:
-                break
-        except urllib.error.URLError as e:
-            if time() > start + 10:
-                raise AssertionError("Webserver didn't come up", e)
-            sleep(0.5)
-
-    yield
-    p.kill()
-    p.join(timeout=5)
-
-
-@pytest.mark.skipif(
-    MACOS and PY_VERSION == (3, 7), reason="HTTP Server doesn't come up"
-)
-@pytest.mark.asyncio
-async def test_web_preload_worker(cleanup, worker_preload):
-    async with Scheduler(port=8786, host="localhost") as s:
-        async with Nanny(preload_nanny=["http://127.0.0.1:12346/preload"]) as nanny:
-            assert nanny.scheduler_addr == s.address
+@gen_test()
+async def test_web_preload_worker():
+    port = open_port()
+    data = dedent(
+        f"""\
+        import dask
+        dask.config.set(scheduler_address="tcp://127.0.0.1:{port}")
+        """
+    ).encode()
+    with mock.patch(
+        "urllib3.PoolManager.request",
+        **{"return_value.data": data},
+    ) as request:
+        async with Scheduler(port=port, host="localhost") as s:
+            async with Nanny(preload_nanny=["http://example.com/preload"]) as nanny:
+                assert nanny.scheduler_addr == s.address
+    assert request.mock_calls == [
+        mock.call(method="GET", url="http://example.com/preload", retries=mock.ANY)
+    ]
 
 
 # This test is blocked on https://github.com/dask/distributed/issues/5819
@@ -296,7 +228,7 @@ async def test_web_preload_worker(cleanup, worker_preload):
     reason="The preload argument to the client isn't supported yet", strict=True
 )
 @gen_cluster(nthreads=[])
-async def test_client_preload_text(s: Scheduler):
+async def test_client_preload_text(s):
     text = dedent(
         """\
         def dask_setup(client):
@@ -351,6 +283,28 @@ async def test_client_preload_click(s):
         address=s.address, asynchronous=True, preload=text, preload_argv=[[value]]
     ) as c:
         assert c.foo == value
+
+
+@gen_test()
+async def test_failure_doesnt_crash():
+    text = """
+def dask_setup(worker):
+    raise Exception(123)
+
+def dask_teardown(worker):
+    raise Exception(456)
+"""
+
+    with captured_logger("distributed.scheduler") as s_logger:
+        with captured_logger("distributed.worker") as w_logger:
+            async with Scheduler(dashboard_address=":0", preload=text) as s:
+                async with Worker(s.address, preload=[text]) as w:
+                    pass
+
+    assert "123" in s_logger.getvalue()
+    assert "123" in w_logger.getvalue()
+    assert "456" in s_logger.getvalue()
+    assert "456" in w_logger.getvalue()
 
 
 @gen_cluster(nthreads=[])

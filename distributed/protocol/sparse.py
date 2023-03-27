@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sparse
 
 from distributed.protocol.serialize import (
@@ -24,7 +26,6 @@ def serialize_sparse(x):
 
 @dask_deserialize.register(sparse.COO)
 def deserialize_sparse(header, frames):
-
     coords_frames = frames[: header["nframes"][0]]
     data_frames = frames[header["nframes"][0] :]
 

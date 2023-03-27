@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import re
 import warnings
@@ -21,14 +23,6 @@ class MyWorker(Worker):
     pass
 
 
-class BrokenWorker(Worker):
-    def __await__(self):
-        async def _():
-            raise Exception("Worker Broken")
-
-        return _().__await__()
-
-
 worker_spec = {
     0: {"cls": "dask.distributed.Worker", "options": {"nthreads": 1}},
     1: {"cls": Worker, "options": {"nthreads": 2}},
@@ -50,9 +44,9 @@ async def test_specification():
         assert isinstance(cluster.workers[1], Worker)
         assert isinstance(cluster.workers["my-worker"], MyWorker)
 
-        assert cluster.workers[0].nthreads == 1
-        assert cluster.workers[1].nthreads == 2
-        assert cluster.workers["my-worker"].nthreads == 3
+        assert cluster.workers[0].state.nthreads == 1
+        assert cluster.workers[1].state.nthreads == 2
+        assert cluster.workers["my-worker"].state.nthreads == 3
 
         async with Client(cluster, asynchronous=True) as client:
             result = await client.submit(lambda x: x + 1, 10)
@@ -77,9 +71,9 @@ def test_spec_sync(loop):
         assert isinstance(cluster.workers[1], Worker)
         assert isinstance(cluster.workers["my-worker"], MyWorker)
 
-        assert cluster.workers[0].nthreads == 1
-        assert cluster.workers[1].nthreads == 2
-        assert cluster.workers["my-worker"].nthreads == 3
+        assert cluster.workers[0].state.nthreads == 1
+        assert cluster.workers[1].state.nthreads == 2
+        assert cluster.workers["my-worker"].state.nthreads == 3
 
         with Client(cluster, loop=loop) as client:
             assert cluster.loop is cluster.scheduler.loop
@@ -88,9 +82,16 @@ def test_spec_sync(loop):
             assert result == 11
 
 
-def test_loop_started():
-    with SpecCluster(worker_spec, scheduler=scheduler):
-        pass
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
+@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
+def test_loop_started_in_constructor(cleanup):
+    # test that SpecCluster.__init__ starts a loop in another thread
+    cluster = SpecCluster(worker_spec, scheduler=scheduler, loop=None)
+    try:
+        assert cluster.loop.asyncio_loop.is_running()
+    finally:
+        with cluster:
+            pass
 
 
 @gen_test()
@@ -140,7 +141,6 @@ async def test_scale():
 @gen_test()
 async def test_adaptive_killed_worker():
     with dask.config.set({"distributed.deploy.lost-worker-timeout": 0.1}):
-
         async with SpecCluster(
             asynchronous=True,
             worker={"cls": Nanny, "options": {"nthreads": 1}},
@@ -210,20 +210,31 @@ async def test_restart():
 
 
 @pytest.mark.skipif(WINDOWS, reason="HTTP Server doesn't close out")
-# FIXME cleanup fails:
-#       some RPCs left active by test: {<rpc to 'tcp://10.19.0.6:35045', 1 comms>}
-# @gen_test()
-@pytest.mark.asyncio
+@gen_test()
 async def test_broken_worker():
-    with pytest.raises(Exception) as info:
-        async with SpecCluster(
-            asynchronous=True,
-            workers={"good": {"cls": Worker}, "bad": {"cls": BrokenWorker}},
-            scheduler=scheduler,
-        ):
-            pass
+    class BrokenWorkerException(Exception):
+        pass
 
-    assert "Broken" in str(info.value)
+    class BrokenWorker(Worker):
+        def __await__(self):
+            async def _():
+                self.status = Status.closed
+                raise BrokenWorkerException("Worker Broken")
+
+            return _().__await__()
+
+    cluster = SpecCluster(
+        asynchronous=True,
+        workers={"good": {"cls": Worker}, "bad": {"cls": BrokenWorker}},
+        scheduler=scheduler,
+    )
+    try:
+        with pytest.raises(BrokenWorkerException, match=r"Worker Broken"):
+            async with cluster:
+                pass
+    finally:
+        # FIXME: SpecCluster leaks if SpecCluster.__aenter__ raises
+        await cluster.close()
 
 
 @pytest.mark.skipif(WINDOWS, reason="HTTP Server doesn't close out")
@@ -343,7 +354,6 @@ async def test_widget():
         asynchronous=True,
         worker={"cls": Worker, "options": {"nthreads": 1}},
     ) as cluster:
-
         start = time()  # wait for all workers
         while len(cluster.scheduler_info["workers"]) < len(cluster.worker_spec):
             await asyncio.sleep(0.01)
@@ -454,7 +464,7 @@ async def test_MultiWorker():
 
             adapt = cluster.adapt(minimum=0, maximum=4)
 
-            for i in range(adapt.wait_count):  # relax down to 0 workers
+            for _ in range(adapt.wait_count):  # relax down to 0 workers
                 await adapt.adapt()
             await cluster
             assert not s.workers

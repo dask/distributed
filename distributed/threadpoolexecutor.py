@@ -20,6 +20,8 @@ which is included as a comment at the end of this file:
 
    Copyright 2001-2016 Python Software Foundation; All Rights Reserved
 """
+from __future__ import annotations
+
 import itertools
 import logging
 import os

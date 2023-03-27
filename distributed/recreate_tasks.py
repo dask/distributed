@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 
 from dask.utils import stringify
@@ -23,7 +25,6 @@ class ReplayTaskScheduler:
         self.scheduler = scheduler
         self.scheduler.handlers["get_runspec"] = self.get_runspec
         self.scheduler.handlers["get_error_cause"] = self.get_error_cause
-        self.scheduler.extensions["replay-tasks"] = self
 
     def _process_key(self, key):
         if isinstance(key, list):

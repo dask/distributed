@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import multiprocessing as mp
 import os
 
@@ -13,6 +15,16 @@ from distributed.diagnostics import nvml
 from distributed.utils_test import gen_cluster
 
 
+@pytest.fixture(autouse=True)
+def reset_nvml_state():
+    try:
+        pynvml.nvmlShutdown()
+    except pynvml.NVMLError_Uninitialized:
+        pass
+    nvml.NVML_STATE = nvml.NVML_STATE.UNINITIALIZED
+    nvml.NVML_OWNER_PID = None
+
+
 def test_one_time():
     if nvml.device_get_count() < 1:
         pytest.skip("No GPUs available")
@@ -25,30 +37,36 @@ def test_one_time():
 
 
 def test_enable_disable_nvml():
-    try:
-        pynvml.nvmlShutdown()
-    except pynvml.NVMLError_Uninitialized:
-        pass
-    else:
-        nvml.nvmlInitialized = False
-
     with dask.config.set({"distributed.diagnostics.nvml": False}):
         nvml.init_once()
-        assert nvml.nvmlInitialized is False
+        assert not nvml.is_initialized()
+        assert nvml.NVML_STATE == nvml.NVMLState.DISABLED_CONFIG
 
-    with dask.config.set({"distributed.diagnostics.nvml": True}):
-        nvml.init_once()
-        assert nvml.nvmlInitialized is True
+    # Idempotent (once we've decided not to turn things on with
+    # configuration, it's set in stone)
+    nvml.init_once()
+    assert not nvml.is_initialized()
+    assert nvml.NVML_STATE == nvml.NVMLState.DISABLED_CONFIG
+
+
+def test_wsl_monitoring_enabled():
+    nvml.init_once()
+    assert nvml.NVML_STATE != nvml.NVMLState.DISABLED_WSL_INSUFFICIENT_DRIVER
 
 
 def run_has_cuda_context(queue):
     try:
-        assert not nvml.has_cuda_context()
+        assert not nvml.has_cuda_context().has_context
 
         import numba.cuda
 
         numba.cuda.current_context()
-        assert nvml.has_cuda_context() == 0
+        ctx = nvml.has_cuda_context()
+        assert (
+            ctx.has_context
+            and ctx.device_info.device_index == 0
+            and isinstance(ctx.device_info.uuid, bytes)
+        )
 
         queue.put(None)
 
@@ -56,6 +74,7 @@ def run_has_cuda_context(queue):
         queue.put(e)
 
 
+@pytest.mark.xfail(reason="If running on Docker, requires --pid=host")
 def test_has_cuda_context():
     if nvml.device_get_count() < 1:
         pytest.skip("No GPUs available")
@@ -112,10 +131,7 @@ async def test_gpu_metrics(s, a, b):
         == pynvml.nvmlDeviceGetMemoryInfo(h).used
     )
     assert "gpu" in a.startup_information
-    assert (
-        s.workers[a.address].extra["gpu"]["name"]
-        == pynvml.nvmlDeviceGetName(h).decode()
-    )
+    assert s.workers[a.address].extra["gpu"]["name"] == nvml._get_name(h)
 
 
 @pytest.mark.flaky(reruns=5, reruns_delay=2)
@@ -135,7 +151,7 @@ async def test_gpu_monitoring_recent(s, a, b):
         res[a.address]["range_query"]["gpu_memory_used"]
         == pynvml.nvmlDeviceGetMemoryInfo(h).used
     )
-    assert res[a.address]["gpu_name"] == pynvml.nvmlDeviceGetName(h).decode()
+    assert res[a.address]["gpu_name"] == nvml._get_name(h)
     assert res[a.address]["gpu_memory_total"] == pynvml.nvmlDeviceGetMemoryInfo(h).total
 
 

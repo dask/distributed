@@ -1,6 +1,8 @@
 """
 Efficient serialization of SciPy sparse matrices.
 """
+from __future__ import annotations
+
 import scipy
 
 from distributed.protocol.serialize import (
