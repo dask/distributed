@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Iterable, Iterator, NewType, Union
+from typing import TYPE_CHECKING, Any, Iterable, Iterator, NewType
 
 import dask
 from dask.base import tokenize
@@ -140,8 +140,9 @@ def rearrange_by_column_p2p(
     )
 
 
-_T_Key: TypeAlias = Union[tuple[str, int], str]
-_T_LowLevelGraph: TypeAlias = dict[_T_Key, tuple]
+# TODO remove quotes (requires Python >=3.9)
+_T_Key: TypeAlias = "tuple[str, int] | str"
+_T_LowLevelGraph: TypeAlias = "dict[_T_Key, tuple]"
 
 
 class P2PShuffleLayer(Layer):
