@@ -1930,7 +1930,7 @@ class Client(SyncMethodMixin):
             [skey],
             workers=workers,
             allow_other_workers=allow_other_workers,
-            priority={skey: 0},
+            internal_priority={skey: 0},
             user_priority=priority,
             resources=resources,
             retries=retries,
@@ -2134,7 +2134,7 @@ class Client(SyncMethodMixin):
             keys,
             workers=workers,
             allow_other_workers=allow_other_workers,
-            priority=internal_priority,
+            internal_priority=internal_priority,
             resources=resources,
             retries=retries,
             user_priority=priority,
@@ -3035,7 +3035,7 @@ class Client(SyncMethodMixin):
         keys,
         workers=None,
         allow_other_workers=None,
-        priority=None,
+        internal_priority=None,
         user_priority=0,
         resources=None,
         retries=None,
@@ -3071,21 +3071,33 @@ class Client(SyncMethodMixin):
 
             # Pack the high level graph before sending it to the scheduler
             keyset = set(keys)
-            dsk = dsk.__dask_distributed_pack__(self, keyset, annotations)
 
             # Create futures before sending graph (helps avoid contention)
             futures = {key: Future(key, self, inform=False) for key in keyset}
+            # Circular import
+            from distributed.protocol import serialize
+            from distributed.protocol.serialize import ToPickle
 
+            header, frames = serialize(ToPickle(dsk), on_error="raise")
+            nbytes = len(header) + sum(map(len, frames))
+            if nbytes > 10_000_000:
+                warnings.warn(
+                    f"Sending large graph of size {format_bytes(nbytes)}.\n"
+                    "This may cause some slowdown.\n"
+                    "Consider scattering data ahead of time and using futures."
+                )
             self._send_to_scheduler(
                 {
-                    "op": "update-graph-hlg",
-                    "hlg": dsk,
+                    "op": "update-graph",
+                    "graph_header": header,
+                    "graph_frames": frames,
                     "keys": list(map(stringify, keys)),
-                    "priority": priority,
+                    "internal_priority": internal_priority,
                     "submitting_task": getattr(thread_state, "key", None),
                     "fifo_timeout": fifo_timeout,
                     "actors": actors,
                     "code": self._get_computation_code(),
+                    "annotations": ToPickle(annotations),
                 }
             )
             return futures

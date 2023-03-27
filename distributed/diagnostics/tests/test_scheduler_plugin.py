@@ -243,3 +243,97 @@ async def test_closing_errors_ok(c, s, a, b, capsys):
     assert "BEFORE_CLOSE" in text
     text = logger.getvalue()
     assert "AFTER_CLOSE" in text
+
+
+@gen_cluster(client=True)
+async def test_update_graph_hook_simple(c, s, a, b):
+    class UpdateGraph(SchedulerPlugin):
+        def __init__(self) -> None:
+            self.success = False
+
+        def update_graph(  # type: ignore
+            self,
+            scheduler,
+            client,
+            keys,
+            tasks,
+            annotations,
+            priority,
+            dependencies,
+            **kwargs,
+        ) -> None:
+            assert scheduler is s
+            assert client == c.id
+            # If new parameters are added we should add a test
+            assert not kwargs
+            assert keys == {"foo"}
+            assert tasks == ["foo"]
+            assert annotations == {}
+            assert len(priority) == 1
+            assert isinstance(priority["foo"], tuple)
+            assert dependencies == {"foo": set()}
+            self.success = True
+
+    plugin = UpdateGraph()
+    s.add_plugin(plugin, name="update-graph")
+
+    await c.submit(inc, 5, key="foo")
+    assert plugin.success
+
+
+import dask
+from dask import delayed
+
+
+@gen_cluster(client=True)
+async def test_update_graph_hook_complex(c, s, a, b):
+    class UpdateGraph(SchedulerPlugin):
+        def __init__(self) -> None:
+            self.success = False
+
+        def update_graph(  # type: ignore
+            self,
+            scheduler,
+            client,
+            keys,
+            tasks,
+            annotations,
+            priority,
+            dependencies,
+            **kwargs,
+        ) -> None:
+            assert scheduler is s
+            assert client == c.id
+            # If new parameters are added we should add a test
+            assert not kwargs
+            assert keys == {"sum"}
+            assert set(tasks) == {"sum", "f1", "f3", "f2"}
+            assert annotations == {
+                "global_annot": {k: 24 for k in tasks},
+                "layer": {"f2": "explicit"},
+                "len_key": {"f3": 2},
+                "priority": {"f2": 13},
+            }
+            assert len(priority) == len(tasks), priority
+            assert priority["f2"][0] == -13
+            for k in keys:
+                assert k in dependencies
+            assert dependencies["f1"] == set()
+            assert dependencies["sum"] == {"f1", "f3"}
+
+            self.success = True
+
+    plugin = UpdateGraph()
+    s.add_plugin(plugin, name="update-graph")
+    del_inc = delayed(inc)
+    f1 = del_inc(1, dask_key_name="f1")
+    with dask.annotate(layer="explicit", priority=13):
+        f2 = del_inc(2, dask_key_name="f2")
+    with dask.annotate(len_key=lambda x: len(x)):
+        f3 = del_inc(f2, dask_key_name="f3")
+
+    f4 = delayed(sum)([f1, f3], dask_key_name="sum")
+
+    with dask.annotate(global_annot=24):
+        await c.compute(f4)
+    assert plugin.success
