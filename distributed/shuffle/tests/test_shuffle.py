@@ -21,6 +21,7 @@ import dask
 from dask.distributed import Event, Nanny, Worker
 from dask.utils import stringify
 
+from distributed.client import Client
 from distributed.scheduler import Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._arrow import serialize_table
@@ -39,6 +40,7 @@ from distributed.shuffle._worker_extension import (
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
 from distributed.utils import Deadline
 from distributed.utils_test import (
+    cluster,
     gen_cluster,
     gen_test,
     raises_with_cause,
@@ -152,6 +154,20 @@ async def test_raise_on_lost_annotation(c, s, a, b):
     await clean_worker(a)
     await clean_worker(b)
     await clean_scheduler(s)
+
+
+def test_shuffle_before_categorize(loop_in_thread):
+    """Regression test for https://github.com/dask/distributed/issues/7615"""
+    with cluster() as (s, [a, b]), Client(s["address"], loop=loop_in_thread) as c:
+        df = dask.datasets.timeseries(
+            start="2000-01-01",
+            end="2000-01-10",
+            dtypes={"x": float, "y": str},
+            freq="10 s",
+        )
+        df = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+        df.categorize(columns=["y"])
+        c.compute(df)
 
 
 @gen_cluster(client=True)
