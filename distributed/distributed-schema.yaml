@@ -644,6 +644,18 @@ properties:
               Should be used for variables that must be set before
               process startup, interpreter startup, or imports.
 
+      shuffle:
+        type: object
+        description: |
+          Low-level settings for control of p2p shuffle
+        properties:
+          output_max_buffer_size:
+            type: [string, integer, 'null']
+            description: |
+              Maximum size of the in-memory output buffer for p2p
+              shuffles before a worker writes output to disk. If
+              ``None`` then a default of one quarter of the worker's
+              total memory is used.
       client:
         type: object
         description: |

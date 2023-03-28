@@ -193,6 +193,9 @@ distributed:
       MKL_NUM_THREADS: 1
       OPENBLAS_NUM_THREADS: 1
 
+  shuffle:
+    output_max_buffer_size: null  # Size of shuffle output memory buffer
+
   client:
     heartbeat: 5s  # Interval between client heartbeats
     scheduler-info-interval: 2s  # Interval between scheduler-info updates
