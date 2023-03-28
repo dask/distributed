@@ -76,7 +76,7 @@ from distributed.client import (
 from distributed.cluster_dump import load_cluster_dump
 from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, WINDOWS
-from distributed.core import ErrorMessage, Status
+from distributed.core import Status
 from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.metrics import time
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
@@ -4822,13 +4822,13 @@ async def test_restart_workers_exception(c, s, a, b, raise_for_error):
     a.instantiate = fail_instantiate
 
     if raise_for_error:  # default is to raise
-        with pytest.raises(ValueError, match="broken") as excinfo:
+        with pytest.raises(ValueError, match="broken"):
             await c.restart_workers(workers=[a.worker_address])
     else:
         results = await c.restart_workers(
             workers=[a.worker_address], raise_for_error=raise_for_error
         )
-        msg: ErrorMessage = results[a.worker_address]
+        msg = results[a.worker_address]
         assert msg["status"] == "error"
         assert msg["exception_text"] == "ValueError('broken')"
 
