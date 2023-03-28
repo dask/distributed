@@ -1676,9 +1676,10 @@ async def test_include_communication_in_occupancy(c, s, a, b):
     await wait(z)
 
 
-def test_nonempty_data_is_rejected():
+@gen_test()
+async def test_nonempty_data_is_rejected():
     with pytest.raises(ValueError, match="Worker.data must be empty"):
-        Worker("localhost:12345", nthreads=1, data={"x": 1})
+        await Worker("localhost:12345", nthreads=1, data={"x": 1})
 
 
 @gen_cluster(client=True)
