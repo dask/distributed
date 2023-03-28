@@ -305,8 +305,9 @@ def get_partition_id(ts: TaskState) -> Any:
         return ts.annotations["shuffle"]
     except KeyError:
         raise RuntimeError(
-            f"{ts} has lost ``shuffle`` annotation. This may be caused by graph "
-            "optimization. Please report this error with a minimal reproducer."
+            f"{ts} has lost its ``shuffle`` annotation. This may be caused by "
+            " unintended optimization during graph generation. "
+            "Please report this problem at https://github.com/dask/distributed/issues."
         )
 
 
