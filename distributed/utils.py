@@ -789,6 +789,11 @@ def silence_logging(level, root="distributed"):
     """
     Change all StreamHandlers for the given logger to the given level
     """
+    warnings.warn(
+        "silence_logging is deprecated",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if isinstance(level, str):
         level = getattr(logging, level.upper())
 
