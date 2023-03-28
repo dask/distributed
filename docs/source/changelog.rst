@@ -1,6 +1,50 @@
 Changelog
 =========
 
+.. _v2023.3.2:
+
+2023.3.2
+--------
+
+Released on March 24, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Enhanced thread-safety in ``zict.File`` (:pr:`7691`) `crusaderky`_
+- Future deserialization without available client (:pr:`7580`) `Florian Jetter`_
+- Support adjusting GIL monitoring interval (:pr:`7650`) `Miles`_
+- Gracefully stop GIL monitoring if running (:pr:`7652`) `Miles`_
+- Fine performance metrics for ``execute``, ``gather_dep``, etc. (:pr:`7586`) `crusaderky`_
+- Add GIL metric to dashboard (:pr:`7646`) `Miles`_
+- Expose scheduler idle via RPC and HTTP API (:pr:`7642`) `Jacob Tomlinson`_
+- Add full dashboard link in scheduler logs (:pr:`7631`) `Miles`_
+
+Bug Fixes
+^^^^^^^^^
+- Tell workers when their peers have left (so they don't hang fetching data from them) (:pr:`7574`) `Thomas Grainger`_
+- Fix regression in dashboard after (:pr:`7586`) (:pr:`7683`) `crusaderky`_
+- Fix ``OverflowError`` in ``Cluster._sync_cluster_info()`` (:pr:`7648`) `Hendrik Makait`_
+- Ensure that serialized data is measured correctly (:pr:`7593`) `Florian Jetter`_
+
+Documentation
+^^^^^^^^^^^^^
+- Fix unexpected indentation in ``Client.cancel`` docstring (:pr:`7694`) `Thomas Grainger`_
+- Improve plugin API documentation  (:pr:`7653`) `Florian Jetter`_
+
+Maintenance
+^^^^^^^^^^^
+- Configure sphinx warnings as errors  (:pr:`7697`) `Thomas Grainger`_
+- Fix naming comparison in ``test-report`` workflow script (:pr:`7695`) `Miles`_
+- Temporarily restrict ``ipywidgets<8.0.5`` (:pr:`7693`) `crusaderky`_
+- Bump ``actions/checkout`` from 3.3.0 to 3.4.0 (:pr:`7685`)
+- Temporarily restrict ``ipykernel<6.22.0`` (:pr:`7689`) `James Bourbeau`_
+- Fix typo in ``CODEOWNERS`` (:pr:`7670`) `Hendrik Makait`_
+- Avoid ``bool`` object has no attribute ``close`` in ``@gen_cluster`` (:pr:`7657`) `Thomas Grainger`_
+- Fix failing ``test_server_close_stops_gil_monitoring`` (:pr:`7659`) `James Bourbeau`_
+- Add ``CODEOWNERS`` file (:pr:`7645`) `Jacob Tomlinson`_
+- Remove ``weakref`` finalizer for Offload Executor (:pr:`7644`) `Florian Jetter`_
+
+
 .. _v2023.3.1:
 
 2023.3.1
@@ -1125,7 +1169,7 @@ Released on May 2, 2022
 
 Highlights
 ^^^^^^^^^^
-This is a bugfix release for `this issue <https://github.com/dask/distributed/issues/6255>`_.
+This is a bugfix release for :issue:`this issue<6255>`.
 
 Enhancements
 ^^^^^^^^^^^^

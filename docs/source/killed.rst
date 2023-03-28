@@ -86,8 +86,7 @@ as you would for ordinary exceptions happening during task execution.
 Specifically for connectivity problems (e.g., timeout exceptions in the worker
 logs), you will need to diagnose your networking infrastructure, which is more
 complicated than can be described here. Commonly, it may involve logging into
-the machine running the affected worker
-(although you can :ref:`ipylaunch`).
+the machine running the affected worker.
 
 Killed by Nanny
 '''''''''''''''

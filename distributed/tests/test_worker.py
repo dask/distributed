@@ -2756,6 +2756,7 @@ async def test_forget_dependents_after_release(c, s, a):
     assert fut2.key not in {d.key for d in a.state.tasks[fut.key].dependents}
 
 
+@pytest.mark.filterwarnings("ignore:Sending large graph of size")
 @pytest.mark.filterwarnings("ignore:Large object of size")
 @gen_cluster(client=True)
 async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
@@ -2786,24 +2787,6 @@ async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
     wait_in_deserialize.set()
     assert await fut2 == 42
     await fut3
-
-
-@gen_cluster(client=True)
-async def test_run_spec_deserialize_fail(c, s, a, b):
-    class F:
-        def __call__(self):
-            pass
-
-        def __reduce__(self):
-            return lambda: 1 / 0, ()
-
-    with captured_logger("distributed.worker") as logger:
-        fut = c.submit(F())
-        assert isinstance(await fut.exception(), ZeroDivisionError)
-
-    logvalue = logger.getvalue()
-    assert "Could not deserialize task" in logvalue
-    assert "return lambda: 1 / 0, ()" in logvalue
 
 
 @gen_cluster(client=True, config=NO_AMM)

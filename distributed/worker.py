@@ -138,6 +138,7 @@ from distributed.worker_state_machine import (
     PauseEvent,
     RefreshWhoHasEvent,
     RemoveReplicasEvent,
+    RemoveWorkerEvent,
     RescheduleEvent,
     RetryBusyWorkerEvent,
     SecedeEvent,
@@ -766,6 +767,7 @@ class Worker(BaseWorker, ServerNode):
             "steal-request": self._handle_remote_stimulus(StealRequestEvent),
             "refresh-who-has": self._handle_remote_stimulus(RefreshWhoHasEvent),
             "worker-status-change": self.handle_worker_status_change,
+            "remove-worker": self._handle_remove_worker,
         }
 
         ServerNode.__init__(
@@ -2615,6 +2617,10 @@ class Worker(BaseWorker, ServerNode):
         get_worker
         """
         return self.active_threads[threading.get_ident()]
+
+    def _handle_remove_worker(self, worker: str, stimulus_id: str) -> None:
+        self.rpc.remove(worker)
+        self.handle_stimulus(RemoveWorkerEvent(worker=worker, stimulus_id=stimulus_id))
 
     def validate_state(self) -> None:
         try:
