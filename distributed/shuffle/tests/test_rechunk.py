@@ -177,7 +177,7 @@ async def test_raise_on_lost_annotation(c, s, a, b):
         RuntimeError,
         "rechunk_transfer failed",
         RuntimeError,
-        "lost ``shuffle`` annotation",
+        "lost its ``shuffle`` annotation",
     ):
         await c.compute(x2)
 
