@@ -759,3 +759,28 @@ async def test_worker_inherits_temp_config(c, s):
         async with Nanny(s.address):
             out = await c.submit(lambda: dask.config.get("test123"))
             assert out == 123
+
+
+@gen_cluster(nthreads=[])
+async def test_silence_logs(s, caplog):
+    module_name = "dstrbuted.nanny"
+    logger = logging.getLogger(module_name)
+
+    caplog.clear()
+    logger.warning("warning 1")
+    logger.error("error 2")
+    async with Nanny(s.address, silence_logs="ERROR"):
+        logger.warning("warning 3")
+        logger.error("error 4")
+
+    logger.warning("warning 5")
+    logger.error("error 6")
+
+    assert caplog.record_tuples == [
+        (module_name, logging.WARNING, "warning 1"),
+        (module_name, logging.ERROR, "error 2"),
+        # warning 3 is filtered
+        (module_name, logging.ERROR, "error 4"),
+        (module_name, logging.WARNING, "warning 5"),
+        (module_name, logging.ERROR, "error 6"),
+    ]

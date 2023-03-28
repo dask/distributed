@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import functools
 import importlib
@@ -25,6 +26,8 @@ from collections.abc import (
     Callable,
     Collection,
     Container,
+    Generator,
+    Iterator,
     KeysView,
     ValuesView,
 )
@@ -44,7 +47,7 @@ from time import sleep
 from types import ModuleType
 from typing import TYPE_CHECKING
 from typing import Any as AnyType
-from typing import ClassVar, Iterator, TypeVar, overload
+from typing import ClassVar, TypeVar, overload
 
 import click
 import psutil
@@ -805,6 +808,75 @@ def silence_logging(level, root="distributed"):
             handler.setLevel(level)
 
     return old
+
+
+if sys.version_info < (3, 12):
+    # backport from
+    # https://github.com/python/cpython/blob/v3.12.0a6/Lib/logging/__init__.py#L1831-L1848
+    def _logger_get_children(self: logging.Logger) -> set[logging.Logger]:
+        def _hierlevel(logger: logging.Logger) -> int:
+            if logger is logger.manager.root:
+                return 0
+            return 1 + logger.name.count(".")
+
+        d = self.manager.loggerDict
+        logging._acquireLock()  # type: ignore[attr-defined]
+        try:
+            # exclude PlaceHolders - the last check is to ensure that lower-level
+            # descendants aren't returned - if there are placeholders, a logger's
+            # parent field might point to a grandparent or ancestor thereof.
+            return {
+                item
+                for item in d.values()
+                if isinstance(item, logging.Logger)
+                and item.parent is self
+                and _hierlevel(item) == 1 + _hierlevel(item.parent)
+            }
+        finally:
+            logging._releaseLock()  # type: ignore[attr-defined]
+
+else:
+
+    def _logger_get_children(self: logging.Logger) -> set[logging.Logger]:
+        return self.getChildren()
+
+
+@contextlib.contextmanager
+def _set_log_level_recursive(
+    level: int | str, root: str = "distributed"
+) -> Generator[None, None, None]:
+    """
+    Context manager to set a logger and all its children to a given effective level
+    when the context manager is exited the original log levels are restored.
+    """
+    if isinstance(level, str):
+        level_int = int(getattr(logging, level.upper()))
+    else:
+        level_int = level
+
+    assert level_int > 0
+
+    root_logger = logging.getLogger(root)
+    with contextlib.ExitStack() as stack:
+        # if the log level is already correct make no change so that multiple
+        # overlapping calls to _set_log_level_recursive are unlikely to conflict
+        if root_logger.getEffectiveLevel() != level_int:
+            old_root_logger_level = root_logger.level
+            root_logger.setLevel(level_int)
+            stack.callback(root_logger.setLevel, old_root_logger_level)
+
+        d = deque(_logger_get_children(root_logger))
+        while d:
+            child_logger = d.popleft()
+            d.extend(_logger_get_children(child_logger))
+
+            # if the log level is already correct make no change so that multiple
+            # overlapping calls to _set_log_level_recursive are unlikely to conflict
+            if child_logger.getEffectiveLevel() != level_int:
+                old_child_logger_level = child_logger.level
+                child_logger.setLevel(logging.NOTSET)
+                stack.callback(child_logger.setLevel, old_child_logger_level)
+        yield
 
 
 @toolz.memoize

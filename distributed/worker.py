@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import bisect
 import builtins
+import contextlib
 import errno
 import logging
 import math
@@ -94,6 +95,7 @@ from distributed.threadpoolexecutor import secede as tpe_secede
 from distributed.utils import (
     TimeoutError,
     _maybe_complex,
+    _set_log_level_recursive,
     get_ip,
     has_arg,
     import_file,
@@ -107,7 +109,6 @@ from distributed.utils import (
     recursive_to_dict,
     run_in_executor_with_context,
     set_thread_state,
-    silence_logging,
     thread_state,
     wait_for,
     warn_on_duration,
@@ -558,6 +559,7 @@ class Worker(BaseWorker, ServerNode):
                 DeprecationWarning,
                 stacklevel=2,
             )
+        self.__exit_stack = stack = contextlib.ExitStack()
         self.nanny = nanny
         self._lock = threading.Lock()
 
@@ -669,7 +671,7 @@ class Worker(BaseWorker, ServerNode):
 
         self.extensions = {}
         if silence_logs:
-            silence_logging(level=silence_logs)
+            stack.enter_context(_set_log_level_recursive(level=silence_logs))
 
         if isinstance(security, dict):
             security = Security(**security)
@@ -1660,6 +1662,7 @@ class Worker(BaseWorker, ServerNode):
         self.status = Status.closed
         await ServerNode.close(self)
 
+        self.__exit_stack.__exit__(None, None, None)
         setproctitle("dask worker [closed]")
         return "OK"
 

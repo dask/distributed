@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import warnings
 from time import sleep
@@ -519,3 +520,30 @@ async def test_bad_close():
         await cluster.close()
 
     assert not record
+
+
+@gen_test()
+async def test_silence_logs(caplog):
+    module_name = "dstrbuted.deploy.spec"
+    logger = logging.getLogger(module_name)
+
+    caplog.clear()
+    logger.warning("warning 1")
+    logger.error("error 2")
+    async with SpecCluster(
+        scheduler=scheduler, asynchronous=True, silence_logs="ERROR"
+    ):
+        logger.warning("warning 3")
+        logger.error("error 4")
+
+    logger.warning("warning 5")
+    logger.error("error 6")
+
+    assert caplog.record_tuples == [
+        (module_name, logging.WARNING, "warning 1"),
+        (module_name, logging.ERROR, "error 2"),
+        # warning 3 is filtered
+        (module_name, logging.ERROR, "error 4"),
+        (module_name, logging.WARNING, "warning 5"),
+        (module_name, logging.ERROR, "error 6"),
+    ]
