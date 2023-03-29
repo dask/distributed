@@ -2354,7 +2354,6 @@ async def test_cumulative_worker_metrics(c, s, a, b):
     await b.heartbeat()
 
     metrics = s.cumulative_worker_metrics
-    assert metrics != dict()  # Have some data now
 
     # Subset of expected keys
     assert "latency" in metrics
