@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import math
 from textwrap import dedent
 
@@ -66,7 +68,8 @@ class RMMMemoryUsage(DashboardComponent):
                 y="y",
                 width="rmm-used",
                 height=1,
-                color="#7401FF",
+                color="#76B900",
+                alpha=1.0,
             )
             rect.nonselection_glyph = None
 
@@ -76,8 +79,8 @@ class RMMMemoryUsage(DashboardComponent):
                 y="y",
                 width="rmm-total",
                 height=1,
-                color="#7401FF",
-                alpha=0.5,
+                color="#76B900",
+                alpha=0.75,
             )
             rect.nonselection_glyph = None
 
@@ -88,6 +91,7 @@ class RMMMemoryUsage(DashboardComponent):
                 width="external-used",
                 height=1,
                 color="#76B900",
+                alpha=0.5,
             )
             rect.nonselection_glyph = None
 
