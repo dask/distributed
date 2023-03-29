@@ -1871,3 +1871,31 @@ def test_remove_worker_while_in_fetch(ws):
 def test_remove_worker_unknown(ws):
     ws2 = "127.0.0.1:2"
     ws.handle_stimulus(RemoveWorkerEvent(worker=ws2, stimulus_id="s3"))
+
+
+def test_release_drops_dependencies(ws):
+    """Mitigates https://github.com/dask/dask/issues/9888
+
+    1. y is computed with some dependencies
+    2. y is released, but not forgotten
+    3. y is computed again, with different dependencies
+    """
+    ws2 = "127.0.0.1:2"
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy("x", stimulus_id="s1"),
+        ExecuteSuccessEvent.dummy("x", stimulus_id="s2"),
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws.address]}, stimulus_id="s3"),
+        ExecuteSuccessEvent.dummy("y", stimulus_id="s4"),
+        ComputeTaskEvent.dummy("z", who_has={"y": [ws.address]}, stimulus_id="s5"),
+        FreeKeysEvent(keys=["x", "y", "z"], stimulus_id="s6"),
+    )
+    assert "x" not in ws.tasks
+    assert ws.tasks["y"].state == "released"
+    assert not ws.tasks["y"].dependencies
+    assert ws.tasks["z"].state == "cancelled"
+
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy("y", who_has={"w": [ws2]}, stimulus_id="s7"),
+    )
+    assert ws.tasks["y"].state == "waiting"
+    assert ws.tasks["y"].dependencies == {ws.tasks["w"]}

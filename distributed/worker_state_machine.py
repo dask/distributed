@@ -1885,11 +1885,13 @@ class WorkerState:
         self._purge_state(ts)
         recs: Recs = {}
         for dependency in ts.dependencies:
+            dependency.dependents.discard(ts)
             if (
                 not dependency.waiters
                 and dependency.state not in READY | PROCESSING | {"memory"}
             ):
                 recs[dependency] = "released"
+        ts.dependencies.clear()
 
         ts.state = "released"
         if not ts.dependents:
