@@ -2346,13 +2346,9 @@ async def test_idle_timeout_no_workers(c, s):
 
 @gen_cluster(client=True)
 async def test_cumulative_worker_metrics(c, s, a, b):
-    assert s.cumulative_worker_metrics == dict()
-
-    def do_work():
-        pass
-
-    await c.submit(do_work)
-    await asyncio.sleep(0.1)
+    # Race condition: metrics that are updated while idle may or may not be there already
+    assert s.cumulative_worker_metrics.keys() in (set(), {"latency"})
+    await c.submit(inc, 1, key="do_work")
 
     await a.heartbeat()
     await b.heartbeat()
