@@ -911,9 +911,11 @@ async def test_disk_cleanup_on_terminate(c, s, a, ignore_sigterm):
     await wait(fut)
     await c.run(lambda dask_worker: dask_worker.data.evict())
     glob_out = await c.run(
-        lambda dask_worker: glob.glob(dask_worker.local_directory + "/**/myspill")
+        # zict <= 2.2.0: myspill
+        # zict >= 2.3.0: myspill#0
+        lambda dask_worker: glob.glob(dask_worker.local_directory + "/**/myspill*")
     )
-    spill_fname = next(iter(glob_out.values()))[0]
+    spill_fname = glob_out[a.worker_address][0]
     assert os.path.exists(spill_fname)
 
     await leak_until_restart(c, s)

@@ -41,7 +41,7 @@ from typing import (
     overload,
 )
 
-from tlz import first, keymap, pluck
+from tlz import keymap, pluck
 from tornado.ioloop import IOLoop
 
 import dask
@@ -106,6 +106,7 @@ from distributed.utils import (
     parse_ports,
     recursive_to_dict,
     run_in_executor_with_context,
+    set_thread_state,
     silence_logging,
     thread_state,
     wait_for,
@@ -137,6 +138,7 @@ from distributed.worker_state_machine import (
     PauseEvent,
     RefreshWhoHasEvent,
     RemoveReplicasEvent,
+    RemoveWorkerEvent,
     RescheduleEvent,
     RetryBusyWorkerEvent,
     SecedeEvent,
@@ -765,6 +767,7 @@ class Worker(BaseWorker, ServerNode):
             "steal-request": self._handle_remote_stimulus(StealRequestEvent),
             "refresh-who-has": self._handle_remote_stimulus(RefreshWhoHasEvent),
             "worker-status-change": self.handle_worker_status_change,
+            "remove-worker": self._handle_remove_worker,
         }
 
         ServerNode.__init__(
@@ -1154,6 +1157,11 @@ class Worker(BaseWorker, ServerNode):
         if self.contact_address is None:
             self.contact_address = self.address
         logger.info("-" * 49)
+
+        # Worker reconnection is not supported
+        assert not self.data
+        assert not self.state.tasks
+
         while True:
             try:
                 _start = time()
@@ -1166,18 +1174,8 @@ class Worker(BaseWorker, ServerNode):
                         reply=False,
                         address=self.contact_address,
                         status=self.status.name,
-                        keys=list(self.data),
                         nthreads=self.state.nthreads,
                         name=self.name,
-                        nbytes={
-                            ts.key: ts.get_nbytes()
-                            for ts in self.state.tasks.values()
-                            # Only if the task is in memory this is a sensible
-                            # result since otherwise it simply submits the
-                            # default value
-                            if ts.state == "memory"
-                        },
-                        types={k: typename(v) for k, v in self.data.items()},
                         now=time(),
                         resources=self.state.total_resources,
                         memory_limit=self.memory_manager.memory_limit,
@@ -2059,7 +2057,7 @@ class Worker(BaseWorker, ServerNode):
         logger.debug("Request %d keys from %s", len(to_gather), worker)
 
         try:
-            with context_meter.meter("network") as m:
+            with context_meter.meter("network", func=time) as m:
                 response = await get_data_from_worker(
                     rpc=self.rpc, keys=to_gather, worker=worker, who=self.address
                 )
@@ -2615,6 +2613,10 @@ class Worker(BaseWorker, ServerNode):
         """
         return self.active_threads[threading.get_ident()]
 
+    def _handle_remove_worker(self, worker: str, stimulus_id: str) -> None:
+        self.rpc.remove(worker)
+        self.handle_stimulus(RemoveWorkerEvent(worker=worker, stimulus_id=stimulus_id))
+
     def validate_state(self) -> None:
         try:
             self.state.validate_state()
@@ -2704,10 +2706,7 @@ def get_worker() -> Worker:
     try:
         return thread_state.execution_state["worker"]
     except AttributeError:
-        try:
-            return first(w for w in Worker._instances if w.status in WORKER_ANY_RUNNING)
-        except StopIteration:
-            raise ValueError("No workers found")
+        raise ValueError("No worker found") from None
 
 
 def get_client(address=None, timeout=None, resolve_address=True) -> Client:
@@ -2927,6 +2926,8 @@ def loads_function(bytes_object):
 @context_meter.meter("deserialize")
 def _deserialize(function=None, args=None, kwargs=None, task=NO_VALUE):
     """Deserialize task inputs and regularize to func, args, kwargs"""
+    # Some objects require threadlocal state during deserialization, e.g. to
+    # detect the current worker
     if function is not None:
         function = loads_function(function)
     if args and isinstance(args, bytes):
@@ -3055,11 +3056,12 @@ def apply_function(
     ident = threading.get_ident()
     with active_threads_lock:
         active_threads[ident] = key
-    thread_state.start_time = time()
-    thread_state.execution_state = execution_state
-    thread_state.key = key
-
-    msg = apply_function_simple(function, args, kwargs, time_delay)
+    with set_thread_state(
+        start_time=time(),
+        execution_state=execution_state,
+        key=key,
+    ):
+        msg = apply_function_simple(function, args, kwargs, time_delay)
 
     with active_threads_lock:
         del active_threads[ident]
@@ -3186,16 +3188,18 @@ def apply_function_actor(
     with active_threads_lock:
         active_threads[ident] = key
 
-    thread_state.execution_state = execution_state
-    thread_state.key = key
-    thread_state.actor = True
+    with set_thread_state(
+        start_time=time(),
+        execution_state=execution_state,
+        key=key,
+        actor=True,
+    ):
+        result = function(*args, **kwargs)
 
-    result = function(*args, **kwargs)
+        with active_threads_lock:
+            del active_threads[ident]
 
-    with active_threads_lock:
-        del active_threads[ident]
-
-    return result
+        return result
 
 
 def get_msg_safe_str(msg):
@@ -3273,6 +3277,7 @@ async def run(server, comm, function, args=(), kwargs=None, wait=True):
     if has_arg(function, "dask_scheduler"):
         kwargs["dask_scheduler"] = server
     logger.info("Run out-of-band function %r", funcname(function))
+
     try:
         if not is_coro:
             result = function(*args, **kwargs)

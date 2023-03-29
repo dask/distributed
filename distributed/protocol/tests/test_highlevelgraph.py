@@ -26,6 +26,7 @@ async def test_combo_of_layer_types(c, s, a, b):
 
     y = c.submit(lambda x: x, 2)
     z = c.submit(lambda x: x, 3)
+    xx = await c.submit(lambda x: x + 1, y)
     x = da.blockwise(
         add,
         "x",

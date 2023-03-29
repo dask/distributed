@@ -1061,6 +1061,9 @@ async def test_get_client_coroutine(c, s, a, b):
     assert results == {a.address: 11, b.address: 11}
 
 
+@pytest.mark.xfail(
+    reason="Async tasks do not provide worker context. See https://github.com/dask/distributed/pull/7339"
+)
 def test_get_client_coroutine_sync(client, s, a, b):
     async def f():
         client = await get_client()
@@ -1068,8 +1071,8 @@ def test_get_client_coroutine_sync(client, s, a, b):
         result = await future
         return result
 
-    results = client.run(f)
-    assert results == {a["address"]: 11, b["address"]: 11}
+    for w in [a, b]:
+        assert client.submit(f, workers=[w["address"]]).result() == 1
 
 
 @gen_cluster()
@@ -1238,21 +1241,6 @@ async def test_deque_handler(s):
         msg = deque_handler.deque[-1]
         assert "distributed.worker" in deque_handler.format(msg)
         assert any(msg.msg == "foo456" for msg in deque_handler.deque)
-
-
-def test_get_worker_name(client):
-    def f():
-        get_client().submit(inc, 1).result()
-
-    client.run(f)
-
-    def func(dask_scheduler):
-        return list(dask_scheduler.clients)
-
-    start = time()
-    while not any("worker" in n for n in client.run_on_scheduler(func)):
-        sleep(0.1)
-        assert time() < start + 10
 
 
 @gen_cluster(nthreads=[], client=True)
@@ -2225,8 +2213,8 @@ async def test_worker_client_uses_default_no_close(c, s, a):
         def_client = get_client()
         return def_client.id
 
-    worker_client = await c.submit(get_worker_client_id)
-    assert worker_client == existing_client
+    wclient = await c.submit(get_worker_client_id)
+    assert wclient == existing_client
 
     assert not Worker._initialized_clients
 
@@ -2768,6 +2756,7 @@ async def test_forget_dependents_after_release(c, s, a):
     assert fut2.key not in {d.key for d in a.state.tasks[fut.key].dependents}
 
 
+@pytest.mark.filterwarnings("ignore:Sending large graph of size")
 @pytest.mark.filterwarnings("ignore:Large object of size")
 @gen_cluster(client=True)
 async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
@@ -2798,24 +2787,6 @@ async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
     wait_in_deserialize.set()
     assert await fut2 == 42
     await fut3
-
-
-@gen_cluster(client=True)
-async def test_run_spec_deserialize_fail(c, s, a, b):
-    class F:
-        def __call__(self):
-            pass
-
-        def __reduce__(self):
-            return lambda: 1 / 0, ()
-
-    with captured_logger("distributed.worker") as logger:
-        fut = c.submit(F())
-        assert isinstance(await fut.exception(), ZeroDivisionError)
-
-    logvalue = logger.getvalue()
-    assert "Could not deserialize task" in logvalue
-    assert "return lambda: 1 / 0, ()" in logvalue
 
 
 @gen_cluster(client=True, config=NO_AMM)
@@ -3755,3 +3726,25 @@ async def test_offload_getdata(c, s, a, b):
     x = c.submit(EnsureOffloaded, threading.get_ident(), key="x", workers=[a.address])
     y = c.submit(lambda x: None, x, key="y", workers=[b.address])
     await y
+
+
+@gen_cluster(client=True)
+async def test_startstops(c, s, a, b):
+    t0 = time()
+    x = c.submit(inc, 1, key="x", workers=[a.address])
+    y = c.submit(inc, x, key="y", workers=[b.address])
+    await wait(y)
+    t1 = time()
+    ss = b.state.tasks["y"].startstops
+    assert len(ss) == 2
+    assert ss[0]["action"] == "transfer"
+    assert ss[0]["source"] == a.address
+    assert ss[1]["action"] == "compute"
+    assert (
+        t0 + b.scheduler_delay
+        < ss[0]["start"]
+        < ss[0]["stop"]
+        < ss[1]["start"]
+        < ss[1]["stop"]
+        < t1 + b.scheduler_delay
+    )

@@ -57,8 +57,8 @@ async def test_timeout(c, s, a, b):
     await lock1.release()
 
 
-@gen_cluster()
-async def test_timeout_wake_waiter(s, a, b):
+@gen_cluster(client=True)
+async def test_timeout_wake_waiter(c, s, a, b):
     l1 = MultiLock(names=["x"])
     l2 = MultiLock(names=["x", "y"])
     l3 = MultiLock(names=["y"])

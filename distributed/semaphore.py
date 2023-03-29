@@ -342,20 +342,9 @@ class Semaphore(SyncMethodMixin):
         scheduler_rpc=None,
         loop=None,
     ):
-        try:
-            try:
-                worker = get_worker()
-                self.scheduler = scheduler_rpc or worker.scheduler
-                self.loop = loop or worker.loop
+        self._scheduler = scheduler_rpc
+        self._loop = loop
 
-            except ValueError:
-                client = get_client()
-                self.scheduler = scheduler_rpc or client.scheduler
-                self.loop = loop or client.loop
-        except ValueError:
-            # This happens if this is deserialized on the scheduler
-            self.scheduler = None
-            self.loop = None
         self.name = name or "semaphore-" + uuid.uuid4().hex
         self.max_leases = max_leases
         self.id = uuid.uuid4().hex
@@ -385,6 +374,31 @@ class Semaphore(SyncMethodMixin):
         # PC uses the correct event loop.
         if self.loop is not None:
             self.loop.add_callback(pc.start)
+
+    @property
+    def scheduler(self):
+        self._bind_late()
+        return self._scheduler
+
+    @property
+    def loop(self):
+        self._bind_late()
+        return self._loop
+
+    def _bind_late(self):
+        if self._scheduler is None or self._loop is None:
+            try:
+                try:
+                    worker = get_worker()
+                    self._scheduler = self._scheduler or worker.scheduler
+                    self._loop = self._loop or worker.loop
+
+                except ValueError:
+                    client = get_client()
+                    self._scheduler = self._scheduler or client.scheduler
+                    self._loop = self._loop or client.loop
+            except ValueError:
+                pass
 
     def _verify_running(self):
         if not self.scheduler or not self.loop:
@@ -547,4 +561,5 @@ class Semaphore(SyncMethodMixin):
         return self.sync(self.scheduler.semaphore_close, name=self.name)
 
     def __del__(self):
-        self.refresh_callback.stop()
+        if hasattr(self, "refresh_callback"):
+            self.refresh_callback.stop()

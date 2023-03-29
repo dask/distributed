@@ -167,17 +167,26 @@ class Queue:
     """
 
     def __init__(self, name=None, client=None, maxsize=0):
-        try:
-            self.client = client or get_client()
-        except ValueError:
-            self.client = None
+        self._client = client
         self.name = name or "queue-" + uuid.uuid4().hex
         self.maxsize = maxsize
+        self._maybe_start()
+
+    def _maybe_start(self):
         if self.client:
             if self.client.asynchronous:
                 self._started = asyncio.ensure_future(self._start())
             else:
                 self.client.sync(self._start)
+
+    @property
+    def client(self):
+        if not self._client:
+            try:
+                self._client = get_client()
+            except ValueError:
+                pass
+        return self._client
 
     def _verify_running(self):
         if not self.client:
@@ -192,6 +201,7 @@ class Queue:
         return self
 
     def __await__(self):
+        self._maybe_start()
         if hasattr(self, "_started"):
             return self._started.__await__()
         else:

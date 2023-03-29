@@ -71,15 +71,15 @@ jobs:
       - name: Set $TEST_ID
         run: |
           export PARTITION_LABEL=$( echo "${{ matrix.partition }}" | sed "s/ //" )
-          export TEST_ID="${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.queuing }}-$PARTITION_LABEL"
+          export TEST_ID="${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.queuing || join(matrix.extra_packages, '_') }}-$PARTITION_LABEL"
           # Switch to this version for stress-test:
-          # export TEST_ID="${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.queuing }}-$PARTITION_LABEL-${{ matrix.run }}"
+          # export TEST_ID="$TEST_ID-${{ matrix.run }}"
           echo "TEST_ID: $TEST_ID"
           echo "TEST_ID=$TEST_ID" >> $GITHUB_ENV
         shell: bash
 
       - name: Checkout source
-        uses: actions/checkout@v3.3.0
+        uses: actions/checkout@v3.5.0
         with:
           fetch-depth: 0
 
