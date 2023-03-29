@@ -18,7 +18,13 @@ from distributed.shuffle._shuffle import (
 )
 
 if TYPE_CHECKING:
-    from distributed.scheduler import Recs, Scheduler, TaskStateState, WorkerState
+    from distributed.scheduler import (
+        Recs,
+        Scheduler,
+        TaskState,
+        TaskStateState,
+        WorkerState,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +172,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         mapping = {}
 
         for ts in self.scheduler.tasks[name].dependents:
-            part = ts.annotations["shuffle"]
+            part = get_partition_id(ts)
             if ts.worker_restrictions:
                 output_worker = list(ts.worker_restrictions)[0]
             else:
@@ -202,7 +208,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         mapping = {}
 
         for ts in self.scheduler.tasks[name].dependents:
-            part = ts.annotations["shuffle"]
+            part = get_partition_id(ts)
             if ts.worker_restrictions:
                 output_worker = list(ts.worker_restrictions)[0]
             else:
@@ -291,6 +297,19 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self.states.clear()
         self.heartbeats.clear()
         self.erred_shuffles.clear()
+
+
+def get_partition_id(ts: TaskState) -> Any:
+    """Get the output partition ID of this task state."""
+    try:
+        return ts.annotations["shuffle"]
+    except KeyError:
+        raise RuntimeError(
+            f"{ts} has lost its ``shuffle`` annotation. This may be caused by "
+            "unintended optimization during graph generation. "
+            "Please report this problem on GitHub and link it to "
+            "the tracking issue at https://github.com/dask/distributed/issues/7716."
+        )
 
 
 def get_worker_for_range_sharding(
