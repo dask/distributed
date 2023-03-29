@@ -171,7 +171,7 @@ class RMMMemoryUsage(DashboardComponent):
 
             self.memory_figure.title.text = dedent(
                 """\
-                RMM Utilization: {} / {}\n
+                RMM Utilization: {} / {}
                 GPU Memory: {} / {}
                 """.format(
                     format_bytes(sum(rmm_used)),

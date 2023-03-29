@@ -2,6 +2,8 @@
 Diagnostics for GPU memory managed by RMM (RAPIDS memory manager).
 """
 
+from __future__ import annotations
+
 try:
     import rmm
 except ImportError:
