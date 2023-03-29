@@ -4107,12 +4107,9 @@ class Scheduler(SchedulerState, ServerNode):
         address: str,
         status: str,
         server_id: str,
-        keys=(),
         nthreads=None,
         name=None,
         resolve_address=True,
-        nbytes=None,
-        types=None,
         now=None,
         resources=None,
         host_info=None,
@@ -4133,15 +4130,6 @@ class Scheduler(SchedulerState, ServerNode):
 
         if address in self.workers:
             raise ValueError("Worker already exists %s" % address)
-
-        if nbytes:
-            err = (
-                f"Worker {address!r} connected with {len(nbytes)} key(s) in memory! Worker reconnection is not supported. "
-                f"Keys: {list(nbytes)}"
-            )
-            logger.error(err)
-            await comm.write({"status": "error", "message": err, "time": time()})
-            return
 
         if name in self.aliases:
             logger.warning("Worker tried to connect with a duplicate name: %s", name)
@@ -4201,9 +4189,6 @@ class Scheduler(SchedulerState, ServerNode):
         # Do not need to adjust self.total_occupancy as self.occupancy[ws] cannot
         # exist before this.
         self.check_idle_saturated(ws)
-
-        # for key in keys:  # TODO
-        #     self.mark_key_in_memory(key, [address])
 
         self.stream_comms[address] = BatchedSend(interval="5ms", loop=self.loop)
 
@@ -6982,13 +6967,7 @@ class Scheduler(SchedulerState, ServerNode):
         nbytes: dict,
         client=None,
     ):
-        """
-        Learn that new data has entered the network from an external source
-
-        See Also
-        --------
-        Scheduler.mark_key_in_memory
-        """
+        """Learn that new data has entered the network from an external source"""
         who_has = {k: [self.coerce_address(vv) for vv in v] for k, v in who_has.items()}
         logger.debug("Update data %s", who_has)
 

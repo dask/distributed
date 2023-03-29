@@ -1157,6 +1157,11 @@ class Worker(BaseWorker, ServerNode):
         if self.contact_address is None:
             self.contact_address = self.address
         logger.info("-" * 49)
+
+        # Worker reconnection is not supported
+        assert not self.data
+        assert not self.state.tasks
+
         while True:
             try:
                 _start = time()
@@ -1169,18 +1174,8 @@ class Worker(BaseWorker, ServerNode):
                         reply=False,
                         address=self.contact_address,
                         status=self.status.name,
-                        keys=list(self.data),
                         nthreads=self.state.nthreads,
                         name=self.name,
-                        nbytes={
-                            ts.key: ts.get_nbytes()
-                            for ts in self.state.tasks.values()
-                            # Only if the task is in memory this is a sensible
-                            # result since otherwise it simply submits the
-                            # default value
-                            if ts.state == "memory"
-                        },
-                        types={k: typename(v) for k, v in self.data.items()},
                         now=time(),
                         resources=self.state.total_resources,
                         memory_limit=self.memory_manager.memory_limit,
