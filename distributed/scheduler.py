@@ -3449,6 +3449,8 @@ class Scheduler(SchedulerState, ServerNode):
         self.bandwidth_workers = defaultdict(float)
         self.bandwidth_types = defaultdict(float)
 
+        self.cumulative_worker_metrics = defaultdict(float)
+
         if not preload:
             preload = dask.config.get("distributed.scheduler.preload")
         if not preload_argv:
@@ -4050,6 +4052,9 @@ class Scheduler(SchedulerState, ServerNode):
                     ws.executing[ts] = duration
                     ts.prefix.add_exec_time(duration)
 
+        for name, value in metrics["digests_total_since_heartbeat"].items():
+            self.cumulative_worker_metrics[name] += value
+
         ws.metrics = metrics
 
         # Calculate RSS - dask keys, separating "old" and "new" usage
@@ -4111,12 +4116,12 @@ class Scheduler(SchedulerState, ServerNode):
         nthreads: int,
         name: str,
         resolve_address: bool = True,
-        now: int,
-        resources: dict,
+        now: float,
+        resources: dict[str, float],
         # FIXME: This is never submitted by the worker
-        host_info: Any = None,
+        host_info: None = None,
         memory_limit: int | None,
-        metrics: dict,
+        metrics: dict[str, Any],
         pid: int = 0,
         services: dict[str, int],
         local_directory: str,
@@ -6935,7 +6940,7 @@ class Scheduler(SchedulerState, ServerNode):
         return ws.address, ws.identity()
 
     def add_keys(
-        self, worker: str, keys: Iterable[str] = (), stimulus_id: str | None = None
+        self, worker: str, keys: Collection[str] = (), stimulus_id: str | None = None
     ) -> Literal["OK", "not found"]:
         """
         Learn that a worker has certain keys
@@ -6973,8 +6978,8 @@ class Scheduler(SchedulerState, ServerNode):
     def update_data(
         self,
         *,
-        who_has: dict,
-        nbytes: dict,
+        who_has: dict[str, list[str]],
+        nbytes: dict[str, int],
         client: str | None = None,
     ) -> None:
         """Learn that new data has entered the network from an external source"""
@@ -7090,7 +7095,9 @@ class Scheduler(SchedulerState, ServerNode):
             del v["last_seen"]
         return ident
 
-    def get_processing(self, workers: Iterable[str] | None = None) -> dict:
+    def get_processing(
+        self, workers: Iterable[str] | None = None
+    ) -> dict[str, list[str]]:
         if workers is not None:
             workers = set(map(self.coerce_address, workers))
             return {w: [ts.key for ts in self.workers[w].processing] for w in workers}
@@ -7112,7 +7119,9 @@ class Scheduler(SchedulerState, ServerNode):
                 key: [ws.address for ws in ts.who_has] for key, ts in self.tasks.items()
             }
 
-    def get_has_what(self, workers: Iterable[str] | None = None) -> dict:
+    def get_has_what(
+        self, workers: Iterable[str] | None = None
+    ) -> dict[str, list[str]]:
         if workers is not None:
             workers = map(self.coerce_address, workers)
             return {
@@ -7124,14 +7133,16 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             return {w: [ts.key for ts in ws.has_what] for w, ws in self.workers.items()}
 
-    def get_ncores(self, workers: Iterable[str] | None = None) -> dict:
+    def get_ncores(self, workers: Iterable[str] | None = None) -> dict[str, int]:
         if workers is not None:
             workers = map(self.coerce_address, workers)
             return {w: self.workers[w].nthreads for w in workers if w in self.workers}
         else:
             return {w: ws.nthreads for w, ws in self.workers.items()}
 
-    def get_ncores_running(self, workers: Iterable[str] | None = None) -> dict:
+    def get_ncores_running(
+        self, workers: Iterable[str] | None = None
+    ) -> dict[str, int]:
         ncores = self.get_ncores(workers=workers)
         return {
             w: n for w, n in ncores.items() if self.workers[w].status == Status.running
@@ -7226,7 +7237,7 @@ class Scheduler(SchedulerState, ServerNode):
     @log_errors
     def get_nbytes(
         self, keys: Iterable[str] | None = None, summary: bool = True
-    ) -> dict:
+    ) -> dict[str, int]:
         if keys is not None:
             result = {k: self.tasks[k].nbytes for k in keys}
         else:
@@ -7313,7 +7324,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return state
 
-    def get_task_status(self, keys: Iterable[str]) -> dict:
+    def get_task_status(self, keys: Iterable[str]) -> dict[str, TaskStateState | None]:
         return {
             key: (self.tasks[key].state if key in self.tasks else None) for key in keys
         }
@@ -7489,9 +7500,7 @@ class Scheduler(SchedulerState, ServerNode):
     def remove_resources(self, worker: str) -> None:
         ws: WorkerState = self.workers[worker]
         for resource in ws.resources:
-            if resource not in self.resources:
-                self.resources[resource] = {}
-            dr: dict = self.resources[resource]
+            dr = self.resources.setdefault(resource, {})
             del dr[worker]
 
     def coerce_address(self, addr: str | tuple, resolve: bool = True) -> str:
