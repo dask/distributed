@@ -147,7 +147,6 @@ class SubprocessWorker(Subprocess):
             self.scheduler,
             "--spec",
             json.dumps({"cls": self.worker_class, "opts": {**self.worker_kwargs}}),
-            stderr=asyncio.subprocess.PIPE,
         )
 
 
