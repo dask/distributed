@@ -22,14 +22,12 @@ logger = logging.getLogger(__name__)
 
 
 class Subprocess(ProcessInterface, abc.ABC):
-    name: str | None
     process: asyncio.subprocess.Process | None
 
-    def __init__(self, name: str | None = None):
+    def __init__(self):
         if WINDOWS:
             # FIXME: distributed#7434
             raise RuntimeError("Subprocess does not support Windows.")
-        self.name = name
         self.process = None
         super().__init__()
 
@@ -53,18 +51,23 @@ class Subprocess(ProcessInterface, abc.ABC):
 
 
 class SubprocessScheduler(Subprocess):
-    """A local Dask scheduler running in a dedicated subprocess"""
+    """A local Dask scheduler running in a dedicated subprocess
+
+    Parameters
+    ----------
+    scheduler_kwargs:
+        Keywords to pass on to the ``Scheduler`` class constructor
+    """
 
     scheduler_kwargs: dict
     address: str | None
 
     def __init__(
         self,
-        name: str | None = None,
         scheduler_kwargs: dict | None = None,
     ):
         self.scheduler_kwargs = scheduler_kwargs or {}
-        super().__init__(name)
+        super().__init__()
 
     async def _start(self):
         cmd = [
@@ -112,6 +115,7 @@ class SubprocessWorker(Subprocess):
         Keywords to pass on to the ``Worker`` class constructor
     """
 
+    name: str | None
     scheduler: str
     worker_class: str
     worker_kwargs: dict
@@ -123,10 +127,11 @@ class SubprocessWorker(Subprocess):
         name: str | None = None,
         worker_kwargs: dict | None = None,
     ) -> None:
+        self.name = name
         self.scheduler = scheduler
         self.worker_class = worker_class
         self.worker_kwargs = copy.copy(worker_kwargs or {})
-        super().__init__(name)
+        super().__init__()
 
     async def _start(self) -> None:
         cmd = [
