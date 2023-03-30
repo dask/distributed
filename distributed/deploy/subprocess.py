@@ -156,7 +156,7 @@ def SubprocessCluster(
     n_workers: int | None = None,
     threads_per_worker: int | None = None,
     worker_kwargs: dict | None = None,
-    silence_logs: int = logging.INFO,
+    silence_logs: int = logging.WARN,
     **kwargs: Any,
 ) -> SpecCluster:
     """Create in-process scheduler and workers running in dedicated subprocesses
@@ -191,7 +191,7 @@ def SubprocessCluster(
     worker_kwargs:
         Keywords to pass on to the ``Worker`` class constructor
     silence_logs:
-        Level of logs to print out to stdout, defaults to ``logging.INFO``
+        Level of logs to print out to stdout, defaults to ``logging.WARN``
 
         Use a falsy value like False or None to disable log silencing.
 
