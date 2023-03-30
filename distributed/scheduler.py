@@ -3447,6 +3447,8 @@ class Scheduler(SchedulerState, ServerNode):
         self.bandwidth_workers = defaultdict(float)
         self.bandwidth_types = defaultdict(float)
 
+        self.cumulative_worker_metrics = defaultdict(float)
+
         if not preload:
             preload = dask.config.get("distributed.scheduler.preload")
         if not preload_argv:
@@ -4048,6 +4050,9 @@ class Scheduler(SchedulerState, ServerNode):
                     ts = self.tasks[key]
                     ws.executing[ts] = duration
                     ts.prefix.add_exec_time(duration)
+
+        for name, value in metrics["digests_total_since_heartbeat"].items():
+            self.cumulative_worker_metrics[name] += value
 
         ws.metrics = metrics
 
