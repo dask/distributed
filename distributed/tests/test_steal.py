@@ -4,33 +4,51 @@ import asyncio
 import contextlib
 import itertools
 import logging
+import math
 import random
 import weakref
+from collections import defaultdict
 from operator import mul
 from time import sleep
+from typing import Callable, Coroutine, Iterable, Mapping, Sequence
 
 import pytest
-from tlz import concat, sliding_window
+from tlz import merge, sliding_window
 
 import dask
+from dask.utils import key_split, parse_bytes
 
-from distributed import Event, Lock, Nanny, Worker, profile, wait, worker_client
+from distributed import (
+    Client,
+    Event,
+    Lock,
+    Nanny,
+    Scheduler,
+    Worker,
+    profile,
+    wait,
+    worker_client,
+)
+from distributed.client import Future
 from distributed.compatibility import LINUX
-from distributed.config import config
 from distributed.core import Status
 from distributed.metrics import time
-from distributed.scheduler import key_split
 from distributed.system import MEMORY_LIMIT
+from distributed.utils import wait_for
 from distributed.utils_test import (
+    NO_AMM,
+    BlockedGetData,
     captured_logger,
     freeze_batched_send,
     gen_cluster,
+    gen_nbytes,
     inc,
     nodebug_setup_module,
     nodebug_teardown_module,
     slowadd,
     slowidentity,
     slowinc,
+    wait_for_state,
 )
 from distributed.worker_state_machine import (
     ExecuteSuccessEvent,
@@ -45,8 +63,7 @@ setup_module = nodebug_setup_module
 teardown_module = nodebug_teardown_module
 
 
-@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 2), ("127.0.0.2", 2)])
+@gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
 async def test_work_stealing(c, s, a, b):
     [x] = await c._scatter([1], workers=a.address)
     futures = c.map(slowadd, range(50), [x] * 50)
@@ -58,6 +75,7 @@ async def test_work_stealing(c, s, a, b):
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
 async def test_dont_steal_expensive_data_fast_computation(c, s, a, b):
     np = pytest.importorskip("numpy")
+
     x = c.submit(np.arange, 1000000, workers=a.address)
     await wait([x])
     future = c.submit(np.sum, [1], workers=a.address)  # learn that sum is fast
@@ -85,25 +103,25 @@ async def test_steal_cheap_data_slow_computation(c, s, a, b):
     assert abs(len(a.data) - len(b.data)) <= 5
 
 
-@pytest.mark.avoid_ci
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
+@pytest.mark.slow
+@gen_cluster(client=True, nthreads=[("", 1)] * 2, config=NO_AMM)
 async def test_steal_expensive_data_slow_computation(c, s, a, b):
     np = pytest.importorskip("numpy")
 
-    x = c.submit(slowinc, 100, delay=0.2, workers=a.address)
+    x = c.submit(slowinc, 1, delay=0.2, workers=a.address)
     await wait(x)  # learn that slowinc is slow
 
-    x = c.submit(np.arange, 1000000, workers=a.address)  # put expensive data
+    x = c.submit(np.arange, 1_000_000, workers=a.address)  # put expensive data
     await wait(x)
 
-    slow = [c.submit(slowinc, x, delay=0.1, pure=False) for i in range(20)]
+    slow = [c.submit(slowinc, x, delay=0.1, pure=False) for _ in range(20)]
     await wait(slow)
     assert len(s.tasks[x.key].who_has) > 1
 
     assert b.data  # not empty
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10, config=NO_AMM)
 async def test_worksteal_many_thieves(c, s, *workers):
     x = c.submit(slowinc, -1, delay=0.1)
     await x
@@ -169,13 +187,24 @@ async def test_stop_in_flight(c, s, a, b):
     del futs
     while s.tasks or a.state.tasks or b.state.tasks:
         await asyncio.sleep(0.1)
+    event = Event()
+
+    def block(x, event):
+        event.wait()
+        return x + 1
+
     futs = c.map(
-        slowinc, range(num_tasks), workers=[a.address], allow_other_workers=True
+        block,
+        range(num_tasks),
+        event=event,
+        workers=[a.address],
+        allow_other_workers=True,
     )
     while not len(a.state.tasks) == num_tasks:
         await asyncio.sleep(0.01)
     assert len(b.state.tasks) == 0
     await steal.start()
+    await event.set()
     await c.gather(futs)
     assert len(a.state.tasks) != num_tasks
     assert len(b.state.tasks) != 0
@@ -211,7 +240,7 @@ async def test_allow_tasks_stolen_before_first_completes(c, s, a, b):
             await asyncio.sleep(0.001)
         # Ensure the task is indeed blocked
         with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(first, 0.01)
+            await wait_for(first, 0.01)
 
         more_tasks = c.map(
             blocked_task,
@@ -286,44 +315,50 @@ async def test_dont_steal_fast_tasks_compute_time(c, s, *workers):
     assert len(s.workers[workers[0].address].has_what) == len(xs) + len(futures)
 
 
-@gen_cluster(client=True)
-async def test_dont_steal_fast_tasks_blocklist(c, s, a, b):
-    # create a dependency
-    x = c.submit(slowinc, 1, workers=[b.address])
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_dont_steal_fast_tasks_blocklist(c, s, a):
+    async with BlockedGetData(s.address) as b:
+        # create a dependency
+        x = c.submit(inc, 1, workers=[b.address], key="x")
+        await wait(x)
 
-    # If the blocklist of fast tasks is tracked somewhere else, this needs to be
-    # changed. This test requires *any* key which is blocked.
-    from distributed.stealing import fast_tasks
+        # If the blocklist of fast tasks is tracked somewhere else, this needs to be
+        # changed. This test requires *any* key which is blocked.
+        from distributed.stealing import fast_tasks
 
-    blocked_key = next(iter(fast_tasks))
+        blocked_key = next(iter(fast_tasks))
 
-    def fast_blocked(x, y=None):
-        # The task should observe a certain computation time such that we can
-        # ensure that it is not stolen due to the blocking. If it is too
-        # fast, the standard mechanism shouldn't allow stealing
-        import time
+        def fast_blocked(i, x):
+            # The task should observe a certain computation time such that we can
+            # ensure that it is not stolen due to the blocking. If it is too
+            # fast, the standard mechanism shouldn't allow stealing
+            sleep(0.01)
 
-        time.sleep(0.01)
+        futures = c.map(
+            fast_blocked,
+            range(50),
+            x=x,
+            # Submit the task to one worker but allow it to be distributed elsewhere,
+            # i.e. this is not a task restriction
+            workers=[a.address],
+            allow_other_workers=True,
+            key=blocked_key,
+        )
 
-    futures = c.map(
-        fast_blocked,
-        range(100),
-        y=x,
-        # Submit the task to one worker but allow it to be distributed else,
-        # i.e. this is not a task restriction
-        workers=[a.address],
-        allow_other_workers=True,
-        key=blocked_key,
-    )
+        while len(s.tasks) < 51:
+            await asyncio.sleep(0.01)
+        b.block_get_data.set()
+        await wait(futures)
 
-    await wait(futures)
-
-    # The +1 is the dependency we initially submitted to worker B
-    assert len(s.workers[a.address].has_what) == 101
-    assert len(s.workers[b.address].has_what) == 1
+        # Note: x may now be on a, b, or both, depending if the Active Memory Manager
+        # got to run or not
+        ws_a = s.workers[a.address]
+        for ts in s.tasks.values():
+            if ts.key.startswith(blocked_key):
+                assert ts.who_has == {ws_a}
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+@gen_cluster(client=True, nthreads=[("", 1)], config=NO_AMM)
 async def test_new_worker_steals(c, s, a):
     await wait(c.submit(slowinc, 1, delay=0.01))
 
@@ -332,17 +367,17 @@ async def test_new_worker_steals(c, s, a):
     while len(a.state.tasks) < 10:
         await asyncio.sleep(0.01)
 
-    b = await Worker(s.address, nthreads=1, memory_limit=MEMORY_LIMIT)
+    async with Worker(s.address, nthreads=1) as b:
+        result = await total
+        assert result == sum(map(inc, range(100)))
 
-    result = await total
-    assert result == sum(map(inc, range(100)))
+        for w in (a, b):
+            assert all(isinstance(v, int) for v in w.data.values())
 
-    for w in [a, b]:
-        assert all(isinstance(v, int) for v in w.data.values())
-
-    assert b.data
-
-    await b.close()
+        # This requires AMM to be off. Otherwise, if b reports higher optimistic memory
+        # than a and `total` happens to be computed on a, then all keys on b will be
+        # replicated onto a and then deleted by the AMM.
+        assert b.data
 
 
 @gen_cluster(client=True)
@@ -443,17 +478,16 @@ async def test_steal_host_restrictions(c, s, wa, wb):
     assert len(wa.state.tasks) == ntasks
     assert len(wb.state.tasks) == 0
 
-    wc = await Worker(s.address, nthreads=1)
+    async with Worker(s.address, nthreads=1) as wc:
+        start = time()
+        while not wc.state.tasks or len(wa.state.tasks) == ntasks:
+            await asyncio.sleep(0.01)
+            assert time() < start + 3
 
-    start = time()
-    while not wc.state.tasks or len(wa.state.tasks) == ntasks:
-        await asyncio.sleep(0.01)
-        assert time() < start + 3
-
-    await asyncio.sleep(0.1)
-    assert 0 < len(wa.state.tasks) < ntasks
-    assert len(wb.state.tasks) == 0
-    assert 0 < len(wc.state.tasks) < ntasks
+        await asyncio.sleep(0.1)
+        assert 0 < len(wa.state.tasks) < ntasks
+        assert len(wb.state.tasks) == 0
+        assert 0 < len(wc.state.tasks) < ntasks
 
 
 @gen_cluster(
@@ -486,15 +520,12 @@ async def test_steal_resource_restrictions(c, s, a):
         await asyncio.sleep(0.01)
     assert len(a.state.tasks) == 101
 
-    b = await Worker(s.address, nthreads=1, resources={"A": 4})
+    async with Worker(s.address, nthreads=1, resources={"A": 4}) as b:
+        while not b.state.tasks or len(a.state.tasks) == 101:
+            await asyncio.sleep(0.01)
 
-    while not b.state.tasks or len(a.state.tasks) == 101:
-        await asyncio.sleep(0.01)
-
-    assert len(b.state.tasks) > 0
-    assert len(a.state.tasks) < 101
-
-    await b.close()
+        assert len(b.state.tasks) > 0
+        assert len(a.state.tasks) < 101
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1, {"resources": {"A": 2, "C": 1}})])
@@ -508,15 +539,12 @@ async def test_steal_resource_restrictions_asym_diff(c, s, a):
         await asyncio.sleep(0.01)
     assert len(a.state.tasks) == 101
 
-    b = await Worker(s.address, nthreads=1, resources={"A": 4, "B": 5})
+    async with Worker(s.address, nthreads=1, resources={"A": 4, "B": 5}) as b:
+        while not b.state.tasks or len(a.state.tasks) == 101:
+            await asyncio.sleep(0.01)
 
-    while not b.state.tasks or len(a.state.tasks) == 101:
-        await asyncio.sleep(0.01)
-
-    assert len(b.state.tasks) > 0
-    assert len(a.state.tasks) < 101
-
-    await b.close()
+        assert len(b.state.tasks) > 0
+        assert len(a.state.tasks) < 101
 
 
 @gen_cluster(
@@ -634,104 +662,111 @@ async def test_steal_more_attractive_tasks(c, s, a, *rest):
     assert any(future.key in w.state.tasks for w in rest)
 
 
-def func(x):
-    sleep(1)
-
-
 async def assert_balanced(inp, expected, c, s, *workers):
     steal = s.extensions["stealing"]
     await steal.stop()
+    ev = Event()
+
+    def block(*args, event, **kwargs):
+        event.wait()
 
     counter = itertools.count()
-    tasks = list(concat(inp))
-    data_seq = itertools.count()
 
-    futures = []
-    for w, ts in zip(workers, inp):
-        for t in sorted(ts, reverse=True):
+    futures_per_worker = defaultdict(list)
+    for w, tasks in zip(workers, inp):
+        for t in sorted(tasks, reverse=True):
             if t:
-                [dat] = await c.scatter([next(data_seq)], workers=w.address)
-                ts = s.tasks[dat.key]
-                # Ensure scheduler state stays consistent
-                old_nbytes = ts.nbytes
-                ts.nbytes = int(s.bandwidth * t)
-                for ws in ts.who_has:
-                    ws.nbytes += ts.nbytes - old_nbytes
+                [dat] = await c.scatter(
+                    [gen_nbytes(int(t * s.bandwidth))], workers=w.address
+                )
             else:
                 dat = 123
             i = next(counter)
             f = c.submit(
-                func,
+                block,
                 dat,
+                event=ev,
                 key="%d-%d" % (int(t), i),
                 workers=w.address,
                 allow_other_workers=True,
                 pure=False,
                 priority=-i,
             )
-            futures.append(f)
+            futures_per_worker[w].append(f)
 
-    while len([ts for ts in s.tasks.values() if ts.processing_on]) < len(futures):
-        await asyncio.sleep(0.001)
+    # Make sure all tasks are scheduled on the workers
+    # We are relying on the futures not to be rootish (and thus not to remain in the
+    # scheduler-side queue) because they have worker restrictions
+    wait_for_states = []
+    for w, fs in futures_per_worker.items():
+        for i, f in enumerate(fs):
+            # Make sure the first task is executing, all others are ready
+            state = "executing" if i == 0 else "ready"
+            wait_for_states.append(wait_for_state(f.key, state, w))
+    await asyncio.gather(*wait_for_states)
 
-    for i in range(10):
+    # Balance several times since stealing might attempt to steal the already executing task
+    # for each saturated worker and will need a chance to correct its mistake
+    for _ in workers:
         steal.balance()
+        # steal.stop() ensures that all in-flight stealing requests have been resolved
+        await steal.stop()
 
-        while steal.in_flight:
-            await asyncio.sleep(0.001)
+    await ev.set()
+    await c.gather([f for fs in futures_per_worker.values() for f in fs])
 
-        result = [
-            sorted(
-                (int(key_split(ts.key)) for ts in s.workers[w.address].processing),
-                reverse=True,
-            )
-            for w in workers
-        ]
+    result = [
+        sorted(
+            # The name of input data starts with ``SizeOf``
+            (int(key_split(t)) for t in w.data.keys() if not t.startswith("SizeOf")),
+            reverse=True,
+        )
+        for w in workers
+    ]
 
-        result2 = sorted(result, reverse=True)
-        expected2 = sorted(expected, reverse=True)
+    result2 = sorted(result, reverse=True)
+    expected2 = sorted(expected, reverse=True)
 
-        if config.get("pdb-on-err"):
-            if result2 != expected2:
-                import pdb
-
-                pdb.set_trace()
-
-        if result2 == expected2:
-            return
-    raise Exception(f"Expected: {expected2}; got: {result2}")
+    assert result2 == expected2
 
 
-@pytest.mark.slow
 @pytest.mark.parametrize(
     "inp,expected",
     [
-        ([[1], []], [[1], []]),  # don't move unnecessarily
-        ([[0, 0], []], [[0], [0]]),  # balance
-        ([[0.1, 0.1], []], [[0], [0]]),  # balance even if results in even
-        ([[0, 0, 0], []], [[0, 0], [0]]),  # don't over balance
-        ([[0, 0], [0, 0, 0], []], [[0, 0], [0, 0], [0]]),  # move from larger
-        ([[0, 0, 0], [0], []], [[0, 0], [0], [0]]),  # move to smaller
-        ([[0, 1], []], [[1], [0]]),  # choose easier first
-        ([[0, 0, 0, 0], [], []], [[0, 0], [0], [0]]),  # spread evenly
-        ([[1, 0, 2, 0], [], []], [[2, 1], [0], [0]]),  # move easier
-        ([[1, 1, 1], []], [[1, 1], [1]]),  # be willing to move costly items
-        ([[1, 1, 1, 1], []], [[1, 1, 1], [1]]),  # but don't move too many
-        (
-            [[0, 0], [0, 0], [0, 0], []],  # no one clearly saturated
-            [[0, 0], [0, 0], [0], [0]],
+        pytest.param([[1], []], [[1], []], id="don't move unnecessarily"),
+        pytest.param([[0, 0], []], [[0], [0]], id="balance"),
+        pytest.param(
+            [[0.1, 0.1], []], [[0], [0]], id="balance even if results in even"
         ),
-        (
-            [[4, 2, 2, 2, 2, 1, 1], [4, 2, 1, 1], [], [], []],
-            [[4, 2, 2, 2, 2], [4, 2, 1], [1], [1], [1]],
+        pytest.param([[0, 0, 0], []], [[0, 0], [0]], id="don't over balance"),
+        pytest.param(
+            [[0, 0], [0, 0, 0], []], [[0, 0], [0, 0], [0]], id="move from larger"
+        ),
+        pytest.param([[0, 0, 0], [0], []], [[0, 0], [0], [0]], id="move to smaller"),
+        pytest.param([[0, 1], []], [[1], [0]], id="choose easier first"),
+        pytest.param([[0, 0, 0, 0], [], []], [[0, 0], [0], [0]], id="spread evenly"),
+        pytest.param([[1, 0, 2, 0], [], []], [[2, 1], [0], [0]], id="move easier"),
+        pytest.param(
+            [[1, 1, 1], []], [[1, 1], [1]], id="be willing to move costly items"
         ),
         pytest.param(
-            [[1, 1, 1, 1, 1, 1, 1], [1, 1], [1, 1], [1, 1], []],
-            [[1, 1, 1, 1, 1], [1, 1], [1, 1], [1, 1], [1, 1]],
-            # Can't mark as flaky as when it fails it does so every time for some reason
-            marks=pytest.mark.xfail(
-                reason="Some uncertainty based on executing stolen task"
-            ),
+            [[1, 1, 1, 1], []], [[1, 1, 1], [1]], id="but don't move too many"
+        ),
+        pytest.param(
+            [[0, 0], [0, 0], [0, 0], []],
+            [[0, 0], [0, 0], [0], [0]],
+            id="no one clearly saturated",
+        ),
+        # NOTE: There is a timing issue that workers may already start executing
+        # tasks before we call balance, i.e. the workers will reject the
+        # stealing request and we end up with a different end result.
+        # Particularly tests with many input tasks are more likely to fail since
+        # the test setup takes longer and allows the workers more time to
+        # schedule a task on the threadpool
+        pytest.param(
+            [[4, 2, 2, 2, 2, 1, 1], [4, 2, 1, 1], [], [], []],
+            [[4, 2, 2, 2], [4, 2, 1, 1], [2], [1], [1]],
+            id="balance multiple saturated workers",
         ),
     ],
 )
@@ -760,45 +795,11 @@ async def test_restart(c, s, a, b):
         await asyncio.sleep(0.01)
 
     steal = s.extensions["stealing"]
-    assert any(st for st in steal.stealable_all)
     assert any(x for L in steal.stealable.values() for x in L)
 
     await c.restart()
 
-    assert not any(x for x in steal.stealable_all)
     assert not any(x for L in steal.stealable.values() for x in L)
-
-
-@gen_cluster(
-    client=True,
-    config={"distributed.scheduler.default-task-durations": {"slowadd": 0.001}},
-)
-async def test_steal_communication_heavy_tasks(c, s, a, b):
-    steal = s.extensions["stealing"]
-    x = c.submit(mul, b"0", int(s.bandwidth), workers=a.address)
-    y = c.submit(mul, b"1", int(s.bandwidth), workers=b.address)
-
-    futures = [
-        c.submit(
-            slowadd,
-            x,
-            y,
-            delay=1,
-            pure=False,
-            workers=a.address,
-            allow_other_workers=True,
-        )
-        for i in range(10)
-    ]
-
-    while not any(f.key in s.tasks and s.tasks[f.key].processing_on for f in futures):
-        await asyncio.sleep(0.01)
-
-    steal.balance()
-    while steal.in_flight:
-        await asyncio.sleep(0.001)
-
-    assert s.workers[b.address].processing
 
 
 @gen_cluster(client=True)
@@ -810,28 +811,36 @@ async def test_steal_twice(c, s, a, b):
 
     while len(s.tasks) < 100:  # tasks are all allocated
         await asyncio.sleep(0.01)
-    # Wait for b to start stealing tasks
-    while len(b.state.tasks) < 30:
-        await asyncio.sleep(0.01)
+    if math.isinf(s.WORKER_SATURATION):
+        # Wait for b to start stealing tasks
+        while len(b.state.tasks) < 30:
+            await asyncio.sleep(0.01)
+    else:
+        # Wait for b to complete some tasks
+        while len(b.data) < 8:
+            await asyncio.sleep(0.01)
 
     # Army of new workers arrives to help
-    workers = await asyncio.gather(*(Worker(s.address) for _ in range(20)))
+    async with contextlib.AsyncExitStack() as stack:
+        # This is pretty timing sensitive
+        workers = [stack.enter_async_context(Worker(s.address)) for _ in range(10)]
+        workers = await asyncio.gather(*workers)
 
-    await wait(futures)
+        await wait(futures)
 
-    # Note: this includes a and b
-    empty_workers = [ws for ws in s.workers.values() if not ws.has_what]
-    assert (
-        len(empty_workers) < 3
-    ), f"Too many workers without keys ({len(empty_workers)} out of {len(s.workers)})"
-    # This also tests that some tasks were stolen from b
-    # (see `while len(b.state.tasks) < 30` above)
-    assert max(len(ws.has_what) for ws in s.workers.values()) < 30
+        # Note: this includes a and b
+        empty_workers = [ws for ws in s.workers.values() if not ws.has_what]
+        assert (
+            len(empty_workers) < 3
+        ), f"Too many workers without keys ({len(empty_workers)} out of {len(s.workers)})"
+        # This also tests that some tasks were stolen from b
+        # (see `while len(b.state.tasks) < 30` above)
+        # If queuing is enabled, then there was nothing to steal from b,
+        # so this just tests the queue was balanced not-terribly.
+        assert max(len(ws.has_what) for ws in s.workers.values()) < 30
 
-    assert a.state.in_flight_tasks_count == 0
-    assert b.state.in_flight_tasks_count == 0
-
-    await asyncio.gather(*(w.close() for w in workers))
+        assert a.state.in_flight_tasks_count == 0
+        assert b.state.in_flight_tasks_count == 0
 
 
 @gen_cluster(
@@ -892,7 +901,7 @@ async def test_dont_steal_long_running_tasks(c, s, a, b):
     await c.submit(inc, 1)  # learn duration
 
     long_tasks = c.map(long, [0.5, 0.6], workers=a.address, allow_other_workers=True)
-    while sum(len(ws.processing) for ws in s.workers.values()) < 2:  # let them start
+    while sum(len(ws.long_running) for ws in s.workers.values()) < 2:  # let them start
         await asyncio.sleep(0.01)
 
     start = time()
@@ -906,7 +915,6 @@ async def test_dont_steal_long_running_tasks(c, s, a, b):
     incs = c.map(inc, range(100), workers=a.address, allow_other_workers=True)
 
     await asyncio.sleep(0.2)
-
     await wait(long_tasks)
 
     for t in long_tasks:
@@ -955,7 +963,7 @@ async def test_cleanup_repeated_tasks(c, s, a, b):
 async def test_lose_task(c, s, a, b):
     with captured_logger("distributed.stealing") as log:
         s.periodic_callbacks["stealing"].interval = 1
-        for i in range(100):
+        for _ in range(100):
             futures = c.map(
                 slowinc,
                 range(10),
@@ -972,17 +980,20 @@ async def test_lose_task(c, s, a, b):
 
 
 @pytest.mark.parametrize("interval, expected", [(None, 100), ("500ms", 500), (2, 2)])
-@gen_cluster(nthreads=[])
+@gen_cluster(nthreads=[], config={"distributed.scheduler.work-stealing": False})
 async def test_parse_stealing_interval(s, interval, expected):
     from distributed.scheduler import WorkStealing
 
     if interval:
-        ctx = dask.config.set({"distributed.scheduler.work-stealing-interval": "500ms"})
+        ctx = dask.config.set(
+            {"distributed.scheduler.work-stealing-interval": interval}
+        )
     else:
         ctx = contextlib.nullcontext()
     with ctx:
         ws = WorkStealing(s)
-        s.periodic_callbacks["stealing"].callback_time == expected
+        await ws.start()
+        assert s.periodic_callbacks["stealing"].callback_time == expected
 
 
 @gen_cluster(client=True)
@@ -1007,7 +1018,6 @@ async def test_balance_with_longer_task(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_blocklist_shuffle_split(c, s, a, b):
-
     pd = pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
     npart = 10
@@ -1079,22 +1089,29 @@ async def test_steal_concurrent_simple(c, s, *workers):
     assert not ws2.has_what
 
 
-@gen_cluster(
-    client=True,
-    config={
-        "distributed.scheduler.work-stealing-interval": 1_000_000,
-    },
-)
+@gen_cluster(client=True)
 async def test_steal_reschedule_reset_in_flight_occupancy(c, s, *workers):
     # https://github.com/dask/distributed/issues/5370
     steal = s.extensions["stealing"]
+    await steal.stop()
     w0 = workers[0]
-    futs1 = c.map(
-        slowinc,
-        range(10),
-        key=[f"f1-{ix}" for ix in range(10)],
+    roots = c.map(
+        inc,
+        range(6),
+        key=[f"r-{ix}" for ix in range(6)],
     )
-    while not w0.state.tasks:
+
+    def block(x, event):
+        event.wait()
+        return x + 1
+
+    event = Event()
+    futs1 = [
+        c.submit(block, r, event=event, key=f"f{ir}-{ix}")
+        for ir, r in enumerate(roots)
+        for ix in range(4)
+    ]
+    while not w0.state.ready:
         await asyncio.sleep(0.01)
 
     # ready is a heap but we don't need last, just not the next
@@ -1107,7 +1124,8 @@ async def test_steal_reschedule_reset_in_flight_occupancy(c, s, *workers):
 
     steal.move_task_request(victim_ts, wsA, wsB)
 
-    s.reschedule(victim_key, stimulus_id="test")
+    s._reschedule(victim_key, stimulus_id="test")
+    await event.set()
     await c.gather(futs1)
 
     del futs1
@@ -1241,7 +1259,7 @@ async def test_reschedule_concurrent_requests_deadlock(c, s, *workers):
     steal.move_task_request(victim_ts, wsA, wsB)
 
     s.set_restrictions(worker={victim_key: [wsB.address]})
-    s.reschedule(victim_key, stimulus_id="test")
+    s._reschedule(victim_key, stimulus_id="test")
     assert wsB == victim_ts.processing_on
     # move_task_request is not responsible for respecting worker restrictions
     steal.move_task_request(victim_ts, wsB, wsC)
@@ -1271,6 +1289,7 @@ async def test_reschedule_concurrent_requests_deadlock(c, s, *workers):
     assert msgs in (expect1, expect2, expect3)
 
 
+@pytest.mark.skip("executing heartbeats not considered yet")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 async def test_correct_bad_time_estimate(c, s, *workers):
     """Initial time estimation causes the task to not be considered for
@@ -1282,9 +1301,9 @@ async def test_correct_bad_time_estimate(c, s, *workers):
     steal = s.extensions["stealing"]
     future = c.submit(slowinc, 1, delay=0)
     await wait(future)
-    futures = [c.submit(slowinc, future, delay=0.1, pure=False) for i in range(20)]
-    while not any(f.key in s.tasks for f in futures):
-        await asyncio.sleep(0.001)
+    futures = [c.submit(slowinc, future, delay=0.1, pure=False) for _ in range(20)]
+    while len(s.tasks) < 21:
+        await asyncio.sleep(0)
     assert not any(s.tasks[f.key] in steal.key_stealable for f in futures)
     await asyncio.sleep(0.5)
     assert any(s.tasks[f.key] in steal.key_stealable for f in futures)
@@ -1334,3 +1353,532 @@ def test_steal_worker_state(ws_with_running_task):
     assert "x" not in ws.tasks
     assert "x" not in ws.data
     assert ws.available_resources == {"R": 1}
+
+
+@pytest.mark.slow()
+@gen_cluster(nthreads=[("", 1)] * 4, client=True)
+async def test_steal_very_fast_tasks(c, s, *workers):
+    np = pytest.importorskip("numpy")
+
+    # Ensure that very fast tasks are allowed to be stolen
+    root = dask.delayed(lambda n: "x" * n)(
+        dask.utils.parse_bytes("1MiB"), dask_key_name="root"
+    )
+
+    @dask.delayed
+    def func(*args):
+        import time
+
+        time.sleep(0.002)
+
+    ntasks = 1000
+    results = [func(root, i) for i in range(ntasks)]
+    futs = c.compute(results)
+    await c.gather(futs)
+
+    ntasks_per_worker = np.array([len(w.data) for w in workers])
+    ideal = ntasks / len(workers)
+    assert (ntasks_per_worker > ideal * 0.5).all(), (ideal, ntasks_per_worker)
+    assert (ntasks_per_worker < ideal * 1.5).all(), (ideal, ntasks_per_worker)
+
+
+@pytest.mark.parametrize(
+    "cost, ntasks, expect_steal",
+    [
+        pytest.param(10, 10, False, id="not enough work to steal"),
+        pytest.param(10, 12, True, id="enough work to steal"),
+        pytest.param(20, 12, False, id="not enough work for increased cost"),
+    ],
+)
+def test_balance_expensive_tasks(cost, ntasks, expect_steal):
+    dependencies = {"a": cost}
+    dependency_placement = [["a"], []]
+    task_placement = [[["a"]] * ntasks, []]
+
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        return sum(actual_task_counts) == ntasks and (
+            (actual_task_counts[1] > 0) == expect_steal
+        )
+
+    _run_dependency_balance_test(
+        dependencies,
+        dependency_placement,
+        task_placement,
+        _correct_placement,
+    )
+
+
+def test_balance_uneven_without_replica():
+    dependencies = {"a": 1}
+    dependency_placement = [["a"], []]
+    task_placement = [[["a"], ["a"]], []]
+
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        return actual_task_counts == [2, 0]
+
+    _run_dependency_balance_test(
+        dependencies,
+        dependency_placement,
+        task_placement,
+        _correct_placement,
+    )
+
+
+def test_balance_eventually_steals_large_dependency_without_replica():
+    dependencies = {"a": 10}
+    dependency_placement = [["a"], []]
+    task_placement = [[["a"]] * 20, []]
+
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        return sum(actual_task_counts) == 20 and actual_task_counts[1] > 0
+
+    _run_dependency_balance_test(
+        dependencies,
+        dependency_placement,
+        task_placement,
+        _correct_placement,
+    )
+
+
+def test_balance_even_with_replica():
+    dependencies = {"a": 1}
+    dependency_placement = [["a"], ["a"]]
+    task_placement = [[["a"], ["a"]], []]
+
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        return actual_task_counts == [
+            1,
+            1,
+        ]
+
+    _run_dependency_balance_test(
+        dependencies,
+        dependency_placement,
+        task_placement,
+        _correct_placement,
+    )
+
+
+def test_balance_to_replica():
+    dependencies = {"a": 2}
+    dependency_placement = [["a"], ["a"], []]
+    task_placement = [[["a"], ["a"]], [], []]
+
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        return actual_task_counts == [
+            1,
+            1,
+            0,
+        ]
+
+    _run_dependency_balance_test(
+        dependencies,
+        dependency_placement,
+        task_placement,
+        _correct_placement,
+    )
+
+
+def test_balance_multiple_to_replica():
+    dependencies = {"a": 6}
+    dependency_placement = [["a"], ["a"], []]
+    task_placement = [[["a"], ["a"], ["a"], ["a"], ["a"], ["a"], ["a"], ["a"]], [], []]
+
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        # FIXME: A better task placement would be even but the current balancing
+        # logic aborts as soon as a worker is no longer classified as idle
+        # return actual_task_counts == [
+        #     4,
+        #     4,
+        #     0,
+        # ]
+        return actual_task_counts == [
+            6,
+            2,
+            0,
+        ]
+
+    _run_dependency_balance_test(
+        dependencies,
+        dependency_placement,
+        task_placement,
+        _correct_placement,
+    )
+
+
+def test_balance_to_larger_dependency():
+    dependencies = {"a": 2, "b": 1}
+    dependency_placement = [["a", "b"], ["a"], ["b"]]
+    task_placement = [[["a", "b"], ["a", "b"], ["a", "b"]], [], []]
+
+    def _correct_placement(actual):
+        actual_task_counts = [len(placed) for placed in actual]
+        return actual_task_counts == [
+            2,
+            1,
+            0,
+        ]
+
+    _run_dependency_balance_test(
+        dependencies,
+        dependency_placement,
+        task_placement,
+        _correct_placement,
+    )
+
+
+def test_balance_prefers_busier_with_dependency():
+    dependencies = {"a": 5, "b": 1}
+    dependency_placement = [["a"], ["a", "b"], []]
+    task_placement = [
+        [["a"], ["a"], ["a"], ["a"], ["a"], ["a"]],
+        [["b"]],
+        [],
+    ]
+
+    def _correct_placement(actual):
+        actual_task_placements = [sorted(placed) for placed in actual]
+        # FIXME: A better task placement would be even but the current balancing
+        # logic aborts as soon as a worker is no longer classified as idle
+        # return actual_task_placements == [
+        #     [["a"], ["a"], ["a"], ["a"]],
+        #     [["a"], ["a"], ["b"]],
+        #     [],
+        # ]
+        return actual_task_placements == [
+            [["a"], ["a"], ["a"], ["a"], ["a"]],
+            [["a"], ["b"]],
+            [],
+        ]
+
+    _run_dependency_balance_test(
+        dependencies,
+        dependency_placement,
+        task_placement,
+        _correct_placement,
+        # This test relies on disabling queueing to flag workers as idle
+        config={
+            "distributed.scheduler.worker-saturation": float("inf"),
+        },
+    )
+
+
+def _run_dependency_balance_test(
+    dependencies: Mapping[str, int],
+    dependency_placement: list[list[str]],
+    task_placement: list[list[list[str]]],
+    correct_placement_fn: Callable[[list[list[list[str]]]], bool],
+    config: dict | None = None,
+) -> None:
+    """Run a test for balancing with task dependencies according to the provided
+    specifications.
+
+    This method executes the test logic for all permutations of worker placements
+    and generates a new cluster for each one.
+
+    Parameters
+    ----------
+    dependencies
+        Mapping of task dependencies to their weight.
+    dependency_placement
+        List of list of dependencies to be placed on the worker corresponding
+        to the index of the outer list.
+    task_placement
+        List of list of tasks to be placed on the worker corresponding to the
+        index of the outer list. Each task is a list of names of dependencies.
+    correct_placement_fn
+        Callable used to determine if stealing placed the tasks as expected.
+    config
+        Optional configuration to apply to the test.
+    See Also
+    --------
+    _dependency_balance_test_permutation
+    """
+    nworkers = len(task_placement)
+    for permutation in itertools.permutations(range(nworkers)):
+
+        async def _run(
+            *args,
+            permutation=permutation,
+            **kwargs,
+        ):
+            await _dependency_balance_test_permutation(
+                dependencies,
+                dependency_placement,
+                task_placement,
+                correct_placement_fn,
+                permutation,
+                *args,
+                **kwargs,
+            )
+
+        default_task_durations = {
+            compose_task_prefix(deps): "1s"
+            for tasks in task_placement
+            for deps in tasks
+        }
+
+        gen_cluster(
+            client=True,
+            nthreads=[("", 1)] * len(task_placement),
+            config=merge(
+                NO_AMM,
+                config or {},
+                {
+                    "distributed.scheduler.default-task-durations": default_task_durations,
+                },
+            ),
+            # Avoid heartbeats since comm costs are sensitive to bandwidth updates
+            worker_kwargs={"heartbeat_interval": "100s"},
+        )(_run)()
+
+
+def compose_task_prefix(dependencies: list[str]) -> str:
+    dep_key = "".join(sorted(dependencies))
+    return f"task-{dep_key}"
+
+
+async def _dependency_balance_test_permutation(
+    dependencies: Mapping[str, int],
+    dependency_placement: list[list[str]],
+    task_placement: list[list[list[str]]],
+    correct_placement_fn: Callable[[list[list[list[str]]]], bool],
+    permutation: list[int],
+    c: Client,
+    s: Scheduler,
+    *workers: Worker,
+) -> None:
+    """Run a test for balancing with task dependencies according to the provided
+    specifications and worker permutations.
+
+    Parameters
+    ----------
+    dependencies
+        Mapping of task dependencies to their weight.
+    dependency_placement
+        List of list of dependencies to be placed on the worker corresponding
+        to the index of the outer list.
+    task_placement
+        List of list of tasks to be placed on the worker corresponding to the
+        index of the outer list. Each task is a list of names of dependencies.
+    correct_placement_fn
+        Callable used to determine if stealing placed the tasks as expected.
+    permutation
+        Permutation of workers to use for this run.
+
+    See Also
+    --------
+    _run_dependency_balance_test
+    """
+    steal = s.extensions["stealing"]
+    await steal.stop()
+
+    inverse = [permutation.index(i) for i in range(len(permutation))]
+    permutated_dependency_placement = [dependency_placement[i] for i in permutation]
+    permutated_task_placement = [task_placement[i] for i in permutation]
+
+    dependency_futures = await _place_dependencies(
+        dependencies, permutated_dependency_placement, c, s, workers
+    )
+
+    ev, futures_per_worker = await _place_tasks(
+        permutated_task_placement,
+        permutated_dependency_placement,
+        dependency_futures,
+        c,
+        s,
+        workers,
+    )
+
+    # Re-evaluate idle/saturated classification to avoid outdated classifications due to
+    # the initialization order of workers. On a real cluster, this would get constantly
+    # updated by tasks being added or completing.
+    for ws in s.workers.values():
+        s.check_idle_saturated(ws)
+
+    # Balance several since stealing might attempt to steal the already executing task
+    # for each saturated worker and will need a chance to correct its mistake
+    for _ in workers:
+        steal.balance()
+        # steal.stop() ensures that all in-flight stealing requests have been resolved
+        await steal.stop()
+
+    await ev.set()
+    await c.gather([f for fs in futures_per_worker.values() for f in fs])
+
+    permutated_actual_placement = _get_task_placement(s, workers)
+    actual_placement = [permutated_actual_placement[i] for i in inverse]
+
+    assert correct_placement_fn(actual_placement), (actual_placement, permutation)
+
+
+async def _place_dependencies(
+    dependencies: Mapping[str, int],
+    placement: list[list[str]],
+    c: Client,
+    s: Scheduler,
+    workers: Sequence[Worker],
+) -> dict[str, Future]:
+    """Places the dependencies on the workers as specified.
+
+    Parameters
+    ----------
+    dependencies
+        Mapping of task dependencies to their weight.
+    placement
+        List of list of dependencies to be placed on the worker corresponding to the
+        index of the outer list.
+
+    Returns
+    -------
+    Dictionary of futures matching the input dependencies.
+
+    See Also
+    --------
+    _run_dependency_balance_test
+    """
+    dependencies_to_workers = defaultdict(set)
+    for worker_idx, placed in enumerate(placement):
+        for dependency in placed:
+            dependencies_to_workers[dependency].add(workers[worker_idx].address)
+
+    futures = {}
+    for name, multiplier in dependencies.items():
+        key = f"dep-{name}"
+        worker_addresses = dependencies_to_workers[name]
+        futs = await c.scatter(
+            {key: gen_nbytes(int(multiplier * s.bandwidth))},
+            workers=worker_addresses,
+            broadcast=True,
+        )
+        futures[name] = futs[key]
+
+    await c.gather(futures.values())
+
+    return futures
+
+
+async def _place_tasks(
+    placement: list[list[list[str]]],
+    dependency_placement: list[list[str]],
+    dependency_futures: Mapping[str, Future],
+    c: Client,
+    s: Scheduler,
+    workers: Sequence[Worker],
+) -> tuple[Event, dict[Worker, list[Future]]]:
+    """Places the tasks on the workers as specified.
+
+    Parameters
+    ----------
+    placement
+        List of list of tasks to be placed on the worker corresponding to the
+        index of the outer list. Each task is a list of names of dependencies.
+    dependency_placement
+        List of list of dependencies to be placed on the worker corresponding to the
+        index of the outer list.
+    dependency_futures
+        Mapping of dependency names to their corresponding futures.
+
+    Returns
+    -------
+    Tuple of the event blocking the placed tasks and list of futures matching
+    the input task placement.
+
+    See Also
+    --------
+    _run_dependency_balance_test
+    """
+    ev = Event()
+
+    def block(*args, event, **kwargs):
+        event.wait()
+
+    counter = itertools.count()
+    futures_per_worker = defaultdict(list)
+    for worker, tasks, placed_dependencies in zip(
+        workers, placement, dependency_placement
+    ):
+        for dependencies in tasks:
+            for dependency in dependencies:
+                assert dependency in placed_dependencies, (
+                    f"Dependency {dependency} of task {dependencies} not found "
+                    "on worker {worker}. Make sure that workers already hold all "
+                    "dependencies of their tasks to avoid transfers and skewing "
+                    "bandwidth measurements"
+                )
+            i = next(counter)
+            key = f"{compose_task_prefix(dependencies)}-{i}"
+            f = c.submit(
+                block,
+                [dependency_futures[dependency] for dependency in dependencies],
+                event=ev,
+                key=key,
+                workers=worker.address,
+                allow_other_workers=True,
+                pure=False,
+                priority=-i,
+            )
+            futures_per_worker[worker].append(f)
+
+    # Make sure all tasks are scheduled on the workers
+    # We are relying on the futures not to be rootish (and thus not to remain in the
+    # scheduler-side queue) because they have worker restrictions
+    waits_for_state: list[Coroutine] = []
+    for w, fs in futures_per_worker.items():
+        waits_for_executing_state = []
+        for f in fs:
+            # Every task should be either ready or executing
+            waits_for_state.append(wait_for_state(f.key, ["executing", "ready"], w))
+            waits_for_executing_state.append(
+                asyncio.create_task(wait_for_state(f.key, "executing", w))
+            )
+        # Ensure that each worker has started executing a task
+        waits_for_state.append(
+            asyncio.wait(waits_for_executing_state, return_when="FIRST_COMPLETED")
+        )
+    await asyncio.gather(
+        *waits_for_state,
+    )
+
+    return ev, futures_per_worker
+
+
+def _get_task_placement(
+    s: Scheduler, workers: Iterable[Worker]
+) -> list[list[list[str]]]:
+    """Return the placement of tasks on this worker"""
+    actual = []
+    for w in workers:
+        actual.append(
+            [
+                list(key_split(key[5:]))  # Remove "task-" prefix
+                for key in w.data.keys()
+                if key.startswith("task-")
+            ]
+        )
+    return _deterministic_placement(actual)
+
+
+def _deterministic_placement(placement):
+    """Return a deterministic ordering of the tasks or dependencies on each worker."""
+    return [sorted(placed) for placed in placement]
+
+
+# Reproducer from https://github.com/dask/distributed/issues/6573
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 4,
+)
+async def test_trivial_workload_should_not_cause_work_stealing(c, s, *workers):
+    root = dask.delayed(lambda n: "x" * n)(parse_bytes("1MiB"), dask_key_name="root")
+    results = [dask.delayed(lambda *args: None)(root, i) for i in range(1000)]
+    futs = c.compute(results)
+    await c.gather(futs)
+    events = s.events["stealing"]
+    assert len(events) == 0

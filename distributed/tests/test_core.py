@@ -7,6 +7,7 @@ import socket
 import threading
 import time as timemod
 import weakref
+from unittest import mock
 
 import pytest
 from tornado.ioloop import IOLoop
@@ -33,7 +34,7 @@ from distributed.core import (
 from distributed.metrics import time
 from distributed.protocol import to_serialize
 from distributed.protocol.compression import compressions
-from distributed.utils import get_ip, get_ipv6
+from distributed.utils import get_ip, get_ipv6, wait_for
 from distributed.utils_test import (
     assert_can_connect,
     assert_can_connect_from_everywhere_4,
@@ -86,7 +87,7 @@ def test_async_task_group_initialization():
 
 
 async def _wait_for_n_loop_cycles(n):
-    for i in range(n):
+    for _ in range(n):
         await asyncio.sleep(0)
 
 
@@ -252,7 +253,19 @@ async def test_server_assign_assign_enum_is_quiet():
 async def test_server_status_compare_enum_is_quiet():
     """That would be the default in user code"""
     server = Server({})
-    server.status == Status.running
+    # Note: We only want to assert that this comparison does not
+    # raise an error/warning. We do not want to assert its result.
+    server.status == Status.running  # noqa: B015
+
+
+@gen_test(config={"distributed.admin.system-monitor.gil.enabled": True})
+async def test_server_close_stops_gil_monitoring():
+    pytest.importorskip("gilknocker")
+
+    server = Server({})
+    assert server.monitor._gilknocker.is_running
+    await server.close()
+    assert not server.monitor._gilknocker.is_running
 
 
 @gen_test()
@@ -430,7 +443,10 @@ async def test_server_listen():
         await assert_cannot_connect(inproc_addr2)
 
 
-async def check_rpc(listen_addr, rpc_addr=None, listen_args={}, connection_args={}):
+async def check_rpc(listen_addr, rpc_addr=None, listen_args=None, connection_args=None):
+    listen_args = listen_args or {}
+    connection_args = connection_args or {}
+
     async with Server({"ping": pingpong}) as server:
         await server.listen(listen_addr, **listen_args)
         if rpc_addr is None:
@@ -538,14 +554,14 @@ async def test_rpc_message_lifetime_inproc():
 
 async def check_rpc_with_many_connections(listen_arg):
     async def g():
-        for i in range(10):
+        for _ in range(10):
             await remote.ping()
 
     server = await Server({"ping": pingpong})
     await server.listen(listen_arg)
 
     async with rpc(server.address) as remote:
-        for i in range(10):
+        for _ in range(10):
             await g()
 
         server.stop()
@@ -690,7 +706,7 @@ async def test_send_recv_cancelled():
         server_comm = next(iter(server._comms))
 
         with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(send_recv(client_comm, op="get_stuck"), timeout=0.1)
+            await wait_for(send_recv(client_comm, op="get_stuck"), timeout=0.1)
         assert client_comm.closed()
         while not server_comm.closed():
             await asyncio.sleep(0.01)
@@ -719,10 +735,12 @@ async def test_connection_pool():
         *(rpc(ip="127.0.0.1", port=s.port).ping() for s in servers[:5])
     )
     await asyncio.gather(*(rpc(s.address).ping() for s in servers[:5]))
-    await asyncio.gather(*(rpc("127.0.0.1:%d" % s.port).ping() for s in servers[:5]))
+    await asyncio.gather(*(rpc(f"127.0.0.1:{s.port}").ping() for s in servers[:5]))
     await asyncio.gather(
         *(rpc(ip="127.0.0.1", port=s.port).ping() for s in servers[:5])
     )
+    await asyncio.gather(*(rpc(("127.0.0.1", s.port)).ping() for s in servers[:5]))
+
     assert sum(map(len, rpc.available.values())) == 5
     assert sum(map(len, rpc.occupied.values())) == 0
     assert rpc.active == 0
@@ -835,8 +853,35 @@ async def test_connection_pool_outside_cancellation(monkeypatch):
 
 
 @gen_test()
-async def test_connection_pool_respects_limit():
+async def test_remove_cancels_connect_attempts():
+    loop = asyncio.get_running_loop()
+    connect_started = asyncio.Event()
+    connect_finished = loop.create_future()
 
+    async def connect(*args, **kwargs):
+        connect_started.set()
+        await connect_finished
+
+    async def connect_to_server():
+        with pytest.raises(CommClosedError, match="Address removed."):
+            await rpc.connect("tcp://0.0.0.0")
+
+    async def remove_address():
+        await connect_started.wait()
+        rpc.remove("tcp://0.0.0.0")
+
+    rpc = await ConnectionPool(limit=1)
+
+    with mock.patch("distributed.core.connect", connect):
+        await asyncio.gather(
+            connect_to_server(),
+            remove_address(),
+        )
+    assert connect_finished.cancelled()
+
+
+@gen_test()
+async def test_connection_pool_respects_limit():
     limit = 5
 
     async def ping(comm, delay=0.01):
@@ -936,7 +981,7 @@ async def test_counters():
         await server.listen("tcp://")
 
         async with rpc(server.address) as r:
-            for i in range(2):
+            for _ in range(2):
                 await r.identity()
             with pytest.raises(ZeroDivisionError):
                 await r.div(x=1, y=0)
@@ -1083,7 +1128,6 @@ async def test_close_properly():
     ip = get_ip()
     rpc_addr = f"tcp://{ip}:{ports[-1]}"
     async with rpc(rpc_addr) as remote:
-
         comm = await remote.live_comm()
         await comm.write({"op": "sleep"})
         await sleep_started.wait()
@@ -1129,17 +1173,76 @@ async def test_server_comms_mark_active_handlers():
         while not server._comms:
             await asyncio.sleep(0.05)
         assert set(server._comms.values()) == {"wait"}
+
+        assert server.incoming_comms_open == 1
+        assert server.incoming_comms_active == 1
+
+        def validate_dict(server):
+            assert (
+                server.get_connection_counters()["incoming_comms_open"]
+                == server.incoming_comms_open
+            )
+            assert (
+                server.get_connection_counters()["incoming_comms_active"]
+                == server.incoming_comms_active
+            )
+
+            assert (
+                server.get_connection_counters()["outgoing_comms_open"]
+                == server.rpc.open
+            )
+            assert (
+                server.get_connection_counters()["outgoing_comms_active"]
+                == server.rpc.active
+            )
+
+        validate_dict(server)
+
         assert await comm.read() == "done"
         assert set(server._comms.values()) == {None}
+        assert server.incoming_comms_open == 1
+        assert server.incoming_comms_active == 0
+        validate_dict(server)
         await comm.close()
+
         while server._comms:
             await asyncio.sleep(0.01)
+        assert server.incoming_comms_active == 0
+        assert server.incoming_comms_open == 0
+        validate_dict(server)
+
+        async with Server({}) as server2:
+            rpc_ = server2.rpc(server.address)
+            task = asyncio.create_task(rpc_.wait())
+            while not server.incoming_comms_active:
+                await asyncio.sleep(0.1)
+            assert server.incoming_comms_active == 1
+            assert server.incoming_comms_open == 1
+            assert server.outgoing_comms_active == 0
+            assert server.outgoing_comms_open == 0
+
+            assert server2.incoming_comms_active == 0
+            assert server2.incoming_comms_open == 0
+            assert server2.outgoing_comms_active == 1
+            assert server2.outgoing_comms_open == 1
+            validate_dict(server)
+
+            await task
+            assert server.incoming_comms_active == 0
+            assert server.incoming_comms_open == 1
+            assert server.outgoing_comms_active == 0
+            assert server.outgoing_comms_open == 0
+
+            assert server2.incoming_comms_active == 0
+            assert server2.incoming_comms_open == 0
+            assert server2.outgoing_comms_active == 0
+            assert server2.outgoing_comms_open == 1
+            validate_dict(server)
 
 
 @pytest.mark.parametrize("close_via_rpc", [True, False])
 @gen_test()
 async def test_close_fast_without_active_handlers(close_via_rpc):
-
     server = await Server({})
     server.handlers["terminate"] = server.close
     await server.listen(0)
@@ -1147,11 +1250,11 @@ async def test_close_fast_without_active_handlers(close_via_rpc):
 
     if not close_via_rpc:
         fut = server.close()
-        await asyncio.wait_for(fut, 0.5)
+        await wait_for(fut, 0.5)
     else:
         async with rpc(server.address) as _rpc:
             fut = _rpc.terminate(reply=False)
-            await asyncio.wait_for(fut, 0.5)
+            await wait_for(fut, 0.5)
 
 
 @gen_test()
@@ -1174,7 +1277,7 @@ async def test_close_grace_period_for_handlers():
     # since the handler is running for a while, the close will not immediately
     # go through. We'll give the comm about a second to close itself
     with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(wait_for_close.wait(), 0.5)
+        await wait_for(wait_for_close.wait(), 0.5)
     await task
 
 
@@ -1213,7 +1316,7 @@ def test_expects_comm():
         def stream_not_leading_position(self, other, stream):
             ...
 
-    expected_warning = "first arugment of a RPC handler `stream` is deprecated"
+    expected_warning = "first argument of a RPC handler `stream` is deprecated"
 
     instance = A()
 

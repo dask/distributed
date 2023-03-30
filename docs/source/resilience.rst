@@ -48,12 +48,13 @@ This has some fail cases.
     causes a segmentation fault, then that bad function will repeatedly be
     called on other workers.  This function will be marked as "bad" after it
     kills a fixed number of workers (defaults to three).
-3.  Data sent out directly to the workers via a call to ``scatter()`` (instead
-    of being created from a Dask task graph via other Dask functions) is not
-    kept in the scheduler, as it is often quite large, and so the loss of this
-    data is irreparable.  You may wish to call ``Client.replicate`` on the data
-    with a suitable replication factor to ensure that it remains long-lived or
-    else back the data off of some resilient store, like a file system.
+3.  Data sent out directly to the workers via a call to
+    :meth:`~distributed.client.Client.scatter` (instead of being created from a Dask
+    task graph via other Dask functions) is not kept in the scheduler, as it is often
+    quite large, and so the loss of this data is irreparable. You may wish to call
+    :meth:`~distributed.client.Client.replicate` on the data with a suitable replication
+    factor to ensure that it remains long-lived or else back the data off on some
+    resilient store, like a file system.
 
 
 Hardware Failures

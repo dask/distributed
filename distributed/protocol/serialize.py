@@ -13,8 +13,10 @@ import msgpack
 
 import dask
 from dask.base import normalize_token
+from dask.sizeof import sizeof
 from dask.utils import typename
 
+from distributed.metrics import context_meter
 from distributed.protocol import pickle
 from distributed.protocol.compression import decompress, maybe_compress
 from distributed.protocol.utils import (
@@ -47,7 +49,7 @@ def dask_dumps(x, context=None):
     header = {
         "sub-header": sub_header,
         "type": type_name,
-        "type-serialized": pickle.dumps(type(x), protocol=4),
+        "type-serialized": pickle.dumps(type(x)),
         "serializer": "dask",
     }
     return header, frames
@@ -258,7 +260,7 @@ def serialize(  # type: ignore[no-untyped-def]
     if serializers is None:
         serializers = ("dask", "pickle")  # TODO: get from configuration
 
-    # Handle obects that are marked as `Serialize`, or that are
+    # Handle objects that are marked as `Serialize`, or that are
     # already `Serialized` objects (don't want to serialize them twice)
     if isinstance(x, Serialized):
         return x.header, x.frames
@@ -340,6 +342,7 @@ def serialize(  # type: ignore[no-untyped-def]
         return headers, frames
 
     tb = ""
+    exc = None
 
     for name in serializers:
         dumps, _, wants_context = families[name]
@@ -349,11 +352,14 @@ def serialize(  # type: ignore[no-untyped-def]
             return header, frames
         except NotImplementedError:
             continue
-        except Exception:
+        except Exception as e:
+            exc = e
             tb = traceback.format_exc()
             break
-
-    msg = f"Could not serialize object of type {type(x).__name__}"
+    type_x = type(x)
+    if isinstance(x, (ToPickle, Serialize)):
+        type_x = type(x.data)
+    msg = f"Could not serialize object of type {type_x.__name__}"
     if on_error == "message":
         txt_frames = [msg]
         if tb:
@@ -363,7 +369,7 @@ def serialize(  # type: ignore[no-untyped-def]
 
         return {"serializer": "error"}, frames
     elif on_error == "raise":
-        raise TypeError(msg, str(x)[:10000])
+        raise TypeError(msg, str(x)[:10000]) from exc
     else:  # pragma: nocover
         raise ValueError(f"{on_error=}; expected 'message' or 'raise'")
 
@@ -426,10 +432,11 @@ def deserialize(header, frames, deserializers=None):
     return loads(header, frames)
 
 
+@context_meter.meter("serialize")
 def serialize_and_split(
     x, serializers=None, on_error="message", context=None, size=None
 ):
-    """Serialize and split compressable frames
+    """Serialize and split compressible frames
 
     This function is a drop-in replacement of `serialize()` that calls `serialize()`
     followed by `frame_split_size()` on frames that should be compressed.
@@ -462,7 +469,7 @@ def serialize_and_split(
             out_compression.append(compression)
     assert len(out_compression) == len(out_frames)
 
-    # Notice, in order to match msgpack's implicit convertion to tuples,
+    # Notice, in order to match msgpack's implicit conversion to tuples,
     # we convert to tuples here as well.
     header["split-num-sub-frames"] = tuple(num_sub_frames)
     header["split-offsets"] = tuple(offsets)
@@ -470,6 +477,7 @@ def serialize_and_split(
     return header, out_frames
 
 
+@context_meter.meter("deserialize")
 def merge_and_deserialize(header, frames, deserializers=None):
     """Merge and deserialize frames
 
@@ -637,6 +645,18 @@ def nested_deserialize(x):
         return x
 
     return replace_inner(x)
+
+
+@sizeof.register(ToPickle)
+@sizeof.register(Serialize)
+def sizeof_serialize(obj):
+    return sizeof(obj.data)
+
+
+@sizeof.register(Pickled)
+@sizeof.register(Serialized)
+def sizeof_serialized(obj):
+    return sizeof(obj.header) + sizeof(obj.frames)
 
 
 def serialize_bytelist(x, **kwargs):
@@ -817,11 +837,12 @@ def _is_msgpack_serializable(v):
         v is None
         or typ is str
         or typ is bool
+        or typ is bytes
         or typ is int
         or typ is float
         or isinstance(v, dict)
         and all(map(_is_msgpack_serializable, v.values()))
-        and all(typ is str for x in v.keys())
+        and all(type(x) is str for x in v.keys())
         or isinstance(v, (list, tuple))
         and all(map(_is_msgpack_serializable, v))
     )
@@ -834,7 +855,7 @@ class ObjectDictSerializer:
     def serialize(self, est):
         header = {
             "serializer": self.serializer,
-            "type-serialized": pickle.dumps(type(est), protocol=4),
+            "type-serialized": pickle.dumps(type(est)),
             "simple": {},
             "complex": {},
         }

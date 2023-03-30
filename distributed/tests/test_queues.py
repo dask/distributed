@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import pickle
 from datetime import timedelta
 from time import sleep
 
@@ -8,7 +9,7 @@ import pytest
 
 from distributed import Client, Nanny, Queue, TimeoutError, wait, worker_client
 from distributed.metrics import time
-from distributed.utils import open_port
+from distributed.utils import open_port, wait_for
 from distributed.utils_test import div, gen_cluster, inc, popen
 
 
@@ -70,25 +71,22 @@ def test_sync(client):
 
 @gen_cluster()
 async def test_hold_futures(s, a, b):
-    c1 = await Client(s.address, asynchronous=True)
-    future = c1.submit(lambda x: x + 1, 10)
-    q1 = await Queue("q")
-    await q1.put(future)
-    del q1
-    await c1.close()
+    async with Client(s.address, asynchronous=True) as c1:
+        future = c1.submit(lambda x: x + 1, 10)
+        q1 = await Queue("q")
+        await q1.put(future)
+        del q1
 
     await asyncio.sleep(0.1)
 
-    c2 = await Client(s.address, asynchronous=True)
-    q2 = await Queue("q")
-    future2 = await q2.get()
-    result = await future2
+    async with Client(s.address, asynchronous=True) as c1:
+        q2 = await Queue("q")
+        future2 = await q2.get()
+        result = await future2
 
-    assert result == 11
-    await c2.close()
+        assert result == 11
 
 
-@pytest.mark.skip(reason="getting same client from main thread")
 @gen_cluster(client=True)
 async def test_picklability(c, s, a, b):
     q = Queue()
@@ -145,12 +143,12 @@ async def test_same_futures(c, s, a, b):
     q = Queue("x")
     future = await c.scatter(123)
 
-    for i in range(5):
+    for _ in range(5):
         await q.put(future)
 
     assert {ts.key for ts in s.clients["queue-x"].wants_what} == {future.key}
 
-    for i in range(4):
+    for _ in range(4):
         future2 = await q.get()
         assert {ts.key for ts in s.clients["queue-x"].wants_what} == {future.key}
         await asyncio.sleep(0.05)
@@ -184,7 +182,7 @@ async def test_get_many(c, s, a, b):
     assert data == [1, 2]
 
     with pytest.raises(TimeoutError):
-        await asyncio.wait_for(xx.get(batch=2), 0.1)
+        await wait_for(xx.get(batch=2), 0.1)
 
 
 @gen_cluster(client=True)
@@ -193,31 +191,29 @@ async def test_Future_knows_status_immediately(c, s, a, b):
     q = await Queue("q")
     await q.put(x)
 
-    c2 = await Client(s.address, asynchronous=True)
-    q2 = await Queue("q", client=c2)
-    future = await q2.get()
-    assert future.status == "finished"
+    async with Client(s.address, asynchronous=True) as c2:
+        q2 = await Queue("q", client=c2)
+        future = await q2.get()
+        assert future.status == "finished"
 
-    x = c.submit(div, 1, 0)
-    await wait(x)
-    await q.put(x)
+        x = c.submit(div, 1, 0)
+        await wait(x)
+        await q.put(x)
 
-    future2 = await q2.get()
-    assert future2.status == "error"
-    with pytest.raises(Exception):
-        await future2
-
-    start = time()
-    while True:  # we learn about the true error eventually
-        try:
+        future2 = await q2.get()
+        assert future2.status == "error"
+        with pytest.raises(ZeroDivisionError):
             await future2
-        except ZeroDivisionError:
-            break
-        except Exception:
-            assert time() < start + 5
-            await asyncio.sleep(0.05)
 
-    await c2.close()
+        start = time()
+        while True:  # we learn about the true error eventually
+            try:
+                await future2
+            except ZeroDivisionError:
+                break
+            except Exception:
+                assert time() < start + 5
+                await asyncio.sleep(0.05)
 
 
 @gen_cluster(client=True)
@@ -286,12 +282,13 @@ def test_queue_in_task(loop):
     # worker in a separate Python process than the client
     with popen(
         [
-            "dask-scheduler",
+            "dask",
+            "scheduler",
             "--no-dashboard",
             f"--port={port}",
         ]
     ):
-        with popen(["dask-worker", f"127.0.0.1:{port}"]):
+        with popen(["dask", "worker", f"127.0.0.1:{port}"]):
             with Client(f"tcp://127.0.0.1:{port}", loop=loop) as c:
                 c.wait_for_workers(1)
 
@@ -304,3 +301,34 @@ def test_queue_in_task(loop):
 
                 result = c.submit(foo).result()
                 assert result == 123
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_unpickle_without_client(c, s):
+    """Ensure that the object properly pickle roundtrips even if no client, worker, etc. is active in the given context.
+
+    This typically happens if the object is being deserialized on the scheduler.
+    """
+    q = await Queue()
+    pickled = pickle.dumps(q)
+    await c.close()
+
+    # We do not want to initialize a client during unpickling
+    with pytest.raises(ValueError):
+        Client.current()
+
+    q2 = pickle.loads(pickled)
+
+    with pytest.raises(ValueError):
+        Client.current()
+
+    assert q2.client is None
+    await asyncio.sleep(0)
+
+    with pytest.raises(RuntimeError, match="not properly initialized"):
+        await q2.put(1)
+
+    async with Client(s.address, asynchronous=True):
+        q3 = pickle.loads(pickled)
+        await q3.put(1)
+        assert await q3.get() == 1

@@ -1,33 +1,27 @@
 from __future__ import annotations
 
-import random
-import sys
-
-import pytest
 import yaml
 
 from distributed import Client
+from distributed.utils import open_port
 from distributed.utils_test import gen_cluster, gen_test, popen
 
 
-@pytest.mark.flaky(reruns=2)
 @gen_test(timeout=120)
 async def test_text():
-    port = random.randint(10000, 50000)
+    port = open_port()
     with popen(
         [
-            sys.executable,
-            "-m",
-            "distributed.cli.dask_spec",
+            "dask",
+            "spec",
             "--spec",
             '{"cls": "dask.distributed.Scheduler", "opts": {"port": %d}}' % port,
         ]
     ):
         with popen(
             [
-                sys.executable,
-                "-m",
-                "distributed.cli.dask_spec",
+                "dask",
+                "spec",
                 "tcp://localhost:%d" % port,
                 "--spec",
                 '{"cls": "dask.distributed.Worker", "opts": {"nanny": false, "nthreads": 3, "name": "foo"}}',
@@ -54,9 +48,8 @@ async def test_file(c, s, tmp_path):
         )
     with popen(
         [
-            sys.executable,
-            "-m",
-            "distributed.cli.dask_spec",
+            "dask",
+            "spec",
             s.address,
             "--spec-file",
             fn,
@@ -72,9 +65,8 @@ async def test_file(c, s, tmp_path):
 def test_errors():
     with popen(
         [
-            sys.executable,
-            "-m",
-            "distributed.cli.dask_spec",
+            "dask",
+            "spec",
             "--spec",
             '{"foo": "bar"}',
             "--spec-file",
@@ -86,10 +78,7 @@ def test_errors():
         assert "exactly one" in line
         assert "--spec" in line and "--spec-file" in line
 
-    with popen(
-        [sys.executable, "-m", "distributed.cli.dask_spec"],
-        capture_output=True,
-    ) as proc:
+    with popen(["dask", "spec"], capture_output=True) as proc:
         line = proc.stdout.readline().decode()
         assert "exactly one" in line
         assert "--spec" in line and "--spec-file" in line

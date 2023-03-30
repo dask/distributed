@@ -10,14 +10,19 @@ import threading
 import weakref
 from collections.abc import Callable
 from queue import Queue as PyQueue
-from typing import TypeVar
+from typing import TYPE_CHECKING
 
 from tornado.concurrent import Future
 from tornado.ioloop import IOLoop
 
 import dask
 
-from distributed.utils import TimeoutError, get_mp_context
+from distributed.utils import get_mp_context, wait_for
+
+if TYPE_CHECKING:
+    # TODO import from typing (requires Python >=3.11)
+    from typing_extensions import Self
+
 
 logger = logging.getLogger(__name__)
 
@@ -33,24 +38,33 @@ def _loop_add_callback(loop, func, *args):
             raise
 
 
+def _future_set_result_unless_cancelled(future, value):
+    if not future.cancelled():
+        future.set_result(value)
+
+
+def _future_set_exception_unless_cancelled(future, exc):
+    if not future.cancelled():
+        future.set_exception(exc)
+    else:
+        logger.error("Exception after Future was cancelled", exc_info=exc)
+
+
 def _call_and_set_future(loop, future, func, *args, **kwargs):
     try:
         res = func(*args, **kwargs)
     except Exception as exc:
         # Tornado futures are not thread-safe, need to
         # set_result() / set_exc_info() from the loop's thread
-        _loop_add_callback(loop, future.set_exception, exc)
+        _loop_add_callback(loop, _future_set_exception_unless_cancelled, future, exc)
     else:
-        _loop_add_callback(loop, future.set_result, res)
+        _loop_add_callback(loop, _future_set_result_unless_cancelled, future, res)
 
 
 class _ProcessState:
     is_alive = False
     pid = None
     exitcode = None
-
-
-_T_async_process = TypeVar("_T_async_process", bound="AsyncProcess")
 
 
 class AsyncProcess:
@@ -61,7 +75,9 @@ class AsyncProcess:
 
     _process: multiprocessing.Process
 
-    def __init__(self, loop=None, target=None, name=None, args=(), kwargs={}):
+    def __init__(self, loop=None, target=None, name=None, args=(), kwargs=None):
+        kwargs = kwargs or {}
+
         if not callable(target):
             raise TypeError(f"`target` needs to be callable, not {type(target)!r}")
         self._state = _ProcessState()
@@ -153,7 +169,7 @@ class AsyncProcess:
                 parent_alive_pipe.recv()
             except EOFError:
                 # Parent process went away unexpectedly. Exit immediately. Could
-                # consider other exiting approches here. My initial preference
+                # consider other exiting approaches here. My initial preference
                 # is to unconditionally and immediately exit. If we're in this
                 # state it is possible that a "clean" process exit won't work
                 # anyway - if, for example, the system is getting bogged down
@@ -232,9 +248,11 @@ class AsyncProcess:
     def _watch_process(cls, selfref, process, state, q):
         r = repr(selfref())
         process.join()
-        exitcode = process.exitcode
-        assert exitcode is not None
-        logger.debug("[%s] process %r exited with code %r", r, state.pid, exitcode)
+        exitcode = original_exit_code = process.exitcode
+        if exitcode is None:
+            # The child process is already reaped
+            # (may happen if waitpid() is called elsewhere).
+            exitcode = 255
         state.is_alive = False
         state.exitcode = exitcode
         # Make sure the process is removed from the global list
@@ -246,6 +264,16 @@ class AsyncProcess:
                 _loop_add_callback(self._loop, self._on_exit, exitcode)
         finally:
             self = None  # lose reference
+
+        # logging may fail - defer calls to after the callback is added
+        if original_exit_code is None:
+            logger.warning(
+                "[%s] process %r exit status was already read will report exitcode 255",
+                r,
+                state.pid,
+            )
+        else:
+            logger.debug("[%s] process %r exited with code %r", r, state.pid, exitcode)
 
     def start(self):
         """
@@ -297,15 +325,9 @@ class AsyncProcess:
         assert self._state.pid is not None, "can only join a started process"
         if self._state.exitcode is not None:
             return
-        if timeout is None:
-            await self._exit_future
-        else:
-            try:
-                # Shield otherwise the timeout cancels the future and our
-                # on_exit callback will try to set a result on a canceled future
-                await asyncio.wait_for(asyncio.shield(self._exit_future), timeout)
-            except TimeoutError:
-                pass
+        # Shield otherwise the timeout cancels the future and our
+        # on_exit callback will try to set a result on a canceled future
+        await wait_for(asyncio.shield(self._exit_future), timeout)
 
     def close(self):
         """
@@ -317,9 +339,7 @@ class AsyncProcess:
             self._process = None
             self._closed = True
 
-    def set_exit_callback(
-        self: _T_async_process, func: Callable[[_T_async_process], None]
-    ) -> None:
+    def set_exit_callback(self: Self, func: Callable[[Self], None]) -> None:
         """
         Set a function to be called by the event loop when the process exits.
         The function is called with the AsyncProcess as sole argument.

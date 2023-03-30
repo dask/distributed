@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from tornado.ioloop import PeriodicCallback
+from distributed.compatibility import PeriodicCallback
 
 if TYPE_CHECKING:
     # Optional runtime dependencies
@@ -135,7 +135,7 @@ class MemorySampler:
         import pandas as pd
 
         ss = {}
-        for (label, s_list) in self.samples.items():
+        for label, s_list in self.samples.items():
             assert s_list  # There's always at least one sample
             s = pd.DataFrame(s_list).set_index(0)[1]
             s.index = pd.to_datetime(s.index, unit="s")

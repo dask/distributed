@@ -56,12 +56,17 @@ def test_wsl_monitoring_enabled():
 
 def run_has_cuda_context(queue):
     try:
-        assert not nvml.has_cuda_context()
+        assert not nvml.has_cuda_context().has_context
 
         import numba.cuda
 
         numba.cuda.current_context()
-        assert nvml.has_cuda_context() == 0
+        ctx = nvml.has_cuda_context()
+        assert (
+            ctx.has_context
+            and ctx.device_info.device_index == 0
+            and isinstance(ctx.device_info.uuid, bytes)
+        )
 
         queue.put(None)
 
@@ -69,6 +74,7 @@ def run_has_cuda_context(queue):
         queue.put(e)
 
 
+@pytest.mark.xfail(reason="If running on Docker, requires --pid=host")
 def test_has_cuda_context():
     if nvml.device_get_count() < 1:
         pytest.skip("No GPUs available")
@@ -125,10 +131,7 @@ async def test_gpu_metrics(s, a, b):
         == pynvml.nvmlDeviceGetMemoryInfo(h).used
     )
     assert "gpu" in a.startup_information
-    assert (
-        s.workers[a.address].extra["gpu"]["name"]
-        == pynvml.nvmlDeviceGetName(h).decode()
-    )
+    assert s.workers[a.address].extra["gpu"]["name"] == nvml._get_name(h)
 
 
 @pytest.mark.flaky(reruns=5, reruns_delay=2)
@@ -148,7 +151,7 @@ async def test_gpu_monitoring_recent(s, a, b):
         res[a.address]["range_query"]["gpu_memory_used"]
         == pynvml.nvmlDeviceGetMemoryInfo(h).used
     )
-    assert res[a.address]["gpu_name"] == pynvml.nvmlDeviceGetName(h).decode()
+    assert res[a.address]["gpu_name"] == nvml._get_name(h)
     assert res[a.address]["gpu_memory_total"] == pynvml.nvmlDeviceGetMemoryInfo(h).total
 
 

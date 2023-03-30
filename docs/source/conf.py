@@ -353,7 +353,7 @@ epub_copyright = copyright
 # The format is a list of tuples containing the path and title.
 # epub_pre_files = []
 
-# HTML files shat should be inserted after the pages created by sphinx.
+# HTML files that should be inserted after the pages created by sphinx.
 # The format is a list of tuples containing the path and title.
 # epub_post_files = []
 
@@ -411,7 +411,6 @@ redirect_files = [
         "https://docs.dask.org/en/latest/setup/single-distributed.html",
     ),
     ("adaptive.html", "https://docs.dask.org/en/latest/setup/adaptive.html"),
-    ("prometheus.html", "https://docs.dask.org/en/latest/setup/prometheus.html"),
     ("web.html", "https://docs.dask.org/en/latest/diagnostics-distributed.html"),
 ]
 
@@ -426,6 +425,12 @@ redirect_template = """\
   </head>
 </html>
 """
+
+suppress_warnings = [
+    # more than one target found for cross-reference
+    # https://github.com/sphinx-doc/sphinx/issues/10400
+    "ref.python"
+]
 
 
 def copy_legacy_redirects(app, docname):

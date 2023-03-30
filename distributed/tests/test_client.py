@@ -6,6 +6,7 @@ import functools
 import gc
 import inspect
 import logging
+import operator
 import os
 import pathlib
 import pickle
@@ -15,28 +16,34 @@ import sys
 import threading
 import traceback
 import types
-import warnings
 import weakref
 import zipfile
-from collections import deque
+from collections import deque, namedtuple
 from collections.abc import Generator
-from contextlib import contextmanager, nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
 from functools import partial
 from operator import add
 from threading import Semaphore
 from time import sleep
 from typing import Any
+from unittest import mock
 
 import psutil
 import pytest
 import yaml
 from tlz import concat, first, identity, isdistinct, merge, pluck, valmap
+from tornado.ioloop import IOLoop
 
 import dask
 import dask.bag as db
 from dask import delayed
 from dask.optimization import SubgraphCallable
-from dask.utils import parse_timedelta, stringify, tmpfile
+from dask.utils import (
+    get_default_shuffle_algorithm,
+    parse_timedelta,
+    stringify,
+    tmpfile,
+)
 
 from distributed import (
     CancelledError,
@@ -69,35 +76,43 @@ from distributed.client import (
 from distributed.cluster_dump import load_cluster_dump
 from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, WINDOWS
-from distributed.core import Server, Status
+from distributed.core import Status
+from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.metrics import time
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
+from distributed.shuffle import check_minimal_arrow_version
 from distributed.sizeof import sizeof
 from distributed.utils import (
     NoOpAwaitable,
     get_mp_context,
     is_valid_xml,
+    open_port,
     sync,
     tmp_text,
 )
 from distributed.utils_test import (
+    NO_AMM,
+    BlockedGatherDep,
     TaskStateMetadataPlugin,
     _UnhashableCallable,
-    async_wait_for,
+    async_poll_for,
     asyncinc,
+    block_on_event,
     captured_logger,
     cluster,
     dec,
     div,
     double,
+    ensure_no_new_clients,
     gen_cluster,
     gen_test,
     get_cert,
     inc,
     map_varying,
     nodebug,
+    poll_for,
     popen,
-    pristine_loop,
+    raises_with_cause,
     randominc,
     save_sys_modules,
     slowadd,
@@ -106,7 +121,7 @@ from distributed.utils_test import (
     throws,
     tls_only_security,
     varying,
-    wait_for,
+    wait_for_state,
 )
 
 pytestmark = pytest.mark.ci1
@@ -319,31 +334,6 @@ def test_retries_get(c):
 
 
 @gen_cluster(client=True)
-async def test_compute_persisted_retries(c, s, a, b):
-    args = [ZeroDivisionError("one"), ZeroDivisionError("two"), 3]
-
-    # Sanity check
-    x = c.persist(delayed(varying(args))())
-    fut = c.compute(x)
-    with pytest.raises(ZeroDivisionError, match="one"):
-        await fut
-
-    x = c.persist(delayed(varying(args))())
-    fut = c.compute(x, retries=1)
-    with pytest.raises(ZeroDivisionError, match="two"):
-        await fut
-
-    x = c.persist(delayed(varying(args))())
-    fut = c.compute(x, retries=2)
-    assert await fut == 3
-
-    args.append(4)
-    x = c.persist(delayed(varying(args))())
-    fut = c.compute(x, retries=3)
-    assert await fut == 3
-
-
-@gen_cluster(client=True)
 async def test_persist_retries(c, s, a, b):
     # Same retries for all
     args = [ZeroDivisionError("one"), ZeroDivisionError("two"), 3]
@@ -461,16 +451,16 @@ def test_Future_release_sync(c):
     x = c.submit(div, 1, 1)
     x.result()
     x.release()
-    wait_for(lambda: not c.futures, timeout=0.3)
+    poll_for(lambda: not c.futures, timeout=0.3)
 
     x = c.submit(slowinc, 1, delay=0.8)
     x.release()
-    wait_for(lambda: not c.futures, timeout=0.3)
+    poll_for(lambda: not c.futures, timeout=0.3)
 
     x = c.submit(div, 1, 0)
     x.exception()
     x.release()
-    wait_for(lambda: not c.futures, timeout=0.3)
+    poll_for(lambda: not c.futures, timeout=0.3)
 
 
 def test_short_tracebacks(loop, c):
@@ -532,17 +522,14 @@ async def test_exceptions(c, s, a, b):
 
 @gen_cluster()
 async def test_gc(s, a, b):
-    c = await Client(s.address, asynchronous=True)
-
-    x = c.submit(inc, 10)
-    await x
-    assert s.tasks[x.key].who_has
-    x.__del__()
-    await async_wait_for(
-        lambda: x.key not in s.tasks or not s.tasks[x.key].who_has, timeout=0.3
-    )
-
-    await c.close()
+    async with Client(s.address, asynchronous=True) as c:
+        x = c.submit(inc, 10)
+        await x
+        assert s.tasks[x.key].who_has
+        x.__del__()
+        await async_poll_for(
+            lambda: x.key not in s.tasks or not s.tasks[x.key].who_has, timeout=0.3
+        )
 
 
 def test_thread(c):
@@ -585,13 +572,12 @@ async def test_gather(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_gather_mismatched_client(c, s, a, b):
-    c2 = await Client(s.address, asynchronous=True)
+    async with Client(s.address, asynchronous=True) as c2:
+        x = c.submit(inc, 10)
+        y = c2.submit(inc, 5)
 
-    x = c.submit(inc, 10)
-    y = c2.submit(inc, 5)
-
-    with pytest.raises(ValueError, match="Futures created by another client"):
-        await c.gather([x, y])
+        with pytest.raises(ValueError, match="Futures created by another client"):
+            await c.gather([x, y])
 
 
 @gen_cluster(client=True)
@@ -601,7 +587,7 @@ async def test_gather_lost(c, s, a, b):
 
     await a.close()
 
-    with pytest.raises(Exception):
+    with pytest.raises(CancelledError):
         await c.gather([x, y])
 
 
@@ -635,8 +621,8 @@ async def test_gather_skip(c, s, a):
     x = c.submit(div, 1, 0, priority=10)
     y = c.submit(slowinc, 1, delay=0.5)
 
-    with captured_logger(logging.getLogger("distributed.scheduler")) as sched:
-        with captured_logger(logging.getLogger("distributed.client")) as client:
+    with captured_logger("distributed.scheduler") as sched:
+        with captured_logger("distributed.client") as client:
             L = await c.gather([x, y], errors="skip")
             assert L == [2]
 
@@ -648,7 +634,7 @@ async def test_gather_skip(c, s, a):
 async def test_limit_concurrent_gathering(c, s, a, b):
     futures = c.map(inc, range(100))
     await c.gather(futures)
-    assert len(a.outgoing_transfer_log) + len(b.outgoing_transfer_log) < 100
+    assert len(a.transfer_outgoing_log) + len(b.transfer_outgoing_log) < 100
 
 
 @gen_cluster(client=True)
@@ -727,8 +713,9 @@ async def test_wait(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_wait_first_completed(c, s, a, b):
-    x = c.submit(slowinc, 1)
-    y = c.submit(slowinc, 1)
+    event = Event()
+    x = c.submit(block_on_event, event)
+    y = c.submit(block_on_event, event)
     z = c.submit(inc, 2)
 
     done, not_done = await wait([x, y, z], return_when="FIRST_COMPLETED")
@@ -738,6 +725,7 @@ async def test_wait_first_completed(c, s, a, b):
     assert z.status == "finished"
     assert x.status == "pending"
     assert y.status == "pending"
+    await event.set()
 
 
 @gen_cluster(client=True)
@@ -745,6 +733,11 @@ async def test_wait_timeout(c, s, a, b):
     future = c.submit(sleep, 0.3)
     with pytest.raises(TimeoutError):
         await wait(future, timeout=0.01)
+
+    # Ensure timeout can be a string
+    future = c.submit(sleep, 0.3)
+    with pytest.raises(TimeoutError):
+        await wait(future, timeout="0.01 s")
 
 
 def test_wait_sync(c):
@@ -841,75 +834,6 @@ async def test_long_tasks_dont_trigger_timeout(c, s, a, b):
     await x
 
 
-@pytest.mark.skip
-@gen_cluster(client=True)
-async def test_missing_data_heals(c, s, a, b):
-    a.validate = False
-    b.validate = False
-    x = c.submit(inc, 1)
-    y = c.submit(inc, x)
-    z = c.submit(inc, y)
-
-    await wait([x, y, z])
-
-    # Secretly delete y's key
-    if y.key in a.data:
-        del a.data[y.key]
-        a.release_key(y.key, stimulus_id="test")
-    if y.key in b.data:
-        del b.data[y.key]
-        b.release_key(y.key, stimulus_id="test")
-    await asyncio.sleep(0)
-
-    w = c.submit(add, y, z)
-
-    result = await w
-    assert result == 3 + 4
-
-
-@pytest.mark.skip
-@gen_cluster(client=True)
-async def test_gather_robust_to_missing_data(c, s, a, b):
-    a.validate = False
-    b.validate = False
-    x, y, z = c.map(inc, range(3))
-    await wait([x, y, z])  # everything computed
-
-    for f in [x, y]:
-        for w in [a, b]:
-            if f.key in w.data:
-                del w.data[f.key]
-                await asyncio.sleep(0)
-                w.release_key(f.key, stimulus_id="test")
-
-    xx, yy, zz = await c.gather([x, y, z])
-    assert (xx, yy, zz) == (1, 2, 3)
-
-
-@pytest.mark.skip
-@gen_cluster(client=True)
-async def test_gather_robust_to_nested_missing_data(c, s, a, b):
-    a.validate = False
-    b.validate = False
-    w = c.submit(inc, 1)
-    x = c.submit(inc, w)
-    y = c.submit(inc, x)
-    z = c.submit(inc, y)
-
-    await wait([z])
-
-    for worker in [a, b]:
-        for datum in [y, z]:
-            if datum.key in worker.data:
-                del worker.data[datum.key]
-                await asyncio.sleep(0)
-                worker.release_key(datum.key, stimulus_id="test")
-
-    result = await c.gather([z])
-
-    assert result == [inc(inc(inc(inc(1))))]
-
-
 @gen_cluster(client=True)
 async def test_tokenize_on_futures(c, s, a, b):
     x = c.submit(inc, 1)
@@ -924,7 +848,7 @@ async def test_tokenize_on_futures(c, s, a, b):
 
 
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
-@gen_cluster([("127.0.0.1", 1), ("127.0.0.2", 2)], client=True)
+@gen_cluster([("127.0.0.1", 1), ("127.0.0.2", 2)], client=True, config=NO_AMM)
 async def test_restrictions_submit(c, s, a, b):
     x = c.submit(inc, 1, workers={a.ip})
     y = c.submit(inc, x, workers={b.ip})
@@ -937,10 +861,10 @@ async def test_restrictions_submit(c, s, a, b):
     assert y.key in b.data
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_restrictions_ip_port(c, s, a, b):
-    x = c.submit(inc, 1, workers={a.address})
-    y = c.submit(inc, x, workers={b.address})
+    x = c.submit(inc, 1, workers={a.address}, key="x")
+    y = c.submit(inc, x, workers={b.address}, key="y")
     await wait([x, y])
 
     assert s.tasks[x.key].worker_restrictions == {a.address}
@@ -975,7 +899,7 @@ async def test_restrictions_get(c, s, a, b):
     assert len(b.data) == 0
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_restrictions_get_annotate(c, s, a, b):
     x = 1
     with dask.annotate(workers=a.address):
@@ -1025,11 +949,14 @@ async def test_errors_dont_block(c, s, w):
     assert result == [2, 3]
 
 
+def assert_list(x, z=None):
+    if z is None:
+        z = []
+    return isinstance(x, list) and isinstance(z, list)
+
+
 @gen_cluster(client=True)
 async def test_submit_quotes(c, s, a, b):
-    def assert_list(x, z=[]):
-        return isinstance(x, list) and isinstance(z, list)
-
     x = c.submit(assert_list, [1, 2, 3])
     result = await x
     assert result
@@ -1047,9 +974,6 @@ async def test_submit_quotes(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_map_quotes(c, s, a, b):
-    def assert_list(x, z=[]):
-        return isinstance(x, list) and isinstance(z, list)
-
     L = c.map(assert_list, [[1, 2, 3], [4]])
     result = await c.gather(L)
     assert all(result)
@@ -1065,20 +989,15 @@ async def test_map_quotes(c, s, a, b):
 
 @gen_cluster()
 async def test_two_consecutive_clients_share_results(s, a, b):
-    c = await Client(s.address, asynchronous=True)
+    async with Client(s.address, asynchronous=True) as c:
+        x = c.submit(random.randint, 0, 1000, pure=True)
+        xx = await x
 
-    x = c.submit(random.randint, 0, 1000, pure=True)
-    xx = await x
+        async with Client(s.address, asynchronous=True) as f:
+            y = f.submit(random.randint, 0, 1000, pure=True)
+            yy = await y
 
-    f = await Client(s.address, asynchronous=True)
-
-    y = f.submit(random.randint, 0, 1000, pure=True)
-    yy = await y
-
-    assert xx == yy
-
-    await c.close()
-    await f.close()
+            assert xx == yy
 
 
 @gen_cluster(client=True)
@@ -1412,23 +1331,13 @@ async def test_scatter_direct(c, s, a, b):
     assert result == 123
     assert not s.counters["op"].components[0]["scatter"]
 
-    result = await future
-    assert not s.counters["op"].components[0]["gather"]
-
-    result = await c.gather(future)
-    assert not s.counters["op"].components[0]["gather"]
-
 
 @gen_cluster()
 async def test_scatter_direct_2(s, a, b):
-    c = await Client(s.address, asynchronous=True, heartbeat_interval=10)
-
-    last = s.clients[c.id].last_seen
-
-    while s.clients[c.id].last_seen == last:
-        await asyncio.sleep(0.10)
-
-    await c.close()
+    async with Client(s.address, asynchronous=True, heartbeat_interval=10) as c:
+        last = s.clients[c.id].last_seen
+        while s.clients[c.id].last_seen == last:
+            await asyncio.sleep(0.10)
 
 
 @gen_cluster(client=True)
@@ -1441,7 +1350,7 @@ async def test_scatter_direct_numpy(c, s, a, b):
     assert not s.counters["op"].components[0]["scatter"]
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_scatter_direct_broadcast(c, s, a, b):
     future2 = await c.scatter(456, direct=True, broadcast=True)
     assert future2.key in a.data
@@ -1458,7 +1367,7 @@ async def test_scatter_direct_balanced(c, s, *workers):
     assert sorted(len(w.data) for w in workers) == [0, 1, 1, 1]
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4, config=NO_AMM)
 async def test_scatter_direct_broadcast_target(c, s, *workers):
     futures = await c.scatter([123, 456], direct=True, workers=workers[0].address)
     assert futures[0].key in workers[0].data
@@ -1693,7 +1602,8 @@ async def test_upload_file_egg(c, s, a, b):
                 assert result == (value, value)
 
 
-@gen_cluster(client=True)
+# _upload_large_file internally calls replicate, which makes it incompatible with AMM
+@gen_cluster(client=True, config=NO_AMM)
 async def test_upload_large_file(c, s, a, b):
     assert a.local_directory
     assert b.local_directory
@@ -1969,34 +1879,6 @@ class BadlySerializedObject:
         raise TypeError("hello!")
 
 
-class FatallySerializedObject:
-    def __getstate__(self):
-        return 1
-
-    def __setstate__(self, state):
-        print("This should never have been deserialized, closing")
-        import sys
-
-        sys.exit(0)
-
-
-@gen_cluster(client=True)
-async def test_badly_serialized_input(c, s, a, b):
-    o = BadlySerializedObject()
-
-    future = c.submit(inc, o)
-    futures = c.map(inc, range(10))
-
-    L = await c.gather(futures)
-    assert list(L) == list(map(inc, range(10)))
-    assert future.status == "error"
-
-    with pytest.raises(Exception) as info:
-        await future
-
-    assert "hello!" in str(info.value)
-
-
 @pytest.mark.skip
 @gen_test()
 async def test_badly_serialized_input_stderr(capsys, c):
@@ -2012,21 +1894,26 @@ async def test_badly_serialized_input_stderr(capsys, c):
     assert future.status == "error"
 
 
-def test_repr(loop):
-    funcs = [str, repr, lambda x: x._repr_html_()]
+@pytest.mark.parametrize(
+    "func",
+    [
+        str,
+        repr,
+        operator.methodcaller("_repr_html_"),
+    ],
+)
+def test_repr(loop, func):
     with cluster(nworkers=3, worker_kwargs={"memory_limit": "2 GiB"}) as (s, [a, b, c]):
         with Client(s["address"], loop=loop) as c:
-            for func in funcs:
-                text = func(c)
-                assert c.scheduler.address in text
-                assert "threads=3" in text or "Total threads: </strong>" in text
-                assert "6.00 GiB" in text
-                if "<table" not in text:
-                    assert len(text) < 80
-
-        for func in funcs:
             text = func(c)
-            assert "No scheduler connected" in text
+            assert c.scheduler.address in text
+            assert "threads=3" in text or "Total threads: </strong>" in text
+            assert "6.00 GiB" in text
+            if "<table" not in text:
+                assert len(text) < 80
+
+        text = func(c)
+        assert "No scheduler connected" in text
 
 
 @gen_cluster(client=True)
@@ -2041,17 +1928,12 @@ async def test_repr_no_memory_limit(c, s, a, b):
 
 @gen_test()
 async def test_repr_localcluster():
-    cluster = await LocalCluster(
+    async with LocalCluster(
         processes=False, dashboard_address=":0", asynchronous=True
-    )
-    client = await Client(cluster, asynchronous=True)
-    try:
+    ) as cluster, Client(cluster, asynchronous=True) as client:
         text = client._repr_html_()
         assert cluster.scheduler.address in text
         assert is_valid_xml(client._repr_html_())
-    finally:
-        await client.close()
-        await cluster.close()
 
 
 @gen_cluster(client=True)
@@ -2119,7 +2001,7 @@ async def test_forget_in_flight(e, s, A, B):
     x, y = e.compute([ac, acab])
     s.validate_state()
 
-    for i in range(5):
+    for _ in range(5):
         await asyncio.sleep(0.01)
         s.validate_state()
 
@@ -2174,39 +2056,52 @@ def test_repr_sync(c):
 
 @gen_cluster()
 async def test_multi_client(s, a, b):
-    c = await Client(s.address, asynchronous=True)
-    f = await Client(s.address, asynchronous=True)
+    async with Client(s.address, asynchronous=True) as f:
+        async with Client(s.address, asynchronous=True) as c:
+            assert set(s.client_comms) == {c.id, f.id}
 
-    assert set(s.client_comms) == {c.id, f.id}
+            x = c.submit(inc, 1)
+            y = f.submit(inc, 2)
+            y2 = c.submit(inc, 2)
 
-    x = c.submit(inc, 1)
-    y = f.submit(inc, 2)
-    y2 = c.submit(inc, 2)
+            assert y.key == y2.key
 
-    assert y.key == y2.key
+            await wait([x, y])
 
-    await wait([x, y])
+            assert {ts.key for ts in s.clients[c.id].wants_what} == {x.key, y.key}
+            assert {ts.key for ts in s.clients[f.id].wants_what} == {y.key}
 
-    assert {ts.key for ts in s.clients[c.id].wants_what} == {x.key, y.key}
-    assert {ts.key for ts in s.clients[f.id].wants_what} == {y.key}
+        while c.id in s.clients:
+            await asyncio.sleep(0.01)
 
-    await c.close()
-
-    while c.id in s.clients:
-        await asyncio.sleep(0.01)
-
-    assert c.id not in s.clients
-    assert c.id not in s.tasks[y.key].who_wants
-    assert x.key not in s.tasks
-
-    await f.close()
+        assert c.id not in s.clients
+        assert c.id not in s.tasks[y.key].who_wants
+        assert x.key not in s.tasks
 
     while s.tasks:
         await asyncio.sleep(0.01)
 
 
+@contextmanager
+def _pristine_loop():
+    IOLoop.clear_instance()
+    IOLoop.clear_current()
+    loop = IOLoop()
+    loop.make_current()
+    assert IOLoop.current() is loop
+    try:
+        yield loop
+    finally:
+        try:
+            loop.close(all_fds=True)
+        except (KeyError, ValueError):
+            pass
+        IOLoop.clear_instance()
+        IOLoop.clear_current()
+
+
 def long_running_client_connection(address):
-    with pristine_loop():
+    with _pristine_loop():
         c = Client(address)
         x = c.submit(lambda x: x + 1, 10)
         x.result()
@@ -2232,58 +2127,54 @@ async def test_cleanup_after_broken_client_connection(s, a, b):
 
 @gen_cluster()
 async def test_multi_garbage_collection(s, a, b):
-    c = await Client(s.address, asynchronous=True)
+    async with Client(s.address, asynchronous=True) as c, Client(
+        s.address, asynchronous=True
+    ) as f:
+        x = c.submit(inc, 1)
+        y = f.submit(inc, 2)
+        y2 = c.submit(inc, 2)
 
-    f = await Client(s.address, asynchronous=True)
+        assert y.key == y2.key
 
-    x = c.submit(inc, 1)
-    y = f.submit(inc, 2)
-    y2 = c.submit(inc, 2)
+        await wait([x, y])
 
-    assert y.key == y2.key
+        x.__del__()
+        while x.key in a.data or x.key in b.data:
+            await asyncio.sleep(0.01)
 
-    await wait([x, y])
+        assert {ts.key for ts in s.clients[c.id].wants_what} == {y.key}
+        assert {ts.key for ts in s.clients[f.id].wants_what} == {y.key}
 
-    x.__del__()
-    while x.key in a.data or x.key in b.data:
-        await asyncio.sleep(0.01)
+        y.__del__()
+        while x.key in {ts.key for ts in s.clients[f.id].wants_what}:
+            await asyncio.sleep(0.01)
 
-    assert {ts.key for ts in s.clients[c.id].wants_what} == {y.key}
-    assert {ts.key for ts in s.clients[f.id].wants_what} == {y.key}
+        await asyncio.sleep(0.1)
+        assert y.key in a.data or y.key in b.data
+        assert {ts.key for ts in s.clients[c.id].wants_what} == {y.key}
+        assert not s.clients[f.id].wants_what
 
-    y.__del__()
-    while x.key in {ts.key for ts in s.clients[f.id].wants_what}:
-        await asyncio.sleep(0.01)
+        y2.__del__()
+        while y.key in a.data or y.key in b.data:
+            await asyncio.sleep(0.01)
 
-    await asyncio.sleep(0.1)
-    assert y.key in a.data or y.key in b.data
-    assert {ts.key for ts in s.clients[c.id].wants_what} == {y.key}
-    assert not s.clients[f.id].wants_what
-
-    y2.__del__()
-    while y.key in a.data or y.key in b.data:
-        await asyncio.sleep(0.01)
-
-    assert not s.tasks
-
-    await c.close()
-    await f.close()
+        assert not s.tasks
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test__broadcast(c, s, a, b):
     x, y = await c.scatter([1, 2], broadcast=True)
     assert a.data == b.data == {x.key: 1, y.key: 2}
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4, config=NO_AMM)
 async def test__broadcast_integer(c, s, *workers):
     x, y = await c.scatter([1, 2], broadcast=2)
     assert len(s.tasks[x.key].who_has) == 2
     assert len(s.tasks[y.key].who_has) == 2
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test__broadcast_dict(c, s, a, b):
     d = await c.scatter({"x": 1}, broadcast=True)
     assert a.data == b.data == {"x": 1}
@@ -2329,7 +2220,6 @@ async def test_cancel_tuple_key(c, s, a, b):
 async def test_cancel_multi_client(s, a, b):
     async with Client(s.address, asynchronous=True, name="c") as c:
         async with Client(s.address, asynchronous=True, name="f") as f:
-
             x = c.submit(slowinc, 1)
             y = f.submit(slowinc, 1)
 
@@ -2355,15 +2245,14 @@ async def test_cancel_multi_client(s, a, b):
 
 
 @gen_cluster(nthreads=[("", 1)], client=True)
-async def test_cancel_before_known_to_scheduler(c, s, a):
-    with captured_logger("distributed.scheduler") as slogs:
-        f = c.submit(inc, 1)
-        await c.cancel([f])
+async def test_cancel_before_known_to_scheduler(c, s, a, caplog):
+    f = c.submit(inc, 1)
+    await c.cancel([f])
 
-        with pytest.raises(CancelledError):
-            await f
-
-        assert "Scheduler cancels key" in slogs.getvalue()
+    with pytest.raises(CancelledError):
+        await f
+    while f"Scheduler cancels key {f.key}" not in caplog.text:
+        await asyncio.sleep(0.05)
 
 
 @gen_cluster(client=True)
@@ -2564,20 +2453,21 @@ async def test_futures_of_cancelled_raises(c, s, a, b):
 
     with pytest.raises(CancelledError):
         await x
+    while x.key in s.tasks:
+        await asyncio.sleep(0.01)
+    with pytest.raises(CancelledError):
+        get_obj = c.get({"x": (inc, x), "y": (inc, 2)}, ["x", "y"], sync=False)
+        gather_obj = c.gather(get_obj)
+        await gather_obj
 
     with pytest.raises(CancelledError):
-        await c.get({"x": (inc, x), "y": (inc, 2)}, ["x", "y"], sync=False)
+        await c.submit(inc, x)
 
     with pytest.raises(CancelledError):
-        c.submit(inc, x)
+        await c.submit(add, 1, y=x)
 
     with pytest.raises(CancelledError):
-        c.submit(add, 1, y=x)
-
-    with pytest.raises(CancelledError):
-        c.map(add, [1], y=x)
-
-    assert "y" not in s.tasks
+        await c.gather(c.map(add, [1], y=x))
 
 
 @pytest.mark.skip
@@ -2596,16 +2486,6 @@ async def test_dont_delete_recomputed_results(c, s, w):
 
     while time() < start + (s.delete_interval + 100) / 1000:  # and stays
         assert xx.key in w.data
-        await asyncio.sleep(0.01)
-
-
-@gen_cluster(nthreads=[], client=True)
-async def test_fatally_serialized_input(c, s):
-    o = FatallySerializedObject()
-
-    future = c.submit(inc, o)
-
-    while not s.tasks:
         await asyncio.sleep(0.01)
 
 
@@ -2855,7 +2735,7 @@ def test_client_num_fds(loop):
         proc = psutil.Process()
         with Client(s["address"], loop=loop) as c:  # first client to start loop
             before = proc.num_fds()  # measure
-            for i in range(4):
+            for _ in range(4):
                 with Client(s["address"], loop=loop):  # start more clients
                     pass
             start = time()
@@ -2866,13 +2746,15 @@ def test_client_num_fds(loop):
 
 @gen_cluster()
 async def test_startup_close_startup(s, a, b):
-    c = await Client(s.address, asynchronous=True)
-    await c.close()
+    async with Client(s.address, asynchronous=True):
+        pass
 
-    c = await Client(s.address, asynchronous=True)
-    await c.close()
+    async with Client(s.address, asynchronous=True):
+        pass
 
 
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
+@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
 def test_startup_close_startup_sync(loop):
     with cluster() as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
@@ -2903,11 +2785,14 @@ async def test_badly_serialized_exceptions(c, s, a, b):
 # Set rebalance() to work predictably on small amounts of managed memory. By default, it
 # uses optimistic memory, which would only be possible to test by allocating very large
 # amounts of managed memory, so that they would hide variations in unmanaged memory.
-REBALANCE_MANAGED_CONFIG = {
-    "distributed.worker.memory.rebalance.measure": "managed",
-    "distributed.worker.memory.rebalance.sender-min": 0,
-    "distributed.worker.memory.rebalance.sender-recipient-gap": 0,
-}
+REBALANCE_MANAGED_CONFIG = merge(
+    NO_AMM,
+    {
+        "distributed.worker.memory.rebalance.measure": "managed",
+        "distributed.worker.memory.rebalance.sender-min": 0,
+        "distributed.worker.memory.rebalance.sender-recipient-gap": 0,
+    },
+)
 
 
 @gen_cluster(client=True, config=REBALANCE_MANAGED_CONFIG)
@@ -2961,7 +2846,7 @@ def test_rebalance_sync(loop):
             assert len(b.data) == 50
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_rebalance_unprepared(c, s, a, b):
     """Client.rebalance() internally waits for unfinished futures"""
     futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
@@ -2973,7 +2858,7 @@ async def test_rebalance_unprepared(c, s, a, b):
     s.validate_state()
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_rebalance_raises_on_explicit_missing_data(c, s, a, b):
     """rebalance() raises KeyError if explicitly listed futures disappear"""
     f = Future("x", client=c, state="memory")
@@ -3004,15 +2889,13 @@ async def test_unrunnable_task_runs(c, s, a, b):
     assert s.tasks[x.key] in s.unrunnable
     assert s.get_task_status(keys=[x.key]) == {x.key: "no-worker"}
 
-    w = await Worker(s.address)
+    async with Worker(s.address):
+        while x.status != "finished":
+            await asyncio.sleep(0.01)
 
-    while x.status != "finished":
-        await asyncio.sleep(0.01)
-
-    assert s.tasks[x.key] not in s.unrunnable
-    result = await x
-    assert result == 2
-    await w.close()
+        assert s.tasks[x.key] not in s.unrunnable
+        result = await x
+        assert result == 2
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -3023,7 +2906,7 @@ async def test_add_worker_after_tasks(c, s):
 
 
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
-@gen_cluster([("127.0.0.1", 1), ("127.0.0.2", 2)], client=True)
+@gen_cluster([("127.0.0.1", 1), ("127.0.0.2", 2)], client=True, config=NO_AMM)
 async def test_workers_register_indirect_data(c, s, a, b):
     [x] = await c.scatter([1], workers=a.address)
     y = c.submit(inc, x, workers=b.ip)
@@ -3042,10 +2925,14 @@ async def test_submit_on_cancelled_future(c, s, a, b):
     await c.cancel(x)
 
     with pytest.raises(CancelledError):
-        c.submit(inc, x)
+        await c.submit(inc, x)
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10)
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 10,
+    config=NO_AMM,
+)
 async def test_replicate(c, s, *workers):
     [a, b] = await c.scatter([1, 2])
     await s.replicate(keys=[a.key, b.key], n=5)
@@ -3058,7 +2945,7 @@ async def test_replicate(c, s, *workers):
     assert sum(b.key in w.data for w in workers) == 5
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_replicate_tuple_keys(c, s, a, b):
     x = delayed(inc)(1, dask_key_name=("x", 1))
     f = c.persist(x)
@@ -3070,9 +2957,12 @@ async def test_replicate_tuple_keys(c, s, a, b):
     s.validate_state()
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10)
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 10,
+    config=NO_AMM,
+)
 async def test_replicate_workers(c, s, *workers):
-
     [a, b] = await c.scatter([1, 2], workers=[workers[0].address])
     await s.replicate(
         keys=[a.key, b.key], n=5, workers=[w.address for w in workers[:5]]
@@ -3121,7 +3011,11 @@ class CountSerialization:
         return self.n
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10)
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 10,
+    config=NO_AMM,
+)
 async def test_replicate_tree_branching(c, s, *workers):
     obj = CountSerialization()
     [future] = await c.scatter([obj])
@@ -3131,7 +3025,11 @@ async def test_replicate_tree_branching(c, s, *workers):
     assert max_count > 1
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10)
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 10,
+    config=NO_AMM,
+)
 async def test_client_replicate(c, s, *workers):
     x = c.submit(inc, 1)
     y = c.submit(inc, 2)
@@ -3156,6 +3054,7 @@ async def test_client_replicate(c, s, *workers):
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1), ("127.0.0.2", 1), ("127.0.0.2", 1)],
+    config=NO_AMM,
 )
 async def test_client_replicate_host(client, s, a, b, c):
     aws = s.workers[a.address]
@@ -3173,7 +3072,9 @@ async def test_client_replicate_host(client, s, a, b, c):
     assert s.tasks[x.key].who_has == {aws, bws, cws}
 
 
-def test_client_replicate_sync(c):
+def test_client_replicate_sync(client_no_amm):
+    c = client_no_amm
+
     x = c.submit(inc, 1)
     y = c.submit(inc, 2)
     c.replicate([x, y], n=2)
@@ -3240,7 +3141,7 @@ async def test_balanced_with_submit(c, s, *workers):
         assert len(w.data) == 1
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4, config=NO_AMM)
 async def test_balanced_with_submit_and_resident_data(c, s, *workers):
     [x] = await c.scatter([10], broadcast=True)
     L = [c.submit(slowinc, x, pure=False) for i in range(4)]
@@ -3266,16 +3167,13 @@ async def test_scheduler_saturates_cores(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 20)] * 2)
 async def test_scheduler_saturates_cores_random(c, s, a, b):
-    for delay in [0, 0.01, 0.1]:
-        futures = c.map(randominc, range(100), scale=0.1)
-        while not s.tasks:
-            if s.tasks:
-                assert all(
-                    len(p) >= 20
-                    for w in s.workers.values()
-                    for p in w.processing.values()
-                )
-            await asyncio.sleep(0.01)
+    futures = c.map(randominc, range(100), scale=0.1)
+    while not s.tasks:
+        if s.tasks:
+            assert all(
+                len(p) >= 20 for w in s.workers.values() for p in w.processing.values()
+            )
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4)
@@ -3293,28 +3191,37 @@ async def test_cancel_clears_processing(c, s, *workers):
 
 
 def test_default_get(loop_in_thread):
+    has_pyarrow = False
+    try:
+        check_minimal_arrow_version()
+        has_pyarrow = True
+    except RuntimeError:
+        pass
     loop = loop_in_thread
     with cluster() as (s, [a, b]):
         pre_get = dask.base.get_scheduler()
-        pytest.raises(KeyError, dask.config.get, "shuffle")
+        # These may change in the future but the selection below should not
+        distributed_default = "p2p" if has_pyarrow else "tasks"
+        local_default = "disk"
+        assert get_default_shuffle_algorithm() == local_default
         with Client(s["address"], set_as_default=True, loop=loop) as c:
             assert dask.base.get_scheduler() == c.get
-            assert dask.config.get("shuffle") == "tasks"
+            assert get_default_shuffle_algorithm() == distributed_default
 
         assert dask.base.get_scheduler() == pre_get
-        pytest.raises(KeyError, dask.config.get, "shuffle")
+        assert get_default_shuffle_algorithm() == local_default
 
         c = Client(s["address"], set_as_default=False, loop=loop)
         assert dask.base.get_scheduler() == pre_get
-        pytest.raises(KeyError, dask.config.get, "shuffle")
+        assert get_default_shuffle_algorithm() == local_default
         c.close()
 
         c = Client(s["address"], set_as_default=True, loop=loop)
-        assert dask.config.get("shuffle") == "tasks"
+        assert get_default_shuffle_algorithm() == distributed_default
         assert dask.base.get_scheduler() == c.get
         c.close()
         assert dask.base.get_scheduler() == pre_get
-        pytest.raises(KeyError, dask.config.get, "shuffle")
+        assert get_default_shuffle_algorithm() == local_default
 
         with Client(s["address"], loop=loop) as c:
             assert dask.base.get_scheduler() == c.get
@@ -3437,7 +3344,7 @@ async def test_get_foo_lost_keys(c, s, u, v, w):
 )
 async def test_bad_tasks_fail(c, s, a, b):
     f = c.submit(sys.exit, 0)
-    with captured_logger(logging.getLogger("distributed.scheduler")) as logger:
+    with captured_logger("distributed.scheduler") as logger:
         with pytest.raises(KilledWorker) as info:
             await f
 
@@ -3484,9 +3391,9 @@ def test_get_returns_early(c):
         result = c.get({"x": (throws, 1), "y": (block, event)}, ["x", "y"])
 
     # Futures should be released and forgotten
-    wait_for(lambda: not c.futures, timeout=1)
+    poll_for(lambda: not c.futures, timeout=1)
     event.set()
-    wait_for(lambda: not any(c.processing().values()), timeout=3)
+    poll_for(lambda: not any(c.processing().values()), timeout=3)
 
     x = c.submit(inc, 1)
     x.result()
@@ -3570,11 +3477,10 @@ def test_as_completed_next_batch(c):
 
 @gen_cluster(nthreads=[])
 async def test_status(s):
-    c = await Client(s.address, asynchronous=True)
-    assert c.status == "running"
-    x = c.submit(inc, 1)
+    async with Client(s.address, asynchronous=True) as c:
+        assert c.status == "running"
+        x = c.submit(inc, 1)
 
-    await c.close()
     assert c.status == "closed"
 
 
@@ -3609,73 +3515,58 @@ async def test_scatter_raises_if_no_workers(c, s):
         await c.scatter(1, timeout=0.5)
 
 
-@pytest.mark.flaky(reruns=2)  # due to random port
+@pytest.mark.slow
 @gen_test()
 async def test_reconnect():
-    port = random.randint(10000, 50000)
+    port = open_port()
 
-    async def hard_stop(s):
-        for pc in s.periodic_callbacks.values():
-            pc.stop()
+    stack = ExitStack()
+    proc = popen(["dask", "scheduler", "--no-dashboard", f"--port={port}"])
+    stack.enter_context(proc)
+    async with Client(f"127.0.0.1:{port}", asynchronous=True) as c, Worker(
+        f"127.0.0.1:{port}"
+    ) as w:
+        await c.wait_for_workers(1, timeout=10)
+        x = c.submit(inc, 1)
+        assert (await x) == 2
+        stack.close()
 
-        s.stop_services()
-        for comm in list(s.stream_comms.values()):
-            comm.abort()
-        for comm in list(s.client_comms.values()):
-            comm.abort()
+        start = time()
+        while c.status != "connecting":
+            assert time() < start + 10
+            await asyncio.sleep(0.01)
 
-        await s.rpc.close()
-        s.stop()
-        await Server.close(s)
-
-    s = await Scheduler(port=port)
-    w = await Worker(f"127.0.0.1:{port}")
-    c = await Client(f"127.0.0.1:{port}", asynchronous=True)
-    await c.wait_for_workers(1, timeout=10)
-    x = c.submit(inc, 1)
-    assert (await x) == 2
-    await hard_stop(s)
-
-    start = time()
-    while c.status != "connecting":
-        assert time() < start + 10
-        await asyncio.sleep(0.01)
-
-    assert x.status == "cancelled"
-    with pytest.raises(CancelledError):
-        await x
-
-    s = await Scheduler(port=port)
-    start = time()
-    while c.status != "running":
-        await asyncio.sleep(0.1)
-        assert time() < start + 10
-
-    await w.finished()
-    w = await Worker(f"127.0.0.1:{port}")
-
-    start = time()
-    while len(await c.nthreads()) != 1:
-        await asyncio.sleep(0.05)
-        assert time() < start + 10
-
-    x = c.submit(inc, 1)
-    assert (await x) == 2
-    await hard_stop(s)
-
-    start = time()
-    while True:
-        assert time() < start + 10
-        try:
+        assert x.status == "cancelled"
+        with pytest.raises(CancelledError):
             await x
-            assert False
-        except CommClosedError:
-            continue
-        except CancelledError:
-            break
 
-    await w.close()
-    await c._close(fast=True)
+        with popen(["dask", "scheduler", "--no-dashboard", f"--port={port}"]):
+            start = time()
+            while c.status != "running":
+                await asyncio.sleep(0.1)
+                assert time() < start + 10
+
+            await w.finished()
+            async with Worker(f"127.0.0.1:{port}"):
+                start = time()
+                while len(await c.nthreads()) != 1:
+                    await asyncio.sleep(0.05)
+                    assert time() < start + 10
+
+                x = c.submit(inc, 1)
+                assert (await x) == 2
+
+        start = time()
+        while True:
+            assert time() < start + 10
+            try:
+                await x
+                assert False
+            except CommClosedError:
+                continue
+            except CancelledError:
+                break
+        await c._close(fast=True)
 
 
 class UnhandledExceptions(Exception):
@@ -3739,7 +3630,7 @@ def test_open_close_many_workers(loop, worker, count, repeat):
         status = True
 
         async def start_worker(sleep, duration, repeat=1):
-            for i in range(repeat):
+            for _ in range(repeat):
                 await asyncio.sleep(sleep)
                 if not status:
                     return
@@ -3755,7 +3646,7 @@ def test_open_close_many_workers(loop, worker, count, repeat):
                 await asyncio.sleep(0)
             done.release()
 
-        for i in range(count):
+        for _ in range(count):
             loop.add_callback(
                 start_worker, random.random() / 5, random.random() / 5, repeat=repeat
             )
@@ -3763,7 +3654,7 @@ def test_open_close_many_workers(loop, worker, count, repeat):
         with Client(s["address"], loop=loop) as c:
             sleep(1)
 
-            for i in range(count):
+            for _ in range(count):
                 done.acquire(timeout=5)
                 gc.collect()
                 if not running:
@@ -3797,46 +3688,43 @@ def test_open_close_many_workers(loop, worker, count, repeat):
 
 @gen_cluster()
 async def test_idempotence(s, a, b):
-    c = await Client(s.address, asynchronous=True)
-    f = await Client(s.address, asynchronous=True)
+    async with Client(s.address, asynchronous=True) as c, Client(
+        s.address, asynchronous=True
+    ) as f:
+        # Submit
+        x = c.submit(inc, 1)
+        await x
+        log = list(s.transition_log)
 
-    # Submit
-    x = c.submit(inc, 1)
-    await x
-    log = list(s.transition_log)
+        len_single_submit = len(log)  # see last assert
 
-    len_single_submit = len(log)  # see last assert
+        y = f.submit(inc, 1)
+        assert x.key == y.key
+        await y
+        await asyncio.sleep(0.1)
+        log2 = list(s.transition_log)
+        assert log == log2
 
-    y = f.submit(inc, 1)
-    assert x.key == y.key
-    await y
-    await asyncio.sleep(0.1)
-    log2 = list(s.transition_log)
-    assert log == log2
+        # Error
+        a = c.submit(div, 1, 0)
+        await wait(a)
+        assert a.status == "error"
+        log = list(s.transition_log)
 
-    # Error
-    a = c.submit(div, 1, 0)
-    await wait(a)
-    assert a.status == "error"
-    log = list(s.transition_log)
+        b = f.submit(div, 1, 0)
+        assert a.key == b.key
+        await wait(b)
+        await asyncio.sleep(0.1)
+        log2 = list(s.transition_log)
+        assert log == log2
 
-    b = f.submit(div, 1, 0)
-    assert a.key == b.key
-    await wait(b)
-    await asyncio.sleep(0.1)
-    log2 = list(s.transition_log)
-    assert log == log2
+        s.transition_log.clear()
+        # Simultaneous Submit
+        d = c.submit(inc, 2)
+        e = c.submit(inc, 2)
+        await wait([d, e])
 
-    s.transition_log.clear()
-    # Simultaneous Submit
-    d = c.submit(inc, 2)
-    e = c.submit(inc, 2)
-    await wait([d, e])
-
-    assert len(s.transition_log) == len_single_submit
-
-    await c.close()
-    await f.close()
+        assert len(s.transition_log) == len_single_submit
 
 
 def test_scheduler_info(c):
@@ -3867,8 +3755,8 @@ def test_get_versions_sync(c):
     assert v["scheduler"] is not None
     assert v["client"] is not None
     assert len(v["workers"]) == 2
-    for k, v in v["workers"].items():
-        assert v is not None
+    for wv in v["workers"].values():
+        assert wv is not None
 
     c.get_versions(check=True)
     # smoke test for versions
@@ -3897,10 +3785,10 @@ def test_threaded_get_within_distributed(c):
 
     for get in [dask.local.get_sync, dask.multiprocessing.get, dask.threaded.get]:
 
-        def f():
+        def f(get):
             return get({"x": (lambda: 1,)}, "x")
 
-        future = c.submit(f)
+        future = c.submit(f, get)
         assert future.result() == 1
 
 
@@ -3915,7 +3803,11 @@ async def test_lose_scattered_data(c, s, a, b):
     assert x.key not in s.tasks
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 3,
+    config=NO_AMM,
+)
 async def test_partially_lose_scattered_data(e, s, a, b, c):
     x = await e.scatter(1, workers=a.address)
     await e.replicate(x, n=2)
@@ -3927,22 +3819,22 @@ async def test_partially_lose_scattered_data(e, s, a, b, c):
     assert s.get_task_status(keys=[x.key]) == {x.key: "memory"}
 
 
-@gen_cluster(client=True)
-async def test_scatter_compute_lose(c, s, a, b):
-    [x] = await c.scatter([[1, 2, 3, 4]], workers=a.address)
-    y = c.submit(inc, 1, workers=b.address)
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_scatter_compute_lose(c, s, a):
+    x = (await c.scatter({"x": 1}, workers=[a.address]))["x"]
 
-    z = c.submit(slowadd, x, y, delay=0.2)
-    await asyncio.sleep(0.1)
+    async with BlockedGatherDep(s.address) as b:
+        y = c.submit(inc, x, key="y", workers=[b.address])
+        await wait_for_state("x", "flight", b)
 
-    await a.close()
+        await a.close()
+        b.block_gather_dep.set()
 
-    with pytest.raises(CancelledError):
-        await wait(z)
+        with pytest.raises(CancelledError):
+            await wait(y)
 
-    assert x.status == "cancelled"
-    assert y.status == "finished"
-    assert z.status == "cancelled"
+        assert x.status == "cancelled"
+        assert y.status == "cancelled"
 
 
 @gen_cluster(client=True)
@@ -4011,60 +3903,75 @@ async def test_scatter_compute_store_lose_processing(c, s, a, b):
 
 @gen_cluster()
 async def test_serialize_future(s, a, b):
-    c1 = await Client(s.address, asynchronous=True)
-    c2 = await Client(s.address, asynchronous=True)
+    async with Client(s.address, asynchronous=True) as c1, Client(
+        s.address, asynchronous=True
+    ) as c2:
+        future = c1.submit(lambda: 1)
+        result = await future
 
-    future = c1.submit(lambda: 1)
-    result = await future
+        for ci in (c1, c2):
+            with ensure_no_new_clients():
+                with ci.as_current():
+                    future2 = pickle.loads(pickle.dumps(future))
+                    assert future2.client is ci
+                    assert stringify(future2.key) in ci.futures
+                    result2 = await future2
+                    assert result == result2
+                with temp_default_client(ci):
+                    future2 = pickle.loads(pickle.dumps(future))
 
-    for ci in (c1, c2):
-        for ctxman in ci.as_current, lambda: temp_default_client(ci):
-            with ctxman():
-                future2 = pickle.loads(pickle.dumps(future))
-                assert future2.client is ci
-                assert stringify(future2.key) in ci.futures
-                result2 = await future2
-                assert result == result2
 
-    await c1.close()
-    await c2.close()
+@gen_cluster()
+async def test_serialize_future_without_client(s, a, b):
+    # Do not use a ctx manager to avoid having this being set as a current and/or default client
+    c1 = await Client(s.address, asynchronous=True, set_as_default=False)
+
+    with ensure_no_new_clients():
+
+        def do_stuff():
+            return 1
+
+        future = c1.submit(do_stuff)
+        pickled = pickle.dumps(future)
+        unpickled_fut = pickle.loads(pickled)
+
+    with pytest.raises(RuntimeError):
+        await unpickled_fut
+
+    with c1.as_current():
+        unpickled_fut_ctx = pickle.loads(pickled)
+        assert await unpickled_fut_ctx == 1
 
 
 @gen_cluster()
 async def test_temp_default_client(s, a, b):
-    c1 = await Client(s.address, asynchronous=True)
-    c2 = await Client(s.address, asynchronous=True)
+    async with Client(s.address, asynchronous=True) as c1, Client(
+        s.address, asynchronous=True
+    ) as c2:
+        with temp_default_client(c1):
+            assert default_client() is c1
+            assert default_client(c2) is c2
 
-    with temp_default_client(c1):
-        assert default_client() is c1
-        assert default_client(c2) is c2
-
-    with temp_default_client(c2):
-        assert default_client() is c2
-        assert default_client(c1) is c1
-
-    await c1.close()
-    await c2.close()
+        with temp_default_client(c2):
+            assert default_client() is c2
+            assert default_client(c1) is c1
 
 
 @gen_cluster(client=True)
 async def test_as_current(c, s, a, b):
-    c1 = await Client(s.address, asynchronous=True)
-    c2 = await Client(s.address, asynchronous=True)
-
-    with temp_default_client(c):
-        assert Client.current() is c
-        with pytest.raises(ValueError):
-            Client.current(allow_global=False)
-        with c1.as_current():
-            assert Client.current() is c1
-            assert Client.current(allow_global=True) is c1
-        with c2.as_current():
-            assert Client.current() is c2
-            assert Client.current(allow_global=True) is c2
-
-    await c1.close()
-    await c2.close()
+    async with Client(s.address, asynchronous=True) as c1, Client(
+        s.address, asynchronous=True
+    ) as c2:
+        with temp_default_client(c):
+            assert Client.current() is c
+            with pytest.raises(ValueError):
+                Client.current(allow_global=False)
+            with c1.as_current():
+                assert Client.current() is c1
+                assert Client.current(allow_global=True) is c1
+            with c2.as_current():
+                assert Client.current() is c2
+                assert Client.current(allow_global=True) is c2
 
 
 def test_as_current_is_thread_local(s, loop):
@@ -4080,6 +3987,7 @@ def test_as_current_is_thread_local(s, loop):
                     # This line runs only when all parties are inside the
                     # context manager
                     assert Client.current(allow_global=False) is c
+                    assert default_client() is c
                 finally:
                     cm_before_exit.wait()
 
@@ -4131,7 +4039,7 @@ async def test_as_current_is_task_local(s, a, b):
 
 
 @nodebug  # test timing is fragile
-@gen_cluster(nthreads=[("127.0.0.1", 1)] * 3, client=True)
+@gen_cluster(nthreads=[("127.0.0.1", 1)] * 3, client=True, config=NO_AMM)
 async def test_persist_workers_annotate(e, s, a, b, c):
     with dask.annotate(workers=a.address, allow_other_workers=False):
         L1 = [delayed(inc)(i) for i in range(4)]
@@ -4157,8 +4065,10 @@ async def test_persist_workers_annotate(e, s, a, b, c):
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)] * 3, client=True)
 async def test_persist_workers_annotate2(e, s, a, b, c):
+    addr = a.address
+
     def key_to_worker(key):
-        return a.address
+        return addr
 
     L1 = [delayed(inc)(i) for i in range(4)]
     for x in L1:
@@ -4338,10 +4248,13 @@ async def test_weight_occupancy_against_data_movement(c, s, a, b):
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1), ("127.0.0.1", 10)],
-    config={
-        "distributed.scheduler.work-stealing": False,
-        "distributed.scheduler.default-task-durations": {"f": "10ms"},
-    },
+    config=merge(
+        NO_AMM,
+        {
+            "distributed.scheduler.work-stealing": False,
+            "distributed.scheduler.default-task-durations": {"f": "10ms"},
+        },
+    ),
 )
 async def test_distribute_tasks_by_nthreads(c, s, a, b):
     def f(x, y=0):
@@ -4557,22 +4470,34 @@ async def test_scatter_dict_workers(c, s, a, b):
     assert "a" in a.data or "a" in b.data
 
 
-@pytest.mark.flaky(reruns=2)
 @pytest.mark.slow
 @gen_test()
 async def test_client_timeout():
     """`await Client(...)` keeps retrying for 10 seconds if it can't find the Scheduler
     straight away
     """
-    port = random.randint(10000, 50000)
-    with dask.config.set({"distributed.comm.timeouts.connect": "10s"}):
-        c = Client(f"127.0.0.1:{port}", asynchronous=True)
-        client_start_fut = asyncio.ensure_future(c)
+    port = open_port()
+    stop_event = asyncio.Event()
+
+    async def run_client():
+        try:
+            async with Client(f"127.0.0.1:{port}", asynchronous=True) as c:
+                return await c.run_on_scheduler(lambda: 123)
+        finally:
+            stop_event.set()
+
+    async def run_scheduler_after_2_seconds():
+        # TODO: start a scheduler that waits for the first connection and
+        # closes it
         await asyncio.sleep(2)
         async with Scheduler(port=port, dashboard_address=":0"):
-            await client_start_fut
-            assert await c.run_on_scheduler(lambda: 123) == 123
-            await c.close()
+            await stop_event.wait()
+
+    with dask.config.set({"distributed.comm.timeouts.connect": "10s"}):
+        assert await asyncio.gather(
+            run_client(),
+            run_scheduler_after_2_seconds(),
+        ) == [123, None]
 
 
 @gen_cluster(client=True)
@@ -4819,6 +4744,107 @@ async def test_retire_workers(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
+class WorkerStartTime(WorkerPlugin):
+    def setup(self, worker):
+        worker.start_time = time()
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=Nanny, worker_kwargs={"plugins": [WorkerStartTime()]})
+async def test_restart_workers(c, s, a, b):
+    # Get initial worker start times
+    results = await c.run(lambda dask_worker: dask_worker.start_time)
+    a_start_time = results[a.worker_address]
+    b_start_time = results[b.worker_address]
+    assert set(s.workers) == {a.worker_address, b.worker_address}
+
+    # Persist futures and perform a computation
+    da = pytest.importorskip("dask.array")
+    size = 100
+    x = da.ones(size, chunks=10)
+    x = x.persist()
+    assert await c.compute(x.sum()) == size
+
+    # Restart a single worker
+    a_worker_addr = a.worker_address
+    results = await c.restart_workers(workers=[a.worker_address])
+    assert results[a_worker_addr] == "OK"
+    assert set(s.workers) == {a.worker_address, b.worker_address}
+
+    # Make sure worker start times are as expected
+    results = await c.run(lambda dask_worker: dask_worker.start_time)
+    assert results[b.worker_address] == b_start_time
+    assert results[a.worker_address] > a_start_time
+
+    # Ensure computation still completes after worker restart
+    assert await c.compute(x.sum()) == size
+
+
+@gen_cluster(client=True)
+async def test_restart_workers_no_nanny_raises(c, s, a, b):
+    with pytest.raises(ValueError) as excinfo:
+        await c.restart_workers(workers=[a.address])
+    msg = str(excinfo.value).lower()
+    assert "restarting workers requires a nanny" in msg
+    assert a.address in msg
+
+
+class SlowKillNanny(Nanny):
+    async def kill(self, timeout=2, **kwargs):
+        await asyncio.sleep(2)
+        return await super().kill(timeout=timeout)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("raise_for_error", (True, False))
+@gen_cluster(client=True, Worker=SlowKillNanny)
+async def test_restart_workers_timeout(c, s, a, b, raise_for_error):
+    kwargs = dict(workers=[a.worker_address], timeout=0.001)
+
+    if raise_for_error:  # default is to raise
+        with pytest.raises(TimeoutError) as excinfo:
+            await c.restart_workers(**kwargs)
+        msg = str(excinfo.value).lower()
+        assert "workers failed to restart" in msg
+        assert a.worker_address in msg
+    else:
+        results = await c.restart_workers(raise_for_error=raise_for_error, **kwargs)
+        assert results == {a.worker_address: "timed out"}
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("raise_for_error", (True, False))
+@gen_cluster(client=True, Worker=SlowKillNanny)
+async def test_restart_workers_exception(c, s, a, b, raise_for_error):
+    async def fail_instantiate(*_args, **_kwargs):
+        raise ValueError("broken")
+
+    a.instantiate = fail_instantiate
+
+    if raise_for_error:  # default is to raise
+        with pytest.raises(ValueError, match="broken"):
+            await c.restart_workers(workers=[a.worker_address])
+    else:
+        results = await c.restart_workers(
+            workers=[a.worker_address], raise_for_error=raise_for_error
+        )
+        msg = results[a.worker_address]
+        assert msg["status"] == "error"
+        assert msg["exception_text"] == "ValueError('broken')"
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("by_name", (True, False))
+@gen_cluster(client=True, Worker=Nanny)
+async def test_restart_workers_by_name(c, s, a, b, by_name):
+    a_addr = a.worker_address
+    b_addr = b.worker_address
+    results = await c.restart_workers([a.name if by_name else a_addr, b_addr])
+
+    # Same keys as those passed in, even when mixed with address and names.
+    assert results == {a.name if by_name else a_addr: "OK", b_addr: "OK"}
+
+
 class MyException(Exception):
     pass
 
@@ -4829,7 +4855,7 @@ async def test_robust_unserializable(c, s, a, b):
         def __getstate__(self):
             raise MyException()
 
-    with pytest.raises(MyException):
+    with pytest.raises(TypeError, match="Could not serialize"):
         future = c.submit(identity, Foo())
 
     futures = c.map(inc, range(10))
@@ -4849,7 +4875,9 @@ async def test_robust_undeserializable(c, s, a, b):
             raise MyException("hello")
 
     future = c.submit(identity, Foo())
-    with pytest.raises(MyException):
+    await wait(future)
+    assert future.status == "error"
+    with raises_with_cause(RuntimeError, "deserialization", MyException, "hello"):
         await future
 
     futures = c.map(inc, range(10))
@@ -4872,7 +4900,9 @@ async def test_robust_undeserializable_function(c, s, a, b):
             return 1
 
     future = c.submit(Foo(), 1)
-    with pytest.raises(MyException):
+    await wait(future)
+    assert future.status == "error"
+    with raises_with_cause(RuntimeError, "deserialization", MyException, "hello"):
         await future
 
     futures = c.map(inc, range(10))
@@ -4919,7 +4949,7 @@ async def test_fire_and_forget_err(c, s, a, b):
 
 
 def test_quiet_client_close(loop):
-    with captured_logger(logging.getLogger("distributed")) as logger:
+    with captured_logger("distributed") as logger:
         with Client(
             loop=loop,
             processes=False,
@@ -4945,7 +4975,7 @@ def test_quiet_client_close(loop):
 
 @pytest.mark.slow
 def test_quiet_client_close_when_cluster_is_closed_before_client(loop):
-    with captured_logger(logging.getLogger("tornado.application")) as logger:
+    with captured_logger("tornado.application") as logger:
         cluster = LocalCluster(loop=loop, n_workers=1, dashboard_address=":0")
         client = Client(cluster, loop=loop)
         cluster.close()
@@ -4957,20 +4987,20 @@ def test_quiet_client_close_when_cluster_is_closed_before_client(loop):
 
 @gen_cluster()
 async def test_close(s, a, b):
-    c = await Client(s.address, asynchronous=True)
-    future = c.submit(inc, 1)
-    await wait(future)
-    assert c.id in s.clients
-    await c.close()
+    async with Client(s.address, asynchronous=True) as c:
+        future = c.submit(inc, 1)
+        await wait(future)
+        assert c.id in s.clients
+        await c.close()
 
-    while c.id in s.clients or s.tasks:
-        await asyncio.sleep(0.01)
+        while c.id in s.clients or s.tasks:
+            await asyncio.sleep(0.01)
 
 
 def test_threadsafe(c):
     def f(_):
         d = deque(maxlen=50)
-        for i in range(100):
+        for _ in range(100):
             future = c.submit(inc, random.randint(0, 100))
             d.append(future)
             sleep(0.001)
@@ -4993,7 +5023,7 @@ def test_threadsafe_get(c):
 
     def f(_):
         total = 0
-        for i in range(20):
+        for _ in range(20):
             total += (x + random.randint(0, 20)).sum().compute()
             sleep(0.001)
         return total
@@ -5012,7 +5042,7 @@ def test_threadsafe_compute(c):
 
     def f(_):
         total = 0
-        for i in range(20):
+        for _ in range(20):
             future = c.compute((x + random.randint(0, 20)).sum())
             total += future.result()
             sleep(0.001)
@@ -5147,13 +5177,10 @@ async def test_long_running_not_in_occupancy(c, s, a, raise_exception):
         await asyncio.sleep(0.01)
     await a.heartbeat()
 
-    s._set_duration_estimate(ts, ws)
     assert s.workers[a.address].occupancy == 0
     assert s.total_occupancy == 0
     assert ws.occupancy == 0
 
-    s._ongoing_background_tasks.call_soon(s.reevaluate_occupancy, 0)
-    assert s.workers[a.address].occupancy == 0
     await l.release()
 
     with (
@@ -5235,11 +5262,19 @@ async def test_sub_submit_priority(c, s, a, b):
 
 
 def test_get_client_sync(c, s, a, b):
-    results = c.run(lambda: get_worker().scheduler.address)
-    assert results == {w["address"]: s["address"] for w in [a, b]}
-
-    results = c.run(lambda: get_client().scheduler.address)
-    assert results == {w["address"]: s["address"] for w in [a, b]}
+    for w in [a, b]:
+        assert (
+            c.submit(
+                lambda: get_worker().scheduler.address, workers=[w["address"]]
+            ).result()
+            == s["address"]
+        )
+        assert (
+            c.submit(
+                lambda: get_client().scheduler.address, workers=[w["address"]]
+            ).result()
+            == s["address"]
+        )
 
 
 @gen_cluster(client=True)
@@ -5491,7 +5526,7 @@ async def test_profile_keys(c, s, a, b):
 
     assert p["count"] == xp["count"] + yp["count"]
 
-    with captured_logger(logging.getLogger("distributed")) as logger:
+    with captured_logger("distributed") as logger:
         prof = await c.profile("does-not-exist")
         assert prof == profile.create()
     out = logger.getvalue()
@@ -5501,9 +5536,8 @@ async def test_profile_keys(c, s, a, b):
 @gen_cluster()
 async def test_client_with_name(s, a, b):
     with captured_logger("distributed.scheduler") as sio:
-        client = await Client(s.address, asynchronous=True, name="foo")
-        assert "foo" in client.id
-        await client.close()
+        async with Client(s.address, asynchronous=True, name="foo") as client:
+            assert "foo" in client.id
 
     text = sio.getvalue()
     assert "foo" in text
@@ -5523,22 +5557,27 @@ async def test_future_auto_inform(c, s, a, b):
     x = c.submit(inc, 1)
     await wait(x)
 
-    client = await Client(s.address, asynchronous=True)
-    future = Future(x.key, client)
+    async with Client(s.address, asynchronous=True) as client:
+        future = Future(x.key, client)
 
-    while future.status != "finished":
-        await asyncio.sleep(0.01)
-
-    await client.close()
+        while future.status != "finished":
+            await asyncio.sleep(0.01)
 
 
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
+@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
+@pytest.mark.filterwarnings("ignore:clear_current is deprecated:DeprecationWarning")
 def test_client_async_before_loop_starts(cleanup):
     async def close():
         async with client:
             pass
 
-    with pristine_loop() as loop:
-        client = Client(asynchronous=True, loop=loop)
+    with _pristine_loop() as loop:
+        with pytest.warns(
+            DeprecationWarning,
+            match=r"Constructing LoopRunner\(loop=loop\) without a running loop is deprecated",
+        ):
+            client = Client(asynchronous=True, loop=loop)
         assert client.asynchronous
         assert isinstance(client.close(), NoOpAwaitable)
         loop.run_sync(close)  # TODO: client.close() does not unset global client
@@ -5564,9 +5603,28 @@ async def test_nested_compute(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_task_metadata(c, s, a, b):
+    with pytest.raises(KeyError):
+        await c.get_metadata("x")
+    with pytest.raises(KeyError):
+        await c.get_metadata(["x"])
+    result = await c.get_metadata("x", None)
+    assert result is None
+    result = await c.get_metadata(["x"], None)
+    assert result is None
+
+    with pytest.raises(KeyError):
+        await c.get_metadata(["x", "y"])
+    result = await c.get_metadata(["x", "y"], None)
+    assert result is None
+
     await c.set_metadata("x", 1)
     result = await c.get_metadata("x")
     assert result == 1
+
+    with pytest.raises(TypeError):
+        await c.get_metadata(["x", "y"])
+    with pytest.raises(TypeError):
+        await c.get_metadata(["x", "y"], None)
 
     future = c.submit(inc, 1)
     key = future.key
@@ -5628,6 +5686,42 @@ async def test_logs(c, s, a, b):
             assert "distributed.nanny" in msg
 
 
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_logs_from_worker_submodules(c, s, a):
+    def on_worker(dask_worker):
+        from distributed.worker import logger as l1
+        from distributed.worker_memory import worker_logger as l2
+        from distributed.worker_state_machine import logger as l3
+
+        l1.info("AAA")
+        l2.info("BBB")
+        l3.info("CCC")
+
+    await c.run(on_worker)
+    logs = await c.get_worker_logs()
+    logs = [row[1].partition(" - ")[2] for row in logs[a.worker_address]]
+    assert logs[:3] == [
+        "distributed.worker.state_machine - INFO - CCC",
+        "distributed.worker.memory - INFO - BBB",
+        "distributed.worker - INFO - AAA",
+    ]
+
+    def on_nanny(dask_worker):
+        from distributed.nanny import logger as l4
+        from distributed.worker_memory import nanny_logger as l5
+
+        l4.info("DDD")
+        l5.info("EEE")
+
+    await c.run(on_nanny, nanny=True)
+    logs = await c.get_worker_logs(nanny=True)
+    logs = [row[1].partition(" - ")[2] for row in logs[a.worker_address]]
+    assert logs[:2] == [
+        "distributed.nanny.memory - INFO - EEE",
+        "distributed.nanny - INFO - DDD",
+    ]
+
+
 @gen_cluster(client=True)
 async def test_avoid_delayed_finalize(c, s, a, b):
     x = delayed(inc)(1)
@@ -5641,31 +5735,20 @@ async def test_avoid_delayed_finalize(c, s, a, b):
 async def test_config_scheduler_address(s, a, b):
     with dask.config.set({"scheduler-address": s.address}):
         with captured_logger("distributed.client") as sio:
-            c = await Client(asynchronous=True)
-            assert c.scheduler.address == s.address
+            async with Client(asynchronous=True) as c:
+                assert c.scheduler.address == s.address
 
-        text = sio.getvalue()
-        assert s.address in text
-
-        await c.close()
+    assert sio.getvalue() == f"Config value `scheduler-address` found: {s.address}\n"
 
 
+@pytest.mark.filterwarnings("ignore:Large object:UserWarning")
 @gen_cluster(client=True)
 async def test_warn_when_submitting_large_values(c, s, a, b):
     with pytest.warns(
         UserWarning,
-        match=r"Large object of size (2\.00 MB|1.91 MiB) detected in task graph:"
-        r" \n  \(b'00000000000000000000000000000000000000000000000 \.\.\. 000000000000',\)"
-        r"\nConsider scattering large objects ahead of time.*",
+        match="Sending large graph of size",
     ):
-        future = c.submit(lambda x: x + 1, b"0" * 2000000)
-
-    with warnings.catch_warnings(record=True) as record:
-        data = b"0" * 2000000
-        for i in range(10):
-            future = c.submit(lambda x, y: x, data, i)
-
-    assert not record
+        future = c.submit(lambda x: x + 1, b"0" * 10_000_000)
 
 
 @gen_cluster(client=True)
@@ -5678,10 +5761,8 @@ async def test_unhashable_function(c, s, a, b):
 @gen_cluster()
 async def test_client_name(s, a, b):
     with dask.config.set({"client-name": "hello-world"}):
-        c = await Client(s.address, asynchronous=True)
-        assert any("hello-world" in name for name in list(s.clients))
-
-    await c.close()
+        async with Client(s.address, asynchronous=True) as c:
+            assert any("hello-world" in name for name in list(s.clients))
 
 
 def test_client_doesnt_close_given_loop(loop_in_thread, s, a, b):
@@ -5691,10 +5772,11 @@ def test_client_doesnt_close_given_loop(loop_in_thread, s, a, b):
         assert c.submit(inc, 2).result() == 3
 
 
+@pytest.mark.slow
 @gen_cluster(client=True, nthreads=[])
 async def test_quiet_scheduler_loss(c, s):
     c._periodic_callbacks["scheduler-info"].interval = 10
-    with captured_logger(logging.getLogger("distributed.client")) as logger:
+    with captured_logger("distributed.client") as logger:
         await s.close()
     text = logger.getvalue()
     assert "BrokenPipeError" not in text
@@ -5721,20 +5803,17 @@ async def test_dashboard_link_inproc():
             assert "/" not in c.dashboard_link
 
 
-@pytest.mark.flaky(reruns=2)
 @gen_test()
 async def test_client_timeout_2():
-    port = random.randint(10000, 50000)
+    port = open_port()
     with dask.config.set({"distributed.comm.timeouts.connect": "10ms"}):
         start = time()
         c = Client(f"127.0.0.1:{port}", asynchronous=True)
         with pytest.raises((TimeoutError, IOError)):
-            await c
+            async with c:
+                pass
         stop = time()
-
         assert c.status == "closed"
-        await c.close()
-
         assert stop - start < 1
 
 
@@ -5749,8 +5828,8 @@ async def test_client_active_bad_port():
     with dask.config.set({"distributed.comm.timeouts.connect": "10ms"}):
         c = Client("127.0.0.1:8080", asynchronous=True)
         with pytest.raises((TimeoutError, IOError)):
-            await c
-        await c._close(fast=True)
+            async with c:
+                pass
     http_server.stop()
 
 
@@ -5792,50 +5871,45 @@ async def test_turn_off_pickle(c, s, a, b, direct):
 async def test_de_serialization(s, a, b):
     np = pytest.importorskip("numpy")
 
-    c = await Client(
+    async with Client(
         s.address,
         asynchronous=True,
         serializers=["msgpack", "pickle"],
         deserializers=["msgpack"],
-    )
-    try:
+    ) as c:
         # Can send complex data
         future = await c.scatter(np.ones(5))
 
         # But can not retrieve it
         with pytest.raises(TypeError):
             result = await future
-    finally:
-        await c.close()
 
 
 @gen_cluster()
 async def test_de_serialization_none(s, a, b):
     np = pytest.importorskip("numpy")
 
-    c = await Client(s.address, asynchronous=True, deserializers=["msgpack"])
-    try:
+    async with Client(s.address, asynchronous=True, deserializers=["msgpack"]) as c:
         # Can send complex data
         future = await c.scatter(np.ones(5))
 
         # But can not retrieve it
         with pytest.raises(TypeError):
             result = await future
-    finally:
-        await c.close()
 
 
 @gen_cluster()
 async def test_client_repr_closed(s, a, b):
-    c = await Client(s.address, asynchronous=True)
-    await c.close()
-    c._repr_html_()
+    async with Client(s.address, asynchronous=True) as c:
+        pass
+    assert "No scheduler connected." in c._repr_html_()
 
 
+@pytest.mark.skip
 def test_client_repr_closed_sync(loop):
     with Client(loop=loop, processes=False, dashboard_address=":0") as c:
         pass
-    c._repr_html_()
+    assert "No scheduler connected." in c._repr_html_()
 
 
 @pytest.mark.xfail(reason="https://github.com/dask/dask/pull/6807")
@@ -5877,7 +5951,7 @@ async def test_scatter_error_cancel(c, s, a, b):
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 10,
-    config={"distributed.worker.memory.pause": False},
+    config=merge(NO_AMM, {"distributed.worker.memory.pause": False}),
 )
 async def test_scatter_and_replicate_avoid_paused_workers(
     c, s, *workers, workers_arg, direct, broadcast
@@ -5915,13 +5989,11 @@ def test_no_threads_lingering():
 
 @gen_cluster()
 async def test_direct_async(s, a, b):
-    c = await Client(s.address, asynchronous=True, direct_to_workers=True)
-    assert c.direct_to_workers
-    await c.close()
+    async with Client(s.address, asynchronous=True, direct_to_workers=True) as c:
+        assert c.direct_to_workers
 
-    c = await Client(s.address, asynchronous=True, direct_to_workers=False)
-    assert not c.direct_to_workers
-    await c.close()
+    async with Client(s.address, asynchronous=True, direct_to_workers=False) as c:
+        assert not c.direct_to_workers
 
 
 def test_direct_sync(c):
@@ -5934,18 +6006,23 @@ def test_direct_sync(c):
 
 
 @gen_cluster()
-async def test_mixing_clients(s, a, b):
-    c1 = await Client(s.address, asynchronous=True)
-    c2 = await Client(s.address, asynchronous=True)
+async def test_mixing_clients_same_scheduler(s, a, b):
+    async with Client(s.address, asynchronous=True) as c1, Client(
+        s.address, asynchronous=True
+    ) as c2:
+        future = c1.submit(inc, 1)
+        assert await c2.submit(inc, future) == 3
+    assert not s.tasks
 
-    future = c1.submit(inc, 1)
-    with pytest.raises(ValueError):
-        c2.submit(inc, future)
 
-    assert not c2.futures  # Don't create Futures on second Client
-
-    await c1.close()
-    await c2.close()
+@gen_cluster()
+async def test_mixing_clients_different_scheduler(s, a, b):
+    async with Scheduler(port=open_port()) as s2, Worker(s2.address) as w1, Client(
+        s.address, asynchronous=True
+    ) as c1, Client(s2.address, asynchronous=True) as c2:
+        future = c1.submit(inc, 1)
+        with pytest.raises(CancelledError):
+            await c2.submit(inc, future)
 
 
 @gen_cluster(client=True)
@@ -6115,11 +6192,10 @@ async def test_wait_for_workers(c, s, a, b):
     await asyncio.sleep(0.22)  # 2 chances
     assert not future.done()
 
-    w = await Worker(s.address)
-    start = time()
-    await future
-    assert time() < start + 1
-    await w.close()
+    async with Worker(s.address):
+        start = time()
+        await future
+        assert time() < start + 1
 
     with pytest.raises(TimeoutError) as info:
         await c.wait_for_workers(n_workers=10, timeout="1 ms")
@@ -6129,7 +6205,9 @@ async def test_wait_for_workers(c, s, a, b):
 
 
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
-@pytest.mark.parametrize("Worker", [Worker, Nanny])
+@pytest.mark.parametrize(
+    "Worker", [Worker, pytest.param(Nanny, marks=[pytest.mark.slow])]
+)
 @gen_test()
 async def test_file_descriptors_dont_leak(Worker):
     pytest.importorskip("pandas")
@@ -6173,6 +6251,7 @@ async def test_shutdown():
 
                 assert s.status == Status.closed
                 assert w.status in {Status.closed, Status.closing}
+                assert c.status == "closed"
 
 
 @gen_test()
@@ -6184,6 +6263,44 @@ async def test_shutdown_localcluster():
             await c.shutdown()
 
         assert lc.scheduler.status == Status.closed
+        assert lc.status == Status.closed
+        assert c.status == "closed"
+
+
+@gen_test()
+async def test_shutdown_stops_callbacks():
+    async with Scheduler(dashboard_address=":0") as s:
+        async with Worker(s.address) as w:
+            async with Client(s.address, asynchronous=True) as c:
+                await c.shutdown()
+                assert not any(pc.is_running() for pc in c._periodic_callbacks.values())
+
+
+@gen_test()
+async def test_shutdown_is_quiet_with_cluster():
+    async with LocalCluster(
+        n_workers=1, asynchronous=True, processes=False, dashboard_address=":0"
+    ) as cluster:
+        with captured_logger("distributed.client") as logger:
+            timeout = 0.1
+            async with Client(cluster, asynchronous=True, timeout=timeout) as c:
+                await c.shutdown()
+                await asyncio.sleep(timeout)
+            msg = logger.getvalue().strip()
+            assert msg == "Shutting down scheduler from Client", msg
+
+
+@gen_test()
+async def test_client_is_quiet_cluster_close():
+    async with LocalCluster(
+        n_workers=1, asynchronous=True, processes=False, dashboard_address=":0"
+    ) as cluster:
+        with captured_logger("distributed.client") as logger:
+            timeout = 0.1
+            async with Client(cluster, asynchronous=True, timeout=timeout) as c:
+                await cluster.close()
+                await asyncio.sleep(timeout)
+            assert not logger.getvalue().strip()
 
 
 @gen_test()
@@ -6208,7 +6325,6 @@ async def test_futures_of_sorted(c, s, a, b):
         assert str(k) in str(f)
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(
     client=True,
     config={
@@ -6308,7 +6424,6 @@ async def test_as_completed_async_for_results(c, s, a, b):
     await f()
 
     assert set(results) == set(range(1, 11))
-    assert not s.counters["op"].components[0]["gather"]
 
 
 @gen_cluster(client=True)
@@ -6426,6 +6541,7 @@ async def test_run_on_scheduler_async_def_wait(c, s, a, b):
     assert b.foo == "bar"
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(WINDOWS, reason="frequently kills off the whole test suite")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 2)
 async def test_performance_report(c, s, a, b):
@@ -6450,7 +6566,7 @@ async def test_performance_report(c, s, a, b):
                 data = f.read()
         return data
 
-    # Ensure default kwarg maintains backward compatability
+    # Ensure default kwarg maintains backward compatibility
     data = await f(stacklevel=1)
 
     assert "Also, we want this comment to appear" in data
@@ -6504,9 +6620,9 @@ async def test_as_completed_condition_loop(c, s, a, b):
     sys.version_info >= (3, 10),
     reason="On Py3.10+ semaphore._loop is not bound until .acquire() blocks",
 )
-def test_client_connectionpool_semaphore_loop(s, a, b):
-    with Client(s["address"]) as c:
-        assert c.rpc.semaphore._loop is c.loop.asyncio_loop
+def test_client_connectionpool_semaphore_loop(s, a, b, loop):
+    with Client(s["address"], loop=loop) as c:
+        assert c.rpc.semaphore._loop is loop.asyncio_loop
 
 
 @pytest.mark.slow
@@ -6527,34 +6643,33 @@ async def test_mixed_compression(s):
                 await c.compute(y.sum())
 
 
-@gen_cluster(client=True)
-async def test_futures_in_subgraphs(c, s, a, b):
+def test_futures_in_subgraphs(loop_in_thread):
     """Regression test of <https://github.com/dask/distributed/issues/4145>"""
 
     dd = pytest.importorskip("dask.dataframe")
-    import pandas as pd
+    pd = pytest.importorskip("pandas")
+    with cluster() as (s, [a, b]), Client(s["address"], loop=loop_in_thread) as c:
+        ddf = dd.from_pandas(
+            pd.DataFrame(
+                dict(
+                    uid=range(50),
+                    enter_time=pd.date_range(
+                        start="2020-01-01", end="2020-09-01", periods=50, tz="UTC"
+                    ),
+                )
+            ),
+            npartitions=5,
+        )
 
-    ddf = dd.from_pandas(
-        pd.DataFrame(
-            dict(
-                uid=range(50),
-                enter_time=pd.date_range(
-                    start="2020-01-01", end="2020-09-01", periods=50, tz="UTC"
-                ),
-            )
-        ),
-        npartitions=5,
-    )
-
-    ddf = ddf[ddf.uid.isin(range(29))].persist()
-    ddf["local_time"] = ddf.enter_time.dt.tz_convert("US/Central")
-    ddf["day"] = ddf.enter_time.dt.day_name()
-    ddf = await c.submit(dd.categorical.categorize, ddf, columns=["day"], index=False)
+        ddf = ddf[ddf.uid.isin(range(29))].persist()
+        ddf["local_time"] = ddf.enter_time.dt.tz_convert("US/Central")
+        ddf["day"] = ddf.enter_time.dt.day_name()
+        ddf = dd.categorical.categorize(ddf, columns=["day"], index=False)
+        ddf.compute()
 
 
 @gen_cluster(client=True)
 async def test_get_task_metadata(c, s, a, b):
-
     # Populate task metadata
     await c.register_worker_plugin(TaskStateMetadataPlugin())
 
@@ -6575,7 +6690,6 @@ async def test_get_task_metadata(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_get_task_metadata_multiple(c, s, a, b):
-
     # Populate task metadata
     await c.register_worker_plugin(TaskStateMetadataPlugin())
 
@@ -6613,7 +6727,6 @@ async def test_register_worker_plugin_exception(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_log_event(c, s, a):
-
     # Log an event from inside a task
     def foo():
         get_worker().log_event("topic1", {"foo": "bar"})
@@ -6638,6 +6751,36 @@ async def test_log_event(c, s, a):
     events = await c.get_events("topic2")
     assert len(events) == 2
     assert events[1][1] == ("alice", "bob")
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_log_event_multiple_clients(c, s):
+    async with Client(s.address, asynchronous=True) as c2, Client(
+        s.address, asynchronous=True
+    ) as c3:
+        received_events = []
+
+        def get_event_handler(handler_id):
+            def handler(event):
+                received_events.append((handler_id, event))
+
+            return handler
+
+        c.subscribe_topic("test-topic", get_event_handler(1))
+        c2.subscribe_topic("test-topic", get_event_handler(2))
+
+        while len(s.event_subscriber["test-topic"]) != 2:
+            await asyncio.sleep(0.01)
+
+        with captured_logger("distributed.client") as logger:
+            await c.log_event("test-topic", {})
+
+        while len(received_events) < 2:
+            await asyncio.sleep(0.01)
+
+        assert len(received_events) == 2
+        assert {handler_id for handler_id, _ in received_events} == {1, 2}
+        assert "ValueError" not in logger.getvalue()
 
 
 @gen_cluster(client=True)
@@ -6715,7 +6858,7 @@ async def test_annotations_workers(c, s, a, b):
     with dask.config.set(optimization__fuse__active=False):
         x = await x.persist()
 
-    assert all({"workers": (a.address,)} == ts.annotations for ts in s.tasks.values())
+    assert all({"workers": [a.address]} == ts.annotations for ts in s.tasks.values())
     assert all({a.address} == ts.worker_restrictions for ts in s.tasks.values())
     assert a.data
     assert not b.data
@@ -6822,10 +6965,30 @@ async def test_annotations_loose_restrictions(c, s, a, b):
     assert all({"fake"} == ts.host_restrictions for ts in s.tasks.values())
     assert all(
         [
-            {"workers": ("fake",), "allow_other_workers": True} == ts.annotations
+            {"workers": ["fake"], "allow_other_workers": True} == ts.annotations
             for ts in s.tasks.values()
         ]
     )
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[
+        ("127.0.0.1", 1, {"resources": {"foo": 4}}),
+        ("127.0.0.1", 1),
+    ],
+)
+async def test_annotations_submit_map(c, s, a, b):
+    with dask.annotate(resources={"foo": 1}):
+        f = c.submit(inc, 0)
+    with dask.annotate(resources={"foo": 1}):
+        fs = c.map(inc, range(10, 13))
+
+    await wait([f, *fs])
+
+    assert all([{"foo": 1} == ts.resource_restrictions for ts in s.tasks.values()])
+    assert all([{"resources": {"foo": 1}} == ts.annotations for ts in s.tasks.values()])
+    assert not b.state.tasks
 
 
 @gen_cluster(client=True)
@@ -6837,6 +7000,8 @@ async def test_workers_collection_restriction(c, s, a, b):
     assert a.data and not b.data
 
 
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
+@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_get_client_functions_spawn_clusters(c, s, a):
     # see gh4565
@@ -6867,7 +7032,6 @@ async def test_get_client_functions_spawn_clusters(c, s, a):
 
 
 def test_computation_code_walk_frames():
-
     test_function_code = inspect.getsource(test_computation_code_walk_frames)
     code = Client._get_computation_code()
 
@@ -6893,6 +7057,19 @@ def test_computation_code_walk_frames():
         code = Client._get_computation_code()
         assert code == upper_frame_code
         assert nested_call() == upper_frame_code
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_computation_store_annotations(c, s, a):
+    # We do not want to store layer annotations
+    with dask.annotate(layer="foo"):
+        f = delayed(inc)(1)
+
+    with dask.annotate(job="very-important"):
+        assert await c.compute(f) == 2
+
+    assert len(s.computations) == 1
+    assert s.computations[0].annotations == {"job": "very-important"}
 
 
 def test_computation_object_code_dask_compute(client):
@@ -7053,6 +7230,7 @@ async def test_computation_object_code_client_compute(c, s, a, b):
     assert comp.code[0] == test_function_code
 
 
+@pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny)
 async def test_upload_directory(c, s, a, b, tmp_path):
     from dask.distributed import UploadDirectory
@@ -7126,7 +7304,6 @@ async def test_async_task_with_partial(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_events_subscribe_topic(c, s, a):
-
     log = []
 
     def user_event_handler(event):
@@ -7241,32 +7418,154 @@ async def test_log_event_warn(c, s, a, b):
     def foo():
         get_worker().log_event(["foo", "warn"], "Hello!")
 
-    with pytest.warns(Warning, match="Hello!"):
+    with pytest.warns(UserWarning, match="Hello!"):
         await c.submit(foo)
+
+    def no_message():
+        # missing "message" key should log TypeError
+        get_worker().log_event("warn", {})
+
+    with captured_logger("distributed.client") as log:
+        await c.submit(no_message)
+        assert "TypeError" in log.getvalue()
+
+    def no_category():
+        # missing "category" defaults to `UserWarning`
+        get_worker().log_event("warn", {"message": pickle.dumps("asdf")})
+
+    with pytest.warns(UserWarning, match="asdf"):
+        await c.submit(no_category)
 
 
 @gen_cluster(client=True)
 async def test_log_event_warn_dask_warns(c, s, a, b):
     from dask.distributed import warn
 
-    def foo():
+    def warn_simple():
         warn("Hello!")
 
-    with pytest.warns(Warning, match="Hello!"):
-        await c.submit(foo)
+    with pytest.warns(UserWarning, match="Hello!"):
+        await c.submit(warn_simple)
+
+    def warn_deprecation_1():
+        # one way to do it...
+        warn("You have been deprecated by AI", DeprecationWarning)
+
+    with pytest.warns(DeprecationWarning, match="You have been deprecated by AI"):
+        await c.submit(warn_deprecation_1)
+
+    def warn_deprecation_2():
+        # another way to do it...
+        warn(DeprecationWarning("Your profession has been deprecated"))
+
+    with pytest.warns(DeprecationWarning, match="Your profession has been deprecated"):
+        await c.submit(warn_deprecation_2)
+
+    # user-defined warning subclass
+    class MyPrescientWarning(UserWarning):
+        pass
+
+    def warn_cassandra():
+        warn(MyPrescientWarning("Cassandra says..."))
+
+    with pytest.warns(MyPrescientWarning, match="Cassandra says..."):
+        await c.submit(warn_cassandra)
 
 
 @gen_cluster(client=True, Worker=Nanny)
-async def test_print(c, s, a, b, capsys):
+async def test_print_remote(c, s, a, b, capsys):
     from dask.distributed import print
 
     def foo():
+        print("Hello!", 123)
+
+    def bar():
         print("Hello!", 123, sep=":")
 
-    await c.submit(foo)
+    def baz():
+        print("Hello!", 123, sep=":", end="")
 
+    def frotz():
+        # like builtin print(), None values for kwargs should be same as
+        # defaults " ", "\n", sys.stdout, False, respectively.
+        # (But note we don't really have a good way to test for flushes.)
+        print("Hello!", 123, sep=None, end=None, file=None, flush=None)
+
+    def plugh():
+        # no positional arguments
+        print(sep=":", end=".")
+
+    def print_stdout():
+        print("meow", file=sys.stdout)
+
+    def print_stderr():
+        print("meow", file=sys.stderr)
+
+    def print_badfile():
+        print("meow", file="my arbitrary file object")
+
+    capsys.readouterr()  # drop any output captured so far
+
+    await c.submit(foo)
     out, err = capsys.readouterr()
-    assert "Hello!:123" in out
+    assert "Hello! 123\n" == out
+
+    await c.submit(bar)
+    out, err = capsys.readouterr()
+    assert "Hello!:123\n" == out
+
+    await c.submit(baz)
+    out, err = capsys.readouterr()
+    assert "Hello!:123" == out
+
+    await c.submit(frotz)
+    out, err = capsys.readouterr()
+    assert "Hello! 123\n" == out
+
+    await c.submit(plugh)
+    out, err = capsys.readouterr()
+    assert "." == out
+
+    await c.submit(print_stdout)
+    out, err = capsys.readouterr()
+    assert "meow\n" == out and "" == err
+
+    await c.submit(print_stderr)
+    out, err = capsys.readouterr()
+    assert "meow\n" == err and "" == out
+
+    with pytest.raises(TypeError):
+        await c.submit(print_badfile)
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_print_manual(c, s, a, b, capsys):
+    def foo():
+        get_worker().log_event("print", "Hello!")
+
+    capsys.readouterr()  # drop any output captured so far
+
+    await c.submit(foo)
+    out, err = capsys.readouterr()
+    assert "Hello!\n" == out
+
+    def print_otherfile():
+        # this should log a TypeError in the client
+        get_worker().log_event("print", {"args": ("hello",), "file": "bad value"})
+
+    with captured_logger("distributed.client") as log:
+        await c.submit(print_otherfile)
+        assert "TypeError" in log.getvalue()
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_print_manual_bad_args(c, s, a, b, capsys):
+    def foo():
+        get_worker().log_event("print", {"args": "not a tuple"})
+
+    with captured_logger("distributed.client") as log:
+        await c.submit(foo)
+        assert "TypeError" in log.getvalue()
 
 
 @gen_cluster(client=True, Worker=Nanny)
@@ -7282,13 +7581,14 @@ async def test_print_non_msgpack_serializable(c, s, a, b, capsys):
     assert "<object object at" in out
 
 
-def test_print_simple(capsys):
+def test_print_local(capsys):
     from dask.distributed import print
 
-    print("Hello!", 123, sep=":")
+    capsys.readouterr()  # drop any output captured so far
 
+    print("Hello!", 123, sep=":")
     out, err = capsys.readouterr()
-    assert "Hello!:123" in out
+    assert "Hello!:123\n" == out
 
 
 def _verify_cluster_dump(
@@ -7383,7 +7683,7 @@ async def test_dump_cluster_state_exclude_default(c, s, a, b, tmp_path):
 
     assert "workers" in state
     assert len(state["workers"]) == len(s.workers)
-    for worker, worker_dump in state["workers"].items():
+    for worker_dump in state["workers"].values():
         for k, task_dump in worker_dump["tasks"].items():
             assert not any(blocked in task_dump for blocked in excluded_by_default)
             assert k in s.tasks
@@ -7406,7 +7706,7 @@ async def test_dump_cluster_state_exclude_default(c, s, a, b, tmp_path):
 
     assert "workers" in state
     assert len(state["workers"]) == len(s.workers)
-    for worker, worker_dump in state["workers"].items():
+    for worker_dump in state["workers"].values():
         for k, task_dump in worker_dump["tasks"].items():
             assert all(blocked in task_dump for blocked in excluded_by_default)
             assert k in s.tasks
@@ -7540,13 +7840,161 @@ if __name__ == "__main__":
 
 
 @pytest.mark.slow
+# These lines sometimes appear:
+#     Creating scratch directories is taking a surprisingly long time
+#     Future exception was never retrieved
+#     tornado.util.TimeoutError
+#     Batched Comm Closed
+@pytest.mark.flaky(reruns=5, reruns_delay=5)
 @pytest.mark.parametrize("processes", [True, False])
 def test_quiet_close_process(processes, tmp_path):
     with open(tmp_path / "script.py", mode="w") as f:
         f.write(client_script % processes)
 
     with popen([sys.executable, tmp_path / "script.py"], capture_output=True) as proc:
-        out, err = proc.communicate(timeout=10)
+        out, _ = proc.communicate(timeout=60)
 
-    assert not out
-    assert not err
+    lines = out.decode("utf-8").split("\n")
+    lines = [stripped for line in lines if (stripped := line.strip())]
+    assert not lines
+
+
+@gen_cluster(client=False, nthreads=[])
+async def test_deprecated_loop_properties(s):
+    class ExampleClient(Client):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.loop = self.io_loop = IOLoop.current()
+
+    with pytest.warns(DeprecationWarning) as warninfo:
+        async with ExampleClient(s.address, asynchronous=True, loop=IOLoop.current()):
+            pass
+
+    assert [(w.category, *w.message.args) for w in warninfo] == [
+        (DeprecationWarning, "setting the loop property is deprecated"),
+        (DeprecationWarning, "The io_loop property is deprecated"),
+        (DeprecationWarning, "setting the loop property is deprecated"),
+    ]
+
+
+@gen_cluster(client=False, nthreads=[])
+async def test_fast_close_on_aexit_failure(s):
+    class MyException(Exception):
+        pass
+
+    c = Client(s.address, asynchronous=True)
+    with mock.patch.object(c, "_close", wraps=c._close) as _close_proxy:
+        with pytest.raises(MyException):
+            async with c:
+                start = time()
+                raise MyException
+        stop = time()
+
+    assert _close_proxy.mock_calls == [mock.call(fast=True)]
+    assert c.status == "closed"
+    assert (stop - start) < 2
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_wait_for_workers_no_default(c, s):
+    with pytest.warns(
+        FutureWarning,
+        match="specify the `n_workers` argument when using `Client.wait_for_workers`",
+    ):
+        await c.wait_for_workers()
+
+
+@pytest.mark.parametrize(
+    "value, exception",
+    [
+        (None, ValueError),
+        (0, ValueError),
+        (1.0, ValueError),
+        (1, None),
+        (2, None),
+    ],
+)
+@gen_cluster(client=True)
+async def test_wait_for_workers_n_workers_value_check(c, s, a, b, value, exception):
+    if exception:
+        ctx = pytest.raises(exception)
+    else:
+        ctx = nullcontext()
+    with ctx:
+        await c.wait_for_workers(value)
+
+
+class PlainNamedTuple(namedtuple("PlainNamedTuple", "value")):
+    """Namedtuple with a default constructor."""
+
+
+class NewArgsNamedTuple(namedtuple("NewArgsNamedTuple", "ab, c")):
+    """Namedtuple with a custom constructor."""
+
+    def __new__(cls, a, b, c):
+        return super().__new__(cls, f"{a}-{b}", c)
+
+    def __getnewargs__(self):
+        return *self.ab.split("-"), self.c
+
+
+class NewArgsExNamedTuple(namedtuple("NewArgsExNamedTuple", "ab, c, k, v")):
+    """Namedtuple with a custom constructor including keywords-only arguments."""
+
+    def __new__(cls, a, b, c, **kw):
+        return super().__new__(cls, f"{a}-{b}", c, tuple(kw.keys()), tuple(kw.values()))
+
+    def __getnewargs_ex__(self):
+        return (*self.ab.split("-"), self.c), dict(zip(self.k, self.v))
+
+
+@pytest.mark.parametrize(
+    "typ, args, kwargs",
+    [
+        (PlainNamedTuple, ["some-data"], {}),
+        (NewArgsNamedTuple, ["some", "data", "more"], {}),
+        (NewArgsExNamedTuple, ["some", "data", "more"], {"another": "data"}),
+    ],
+)
+@gen_cluster(client=True)
+async def test_unpacks_remotedata_namedtuple(c, s, a, b, typ, args, kwargs):
+    def identity(x):
+        return x
+
+    outer_future = c.submit(identity, typ(*args, **kwargs))
+    result = await outer_future
+    assert result == typ(*args, **kwargs)
+
+
+@pytest.mark.parametrize(
+    "typ, args, kwargs",
+    [
+        (PlainNamedTuple, [], {}),
+        (NewArgsNamedTuple, ["some", "data"], {}),
+        (NewArgsExNamedTuple, ["some", "data"], {"another": "data"}),
+    ],
+)
+@gen_cluster(client=True)
+async def test_resolves_future_in_namedtuple(c, s, a, b, typ, args, kwargs):
+    def identity(x):
+        return x
+
+    inner_result = 1
+    inner_future = c.submit(identity, inner_result)
+    kwin, kwout = dict(kwargs), dict(kwargs)
+    if kwargs:
+        kwin["inner"], kwout["inner"] = inner_future, inner_result
+    outer_future = c.submit(identity, typ(*args, inner_future, **kwin))
+    result = await outer_future
+    assert result == typ(*args, inner_result, **kwout)
+
+
+@gen_cluster(client=True)
+async def test_resolves_future_in_dict(c, s, a, b):
+    def identity(x):
+        return x
+
+    inner_future = c.submit(identity, 1)
+    outer_future = c.submit(identity, {"x": inner_future, "y": 2})
+    result = await outer_future
+    assert result == {"x": 1, "y": 2}

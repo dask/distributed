@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import warnings
 
@@ -33,10 +34,15 @@ def test_registered():
 
 @gen_test()
 async def test_listen_connect():
+    comm_closed = asyncio.Event()
+
     async def handle_comm(comm):
-        while True:
-            msg = await comm.read()
-            await comm.write(msg)
+        try:
+            while True:
+                msg = await comm.read()
+                await comm.write(msg)
+        finally:
+            comm_closed.set()
 
     async with listen("ws://", handle_comm) as listener:
         comm = await connect(listener.contact_address)
@@ -45,14 +51,20 @@ async def test_listen_connect():
         assert result == b"Hello!"
 
         await comm.close()
+        await comm_closed.wait()
 
 
 @gen_test()
 async def test_listen_connect_wss():
+    comm_closed = asyncio.Event()
+
     async def handle_comm(comm):
-        while True:
-            msg = await comm.read()
-            await comm.write(msg)
+        try:
+            while True:
+                msg = await comm.read()
+                await comm.write(msg)
+        finally:
+            comm_closed.set()
 
     server_ctx = get_server_ssl_context()
     client_ctx = get_client_ssl_context()
@@ -65,6 +77,7 @@ async def test_listen_connect_wss():
         result = await comm.read()
         assert result == b"Hello!"
         await comm.close()
+        await comm_closed.wait()
 
 
 @gen_test()
@@ -77,12 +90,12 @@ async def test_expect_ssl_context():
 
 
 @gen_test()
-async def test_expect_scheduler_ssl_when_sharing_server(tmpdir):
+async def test_expect_scheduler_ssl_when_sharing_server(tmp_path):
     xfail_ssl_issue5601()
     pytest.importorskip("cryptography")
     security = Security.temporary()
-    key_path = os.path.join(str(tmpdir), "dask.pem")
-    cert_path = os.path.join(str(tmpdir), "dask.crt")
+    key_path = os.path.join(str(tmp_path), "dask.pem")
+    cert_path = os.path.join(str(tmp_path), "dask.crt")
     with open(key_path, "w") as f:
         f.write(security.tls_scheduler_key)
     with open(cert_path, "w") as f:
@@ -161,9 +174,12 @@ async def test_http_and_comm_server(dashboard, protocol, security, port):
                 assert result == 11
 
 
-@pytest.mark.parametrize("protocol", ["ws://", "wss://"])
-@gen_test()
-async def test_connection_made_with_extra_conn_args(protocol):
+@pytest.mark.parametrize(
+    "protocol,sni",
+    [("ws://", True), ("ws://", False), ("wss://", True), ("wss://", False)],
+)
+@gen_test(clean_kwargs={"instances": False})
+async def test_connection_made_with_extra_conn_args(protocol, sni):
     if protocol == "ws://":
         security = Security(
             extra_conn_args={"headers": {"Authorization": "Token abcd"}}
@@ -178,8 +194,27 @@ async def test_connection_made_with_extra_conn_args(protocol):
         protocol=protocol, security=security, dashboard_address=":0"
     ) as s:
         connection_args = security.get_connection_args("worker")
+        if sni:
+            connection_args["server_hostname"] = "sni.example.host"
         comm = await connect(s.address, **connection_args)
         assert comm.sock.request.headers.get("Authorization") == "Token abcd"
+
+        await comm.close()
+
+
+@gen_test(clean_kwargs={"instances": False})
+async def test_connection_made_with_sni():
+    xfail_ssl_issue5601()
+    pytest.importorskip("cryptography")
+    security = Security.temporary()
+    async with Scheduler(
+        protocol="wss://", security=security, dashboard_address=":0"
+    ) as s:
+        connection_args = security.get_connection_args("worker")
+        connection_args["server_hostname"] = "sni.example.host"
+        comm = await connect(s.address, **connection_args)
+        assert comm.sock.request.headers.get("Host") == "sni.example.host"
+
         await comm.close()
 
 

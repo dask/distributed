@@ -8,9 +8,11 @@ from time import sleep
 from unittest import mock
 
 import pytest
-from tlz import first, partition_all
+from tlz import first, merge, partition_all
 
+import dask.config
 from dask import delayed
+from dask.utils import parse_bytes
 
 from distributed import Client, Nanny, profile, wait
 from distributed.comm import CommClosedError
@@ -18,8 +20,10 @@ from distributed.compatibility import MACOS
 from distributed.metrics import time
 from distributed.utils import CancelledError, sync
 from distributed.utils_test import (
+    NO_AMM,
     BlockedGatherDep,
-    async_wait_for,
+    BlockedGetData,
+    async_poll_for,
     captured_logger,
     cluster,
     div,
@@ -167,50 +171,47 @@ def test_worker_doesnt_await_task_completion(loop):
             future = c.submit(sleep, 100)
             sleep(0.1)
             start = time()
-            c.restart()
+            c.restart(timeout="5s", wait_for_workers=False)
             stop = time()
-            assert stop - start < 20
+            assert stop - start < 10
 
 
 @gen_cluster(Worker=Nanny, timeout=60)
 async def test_multiple_clients_restart(s, a, b):
-    c1 = await Client(s.address, asynchronous=True)
-    c2 = await Client(s.address, asynchronous=True)
+    async with Client(s.address, asynchronous=True) as c1, Client(
+        s.address, asynchronous=True
+    ) as c2:
+        x = c1.submit(inc, 1)
+        y = c2.submit(inc, 2)
+        xx = await x
+        yy = await y
+        assert xx == 2
+        assert yy == 3
 
-    x = c1.submit(inc, 1)
-    y = c2.submit(inc, 2)
-    xx = await x
-    yy = await y
-    assert xx == 2
-    assert yy == 3
+        await c1.restart()
 
-    await c1.restart()
+        assert x.cancelled()
+        start = time()
+        while not y.cancelled():
+            await asyncio.sleep(0.01)
+            assert time() < start + 5
 
-    assert x.cancelled()
-    start = time()
-    while not y.cancelled():
-        await asyncio.sleep(0.01)
-        assert time() < start + 5
+        assert not c1.futures
+        assert not c2.futures
 
-    assert not c1.futures
-    assert not c2.futures
+        # Ensure both clients still work after restart.
+        # Reusing a previous key has no effect.
+        x2 = c1.submit(inc, 1, key=x.key)
+        y2 = c2.submit(inc, 2, key=y.key)
 
-    # Ensure both clients still work after restart.
-    # Reusing a previous key has no effect.
-    x2 = c1.submit(inc, 1, key=x.key)
-    y2 = c2.submit(inc, 2, key=y.key)
+        assert x2._generation != x._generation
+        assert y2._generation != y._generation
 
-    assert x2._generation != x._generation
-    assert y2._generation != y._generation
+        assert await x2 == 2
+        assert await y2 == 3
 
-    assert await x2 == 2
-    assert await y2 == 3
-
-    del x2, y2
-    await async_wait_for(lambda: not s.tasks, timeout=5)
-
-    await c1.close()
-    await c2.close()
+        del x2, y2
+        await async_poll_for(lambda: not s.tasks, timeout=5)
 
 
 @gen_cluster(Worker=Nanny, timeout=60)
@@ -236,7 +237,8 @@ async def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
     y = c.submit(inc, 1)
     del x
 
-    # Ensure that the profiler has stopped and released all references to x so that it can be garbage-collected
+    # Ensure that the profiler has stopped and released all references to x so that it
+    # can be garbage-collected
     with profile.lock:
         pass
     await asyncio.sleep(0.1)
@@ -306,36 +308,27 @@ class SlowTransmitData:
         self.data = data
 
     def __reduce__(self):
-        import time
-
-        time.sleep(self.delay)
-        return (SlowTransmitData, (self.delay,))
+        sleep(self.delay)
+        return SlowTransmitData, (self.data, self.delay)
 
     def __sizeof__(self) -> int:
         # Ensure this is offloaded to avoid blocking loop
-        import dask
-        from dask.utils import parse_bytes
-
         return parse_bytes(dask.config.get("distributed.comm.offload")) + 1
 
 
 @pytest.mark.slow
-@gen_cluster(client=True)
+@gen_cluster(client=True, config={"distributed.scheduler.work-stealing": False})
 async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     """This test is very sensitive to cluster state consistency. Timeouts often
     indicate subtle deadlocks. Be mindful when marking flaky/repeat/etc."""
-    async with Nanny(s.address, nthreads=2) as n:
+    async with Nanny(s.address, nthreads=2, worker_class=BlockedGetData) as n:
         while len(s.workers) < 3:
             await asyncio.sleep(0.01)
 
-        def slow_ser(x, delay):
-            return SlowTransmitData(x, delay=delay)
-
         n_worker_address = n.worker_address
         futures = c.map(
-            slow_ser,
+            inc,
             range(20),
-            delay=0.1,
             key=["f%d" % i for i in range(20)],
             workers=[n_worker_address],
             allow_other_workers=True,
@@ -347,9 +340,7 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
         await wait(futures)
         result_fut = c.submit(sink, futures, workers=a.address)
 
-        with suppress(CommClosedError):
-            await c.run(os._exit, 1, workers=[n_worker_address])
-
+        await n.kill(timeout=1)
         while len(s.workers) > 2:
             await asyncio.sleep(0.01)
 
@@ -364,6 +355,7 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1), ("127.0.0.1", 2), ("127.0.0.1", 3)],
+    config=NO_AMM,
 )
 async def test_worker_same_host_replicas_missing(c, s, a, b, x):
     # See GH4784
@@ -428,8 +420,6 @@ async def test_worker_time_to_live(c, s, a, b):
     assert set(s.workers) == {a.address, b.address}
 
     a.periodic_callbacks["heartbeat"].stop()
-    while a.heartbeat_active:
-        await asyncio.sleep(0.01)
 
     start = time()
     while set(s.workers) == {a.address, b.address}:
@@ -469,11 +459,10 @@ async def test_forget_data_not_supposed_to_have(c, s, a):
 
 @gen_cluster(
     client=True,
-    nthreads=[("127.0.0.1", 1) for _ in range(3)],
-    config={"distributed.comm.timeouts.connect": "1s"},
-    Worker=Nanny,
+    nthreads=[("", 1)] * 2,
+    config=merge(NO_AMM, {"distributed.comm.timeouts.connect": "1s"}),
 )
-async def test_failing_worker_with_additional_replicas_on_cluster(c, s, *workers):
+async def test_failing_worker_with_additional_replicas_on_cluster(c, s, w0, w2):
     """
     If a worker detects a missing dependency, the scheduler is notified. If no
     other replica is available, the dependency is rescheduled. A reschedule
@@ -482,34 +471,31 @@ async def test_failing_worker_with_additional_replicas_on_cluster(c, s, *workers
     and correct its state.
     """
 
-    def slow_transfer(x, delay=0.1):
-        return SlowTransmitData(x, delay=delay)
-
     def dummy(*args, **kwargs):
         return
 
-    import psutil
+    async with BlockedGatherDep(s.address) as w1:
+        f1 = c.submit(
+            inc,
+            1,
+            key="f1",
+            workers=[w0.worker_address],
+        )
 
-    proc = psutil.Process(workers[1].pid)
-    f1 = c.submit(
-        slow_transfer,
-        1,
-        key="f1",
-        workers=[workers[0].worker_address],
-    )
-    # We'll schedule tasks on two workers, s.t. f1 is replicated. We will
-    # suspend one of the workers and kill the origin worker of f1 such that a
-    # comm failure causes the worker to handle a missing dependency. It will ask
-    # the schedule such that it knows that a replica is available on f2 and
-    # reschedules the fetch
-    f2 = c.submit(dummy, f1, pure=False, key="f2", workers=[workers[1].worker_address])
-    f3 = c.submit(dummy, f1, pure=False, key="f3", workers=[workers[2].worker_address])
+        # We'll schedule tasks on two workers, s.t. f1 is replicated. We will
+        # suspend one of the workers and kill the origin worker of f1 such that a
+        # comm failure causes the worker to handle a missing dependency. It will ask
+        # the schedule such that it knows that a replica is available on f2 and
+        # reschedules the fetch
+        f2 = c.submit(dummy, f1, key="f2", workers=[w1.worker_address])
+        f3 = c.submit(dummy, f1, key="f3", workers=[w2.worker_address])
 
-    await wait(f1)
-    proc.suspend()
+        await w1.in_gather_dep.wait()
 
-    await wait(f3)
-    await workers[0].close()
+        await wait(f3)
+        # Because of this line we need to disable AMM; otherwise it could choose to delete
+        # the replicas of f1 on w1 and w2 and keep the one on w0.
+        await w0.close()
 
-    proc.resume()
-    await c.gather([f1, f2, f3])
+        w1.block_gather_dep.set()
+        await c.gather([f1, f2, f3])

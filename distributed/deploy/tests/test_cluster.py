@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import pytest
+from tornado.ioloop import IOLoop
 
-from distributed.deploy.cluster import Cluster
+from distributed.deploy.cluster import Cluster, _exponential_backoff
 from distributed.utils_test import gen_test
 
 
@@ -35,3 +36,28 @@ async def test_logs_deprecated():
     async with Cluster(asynchronous=True) as cluster:
         with pytest.warns(FutureWarning, match="get_logs"):
             cluster.logs()
+
+
+@gen_test()
+async def test_deprecated_loop_properties():
+    class ExampleCluster(Cluster):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.loop = self.io_loop = IOLoop.current()
+
+    with pytest.warns(DeprecationWarning) as warninfo:
+        async with ExampleCluster(asynchronous=True, loop=IOLoop.current()):
+            pass
+
+    assert [(w.category, *w.message.args) for w in warninfo] == [
+        (DeprecationWarning, "setting the loop property is deprecated")
+    ]
+
+
+def test_exponential_backoff():
+    assert _exponential_backoff(0, 1.5, 3, 20) == 1.5
+    assert _exponential_backoff(1, 1.5, 3, 20) == 4.5
+    assert _exponential_backoff(2, 1.5, 3, 20) == 13.5
+    assert _exponential_backoff(5, 1.5, 3, 20) == 20
+    # avoid overflow
+    assert _exponential_backoff(1000, 1.5, 3, 20) == 20

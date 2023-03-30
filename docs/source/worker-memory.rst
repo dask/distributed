@@ -5,10 +5,10 @@ For cluster-wide memory-management, see :doc:`memory`.
 Workers are given a target memory limit to stay under with the
 command line ``--memory-limit`` keyword or the ``memory_limit=`` Python
 keyword argument, which sets the memory limit per worker processes launched
-by dask-worker ::
+by dask worker ::
 
-    $ dask-worker tcp://scheduler:port --memory-limit=auto  # TOTAL_MEMORY * min(1, nthreads / total_nthreads)
-    $ dask-worker tcp://scheduler:port --memory-limit="4 GiB"  # four gigabytes per worker process.
+    $ dask worker tcp://scheduler:port --memory-limit=auto  # TOTAL_MEMORY * min(1, nthreads / total_nthreads)
+    $ dask worker tcp://scheduler:port --memory-limit="4 GiB"  # four gigabytes per worker process.
 
 Workers use a few different heuristics to keep memory use beneath this limit:
 
@@ -26,7 +26,7 @@ will begin to dump the least recently used data to disk. By default, it writes t
 OS's temporary directory (``/tmp`` in Linux); you can control this location
 with the ``--local-directory`` keyword::
 
-   $ dask-worker tcp://scheduler:port --memory-limit="4 GiB" --local-directory /scratch
+   $ dask worker tcp://scheduler:port --memory-limit="4 GiB" --local-directory /scratch
 
 That data is still available and will be read back from disk when necessary. On the
 diagnostic dashboard status page, disk I/O will show up in the task stream plot as
@@ -121,10 +121,10 @@ unmanaged recent
     the ``~/.config/dask/distributed.yaml`` file. If your tasks typically run for longer
     than 30 seconds, it's recommended that you increase this setting accordingly.
 
-    By default, :meth:`distributed.Client.rebalance` and
-    :meth:`distributed.scheduler.Scheduler.rebalance` ignore unmanaged recent memory.
-    This behaviour can also be tweaked using the Dask config - see the methods'
-    documentation.
+    By default, :meth:`distributed.Client.rebalance`,
+    :meth:`distributed.scheduler.Scheduler.rebalance`, and the
+    :doc:`active_memory_manager` ignore unmanaged recent memory. This behaviour can also
+    be tweaked using the Dask config - see the specific components' documentation.
 
 spilled
     managed memory that has been spilled to disk. This is not included in the 'managed'
@@ -133,6 +133,17 @@ spilled
 
 The sum of managed + unmanaged + unmanaged recent is equal by definition to the process
 memory.
+
+The color of the bars will change as a function of memory usage too:
+
+blue
+    The worker is operating as normal
+orange
+    The worker may be spilling data to disk
+red
+    The worker is paused or retiring
+grey
+    Data that has already been spilled to disk; this is in addition to process memory
 
 
 .. _memtrim:
@@ -147,10 +158,11 @@ Dask — it's actually normal behavior for all processes on Linux and MacOS, and
 consequence of how the low-level memory allocator works (see below for details).
 
 Because Dask makes decisions (spill-to-disk, pause, terminate,
-:meth:`~distributed.Client.rebalance`) based on the worker's memory usage as reported by
-the OS, and is unaware of how much of this memory is actually in use versus empty and
-"hoarded", it can overestimate — sometimes significantly — how much memory the process
-is using and think the worker is running out of memory when in fact it isn't.
+:doc:`active_memory_manager`, :meth:`~distributed.Client.rebalance`) based on the
+worker's memory usage as reported by the OS, and is unaware of how much of this memory
+is actually in use versus empty and "hoarded", it can overestimate — sometimes
+significantly — how much memory the process is using and think the worker is running out
+of memory when in fact it isn't.
 
 More in detail: both the Linux and MacOS memory allocators try to avoid performing a
 `brk`_ kernel call every time the application calls `free`_ by implementing a user-space
@@ -201,7 +213,7 @@ this value will increase the number of syscalls, and as a consequence may degrad
 performance.
 
 .. note::
-   The variable must be set before starting the ``dask-worker`` process.
+   The variable must be set before starting the ``dask worker`` process.
 
 .. note::
    If using a :ref:`nanny`, the ``MALLOC_TRIM_THRESHOLD_`` environment variable
@@ -221,21 +233,21 @@ On Linux:
 .. code-block:: bash
 
     conda install jemalloc
-    LD_PRELOAD=$CONDA_PREFIX/lib/libjemalloc.so dask-worker <...>
+    LD_PRELOAD=$CONDA_PREFIX/lib/libjemalloc.so dask worker <...>
 
 On macOS:
 
 .. code-block:: bash
 
     conda install jemalloc
-    DYLD_INSERT_LIBRARIES=$CONDA_PREFIX/lib/libjemalloc.dylib dask-worker <...>
+    DYLD_INSERT_LIBRARIES=$CONDA_PREFIX/lib/libjemalloc.dylib dask worker <...>
 
 Alternatively on macOS, install globally with `homebrew`_:
 
 .. code-block:: bash
 
     brew install jemalloc
-    DYLD_INSERT_LIBRARIES=$(brew --prefix jemalloc)/lib/libjemalloc.dylib dask-worker <...>
+    DYLD_INSERT_LIBRARIES=$(brew --prefix jemalloc)/lib/libjemalloc.dylib dask worker <...>
 
 `jemalloc`_ offers a wealth of configuration settings; please refer to its
 documentation.
@@ -248,10 +260,14 @@ in its decision-making:
 .. code-block:: yaml
 
    distributed:
+     scheduler:
+       active-memory-manager:
+         measure: managed
+
      worker:
        memory:
          rebalance:
-           measure: managed_in_memory
+           measure: managed
          spill: false
          pause: false
          terminate: false

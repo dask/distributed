@@ -20,8 +20,19 @@ import weakref
 import xml.etree.ElementTree
 from asyncio import TimeoutError
 from collections import deque
-from collections.abc import Callable, Collection, Container, KeysView, ValuesView
-from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
+from collections.abc import (
+    Awaitable,
+    Callable,
+    Collection,
+    Container,
+    KeysView,
+    ValuesView,
+)
+from concurrent.futures import (  # noqa: F401
+    CancelledError,
+    Executor,
+    ThreadPoolExecutor,
+)
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from datetime import timedelta
@@ -36,6 +47,7 @@ from typing import Any as AnyType
 from typing import ClassVar, Iterator, TypeVar, overload
 
 import click
+import psutil
 import tblib.pickling_support
 
 try:
@@ -50,11 +62,12 @@ from tornado.ioloop import IOLoop
 import dask
 from dask import istask
 from dask.utils import ensure_bytes as _ensure_bytes
+from dask.utils import key_split
 from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
 from distributed.compatibility import WINDOWS
-from distributed.metrics import time
+from distributed.metrics import monotonic, time
 
 try:
     from dask.context import thread_state
@@ -199,8 +212,6 @@ def get_ip_interface(ifname):
     ValueError is raised if the interface does no have an IPv4 address
     associated with it.
     """
-    import psutil
-
     net_if_addrs = psutil.net_if_addrs()
 
     if ifname not in net_if_addrs:
@@ -332,7 +343,7 @@ class SyncMethodMixin:
         if asynchronous:
             future = func(*args, **kwargs)
             if callback_timeout is not None:
-                future = asyncio.wait_for(future, callback_timeout)
+                future = wait_for(future, callback_timeout)
             return future
         else:
             return sync(
@@ -373,7 +384,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             yield gen.moment
             future = func(*args, **kwargs)
             if callback_timeout is not None:
-                future = asyncio.wait_for(future, callback_timeout)
+                future = wait_for(future, callback_timeout)
             future = asyncio.ensure_future(future)
             result = yield future
         except Exception:
@@ -433,12 +444,26 @@ class LoopRunner:
     def __init__(self, loop=None, asynchronous=False):
         if loop is None:
             if asynchronous:
+                try:
+                    asyncio.get_running_loop()
+                except RuntimeError:
+                    warnings.warn(
+                        "Constructing a LoopRunner(asynchronous=True) without a running loop is deprecated",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
                 self._loop = IOLoop.current()
             else:
                 # We're expecting the loop to run in another thread,
                 # avoid re-using this thread's assigned loop
                 self._loop = IOLoop()
         else:
+            if not loop.asyncio_loop.is_running():
+                warnings.warn(
+                    "Constructing LoopRunner(loop=loop) without a running loop is deprecated",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
             self._loop = loop
         self._asynchronous = asynchronous
         self._loop_thread = None
@@ -569,6 +594,13 @@ class LoopRunner:
 
     @property
     def loop(self):
+        loop = self._loop
+        if not loop.asyncio_loop.is_running():
+            warnings.warn(
+                "Accessing the loop property while the loop is not running is deprecated",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         return self._loop
 
 
@@ -622,66 +654,8 @@ def is_kernel():
     return getattr(get_ipython(), "kernel", None) is not None
 
 
-hex_pattern = re.compile("[a-f]+")
-
-
-@functools.lru_cache(100000)
-def key_split(s):
-    """
-    >>> key_split('x')
-    'x'
-    >>> key_split('x-1')
-    'x'
-    >>> key_split('x-1-2-3')
-    'x'
-    >>> key_split(('x-2', 1))
-    'x'
-    >>> key_split("('x-2', 1)")
-    'x'
-    >>> key_split("('x', 1)")
-    'x'
-    >>> key_split('hello-world-1')
-    'hello-world'
-    >>> key_split(b'hello-world-1')
-    'hello-world'
-    >>> key_split('ae05086432ca935f6eba409a8ecd4896')
-    'data'
-    >>> key_split('<module.submodule.myclass object at 0xdaf372')
-    'myclass'
-    >>> key_split(None)
-    'Other'
-    >>> key_split('x-abcdefab')  # ignores hex
-    'x'
-    """
-    if type(s) is bytes:
-        s = s.decode()
-    if type(s) is tuple:
-        s = s[0]
-    try:
-        words = s.split("-")
-        if not words[0][0].isalpha():
-            result = words[0].split(",")[0].strip("'(\"")
-        else:
-            result = words[0]
-        for word in words[1:]:
-            if word.isalpha() and not (
-                len(word) == 8 and hex_pattern.match(word) is not None
-            ):
-                result += "-" + word
-            else:
-                break
-        if len(result) == 32 and re.match(r"[a-f0-9]{32}", result):
-            return "data"
-        else:
-            if result[0] == "<":
-                result = result.strip("<>").split()[0].split(".")[-1]
-            return result
-    except Exception:
-        return "Other"
-
-
 def key_split_group(x: object) -> str:
-    """A more fine-grained version of key_split
+    """A more fine-grained version of key_split.
 
     >>> key_split_group(('x-2', 1))
     'x-2'
@@ -1029,28 +1003,25 @@ def ensure_bytes(s):
     return _ensure_bytes(s)
 
 
-def ensure_memoryview(obj):
+def ensure_memoryview(obj: bytes | bytearray | memoryview | PickleBuffer) -> memoryview:
     """Ensure `obj` is a 1-D contiguous `uint8` `memoryview`"""
-    mv: memoryview
-    if type(obj) is memoryview:
-        mv = obj
-    else:
-        mv = memoryview(obj)
+    if not isinstance(obj, memoryview):
+        obj = memoryview(obj)
 
-    if not mv.nbytes:
+    if not obj.nbytes:
         # Drop `obj` reference to permit freeing underlying data
         return memoryview(bytearray())
-    elif not mv.contiguous:
+    elif not obj.contiguous:
         # Copy to contiguous form of expected shape & type
-        return memoryview(bytearray(mv))
-    elif mv.ndim != 1 or mv.format != "B":
+        return memoryview(bytearray(obj))
+    elif obj.ndim != 1 or obj.format != "B":
         # Perform zero-copy reshape & cast
         # Use `PickleBuffer.raw()` as `memoryview.cast()` fails with F-order
         # xref: https://github.com/python/cpython/issues/91484
-        return PickleBuffer(mv).raw()
+        return PickleBuffer(obj).raw()
     else:
         # Return `memoryview` as it already meets requirements
-        return mv
+        return obj
 
 
 def open_port(host: str = "") -> int:
@@ -1137,19 +1108,21 @@ def nbytes(frame, _bytes_like=(bytes, bytearray)):
             return len(frame)
 
 
-def json_load_robust(fn, load=json.load):
+def json_load_robust(fn, load=json.load, timeout=None):
     """Reads a JSON file from disk that may be being written as we read"""
-    while not os.path.exists(fn):
-        sleep(0.01)
-    for i in range(10):
-        try:
-            with open(fn) as f:
-                cfg = load(f)
-            if cfg:
-                return cfg
-        except (ValueError, KeyError):  # race with writing process
-            pass
+    deadline = Deadline.after(timeout)
+    while not deadline.expires or deadline.remaining:
+        if os.path.exists(fn):
+            try:
+                with open(fn) as f:
+                    cfg = load(f)
+                if cfg:
+                    return cfg
+            except (ValueError, KeyError):  # race with writing process
+                pass
         sleep(0.1)
+    else:
+        raise TimeoutError(f"Could not load file after {timeout}s.")
 
 
 class DequeHandler(logging.Handler):
@@ -1206,7 +1179,7 @@ def command_has_keyword(cmd, k):
             except ImportError:
                 raise ImportError("Module for command %s is not available" % cmd)
 
-        if isinstance(getattr(cmd, "main"), click.core.Command):
+        if isinstance(cmd.main, click.core.Command):
             cmd = cmd.main
         if isinstance(cmd, click.core.Command):
             cmd_params = {
@@ -1379,7 +1352,7 @@ def cli_keywords(
         A string with the name of a module, or the module containing a
         click-generated command with a "main" function, or the function itself.
         It may be used to parse a module's custom arguments (that is, arguments that
-        are not part of Worker class), such as nworkers from dask-worker CLI or
+        are not part of Worker class), such as nworkers from dask worker CLI or
         enable_nvlink from dask-cuda-worker CLI.
 
     Examples
@@ -1428,7 +1401,6 @@ def is_valid_xml(text):
 
 
 _offload_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="Dask-Offload")
-weakref.finalize(_offload_executor, _offload_executor.shutdown)
 
 
 def import_term(name: str) -> AnyType:
@@ -1448,13 +1420,47 @@ def import_term(name: str) -> AnyType:
     return getattr(module, attr_name)
 
 
-async def offload(fn, *args, **kwargs):
+async def run_in_executor_with_context(
+    executor: Executor | None,
+    func: Callable[P, T],
+    /,
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> T:
+    """Variant of :meth:`~asyncio.AbstractEventLoop.run_in_executor`, which
+    propagates contextvars.
+    Note that this limits the type of Executor to those that do not pickle objects.
+
+    See also
+    --------
+    asyncio.AbstractEventLoop.run_in_executor
+    offload
+    https://bugs.python.org/issue34014
+    """
     loop = asyncio.get_running_loop()
-    # Retain context vars while deserializing; see https://bugs.python.org/issue34014
     context = contextvars.copy_context()
     return await loop.run_in_executor(
-        _offload_executor, lambda: context.run(fn, *args, **kwargs)
+        executor, lambda: context.run(func, *args, **kwargs)
     )
+
+
+def offload(
+    func: Callable[P, T],
+    /,
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> Awaitable[T]:
+    """Run a synchronous function in a separate thread.
+    Unlike :meth:`asyncio.to_thread`, this propagates contextvars and offloads to an
+    ad-hoc thread pool with a single worker.
+
+    See also
+    --------
+    asyncio.to_thread
+    run_in_executor_with_context
+    https://bugs.python.org/issue34014
+    """
+    return run_in_executor_with_context(_offload_executor, func, *args, **kwargs)
 
 
 class EmptyContext:
@@ -1739,3 +1745,105 @@ def is_python_shutting_down() -> bool:
     from distributed import _python_shutting_down
 
     return _python_shutting_down
+
+
+class Deadline:
+    """Utility class tracking a deadline and the progress toward it"""
+
+    #: Expiry time of the deadline in seconds since the epoch
+    #: or None if the deadline never expires
+    expires_at: float | None
+    #: Seconds since the epoch when the deadline was created
+    started_at: float
+
+    def __init__(self, expires_at: float | None = None):
+        self.expires_at = expires_at
+        self.started_at = time()
+
+    @classmethod
+    def after(cls, duration: float | None = None) -> Deadline:
+        """Create a new ``Deadline`` that expires in ``duration`` seconds
+        or never if ``duration`` is None"""
+        started_at = time()
+        expires_at = duration + started_at if duration is not None else duration
+        deadline = cls(expires_at)
+        deadline.started_at = started_at
+        return deadline
+
+    @property
+    def duration(self) -> float | None:
+        """Seconds between the creation and expiration time of the deadline
+        if the deadline expires, None otherwise"""
+        if self.expires_at is None:
+            return None
+        return self.expires_at - self.started_at
+
+    @property
+    def expires(self) -> bool:
+        """Whether the deadline ever expires"""
+        return self.expires_at is not None
+
+    @property
+    def elapsed(self) -> float:
+        """Seconds that elapsed since the deadline was created"""
+        return time() - self.started_at
+
+    @property
+    def remaining(self) -> float | None:
+        """Seconds remaining until the deadline expires if an expiry time is set,
+        None otherwise"""
+        if self.expires_at is None:
+            return None
+        else:
+            return max(0, self.expires_at - time())
+
+    @property
+    def expired(self) -> bool:
+        """Whether the deadline has already expired"""
+        return self.remaining == 0
+
+
+class RateLimiterFilter(logging.Filter):
+    """A Logging filter that ensures a matching message is emitted at most every
+    `rate` seconds"""
+
+    pattern: re.Pattern
+    rate: float
+    _last_seen: float
+
+    def __init__(self, pattern: str, *, name: str = "", rate: str | float = "10s"):
+        super().__init__(name)
+        self.pattern = re.compile(pattern)
+        self.rate = _parse_timedelta(rate)
+        self._last_seen = -self.rate
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if self.pattern.match(record.msg):
+            now = monotonic()
+            if now - self._last_seen < self.rate:
+                return False
+            self._last_seen = now
+        return True
+
+    @classmethod
+    def reset_timer(cls, logger: logging.Logger | str) -> None:
+        """Reset the timer on all RateLimiterFilters on a logger.
+        Useful in unit testing.
+        """
+        if isinstance(logger, str):
+            logger = logging.getLogger(logger)
+        for filter in logger.filters:
+            if isinstance(filter, cls):
+                filter._last_seen = -filter.rate
+
+
+if sys.version_info >= (3, 11):
+
+    async def wait_for(fut: Awaitable[T], timeout: float) -> T:
+        async with asyncio.timeout(timeout):
+            return await fut
+
+else:
+
+    async def wait_for(fut: Awaitable[T], timeout: float) -> T:
+        return await asyncio.wait_for(fut, timeout)

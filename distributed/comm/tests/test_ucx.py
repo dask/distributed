@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import os
+from unittest.mock import patch
 
 import pytest
 
 import dask
+
+from distributed.utils import wait_for
 
 pytestmark = pytest.mark.gpu
 
@@ -12,9 +16,15 @@ ucp = pytest.importorskip("ucp")
 
 from distributed import Client, Scheduler, wait
 from distributed.comm import connect, listen, parse_address, ucx
+from distributed.comm.core import CommClosedError
 from distributed.comm.registry import backends, get_backend
 from distributed.deploy.local import LocalCluster
-from distributed.diagnostics.nvml import has_cuda_context
+from distributed.diagnostics.nvml import (
+    device_get_count,
+    get_device_index_and_uuid,
+    get_device_mig_mode,
+    has_cuda_context,
+)
 from distributed.protocol import to_serialize
 from distributed.utils_test import gen_test, inc
 
@@ -31,8 +41,10 @@ def test_registered(ucx_loop):
 
 
 async def get_comm_pair(
-    listen_addr="ucx://" + HOST, listen_args={}, connect_args={}, **kwargs
+    listen_addr="ucx://" + HOST, listen_args=None, connect_args=None, **kwargs
 ):
+    listen_args = listen_args or {}
+    connect_args = connect_args or {}
     q = asyncio.queues.Queue()
 
     async def handle_comm(comm):
@@ -300,7 +312,7 @@ async def test_stress(
             x = x.persist()
             await wait(x)
 
-            for i in range(10):
+            for _ in range(10):
                 x = x.rechunk((chunksize, -1))
                 x = x.rechunk((-1, chunksize))
                 x = x.persist()
@@ -317,20 +329,40 @@ async def test_simple(
             assert await client.submit(lambda x: x + 1, 10) == 11
 
 
+@pytest.mark.xfail(reason="If running on Docker, requires --pid=host")
 @gen_test()
 async def test_cuda_context(
     ucx_loop,
 ):
-    with dask.config.set({"distributed.comm.ucx.create-cuda-context": True}):
-        async with LocalCluster(
-            protocol="ucx", n_workers=1, asynchronous=True
-        ) as cluster:
-            async with Client(cluster, asynchronous=True) as client:
-                assert cluster.scheduler_address.startswith("ucx://")
-                assert has_cuda_context() == 0
-                worker_cuda_context = await client.run(has_cuda_context)
-                assert len(worker_cuda_context) == 1
-                assert list(worker_cuda_context.values())[0] == 0
+    try:
+        device_info = get_device_index_and_uuid(
+            next(
+                filter(
+                    lambda i: get_device_mig_mode(i)[0] == 0, range(device_get_count())
+                )
+            )
+        )
+    except StopIteration:
+        pytest.skip("No CUDA device in non-MIG mode available")
+
+    with patch.dict(
+        os.environ, {"CUDA_VISIBLE_DEVICES": device_info.uuid.decode("utf-8")}
+    ):
+        with dask.config.set({"distributed.comm.ucx.create-cuda-context": True}):
+            async with LocalCluster(
+                protocol="ucx", n_workers=1, asynchronous=True
+            ) as cluster:
+                async with Client(cluster, asynchronous=True) as client:
+                    assert cluster.scheduler_address.startswith("ucx://")
+                    ctx = has_cuda_context()
+                    assert ctx.has_context and ctx.device_info == device_info
+                    worker_cuda_context = await client.run(has_cuda_context)
+                    assert len(worker_cuda_context) == 1
+                    worker_cuda_context = list(worker_cuda_context.values())
+                    assert (
+                        worker_cuda_context[0].has_context
+                        and worker_cuda_context[0].device_info == device_info
+                    )
 
 
 @gen_test()
@@ -365,3 +397,15 @@ async def test_ucx_unreachable(
 ):
     with pytest.raises(OSError, match="Timed out trying to connect to"):
         await Client("ucx://255.255.255.255:12345", timeout=1, asynchronous=True)
+
+
+@gen_test()
+async def test_comm_closed_on_read_error():
+    reader, writer = await get_comm_pair()
+
+    # Depending on the UCP protocol selected, it may raise either
+    # `asyncio.TimeoutError` or `CommClosedError`, so validate either one.
+    with pytest.raises((asyncio.TimeoutError, CommClosedError)):
+        await wait_for(reader.read(), 0.01)
+
+    assert reader.closed()

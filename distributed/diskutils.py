@@ -5,6 +5,7 @@ import logging
 import os
 import shutil
 import stat
+import sys
 import tempfile
 import weakref
 from typing import ClassVar
@@ -115,21 +116,46 @@ class WorkSpace:
     this will be detected and the directories purged.
     """
 
+    base_dir: str
+    _global_lock_path: str
+    _purge_lock_path: str
+
     # Keep track of all locks known to this process, to avoid several
     # WorkSpaces to step on each other's toes
     _known_locks: ClassVar[set[str]] = set()
 
-    def __init__(self, base_dir):
-        self.base_dir = os.path.abspath(base_dir)
-        self._init_workspace()
+    def __init__(self, base_dir: str):
+        self.base_dir = self._init_workspace(base_dir)
         self._global_lock_path = os.path.join(self.base_dir, "global.lock")
         self._purge_lock_path = os.path.join(self.base_dir, "purge.lock")
 
-    def _init_workspace(self):
-        try:
-            os.mkdir(self.base_dir)
-        except FileExistsError:
-            pass
+    def _init_workspace(self, base_dir: str) -> str:
+        """Create base_dir if it doesn't exist.
+        If base_dir already exists but it's not writeable, change the name.
+        """
+        base_dir = os.path.abspath(base_dir)
+        try_dirs = [base_dir]
+        # Note: WINDOWS constant doesn't work with `mypy --platform win32`
+        if sys.platform != "win32":
+            # - os.getlogin() raises OSError on containerized environments
+            # - os.getuid() does not exist in Windows
+            try_dirs.append(f"{base_dir}-{os.getuid()}")
+
+        for try_dir in try_dirs:
+            try:
+                os.makedirs(try_dir)
+            except FileExistsError:
+                try:
+                    with tempfile.TemporaryFile(dir=try_dir):
+                        pass
+                except PermissionError:
+                    continue
+            return try_dir
+
+        # If we reached this, we're likely in a containerized environment where /tmp
+        # has been shared between containers through a mountpoint, every container
+        # has an external $UID, but the internal one is the same for all.
+        return tempfile.mkdtemp(prefix=base_dir + "-")
 
     def _global_lock(self, **kwargs):
         return locket.lock_file(self._global_lock_path, **kwargs)

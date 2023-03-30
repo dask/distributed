@@ -287,18 +287,15 @@ async def test_failed_worker(c, s, a, b):
 
     await a.close()
 
-    with pytest.raises(Exception) as info:
+    with pytest.raises(ValueError, match="Worker holding Actor was lost"):
         await counter.increment()
-
-    assert "actor" in str(info.value).lower()
-    assert "worker" in str(info.value).lower()
 
 
 @gen_cluster(client=True)
 async def bench(c, s, a, b):
     counter = await c.submit(Counter, actor=True)
 
-    for i in range(1000):
+    for _ in range(1000):
         await counter.increment()
 
 
@@ -357,7 +354,7 @@ async def test_many_computations(c, s, a, b):
     counter = await c.submit(Counter, actor=True)
 
     def add(n, counter):
-        for i in range(n):
+        for _ in range(n):
             counter.increment().result()
 
     futures = c.map(add, range(10), counter=counter)
@@ -383,7 +380,7 @@ async def test_thread_safety(c, s, a, b):
             assert self.n == 0
             self.n += 1
 
-            for i in range(20):
+            for _ in range(20):
                 sleep(0.002)
                 assert self.n == 1
             self.n = 0
@@ -477,14 +474,12 @@ async def bench_param_server(c, s, *workers):
     print(format_time(end - start))
 
 
-@pytest.mark.slow
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
-@gen_cluster(client=True, timeout=120)
+@gen_cluster(client=True)
 async def test_compute(c, s, a, b):
     @dask.delayed
     def f(n, counter):
         assert isinstance(counter, Actor)
-        for i in range(n):
+        for _ in range(n):
             counter.increment().result()
 
     @dask.delayed
@@ -506,7 +501,7 @@ def test_compute_sync(client):
     @dask.delayed
     def f(n, counter):
         assert isinstance(counter, Actor), type(counter)
-        for i in range(n):
+        for _ in range(n):
             counter.increment().result()
 
     @dask.delayed
@@ -544,7 +539,7 @@ async def test_actors_in_profile(c, s, a):
 
     sleeper = await c.submit(Sleeper, actor=True)
 
-    for i in range(5):
+    for _ in range(5):
         await sleeper.sleep(0.200)
         if (
             list(a.profile_recent["children"])[0].startswith("sleep")

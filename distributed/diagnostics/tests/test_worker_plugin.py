@@ -6,7 +6,7 @@ import warnings
 import pytest
 
 from distributed import Worker, WorkerPlugin
-from distributed.utils_test import async_wait_for, gen_cluster, inc
+from distributed.utils_test import async_poll_for, gen_cluster, inc
 
 
 class MyPlugin(WorkerPlugin):
@@ -44,11 +44,10 @@ class MyPlugin(WorkerPlugin):
 async def test_create_with_client(c, s):
     await c.register_worker_plugin(MyPlugin(123))
 
-    worker = await Worker(s.address)
-    assert worker._my_plugin_status == "setup"
-    assert worker._my_plugin_data == 123
+    async with Worker(s.address) as worker:
+        assert worker._my_plugin_status == "setup"
+        assert worker._my_plugin_data == 123
 
-    await worker.close()
     assert worker._my_plugin_status == "teardown"
 
 
@@ -57,33 +56,33 @@ async def test_remove_with_client(c, s):
     await c.register_worker_plugin(MyPlugin(123), name="foo")
     await c.register_worker_plugin(MyPlugin(546), name="bar")
 
-    worker = await Worker(s.address)
-    # remove the 'foo' plugin
-    await c.unregister_worker_plugin("foo")
-    assert worker._my_plugin_status == "teardown"
+    async with Worker(s.address) as worker:
+        # remove the 'foo' plugin
+        await c.unregister_worker_plugin("foo")
+        assert worker._my_plugin_status == "teardown"
 
-    # check that on the scheduler registered worker plugins we only have 'bar'
-    assert len(s.worker_plugins) == 1
-    assert "bar" in s.worker_plugins
+        # check that on the scheduler registered worker plugins we only have 'bar'
+        assert len(s.worker_plugins) == 1
+        assert "bar" in s.worker_plugins
 
-    # check on the worker plugins that we only have 'bar'
-    assert len(worker.plugins) == 1
-    assert "bar" in worker.plugins
+        # check on the worker plugins that we only have 'bar'
+        assert len(worker.plugins) == 1
+        assert "bar" in worker.plugins
 
-    # let's remove 'bar' and we should have none worker plugins
-    await c.unregister_worker_plugin("bar")
-    assert worker._my_plugin_status == "teardown"
-    assert not s.worker_plugins
-    assert not worker.plugins
+        # let's remove 'bar' and we should have none worker plugins
+        await c.unregister_worker_plugin("bar")
+        assert worker._my_plugin_status == "teardown"
+        assert not s.worker_plugins
+        assert not worker.plugins
 
 
 @gen_cluster(client=True, nthreads=[])
 async def test_remove_with_client_raises(c, s):
     await c.register_worker_plugin(MyPlugin(123), name="foo")
 
-    worker = await Worker(s.address)
-    with pytest.raises(ValueError, match="bar"):
-        await c.unregister_worker_plugin("bar")
+    async with Worker(s.address):
+        with pytest.raises(ValueError, match="bar"):
+            await c.unregister_worker_plugin("bar")
 
 
 @gen_cluster(client=True, worker_kwargs={"plugins": [MyPlugin(5)]})
@@ -108,13 +107,16 @@ async def test_normal_task_transitions_called(c, s, w):
 
     await c.register_worker_plugin(plugin)
     await c.submit(lambda x: x, 1, key="task")
-    await async_wait_for(lambda: not w.state.tasks, timeout=10)
+    await async_poll_for(lambda: not w.state.tasks, timeout=10)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
 async def test_failing_task_transitions_called(c, s, w):
+    class CustomError(Exception):
+        pass
+
     def failing(x):
-        raise Exception()
+        raise CustomError()
 
     expected_notifications = [
         {"key": "task", "start": "released", "finish": "waiting"},
@@ -129,7 +131,7 @@ async def test_failing_task_transitions_called(c, s, w):
 
     await c.register_worker_plugin(plugin)
 
-    with pytest.raises(Exception):
+    with pytest.raises(CustomError):
         await c.submit(failing, 1, key="task")
 
 
@@ -151,7 +153,7 @@ async def test_superseding_task_transitions_called(c, s, w):
 
     await c.register_worker_plugin(plugin)
     await c.submit(lambda x: x, 1, key="task", resources={"X": 1})
-    await async_wait_for(lambda: not w.state.tasks, timeout=10)
+    await async_poll_for(lambda: not w.state.tasks, timeout=10)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
@@ -177,7 +179,7 @@ async def test_dependent_tasks(c, s, w):
 
     await c.register_worker_plugin(plugin)
     await c.get(dsk, "task", sync=False)
-    await async_wait_for(lambda: not w.state.tasks, timeout=10)
+    await async_poll_for(lambda: not w.state.tasks, timeout=10)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)

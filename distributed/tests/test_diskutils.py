@@ -24,7 +24,7 @@ from distributed.utils_test import captured_logger
 
 def assert_directory_contents(dir_path, expected, trials=2):
     expected = [os.path.join(dir_path, p) for p in expected]
-    for i in range(trials):
+    for _ in range(trials):
         actual = [
             os.path.join(dir_path, p)
             for p in os.listdir(dir_path)
@@ -38,9 +38,9 @@ def assert_directory_contents(dir_path, expected, trials=2):
         assert sorted(actual) == sorted(expected)
 
 
-def test_workdir_simple(tmpdir):
+def test_workdir_simple(tmp_path):
     # Test nominal operation of WorkSpace and WorkDirs
-    base_dir = str(tmpdir)
+    base_dir = str(tmp_path)
     assert_contents = functools.partial(assert_directory_contents, base_dir)
 
     ws = WorkSpace(base_dir)
@@ -72,10 +72,10 @@ def test_workdir_simple(tmpdir):
     assert b.dir_path != c.dir_path
 
 
-def test_two_workspaces_in_same_directory(tmpdir):
+def test_two_workspaces_in_same_directory(tmp_path):
     # If handling the same directory with two WorkSpace instances,
     # things should work ok too
-    base_dir = str(tmpdir)
+    base_dir = str(tmp_path)
     assert_contents = functools.partial(assert_directory_contents, base_dir)
 
     ws = WorkSpace(base_dir)
@@ -100,10 +100,10 @@ def test_two_workspaces_in_same_directory(tmpdir):
     assert_contents([], trials=5)
 
 
-def test_workspace_process_crash(tmpdir):
+def test_workspace_process_crash(tmp_path):
     # WorkSpace should be able to clean up stale contents left by
     # crashed process
-    base_dir = str(tmpdir)
+    base_dir = str(tmp_path)
     assert_contents = functools.partial(assert_directory_contents, base_dir)
 
     ws = WorkSpace(base_dir)
@@ -156,8 +156,8 @@ def test_workspace_process_crash(tmpdir):
         assert any(repr(p) in line for line in lines)
 
 
-def test_workspace_rmtree_failure(tmpdir):
-    base_dir = str(tmpdir)
+def test_workspace_rmtree_failure(tmp_path):
+    base_dir = str(tmp_path)
 
     ws = WorkSpace(base_dir)
     a = ws.new_work_dir(name="aa")
@@ -171,8 +171,8 @@ def test_workspace_rmtree_failure(tmpdir):
         assert line.startswith(f"Failed to remove {a.dir_path!r}")
 
 
-def test_locking_disabled(tmpdir):
-    base_dir = str(tmpdir)
+def test_locking_disabled(tmp_path):
+    base_dir = str(tmp_path)
 
     with dask.config.set({"distributed.worker.use-file-locking": False}):
         with mock.patch("locket.lock_file") as lock_file:
@@ -222,11 +222,11 @@ def _workspace_concurrency(base_dir, purged_q, err_q, stop_evt, barrier):
 
 
 @pytest.mark.slow
-def test_workspace_concurrency(tmpdir):
+def test_workspace_concurrency(tmp_path):
     """WorkSpace concurrency test. We merely check that no exception or
     deadlock happens.
     """
-    base_dir = str(tmpdir)
+    base_dir = str(tmp_path)
 
     err_q = get_mp_context().Queue()
     purged_q = get_mp_context().Queue()
@@ -286,3 +286,21 @@ def test_workspace_concurrency(tmpdir):
 
     # We attempted to purge most directories at some point
     assert n_purged >= 0.5 * n_created > 0
+
+
+@pytest.mark.skipif(WINDOWS, reason="Need POSIX filesystem permissions and UIDs")
+def test_unwritable_base_dir(tmp_path):
+    os.mkdir(f"{tmp_path}/bad", mode=0o500)
+    with pytest.raises(PermissionError):
+        open(f"{tmp_path}/bad/tryme", "w")
+
+    ws = WorkSpace(f"{tmp_path}/bad")
+    assert ws.base_dir == f"{tmp_path}/bad-{os.getuid()}"
+
+    os.chmod(f"{tmp_path}/bad-{os.getuid()}", 0o500)
+    with pytest.raises(PermissionError):
+        open(f"{tmp_path}/bad-{os.getuid()}/tryme", "w")
+
+    ws = WorkSpace(f"{tmp_path}/bad")
+    assert ws.base_dir.startswith(f"{tmp_path}/bad-")
+    assert ws.base_dir != f"{tmp_path}/bad-{os.getuid()}"
