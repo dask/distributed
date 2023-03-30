@@ -77,7 +77,7 @@ from distributed.core import (
 )
 from distributed.core import rpc as RPCType
 from distributed.core import send_recv
-from distributed.diagnostics import nvml
+from distributed.diagnostics import nvml, rmm
 from distributed.diagnostics.plugin import _get_plugin_name
 from distributed.diskutils import WorkDir, WorkSpace
 from distributed.http import get_handlers
@@ -3320,6 +3320,20 @@ def add_gpu_metrics():
         return nvml.one_time()
 
     DEFAULT_STARTUP_INFORMATION["gpu"] = gpu_startup
+
+
+try:
+    import rmm as _rmm
+except Exception:
+    pass
+else:
+
+    async def rmm_metric(worker):
+        result = await offload(rmm.real_time)
+        return result
+
+    DEFAULT_METRICS["rmm"] = rmm_metric
+    del _rmm
 
 
 def print(
