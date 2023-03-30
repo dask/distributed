@@ -3625,10 +3625,14 @@ class WorkerTable(DashboardComponent):
             "mean_memory_percent",
             "max_num_fds",
             "mean_num_fds",
-            "max_read_bytes",
-            "mean_read_bytes",
-            "max_write_bytes",
-            "mean_write_bytes",
+            "max_host_net_io.read_bps",
+            "mean_host_net_io.read_bps",
+            "max_host_net_io.write_bps",
+            "mean_host_net_io.write_bps",
+            "max_host_disk_io.read_bps",
+            "mean_host_disk_io.read_bps",
+            "max_host_disk_io.write_bps",
+            "mean_host_disk_io.write_bps",
         ]
 
         table_names = [
@@ -3669,11 +3673,14 @@ class WorkerTable(DashboardComponent):
             "mean_memory_percent": "mean(memory %)",
             "max_num_fds": "max(# fds)",
             "mean_num_fds": "mean(# fds)",
-            # TODO: modify these stats to match new IO metrics
-            "max_read_bytes": "max(read)",
-            "mean_read_bytes": "mean(read)",
-            "max_write_bytes": "max(write)",
-            "mean_write_bytes": "mean(write)",
+            "max_host_net_io.read_bps": "max(net read)",
+            "mean_host_net_io.read_bps": "mean(net read)",
+            "max_host_net_io.write_bps": "max(net read)",
+            "mean_host_net_io.write_bps": "mean(net read)",
+            "max_host_disk_io.read_bps": "max(disk read)",
+            "mean_host_disk_io.read_bps": "mean(disk read)",
+            "max_host_disk_io.write_bps": "max(disk read)",
+            "mean_host_disk_io.write_bps": "mean(disk read)",
         }
 
         self.source = ColumnDataSource(
@@ -3777,8 +3784,10 @@ class WorkerTable(DashboardComponent):
                 "memory",
                 "memory %",
                 "# fds",
-                "read",
-                "write",
+                "net read",
+                "net write",
+                "disk read",
+                "disk write",
             ],
             active=[0, 1],
         )
