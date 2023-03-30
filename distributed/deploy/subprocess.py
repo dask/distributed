@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import abc
 import asyncio
 import copy
 import json
@@ -15,13 +16,88 @@ from dask.system import CPU_COUNT
 from distributed.compatibility import WINDOWS
 from distributed.deploy.spec import ProcessInterface, SpecCluster
 from distributed.deploy.utils import nprocesses_nthreads
-from distributed.scheduler import Scheduler
 from distributed.worker_memory import parse_memory_limit
 
 logger = logging.getLogger(__name__)
 
 
-class SubprocessWorker(ProcessInterface):
+class Subprocess(ProcessInterface, abc.ABC):
+    name: str | None
+    process: asyncio.subprocess.Process | None
+
+    def __init__(self, name: str | None = None):
+        if WINDOWS:
+            # FIXME: distributed#7434
+            raise RuntimeError("Subprocess does not support Windows.")
+        self.name = name
+        self.process = None
+        super().__init__()
+
+    async def start(self) -> None:
+        await self._start()
+        await super().start()
+
+    @abc.abstractmethod
+    async def _start(self) -> None:
+        """Start the subprocess"""
+        raise NotImplementedError
+
+    async def close(self) -> None:
+        if self.process and self.process.returncode is None:
+            for child in psutil.Process(self.process.pid).children(recursive=True):
+                child.kill()
+            self.process.kill()
+            await self.process.communicate()
+        self.process = None
+        await super().close()
+
+
+class SubprocessScheduler(Subprocess):
+    """A local Dask scheduler running in a dedicated subprocess"""
+
+    scheduler_kwargs: dict
+    address: str | None
+
+    def __init__(
+        self,
+        name: str | None = None,
+        scheduler_kwargs: dict | None = None,
+    ):
+        self.scheduler_kwargs = scheduler_kwargs or {}
+        super().__init__(name)
+
+    async def _start(self):
+        cmd = [
+            "dask",
+            "spec",
+            "--spec",
+            json.dumps(
+                {"cls": "distributed.Scheduler", "opts": {**self.scheduler_kwargs}}
+            ),
+        ]
+        logger.info(" ".join(cmd))
+        self.process = await asyncio.create_subprocess_exec(
+            "dask",
+            "spec",
+            "--spec",
+            json.dumps(
+                {"cls": "distributed.Scheduler", "opts": {**self.scheduler_kwargs}}
+            ),
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        while True:
+            line = (await self.process.stderr.readline()).decode()
+            if not line.strip():
+                raise RuntimeError("Scheduler failed to start")
+            logger.info(line.strip())
+            if "Scheduler at" in line:
+                self.address = line.split("Scheduler at:")[1].strip()
+                break
+        logger.debug(line)
+
+
+class SubprocessWorker(Subprocess):
     """A local Dask worker running in a dedicated subprocess
 
     Parameters
@@ -39,8 +115,6 @@ class SubprocessWorker(ProcessInterface):
     scheduler: str
     worker_class: str
     worker_kwargs: dict
-    name: str | None
-    process: asyncio.subprocess.Process | None
 
     def __init__(
         self,
@@ -49,34 +123,28 @@ class SubprocessWorker(ProcessInterface):
         name: str | None = None,
         worker_kwargs: dict | None = None,
     ) -> None:
-        if WINDOWS:
-            # FIXME: distributed#7434
-            raise RuntimeError("SubprocessWorker does not support Windows.")
         self.scheduler = scheduler
         self.worker_class = worker_class
-        self.name = name
         self.worker_kwargs = copy.copy(worker_kwargs or {})
-        self.process = None
-        super().__init__()
+        super().__init__(name)
 
-    async def start(self) -> None:
+    async def _start(self) -> None:
+        cmd = [
+            "dask",
+            "spec",
+            self.scheduler,
+            "--spec",
+            json.dumps({"cls": self.worker_class, "opts": {**self.worker_kwargs}}),
+        ]
+        logger.info(" ".join(cmd))
         self.process = await asyncio.create_subprocess_exec(
             "dask",
             "spec",
             self.scheduler,
             "--spec",
             json.dumps({"cls": self.worker_class, "opts": {**self.worker_kwargs}}),
+            stderr=asyncio.subprocess.PIPE,
         )
-        await super().start()
-
-    async def close(self) -> None:
-        if self.process and self.process.returncode is None:
-            for child in psutil.Process(self.process.pid).children(recursive=True):
-                child.kill()
-            self.process.kill()
-            await self.process.wait()
-        self.process = None
-        await super().close()
 
 
 def SubprocessCluster(
@@ -88,7 +156,7 @@ def SubprocessCluster(
     n_workers: int | None = None,
     threads_per_worker: int | None = None,
     worker_kwargs: dict | None = None,
-    silence_logs: int = logging.WARN,
+    silence_logs: int = logging.INFO,
     **kwargs: Any,
 ) -> SpecCluster:
     """Create in-process scheduler and workers running in dedicated subprocesses
@@ -123,7 +191,7 @@ def SubprocessCluster(
     worker_kwargs:
         Keywords to pass on to the ``Worker`` class constructor
     silence_logs:
-        Level of logs to print out to stdout, defaults to ``logging.WARN``
+        Level of logs to print out to stdout, defaults to ``logging.INFO``
 
         Use a falsy value like False or None to disable log silencing.
 
@@ -178,7 +246,12 @@ def SubprocessCluster(
         worker_kwargs,
     )
 
-    scheduler = {"cls": Scheduler, "options": scheduler_kwargs}
+    scheduler = {
+        "cls": SubprocessScheduler,
+        "options": {
+            "scheduler_kwargs": scheduler_kwargs,
+        },
+    }
     worker = {
         "cls": SubprocessWorker,
         "options": {"worker_class": worker_class, "worker_kwargs": worker_kwargs},
