@@ -7,23 +7,20 @@ from bokeh.application import Application
 from bokeh.application.handlers.function import FunctionHandler
 from bokeh.server.server import BokehTornado
 from bokeh.server.util import create_hosts_allowlist
-from packaging.version import parse as parse_version
 
 import dask
 
 from distributed.dashboard.utils import BOKEH_VERSION
-from distributed.versions import MAX_BOKEH_VERSION, MIN_BOKEH_VERSION
+from distributed.versions import BOKEH_REQUIREMENT
 
-if BOKEH_VERSION < parse_version(MIN_BOKEH_VERSION) or BOKEH_VERSION > parse_version(
-    MAX_BOKEH_VERSION
-):
+if BOKEH_VERSION not in BOKEH_REQUIREMENT.specifier:
     warnings.warn(
-        f"\nDask needs bokeh >= {MIN_BOKEH_VERSION}, < 3 for the dashboard."
-        f"\nYou have bokeh=={BOKEH_VERSION}."
+        f"\nDask needs {BOKEH_REQUIREMENT} for the dashboard."
+        f"\nYou have bokeh={BOKEH_VERSION}."
         "\nContinuing without the dashboard."
     )
     raise ImportError(
-        f"Dask needs bokeh >= {MIN_BOKEH_VERSION}, < 3, not bokeh=={BOKEH_VERSION}"
+        f"Dask needs {BOKEH_REQUIREMENT} for the dashboard, not bokeh={BOKEH_VERSION}"
     )
 
 
