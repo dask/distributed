@@ -7832,7 +7832,7 @@ class Scheduler(SchedulerState, ServerNode):
                 )
                 await self.remove_worker(address=ws.address, stimulus_id=stimulus_id)
 
-    def check_idle(self) -> int | None:
+    def check_idle(self) -> float | None:
         if self.status in (Status.closing, Status.closed):
             return None
 
@@ -7844,7 +7844,7 @@ class Scheduler(SchedulerState, ServerNode):
         if (
             self.queued
             or self.unrunnable
-            or any([ws.processing for ws in self.workers.values()])
+            or any(ws.processing for ws in self.workers.values())
         ):
             self.idle_since = None
             return None
@@ -7852,6 +7852,14 @@ class Scheduler(SchedulerState, ServerNode):
         if not self.idle_since:
             self.idle_since = time()
             return self.idle_since
+
+        if self.jupyter:
+            last_activity = (
+                self._jupyter_server_application.web_app.last_activity().timestamp()
+            )
+            if last_activity > self.idle_since:
+                self.idle_since = last_activity
+                return self.idle_since
 
         if self.idle_timeout:
             if time() > self.idle_since + self.idle_timeout:
