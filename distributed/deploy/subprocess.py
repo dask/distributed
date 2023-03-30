@@ -38,7 +38,6 @@ class Subprocess(ProcessInterface, abc.ABC):
     @abc.abstractmethod
     async def _start(self) -> None:
         """Start the subprocess"""
-        raise NotImplementedError
 
     async def close(self) -> None:
         if self.process and self.process.returncode is None:
