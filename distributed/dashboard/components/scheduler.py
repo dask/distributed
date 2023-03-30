@@ -3791,21 +3791,37 @@ class WorkerTable(DashboardComponent):
             ],
             active=[0, 1],
         )
-        column_choice.js_on_click(
-            CustomJS(
-                args=dict(
-                    table=stat_table, columns=stat_columns, names=self.stat_names
-                ),
-                code="""
-                    var visible_columns = [columns["name"], columns["address"]]
-                    for (var i = 0; i < this.active.length; i++) {
-                        visible_columns.push(columns[names[this.active[i] * 2]])
-                        visible_columns.push(columns[names[(this.active[i] * 2) + 1]])
-                    }
-                    table.columns = visible_columns;
-                """,
+        column_choice_callback = """
+            var visible_columns = [columns["name"], columns["address"]]
+            for (var i = 0; i < this.active.length; i++) {
+                visible_columns.push(columns[names[this.active[i] * 2]])
+                visible_columns.push(columns[names[(this.active[i] * 2) + 1]])
+            }
+            table.columns = visible_columns;
+        """
+        # bokeh 3 replaces js_on_click with js_on_event
+        if BOKEH_VERSION.major < 3:
+            column_choice.js_on_click(
+                CustomJS(
+                    args=dict(
+                        table=stat_table, columns=stat_columns, names=self.stat_names
+                    ),
+                    code=column_choice_callback,
+                )
             )
-        )
+        else:
+            column_choice.js_on_event(
+                "button_click",
+                CustomJS(
+                    args=dict(
+                        btn=column_choice,
+                        table=stat_table,
+                        columns=stat_columns,
+                        names=self.stat_names,
+                    ),
+                    code=column_choice_callback.replace("this", "btn"),
+                ),
+            )
 
         hover = HoverTool(
             point_policy="follow_mouse",
