@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 import dask
 from dask.utils import parse_timedelta
 
+# Needed to avoid Sphinx WARNING: more than one target found for cross-reference 'TaskState' and 'WorkerState'"
+# https://github.com/agronholm/sphinx-autodoc-typehints#dealing-with-circular-imports
 from distributed import client
 from distributed import scheduler as scheduler_module
 from distributed.compatibility import PeriodicCallback
