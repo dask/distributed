@@ -6935,7 +6935,7 @@ class Scheduler(SchedulerState, ServerNode):
         return ws.address, ws.identity()
 
     def add_keys(
-        self, worker=None, keys=(), stimulus_id=None
+        self, worker: str, keys: Iterable[str] = (), stimulus_id: str | None = None
     ) -> Literal["OK", "not found"]:
         """
         Learn that a worker has certain keys
@@ -6976,7 +6976,7 @@ class Scheduler(SchedulerState, ServerNode):
         who_has: dict,
         nbytes: dict,
         client: str | None = None,
-    ):
+    ) -> None:
         """Learn that new data has entered the network from an external source"""
         who_has = {k: [self.coerce_address(vv) for vv in v] for k, v in who_has.items()}
         logger.debug("Update data %s", who_has)
@@ -7154,7 +7154,7 @@ class Scheduler(SchedulerState, ServerNode):
             for ts in processing:
                 if ts.processing_on:
                     wkeys = workers[ts.processing_on.address]
-                    assert wkeys
+                    assert wkeys is not None
                     wkeys.append(ts.key)
         else:
             workers = {w: None for w in self.workers}
