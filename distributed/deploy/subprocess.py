@@ -65,7 +65,7 @@ class SubprocessWorker(ProcessInterface):
             "spec",
             self.scheduler,
             "--spec",
-            json.dumps({0: {"cls": self.worker_class, "opts": {**self.worker_kwargs}}}),
+            json.dumps({"cls": self.worker_class, "opts": {**self.worker_kwargs}}),
         )
         await super().start()
 
