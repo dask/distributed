@@ -6940,7 +6940,7 @@ class Scheduler(SchedulerState, ServerNode):
         return ws.address, ws.identity()
 
     def add_keys(
-        self, worker=None, keys=(), stimulus_id=None
+        self, worker: str, keys: Collection[str] = (), stimulus_id: str | None = None
     ) -> Literal["OK", "not found"]:
         """
         Learn that a worker has certain keys
@@ -6978,10 +6978,10 @@ class Scheduler(SchedulerState, ServerNode):
     def update_data(
         self,
         *,
-        who_has: dict,
-        nbytes: dict,
+        who_has: dict[str, list[str]],
+        nbytes: dict[str, int],
         client: str | None = None,
-    ):
+    ) -> None:
         """Learn that new data has entered the network from an external source"""
         who_has = {k: [self.coerce_address(vv) for vv in v] for k, v in who_has.items()}
         logger.debug("Update data %s", who_has)
@@ -7095,7 +7095,9 @@ class Scheduler(SchedulerState, ServerNode):
             del v["last_seen"]
         return ident
 
-    def get_processing(self, workers: Iterable[str] | None = None) -> dict[str, list[str]]:
+    def get_processing(
+        self, workers: Iterable[str] | None = None
+    ) -> dict[str, list[str]]:
         if workers is not None:
             workers = set(map(self.coerce_address, workers))
             return {w: [ts.key for ts in self.workers[w].processing] for w in workers}
@@ -7117,7 +7119,9 @@ class Scheduler(SchedulerState, ServerNode):
                 key: [ws.address for ws in ts.who_has] for key, ts in self.tasks.items()
             }
 
-    def get_has_what(self, workers: Iterable[str] | None = None) -> dict[str, list[str]]:
+    def get_has_what(
+        self, workers: Iterable[str] | None = None
+    ) -> dict[str, list[str]]:
         if workers is not None:
             workers = map(self.coerce_address, workers)
             return {
@@ -7136,7 +7140,9 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             return {w: ws.nthreads for w, ws in self.workers.items()}
 
-    def get_ncores_running(self, workers: Iterable[str] | None = None) -> dict[str, int]:
+    def get_ncores_running(
+        self, workers: Iterable[str] | None = None
+    ) -> dict[str, int]:
         ncores = self.get_ncores(workers=workers)
         return {
             w: n for w, n in ncores.items() if self.workers[w].status == Status.running
