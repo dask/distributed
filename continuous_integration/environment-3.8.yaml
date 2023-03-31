@@ -27,6 +27,7 @@ dependencies:
   - psutil
   - pyarrow=7
   - pynvml  # Only tested here
+  - pytables
   - pytest
   - pytest-cov
   - pytest-faulthandler

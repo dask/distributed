@@ -25,6 +25,7 @@ dependencies:
   - prometheus_client
   - psutil
   - pyarrow=7
+  - pytables
   - pytest
   - pytest-cov
   - pytest-faulthandler
