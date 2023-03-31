@@ -3877,7 +3877,7 @@ class Scheduler(SchedulerState, ServerNode):
                 # formatting dashboard link can fail if distributed.dashboard.link
                 # refers to non-existant env vars.
                 except KeyError as e:
-                    logger.warning(f"Failed to format dashboard link, missing key: {e}")
+                    logger.warning(f"Failed to format dashboard link, unknown value: {e}")
                     link = f":{server.port}"
             else:
                 link = f"{listen_ip}:{server.port}"

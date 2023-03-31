@@ -2865,7 +2865,7 @@ async def test_multiple_listeners(dashboard_link_template, expected_dashboard_li
     # present. Don't kill scheduler, but revert to outputting the port and helpful msg
     assert re.search(expected_dashboard_link, log)
     if "ENV_VAR_MISSING" in dashboard_link_template:
-        msg = r"Failed to format dashboard link, missing key: 'ENV_VAR_MISSING'"
+        msg = r"Failed to format dashboard link, unknown value: 'ENV_VAR_MISSING'"
         assert re.search(msg, log)
 
 
