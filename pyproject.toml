@@ -183,9 +183,6 @@ warn_unreachable = true
 module = ["distributed.client"]
 allow_incomplete_defs = true
 [[tool.mypy.overrides]]
-module = ["distributed.scheduler"]
-allow_incomplete_defs = true
-[[tool.mypy.overrides]]
 module = ["distributed.worker"]
 allow_incomplete_defs = true
 
