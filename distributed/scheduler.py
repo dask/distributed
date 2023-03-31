@@ -3872,7 +3872,13 @@ class Scheduler(SchedulerState, ServerNode):
         for name, server in self.services.items():
             if name == "dashboard":
                 addr = get_address_host(listener.contact_address)
-                link = format_dashboard_link(addr, server.port)
+                try:
+                    link = format_dashboard_link(addr, server.port)
+                # formatting dashboard link can fail if distributed.dashboard.link
+                # refers to non-existant env vars.
+                except KeyError as e:
+                    logger.warning(f"Failed to format dashboard link, missing key: {e}")
+                    link = f":{server.port}"
             else:
                 link = f"{listen_ip}:{server.port}"
             logger.info("%11s at:  %25s", name, link)
