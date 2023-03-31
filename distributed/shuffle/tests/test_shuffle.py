@@ -19,7 +19,7 @@ dd = pytest.importorskip("dask.dataframe")
 
 import dask
 from dask.distributed import Event, Nanny, Worker
-from dask.utils import stringify
+from dask.utils import stringify, tmpfile
 
 from distributed.client import Client
 from distributed.scheduler import Scheduler
@@ -168,6 +168,19 @@ def test_shuffle_before_categorize(loop_in_thread):
         df = dd.shuffle.shuffle(df, "x", shuffle="p2p")
         df.categorize(columns=["y"])
         c.compute(df)
+
+
+def test_shuffle_before_to_hdf(loop_in_thread):
+    with cluster() as (s, [a, b]), Client(s["address"], loop=loop_in_thread) as c:
+        df = dask.datasets.timeseries(
+            start="2000-01-01",
+            end="2000-01-10",
+            dtypes={"x": float, "y": float},
+            freq="10 s",
+        )
+        x = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+        with tmpfile("h5") as fn:
+            x.to_hdf(fn, "/data*")
 
 
 @gen_cluster(client=True)
