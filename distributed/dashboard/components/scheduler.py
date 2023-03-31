@@ -3418,7 +3418,7 @@ class _FinePerformanceMetricsGetData(DashboardComponent):
             from bokeh.palettes import small_palettes
 
             self.source.data = dict(self.data)
-            fig = figure(x_range=self.data['operation'], title='Get Data')
+            fig = figure(x_range=self.data["operation"], title="Get Data")
             renderers = fig.vbar(
                 x="operation",
                 top="operation_log",
@@ -3433,7 +3433,8 @@ class _FinePerformanceMetricsGetData(DashboardComponent):
                 ),
             )
             hover = HoverTool(
-                tooltips=[("Name", "@operation"), ("Value", "@operation_text")], mode="vline"
+                tooltips=[("Name", "@operation"), ("Value", "@operation_text")],
+                mode="vline",
             )
             fig.add_tools(hover)
 
@@ -3455,6 +3456,7 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
         self.scheduler = scheduler
         self.data = defaultdict(list)
         self.source = ColumnDataSource(data=dict())
+        self.piechart_source = ColumnDataSource(data=dict())
         self.substantial_change = False
         self.operations = []
         self.init_root()
@@ -3474,15 +3476,29 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
         self.function_selector = MultiChoice(value=[], options=[])
         self.toggle = Toggle(label="Timing (Toggle for Bytes)")
         self.toggle.on_click(handle_toggle)
-        self.fig = figure()
-        self.root = column(self.function_selector, self.toggle, self.fig, sizing_mode='scale_width')
-
+        self.barchart = figure()
+        self.piechart = figure()
+        self.root = column(
+            self.function_selector,
+            self.toggle,
+            row([
+            self.piechart,
+            self.barchart,
+            ]),
+            sizing_mode="scale_width",
+        )
 
     @without_property_validation
     @log_errors
     def update(self):
         items = self.scheduler.cumulative_worker_metrics.items()
-        items = ((k, v) for k, v in items if isinstance(k, tuple) and k[0] == "execute" and k[-1] in ("bytes", "seconds"))
+        items = (
+            (k, v)
+            for k, v in items
+            if isinstance(k, tuple)
+            and k[0] == "execute"
+            and k[-1] in ("bytes", "seconds")
+        )
         for (_type, function_name, operation, freq), value in items:
             if function_name not in self.data["functions"]:
                 self.substantial_change = True
@@ -3491,7 +3507,7 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
                 self.data["functions"].append(function_name)
             idx = self.data["functions"].index(function_name)
 
-            while len(self.data[f"{operation}_value"]) != len(self.data['functions']):
+            while len(self.data[f"{operation}_value"]) != len(self.data["functions"]):
                 self.data[f"{operation}_value"].append(0)
                 self.data[f"{operation}_bytes"].append(0)
                 self.data[f"{operation}_text"].append("")
@@ -3502,30 +3518,69 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
             elif freq == "bytes":
                 self.data[f"{operation}_text"][idx] = format_bytes(value)
                 self.data[f"{operation}_bytes"][idx] = value
-                
+
             if operation not in self.operations:
                 self.substantial_change = True
                 self.operations.append(operation)
 
         self.source.data = dict(self.data)
 
-        from bokeh.palettes import small_palettes
+        from bokeh.palettes import small_palettes, Category20c
 
-        fig = figure(
+        piechart_data = dict()
+        piechart_data['value'] = [sum(self.data[f"{op}_value"]) for op in self.operations]
+        piechart_data['text'] = [format_time(n) for n in piechart_data['value']]
+        piechart_data["angle"] = [
+            sum(self.data[f"{operation}_value"])
+            / sum(piechart_data['value'])
+            * 2
+            * math.pi
+            for operation in self.operations
+        ]
+        piechart_data['color'] = small_palettes["YlGnBu"][5][: len(self.operations)]
+        piechart_data['operation'] = self.operations
+        self.piechart_source.data = piechart_data
+
+        piechart = figure(
+            height=500,
+            title="Execution total by operation",
+            tools="hover",
+            tooltips="@{operation}: @text",
+            x_range=(-0.5, 1.0),
+        )
+        piechart.axis.axis_label = None
+        piechart.axis.visible = False
+        piechart.grid.grid_line_color = None
+        
+        renderers = piechart.wedge(
+            x=0,
+            y=1,
+            radius=0.4,
+            start_angle=cumsum("angle", include_zero=True),
+            end_angle=cumsum("angle"),
+            line_color="white",
+            fill_color="color",
+            legend_field="operation",
+            source=self.piechart_source,
+        )
+        self.piechart.renderers = [renderers]
+
+        barchart = figure(
             x_range=self.data["functions"],
             height=500,
-            width=1000,
             title="Fine Performance Metrics by execution",
             tools="pan,wheel_zoom,box_zoom,reset",
             sizing_mode="scale_width",
         )
-        fig.yaxis.visible = False
-        fig.xaxis.major_label_orientation = 0.2
-        renderers = fig.vbar_stack(
+        barchart.yaxis.visible = False
+        barchart.xaxis.major_label_orientation = 0.2
+        barchart.grid.grid_line_color = None
+        renderers = barchart.vbar_stack(
             [
                 name
                 for name in self.data.keys()
-                if name.endswith("bytes" if self.toggle.active else "value") and len(self.data[name])
+                if name.endswith("bytes" if self.toggle.active else "value")
+                and len(self.data[name])
             ],
             x="functions",
             width=0.9,
@@ -3536,18 +3591,22 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
         for vbar in renderers:
             tooltips = [
                 (vbar.name, "@$name"),
-                ("Text", f"@{{{vbar.name.replace('_bytes', '').replace('_value', '')}_text}}"),
+                (
+                    "Text",
+                    f"@{{{vbar.name.replace('_bytes', '').replace('_value', '')}_text}}",
+                ),
                 ("function", "@functions"),
             ]
-            fig.add_tools(HoverTool(tooltips=tooltips, renderers=[vbar]))
+            barchart.add_tools(HoverTool(tooltips=tooltips, renderers=[vbar]))
 
         # replacing the child causes small blips if done every iteration vs updating renderers
         # but it's needed when new functions and/or operations show up to rerender plot
         if self.substantial_change:
-            self.root.children[-1] = fig
+            self.root.children[-1].children[0] = barchart
+            self.root.children[-1].children[1] = piechart
             self.substantial_change = False
         else:
-            self.fig.renderers = renderers
+            self.barchart.renderers = renderers
 
 
 class FinePerformanceMetrics(DashboardComponent):
