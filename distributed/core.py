@@ -384,6 +384,7 @@ class Server:
         # In case crick is not installed, also log cumulative totals (reset at server
         # restart) and local maximums (reset by prometheus poll)
         self.digests_total = defaultdict(float)
+        self.digests_total_since_heartbeat = defaultdict(float)
         self.digests_max = defaultdict(float)
 
         self.counters = defaultdict(Counter)
@@ -960,6 +961,8 @@ class Server:
             self.digests[name].add(value)
         # Cumulative data (reset by server restart)
         self.digests_total[name] += value
+        # Cumulative data sent to scheduler and reset on heartbeat
+        self.digests_total_since_heartbeat[name] += value
         # Local maximums (reset by Prometheus poll)
         self.digests_max[name] = max(self.digests_max[name], value)
 

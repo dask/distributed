@@ -262,7 +262,6 @@ async def test_allow_tasks_stolen_before_first_completes(c, s, a, b):
         await steal.start()
         # A is still blocked by executing task f-1 so this can only pass if
         # workstealing moves the tasks to B
-        await asyncio.sleep(5)
         await c.gather(more_tasks)
         assert len(b.data) == 10
     await first

@@ -11,6 +11,7 @@ from distributed.dashboard.components.nvml import (
     gpu_memory_doc,
     gpu_utilization_doc,
 )
+from distributed.dashboard.components.rmm import rmm_memory_doc
 from distributed.dashboard.components.scheduler import (
     AggregateAction,
     BandwidthTypes,
@@ -115,6 +116,7 @@ applications = {
     "/individual-profile-server": individual_profile_server_doc,
     "/individual-gpu-memory": gpu_memory_doc,
     "/individual-gpu-utilization": gpu_utilization_doc,
+    "/individual-rmm-memory": rmm_memory_doc,
 }
 
 
@@ -140,7 +142,8 @@ def template_variables(scheduler):
                 "name": " ".join(x.strip("/").split("-")[1:])
                 .title()
                 .replace("Cpu", "CPU")
-                .replace("Gpu", "GPU"),
+                .replace("Gpu", "GPU")
+                .replace("Rmm", "RMM"),
             }
             for x in applications
             if "individual" in x

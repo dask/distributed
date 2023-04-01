@@ -77,7 +77,7 @@ from distributed.core import (
 )
 from distributed.core import rpc as RPCType
 from distributed.core import send_recv
-from distributed.diagnostics import nvml
+from distributed.diagnostics import nvml, rmm
 from distributed.diagnostics.plugin import _get_plugin_name
 from distributed.diskutils import WorkDir, WorkSpace
 from distributed.http import get_handlers
@@ -138,6 +138,7 @@ from distributed.worker_state_machine import (
     PauseEvent,
     RefreshWhoHasEvent,
     RemoveReplicasEvent,
+    RemoveWorkerEvent,
     RescheduleEvent,
     RetryBusyWorkerEvent,
     SecedeEvent,
@@ -766,6 +767,7 @@ class Worker(BaseWorker, ServerNode):
             "steal-request": self._handle_remote_stimulus(StealRequestEvent),
             "refresh-who-has": self._handle_remote_stimulus(RefreshWhoHasEvent),
             "worker-status-change": self.handle_worker_status_change,
+            "remove-worker": self._handle_remove_worker,
         }
 
         ServerNode.__init__(
@@ -1042,6 +1044,7 @@ class Worker(BaseWorker, ServerNode):
                 "workers": dict(self.bandwidth_workers),
                 "types": keymap(typename, self.bandwidth_types),
             },
+            digests_total_since_heartbeat=dict(self.digests_total_since_heartbeat),
             managed_bytes=self.state.nbytes,
             spilled_bytes={
                 "memory": spilled_memory,
@@ -1057,6 +1060,8 @@ class Worker(BaseWorker, ServerNode):
             },
             event_loop_interval=self._tick_interval_observed,
         )
+
+        self.digests_total_since_heartbeat.clear()
 
         monitor_recent = self.monitor.recent()
         # Convert {foo.bar: 123} to {foo: {bar: 123}}
@@ -1155,6 +1160,11 @@ class Worker(BaseWorker, ServerNode):
         if self.contact_address is None:
             self.contact_address = self.address
         logger.info("-" * 49)
+
+        # Worker reconnection is not supported
+        assert not self.data
+        assert not self.state.tasks
+
         while True:
             try:
                 _start = time()
@@ -1167,18 +1177,8 @@ class Worker(BaseWorker, ServerNode):
                         reply=False,
                         address=self.contact_address,
                         status=self.status.name,
-                        keys=list(self.data),
                         nthreads=self.state.nthreads,
                         name=self.name,
-                        nbytes={
-                            ts.key: ts.get_nbytes()
-                            for ts in self.state.tasks.values()
-                            # Only if the task is in memory this is a sensible
-                            # result since otherwise it simply submits the
-                            # default value
-                            if ts.state == "memory"
-                        },
-                        types={k: typename(v) for k, v in self.data.items()},
                         now=time(),
                         resources=self.state.total_resources,
                         memory_limit=self.memory_manager.memory_limit,
@@ -2616,6 +2616,10 @@ class Worker(BaseWorker, ServerNode):
         """
         return self.active_threads[threading.get_ident()]
 
+    def _handle_remove_worker(self, worker: str, stimulus_id: str) -> None:
+        self.rpc.remove(worker)
+        self.handle_stimulus(RemoveWorkerEvent(worker=worker, stimulus_id=stimulus_id))
+
     def validate_state(self) -> None:
         try:
             self.state.validate_state()
@@ -3316,6 +3320,20 @@ def add_gpu_metrics():
         return nvml.one_time()
 
     DEFAULT_STARTUP_INFORMATION["gpu"] = gpu_startup
+
+
+try:
+    import rmm as _rmm
+except Exception:
+    pass
+else:
+
+    async def rmm_metric(worker):
+        result = await offload(rmm.real_time)
+        return result
+
+    DEFAULT_METRICS["rmm"] = rmm_metric
+    del _rmm
 
 
 def print(

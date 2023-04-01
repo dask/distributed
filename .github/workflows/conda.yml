@@ -6,9 +6,9 @@ on:
   pull_request:
     paths:
       - setup.py
-      - requirements.txt
       - continuous_integration/recipes/**
       - .github/workflows/conda.yml
+      - pyproject.toml
 
 # When this workflow is queued, automatically cancel any previous running
 # or pending jobs from the same branch
@@ -26,7 +26,7 @@ jobs:
     name: Build (and upload)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3.4.0
+      - uses: actions/checkout@v3.5.0
         with:
           fetch-depth: 0
       - name: Set up Python
