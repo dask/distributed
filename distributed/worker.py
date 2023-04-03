@@ -2389,6 +2389,19 @@ class Worker(BaseWorker, ServerNode):
         # This may potentially take many seconds if it involves unspilling
         if isinstance(self.data, AsyncBufferProto):
             with context_meter.meter("zict-offload"):
+                # FIXME Hack around TODO
+                # Avoid reaching the pause threshold by pushing through a lot of tasks
+                # that don't need to unspill dependencies. If you have 1
+                # async_evict_until_below_target future and 1 execute() / gather_dep()
+                # future spilling their outputs, or 2 execute() / gather_dep() spilling
+                # outputs, wait before you start running this task, even if all
+                # dependencies are in fast (or there are no dependencies).
+                while len(self.data.futures) > 1:
+                    await asyncio.wait(
+                        self.data.futures, return_when=asyncio.FIRST_COMPLETED
+                    )
+                # End hack
+
                 data.update(await self.data.async_get(keys))
         else:
             for k in keys:

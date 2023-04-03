@@ -103,6 +103,10 @@ class AsyncBufferProto(Protocol, Collection[str]):
     This is public API.
     """
 
+    #: Currently running / queued futures handling asynchronous spill/unspill activity
+    #: This is a temporary part of the protocol and will be removed soon.
+    futures: set[asyncio.Future]
+
     def __setitem__(self, key: str, value: object) -> None:
         ...
 
