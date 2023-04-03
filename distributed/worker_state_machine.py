@@ -19,7 +19,6 @@ from collections.abc import (
     Hashable,
     Iterator,
     Mapping,
-    MutableMapping,
     Set,
 )
 from copy import copy
@@ -50,6 +49,7 @@ from distributed.metrics import DelayedMetricsLedger, monotonic, time
 from distributed.protocol import pickle
 from distributed.protocol.serialize import Serialize
 from distributed.sizeof import safe_sizeof as sizeof
+from distributed.spill import AsyncBufferProto, WorkerData
 from distributed.utils import recursive_to_dict
 
 logger = logging.getLogger("distributed.worker.state_machine")
@@ -1108,7 +1108,7 @@ class WorkerState:
     #: In-memory tasks data. This collection is shared by reference between
     #: :class:`~distributed.worker.Worker`,
     #: :class:`~distributed.worker_memory.WorkerMemoryManager`, and this class.
-    data: MutableMapping[str, object]
+    data: WorkerData
 
     #: ``{name: worker plugin}``. This collection is shared by reference between
     #: :class:`~distributed.worker.Worker` and this class. The Worker managed adding and
@@ -1280,7 +1280,7 @@ class WorkerState:
         *,
         nthreads: int = 1,
         address: str | None = None,
-        data: MutableMapping[str, object] | None = None,
+        data: WorkerData | None = None,
         threads: dict[str, int] | None = None,
         plugins: dict[str, WorkerPlugin] | None = None,
         resources: Mapping[str, float] | None = None,
@@ -2421,30 +2421,15 @@ class WorkerState:
         if ts.key in self.actors:
             self.actors[ts.key] = value
         else:
-            start = time()
-
             try:
                 self.data[ts.key] = value
             except Exception as e:
-                # distributed.worker.memory.target is enabled and the value is
-                # individually larger than target * memory_limit.
-                # Inserting this task in the SpillBuffer caused it to immediately
-                # spilled to disk, and it failed to serialize.
-                # Third-party MutableMappings (dask-cuda etc.) may have other use cases
-                # for this.
+                # zict <2.3.0, or
+                # self.data is not a SpillBuffer, but instead a third-party synchronous
+                # MutableMapping that can raise on __setitem__ - for example because it
+                # tried and failed to pickle value.
                 msg = error_message(e)
                 return {ts: tuple(msg.values())}, []
-
-            stop = time()
-            if stop - start > 0.005:
-                # The SpillBuffer has spilled this task (if larger than target) or other
-                # tasks (if smaller than target) to disk.
-                # Alternatively, a third-party MutableMapping may have spent time in
-                # other activities, e.g. transferring data between GPGPU and system
-                # memory.
-                ts.startstops.append(
-                    {"action": "disk-write", "start": start, "stop": stop}
-                )
 
         ts.state = "memory"
         if ts.nbytes is None:
@@ -3637,9 +3622,17 @@ class BaseWorker(abc.ABC):
             logger.exception("async instruction handlers should never raise!")
             raise
 
-        with ledger.record():
-            # Capture metric events in _transition_to_memory()
+        if isinstance(self.state.data, AsyncBufferProto):
+            # The offloaded thread will asynchronously emit metrics after
+            # `self.data[key] = value` has returned. They are not relevant to the task's
+            # end to end runtime, so don't record them.
             self.handle_stimulus(stim)
+        else:
+            # zict <2.3.0 and third-party MutableMappings may synchronously serialize,
+            # compress, and/or write to disk when _transition_to_memory() calls
+            # `self.data[key] = value`; add these events to the task runtime.
+            with ledger.record():
+                self.handle_stimulus(stim)
 
         self._finalize_metrics(stim, ledger)
 

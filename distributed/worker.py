@@ -15,15 +15,7 @@ import threading
 import warnings
 import weakref
 from collections import defaultdict, deque
-from collections.abc import (
-    Callable,
-    Collection,
-    Container,
-    Hashable,
-    Iterable,
-    Mapping,
-    MutableMapping,
-)
+from collections.abc import Callable, Collection, Container, Hashable, Iterable, Mapping
 from concurrent.futures import Executor
 from contextlib import suppress
 from datetime import timedelta
@@ -89,6 +81,7 @@ from distributed.pubsub import PubSubWorkerExtension
 from distributed.security import Security
 from distributed.shuffle import ShuffleWorkerExtension
 from distributed.sizeof import safe_sizeof as sizeof
+from distributed.spill import AsyncBufferProto, WorkerData
 from distributed.threadpoolexecutor import ThreadPoolExecutor
 from distributed.threadpoolexecutor import secede as tpe_secede
 from distributed.utils import (
@@ -118,6 +111,7 @@ from distributed.versions import get_versions
 from distributed.worker_memory import (
     DeprecatedMemoryManagerAttribute,
     DeprecatedMemoryMonitor,
+    WorkerDataParameter,
     WorkerMemoryManager,
 )
 from distributed.worker_state_machine import (
@@ -517,16 +511,7 @@ class Worker(BaseWorker, ServerNode):
         memory_limit: str | float = "auto",
         # Allow overriding the dict-like that stores the task outputs.
         # This is meant for power users only. See WorkerMemoryManager for details.
-        data: (
-            MutableMapping[str, Any]  # pre-initialised
-            | Callable[[], MutableMapping[str, Any]]  # constructor
-            # constructor receiving self.local_directory
-            | Callable[[str], MutableMapping[str, Any]]
-            | tuple[
-                Callable[..., MutableMapping[str, Any]], dict[str, Any]
-            ]  # (constructor, kwargs to constructor)
-            | None  # create internally
-        ) = None,
+        data: WorkerDataParameter = None,
         # Deprecated parameters; please use dask config instead.
         memory_target_fraction: float | Literal[False] | None = None,
         memory_spill_fraction: float | Literal[False] | None = None,
@@ -876,7 +861,7 @@ class Worker(BaseWorker, ServerNode):
     memory_manager: WorkerMemoryManager
 
     @property
-    def data(self) -> MutableMapping[str, Any]:
+    def data(self) -> WorkerData:
         """{task key: task payload} of all completed tasks, whether they were computed
         on this Worker or computed somewhere else and then transferred here over the
         network.
@@ -1032,7 +1017,7 @@ class Worker(BaseWorker, ServerNode):
 
     async def get_metrics(self) -> dict:
         try:
-            spilled_memory, spilled_disk = self.data.spilled_total  # type: ignore
+            spilled_memory, spilled_disk = self.data.spilled_total()  # type: ignore
         except AttributeError:
             # spilling is disabled
             spilled_memory, spilled_disk = 0, 0
@@ -1564,7 +1549,10 @@ class Worker(BaseWorker, ServerNode):
             if hasattr(extension, "close"):
                 result = extension.close()
                 if isawaitable(result):
-                    result = await result
+                    await result
+
+        if isinstance(self.data, AsyncBufferProto):
+            self.data.close()
 
         if nanny and self.nanny:
             with self.rpc(self.nanny) as r:
@@ -1766,7 +1754,11 @@ class Worker(BaseWorker, ServerNode):
         self.transfer_outgoing_count_total += 1
 
         # This may potentially take many seconds if it involves unspilling
-        data = {k: self.data[k] for k in keys if k in self.data}
+        if isinstance(self.data, AsyncBufferProto):
+            with context_meter.meter("zict-offload"):
+                data = await self.data.async_get(keys, missing="omit")
+        else:
+            data = {k: self.data[k] for k in keys if k in self.data}
 
         if len(data) < len(keys):
             for k in set(keys) - data.keys():
@@ -1777,13 +1769,22 @@ class Worker(BaseWorker, ServerNode):
                         type(self.state.actors[k]), self.address, k, worker=self
                     )
 
-        msg = {"status": "OK", "data": {k: to_serialize(v) for k, v in data.items()}}
-        # Note: `if k in self.data` above guarantees that
-        # k is in self.state.tasks too and that nbytes is non-None
-        bytes_per_task = {k: self.state.tasks[k].nbytes or 0 for k in data}
+        bytes_per_task = {}
+        for k in list(data):
+            ts = self.state.tasks.get(k)
+            if ts is not None and ts.nbytes is not None:
+                bytes_per_task[k] = ts.nbytes
+            else:
+                # Race condition: a task has transitioned from memory to released
+                # between the moment it was unspilled and now.
+                assert isinstance(self.data, AsyncBufferProto)
+                del data[k]
+
         total_bytes = sum(bytes_per_task.values())
         self.transfer_outgoing_bytes += total_bytes
         self.transfer_outgoing_bytes_total += total_bytes
+
+        msg = {"status": "OK", "data": {k: to_serialize(v) for k, v in data.items()}}
 
         try:
             with context_meter.meter("network", func=time) as m:
@@ -2254,7 +2255,7 @@ class Worker(BaseWorker, ServerNode):
                 assert ts.state in ("executing", "cancelled", "resumed"), ts
                 assert ts.run_spec is not None
 
-            args2, kwargs2 = self._prepare_args_for_execution(ts, args, kwargs)
+            args2, kwargs2 = await self._prepare_args_for_execution(ts, args, kwargs)
 
             assert ts.annotations is not None
             executor = ts.annotations.get("executor", "default")
@@ -2369,19 +2370,30 @@ class Worker(BaseWorker, ServerNode):
                 stimulus_id=f"execute-unknown-error-{time()}",
             )
 
-    def _prepare_args_for_execution(
+    async def _prepare_args_for_execution(
         self, ts: TaskState, args: tuple, kwargs: dict[str, Any]
-    ) -> tuple[tuple, dict[str, Any]]:
+    ) -> tuple[tuple[object, ...], dict[str, object]]:
+        from distributed.actor import Actor
+
         start = time()
-        data = {}
+
+        data: dict[str, object] = {}
+        keys = set()
         for dep in ts.dependencies:
             k = dep.key
-            try:
-                data[k] = self.data[k]
-            except KeyError:
-                from distributed.actor import Actor  # TODO: create local actor
-
+            if k in self.state.actors:
                 data[k] = Actor(type(self.state.actors[k]), self.address, k, self)
+            else:
+                keys.add(k)
+
+        # This may potentially take many seconds if it involves unspilling
+        if isinstance(self.data, AsyncBufferProto):
+            with context_meter.meter("zict-offload"):
+                data.update(await self.data.async_get(keys))
+        else:
+            for k in keys:
+                data[k] = self.data[k]
+
         args2 = pack_data(args, data, key_types=(bytes, str))
         kwargs2 = pack_data(kwargs, data, key_types=(bytes, str))
         stop = time()

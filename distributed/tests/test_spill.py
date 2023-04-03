@@ -16,7 +16,7 @@ from distributed.compatibility import WINDOWS
 from distributed.metrics import meter
 from distributed.spill import SpillBuffer
 from distributed.utils import RateLimiterFilter
-from distributed.utils_test import captured_logger
+from distributed.utils_test import captured_logger, gen_test
 
 
 def psize(tmp_path: Path, **objs: object) -> tuple[int, int]:
@@ -48,10 +48,11 @@ def assert_buf(
     }
     total_weight = psize(tmp_path, **expect_slow)
     assert slow.total_weight == total_weight
-    assert buf.spilled_total == total_weight
+    assert buf.spilled_total() == total_weight
 
 
-def test_psize(tmp_path):
+@gen_test()
+async def test_psize(tmp_path):
     buf = SpillBuffer(str(tmp_path), target=0)
     a = "a" * 100
     assert 100 < sizeof(a) < 200
@@ -60,7 +61,8 @@ def test_psize(tmp_path):
     assert memory_size != disk_size
 
 
-def test_spillbuffer(tmp_path):
+@gen_test()
+async def test_spillbuffer(tmp_path):
     buf = SpillBuffer(str(tmp_path), target=300)
     # Convenience aliases
     assert buf.memory is buf.fast
@@ -118,7 +120,8 @@ def test_spillbuffer(tmp_path):
     assert_buf(buf, tmp_path, {"c": c2}, {"d": d, "e": e})
 
 
-def test_disk_size_calculation(tmp_path):
+@gen_test()
+async def test_disk_size_calculation(tmp_path):
     buf = SpillBuffer(str(tmp_path), target=0)
     a = "a" * 100
     b = array.array("d", (random.random() for _ in range(100)))
@@ -127,7 +130,8 @@ def test_disk_size_calculation(tmp_path):
     assert_buf(buf, tmp_path, {}, {"a": a, "b": b})
 
 
-def test_spillbuffer_maxlim(tmp_path_factory):
+@gen_test()
+async def test_spillbuffer_maxlim(tmp_path_factory):
     buf_dir = tmp_path_factory.mktemp("buf")
     buf = SpillBuffer(str(buf_dir), target=200, max_spill=600)
 
@@ -212,7 +216,8 @@ class Bad:
         return self.size
 
 
-def test_spillbuffer_fail_to_serialize(tmp_path):
+@gen_test()
+async def test_spillbuffer_fail_to_serialize(tmp_path):
     buf = SpillBuffer(str(tmp_path), target=200, max_spill=600)
 
     # bad data individually larger than spill threshold target 200
@@ -246,7 +251,8 @@ def test_spillbuffer_fail_to_serialize(tmp_path):
 
 
 @pytest.mark.skipif(WINDOWS, reason="Needs chmod")
-def test_spillbuffer_oserror(tmp_path):
+@gen_test()
+async def test_spillbuffer_oserror(tmp_path):
     buf = SpillBuffer(str(tmp_path), target=200, max_spill=800)
 
     a, b, c, d = (
@@ -285,7 +291,8 @@ def test_spillbuffer_oserror(tmp_path):
     assert_buf(buf, tmp_path, {"b": b, "d": d}, {"a": a})
 
 
-def test_spillbuffer_evict(tmp_path):
+@gen_test()
+async def test_spillbuffer_evict(tmp_path):
     buf = SpillBuffer(str(tmp_path), target=300)
 
     bad = Bad(size=100)
@@ -347,7 +354,8 @@ class SupportsWeakRef(NoWeakRef):
     [(SupportsWeakRef, True), (NoWeakRef, False)],
 )
 @pytest.mark.parametrize("size", [60, 110])
-def test_weakref_cache(tmp_path, cls, expect_cached, size):
+@gen_test()
+async def test_weakref_cache(tmp_path, cls, expect_cached, size):
     buf = SpillBuffer(str(tmp_path), target=100)
 
     # Run this test twice:
@@ -386,7 +394,8 @@ def test_weakref_cache(tmp_path, cls, expect_cached, size):
     assert (buf["x"] is x2) == expect_cached
 
 
-def test_metrics(tmp_path):
+@gen_test()
+async def test_metrics(tmp_path):
     buf = SpillBuffer(str(tmp_path), target=35_000)
     assert buf.cumulative_metrics == {}
 

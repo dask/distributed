@@ -73,7 +73,7 @@ class WorkerMetricCollector(PrometheusCollector):
         )
 
         try:
-            spilled_memory, spilled_disk = self.server.data.spilled_total  # type: ignore
+            spilled_memory, spilled_disk = self.server.data.spilled_total()  # type: ignore
         except AttributeError:
             spilled_memory, spilled_disk = 0, 0  # spilling is disabled
         process_memory = self.server.monitor.get_process_memory()

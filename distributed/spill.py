@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import defaultdict
-from collections.abc import Hashable, Iterator, Mapping, Sized
+from collections.abc import (
+    Awaitable,
+    Hashable,
+    Iterator,
+    Mapping,
+    MutableMapping,
+    Sized,
+)
 from contextlib import contextmanager
 from functools import partial
-from typing import Any, Literal, NamedTuple, Protocol, cast
+from typing import Collection  # TODO import from typing (requires Python >=3.9)
+from typing import TYPE_CHECKING, Literal, NamedTuple, Protocol, cast, runtime_checkable
 
 from packaging.version import parse as parse_version
 
@@ -14,7 +23,11 @@ import zict
 from distributed.metrics import context_meter
 from distributed.protocol import deserialize_bytes, serialize_bytelist
 from distributed.sizeof import safe_sizeof
-from distributed.utils import RateLimiterFilter
+from distributed.utils import RateLimiterFilter, empty_context
+
+if TYPE_CHECKING:
+    # TODO import from typing (requires Python >=3.10)
+    from typing_extensions import TypeAlias
 
 logger = logging.getLogger(__name__)
 logger.addFilter(RateLimiterFilter("Spill file on disk reached capacity"))
@@ -39,7 +52,9 @@ class SpilledSize(NamedTuple):
 
 
 class ManualEvictProto(Protocol):
-    """Duck-type API that a third-party alternative to SpillBuffer must respect (in
+    """**DEPRECATED**; please upgrade to AsyncBufferProto
+
+    Duck-type API that a third-party alternative to SpillBuffer must respect (in
     addition to MutableMapping) if it wishes to support spilling when the
     ``distributed.worker.memory.spill`` threshold is surpassed.
 
@@ -68,8 +83,74 @@ class ManualEvictProto(Protocol):
         ...  # pragma: nocover
 
 
-# zict.Buffer[str, Any] requires zict >= 2.2.0
-class SpillBuffer(zict.Buffer):
+@runtime_checkable
+class AsyncBufferProto(Protocol, Collection[str]):
+    """Duck-type API that a third-party alternative to SpillBuffer must respect if it
+    wishes to support spilling.
+
+    Notes
+    -----
+    All methods must return (almost) immediately.
+    ``__setitem__`` *may* trigger asynchronous spilling activity, which however this API
+    is opaque to.
+
+    ``async_get`` must raise KeyError if and only if a key is not in the collection at
+    some point during the call. ``__setitem__`` immediately followed by ``async_get``
+    *never* raises KeyError; ``__delitem__ `` immediately followed by ``async_get``
+    *always* raises KeyError. Likewise, ``__contains__`` and ``__len__`` must
+    immediately reflect the changes wrought by ``__setitem__`` / ``__delitem__``.
+
+    This is public API.
+    """
+
+    def __setitem__(self, key: str, value: object) -> None:
+        ...
+
+    def __delitem__(self, key: str) -> None:
+        ...
+
+    def async_get(
+        self, keys: Collection[str], missing: Literal["raise", "omit"] = "raise"
+    ) -> Awaitable[dict[str, object]]:
+        """Fetch zero or more key/value pairs.
+
+        Parameters
+        ----------
+        keys:
+            Zero or more keys
+        missing: raise | omit, optional
+            raise
+                If any key is missing, raise KeyError
+            omit
+                Omit missing keys from the returned dict
+        """
+        ...  # pragma: nocover
+
+    def memory_total(self) -> int:
+        """(estimated) bytes currently held in fast memory"""
+
+    def async_evict_until_below_target(self, n: int) -> None:
+        """Asynchronously start spilling keys until memory_total <= n
+
+        This is a temporary part of the protocol and will be removed soon.
+        """
+
+    def close(self) -> None:
+        """Cancel futures, shut down threads, etc."""
+
+
+# TODO remove quotes (requires Python >=3.9)
+WorkerData: TypeAlias = "AsyncBufferProto | MutableMapping[str, object]"
+
+
+if has_zict_230:
+    from zict import AsyncBuffer
+else:
+    from zict import Buffer as AsyncBuffer  # type: ignore[assignment]
+
+
+# zict.Buffer[str, object] requires zict >= 2.2.0
+class SpillBuffer(AsyncBuffer):
     """MutableMapping that automatically spills out dask key/value pairs to disk when
     the total size of the stored data exceeds the target. If max_spill is provided the
     key/value pairs won't be spilled once this threshold has been reached.
@@ -102,6 +183,10 @@ class SpillBuffer(zict.Buffer):
         super().__init__(fast={}, slow=slow_cached, n=target, weight=_in_memory_weight)
         self.logged_pickle_errors = set()  # keys logged with pickle error
         self.cumulative_metrics = defaultdict(float)
+
+        if not has_zict_230:
+            self.lock = empty_context  # type: ignore
+            self.fast.lock = empty_context  # type: ignore
 
     @contextmanager
     def _capture_metrics(self) -> Iterator[None]:
@@ -164,60 +249,88 @@ class SpillBuffer(zict.Buffer):
                     self.logged_pickle_errors.add(key_e)
                 raise HandledError()
 
-    def __setitem__(self, key: str, value: Any) -> None:
-        """If sizeof(value) < target, write key/value pair to self.fast; this may in
-        turn cause older keys to be spilled from fast to slow.
-        If sizeof(value) >= target, write key/value pair directly to self.slow instead.
+    if has_zict_230:
 
-        Raises
-        ------
-        Exception
-            sizeof(value) >= target, and value failed to pickle.
-            The key/value pair has been forgotten.
+        def async_get(
+            self, keys: Collection[str], missing: Literal["raise", "omit"] = "raise"
+        ) -> asyncio.Future[dict[str, object]]:
+            with self.lock, self.fast.lock, self._capture_metrics():
+                f = super().async_get(keys, missing=missing)
+                if f.done():
+                    # if missing='omit', f.result() may have less keys than keys
+                    for key in f.result():
+                        nbytes = cast(int, self.fast.weights[key])
+                        context_meter.digest_metric("memory-read", 1, "count")
+                        context_meter.digest_metric("memory-read", nbytes, "bytes")
+            return f
 
-        In all other cases:
+        def evict_until_below_target(self, n: float | None = None) -> None:
+            try:
+                with self._capture_metrics(), self._handle_errors(None):
+                    super().evict_until_below_target(n)
+            except HandledError:
+                pass
 
-        - an older value was evicted and failed to pickle,
-        - this value or an older one caused the disk to fill and raise OSError,
-        - this value or an older one caused the max_spill threshold to be exceeded,
+    else:
 
-        this method does not raise and guarantees that the key/value that caused the
-        issue remained in fast.
-        """
-        try:
-            with self._capture_metrics(), self._handle_errors(key):
-                super().__setitem__(key, value)
-                self.logged_pickle_errors.discard(key)
-        except HandledError:
-            assert key in self.fast
-            assert key not in self.slow
+        def __setitem__(self, key: str, value: object) -> None:
+            """If sizeof(value) < target, write key/value pair to self.fast; this may in
+            turn cause older keys to be spilled from fast to slow.
+            If sizeof(value) >= target, write key/value pair directly to self.slow instead.
 
-    def evict(self) -> int:
-        """Implementation of :meth:`ManualEvictProto.evict`.
+            Raises
+            ------
+            Exception
+                sizeof(value) >= target, and value failed to pickle.
+                The key/value pair has been forgotten.
 
-        Manually evict the oldest key/value pair, even if target has not been
-        reached. Returns sizeof(value).
-        If the eviction failed (value failed to pickle, disk full, or max_spill
-        exceeded), return -1; the key/value pair that caused the issue will remain in
-        fast. The exception has been logged internally.
-        This method never raises.
-        """
-        try:
-            with self._capture_metrics(), self._handle_errors(None):
-                _, _, weight = self.fast.evict()
-                return cast(int, weight)
-        except HandledError:
-            return -1
+            In all other cases:
 
-    def __getitem__(self, key: str) -> Any:
+            - an older value was evicted and failed to pickle,
+            - this value or an older one caused the disk to fill and raise OSError,
+            - this value or an older one caused the max_spill threshold to be exceeded,
+
+            this method does not raise and guarantees that the key/value that caused the
+            issue remained in fast.
+            """
+            try:
+                with self._capture_metrics(), self._handle_errors(key):
+                    super().__setitem__(key, value)
+                    self.logged_pickle_errors.discard(key)
+            except HandledError:
+                assert key in self.fast
+                assert key not in self.slow
+
+        def evict(self) -> int:
+            """Implementation of :meth:`ManualEvictProto.evict`.
+
+            Manually evict the oldest key/value pair, even if target has not been
+            reached. Returns sizeof(value).
+            If the eviction failed (value failed to pickle, disk full, or max_spill
+            exceeded), return -1; the key/value pair that caused the issue will remain in
+            fast. The exception has been logged internally.
+            This method never raises.
+            """
+            try:
+                with self._capture_metrics(), self._handle_errors(None):
+                    _, _, weight = self.fast.evict()
+                    return cast(int, weight)
+            except HandledError:
+                return -1
+
+    # In zict >=2.3.0, this is always called from an offloaded thread, except at most
+    # in unit tests (see zict.AsyncBuffer.async_get)
+    def __getitem__(self, key: str) -> object:
+        # Note: don't log from self.fast.__getitem__, because that's called every time a
+        # key is evicted, and we don't want to count those events here.
+        # This is logged not only by the internal metrics callback but also by those
+        # installed by gather_dep, get_data, and execute
         with self._capture_metrics():
-            if key in self.fast:
-                # Note: don't log from self.fast.__getitem__, because that's called
-                # every time a key is evicted, and we don't want to count those events
-                # here.
+            try:
                 nbytes = cast(int, self.fast.weights[key])
-                # This is logged not only by the internal metrics callback but also by
-                # those installed by gather_dep, get_data, and execute
+            except KeyError:
+                pass
+            else:
                 context_meter.digest_metric("memory-read", 1, "count")
                 context_meter.digest_metric("memory-read", nbytes, "bytes")
 
@@ -227,21 +340,21 @@ class SpillBuffer(zict.Buffer):
         super().__delitem__(key)
         self.logged_pickle_errors.discard(key)
 
-    def pop(self, key: str, default: Any = None) -> Any:
+    def pop(self, key: str, default: object = None) -> object:
         raise NotImplementedError(
             "Are you calling .pop(key, None) as a way to discard a key if it exists?"
             "It may cause data to be read back from disk! Please use `del` instead."
         )
 
     @property
-    def memory(self) -> Mapping[str, Any]:
+    def memory(self) -> Mapping[str, object]:
         """Key/value pairs stored in RAM. Alias of zict.Buffer.fast.
         For inspection only - do not modify directly!
         """
         return self.fast
 
     @property
-    def disk(self) -> Mapping[str, Any]:
+    def disk(self) -> Mapping[str, object]:
         """Key/value pairs spilled out to disk. Alias of zict.Buffer.slow.
         For inspection only - do not modify directly!
         """
@@ -252,7 +365,10 @@ class SpillBuffer(zict.Buffer):
         cache = cast(zict.Cache, self.slow)
         return cast(Slow, cache.data)
 
-    @property
+    def memory_total(self) -> int:
+        """Number of bytes in memory (output of sizeof())"""
+        return cast(int, self.fast.total_weight)
+
     def spilled_total(self) -> SpilledSize:
         """Number of bytes spilled to disk. Tuple of
 
@@ -265,7 +381,7 @@ class SpillBuffer(zict.Buffer):
         return self._slow_uncached.total_weight
 
 
-def _in_memory_weight(key: str, value: Any) -> int:
+def _in_memory_weight(key: str, value: object) -> int:
     return safe_sizeof(value)
 
 
@@ -282,7 +398,7 @@ class HandledError(Exception):
     pass
 
 
-# zict.Func[str, Any] requires zict >= 2.2.0
+# zict.Func[str, object] requires zict >= 2.2.0
 class Slow(zict.Func):
     max_weight: int | Literal[False]
     weight_by_key: dict[str, SpilledSize]
@@ -298,7 +414,10 @@ class Slow(zict.Func):
         self.weight_by_key = {}
         self.total_weight = SpilledSize(0, 0)
 
-    def __getitem__(self, key: str) -> Any:
+        if not has_zict_230:
+            self.lock = empty_context  # type: ignore
+
+    def __getitem__(self, key: str) -> object:
         with context_meter.meter("disk-read", "seconds"):
             pickled = self.d[key]
         context_meter.digest_metric("disk-read", 1, "count")
@@ -306,7 +425,7 @@ class Slow(zict.Func):
         out = self.load(pickled)
         return out
 
-    def __setitem__(self, key: str, value: Any) -> None:
+    def __setitem__(self, key: str, value: object) -> None:
         try:
             pickled = self.dump(value)
         except Exception as e:
@@ -341,9 +460,14 @@ class Slow(zict.Func):
         context_meter.digest_metric("disk-write", pickled_size, "bytes")
 
         weight = SpilledSize(safe_sizeof(value), pickled_size)
-        self.weight_by_key[key] = weight
-        self.total_weight += weight
+
+        with self.lock:
+            # 2 threads call Slow.__delitem__, but only one calls Slow.__setitem__
+            assert key not in self.weight_by_key
+            self.weight_by_key[key] = weight
+            self.total_weight += weight
 
     def __delitem__(self, key: str) -> None:
-        super().__delitem__(key)
-        self.total_weight -= self.weight_by_key.pop(key)
+        with self.lock:
+            super().__delitem__(key)
+            self.total_weight -= self.weight_by_key.pop(key)

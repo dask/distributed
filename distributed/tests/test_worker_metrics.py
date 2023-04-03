@@ -15,6 +15,7 @@ from distributed import Event, Worker, wait
 from distributed.comm.utils import OFFLOAD_THRESHOLD
 from distributed.compatibility import WINDOWS
 from distributed.metrics import context_meter, meter
+from distributed.spill import has_zict_230
 from distributed.utils_test import (
     BlockedGatherDep,
     BlockedGetData,
@@ -55,59 +56,104 @@ async def test_task_lifecycle(c, s, a, b):
     del x, y, z
     await async_poll_for(lambda: not a.state.tasks, timeout=5)  # For hygene only
 
-    expect = [
-        # a.gather_dep(worker=b.address, keys=["z"])
-        ("gather-dep", "decompress", "seconds"),
-        ("gather-dep", "deserialize", "seconds"),
-        ("gather-dep", "network", "seconds"),
-        # Spill output; added by _transition_to_memory
-        ("gather-dep", "serialize", "seconds"),
-        ("gather-dep", "compress", "seconds"),
-        ("gather-dep", "disk-write", "seconds"),
-        ("gather-dep", "disk-write", "count"),
-        ("gather-dep", "disk-write", "bytes"),
-        # Delta to end-to-end runtime as seen from the worker state machine
-        ("gather-dep", "other", "seconds"),
-        # a.execute()
-        # -> Deserialize run_spec
-        ("execute", "z", "deserialize", "seconds"),
-        # -> Unspill inputs
-        # (There's also another execute-deserialize-seconds entry)
-        ("execute", "z", "disk-read", "seconds"),
-        ("execute", "z", "disk-read", "count"),
-        ("execute", "z", "disk-read", "bytes"),
-        ("execute", "z", "decompress", "seconds"),
-        # -> Run in thread
-        ("execute", "z", "thread-cpu", "seconds"),
-        ("execute", "z", "thread-noncpu", "seconds"),
-        # Spill output; added by _transition_to_memory
-        ("execute", "z", "serialize", "seconds"),
-        ("execute", "z", "compress", "seconds"),
-        ("execute", "z", "disk-write", "seconds"),
-        ("execute", "z", "disk-write", "count"),
-        ("execute", "z", "disk-write", "bytes"),
-        # Delta to end-to-end runtime as seen from the worker state machine
-        ("execute", "z", "other", "seconds"),
-        # a.get_data() (triggered by the client retrieving the Future for z)
-        # Unspill
-        ("get-data", "disk-read", "seconds"),
-        ("get-data", "disk-read", "count"),
-        ("get-data", "disk-read", "bytes"),
-        ("get-data", "decompress", "seconds"),
-        ("get-data", "deserialize", "seconds"),
-        # Send over the network
-        ("get-data", "serialize", "seconds"),
-        ("get-data", "compress", "seconds"),
-        ("get-data", "network", "seconds"),
-    ]
+    if has_zict_230:
+        expect = [
+            # a.gather_dep(worker=b.address, keys=["z"])
+            ("gather-dep", "decompress", "seconds"),
+            ("gather-dep", "deserialize", "seconds"),
+            ("gather-dep", "network", "seconds"),
+            # Delta to end-to-end runtime as seen from the worker state machine
+            ("gather-dep", "other", "seconds"),
+            # a.execute()
+            # -> Deserialize run_spec
+            ("execute", "z", "deserialize", "seconds"),
+            # -> Unspill inputs
+            # (There's also another execute-deserialize-seconds entry)
+            ("execute", "z", "disk-read", "seconds"),
+            ("execute", "z", "disk-read", "count"),
+            ("execute", "z", "disk-read", "bytes"),
+            ("execute", "z", "decompress", "seconds"),
+            ("execute", "z", "zict-offload", "seconds"),
+            # -> Run in thread
+            ("execute", "z", "thread-cpu", "seconds"),
+            ("execute", "z", "thread-noncpu", "seconds"),
+            # Delta to end-to-end runtime as seen from the worker state machine
+            ("execute", "z", "other", "seconds"),
+            # a.get_data() (triggered by the client retrieving the Future for z)
+            # Unspill
+            ("get-data", "disk-read", "seconds"),
+            ("get-data", "disk-read", "count"),
+            ("get-data", "disk-read", "bytes"),
+            ("get-data", "decompress", "seconds"),
+            ("get-data", "deserialize", "seconds"),
+            ("get-data", "zict-offload", "seconds"),
+            # Send over the network
+            ("get-data", "serialize", "seconds"),
+            ("get-data", "compress", "seconds"),
+            ("get-data", "network", "seconds"),
+        ]
+    else:
+        expect = [
+            # a.gather_dep(worker=b.address, keys=["z"])
+            ("gather-dep", "decompress", "seconds"),
+            ("gather-dep", "deserialize", "seconds"),
+            ("gather-dep", "network", "seconds"),
+            # Spill output; added by _transition_to_memory
+            ("gather-dep", "serialize", "seconds"),
+            ("gather-dep", "compress", "seconds"),
+            ("gather-dep", "disk-write", "seconds"),
+            ("gather-dep", "disk-write", "count"),
+            ("gather-dep", "disk-write", "bytes"),
+            # Delta to end-to-end runtime as seen from the worker state machine
+            ("gather-dep", "other", "seconds"),
+            # a.execute()
+            # -> Deserialize run_spec
+            ("execute", "z", "deserialize", "seconds"),
+            # -> Unspill inputs
+            # (There's also another execute-deserialize-seconds entry)
+            ("execute", "z", "disk-read", "seconds"),
+            ("execute", "z", "disk-read", "count"),
+            ("execute", "z", "disk-read", "bytes"),
+            ("execute", "z", "decompress", "seconds"),
+            # -> Run in thread
+            ("execute", "z", "thread-cpu", "seconds"),
+            ("execute", "z", "thread-noncpu", "seconds"),
+            # Spill output; added by _transition_to_memory
+            ("execute", "z", "serialize", "seconds"),
+            ("execute", "z", "compress", "seconds"),
+            ("execute", "z", "disk-write", "seconds"),
+            ("execute", "z", "disk-write", "count"),
+            ("execute", "z", "disk-write", "bytes"),
+            # Delta to end-to-end runtime as seen from the worker state machine
+            ("execute", "z", "other", "seconds"),
+            # a.get_data() (triggered by the client retrieving the Future for z)
+            # Unspill
+            ("get-data", "disk-read", "seconds"),
+            ("get-data", "disk-read", "count"),
+            ("get-data", "disk-read", "bytes"),
+            ("get-data", "decompress", "seconds"),
+            ("get-data", "deserialize", "seconds"),
+            # Send over the network
+            ("get-data", "serialize", "seconds"),
+            ("get-data", "compress", "seconds"),
+            ("get-data", "network", "seconds"),
+        ]
+
     assert list(get_digests(a)) == expect
 
-    assert get_digests(a, allow="count") == {
+    expect_counts = {
         ("execute", "z", "disk-read", "count"): 2,
-        ("execute", "z", "disk-write", "count"): 1,
-        ("gather-dep", "disk-write", "count"): 1,
         ("get-data", "disk-read", "count"): 1,
     }
+    if not has_zict_230:
+        expect_counts.update(
+            {
+                ("execute", "z", "disk-write", "count"): 1,
+                ("gather-dep", "disk-write", "count"): 1,
+            }
+        )
+    assert get_digests(a, allow="count") == expect_counts
+
     if not WINDOWS:  # Fiddly rounding; see distributed.metrics._WindowsTime
         assert sum(get_digests(a, allow="seconds").values()) <= m.delta
 
@@ -133,12 +179,20 @@ async def test_custom_executor(c, s, a):
         with dask.annotate(executor="processes"):
             await c.submit(sleep, 0.1)
 
-    assert list(get_digests(a, "execute")) == [
-        ("execute", "sleep", "deserialize", "seconds"),
-        ("execute", "sleep", "executor", "seconds"),
-        ("execute", "sleep", "other", "seconds"),
-    ]
-
+    if has_zict_230:
+        expect = [
+            ("execute", "sleep", "deserialize", "seconds"),
+            ("execute", "sleep", "zict-offload", "seconds"),
+            ("execute", "sleep", "executor", "seconds"),
+            ("execute", "sleep", "other", "seconds"),
+        ]
+    else:
+        expect = [
+            ("execute", "sleep", "deserialize", "seconds"),
+            ("execute", "sleep", "executor", "seconds"),
+            ("execute", "sleep", "other", "seconds"),
+        ]
+    assert list(get_digests(a, "execute")) == expect
     assert 0 < a.digests_total["execute", "sleep", "executor", "seconds"] < 1
 
 
@@ -315,17 +369,25 @@ async def test_memory_monitor(c, s, a):
     x = c.submit(inc, 1, key="x")
     await async_poll_for(lambda: a.data.disk, timeout=5)
 
-    assert list(get_digests(a)) == [
-        ("execute", "x", "deserialize", "seconds"),
-        ("execute", "x", "thread-cpu", "seconds"),
-        ("execute", "x", "thread-noncpu", "seconds"),
-        ("execute", "x", "other", "seconds"),
-        ("memory-monitor", "serialize", "seconds"),
-        ("memory-monitor", "compress", "seconds"),
-        ("memory-monitor", "disk-write", "seconds"),
-        ("memory-monitor", "disk-write", "count"),
-        ("memory-monitor", "disk-write", "bytes"),
-    ]
+    if has_zict_230:
+        expect = [
+            ("memory-monitor", "serialize", "seconds"),
+            ("memory-monitor", "compress", "seconds"),
+            ("memory-monitor", "zict-offload", "seconds"),
+            ("memory-monitor", "disk-write", "seconds"),
+            ("memory-monitor", "disk-write", "count"),
+            ("memory-monitor", "disk-write", "bytes"),
+        ]
+    else:
+        expect = [
+            ("memory-monitor", "serialize", "seconds"),
+            ("memory-monitor", "compress", "seconds"),
+            ("memory-monitor", "disk-write", "seconds"),
+            ("memory-monitor", "disk-write", "count"),
+            ("memory-monitor", "disk-write", "bytes"),
+        ]
+
+    assert list(get_digests(a, "memory-monitor")) == expect
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -339,13 +401,25 @@ async def test_user_metrics_sync(c, s, a):
 
     await wait(c.submit(f, key="x"))
 
-    assert list(get_digests(a)) == [
-        ("execute", "x", "deserialize", "seconds"),
-        ("execute", "x", "I/O", "seconds"),
-        ("execute", "x", "thread-cpu", "seconds"),
-        ("execute", "x", "thread-noncpu", "seconds"),
-        ("execute", "x", "other", "seconds"),
-    ]
+    if has_zict_230:
+        expect = [
+            ("execute", "x", "deserialize", "seconds"),
+            ("execute", "x", "zict-offload", "seconds"),
+            ("execute", "x", "I/O", "seconds"),
+            ("execute", "x", "thread-cpu", "seconds"),
+            ("execute", "x", "thread-noncpu", "seconds"),
+            ("execute", "x", "other", "seconds"),
+        ]
+    else:
+        expect = [
+            ("execute", "x", "deserialize", "seconds"),
+            ("execute", "x", "I/O", "seconds"),
+            ("execute", "x", "thread-cpu", "seconds"),
+            ("execute", "x", "thread-noncpu", "seconds"),
+            ("execute", "x", "other", "seconds"),
+        ]
+
+    assert list(get_digests(a)) == expect
     assert get_digests(a)["execute", "x", "I/O", "seconds"] == 5
     assert get_digests(a)["execute", "x", "thread-cpu", "seconds"] == 0
     assert get_digests(a)["execute", "x", "thread-noncpu", "seconds"] == 0
@@ -359,13 +433,22 @@ async def test_user_metrics_async(c, s, a):
         context_meter.digest_metric("I/O", 5, "seconds")
 
     await wait(c.submit(f, key="x"))
-
-    assert list(get_digests(a)) == [
-        ("execute", "x", "deserialize", "seconds"),
-        ("execute", "x", "I/O", "seconds"),
-        ("execute", "x", "thread-noncpu", "seconds"),
-        ("execute", "x", "other", "seconds"),
-    ]
+    if has_zict_230:
+        expect = [
+            ("execute", "x", "deserialize", "seconds"),
+            ("execute", "x", "zict-offload", "seconds"),
+            ("execute", "x", "I/O", "seconds"),
+            ("execute", "x", "thread-noncpu", "seconds"),
+            ("execute", "x", "other", "seconds"),
+        ]
+    else:
+        expect = [
+            ("execute", "x", "deserialize", "seconds"),
+            ("execute", "x", "I/O", "seconds"),
+            ("execute", "x", "thread-noncpu", "seconds"),
+            ("execute", "x", "other", "seconds"),
+        ]
+    assert list(get_digests(a)) == expect
     assert get_digests(a)["execute", "x", "I/O", "seconds"] == 5
     assert get_digests(a)["execute", "x", "thread-noncpu", "seconds"] == 0
     assert get_digests(a)["execute", "x", "other", "seconds"] == 0

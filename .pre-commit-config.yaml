@@ -64,4 +64,7 @@ repos:
           - tornado
           - pyarrow
           - git+https://github.com/dask/dask
-          - git+https://github.com/dask/zict
+          # DO NOT MERGE
+          - git+https://github.com/crusaderky/zict@async_buffer2
+
+# clear cache +1

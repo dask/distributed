@@ -28,7 +28,7 @@ import warnings
 from collections.abc import Callable, Hashable, MutableMapping
 from contextlib import suppress
 from functools import partial
-from typing import TYPE_CHECKING, Any, Container, Literal, cast
+from typing import TYPE_CHECKING, Any, Container, Literal, Union, cast
 
 import psutil
 
@@ -40,14 +40,38 @@ from distributed import system
 from distributed.compatibility import WINDOWS, PeriodicCallback
 from distributed.core import Status
 from distributed.metrics import context_meter, monotonic
-from distributed.spill import ManualEvictProto, SpillBuffer
+from distributed.spill import (
+    AsyncBufferProto,
+    ManualEvictProto,
+    SpillBuffer,
+    WorkerData,
+)
 from distributed.utils import RateLimiterFilter, has_arg, log_errors
 from distributed.utils_perf import ThrottledGC
 
 if TYPE_CHECKING:
+    # TODO import from typing (requires Python >=3.10)
+    from typing_extensions import TypeAlias
+
     # Circular imports
     from distributed.nanny import Nanny
     from distributed.worker import Worker
+
+    # TODO move outside of TYPE_CHECKING (requires Python >=3.9)
+    WorkerDataParameter: TypeAlias = Union[
+        # pre-initialized
+        WorkerData,
+        # constructor
+        Callable[[], WorkerData],
+        # constructor, passed worker.local_directory
+        Callable[[str], WorkerData],
+        # (constructor, kwargs to constructor)
+        tuple[Callable[..., WorkerData], dict[str, Any]],
+        # initialize internally
+        None,
+    ]
+else:
+    WorkerDataParameter = object
 
 worker_logger = logging.getLogger("distributed.worker.memory")
 worker_logger.addFilter(RateLimiterFilter(r"Unmanaged memory use is high"))
@@ -73,7 +97,7 @@ class WorkerMemoryManager:
 
     """
 
-    data: MutableMapping[str, object]  # {task key: task payload}
+    data: WorkerData
     memory_limit: int | None
     memory_target_fraction: float | Literal[False]
     memory_spill_fraction: float | Literal[False]
@@ -88,18 +112,9 @@ class WorkerMemoryManager:
         *,
         nthreads: int,
         memory_limit: str | float = "auto",
-        # This should be None most of the times, short of a power user replacing the
-        # SpillBuffer with their own custom dict-like
-        data: (
-            MutableMapping[str, Any]  # pre-initialised
-            | Callable[[], MutableMapping[str, Any]]  # constructor
-            # constructor, passed worker.local_directory
-            | Callable[[str], MutableMapping[str, Any]]
-            | tuple[
-                Callable[..., MutableMapping[str, Any]], dict[str, Any]
-            ]  # (constructor, kwargs to constructor)
-            | None  # create internally
-        ) = None,
+        # This should be typically None, short of a power user replacing the SpillBuffer
+        # with their own custom dict-like
+        data: WorkerDataParameter = None,
         # Deprecated parameters; use dask.config instead
         memory_target_fraction: float | Literal[False] | None = None,
         memory_spill_fraction: float | Literal[False] | None = None,
@@ -127,14 +142,14 @@ class WorkerMemoryManager:
         max_spill = dask.config.get("distributed.worker.memory.max-spill")
         self.max_spill = False if max_spill is False else parse_bytes(max_spill)
 
-        if isinstance(data, MutableMapping):
+        if isinstance(data, (MutableMapping, AsyncBufferProto)):
             self.data = data
         elif callable(data):
             if has_arg(data, "worker_local_directory"):
-                data = cast("Callable[[str], MutableMapping[str, Any]]", data)
+                data = cast("Callable[[str], WorkerData]", data)
                 self.data = data(worker.local_directory)
             else:
-                data = cast("Callable[[], MutableMapping[str, Any]]", data)
+                data = cast("Callable[[], WorkerData]", data)
                 self.data = data()
         elif isinstance(data, tuple):
             func, kwargs = data
@@ -164,6 +179,11 @@ class WorkerMemoryManager:
         else:
             self.data = {}
 
+        if not isinstance(self.data, (AsyncBufferProto, MutableMapping)):
+            raise TypeError(
+                "Worker.data must be a MutableMapping or respect the AsyncBufferProto "
+                f"protocol; got {self.data}"
+            )
         if self.data:
             raise ValueError("Worker.data must be empty at initialization time")
 
@@ -243,19 +263,18 @@ class WorkerMemoryManager:
         if self.memory_spill_fraction is False:
             return
 
-        # SpillBuffer or a duct-type compatible MutableMapping which offers the
-        # fast property and evict() methods. Dask-CUDA uses this.
-        if not hasattr(self.data, "fast") or not hasattr(self.data, "evict"):
-            return
-
         assert self.memory_limit
         frac = memory / self.memory_limit
         if frac <= self.memory_spill_fraction:
             return
 
-        worker_logger.debug(
-            "Worker is at %.0f%% memory usage. Start spilling data to disk.",
-            frac * 100,
+        # Implement hysteresis cycle where spilling starts at the spill threshold and
+        # stops at the target threshold. Normally that here the target threshold defines
+        # process memory, whereas normally it defines reported managed memory (e.g.
+        # output of sizeof() ). If target=False, disable hysteresis.
+        target = int(
+            self.memory_limit
+            * (self.memory_target_fraction or self.memory_spill_fraction)
         )
 
         def metrics_callback(label: Hashable, value: float, unit: str) -> None:
@@ -263,32 +282,52 @@ class WorkerMemoryManager:
                 label = (label,)
             worker.digest_metric(("memory-monitor", *label, unit), value)
 
-        # Work around bug with Tornado 6.2 PeriodicCallback, which does not properly
-        # insulate contextvars. Without this hack, you would see metrics that are
-        # clearly emitted by Worker.execute labelled with 'memory-monitor'.So we're
-        # wrapping our change in contextvars (inside add_callback) inside create_task(),
-        # which copies and insulates the context.
-        async def _() -> None:
-            with context_meter.add_callback(metrics_callback):
-                # Measure delta between the measures from the SpillBuffer and the total
-                # end-to-end duration of _spill
-                await self._spill(worker, memory)
+        if isinstance(self.data, AsyncBufferProto):
+            # zict >=2.3.0
+            managed = self.data.memory_total()
+            assert isinstance(managed, int)
+            if managed:
+                with context_meter.add_callback(metrics_callback), context_meter.meter(
+                    "zict-offload"
+                ):
+                    self.data.async_evict_until_below_target(target - memory + managed)
+            else:
+                self._warn_high_unmanaged_memory(memory)
 
-        await asyncio.create_task(_(), name="memory-monitor-spill")
-        # End work around
+        elif hasattr(self.data, "fast") and hasattr(self.data, "evict"):
+            # zict <2.3.0, Dask-CUDA
 
-    async def _spill(self, worker: Worker, memory: int) -> None:
-        """Evict keys until the process memory goes below the ``target`` threshold"""
+            # Work around bug with Tornado 6.2 PeriodicCallback, which does not properly
+            # insulate contextvars. Without this hack, you would see metrics that are
+            # clearly emitted by Worker.execute labelled with 'memory-monitor'.So we're
+            # wrapping our change in contextvars (inside add_callback) inside
+            # create_task(), which copies and insulates the context.
+            async def _() -> None:
+                with context_meter.add_callback(metrics_callback):
+                    await self._sync_spill(worker, memory, target)
+
+            await asyncio.create_task(_(), name="memory-monitor-spill")
+
+    def _warn_high_unmanaged_memory(self, memory: int) -> None:
+        assert self.memory_limit is not None
+        worker_logger.warning(
+            "Unmanaged memory use is high. This may indicate a memory leak "
+            "or the memory may not be released to the OS; see "
+            "https://distributed.dask.org/en/latest/worker-memory.html"
+            "#memory-not-released-back-to-the-os for more information. "
+            "-- Unmanaged memory: %s -- Worker memory limit: %s",
+            format_bytes(memory),
+            format_bytes(self.memory_limit),
+        )
+
+    async def _sync_spill(self, worker: Worker, memory: int, target: int) -> None:
+        """Evict keys until the process memory goes below the ``target`` threshold.
+
+        This method is used exclusively in zict <=2.3.0 and Dask-CUDA.
+        """
         assert self.memory_limit
         total_spilled = 0
 
-        # Implement hysteresis cycle where spilling starts at the spill threshold and
-        # stops at the target threshold. Normally that here the target threshold defines
-        # process memory, whereas normally it defines reported managed memory (e.g.
-        # output of sizeof() ). If target=False, disable hysteresis.
-        target = self.memory_limit * (
-            self.memory_target_fraction or self.memory_spill_fraction
-        )
         count = 0
         need = memory - target
         last_checked_for_pause = last_yielded = monotonic()
@@ -297,15 +336,7 @@ class WorkerMemoryManager:
 
         while memory > target:
             if not data.fast:
-                worker_logger.warning(
-                    "Unmanaged memory use is high. This may indicate a memory leak "
-                    "or the memory may not be released to the OS; see "
-                    "https://distributed.dask.org/en/latest/worker-memory.html#memory-not-released-back-to-the-os "
-                    "for more information. "
-                    "-- Unmanaged memory: %s -- Worker memory limit: %s",
-                    format_bytes(memory),
-                    format_bytes(self.memory_limit),
-                )
+                self._warn_high_unmanaged_memory(memory)
                 break
 
             weight = data.evict()

@@ -1858,7 +1858,7 @@ def _get_task_placement(
         actual.append(
             [
                 list(key_split(key[5:]))  # Remove "task-" prefix
-                for key in w.data.keys()
+                for key in w.data
                 if key.startswith("task-")
             ]
         )
