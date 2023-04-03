@@ -38,7 +38,9 @@ from distributed.worker_state_machine import (
     ExecuteSuccessEvent,
     FreeKeysEvent,
     GatherDep,
+    GatherDepBusyEvent,
     GatherDepFailureEvent,
+    GatherDepNetworkFailureEvent,
     GatherDepSuccessEvent,
     Instruction,
     InvalidTaskState,
@@ -48,8 +50,12 @@ from distributed.worker_state_machine import (
     RefreshWhoHasEvent,
     ReleaseWorkerDataMsg,
     RemoveReplicasEvent,
+    RemoveWorkerEvent,
+    RequestRefreshWhoHasMsg,
     RescheduleEvent,
     RescheduleMsg,
+    RetryBusyWorkerEvent,
+    RetryBusyWorkerLater,
     SecedeEvent,
     SerializedTask,
     StateMachineEvent,
@@ -1761,3 +1767,107 @@ def test_task_counter(ws):
     assert_time(elapsed["x", "cancelled"], 0.15)
     assert_time(elapsed["y", "waiting"], 0.1)
     assert_time(elapsed["z", "flight"], 0.25)
+
+
+@pytest.mark.parametrize("outcome", ["fail", "success", "no-key", "busy"])
+def test_remove_worker_while_in_flight(ws, outcome):
+    ws2 = "127.0.0.1:2"
+    ws.handle_stimulus(
+        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s1"),
+        RemoveWorkerEvent(worker=ws2, stimulus_id="s2"),
+    )
+    ts = ws.tasks["x"]
+    assert ts.state == "flight"
+    assert not ws.data_needed
+    assert not ws.tasks["y"].who_has
+    assert not ws.has_what
+
+    if outcome == "fail":
+        instructions = ws.handle_stimulus(
+            GatherDepNetworkFailureEvent(worker=ws2, total_nbytes=1, stimulus_id="s3")
+        )
+        assert not instructions
+        assert ts.state == "missing"
+    elif outcome == "success":
+        instructions = ws.handle_stimulus(
+            GatherDepSuccessEvent(
+                worker=ws2, total_nbytes=1, data={"x": None}, stimulus_id="s3"
+            )
+        )
+        assert instructions == [
+            AddKeysMsg(stimulus_id="s3", keys=["x"]),
+            Execute(stimulus_id="s3", key="y"),
+        ]
+        assert ts.state == "memory"
+    elif outcome == "no-key":
+        instructions = ws.handle_stimulus(
+            GatherDepSuccessEvent(worker=ws2, total_nbytes=1, data={}, stimulus_id="s3")
+        )
+        assert not instructions
+        assert ts.state == "missing"
+    else:
+        assert outcome == "busy"
+        instructions = ws.handle_stimulus(
+            GatherDepBusyEvent(worker=ws2, total_nbytes=1, stimulus_id="s3")
+        )
+        assert instructions == [
+            RetryBusyWorkerLater(worker=ws2, stimulus_id="s3"),
+            RequestRefreshWhoHasMsg(keys=["x"], stimulus_id="s3"),
+        ]
+        assert ts.state == "missing"
+        instructions = ws.handle_stimulus(
+            RetryBusyWorkerEvent(worker=ws2, stimulus_id="s4")
+        )
+        assert not instructions
+        assert ts.state == "missing"
+
+    assert not ts.who_has
+    assert not ws.has_what
+
+
+def test_remove_worker_while_in_flight_unused_peer(ws):
+    ws2 = "127.0.0.1:2"
+    ws3 = "127.0.0.1:3"
+    ws.handle_stimulus(
+        AcquireReplicasEvent(who_has={"x": [ws2]}, nbytes={"x": 1}, stimulus_id="s1"),
+        AcquireReplicasEvent(
+            who_has={"y": [ws2, ws3]}, nbytes={"y": 1}, stimulus_id="s2"
+        ),
+    )
+
+    ts = ws.tasks["y"]
+    assert ts.state == "flight"
+    assert ts.who_has == {ws2, ws3}
+    assert ts.coming_from == ws3
+
+    ws.handle_stimulus(RemoveWorkerEvent(worker=ws2, stimulus_id="s3"))
+    assert ts.state == "flight"
+    assert ts.who_has == {ws3}
+    assert ts.coming_from == ws3
+
+
+def test_remove_worker_while_in_fetch(ws):
+    ws2 = "127.0.0.1:2"
+    ws3 = "127.0.0.1:3"
+    ws.handle_stimulus(
+        AcquireReplicasEvent(
+            who_has={"x": [ws2], "y": [ws3]}, nbytes={"x": 1, "y": 1}, stimulus_id="s1"
+        ),
+        AcquireReplicasEvent(
+            who_has={"w": [ws2], "z": [ws2, ws3]},
+            nbytes={"w": 1, "z": 1},
+            stimulus_id="s2",
+        ),
+        RemoveWorkerEvent(worker=ws2, stimulus_id="s3"),
+    )
+    assert ws.tasks["w"].state == "missing"
+    assert ws.tasks["z"].state == "fetch"
+    assert not ws.tasks["w"].who_has
+    assert ws.tasks["z"].who_has == {ws3}
+    assert {k: list(v) for k, v in ws.data_needed.items()} == {ws3: [ws.tasks["z"]]}
+    assert ws.has_what == {ws3: {"y", "z"}}
+
+
+def test_remove_worker_unknown(ws):
+    ws2 = "127.0.0.1:2"
+    ws.handle_stimulus(RemoveWorkerEvent(worker=ws2, stimulus_id="s3"))

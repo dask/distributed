@@ -21,12 +21,13 @@ import dask
 from dask.distributed import Event, Nanny, Worker
 from dask.utils import stringify
 
+from distributed.client import Client
 from distributed.scheduler import Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._arrow import serialize_table
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_extension import get_worker_for_range_sharding
-from distributed.shuffle._shuffle import ShuffleId, barrier_key
+from distributed.shuffle._shuffle import P2PShuffleLayer, ShuffleId, barrier_key
 from distributed.shuffle._worker_extension import (
     DataFrameShuffleRun,
     ShuffleRun,
@@ -38,7 +39,13 @@ from distributed.shuffle._worker_extension import (
 )
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
 from distributed.utils import Deadline
-from distributed.utils_test import gen_cluster, gen_test, wait_for_state
+from distributed.utils_test import (
+    cluster,
+    gen_cluster,
+    gen_test,
+    raises_with_cause,
+    wait_for_state,
+)
 from distributed.worker_state_machine import TaskState as WorkerTaskState
 
 try:
@@ -119,6 +126,48 @@ def test_raise_on_fuse_optimization():
     with dask.config.set({"optimization.fuse.active": True}):
         with pytest.raises(RuntimeError, match="fuse optimization"):
             dd.shuffle.shuffle(df, "x", shuffle="p2p")
+
+
+@gen_cluster(client=True)
+async def test_raise_on_lost_annotation(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    df = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+
+    # Manually drop "shuffle" annotation
+    for layer in df.dask.layers.values():
+        if isinstance(layer, P2PShuffleLayer):
+            del layer.annotations["shuffle"]
+
+    with raises_with_cause(
+        RuntimeError,
+        "shuffle_transfer failed",
+        RuntimeError,
+        "lost its ``shuffle`` annotation",
+    ):
+        await c.compute(df)
+
+    await clean_worker(a)
+    await clean_worker(b)
+    await clean_scheduler(s)
+
+
+def test_shuffle_before_categorize(loop_in_thread):
+    """Regression test for https://github.com/dask/distributed/issues/7615"""
+    with cluster() as (s, [a, b]), Client(s["address"], loop=loop_in_thread) as c:
+        df = dask.datasets.timeseries(
+            start="2000-01-01",
+            end="2000-01-10",
+            dtypes={"x": float, "y": str},
+            freq="10 s",
+        )
+        df = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+        df.categorize(columns=["y"])
+        c.compute(df)
 
 
 @gen_cluster(client=True)

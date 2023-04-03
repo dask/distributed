@@ -744,6 +744,12 @@ class GatherDepFailureEvent(GatherDepDoneEvent):
 
 
 @dataclass
+class RemoveWorkerEvent(StateMachineEvent):
+    worker: str
+    __slots__ = ("worker",)
+
+
+@dataclass
 class ComputeTaskEvent(StateMachineEvent):
     key: str
     run_id: int
@@ -2945,7 +2951,8 @@ class WorkerState:
                     assert ts.state != "fetch"
                     assert ts not in self.data_needed[ev.worker]
                 ts.who_has.discard(ev.worker)
-                self.has_what[ev.worker].discard(ts.key)
+                if ev.worker in self.has_what:
+                    self.has_what[ev.worker].discard(ts.key)
                 recommendations[ts] = "fetch"
 
         return recommendations, []
@@ -3008,7 +3015,7 @@ class WorkerState:
                 # This can override a recommendation from the previous for loop
                 recommendations[ts] = "missing"
 
-        for key in self.has_what.pop(ev.worker):
+        for key in self.has_what.pop(ev.worker, ()):
             ts = self.tasks[key]
             ts.who_has.remove(ev.worker)
 
@@ -3029,6 +3036,23 @@ class WorkerState:
             )
             for ts in self._gather_dep_done_common(ev)
         }
+
+        return recommendations, []
+
+    @_handle_event.register
+    def _handle_remove_worker(self, ev: RemoveWorkerEvent) -> RecsInstrs:
+        recommendations: Recs = {}
+        for ts in self.data_needed.pop(ev.worker, ()):
+            if self.validate:
+                assert ts.state == "fetch"
+                assert ev.worker in ts.who_has
+            if ts.who_has == {ev.worker}:
+                # This can override a recommendation from the previous for loop
+                recommendations[ts] = "missing"
+
+        for key in self.has_what.pop(ev.worker, ()):
+            ts = self.tasks[key]
+            ts.who_has.remove(ev.worker)
 
         return recommendations, []
 

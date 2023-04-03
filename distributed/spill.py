@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from collections.abc import Hashable, Iterator, Mapping, MutableMapping, Sized
+from collections.abc import Hashable, Iterator, Mapping, Sized
 from contextlib import contextmanager
 from functools import partial
 from typing import Any, Literal, NamedTuple, Protocol, cast
@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 logger.addFilter(RateLimiterFilter("Spill file on disk reached capacity"))
 logger.addFilter(RateLimiterFilter("Spill to disk failed"))
 
-has_zict_220 = parse_version(zict.__version__) >= parse_version("2.2.0")
 has_zict_230 = parse_version(zict.__version__) >= parse_version("2.3.0")
 
 
@@ -95,13 +94,12 @@ class SpillBuffer(zict.Buffer):
         target: int,
         max_spill: int | Literal[False] = False,
     ):
-        slow: MutableMapping[str, Any] = Slow(spill_directory, max_spill)
-        if has_zict_220:
-            # If a value is still in use somewhere on the worker since the last time it
-            # was unspilled, don't duplicate it
-            slow = zict.Cache(slow, zict.WeakValueMapping())
+        # If a value is still in use somewhere on the worker since the last time it was
+        # unspilled, don't duplicate it
+        slow = Slow(spill_directory, max_spill)
+        slow_cached = zict.Cache(slow, zict.WeakValueMapping())
 
-        super().__init__(fast={}, slow=slow, n=target, weight=_in_memory_weight)
+        super().__init__(fast={}, slow=slow_cached, n=target, weight=_in_memory_weight)
         self.logged_pickle_errors = set()  # keys logged with pickle error
         self.cumulative_metrics = defaultdict(float)
 
@@ -251,8 +249,8 @@ class SpillBuffer(zict.Buffer):
 
     @property
     def _slow_uncached(self) -> Slow:
-        slow = cast(zict.Cache, self.slow).data if has_zict_220 else self.slow
-        return cast(Slow, slow)
+        cache = cast(zict.Cache, self.slow)
+        return cast(Slow, cache.data)
 
     @property
     def spilled_total(self) -> SpilledSize:

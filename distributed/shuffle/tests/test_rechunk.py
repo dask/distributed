@@ -22,7 +22,7 @@ from distributed.shuffle._scheduler_extension import get_worker_for_range_shardi
 from distributed.shuffle._shuffle import ShuffleId
 from distributed.shuffle._worker_extension import ArrayRechunkRun
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
-from distributed.utils_test import gen_cluster, gen_test
+from distributed.utils_test import gen_cluster, gen_test, raises_with_cause
 
 
 class ArrayRechunkTestPool(AbstractShuffleTestPool):
@@ -159,6 +159,27 @@ def test_raise_on_fuse_optimization():
     new = ((6,) * 5,)
     with pytest.raises(RuntimeError, match="fuse optimization"):
         rechunk(x, chunks=new, method="p2p")
+
+
+@gen_cluster(client=True, config={"optimization.fuse.active": False})
+async def test_raise_on_lost_annotation(c, s, a, b):
+    a = np.random.uniform(0, 1, 30)
+    x = da.from_array(a, chunks=((10,) * 3,))
+    new = ((6,) * 5,)
+    x2 = rechunk(x, chunks=new, method="p2p")
+
+    # Manually drop "shuffle" annotation
+    for name, layer in x2.dask.layers.items():
+        if name.startswith("rechunk-p2p"):
+            del layer.annotations["shuffle"]
+
+    with raises_with_cause(
+        RuntimeError,
+        "rechunk_transfer failed",
+        RuntimeError,
+        "lost its ``shuffle`` annotation",
+    ):
+        await c.compute(x2)
 
 
 @pytest.mark.parametrize("config_value", ["tasks", "p2p", None])

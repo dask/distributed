@@ -342,6 +342,7 @@ def serialize(  # type: ignore[no-untyped-def]
         return headers, frames
 
     tb = ""
+    exc = None
 
     for name in serializers:
         dumps, _, wants_context = families[name]
@@ -351,11 +352,14 @@ def serialize(  # type: ignore[no-untyped-def]
             return header, frames
         except NotImplementedError:
             continue
-        except Exception:
+        except Exception as e:
+            exc = e
             tb = traceback.format_exc()
             break
-
-    msg = f"Could not serialize object of type {type(x).__name__}"
+    type_x = type(x)
+    if isinstance(x, (ToPickle, Serialize)):
+        type_x = type(x.data)
+    msg = f"Could not serialize object of type {type_x.__name__}"
     if on_error == "message":
         txt_frames = [msg]
         if tb:
@@ -365,7 +369,7 @@ def serialize(  # type: ignore[no-untyped-def]
 
         return {"serializer": "error"}, frames
     elif on_error == "raise":
-        raise TypeError(msg, str(x)[:10000])
+        raise TypeError(msg, str(x)[:10000]) from exc
     else:  # pragma: nocover
         raise ValueError(f"{on_error=}; expected 'message' or 'raise'")
 

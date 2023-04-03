@@ -98,12 +98,13 @@ def test_timeout_sync(client):
 
 
 @gen_cluster(
+    client=True,
     config={
         "distributed.scheduler.locks.lease-validation-interval": "200ms",
         "distributed.scheduler.locks.lease-timeout": "200ms",
     },
 )
-async def test_release_semaphore_after_timeout(s, a, b):
+async def test_release_semaphore_after_timeout(c, s, a, b):
     sem = await Semaphore(name="x", max_leases=2)
     await sem.acquire()  # leases: 2 - 1 = 1
 
@@ -121,8 +122,8 @@ async def test_release_semaphore_after_timeout(s, a, b):
     assert not (await sem.acquire(timeout=0.1))
 
 
-@gen_cluster()
-async def test_async_ctx(s, a, b):
+@gen_cluster(client=True)
+async def test_async_ctx(c, s, a, b):
     sem = await Semaphore(name="x")
     async with sem:
         assert not await sem.acquire(timeout=0.025)
