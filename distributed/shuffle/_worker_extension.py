@@ -10,12 +10,13 @@ import time
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from importlib import import_module
 from io import BytesIO
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 
 import toolz
 
-from dask.utils import parse_bytes
+from dask.utils import parse_bytes, typename
 
 from distributed.core import PooledRPCCall
 from distributed.protocol import to_serialize
@@ -419,6 +420,8 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
     memory_limiter_comm:
         A ``ResourceLimiter`` limiting the total amount of memory used in either
         buffer.
+    dataframe_backend:
+        Backend dataframe library name. Default is "pandas".
     """
 
     def __init__(
@@ -436,8 +439,9 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
+        dataframe_backend: str = "pandas",
     ):
-        import pandas as pd
+        lib = import_module(dataframe_backend)
 
         super().__init__(
             id=id,
@@ -457,7 +461,8 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         for part, addr in worker_for.items():
             partitions_of[addr].append(part)
         self.partitions_of = dict(partitions_of)
-        self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
+        self.worker_for = lib.Series(worker_for, name="_workers").astype("category")
+        self._dataframe_backend = dataframe_backend
 
     async def receive(self, data: list[tuple[int, bytes]]) -> None:
         await self._receive(data)
@@ -507,6 +512,13 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         await self._write_to_comm(out)
         return self.run_id
 
+    def _arrow_to_df(self, table) -> pd.DataFrame:
+        if self._dataframe_backend == "cudf":
+            import cudf
+
+            return cudf.DataFrame.from_arrow(table)
+        return table.to_pandas()
+
     async def get_output_partition(self, i: int) -> pd.DataFrame:
         self.raise_if_closed()
         assert self.transferred, "`get_output_partition` called before barrier task"
@@ -524,11 +536,11 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
 
             def _() -> pd.DataFrame:
                 df = convert_partition(data)
-                return df.to_pandas()
+                return self._arrow_to_df(df)
 
             out = await self.offload(_)
         except KeyError:
-            out = self.schema.empty_table().to_pandas()
+            out = self._arrow_to_df(self.schema.empty_table())
         return out
 
 
@@ -550,6 +562,7 @@ class ShuffleWorkerExtension:
     memory_limiter_comms: ResourceLimiter
     memory_limiter_disk: ResourceLimiter
     closed: bool
+    _backends: dict
 
     def __init__(self, worker: Worker) -> None:
         # Attach to worker
@@ -566,6 +579,7 @@ class ShuffleWorkerExtension:
         self.memory_limiter_disk = ResourceLimiter(parse_bytes("1 GiB"))
         self.closed = False
         self._executor = ThreadPoolExecutor(self.worker.state.nthreads)
+        self._backends = {}
 
     # Handlers
     ##########
@@ -628,6 +642,8 @@ class ShuffleWorkerExtension:
     ) -> int:
         if type == ShuffleType.DATAFRAME:
             kwargs["empty"] = data
+        if shuffle_id not in self._backends:
+            self._backends[shuffle_id] = typename(data).partition(".")[0]
         shuffle = self.get_or_create_shuffle(shuffle_id, type=type, **kwargs)
         return sync(
             self.worker.loop,
@@ -758,7 +774,11 @@ class ShuffleWorkerExtension:
                 id=shuffle_id,
                 type=type,
                 spec={
-                    "schema": pa.Schema.from_pandas(kwargs["empty"])
+                    "schema": pa.Schema.from_pandas(
+                        kwargs["empty"].to_pandas()
+                        if hasattr(kwargs["empty"], "to_pandas")
+                        else kwargs["empty"]
+                    )
                     .serialize()
                     .to_pybytes(),
                     "npartitions": kwargs["npartitions"],
@@ -818,6 +838,7 @@ class ShuffleWorkerExtension:
                 scheduler=self.worker.scheduler,
                 memory_limiter_disk=self.memory_limiter_disk,
                 memory_limiter_comms=self.memory_limiter_comms,
+                dataframe_backend=self._backends.get(shuffle_id, "pandas"),
             )
         elif result["type"] == ShuffleType.ARRAY_RECHUNK:
             shuffle = ArrayRechunkRun(
@@ -926,7 +947,11 @@ def split_by_worker(
     # assert len(df) == nrows  # Not true if some outputs aren't wanted
     # FIXME: If we do not preserve the index something is corrupting the
     # bytestream such that it cannot be deserialized anymore
-    t = pa.Table.from_pandas(df, preserve_index=True)
+    t = (
+        df.to_arrow(preserve_index=True)
+        if hasattr(df, "to_arrow") and callable(df.to_arrow)
+        else pa.Table.from_pandas(df, preserve_index=True)
+    )
     t = t.sort_by("_worker")
     codes = np.asarray(t.select(["_worker"]))[0]
     t = t.drop(["_worker"])
