@@ -6,7 +6,7 @@ import operator
 import os
 from collections import OrderedDict, defaultdict
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import datetime, timedelta
 from numbers import Number
 from typing import Any, TypeVar
 
@@ -3481,10 +3481,12 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
         self.root = column(
             self.function_selector,
             self.toggle,
-            row([
-            self.piechart,
-            self.barchart,
-            ]),
+            row(
+                [
+                    self.piechart,
+                    self.barchart,
+                ]
+            ),
             sizing_mode="scale_width",
         )
 
@@ -3503,8 +3505,8 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
             if function_name not in self.data["functions"]:
                 self.substantial_change = True
                 self.function_selector.options.append(function_name)
-                self.function_selector.value.append(function_name)
                 self.data["functions"].append(function_name)
+                self.data["timestamp"].append(datetime.utcnow())
             idx = self.data["functions"].index(function_name)
 
             while len(self.data[f"{operation}_value"]) != len(self.data["functions"]):
@@ -3522,23 +3524,33 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
             if operation not in self.operations:
                 self.substantial_change = True
                 self.operations.append(operation)
+        data = self.data.copy()
 
-        self.source.data = dict(self.data)
+        n_show = (
+            len(
+                [
+                    d
+                    for d in data["timestamp"]
+                    if d > datetime.utcnow() - timedelta(seconds=5)
+                ]
+            )
+            or 2
+        )
+        for key in data:
+            self.substantial_change = True
+            data[key] = data[key][-n_show:]
 
         from bokeh.palettes import small_palettes, Category20c
 
         piechart_data = dict()
-        piechart_data['value'] = [sum(self.data[f"{op}_value"]) for op in self.operations]
-        piechart_data['text'] = [format_time(n) for n in piechart_data['value']]
+        piechart_data["value"] = [sum(data[f"{op}_value"]) for op in self.operations]
+        piechart_data["text"] = [format_time(n) for n in piechart_data["value"]]
         piechart_data["angle"] = [
-            sum(self.data[f"{operation}_value"])
-            / sum(piechart_data['value'])
-            * 2
-            * math.pi
+            sum(data[f"{operation}_value"]) / sum(piechart_data["value"]) * 2 * math.pi
             for operation in self.operations
         ]
-        piechart_data['color'] = small_palettes["YlGnBu"][5][: len(self.operations)]
-        piechart_data['operation'] = self.operations
+        piechart_data["color"] = small_palettes["YlGnBu"][5][: len(self.operations)]
+        piechart_data["operation"] = self.operations
         self.piechart_source.data = piechart_data
 
         piechart = figure(
@@ -3551,7 +3563,7 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
         piechart.axis.axis_label = None
         piechart.axis.visible = False
         piechart.grid.grid_line_color = None
-        
+
         renderers = piechart.wedge(
             x=0,
             y=1,
@@ -3566,7 +3578,7 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
         self.piechart.renderers = [renderers]
 
         barchart = figure(
-            x_range=self.data["functions"],
+            x_range=data["functions"],
             height=500,
             title="Fine Performance Metrics by execution",
             tools="pan,wheel_zoom,box_zoom,reset",
@@ -3578,9 +3590,9 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
         renderers = barchart.vbar_stack(
             [
                 name
-                for name in self.data.keys()
+                for name in data.keys()
                 if name.endswith("bytes" if self.toggle.active else "value")
-                and len(self.data[name])
+                and len(data[name])
             ],
             x="functions",
             width=0.9,
@@ -3598,6 +3610,8 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
                 ("function", "@functions"),
             ]
             barchart.add_tools(HoverTool(tooltips=tooltips, renderers=[vbar]))
+
+        self.source.data = dict(data)
 
         # replacing the child causes small blips if done every iteration vs updating renderers
         # but it's needed when new functions and/or operations show up to rerender plot
