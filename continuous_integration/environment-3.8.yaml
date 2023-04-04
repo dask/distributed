@@ -3,6 +3,7 @@ channels:
   - conda-forge
   - defaults
 dependencies:
+  - pandas<2
   - python=3.8
   - packaging
   - pip

@@ -4,6 +4,7 @@ channels:
   - defaults
   - pytorch
 dependencies:
+  - pandas<2
   - python=3.9
   - packaging
   - pip
