@@ -37,6 +37,9 @@ gpuci_logger "Activate conda env"
 . /opt/conda/etc/profile.d/conda.sh
 conda activate dask
 
+# gpuCI images need to be dropped down to bokeh<3
+mamba install "bokeh>=2.4.2,<3"
+
 gpuci_logger "Install dask"
 python -m pip install git+https://github.com/dask/dask@2023.3.2
 
