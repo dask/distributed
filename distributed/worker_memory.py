@@ -164,9 +164,6 @@ class WorkerMemoryManager:
         else:
             self.data = {}
 
-        if self.data:
-            raise ValueError("Worker.data must be empty at initialization time")
-
         self.memory_monitor_interval = parse_timedelta(
             dask.config.get("distributed.worker.memory.monitor-interval"),
             default=False,

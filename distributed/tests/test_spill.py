@@ -14,7 +14,7 @@ from dask.sizeof import sizeof
 from distributed import profile
 from distributed.compatibility import WINDOWS
 from distributed.metrics import meter
-from distributed.spill import SpillBuffer
+from distributed.spill import SpillBuffer, has_zict_220
 from distributed.utils import RateLimiterFilter
 from distributed.utils_test import captured_logger
 
@@ -42,7 +42,7 @@ def assert_buf(
 
     # assertions on slow
     assert set(buf.slow) == set(expect_slow)
-    slow = buf._slow_uncached
+    slow = buf.slow.data if has_zict_220 else buf.slow  # type: ignore
     assert slow.weight_by_key == {
         k: psize(tmp_path, **{k: v}) for k, v in expect_slow.items()
     }
@@ -344,7 +344,10 @@ class SupportsWeakRef(NoWeakRef):
 
 @pytest.mark.parametrize(
     "cls,expect_cached",
-    [(SupportsWeakRef, True), (NoWeakRef, False)],
+    [
+        (SupportsWeakRef, has_zict_220),
+        (NoWeakRef, False),
+    ],
 )
 @pytest.mark.parametrize("size", [60, 110])
 def test_weakref_cache(tmp_path, cls, expect_cached, size):

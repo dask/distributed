@@ -74,45 +74,11 @@ class SchedulerPlugin:
     def update_graph(
         self,
         scheduler: Scheduler,
-        *,
-        client: str,
         keys: set[str],
-        tasks: list[str],
-        annotations: dict[str, dict[str, Any]],
-        priority: dict[str, tuple[int | float, ...]],
-        dependencies: dict[str, set],
+        restrictions: dict[str, float],
         **kwargs: Any,
     ) -> None:
-        """Run when a new graph / tasks enter the scheduler
-
-        Parameters
-        ----------
-            scheduler:
-                The `Scheduler` instance.
-            client:
-                The unique Client id.
-            keys:
-                The keys the Client is interested in when calling `update_graph`.
-            tasks:
-                The
-            annotations:
-                Fully resolved annotations as applied to the tasks in the format::
-
-                    {
-                        "annotation": {
-                            "key": "value,
-                            ...
-                        },
-                        ...
-                    }
-            priority:
-                Task calculated priorities as assigned to the tasks.
-            dependencies:
-                A mapping that maps a key to its dependencies.
-            **kwargs:
-                It is recommended to allow plugins to accept more parameters to
-                ensure future compatibility.
-        """
+        """Run when a new graph / tasks enter the scheduler"""
 
     def restart(self, scheduler: Scheduler) -> None:
         """Run when the scheduler restarts itself"""

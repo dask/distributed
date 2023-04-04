@@ -1930,7 +1930,7 @@ class Client(SyncMethodMixin):
             [skey],
             workers=workers,
             allow_other_workers=allow_other_workers,
-            internal_priority={skey: 0},
+            priority={skey: 0},
             user_priority=priority,
             resources=resources,
             retries=retries,
@@ -2134,7 +2134,7 @@ class Client(SyncMethodMixin):
             keys,
             workers=workers,
             allow_other_workers=allow_other_workers,
-            internal_priority=internal_priority,
+            priority=internal_priority,
             resources=resources,
             retries=retries,
             user_priority=priority,
@@ -2974,9 +2974,7 @@ class Client(SyncMethodMixin):
         )
 
     @staticmethod
-    def _get_computation_code(
-        stacklevel: int | None = None, nframes: int = 1
-    ) -> tuple[str, ...]:
+    def _get_computation_code(stacklevel: int | None = None) -> str:
         """Walk up the stack to the user code and extract the code surrounding
         the compute/submit/persist call. All modules encountered which are
         ignored through the option
@@ -2987,8 +2985,6 @@ class Client(SyncMethodMixin):
         ``stacklevel`` may be used to explicitly indicate from which frame on
         the stack to get the source code.
         """
-        if nframes <= 0:
-            return ()
         ignore_modules = dask.config.get(
             "distributed.diagnostics.computations.ignore-modules"
         )
@@ -3007,10 +3003,7 @@ class Client(SyncMethodMixin):
             # stacklevel 0 or less - shows dask internals which likely isn't helpful
             stacklevel = stacklevel if stacklevel > 0 else 1
 
-        code: list[str] = []
         for i, (fr, _) in enumerate(traceback.walk_stack(sys._getframe().f_back), 1):
-            if len(code) >= nframes:
-                break
             if stacklevel is not None:
                 if i != stacklevel:
                     continue
@@ -3020,7 +3013,7 @@ class Client(SyncMethodMixin):
             ):
                 continue
             try:
-                code.append(inspect.getsource(fr))
+                return inspect.getsource(fr)
             except OSError:
                 # Try to fine the source if we are in %%time or %%timeit magic.
                 if (
@@ -3032,10 +3025,9 @@ class Client(SyncMethodMixin):
                     ip = get_ipython()
                     if ip is not None:
                         # The current cell
-                        code.append(ip.history_manager._i00)
+                        return ip.history_manager._i00
                 break
-
-        return tuple(reversed(code))
+        return "<Code not available>"
 
     def _graph_to_futures(
         self,
@@ -3043,7 +3035,7 @@ class Client(SyncMethodMixin):
         keys,
         workers=None,
         allow_other_workers=None,
-        internal_priority=None,
+        priority=None,
         user_priority=0,
         resources=None,
         retries=None,
@@ -3079,37 +3071,21 @@ class Client(SyncMethodMixin):
 
             # Pack the high level graph before sending it to the scheduler
             keyset = set(keys)
+            dsk = dsk.__dask_distributed_pack__(self, keyset, annotations)
 
             # Create futures before sending graph (helps avoid contention)
             futures = {key: Future(key, self, inform=False) for key in keyset}
-            # Circular import
-            from distributed.protocol import serialize
-            from distributed.protocol.serialize import ToPickle
 
-            header, frames = serialize(ToPickle(dsk), on_error="raise")
-            nbytes = len(header) + sum(map(len, frames))
-            if nbytes > 10_000_000:
-                warnings.warn(
-                    f"Sending large graph of size {format_bytes(nbytes)}.\n"
-                    "This may cause some slowdown.\n"
-                    "Consider scattering data ahead of time and using futures."
-                )
             self._send_to_scheduler(
                 {
-                    "op": "update-graph",
-                    "graph_header": header,
-                    "graph_frames": frames,
+                    "op": "update-graph-hlg",
+                    "hlg": dsk,
                     "keys": list(map(stringify, keys)),
-                    "internal_priority": internal_priority,
+                    "priority": priority,
                     "submitting_task": getattr(thread_state, "key", None),
                     "fifo_timeout": fifo_timeout,
                     "actors": actors,
-                    "code": self._get_computation_code(
-                        nframes=dask.config.get(
-                            "distributed.diagnostics.computations.nframes"
-                        )
-                    ),
-                    "annotations": ToPickle(annotations),
+                    "code": self._get_computation_code(),
                 }
             )
             return futures
@@ -5581,8 +5557,7 @@ class performance_report:
     async def __aexit__(self, exc_type, exc_value, traceback, code=None):
         client = get_client()
         if code is None:
-            frames = client._get_computation_code(self._stacklevel + 1, nframes=1)
-            code = frames[0] if frames else "<Code not available>"
+            code = client._get_computation_code(self._stacklevel + 1)
         data = await client.scheduler.performance_report(
             start=self.start, last_count=self.last_count, code=code, mode=self.mode
         )
@@ -5594,8 +5569,7 @@ class performance_report:
 
     def __exit__(self, exc_type, exc_value, traceback):
         client = get_client()
-        frames = client._get_computation_code(self._stacklevel + 1, nframes=1)
-        code = frames[0] if frames else "<Code not available>"
+        code = client._get_computation_code(self._stacklevel + 1)
         client.sync(self.__aexit__, exc_type, exc_value, traceback, code=code)
 
 

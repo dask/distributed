@@ -18,12 +18,11 @@ from unittest import mock
 import cloudpickle
 import psutil
 import pytest
-from tlz import concat, first, merge
+from tlz import concat, first, merge, valmap
 from tornado.ioloop import IOLoop
 
 import dask
 from dask import delayed
-from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 from dask.utils import apply, parse_timedelta, stringify, tmpfile, typename
 
 from distributed import (
@@ -41,9 +40,7 @@ from distributed.comm.addressing import parse_host_port
 from distributed.compatibility import LINUX, MACOS, WINDOWS, PeriodicCallback
 from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
-from distributed.protocol import serialize
 from distributed.protocol.pickle import dumps, loads
-from distributed.protocol.serialize import ToPickle
 from distributed.scheduler import KilledWorker, MemoryState, Scheduler, WorkerState
 from distributed.utils import TimeoutError, wait_for
 from distributed.utils_test import (
@@ -721,20 +718,19 @@ async def test_server_listens_to_other_ops(s, a, b):
         assert ident["id"].lower().startswith("scheduler")
 
 
-@gen_cluster(client=True)
-async def test_remove_worker_from_scheduler(c, s, a, b):
-    """see also test_ready_remove_worker"""
-    ev = Event()
-    futs = c.map(lambda x, ev: ev.wait(), range(20), ev=ev)
-    while len(s.tasks) != len(futs):
-        await asyncio.sleep(0.01)
+@gen_cluster()
+async def test_remove_worker_from_scheduler(s, a, b):
+    dsk = {("x-%d" % i): (inc, i) for i in range(20)}
+    s.update_graph(
+        tasks=valmap(dumps_task, dsk),
+        keys=list(dsk),
+        dependencies={k: set() for k in dsk},
+    )
 
     assert a.address in s.stream_comms
     await s.remove_worker(address=a.address, stimulus_id="test")
     assert a.address not in s.workers
-    assert len(s.workers[b.address].processing) + len(s.queued) == len(futs)
-    await ev.set()
-    await c.gather(futs)
+    assert len(s.workers[b.address].processing) + len(s.queued) == len(dsk)
 
 
 @gen_cluster()
@@ -930,6 +926,47 @@ async def test_delete(c, s, a):
     s.report_on_key(key=x.key)
 
 
+@gen_cluster()
+async def test_filtered_communication(s, a, b):
+    c = await connect(s.address)
+    f = await connect(s.address)
+    await c.write({"op": "register-client", "client": "c", "versions": {}})
+    await f.write({"op": "register-client", "client": "f", "versions": {}})
+    await c.read()
+    await f.read()
+
+    assert set(s.client_comms) == {"c", "f"}
+
+    await c.write(
+        {
+            "op": "update-graph",
+            "tasks": {"x": dumps_task((inc, 1)), "y": dumps_task((inc, "x"))},
+            "dependencies": {"x": [], "y": ["x"]},
+            "client": "c",
+            "keys": ["y"],
+        }
+    )
+
+    await f.write(
+        {
+            "op": "update-graph",
+            "tasks": {
+                "x": dumps_task((inc, 1)),
+                "z": dumps_task((operator.add, "x", 10)),
+            },
+            "dependencies": {"x": [], "z": ["x"]},
+            "client": "f",
+            "keys": ["z"],
+        }
+    )
+    (msg,) = await c.read()
+    assert msg["op"] == "key-in-memory"
+    assert msg["key"] == "y"
+    (msg,) = await f.read()
+    assert msg["op"] == "key-in-memory"
+    assert msg["key"] == "z"
+
+
 def test_dumps_function():
     a = dumps_function(inc)
     assert cloudpickle.loads(a)(10) == 11
@@ -960,21 +997,23 @@ def test_dumps_task():
 
 
 @pytest.mark.parametrize("worker_saturation", [1.0, float("inf")])
-@gen_cluster(client=True)
-async def test_ready_remove_worker(c, s, a, b, worker_saturation):
-    """see also test_remove_worker_from_scheduler"""
+@gen_cluster()
+async def test_ready_remove_worker(s, a, b, worker_saturation):
     s.WORKER_SATURATION = worker_saturation
+    s.update_graph(
+        tasks={"x-%d" % i: dumps_task((inc, i)) for i in range(20)},
+        keys=["x-%d" % i for i in range(20)],
+        client="client",
+        dependencies={"x-%d" % i: [] for i in range(20)},
+    )
 
-    ev = Event()
-    futs = c.map(lambda x, ev: ev.wait(), range(20), ev=ev)
-    while len(s.tasks) != len(futs):
-        await asyncio.sleep(0.01)
     if s.WORKER_SATURATION == 1:
         cmp = operator.eq
     elif math.isinf(s.WORKER_SATURATION):
         cmp = operator.gt
     else:
         pytest.fail(f"{s.WORKER_SATURATION=}, must be 1 or inf")
+
     assert all(cmp(len(w.processing), w.nthreads) for w in s.workers.values()), (
         list(s.workers.values()),
         s.WORKER_SATURATION,
@@ -982,7 +1021,9 @@ async def test_ready_remove_worker(c, s, a, b, worker_saturation):
     assert sum(len(w.processing) for w in s.workers.values()) + len(s.queued) == len(
         s.tasks
     )
+
     await s.remove_worker(address=a.address, stimulus_id="test")
+
     assert set(s.workers) == {b.address}
     assert all(cmp(len(w.processing), w.nthreads) for w in s.workers.values()), (
         list(s.workers.values()),
@@ -991,7 +1032,6 @@ async def test_ready_remove_worker(c, s, a, b, worker_saturation):
     assert sum(len(w.processing) for w in s.workers.values()) + len(s.queued) == len(
         s.tasks
     )
-    await ev.set()
 
 
 @pytest.mark.slow
@@ -1331,33 +1371,15 @@ async def test_file_descriptors_dont_leak(s):
 
 @gen_cluster()
 async def test_update_graph_culls(s, a, b):
-    # This is a rather low level API but the fact that update_graph actually
-    # culls is worth testing and hard to do so with high level user API. Most
-    # but not all HLGs are implementing culling themselves already, i.e. a graph
-    # like the one written here will rarely exist in reality. It's worth to
-    # consider dropping this from the scheduler iff graph materialization
-    # actually ensure this
-    dsk = HighLevelGraph(
-        layers={
-            "foo": MaterializedLayer(
-                {
-                    "x": dumps_task((inc, 1)),
-                    "y": dumps_task((inc, "x")),
-                    "z": dumps_task((inc, 2)),
-                }
-            )
-        },
-        dependencies={"foo": set()},
-    )
-
-    header, frames = serialize(ToPickle(dsk), on_error="raise")
     s.update_graph(
-        graph_header=header,
-        graph_frames=frames,
+        tasks={
+            "x": dumps_task((inc, 1)),
+            "y": dumps_task((inc, "x")),
+            "z": dumps_task((inc, 2)),
+        },
         keys=["y"],
+        dependencies={"y": "x", "x": [], "z": []},
         client="client",
-        internal_priority={k: 0 for k in "xyz"},
-        submitting_task=None,
     )
     assert "z" not in s.tasks
 
@@ -1676,14 +1698,30 @@ async def test_include_communication_in_occupancy(c, s, a, b):
     await wait(z)
 
 
-@gen_test()
-async def test_nonempty_data_is_rejected():
-    with pytest.raises(ValueError, match="Worker.data must be empty"):
-        await Worker("localhost:12345", nthreads=1, data={"x": 1})
+@gen_cluster(nthreads=[])
+async def test_new_worker_with_data_rejected(s):
+    w = Worker(s.address, nthreads=1)
+    w.update_data(data={"x": 0})
+    assert w.state.tasks["x"].state == "memory"
+    assert w.data == {"x": 0}
+
+    with captured_logger(
+        "distributed.worker", level=logging.WARNING
+    ) as wlog, captured_logger("distributed.scheduler", level=logging.WARNING) as slog:
+        with pytest.raises(RuntimeError, match="Worker failed to start"):
+            await w
+        assert "connected with 1 key(s) in memory" in slog.getvalue()
+        assert "Register worker" not in slog.getvalue()
+        assert "connected with 1 key(s) in memory" in wlog.getvalue()
+
+    assert w.status == Status.failed
+    assert not s.workers
+    assert not s.stream_comms
+    assert not s.host_info
 
 
 @gen_cluster(client=True)
-async def test_worker_arrives_with_data_is_rejected(c, s, a, b):
+async def test_worker_arrives_with_processing_data(c, s, a, b):
     # A worker arriving with data we need should still be rejected,
     # and not affect other computations
     x = delayed(slowinc)(1, delay=0.4)
@@ -2304,24 +2342,6 @@ async def test_idle_timeout_no_workers(c, s):
     assert not s.check_idle()
 
     assert s.check_idle()
-
-
-@gen_cluster(client=True)
-async def test_cumulative_worker_metrics(c, s, a, b):
-    # Race condition: metrics that are updated while idle may or may not be there already
-    assert s.cumulative_worker_metrics.keys() in (set(), {"latency"})
-    await c.submit(inc, 1, key="do_work")
-
-    await a.heartbeat()
-    await b.heartbeat()
-
-    metrics = s.cumulative_worker_metrics
-
-    # Subset of expected keys
-    assert "latency" in metrics
-    assert ("execute", "do_work", "deserialize", "seconds") in metrics
-
-    assert all(isinstance(value, float) for value in metrics.values())
 
 
 @gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})

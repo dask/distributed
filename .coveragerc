@@ -1,0 +1,32 @@
+[run]
+source =
+    distributed
+omit =
+    distributed/tests/test*
+    distributed/*/tests/test*
+    distributed/cli/utils.py
+    distributed/cli/dask_spec.py
+    distributed/deploy/ssh.py
+    distributed/_version.py
+    distributed/pytest_resourceleaks.py
+    distributed/comm/ucx.py
+
+[report]
+show_missing = True
+exclude_lines =
+    # re-enable the standard pragma
+    pragma: nocover
+    pragma: no cover
+    # exclude nvml calls
+    [\s(.]nvml[\s(.]
+    [\s(.]pynvml[\s(.]
+    # exclude LOG_PDB
+    LOG_PDB
+    # always ignore type checking blocks
+    TYPE_CHECKING
+    except ImportError
+    @overload
+
+[html]
+directory = coverage_html_report
+

@@ -2,21 +2,18 @@ from __future__ import annotations
 
 import logging
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Iterable, Iterator, NewType
+from typing import TYPE_CHECKING, Any, NewType
 
 import dask
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
-from dask.layers import Layer
+from dask.layers import SimpleShuffleLayer
 
 from distributed.shuffle._arrow import check_dtype_support, check_minimal_arrow_version
 
 logger = logging.getLogger("distributed.shuffle")
 if TYPE_CHECKING:
     import pandas as pd
-
-    # TODO import from typing (requires Python >=3.10)
-    from typing_extensions import TypeAlias
 
     from dask.dataframe import DataFrame
 
@@ -66,8 +63,12 @@ def shuffle_transfer(
             npartitions=npartitions,
             column=column,
         )
-    except Exception as e:
-        raise RuntimeError(f"shuffle_transfer failed during shuffle {id}") from e
+    except Exception:
+        msg = f"shuffle_transfer failed during shuffle {id}"
+        # FIXME: Use exception chaining instead of logging the traceback.
+        #  This has previously led to spurious recursion errors
+        logger.error(msg, exc_info=True)
+        raise RuntimeError(msg)
 
 
 def shuffle_unpack(
@@ -77,15 +78,23 @@ def shuffle_unpack(
         return _get_worker_extension().get_output_partition(
             id, barrier_run_id, output_partition
         )
-    except Exception as e:
-        raise RuntimeError(f"shuffle_unpack failed during shuffle {id}") from e
+    except Exception:
+        msg = f"shuffle_unpack failed during shuffle {id}"
+        # FIXME: Use exception chaining instead of logging the traceback.
+        #  This has previously led to spurious recursion errors
+        logger.error(msg, exc_info=True)
+        raise RuntimeError(msg)
 
 
 def shuffle_barrier(id: ShuffleId, run_ids: list[int]) -> int:
     try:
         return _get_worker_extension().barrier(id, run_ids)
-    except Exception as e:
-        raise RuntimeError(f"shuffle_barrier failed during shuffle {id}") from e
+    except Exception:
+        msg = f"shuffle_barrier failed during shuffle {id}"
+        # FIXME: Use exception chaining instead of logging the traceback.
+        #  This has previously led to spurious recursion errors
+        logger.error(msg, exc_info=True)
+        raise RuntimeError(msg)
 
 
 def rearrange_by_column_p2p(
@@ -118,7 +127,9 @@ def rearrange_by_column_p2p(
         column,
         npartitions,
         npartitions_input=df.npartitions,
+        ignore_index=True,
         name_input=df._name,
+        meta_input=empty,
     )
     return DataFrame(
         HighLevelGraph.from_collections(name, layer, [df]),
@@ -128,112 +139,58 @@ def rearrange_by_column_p2p(
     )
 
 
-# TODO remove quotes (requires Python >=3.9)
-_T_Key: TypeAlias = "tuple[str, int] | str"
-_T_LowLevelGraph: TypeAlias = "dict[_T_Key, tuple]"
-
-
-class P2PShuffleLayer(Layer):
+class P2PShuffleLayer(SimpleShuffleLayer):
     def __init__(
         self,
         name: str,
         column: str,
         npartitions: int,
         npartitions_input: int,
+        ignore_index: bool,
         name_input: str,
-        parts_out: Iterable | None = None,
+        meta_input: pd.DataFrame,
+        parts_out: list | None = None,
         annotations: dict | None = None,
     ):
         check_minimal_arrow_version()
         annotations = annotations or {}
         annotations.update({"shuffle": lambda key: key[1]})
-        self.name = name
-        self.column = column
-        self.npartitions = npartitions
-        self.name_input = name_input
-        if parts_out:
-            self.parts_out = set(parts_out)
-        else:
-            self.parts_out = set(range(self.npartitions))
-        self.npartitions_input = npartitions_input
-        super().__init__(annotations=annotations)
+        super().__init__(
+            name,
+            column,
+            npartitions,
+            npartitions_input,
+            ignore_index,
+            name_input,
+            meta_input,
+            parts_out,
+            annotations=annotations,
+        )
+
+    def get_split_keys(self) -> list:
+        # TODO: This is doing some funky stuff to set priorities but we don't need this
+        return []
 
     def __repr__(self) -> str:
         return (
             f"{type(self).__name__}<name='{self.name}', npartitions={self.npartitions}>"
         )
 
-    def get_output_keys(self) -> set[_T_Key]:
-        return {(self.name, part) for part in self.parts_out}
-
-    def is_materialized(self) -> bool:
-        return hasattr(self, "_cached_dict")
-
-    @property
-    def _dict(self) -> _T_LowLevelGraph:
-        """Materialize full dict representation"""
-        self._cached_dict: _T_LowLevelGraph
-        dsk: _T_LowLevelGraph
-        if hasattr(self, "_cached_dict"):
-            return self._cached_dict
-        else:
-            dsk = self._construct_graph()
-            self._cached_dict = dsk
-        return self._cached_dict
-
-    def __getitem__(self, key: _T_Key) -> tuple:
-        return self._dict[key]
-
-    def __iter__(self) -> Iterator[_T_Key]:
-        return iter(self._dict)
-
-    def __len__(self) -> int:
-        return len(self._dict)
-
-    def _cull(self, parts_out: Iterable[int]) -> P2PShuffleLayer:
+    def _cull(self, parts_out: list) -> P2PShuffleLayer:
         return P2PShuffleLayer(
             self.name,
             self.column,
             self.npartitions,
             self.npartitions_input,
+            self.ignore_index,
             self.name_input,
+            self.meta_input,
             parts_out=parts_out,
         )
 
-    def _keys_to_parts(self, keys: Iterable[_T_Key]) -> set[int]:
-        """Simple utility to convert keys to partition indices."""
-        parts = set()
-        for key in keys:
-            if isinstance(key, tuple) and len(key) == 2:
-                _name, _part = key
-                if _name != self.name:
-                    continue
-                parts.add(_part)
-        return parts
-
-    def cull(
-        self, keys: Iterable[_T_Key], all_keys: Any
-    ) -> tuple[P2PShuffleLayer, dict]:
-        """Cull a P2PShuffleLayer HighLevelGraph layer.
-
-        The underlying graph will only include the necessary
-        tasks to produce the keys (indices) included in `parts_out`.
-        Therefore, "culling" the layer only requires us to reset this
-        parameter.
-        """
-        parts_out = self._keys_to_parts(keys)
-        input_parts = {(self.name_input, i) for i in range(self.npartitions_input)}
-        culled_deps = {(self.name, part): input_parts.copy() for part in parts_out}
-
-        if parts_out != set(self.parts_out):
-            culled_layer = self._cull(parts_out)
-            return culled_layer, culled_deps
-        else:
-            return self, culled_deps
-
-    def _construct_graph(self) -> _T_LowLevelGraph:
+    def _construct_graph(self, deserializing: Any = None) -> dict[tuple | str, tuple]:
         token = tokenize(self.name_input, self.column, self.npartitions, self.parts_out)
-        dsk: _T_LowLevelGraph = {}
+        dsk: dict[tuple | str, tuple] = {}
         _barrier_key = barrier_key(ShuffleId(token))
         name = "shuffle-transfer-" + token
         transfer_keys = list()
