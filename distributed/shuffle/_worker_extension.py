@@ -10,7 +10,6 @@ import time
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from importlib import import_module
 from io import BytesIO
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 
@@ -438,6 +437,8 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
     ):
+        import pandas as pd
+
         super().__init__(
             id=id,
             run_id=run_id,
@@ -456,7 +457,7 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         for part, addr in worker_for.items():
             partitions_of[addr].append(part)
         self.partitions_of = dict(partitions_of)
-        self.worker_for = worker_for
+        self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
 
     async def receive(self, data: list[tuple[int, bytes]]) -> None:
         await self._receive(data)
@@ -916,7 +917,7 @@ class ShuffleWorkerExtension:
 def split_by_worker(
     df: pd.DataFrame,
     column: str,
-    worker_for: dict[int, str],
+    worker_for: pd.Series,
 ) -> dict[Any, pa.Table]:
     """
     Split data into many arrow batches, partitioned by destination worker
@@ -925,11 +926,12 @@ def split_by_worker(
     import pyarrow as pa
 
     lib = typename(df).partition(".")[0]
-    worker_for_ser = (
-        import_module(lib).Series(worker_for, name="_workers").astype("category")
-    )
+    if lib == "cudf":
+        import cudf
+
+        worker_for = cudf.from_pandas(worker_for)
     df = df.merge(
-        right=worker_for_ser.cat.codes.rename("_worker"),
+        right=worker_for.cat.codes.rename("_worker"),
         left_on=column,
         right_index=True,
         how="inner",
@@ -962,7 +964,7 @@ def split_by_worker(
     unique_codes = codes[splits]
     out = {
         # FIXME https://github.com/pandas-dev/pandas-stubs/issues/43
-        worker_for_ser.cat.categories[code]: shard
+        worker_for.cat.categories[code]: shard
         for code, shard in zip(unique_codes, shards)
     }
     assert sum(map(len, out.values())) == nrows
