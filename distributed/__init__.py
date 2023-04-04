@@ -7,7 +7,9 @@ from distributed import widgets  # load distributed widgets second
 # isort: on
 
 import atexit
+import weakref
 
+weakref.finalize(lambda: None, lambda: None)
 import dask
 from dask.config import config  # type: ignore
 
