@@ -233,7 +233,4 @@ class SystemMonitor:
 
     def close(self) -> None:
         if self.monitor_gil_contention:
-            try:
-                self._gilknocker.stop()
-            except ValueError:  # Wasn't started or already stopped
-                pass
+            self._gilknocker.stop()
