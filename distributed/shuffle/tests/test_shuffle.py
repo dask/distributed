@@ -655,10 +655,11 @@ def test_processing_chain():
             f"col{next(counter)}": pd.array(range(100), dtype="float64"),
             f"col{next(counter)}": pd.array(
                 [np.datetime64("2022-01-01") + i for i in range(100)],
-                dtype="datetime64",
+                dtype="datetime64[ns]",
             ),
             f"col{next(counter)}": pd.array(
-                [np.timedelta64(1, "D") + i for i in range(100)], dtype="timedelta64"
+                [np.timedelta64(1, "D") + i for i in range(100)],
+                dtype="timedelta64[ns]",
             ),
             # FIXME: PyArrow does not support complex numbers: https://issues.apache.org/jira/browse/ARROW-638
             # f"col{next(counter)}": pd.array(range(100), dtype="csingle"),
