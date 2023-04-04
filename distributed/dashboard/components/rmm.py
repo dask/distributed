@@ -56,7 +56,6 @@ class RMMMemoryUsage(DashboardComponent):
             memory = figure(
                 title="RMM Memory",
                 tools="",
-                id="bk-rmm-memory-worker-plot",
                 width=int(width / 2),
                 name="rmm_memory_histogram",
                 **kwargs,
