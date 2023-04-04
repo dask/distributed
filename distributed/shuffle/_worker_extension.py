@@ -420,8 +420,6 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
     memory_limiter_comm:
         A ``ResourceLimiter`` limiting the total amount of memory used in either
         buffer.
-    dataframe_backend:
-        Backend dataframe library name. Default is "pandas".
     """
 
     def __init__(
@@ -439,10 +437,7 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
-        dataframe_backend: str = "pandas",
     ):
-        lib = import_module(dataframe_backend)
-
         super().__init__(
             id=id,
             run_id=run_id,
@@ -461,8 +456,7 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         for part, addr in worker_for.items():
             partitions_of[addr].append(part)
         self.partitions_of = dict(partitions_of)
-        self.worker_for = lib.Series(worker_for, name="_workers").astype("category")
-        self._dataframe_backend = dataframe_backend
+        self.worker_for = worker_for
 
     async def receive(self, data: list[tuple[int, bytes]]) -> None:
         await self._receive(data)
@@ -512,8 +506,8 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         await self._write_to_comm(out)
         return self.run_id
 
-    def _arrow_to_df(self, table) -> pd.DataFrame:
-        if self._dataframe_backend == "cudf":
+    def _arrow_to_df(self, table: pa.Table) -> pd.DataFrame:
+        if table.schema.metadata.get(b"dataframe", None) == b"cudf":
             import cudf
 
             return cudf.DataFrame.from_arrow(table)
@@ -562,7 +556,6 @@ class ShuffleWorkerExtension:
     memory_limiter_comms: ResourceLimiter
     memory_limiter_disk: ResourceLimiter
     closed: bool
-    _backends: dict
 
     def __init__(self, worker: Worker) -> None:
         # Attach to worker
@@ -579,7 +572,6 @@ class ShuffleWorkerExtension:
         self.memory_limiter_disk = ResourceLimiter(parse_bytes("1 GiB"))
         self.closed = False
         self._executor = ThreadPoolExecutor(self.worker.state.nthreads)
-        self._backends = {}
 
     # Handlers
     ##########
@@ -642,8 +634,6 @@ class ShuffleWorkerExtension:
     ) -> int:
         if type == ShuffleType.DATAFRAME:
             kwargs["empty"] = data
-        if shuffle_id not in self._backends:
-            self._backends[shuffle_id] = typename(data).partition(".")[0]
         shuffle = self.get_or_create_shuffle(shuffle_id, type=type, **kwargs)
         return sync(
             self.worker.loop,
@@ -838,7 +828,6 @@ class ShuffleWorkerExtension:
                 scheduler=self.worker.scheduler,
                 memory_limiter_disk=self.memory_limiter_disk,
                 memory_limiter_comms=self.memory_limiter_comms,
-                dataframe_backend=self._backends.get(shuffle_id, "pandas"),
             )
         elif result["type"] == ShuffleType.ARRAY_RECHUNK:
             shuffle = ArrayRechunkRun(
@@ -927,7 +916,7 @@ class ShuffleWorkerExtension:
 def split_by_worker(
     df: pd.DataFrame,
     column: str,
-    worker_for: pd.Series,
+    worker_for: dict[int, str],
 ) -> dict[Any, pa.Table]:
     """
     Split data into many arrow batches, partitioned by destination worker
@@ -935,8 +924,12 @@ def split_by_worker(
     import numpy as np
     import pyarrow as pa
 
+    lib = typename(df).partition(".")[0]
+    worker_for_ser = (
+        import_module(lib).Series(worker_for, name="_workers").astype("category")
+    )
     df = df.merge(
-        right=worker_for.cat.codes.rename("_worker"),
+        right=worker_for_ser.cat.codes.rename("_worker"),
         left_on=column,
         right_index=True,
         how="inner",
@@ -952,6 +945,7 @@ def split_by_worker(
         if hasattr(df, "to_arrow") and callable(df.to_arrow)
         else pa.Table.from_pandas(df, preserve_index=True)
     )
+    t = t.replace_schema_metadata(t.schema.metadata | {"dataframe": lib})
     t = t.sort_by("_worker")
     codes = np.asarray(t.select(["_worker"]))[0]
     t = t.drop(["_worker"])
@@ -968,7 +962,7 @@ def split_by_worker(
     unique_codes = codes[splits]
     out = {
         # FIXME https://github.com/pandas-dev/pandas-stubs/issues/43
-        worker_for.cat.categories[code]: shard
+        worker_for_ser.cat.categories[code]: shard
         for code, shard in zip(unique_codes, shards)
     }
     assert sum(map(len, out.values())) == nrows
