@@ -62,5 +62,5 @@ repos:
           - pytest
           - tornado
           - pyarrow
-          - git+https://github.com/dask/dask
+          - git+https://github.com/dask/dask@2023.3.2
           - git+https://github.com/dask/zict
