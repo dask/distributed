@@ -7035,12 +7035,15 @@ def test_computation_code_walk_frames():
     test_function_code = inspect.getsource(test_computation_code_walk_frames)
     code = Client._get_computation_code()
 
-    assert test_function_code == code
+    assert code == (test_function_code,)
 
     def nested_call():
-        return Client._get_computation_code()
+        return Client._get_computation_code(nframes=2)
 
-    assert nested_call() == inspect.getsource(nested_call)
+    nested = nested_call()
+    assert len(nested) == 2
+    assert nested[-1] == inspect.getsource(nested_call)
+    assert nested[-2] == test_function_code
 
     with pytest.raises(TypeError, match="Ignored modules must be a list"):
         with dask.config.set(
@@ -7055,8 +7058,8 @@ def test_computation_code_walk_frames():
 
         upper_frame_code = inspect.getsource(sys._getframe(1))
         code = Client._get_computation_code()
-        assert code == upper_frame_code
-        assert nested_call() == upper_frame_code
+        assert code == (upper_frame_code,)
+        assert nested_call()[-1] == upper_frame_code
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -7074,9 +7077,9 @@ async def test_computation_store_annotations(c, s, a):
 
 def test_computation_object_code_dask_compute(client):
     da = pytest.importorskip("dask.array")
-    x = da.ones((10, 10), chunks=(3, 3))
-    future = x.sum().compute()
-    y = future
+    with dask.config.set({"distributed.diagnostics.computations.nframes": 2}):
+        x = da.ones((10, 10), chunks=(3, 3))
+        x.sum().compute()
 
     test_function_code = inspect.getsource(test_computation_object_code_dask_compute)
 
@@ -7089,29 +7092,44 @@ def test_computation_object_code_dask_compute(client):
 
     code = client.run_on_scheduler(fetch_comp_code)
 
-    assert code == test_function_code
+    assert len(code) == 2
+    assert code[-1] == test_function_code
+    assert code[-2] == inspect.getsource(sys._getframe(1))
+
+
+def test_computation_object_code_dask_compute_no_frames_default(client):
+    da = pytest.importorskip("dask.array")
+    x = da.ones((10, 10), chunks=(3, 3))
+    x.sum().compute()
+
+    def fetch_comp_code(dask_scheduler):
+        computations = list(dask_scheduler.computations)
+        assert len(computations) == 1
+        comp = computations[0]
+        assert not comp.code
+
+    client.run_on_scheduler(fetch_comp_code)
 
 
 def test_computation_object_code_not_available(client):
     np = pytest.importorskip("numpy")
     pd = pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
-    df = pd.DataFrame({"a": range(10)})
-    ddf = dd.from_pandas(df, npartitions=3)
-    result = np.where(ddf.a > 4)
+    with dask.config.set({"distributed.diagnostics.computations.nframes": 2}):
+        df = pd.DataFrame({"a": range(10)})
+        ddf = dd.from_pandas(df, npartitions=3)
+        result = np.where(ddf.a > 4)
 
     def fetch_comp_code(dask_scheduler):
         computations = list(dask_scheduler.computations)
         assert len(computations) == 1
         comp = computations[0]
-        assert len(comp.code) == 1
-        return comp.code[0]
+        assert not comp.code
 
-    code = client.run_on_scheduler(fetch_comp_code)
-    assert code == "<Code not available>"
+    client.run_on_scheduler(fetch_comp_code)
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
 async def test_computation_object_code_dask_persist(c, s, a, b):
     da = pytest.importorskip("dask.array")
     x = da.ones((10, 10), chunks=(3, 3))
@@ -7126,10 +7144,12 @@ async def test_computation_object_code_dask_persist(c, s, a, b):
     comp = computations[0]
     assert len(comp.code) == 1
 
-    assert comp.code[0] == test_function_code
+    assert len(comp.code[0]) == 2
+    assert comp.code[0][-1] == test_function_code
+    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
 async def test_computation_object_code_client_submit_simple(c, s, a, b):
     def func(x):
         return x
@@ -7147,10 +7167,12 @@ async def test_computation_object_code_client_submit_simple(c, s, a, b):
 
     assert len(comp.code) == 1
 
-    assert comp.code[0] == test_function_code
+    assert len(comp.code[0]) == 2
+    assert comp.code[0][-1] == test_function_code
+    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
 async def test_computation_object_code_client_submit_list_comp(c, s, a, b):
     def func(x):
         return x
@@ -7169,10 +7191,12 @@ async def test_computation_object_code_client_submit_list_comp(c, s, a, b):
     # Code is deduplicated
     assert len(comp.code) == 1
 
-    assert comp.code[0] == test_function_code
+    assert len(comp.code[0]) == 2
+    assert comp.code[0][-1] == test_function_code
+    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
 async def test_computation_object_code_client_submit_dict_comp(c, s, a, b):
     def func(x):
         return x
@@ -7191,15 +7215,18 @@ async def test_computation_object_code_client_submit_dict_comp(c, s, a, b):
     # Code is deduplicated
     assert len(comp.code) == 1
 
-    assert comp.code[0] == test_function_code
+    assert len(comp.code[0]) == 2
+    assert comp.code[0][-1] == test_function_code
+    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
 async def test_computation_object_code_client_map(c, s, a, b):
-    da = pytest.importorskip("dask.array")
-    x = da.ones((10, 10), chunks=(3, 3))
-    future = c.compute(x.sum(), retries=2)
-    y = await future
+    def func(x):
+        return x
+
+    futs = c.map(func, list(range(5)))
+    await c.gather(futs)
 
     test_function_code = inspect.getsource(
         test_computation_object_code_client_map.__wrapped__
@@ -7209,10 +7236,12 @@ async def test_computation_object_code_client_map(c, s, a, b):
     comp = computations[0]
     assert len(comp.code) == 1
 
-    assert comp.code[0] == test_function_code
+    assert len(comp.code[0]) == 2
+    assert comp.code[0][-1] == test_function_code
+    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
 async def test_computation_object_code_client_compute(c, s, a, b):
     da = pytest.importorskip("dask.array")
     x = da.ones((10, 10), chunks=(3, 3))
@@ -7227,7 +7256,9 @@ async def test_computation_object_code_client_compute(c, s, a, b):
     comp = computations[0]
     assert len(comp.code) == 1
 
-    assert comp.code[0] == test_function_code
+    assert len(comp.code[0]) == 2
+    assert comp.code[0][-1] == test_function_code
+    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
 
 
 @pytest.mark.slow

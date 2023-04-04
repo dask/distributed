@@ -270,6 +270,7 @@ distributed:
     nvml: True
     computations:
       max-history: 100
+      nframes: 0
       ignore-modules:
         - distributed
         - dask

@@ -4317,7 +4317,8 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             computation = Computation()
             self.computations.append(computation)
-        if code and code not in computation.code:  # add new code blocks
+
+        if code:  # add new code blocks
             computation.code.add(code)
         if annotations:
             computation.annotations.update(annotations)
