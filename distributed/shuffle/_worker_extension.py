@@ -942,12 +942,11 @@ def split_by_worker(
     # assert len(df) == nrows  # Not true if some outputs aren't wanted
     # FIXME: If we do not preserve the index something is corrupting the
     # bytestream such that it cannot be deserialized anymore
-    t = (
-        df.to_arrow(preserve_index=True)
-        if hasattr(df, "to_arrow") and callable(df.to_arrow)
-        else pa.Table.from_pandas(df, preserve_index=True)
-    )
-    t = t.replace_schema_metadata(t.schema.metadata | {"dataframe": lib})
+    if hasattr(df, "to_arrow") and callable(df.to_arrow):
+        t = df.to_arrow(preserve_index=True)
+        t = t.replace_schema_metadata(t.schema.metadata | {"dataframe": lib})
+    else:
+        t = pa.Table.from_pandas(df, preserve_index=True)
     t = t.sort_by("_worker")
     codes = np.asarray(t.select(["_worker"]))[0]
     t = t.drop(["_worker"])
