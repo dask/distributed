@@ -162,7 +162,7 @@ def SubprocessCluster(
     silence_logs: int = logging.WARN,
     **kwargs: Any,
 ) -> SpecCluster:
-    """Create a scheduler and workers run in dedicated subprocesses
+    """Create a scheduler and workers that run in dedicated subprocesses
 
     This creates a "cluster" of a scheduler and workers running in dedicated subprocesses.
 
