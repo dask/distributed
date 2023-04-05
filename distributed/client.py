@@ -250,12 +250,13 @@ class Future(WrappedKey):
                 raise RuntimeError(
                     textwrap.dedent(
                         """\
-                Critical error encountered during Future initialization. This
-                typically occurs when when interacting with a Future object in
-                tasks that are being run on Workers without initializing a
-                Client explicitly. If you encounter this, please ensure to
-                initialize a Client object yourself before interacting with the
-                Future object directly. See also
+                Critical error encountered during Future initialization.
+                This typically occurs when interacting with Future object
+                directly inside of a Task without initializing a Client
+                explicitly inside of this Task.
+                If you encounter this, please ensure to initialize a Client
+                object yourself before interacting with the Future object
+                directly. See also
                 https://distributed.dask.org/en/stable/api.html#distributed.worker_client
                 """
                     )
