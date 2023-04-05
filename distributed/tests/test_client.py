@@ -7622,6 +7622,106 @@ def test_print_local(capsys):
     assert "Hello!:123\n" == out
 
 
+@gen_cluster(client=True, Worker=Nanny)
+async def test_forward_logging(c, s, a, b):
+    # logger will be created with default config, which handles ERROR and above.
+    client_side_logger = logging.getLogger("test.logger")
+
+    # set up log forwarding on root logger
+    await c.forward_logging()
+
+    # a task that does some error logging. should be forwarded
+    def do_error():
+        logging.getLogger("test.logger").error("Hello error")
+
+    with captured_logger(client_side_logger) as log:
+        await c.submit(do_error)
+        assert "Hello error" in log.getvalue()
+
+    # task that does some error logging with exception traceback info
+    def do_exception():
+        try:
+            raise ValueError("wrong value")
+        except ValueError:
+            logging.getLogger("test.logger").error("oops", exc_info=True)
+
+    with captured_logger(client_side_logger) as log:
+        await c.submit(do_exception)
+        log_out = log.getvalue()
+        assert "oops" in log_out
+        assert "Traceback" in log_out
+        assert "ValueError: wrong value" in log_out
+
+    # a task that does some info logging. should NOT be forwarded
+    def do_info():
+        logging.getLogger("test.logger").info("Hello info")
+
+    with captured_logger(client_side_logger) as log:
+        await c.submit(do_info)
+        assert "Hello info" not in log.getvalue()
+
+    # If we set level appropriately on both client and worker side, then the
+    # info record SHOULD be forwarded
+    client_side_logger.setLevel(logging.INFO)
+
+    def do_info_2():
+        logger = logging.getLogger("test.logger")
+        logger.setLevel(logging.INFO)
+        logger.info("Hello info")
+
+    with captured_logger(client_side_logger) as log:
+        await c.submit(do_info_2)
+        assert "Hello info" in log.getvalue()
+
+    # stop forwarding logging; the client-side logger should no longer
+    # receive forwarded records
+    await c.unforward_logging()
+    with captured_logger(client_side_logger) as log:
+        await c.submit(do_error)
+        assert "Hello error" not in log.getvalue()
+
+    # logger-specific forwarding:
+    # we should get no forwarded records from do_error(), but we should get
+    # forwarded records from do_error_other().
+    client_side_other_logger = logging.getLogger("test.other_logger")
+    await c.forward_logging("test.other_logger")
+
+    def do_error_other():
+        logging.getLogger("test.other_logger").error("Hello error")
+
+    with captured_logger(client_side_logger) as log:
+        await c.submit(do_error)
+        # no record forwarded to test.logger
+        assert "Hello error" not in log.getvalue()
+    with captured_logger(client_side_other_logger) as log:
+        await c.submit(do_error_other)
+        # record forwarded to test.other_logger
+        assert "Hello error" in log.getvalue()
+    await c.unforward_logging("test.other_logger")
+
+    # test the optional `level` argument of forward_logging(). Same semantics as
+    # `level` of built-in logging.Handlers: restriction applied on top of the
+    # level of whatever logger the handler is added to
+    await c.forward_logging("test.yet_another_logger", logging.CRITICAL)
+    client_side_yet_another_logger = logging.getLogger("test.yet_another_logger")
+
+    def do_error_yet_another():
+        logging.getLogger("test.yet_another_logger").error("Hello error")
+
+    def do_critical_yet_another():
+        logging.getLogger("test.yet_another_logger").critical("Hello criticality")
+
+    with captured_logger(client_side_yet_another_logger) as log:
+        await c.submit(do_error_yet_another)
+        # no record forwarded to logger, even though the logger by default would
+        # handle ERRORs, because we are only forwarding CRITICAL and above
+        assert "Hello error" not in log.getvalue()
+    with captured_logger(client_side_yet_another_logger) as log:
+        await c.submit(do_critical_yet_another)
+        # record forwarded to logger
+        assert "Hello criticality" in log.getvalue()
+
+
 def _verify_cluster_dump(
     url: str | pathlib.PosixPath, format: str, addresses: set[str]
 ) -> dict:
