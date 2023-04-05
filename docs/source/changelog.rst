@@ -1,6 +1,18 @@
 Changelog
 =========
 
+.. _v2023.3.2.1:
+
+2023.3.2.1
+----------
+
+Released on April 5, 2023
+
+Bug Fixes
+^^^^^^^^^
+- Register atexit handler before Distributed handlers to unblock hanging UCX clusters `Lawrence Mitchell`_ `Ben Zaitlen`_
+
+
 .. _v2023.3.2:
 
 2023.3.2
