@@ -309,7 +309,7 @@ async def test_resources(c, s):
 @pytest.mark.slow
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 @gen_cluster(client=True, nthreads=[])
-async def test_local_directory(c, s, nanny, tmpdir):
+async def test_local_directory(c, s, nanny, tmp_path):
     with popen(
         [
             "dask",
@@ -318,13 +318,13 @@ async def test_local_directory(c, s, nanny, tmpdir):
             nanny,
             "--no-dashboard",
             "--local-directory",
-            str(tmpdir),
+            str(tmp_path),
         ]
     ):
         await c.wait_for_workers(1)
         info = c.scheduler_info()
         (d,) = info["workers"].values()
-        assert d["local_directory"].startswith(str(tmpdir))
+        assert d["local_directory"].startswith(str(tmp_path))
 
 
 @pytest.mark.slow
@@ -608,6 +608,39 @@ def dask_setup(worker):
         await c.wait_for_workers(1)
         [foo] = (await c.run(lambda dask_worker: dask_worker.foo)).values()
         assert foo == "setup"
+
+
+@pytest.mark.slow
+@gen_cluster(nthreads=[], client=True)
+async def test_set_lifetime_stagger_via_env_var(c, s):
+    # Ensure that lifetime stagger can be set via an environment variable
+    env = os.environ.copy()
+    env["DASK_DISTRIBUTED__WORKER__LIFETIME__DURATION"] = "10 seconds"
+    env["DASK_DISTRIBUTED__WORKER__LIFETIME__STAGGER"] = "2 seconds"
+    with popen(["dask", "worker", s.address], env=env), popen(
+        ["dask", "worker", s.address], env=env
+    ):
+        await c.wait_for_workers(2)
+        [lifetime1, lifetime2] = (
+            await c.run(lambda dask_worker: dask_worker.lifetime)
+        ).values()
+        assert lifetime1 != lifetime2
+        assert 8 <= lifetime1 <= 12
+        assert 8 <= lifetime2 <= 12
+
+
+@pytest.mark.slow
+@gen_cluster(nthreads=[], client=True)
+async def test_set_lifetime_restart_via_env_var(c, s):
+    # Ensure that lifetime restart can be set via an environment variable
+    env = os.environ.copy()
+    env["DASK_DISTRIBUTED__WORKER__LIFETIME__RESTART"] = "True"
+    with popen(["dask", "worker", s.address], env=env):
+        await c.wait_for_workers(1)
+        [lifetime_restart] = (
+            await c.run(lambda dask_worker: dask_worker.lifetime_restart)
+        ).values()
+        assert lifetime_restart
 
 
 @pytest.mark.slow

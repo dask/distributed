@@ -6,9 +6,10 @@ import copy
 import logging
 import math
 import weakref
+from collections.abc import Awaitable, Generator
 from contextlib import suppress
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 
 from tornado import gen
 from tornado.ioloop import IOLoop
@@ -25,6 +26,9 @@ from distributed.security import Security
 from distributed.utils import NoOpAwaitable, TimeoutError, import_term, silence_logging
 
 if TYPE_CHECKING:
+    # TODO import from typing (requires Python >=3.11)
+    from typing_extensions import Self
+
     # Circular imports
     from distributed import Nanny, Worker
 
@@ -106,6 +110,13 @@ class ProcessInterface:
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         await self.close()
+
+
+_T = TypeVar("_T")
+
+
+async def _wrap_awaitable(aw: Awaitable[_T]) -> _T:
+    return await aw
 
 
 class SpecCluster(Cluster):
@@ -327,7 +338,7 @@ class SpecCluster(Cluster):
             self._correct_state_waiting = task
             return task
 
-    async def _correct_state_internal(self):
+    async def _correct_state_internal(self) -> None:
         async with self._lock:
             self._correct_state_waiting = None
 
@@ -363,7 +374,9 @@ class SpecCluster(Cluster):
                 self._created.add(worker)
                 workers.append(worker)
             if workers:
-                await asyncio.wait(workers)
+                await asyncio.wait(
+                    [asyncio.create_task(_wrap_awaitable(w)) for w in workers]
+                )
                 for w in workers:
                     w._cluster = weakref.ref(self)
                     await w  # for tornado gen.coroutine support
@@ -392,14 +405,19 @@ class SpecCluster(Cluster):
             asyncio.get_running_loop().call_later(delay, f)
         super()._update_worker_status(op, msg)
 
-    def __await__(self):
-        async def _():
+    def __await__(self: Self) -> Generator[Any, Any, Self]:
+        async def _() -> Self:
             if self.status == Status.created:
                 await self._start()
             await self.scheduler
             await self._correct_state()
             if self.workers:
-                await asyncio.wait(list(self.workers.values()))  # maybe there are more
+                await asyncio.wait(
+                    [
+                        asyncio.create_task(_wrap_awaitable(w))
+                        for w in self.workers.values()
+                    ]
+                )  # maybe there are more
             return self
 
         return _().__await__()

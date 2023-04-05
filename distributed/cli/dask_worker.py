@@ -190,8 +190,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option(
     "--lifetime-stagger",
     type=str,
-    default="0 seconds",
-    show_default=True,
+    default=None,
     help="Random amount by which to stagger lifetime values",
 )
 @click.option(
@@ -204,8 +203,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option(
     "--lifetime-restart/--no-lifetime-restart",
     "lifetime_restart",
-    default=False,
-    show_default=True,
+    default=None,
     required=False,
     help="Whether or not to restart the worker after the lifetime lapses. "
     "This assumes that you are using the --lifetime and --nanny keywords",
@@ -260,12 +258,13 @@ def main(  # type: ignore[no-untyped-def]
     preload_nanny,
     **kwargs,
 ):
-    """Launch a distributed worker attached to an existing SCHEDULER."""
+    """Launch a Dask worker attached to an existing scheduler"""
 
     if "dask-worker" in sys.argv[0]:
         warnings.warn(
             "dask-worker is deprecated and will be removed in a future release; use `dask worker` instead",
             FutureWarning,
+            stacklevel=1,
         )
 
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653

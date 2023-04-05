@@ -17,7 +17,7 @@ from distributed.protocol import (
     serialize,
     to_serialize,
 )
-from distributed.protocol.compression import maybe_compress
+from distributed.protocol.compression import default_compression, maybe_compress
 from distributed.protocol.numpy import itemsize
 from distributed.protocol.utils import BIG_BYTES_SHARD_SIZE
 from distributed.system import MEMORY_LIMIT
@@ -216,8 +216,8 @@ def test_itemsize(dt, size):
     assert itemsize(np.dtype(dt)) == size
 
 
+@pytest.mark.skipif(default_compression is None, reason="requires lz4 or snappy")
 def test_compress_numpy():
-    pytest.importorskip("lz4")
     x = np.ones(10000000, dtype="i4")
     frames = dumps({"x": to_serialize(x)})
     assert sum(map(nbytes, frames)) < x.nbytes

@@ -44,7 +44,7 @@ class ResourceLimiter:
     async def wait_for_available(self) -> None:
         """Block until the counter drops below maxvalue"""
         start = time()
-        duration = 0
+        duration = 0.0
         try:
             if self.available():
                 return

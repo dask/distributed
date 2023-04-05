@@ -428,7 +428,6 @@ class WorkStealing(SchedulerPlugin):
                 if not potential_thieves:
                     break
                 for victim in list(potential_victims):
-
                     stealable = self.stealable[victim.address][level]
                     if not stealable or not potential_thieves:
                         continue
@@ -439,14 +438,13 @@ class WorkStealing(SchedulerPlugin):
                         if (
                             ts not in self.key_stealable
                             or ts.processing_on is not victim
+                            or ts not in victim.processing
                         ):
+                            # FIXME: Instead of discarding here, clean up stealable properly
                             stealable.discard(ts)
                             continue
                         i += 1
                         if not (thief := _get_thief(s, ts, potential_thieves)):
-                            continue
-                        if ts not in victim.processing:
-                            stealable.discard(ts)
                             continue
 
                         occ_thief = self._combined_occupancy(thief)
@@ -483,6 +481,9 @@ class WorkStealing(SchedulerPlugin):
                                 thief, occ_thief, nproc_thief
                             ):
                                 potential_thieves.discard(thief)
+                            # FIXME: move_task_request already implements some logic
+                            # for removing ts from stealable. If we made sure to
+                            # properly clean up, we would not need this
                             stealable.discard(ts)
                     self.scheduler.check_idle_saturated(
                         victim, occ=self._combined_occupancy(victim)

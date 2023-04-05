@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from unittest import mock
 
@@ -10,6 +9,7 @@ from tornado.httpclient import AsyncHTTPClient
 from distributed import Event, Worker, wait
 from distributed.sizeof import sizeof
 from distributed.utils_test import (
+    async_poll_for,
     fetch_metrics,
     fetch_metrics_body,
     fetch_metrics_sample_names,
@@ -21,23 +21,33 @@ from distributed.utils_test import (
 async def test_prometheus(c, s, a):
     pytest.importorskip("prometheus_client")
 
+    # We need *some* tasks or dask_worker_tasks won't appear
+    fut = c.submit(lambda: 1)
+    await wait(fut)
+
+    a.data.evict()
+
     active_metrics = await fetch_metrics_sample_names(
         a.http_server.port, prefix="dask_worker_"
     )
     expected_metrics = {
-        "dask_worker_tasks",
         "dask_worker_concurrent_fetch_requests",
-        "dask_worker_threads",
         "dask_worker_latency_seconds",
         "dask_worker_memory_bytes",
+        "dask_worker_spill_bytes_total",
+        "dask_worker_spill_count_total",
+        "dask_worker_spill_time_seconds_total",
+        "dask_worker_tasks",
+        "dask_worker_threads",
+        "dask_worker_tick_count_total",
+        "dask_worker_tick_duration_maximum_seconds",
         "dask_worker_transfer_incoming_bytes",
         "dask_worker_transfer_incoming_count",
         "dask_worker_transfer_incoming_count_total",
         "dask_worker_transfer_outgoing_bytes",
         "dask_worker_transfer_outgoing_count",
         "dask_worker_transfer_outgoing_count_total",
-        "dask_worker_tick_count_total",
-        "dask_worker_tick_duration_maximum_seconds",
+        "dask_worker_transfer_outgoing_bytes_total",
     }
 
     try:
@@ -45,7 +55,7 @@ async def test_prometheus(c, s, a):
     except ImportError:
         pass
     else:
-        expected_metrics = expected_metrics.union(
+        expected_metrics.update(
             {
                 "dask_worker_tick_duration_median_seconds",
                 "dask_worker_task_duration_median_seconds",
@@ -82,71 +92,44 @@ async def test_metrics_when_prometheus_client_not_installed(
 async def test_prometheus_collect_task_states(c, s, a):
     pytest.importorskip("prometheus_client")
 
-    async def fetch_state_metrics():
+    async def assert_metrics(**expect):
         families = await fetch_metrics(a.http_server.port, prefix="dask_worker_")
-        active_metrics = {
+        actual = {
             sample.labels["state"]: sample.value
             for sample in families["dask_worker_tasks"].samples
         }
-        return active_metrics
+
+        assert actual == expect
 
     assert not a.state.tasks
-    active_metrics = await fetch_state_metrics()
-    assert active_metrics == {
-        "constrained": 0.0,
-        "executing": 0.0,
-        "fetch": 0.0,
-        "flight": 0.0,
-        "long-running": 0.0,
-        "memory": 0.0,
-        "missing": 0.0,
-        "other": 0.0,
-        "ready": 0.0,
-        "waiting": 0.0,
-    }
-
+    await assert_metrics()
     ev = Event()
 
     # submit a task which should show up in the prometheus scraping
-    future = c.submit(ev.wait)
-    while not a.state.executing:
-        await asyncio.sleep(0.001)
+    fut1 = c.submit(ev.wait)
+    await async_poll_for(lambda: a.state.executing, timeout=5)
 
-    active_metrics = await fetch_state_metrics()
-    assert active_metrics == {
-        "constrained": 0.0,
-        "executing": 1.0,
-        "fetch": 0.0,
-        "flight": 0.0,
-        "long-running": 0.0,
-        "memory": 0.0,
-        "missing": 0.0,
-        "other": 0.0,
-        "ready": 0.0,
-        "waiting": 0.0,
-    }
+    await assert_metrics(executing=1)
 
     await ev.set()
-    await c.gather(future)
+    await wait(fut1)
 
-    future.release()
+    await assert_metrics(memory=1)
 
-    while future.key in a.state.tasks:
-        await asyncio.sleep(0.001)
+    fut2 = c.submit(lambda: 1)
+    await wait(fut2)
+    await assert_metrics(memory=2)
 
-    active_metrics = await fetch_state_metrics()
-    assert active_metrics == {
-        "constrained": 0.0,
-        "executing": 0.0,
-        "fetch": 0.0,
-        "flight": 0.0,
-        "long-running": 0.0,
-        "memory": 0.0,
-        "missing": 0.0,
-        "other": 0.0,
-        "ready": 0.0,
-        "waiting": 0.0,
-    }
+    a.data.evict()
+    await assert_metrics(memory=1, disk=1)
+    a.data.evict()
+    await assert_metrics(disk=2)
+
+    fut1.release()
+    fut2.release()
+
+    await async_poll_for(lambda: not a.state.tasks, timeout=5)
+    await assert_metrics()
 
 
 @gen_cluster(client=True)

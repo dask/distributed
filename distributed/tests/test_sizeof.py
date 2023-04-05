@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import logging
-
 import pytest
 
 from dask.sizeof import sizeof
@@ -23,13 +21,13 @@ def test_safe_sizeof_logs_on_failure():
     foo = BadlySized()
 
     # Defaults to 0.95 MiB by default
-    with captured_logger(logging.getLogger("distributed.sizeof")) as logs:
+    with captured_logger("distributed.sizeof") as logs:
         assert safe_sizeof(foo) == 1e6
 
     assert "Sizeof calculation failed. Defaulting to 0.95 MiB" in logs.getvalue()
 
     # Can provide custom `default_size`
-    with captured_logger(logging.getLogger("distributed.sizeof")) as logs:
+    with captured_logger("distributed.sizeof") as logs:
         default_size = 2 * (1024**2)  # 2 MiB
         assert safe_sizeof(foo, default_size=default_size) == default_size
 

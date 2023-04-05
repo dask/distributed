@@ -98,12 +98,13 @@ def test_timeout_sync(client):
 
 
 @gen_cluster(
+    client=True,
     config={
         "distributed.scheduler.locks.lease-validation-interval": "200ms",
         "distributed.scheduler.locks.lease-timeout": "200ms",
     },
 )
-async def test_release_semaphore_after_timeout(s, a, b):
+async def test_release_semaphore_after_timeout(c, s, a, b):
     sem = await Semaphore(name="x", max_leases=2)
     await sem.acquire()  # leases: 2 - 1 = 1
 
@@ -121,19 +122,19 @@ async def test_release_semaphore_after_timeout(s, a, b):
     assert not (await sem.acquire(timeout=0.1))
 
 
-@gen_cluster()
-async def test_async_ctx(s, a, b):
+@gen_cluster(client=True)
+async def test_async_ctx(c, s, a, b):
     sem = await Semaphore(name="x")
     async with sem:
         assert not await sem.acquire(timeout=0.025)
     assert await sem.acquire()
 
 
-@pytest.mark.slow
 def test_worker_dies(loop):
     with cluster(
         config={
-            "distributed.scheduler.locks.lease-timeout": "0.1s",
+            "distributed.scheduler.locks.lease-timeout": "50ms",
+            "distributed.scheduler.locks.lease-validation-interval": "10ms",
         }
     ) as (scheduler, workers):
         with Client(scheduler["address"], loop=loop) as client:
@@ -191,9 +192,8 @@ async def test_access_semaphore_by_name(c, s, a, b):
     assert result.count(False) == 9
 
 
-@pytest.mark.slow
-@gen_cluster(client=True, timeout=120)
-async def test_close_async(c, s, a, b):
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_close_async(c, s, a):
     sem = await Semaphore(name="test")
 
     assert await sem.acquire()
@@ -212,7 +212,7 @@ async def test_close_async(c, s, a, b):
     assert await sem2.acquire()
 
     def f(sem_):
-        return sem_.acquire()
+        sem_.acquire(timeout="0.5s")
 
     semaphore_object = s.extensions["semaphores"]
     fire_and_forget(c.submit(f, sem_=sem2))
@@ -298,7 +298,6 @@ class FlakyConnectionPool(ConnectionPool):
 @gen_cluster(client=True)
 async def test_retry_acquire(c, s, a, b):
     with dask.config.set({"distributed.comm.retry.count": 1}):
-
         pool = await FlakyConnectionPool(failing_connections=1)
 
         semaphore = await Semaphore(
@@ -441,7 +440,6 @@ async def test_timeout_zero(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_getvalue(c, s, a, b):
-
     sem = await Semaphore()
 
     assert await sem.get_value() == 0
@@ -517,7 +515,7 @@ def test_threadpoolworkers_pick_correct_ioloop(cleanup, loop):
                     assert len(protected_resource) == 0
                     protected_resource.append(val)
                     # Interact with the DB
-                    time.sleep(0.2)
+                    time.sleep(0.01)
                     protected_resource.remove(val)
 
             client.gather(client.map(access_limited, range(10), sem=sem))
@@ -556,50 +554,56 @@ async def test_release_retry(c, s, a, b):
         "distributed.scheduler.locks.lease-validation-interval": "100ms",
     },
 )
-async def test_release_failure(c, s, a, b):
+async def test_release_failure(c, s, a, b, caplog):
     """Don't raise even if release fails: lease will be cleaned up by the
     lease-validation after a specified interval anyway (see config parameters used).
     """
 
     with dask.config.set({"distributed.comm.retry.count": 1}):
         pool = await FlakyConnectionPool(failing_connections=5)
-
+        ext = s.extensions["semaphores"]
+        name = "foo"
         semaphore = await Semaphore(
             max_leases=2,
-            name="resource_we_want_to_limit",
+            name=name,
             scheduler_rpc=pool(s.address),
         )
         await semaphore.acquire()
         pool.activate()  # Comm chaos starts
+        assert await semaphore.release() is False
 
-        # Release fails (after a single retry) because of broken connections
-        with captured_logger(
-            "distributed.semaphore", level=logging.ERROR
-        ) as semaphore_log:
-            with captured_logger("distributed.utils_comm") as retry_log:
-                assert await semaphore.release() is False
+        pool.deactivate()  # comm chaos stops
+        assert ext.get_value(name) == 1  # lease is still registered
+        while not (await semaphore.get_value() == 0):
+            await asyncio.sleep(0.01)
 
-        with captured_logger(
-            "distributed.semaphore", level=logging.DEBUG
-        ) as semaphore_cleanup_log:
-            pool.deactivate()  # comm chaos stops
-            assert await semaphore.get_value() == 1  # lease is still registered
-            await asyncio.sleep(0.2)  # Wait for lease to be cleaned up
 
-        # Check release was retried
-        retry_log = retry_log.getvalue().split("\n")[0]
-        assert retry_log.startswith(
-            "Retrying semaphore release:"
-        ) and retry_log.endswith("after exception in attempt 0/1: ")
-        # Check release failed
-        semaphore_log = semaphore_log.getvalue().split("\n")[0]
-        assert semaphore_log.startswith(
-            "Release failed for id="
-        ) and semaphore_log.endswith("Cluster network might be unstable?")
+@gen_cluster(client=True, nthreads=[])
+async def test_unpickle_without_client(c, s):
+    """Ensure that the object properly pickle roundtrips even if no client, worker, etc. is active in the given context.
 
-        # Check lease has timed out
-        assert any(
-            log.startswith("Lease") and "timed out after" in log
-            for log in semaphore_cleanup_log.getvalue().split("\n")
-        )
-        assert await semaphore.get_value() == 0
+    This typically happens if the object is being deserialized on the scheduler.
+    """
+    sem = await Semaphore()
+    pickled = pickle.dumps(sem)
+    await c.close()
+
+    # We do not want to initialize a client during unpickling
+    with pytest.raises(ValueError):
+        Client.current()
+
+    s2 = pickle.loads(pickled)
+
+    with pytest.raises(ValueError):
+        Client.current()
+
+    assert s2.scheduler is None
+    await asyncio.sleep(0)
+    assert not s2.refresh_callback.is_running()
+
+    with pytest.raises(RuntimeError, match="not properly initialized"):
+        await s2.acquire()
+
+    async with Client(s.address, asynchronous=True):
+        s3 = pickle.loads(pickled)
+        assert await s3.acquire()

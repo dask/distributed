@@ -10,7 +10,7 @@ from distributed.batched import BatchedSend
 from distributed.core import CommClosedError, connect, listen
 from distributed.metrics import time
 from distributed.protocol import to_serialize
-from distributed.utils import All
+from distributed.utils import All, wait_for
 from distributed.utils_test import captured_logger, gen_test
 
 
@@ -172,7 +172,7 @@ async def test_stress():
 
         async def recv():
             while True:
-                result = await asyncio.wait_for(comm.read(), 1)
+                result = await wait_for(comm.read(), 1)
                 L.extend(result)
                 if result[-1] == 9999:
                     break
@@ -207,7 +207,7 @@ async def run_traffic_jam(nsends, nbytes):
             # If this times out then I think it's a backpressure issue
             # Somehow we're able to flood the socket so that the receiving end
             # loses some of our messages
-            L = await asyncio.wait_for(comm.read(), 5)
+            L = await wait_for(comm.read(), 5)
             count += 1
             results.extend(r["i"] for r in L)
 
