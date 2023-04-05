@@ -3,9 +3,11 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
+import textwrap
 
 import pytest
 import yaml
@@ -188,6 +190,42 @@ def test_logging_extended():
             """
 
         subprocess.check_call([sys.executable, "-c", code])
+
+
+def test_default_logging_does_not_override_basic_config():
+    code = textwrap.dedent(
+        """\
+        import logging
+        logging.basicConfig()
+        import distributed
+        logging.getLogger("distributed").warning("hello")
+        """
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code], check=True, capture_output=True, encoding="utf8"
+    )
+    assert proc.stdout == ""
+    assert proc.stderr == "WARNING:distributed:hello\n"
+
+
+def test_basic_config_does_not_override_default_logging():
+    code = textwrap.dedent(
+        """\
+        import logging
+        import distributed
+
+        logging.basicConfig()
+        logging.getLogger("distributed").warning("hello")
+        """
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code], check=True, capture_output=True, encoding="utf8"
+    )
+    assert proc.stdout == ""
+    assert re.match(
+        r"\A\d+-\d+-\d+ \d+:\d+:\d+,\d+ - distributed - WARNING - hello\n\Z",
+        proc.stderr,
+    )
 
 
 def test_logging_mutual_exclusive():
