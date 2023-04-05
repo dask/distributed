@@ -102,7 +102,7 @@ def _initialize_logging_old_style(config: dict[Any, Any]) -> None:
         )
     )
     logging_names = _logging_get_level_names_mapping()
-    for name, raw_level in loggers.items():
+    for name, raw_level in sorted(loggers.items()):
         level = (
             logging_names[raw_level.upper()]
             if isinstance(raw_level, str)
@@ -112,20 +112,18 @@ def _initialize_logging_old_style(config: dict[Any, Any]) -> None:
         logger.setLevel(level)
 
         # Ensure that we're not registering the logger twice in this hierarchy.
-        anc: logging.Logger | None = None
+        anc = logging.getLogger(None)
         already_registered = False
-        for ancestor in name.split("."):
-            if anc is None:
-                anc = logging.getLogger(ancestor)
-            else:
-                anc.getChild(ancestor)
 
-            if handler in anc.handlers:
+        for ancestor in name.split("."):
+            if anc.handlers:
                 already_registered = True
                 break
+            anc.getChild(ancestor)
 
         if not already_registered:
             logger.addHandler(handler)
+            logger.propagate = False
 
 
 def _initialize_logging_new_style(config: dict[Any, Any]) -> None:
