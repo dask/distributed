@@ -79,12 +79,7 @@ class SubprocessScheduler(Subprocess):
         ]
         logger.info(" ".join(cmd))
         self.process = await asyncio.create_subprocess_exec(
-            "dask",
-            "spec",
-            "--spec",
-            json.dumps(
-                {"cls": "distributed.Scheduler", "opts": {**self.scheduler_kwargs}}
-            ),
+            *cmd,
             stderr=asyncio.subprocess.PIPE,
         )
 
@@ -141,13 +136,7 @@ class SubprocessWorker(Subprocess):
             json.dumps({"cls": self.worker_class, "opts": {**self.worker_kwargs}}),
         ]
         logger.info(" ".join(cmd))
-        self.process = await asyncio.create_subprocess_exec(
-            "dask",
-            "spec",
-            self.scheduler,
-            "--spec",
-            json.dumps({"cls": self.worker_class, "opts": {**self.worker_kwargs}}),
-        )
+        self.process = await asyncio.create_subprocess_exec(*cmd)
 
 
 def SubprocessCluster(
