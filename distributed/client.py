@@ -10,6 +10,7 @@ import os
 import pickle
 import re
 import sys
+import textwrap
 import threading
 import traceback
 import uuid
@@ -242,6 +243,22 @@ class Future(WrappedKey):
                     pass
                 else:
                     handler(key=self.key)
+        if self._client:
+            try:
+                assert self._state is self._client.futures[self._tkey]
+            except (AssertionError, KeyError):
+                raise RuntimeError(
+                    textwrap.dedent(
+                        """\
+                Critical error encountered during Future initialization. This
+                typically occurs when passing around Future objects without
+                handling the Client lifecycle explicitly. If you encounter this,
+                please ensure to initialize a Client object yourself before
+                interacting with the Future object. See also
+                https://distributed.dask.org/en/stable/api.html#distributed.worker_client
+                """
+                    )
+                )
 
     def _verify_initialized(self):
         if not self.client or not self._state:

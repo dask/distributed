@@ -59,6 +59,7 @@ from distributed import (
     performance_report,
     profile,
     secede,
+    worker_client,
 )
 from distributed.client import (
     Client,
@@ -8029,3 +8030,45 @@ async def test_resolves_future_in_dict(c, s, a, b):
     outer_future = c.submit(identity, {"x": inner_future, "y": 2})
     result = await outer_future
     assert result == {"x": 1, "y": 2}
+
+
+def bad_wrapper(client, use_worker_client=False):
+    class FuncWrapper:
+        def __init__(self, f, args=None):
+            self.f = f
+            self.args = [] if args is None else args
+
+        def __call__(self, x):
+            return self.f(x, *self.args)
+
+    def make_data():
+        return 1
+
+    def func_to_map(x, x0):
+        if use_worker_client:
+            ctx = worker_client()
+        else:
+            ctx = nullcontext()
+        with ctx:
+            return x0.result() + x
+
+    shared_future = client.submit(make_data)
+
+    wrapped_func = FuncWrapper(func_to_map, (shared_future,))
+
+    futures = client.map(wrapped_func, range(10))
+    results = client.gather(futures)
+
+
+def test_cancelled_error_wrapped_future(loop):
+    # See https://github.com/dask/distributed/issues/7746
+
+    # FIXME: This does not trigger with the ordinary cluster utils and depends
+    # on a race on the worker. In the case of an error, it appears multiple
+    # worker clients are created implicitly and ownership of futures is mixed
+    with LocalCluster(loop=loop, dashboard_address=":0") as cluster:
+        with Client(cluster, loop=loop) as c:
+            with pytest.raises(RuntimeError, match="worker_client"):
+                bad_wrapper(c)
+        with Client(cluster, loop=loop) as c:
+            bad_wrapper(c, use_worker_client=True)
