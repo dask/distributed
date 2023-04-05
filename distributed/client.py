@@ -251,9 +251,9 @@ class Future(WrappedKey):
                     textwrap.dedent(
                         """\
                 Critical error encountered during Future initialization.
-                This typically occurs when interacting with Future object
+                This typically occurs when interacting with Future objects
                 directly inside of a Task without initializing a Client
-                explicitly inside of this Task.
+                explicitly inside of this Task first.
                 If you encounter this, please ensure to initialize a Client
                 object yourself before interacting with the Future object
                 directly. See also
