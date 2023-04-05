@@ -251,10 +251,11 @@ class Future(WrappedKey):
                     textwrap.dedent(
                         """\
                 Critical error encountered during Future initialization. This
-                typically occurs when passing around Future objects without
-                handling the Client lifecycle explicitly. If you encounter this,
-                please ensure to initialize a Client object yourself before
-                interacting with the Future object. See also
+                typically occurs when when interacting with a Future object in
+                tasks that are being run on Workers without initializing a
+                Client explicitly. If you encounter this, please ensure to
+                initialize a Client object yourself before interacting with the
+                Future object directly. See also
                 https://distributed.dask.org/en/stable/api.html#distributed.worker_client
                 """
                     )
