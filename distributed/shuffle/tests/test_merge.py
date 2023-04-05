@@ -241,7 +241,7 @@ async def test_merge_by_multiple_columns(c, s, a, b, how):
                 # FIXME: There's an discrepancy with an empty index for
                 # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
                 # Temporarily avoid index check until the discrepancy is fixed.
-                check_index=not PANDAS_GT_200 and not expected.index.empty,
+                check_index=not (PANDAS_GT_200 and expected.index.empty),
             )
 
             expected = pdr.join(pdl, how=how)
@@ -251,7 +251,7 @@ async def test_merge_by_multiple_columns(c, s, a, b, how):
                 # FIXME: There's an discrepancy with an empty index for
                 # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
                 # Temporarily avoid index check until the discrepancy is fixed.
-                check_index=not PANDAS_GT_200 and not expected.index.empty,
+                check_index=not (PANDAS_GT_200 and expected.index.empty),
             )
 
             expected = pd.merge(pdl, pdr, how=how, left_index=True, right_index=True)
@@ -270,7 +270,7 @@ async def test_merge_by_multiple_columns(c, s, a, b, how):
                 # FIXME: There's an discrepancy with an empty index for
                 # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
                 # Temporarily avoid index check until the discrepancy is fixed.
-                check_index=not PANDAS_GT_200 and not expected.index.empty,
+                check_index=not (PANDAS_GT_200 and expected.index.empty),
             )
 
             expected = pd.merge(pdr, pdl, how=how, left_index=True, right_index=True)
@@ -287,9 +287,9 @@ async def test_merge_by_multiple_columns(c, s, a, b, how):
                 ),
                 expected,
                 # FIXME: There's an discrepancy with an empty index for
-                # (xref https://github.com/dask/dask/issues/9957).
+                # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
                 # Temporarily avoid index check until the discrepancy is fixed.
-                check_index=not PANDAS_GT_200 and not expected.index.empty,
+                check_index=not (PANDAS_GT_200 and expected.index.empty),
             )
 
             # hash join
