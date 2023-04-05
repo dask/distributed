@@ -8060,15 +8060,11 @@ def bad_wrapper(client, use_worker_client=False):
     results = client.gather(futures)
 
 
+@pytest.mark.slow()
 def test_cancelled_error_wrapped_future(loop):
     # See https://github.com/dask/distributed/issues/7746
-
-    # FIXME: This does not trigger with the ordinary cluster utils and depends
-    # on a race on the worker. In the case of an error, it appears multiple
-    # worker clients are created implicitly and ownership of futures is mixed
-    with LocalCluster(loop=loop, dashboard_address=":0") as cluster:
+    with LocalCluster(loop=loop, dashboard_address=":0", n_workers=1) as cluster:
         with Client(cluster, loop=loop) as c:
-            with pytest.raises(RuntimeError, match="worker_client"):
-                bad_wrapper(c)
+            bad_wrapper(c)
         with Client(cluster, loop=loop) as c:
             bad_wrapper(c, use_worker_client=True)
