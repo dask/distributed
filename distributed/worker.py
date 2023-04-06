@@ -118,6 +118,7 @@ from distributed.versions import get_versions
 from distributed.worker_memory import (
     DeprecatedMemoryManagerAttribute,
     DeprecatedMemoryMonitor,
+    WorkerDataParameter,
     WorkerMemoryManager,
 )
 from distributed.worker_state_machine import (
@@ -517,16 +518,7 @@ class Worker(BaseWorker, ServerNode):
         memory_limit: str | float = "auto",
         # Allow overriding the dict-like that stores the task outputs.
         # This is meant for power users only. See WorkerMemoryManager for details.
-        data: (
-            MutableMapping[str, Any]  # pre-initialised
-            | Callable[[], MutableMapping[str, Any]]  # constructor
-            # constructor receiving self.local_directory
-            | Callable[[str], MutableMapping[str, Any]]
-            | tuple[
-                Callable[..., MutableMapping[str, Any]], dict[str, Any]
-            ]  # (constructor, kwargs to constructor)
-            | None  # create internally
-        ) = None,
+        data: WorkerDataParameter = None,
         # Deprecated parameters; please use dask config instead.
         memory_target_fraction: float | Literal[False] | None = None,
         memory_spill_fraction: float | Literal[False] | None = None,
@@ -876,7 +868,7 @@ class Worker(BaseWorker, ServerNode):
     memory_manager: WorkerMemoryManager
 
     @property
-    def data(self) -> MutableMapping[str, Any]:
+    def data(self) -> MutableMapping[str, object]:
         """{task key: task payload} of all completed tasks, whether they were computed
         on this Worker or computed somewhere else and then transferred here over the
         network.
@@ -1564,7 +1556,7 @@ class Worker(BaseWorker, ServerNode):
             if hasattr(extension, "close"):
                 result = extension.close()
                 if isawaitable(result):
-                    result = await result
+                    await result
 
         if nanny and self.nanny:
             with self.rpc(self.nanny) as r:
@@ -2371,7 +2363,7 @@ class Worker(BaseWorker, ServerNode):
 
     def _prepare_args_for_execution(
         self, ts: TaskState, args: tuple, kwargs: dict[str, Any]
-    ) -> tuple[tuple, dict[str, Any]]:
+    ) -> tuple[tuple[object, ...], dict[str, object]]:
         start = time()
         data = {}
         for dep in ts.dependencies:

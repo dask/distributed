@@ -211,7 +211,8 @@ class WorkerPlugin:
         """
 
     def teardown(self, worker):
-        """Run when the worker to which the plugin is attached to is closed"""
+        """Run when the worker to which the plugin is attached is closed, or
+        when the plugin is removed."""
 
     def transition(self, key, start, finish, **kwargs):
         """
@@ -572,6 +573,87 @@ class UploadFile(WorkerPlugin):
             filename=self.filename, data=self.data, load=True
         )
         assert len(self.data) == response["nbytes"]
+
+
+class ForwardLoggingPlugin(WorkerPlugin):
+    """
+    A ``WorkerPlugin`` to forward python logging records from worker to client.
+    See :meth:`Client.forward_logging` for full documentation and usage. Needs
+    to be used in coordination with :meth:`Client.subscribe_topic`, the details
+    of which :meth:`Client.forward_logging` handles for you.
+
+    Parameters
+    ----------
+    logger_name : str
+        The name of the logger to begin forwarding.
+
+    level : str | int
+        Optionally restrict forwarding to ``LogRecord``s of this level or
+        higher, even if the forwarded logger's own level is lower.
+
+    topic : str
+        The name of the topic to which to the worker should log the forwarded log
+        records.
+    """
+
+    def __init__(self, logger_name, level, topic):
+        self.logger_name = logger_name
+        self.level = level
+        self.topic = topic
+        self.handler = None
+
+    def setup(self, worker):
+        self.handler = _ForwardingLogHandler(worker, self.topic, level=self.level)
+        logger = logging.getLogger(self.logger_name)
+        logger.addHandler(self.handler)
+
+    def teardown(self, worker):
+        if self.handler is not None:
+            logger = logging.getLogger(self.logger_name)
+            logger.removeHandler(self.handler)
+
+
+class _ForwardingLogHandler(logging.Handler):
+    """
+    Handler class that gets installed inside workers by
+    :class:`ForwardLoggingPlugin`. Not intended to be instantiated by the user
+    directly.
+
+    In each affected worker, ``ForwardLoggingPlugin`` adds an instance of this
+    handler to one or more loggers (possibly the root logger). Tasks running on
+    the worker may then use the affected logger as normal, with the side effect
+    that any ``LogRecord``s handled by the logger (or by a logger below it in
+    the hierarchy) will be published to the dask client as a
+    ``topic`` event.
+    """
+
+    def __init__(self, worker, topic, level=logging.NOTSET):
+        super().__init__(level)
+        self.worker = worker
+        self.topic = topic
+
+    def prepare_record_attributes(self, record):
+        # Adapted from the CPython standard library's
+        # logging.handlers.SocketHandler.makePickle; see its source at:
+        # https://github.com/python/cpython/blob/main/Lib/logging/handlers.py
+        ei = record.exc_info
+        if ei:
+            # just to get traceback text into record.exc_text ...
+            _ = self.format(record)
+        # If msg or args are objects, they may not be available on the receiving
+        # end. So we convert the msg % args to a string, save it as msg and zap
+        # the args.
+        d = dict(record.__dict__)
+        d["msg"] = record.getMessage()
+        d["args"] = None
+        d["exc_info"] = None
+        # delete 'message' if present: redundant with 'msg'
+        d.pop("message", None)
+        return d
+
+    def emit(self, record):
+        attributes = self.prepare_record_attributes(record)
+        self.worker.log_event(self.topic, attributes)
 
 
 class Environ(NannyPlugin):

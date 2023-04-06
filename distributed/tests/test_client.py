@@ -7035,12 +7035,15 @@ def test_computation_code_walk_frames():
     test_function_code = inspect.getsource(test_computation_code_walk_frames)
     code = Client._get_computation_code()
 
-    assert test_function_code == code
+    assert code == (test_function_code,)
 
     def nested_call():
-        return Client._get_computation_code()
+        return Client._get_computation_code(nframes=2)
 
-    assert nested_call() == inspect.getsource(nested_call)
+    nested = nested_call()
+    assert len(nested) == 2
+    assert nested[-1] == inspect.getsource(nested_call)
+    assert nested[-2] == test_function_code
 
     with pytest.raises(TypeError, match="Ignored modules must be a list"):
         with dask.config.set(
@@ -7055,8 +7058,8 @@ def test_computation_code_walk_frames():
 
         upper_frame_code = inspect.getsource(sys._getframe(1))
         code = Client._get_computation_code()
-        assert code == upper_frame_code
-        assert nested_call() == upper_frame_code
+        assert code == (upper_frame_code,)
+        assert nested_call()[-1] == upper_frame_code
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -7074,9 +7077,9 @@ async def test_computation_store_annotations(c, s, a):
 
 def test_computation_object_code_dask_compute(client):
     da = pytest.importorskip("dask.array")
-    x = da.ones((10, 10), chunks=(3, 3))
-    future = x.sum().compute()
-    y = future
+    with dask.config.set({"distributed.diagnostics.computations.nframes": 2}):
+        x = da.ones((10, 10), chunks=(3, 3))
+        x.sum().compute()
 
     test_function_code = inspect.getsource(test_computation_object_code_dask_compute)
 
@@ -7089,29 +7092,44 @@ def test_computation_object_code_dask_compute(client):
 
     code = client.run_on_scheduler(fetch_comp_code)
 
-    assert code == test_function_code
+    assert len(code) == 2
+    assert code[-1] == test_function_code
+    assert code[-2] == inspect.getsource(sys._getframe(1))
+
+
+def test_computation_object_code_dask_compute_no_frames_default(client):
+    da = pytest.importorskip("dask.array")
+    x = da.ones((10, 10), chunks=(3, 3))
+    x.sum().compute()
+
+    def fetch_comp_code(dask_scheduler):
+        computations = list(dask_scheduler.computations)
+        assert len(computations) == 1
+        comp = computations[0]
+        assert not comp.code
+
+    client.run_on_scheduler(fetch_comp_code)
 
 
 def test_computation_object_code_not_available(client):
     np = pytest.importorskip("numpy")
     pd = pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
-    df = pd.DataFrame({"a": range(10)})
-    ddf = dd.from_pandas(df, npartitions=3)
-    result = np.where(ddf.a > 4)
+    with dask.config.set({"distributed.diagnostics.computations.nframes": 2}):
+        df = pd.DataFrame({"a": range(10)})
+        ddf = dd.from_pandas(df, npartitions=3)
+        result = np.where(ddf.a > 4)
 
     def fetch_comp_code(dask_scheduler):
         computations = list(dask_scheduler.computations)
         assert len(computations) == 1
         comp = computations[0]
-        assert len(comp.code) == 1
-        return comp.code[0]
+        assert not comp.code
 
-    code = client.run_on_scheduler(fetch_comp_code)
-    assert code == "<Code not available>"
+    client.run_on_scheduler(fetch_comp_code)
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
 async def test_computation_object_code_dask_persist(c, s, a, b):
     da = pytest.importorskip("dask.array")
     x = da.ones((10, 10), chunks=(3, 3))
@@ -7126,10 +7144,12 @@ async def test_computation_object_code_dask_persist(c, s, a, b):
     comp = computations[0]
     assert len(comp.code) == 1
 
-    assert comp.code[0] == test_function_code
+    assert len(comp.code[0]) == 2
+    assert comp.code[0][-1] == test_function_code
+    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
 async def test_computation_object_code_client_submit_simple(c, s, a, b):
     def func(x):
         return x
@@ -7147,10 +7167,12 @@ async def test_computation_object_code_client_submit_simple(c, s, a, b):
 
     assert len(comp.code) == 1
 
-    assert comp.code[0] == test_function_code
+    assert len(comp.code[0]) == 2
+    assert comp.code[0][-1] == test_function_code
+    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
 async def test_computation_object_code_client_submit_list_comp(c, s, a, b):
     def func(x):
         return x
@@ -7169,10 +7191,12 @@ async def test_computation_object_code_client_submit_list_comp(c, s, a, b):
     # Code is deduplicated
     assert len(comp.code) == 1
 
-    assert comp.code[0] == test_function_code
+    assert len(comp.code[0]) == 2
+    assert comp.code[0][-1] == test_function_code
+    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
 async def test_computation_object_code_client_submit_dict_comp(c, s, a, b):
     def func(x):
         return x
@@ -7191,15 +7215,18 @@ async def test_computation_object_code_client_submit_dict_comp(c, s, a, b):
     # Code is deduplicated
     assert len(comp.code) == 1
 
-    assert comp.code[0] == test_function_code
+    assert len(comp.code[0]) == 2
+    assert comp.code[0][-1] == test_function_code
+    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
 async def test_computation_object_code_client_map(c, s, a, b):
-    da = pytest.importorskip("dask.array")
-    x = da.ones((10, 10), chunks=(3, 3))
-    future = c.compute(x.sum(), retries=2)
-    y = await future
+    def func(x):
+        return x
+
+    futs = c.map(func, list(range(5)))
+    await c.gather(futs)
 
     test_function_code = inspect.getsource(
         test_computation_object_code_client_map.__wrapped__
@@ -7209,10 +7236,12 @@ async def test_computation_object_code_client_map(c, s, a, b):
     comp = computations[0]
     assert len(comp.code) == 1
 
-    assert comp.code[0] == test_function_code
+    assert len(comp.code[0]) == 2
+    assert comp.code[0][-1] == test_function_code
+    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
 async def test_computation_object_code_client_compute(c, s, a, b):
     da = pytest.importorskip("dask.array")
     x = da.ones((10, 10), chunks=(3, 3))
@@ -7227,7 +7256,9 @@ async def test_computation_object_code_client_compute(c, s, a, b):
     comp = computations[0]
     assert len(comp.code) == 1
 
-    assert comp.code[0] == test_function_code
+    assert len(comp.code[0]) == 2
+    assert comp.code[0][-1] == test_function_code
+    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
 
 
 @pytest.mark.slow
@@ -7589,6 +7620,106 @@ def test_print_local(capsys):
     print("Hello!", 123, sep=":")
     out, err = capsys.readouterr()
     assert "Hello!:123\n" == out
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_forward_logging(c, s, a, b):
+    # logger will be created with default config, which handles ERROR and above.
+    client_side_logger = logging.getLogger("test.logger")
+
+    # set up log forwarding on root logger
+    await c.forward_logging()
+
+    # a task that does some error logging. should be forwarded
+    def do_error():
+        logging.getLogger("test.logger").error("Hello error")
+
+    with captured_logger(client_side_logger) as log:
+        await c.submit(do_error)
+        assert "Hello error" in log.getvalue()
+
+    # task that does some error logging with exception traceback info
+    def do_exception():
+        try:
+            raise ValueError("wrong value")
+        except ValueError:
+            logging.getLogger("test.logger").error("oops", exc_info=True)
+
+    with captured_logger(client_side_logger) as log:
+        await c.submit(do_exception)
+        log_out = log.getvalue()
+        assert "oops" in log_out
+        assert "Traceback" in log_out
+        assert "ValueError: wrong value" in log_out
+
+    # a task that does some info logging. should NOT be forwarded
+    def do_info():
+        logging.getLogger("test.logger").info("Hello info")
+
+    with captured_logger(client_side_logger) as log:
+        await c.submit(do_info)
+        assert "Hello info" not in log.getvalue()
+
+    # If we set level appropriately on both client and worker side, then the
+    # info record SHOULD be forwarded
+    client_side_logger.setLevel(logging.INFO)
+
+    def do_info_2():
+        logger = logging.getLogger("test.logger")
+        logger.setLevel(logging.INFO)
+        logger.info("Hello info")
+
+    with captured_logger(client_side_logger) as log:
+        await c.submit(do_info_2)
+        assert "Hello info" in log.getvalue()
+
+    # stop forwarding logging; the client-side logger should no longer
+    # receive forwarded records
+    await c.unforward_logging()
+    with captured_logger(client_side_logger) as log:
+        await c.submit(do_error)
+        assert "Hello error" not in log.getvalue()
+
+    # logger-specific forwarding:
+    # we should get no forwarded records from do_error(), but we should get
+    # forwarded records from do_error_other().
+    client_side_other_logger = logging.getLogger("test.other_logger")
+    await c.forward_logging("test.other_logger")
+
+    def do_error_other():
+        logging.getLogger("test.other_logger").error("Hello error")
+
+    with captured_logger(client_side_logger) as log:
+        await c.submit(do_error)
+        # no record forwarded to test.logger
+        assert "Hello error" not in log.getvalue()
+    with captured_logger(client_side_other_logger) as log:
+        await c.submit(do_error_other)
+        # record forwarded to test.other_logger
+        assert "Hello error" in log.getvalue()
+    await c.unforward_logging("test.other_logger")
+
+    # test the optional `level` argument of forward_logging(). Same semantics as
+    # `level` of built-in logging.Handlers: restriction applied on top of the
+    # level of whatever logger the handler is added to
+    await c.forward_logging("test.yet_another_logger", logging.CRITICAL)
+    client_side_yet_another_logger = logging.getLogger("test.yet_another_logger")
+
+    def do_error_yet_another():
+        logging.getLogger("test.yet_another_logger").error("Hello error")
+
+    def do_critical_yet_another():
+        logging.getLogger("test.yet_another_logger").critical("Hello criticality")
+
+    with captured_logger(client_side_yet_another_logger) as log:
+        await c.submit(do_error_yet_another)
+        # no record forwarded to logger, even though the logger by default would
+        # handle ERRORs, because we are only forwarding CRITICAL and above
+        assert "Hello error" not in log.getvalue()
+    with captured_logger(client_side_yet_another_logger) as log:
+        await c.submit(do_critical_yet_another)
+        # record forwarded to logger
+        assert "Hello criticality" in log.getvalue()
 
 
 def _verify_cluster_dump(

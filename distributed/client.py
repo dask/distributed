@@ -72,6 +72,7 @@ from distributed.core import (
     rpc,
 )
 from distributed.diagnostics.plugin import (
+    ForwardLoggingPlugin,
     NannyPlugin,
     UploadFile,
     WorkerPlugin,
@@ -123,6 +124,8 @@ _current_client: ContextVar[Client | None] = ContextVar("_current_client", defau
 DEFAULT_EXTENSIONS = {
     "pubsub": PubSubClientExtension,
 }
+
+TOPIC_PREFIX_FORWARDED_LOG_RECORD = "forwarded-log-record"
 
 
 def _get_global_client() -> Client | None:
@@ -2974,7 +2977,9 @@ class Client(SyncMethodMixin):
         )
 
     @staticmethod
-    def _get_computation_code(stacklevel: int | None = None) -> str:
+    def _get_computation_code(
+        stacklevel: int | None = None, nframes: int = 1
+    ) -> tuple[str, ...]:
         """Walk up the stack to the user code and extract the code surrounding
         the compute/submit/persist call. All modules encountered which are
         ignored through the option
@@ -2985,6 +2990,8 @@ class Client(SyncMethodMixin):
         ``stacklevel`` may be used to explicitly indicate from which frame on
         the stack to get the source code.
         """
+        if nframes <= 0:
+            return ()
         ignore_modules = dask.config.get(
             "distributed.diagnostics.computations.ignore-modules"
         )
@@ -3003,7 +3010,10 @@ class Client(SyncMethodMixin):
             # stacklevel 0 or less - shows dask internals which likely isn't helpful
             stacklevel = stacklevel if stacklevel > 0 else 1
 
+        code: list[str] = []
         for i, (fr, _) in enumerate(traceback.walk_stack(sys._getframe().f_back), 1):
+            if len(code) >= nframes:
+                break
             if stacklevel is not None:
                 if i != stacklevel:
                     continue
@@ -3013,7 +3023,7 @@ class Client(SyncMethodMixin):
             ):
                 continue
             try:
-                return inspect.getsource(fr)
+                code.append(inspect.getsource(fr))
             except OSError:
                 # Try to fine the source if we are in %%time or %%timeit magic.
                 if (
@@ -3025,9 +3035,10 @@ class Client(SyncMethodMixin):
                     ip = get_ipython()
                     if ip is not None:
                         # The current cell
-                        return ip.history_manager._i00
+                        code.append(ip.history_manager._i00)
                 break
-        return "<Code not available>"
+
+        return tuple(reversed(code))
 
     def _graph_to_futures(
         self,
@@ -3096,7 +3107,11 @@ class Client(SyncMethodMixin):
                     "submitting_task": getattr(thread_state, "key", None),
                     "fifo_timeout": fifo_timeout,
                     "actors": actors,
-                    "code": self._get_computation_code(),
+                    "code": self._get_computation_code(
+                        nframes=dask.config.get(
+                            "distributed.diagnostics.computations.nframes"
+                        )
+                    ),
                     "annotations": ToPickle(annotations),
                 }
             )
@@ -4932,6 +4947,146 @@ class Client(SyncMethodMixin):
 
         return AMMClientProxy(self)
 
+    def _handle_forwarded_log_record(self, event):
+        _, record_attrs = event
+        record = logging.makeLogRecord(record_attrs)
+        dest_logger = logging.getLogger(record.name)
+        dest_logger.handle(record)
+
+    def forward_logging(self, logger_name=None, level=logging.NOTSET):
+        """
+        Begin forwarding the given logger (by default the root) and all loggers
+        under it from worker tasks to the client process. Whenever the named
+        logger handles a LogRecord on the worker-side, the record will be
+        serialized, sent to the client, and handled by the logger with the same
+        name on the client-side.
+
+        Note that worker-side loggers will only handle LogRecords if their level
+        is set appropriately, and the client-side logger will only emit the
+        forwarded LogRecord if its own level is likewise set appropriately. For
+        example, if your submitted task logs a DEBUG message to logger "foo",
+        then in order for ``forward_logging()`` to cause that message to be
+        emitted in your client session, you must ensure that the logger "foo"
+        have its level set to DEBUG (or lower) in the worker process *and* in the
+        client process.
+
+        Parameters
+        ----------
+        logger_name : str, optional
+            The name of the logger to begin forwarding. The usual rules of the
+            ``logging`` module's hierarchical naming system apply. For example,
+            if ``name`` is ``"foo"``, then not only ``"foo"``, but also
+            ``"foo.bar"``, ``"foo.baz"``, etc. will be forwarded. If ``name`` is
+            ``None``, this indicates the root logger, and so *all* loggers will
+            be forwarded.
+
+            Note that a logger will only forward a given LogRecord if the
+            logger's level is sufficient for the LogRecord to be handled at all.
+
+        level : str | int, optional
+            Optionally restrict forwarding to LogRecords of this level or
+            higher, even if the forwarded logger's own level is lower.
+
+        Examples
+        --------
+        For purposes of the examples, suppose we configure client-side logging
+        as a user might: with a single StreamHandler attached to the root logger
+        with an output level of INFO and a simple output format::
+
+            import logging
+            import distributed
+            import io, yaml
+
+            TYPICAL_LOGGING_CONFIG = '''
+            version: 1
+            handlers:
+              console:
+                class : logging.StreamHandler
+                formatter: default
+                level   : INFO
+            formatters:
+              default:
+                format: '%(asctime)s %(levelname)-8s [worker %(worker)s] %(name)-15s %(message)s'
+                datefmt: '%Y-%m-%d %H:%M:%S'
+            root:
+              handlers:
+                - console
+            '''
+            config = yaml.safe_load(io.StringIO(TYPICAL_LOGGING_CONFIG))
+            logging.config.dictConfig(config)
+
+        Now create a client and begin forwarding the root logger from workers
+        back to our local client process.
+
+        >>> client = distributed.Client()
+        >>> client.forward_logging()  # forward the root logger at any handled level
+
+        Then submit a task that does some error logging on a worker. We see
+        output from the client-side StreamHandler.
+
+        >>> def do_error():
+        ...     logging.getLogger("user.module").error("Hello error")
+        ...     return 42
+        >>> client.submit(do_error).result()
+        2022-11-09 03:43:25 ERROR    [worker tcp://127.0.0.1:34783] user.module     Hello error
+        42
+
+        Note how an attribute ``"worker"`` is also added by dask to the
+        forwarded LogRecord, which our custom formatter uses. This is useful for
+        identifying exactly which worker logged the error.
+
+        One nuance worth highlighting: even though our client-side root logger
+        is configured with a level of INFO, the worker-side root loggers still
+        have their default level of ERROR because we haven't done any explicit
+        logging configuration on the workers. Therefore worker-side INFO logs
+        will *not* be forwarded because they never even get handled in the first
+        place.
+
+        >>> def do_info_1():
+        ...     # no output on the client side
+        ...     logging.getLogger("user.module").info("Hello info the first time")
+        ...     return 84
+        >>> client.submit(do_info_1).result()
+        84
+
+        It is necessary to set the client-side logger's level to INFO before the info
+        message will be handled and forwarded to the client. In other words, the
+        "effective" level of the client-side forwarded logging is the maximum of each
+        logger's client-side and worker-side levels.
+
+        >>> def do_info_2():
+        ...     logger = logging.getLogger("user.module")
+        ...     logger.setLevel(logging.INFO)
+        ...     # now produces output on the client side
+        ...     logger.info("Hello info the second time")
+        ...     return 84
+        >>> client.submit(do_info_2).result()
+        2022-11-09 03:57:39 INFO     [worker tcp://127.0.0.1:42815] user.module     Hello info the second time
+        84
+        """
+
+        plugin_name = f"forward-logging-{logger_name or '<root>'}"
+        topic = f"{TOPIC_PREFIX_FORWARDED_LOG_RECORD}-{plugin_name}"
+        # note that subscription is idempotent
+        self.subscribe_topic(topic, self._handle_forwarded_log_record)
+        # note that any existing plugin with the same name will automatically be
+        # removed and torn down (see distributed.worker.Worker.plugin_add()), so
+        # this is effectively idempotent, i.e., forwarding the same logger twice
+        # won't cause every LogRecord to be forwarded twice
+        return self.register_worker_plugin(
+            ForwardLoggingPlugin(logger_name, level, topic), plugin_name
+        )
+
+    def unforward_logging(self, logger_name=None):
+        """
+        Stop forwarding the given logger (default root) from worker tasks to the
+        client process.
+        """
+        plugin_name = f"forward-logging-{logger_name or '<root>'}"
+        topic = f"{TOPIC_PREFIX_FORWARDED_LOG_RECORD}-{plugin_name}"
+        self.unsubscribe_topic(topic)
+        return self.unregister_worker_plugin(plugin_name)
+
 
 class _WorkerSetupPlugin(WorkerPlugin):
     """This is used to support older setup functions as callbacks"""
@@ -5569,7 +5724,8 @@ class performance_report:
     async def __aexit__(self, exc_type, exc_value, traceback, code=None):
         client = get_client()
         if code is None:
-            code = client._get_computation_code(self._stacklevel + 1)
+            frames = client._get_computation_code(self._stacklevel + 1, nframes=1)
+            code = frames[0] if frames else "<Code not available>"
         data = await client.scheduler.performance_report(
             start=self.start, last_count=self.last_count, code=code, mode=self.mode
         )
@@ -5581,7 +5737,8 @@ class performance_report:
 
     def __exit__(self, exc_type, exc_value, traceback):
         client = get_client()
-        code = client._get_computation_code(self._stacklevel + 1)
+        frames = client._get_computation_code(self._stacklevel + 1, nframes=1)
+        code = frames[0] if frames else "<Code not available>"
         client.sync(self.__aexit__, exc_type, exc_value, traceback, code=code)
 
 
