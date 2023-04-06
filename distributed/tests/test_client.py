@@ -8045,6 +8045,7 @@ def bad_wrapper(client, use_worker_client=False):
         return 1
 
     def func_to_map(x, x0):
+        sleep(0.1)
         if use_worker_client:
             ctx = worker_client()
         else:
@@ -8063,7 +8064,9 @@ def bad_wrapper(client, use_worker_client=False):
 @pytest.mark.slow()
 def test_cancelled_error_wrapped_future(loop):
     # See https://github.com/dask/distributed/issues/7746
-    with LocalCluster(loop=loop, dashboard_address=":0", n_workers=1) as cluster:
+    with LocalCluster(
+        loop=loop, dashboard_address=":0", n_workers=1, threads_per_worker=2
+    ) as cluster:
         with Client(cluster, loop=loop) as c:
             bad_wrapper(c)
         with Client(cluster, loop=loop) as c:

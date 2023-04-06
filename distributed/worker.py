@@ -2544,6 +2544,8 @@ class Worker(BaseWorker, ServerNode):
         get_client
         """
         with self._lock:
+            if self._client:
+                return self._client
             if timeout is None:
                 timeout = dask.config.get("distributed.comm.timeouts.connect")
 
