@@ -15,10 +15,8 @@ include setup.py
 include README.rst
 include LICENSE.txt
 include MANIFEST.in
-include requirements.txt
 include distributed/py.typed
 exclude distributed/pytest_resourceleaks.py
 
 prune docs/_build
-include versioneer.py
 include distributed/_version.py

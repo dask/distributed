@@ -179,7 +179,9 @@ class Cluster(SyncMethodMixin):
                         exc_info=True,
                     )
             # Sleep, with error backoff
-            interval = min(max_interval, self._sync_interval * 1.5**err_count)
+            interval = _exponential_backoff(
+                err_count, self._sync_interval, 1.5, max_interval
+            )
             await asyncio.sleep(interval)
 
     async def _close(self):
@@ -483,7 +485,6 @@ class Cluster(SyncMethodMixin):
         return tab
 
     def _repr_html_(self, cluster_status=None):
-
         try:
             scheduler_info_repr = self.scheduler_info._repr_html_()
         except AttributeError:
@@ -635,3 +636,14 @@ class Cluster(SyncMethodMixin):
                 f"`n_workers` must be a positive integer. Instead got {n_workers}."
             )
         return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
+
+def _exponential_backoff(
+    attempt: int, multiplier: float, exponential_base: float, max_interval: float
+) -> float:
+    """Calculate the duration of an exponential backoff"""
+    try:
+        interval = multiplier * exponential_base**attempt
+    except OverflowError:
+        return max_interval
+
+    return min(max_interval, interval)

@@ -7,8 +7,7 @@ dependencies:
   - packaging
   - pip
   - asyncssh
-  # Temporary restriction until https://github.com/dask/distributed/issues/7173 is resolved
-  - bokeh<3
+  - bokeh
   - click
   - cloudpickle
   - coverage
@@ -16,8 +15,8 @@ dependencies:
   - dask  # overridden by git tip below
   - filesystem-spec
   - h5py
-  - ipykernel
-  - ipywidgets
+  - ipykernel <6.22.0  # https://github.com/dask/distributed/issues/7688
+  - ipywidgets <8.0.5  # https://github.com/dask/distributed/issues/7688
   - jinja2 >=2.10.3
   - locket >=1.0
   - msgpack-python
@@ -49,3 +48,4 @@ dependencies:
       - git+https://github.com/dask/dask
       - git+https://github.com/jcrist/crick  # Only tested here
       - keras
+      - gilknocker>=0.3.0

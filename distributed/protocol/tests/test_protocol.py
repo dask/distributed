@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import sys
 from threading import Thread
 from time import sleep
 
 import pytest
 
 import dask
+from dask.sizeof import sizeof
 
+from distributed.compatibility import WINDOWS
 from distributed.protocol import dumps, loads, maybe_compress, msgpack, to_serialize
 from distributed.protocol.compression import (
     compressions,
@@ -15,8 +18,10 @@ from distributed.protocol.compression import (
 )
 from distributed.protocol.cuda import cuda_deserialize, cuda_serialize
 from distributed.protocol.serialize import (
+    Pickled,
     Serialize,
     Serialized,
+    ToPickle,
     dask_deserialize,
     dask_serialize,
     deserialize,
@@ -393,3 +398,38 @@ def test_preserve_header(serializers):
     header, frames = serialize(MyObj(), serializers=serializers)
     o = deserialize(header, frames)
     assert isinstance(o, MyObj)
+
+
+@pytest.mark.parametrize(
+    "Wrapper, Wrapped",
+    [
+        (Serialize, Serialized),
+        (to_serialize, Serialized),
+        (ToPickle, Pickled),
+    ],
+)
+def test_sizeof_serialize(Wrapper, Wrapped):
+    size = 100_000
+    ser_obj = Wrapper(b"0" * size)
+    assert size <= sizeof(ser_obj) < size * 1.05
+    serialized = Wrapped(*serialize(ser_obj))
+    assert size <= sizeof(serialized) < size * 1.05
+
+
+@pytest.mark.skipif(WINDOWS, reason="On windows this is triggering a stackoverflow")
+def test_deeply_nested_structures():
+    # These kind of deeply nested structures are generated in our profiling code
+    def gen_deeply_nested(depth):
+        msg = {}
+        d = msg
+        while depth:
+            depth -= 1
+            d["children"] = d = {}
+        return msg
+
+    msg = gen_deeply_nested(sys.getrecursionlimit() - 100)
+    with pytest.raises(TypeError, match="Could not serialize object"):
+        serialize(msg, on_error="raise")
+
+    msg = gen_deeply_nested(sys.getrecursionlimit() // 4)
+    assert isinstance(serialize(msg), tuple)

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from unittest import mock
 
@@ -10,6 +9,7 @@ from tornado.httpclient import AsyncHTTPClient
 from distributed import Event, Worker, wait
 from distributed.sizeof import sizeof
 from distributed.utils_test import (
+    async_poll_for,
     fetch_metrics,
     fetch_metrics_body,
     fetch_metrics_sample_names,
@@ -21,13 +21,17 @@ from distributed.utils_test import (
 async def test_prometheus(c, s, a):
     pytest.importorskip("prometheus_client")
 
+    # We need *some* tasks or dask_worker_tasks won't appear
+    fut = c.submit(lambda: 1)
+    await wait(fut)
+
+    a.data.evict()
+
     active_metrics = await fetch_metrics_sample_names(
         a.http_server.port, prefix="dask_worker_"
     )
     expected_metrics = {
         "dask_worker_concurrent_fetch_requests",
-        "dask_worker_event_loop_blocked_time_max_seconds",
-        "dask_worker_event_loop_blocked_time_seconds_total",
         "dask_worker_latency_seconds",
         "dask_worker_memory_bytes",
         "dask_worker_spill_bytes_total",
@@ -88,22 +92,7 @@ async def test_metrics_when_prometheus_client_not_installed(
 async def test_prometheus_collect_task_states(c, s, a):
     pytest.importorskip("prometheus_client")
 
-    async def assert_metrics(**kwargs):
-        expect = {
-            "constrained": 0,
-            "executing": 0,
-            "fetch": 0,
-            "flight": 0,
-            "long-running": 0,
-            "memory": 0,
-            "disk": 0,
-            "missing": 0,
-            "other": 0,
-            "ready": 0,
-            "waiting": 0,
-        }
-        expect.update(kwargs)
-
+    async def assert_metrics(**expect):
         families = await fetch_metrics(a.http_server.port, prefix="dask_worker_")
         actual = {
             sample.labels["state"]: sample.value
@@ -117,24 +106,29 @@ async def test_prometheus_collect_task_states(c, s, a):
     ev = Event()
 
     # submit a task which should show up in the prometheus scraping
-    future = c.submit(ev.wait)
-    while not a.state.executing:
-        await asyncio.sleep(0.001)
+    fut1 = c.submit(ev.wait)
+    await async_poll_for(lambda: a.state.executing, timeout=5)
 
     await assert_metrics(executing=1)
 
     await ev.set()
-    await c.gather(future)
+    await wait(fut1)
 
     await assert_metrics(memory=1)
+
+    fut2 = c.submit(lambda: 1)
+    await wait(fut2)
+    await assert_metrics(memory=2)
+
     a.data.evict()
-    await assert_metrics(disk=1)
+    await assert_metrics(memory=1, disk=1)
+    a.data.evict()
+    await assert_metrics(disk=2)
 
-    future.release()
+    fut1.release()
+    fut2.release()
 
-    while future.key in a.state.tasks:
-        await asyncio.sleep(0.001)
-
+    await async_poll_for(lambda: not a.state.tasks, timeout=5)
     await assert_metrics()
 
 
@@ -253,37 +247,3 @@ async def test_prometheus_collect_memory_metrics_bogus_sizeof(c, s, a):
     assert 50 * 2**20 < metrics["managed"] < 100 * 2**30  # capped to process memory
     assert metrics["unmanaged"] == 0  # floored to 0
     assert metrics["spilled"] == 0
-
-
-@gen_cluster(
-    client=True,
-    nthreads=[("127.0.0.1", 1)],
-    worker_kwargs={"memory_limit": "10 MiB"},
-    config={
-        "distributed.worker.memory.target": 1.0,
-        "distributed.worker.memory.spill": False,
-        "distributed.worker.memory.pause": False,
-    },
-)
-async def test_prometheus_resets_max_metrics(c, s, a):
-    pytest.importorskip("prometheus_client")
-    np = pytest.importorskip("numpy")
-
-    # The first GET to /metrics calls collect() twice
-    await fetch_metrics(a.http_server.port)
-
-    # We need substantial data to be sure that spilling it will take more than 5ms.
-    x = c.submit(lambda: "x" * 40_000_000, key="x", workers=[a.address])
-    await wait(x)
-    # Key is individually larger than target threshold, so it was spilled immediately
-    assert "x" in a.data.slow
-
-    nsecs = a.digests_max["disk-write-target-duration"]
-    assert nsecs > 0
-
-    families = await fetch_metrics(a.http_server.port)
-    metric = families["dask_worker_event_loop_blocked_time_max_seconds"]
-    samples = {sample.labels["cause"]: sample.value for sample in metric.samples}
-
-    assert samples["disk-write-target"] == nsecs
-    assert a.digests_max["disk-write-target-duration"] == 0

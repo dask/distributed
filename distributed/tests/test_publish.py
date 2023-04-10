@@ -56,7 +56,6 @@ async def test_publish_roundtrip(s, a, b):
     async with Client(s.address, asynchronous=True) as c, Client(
         s.address, asynchronous=True
     ) as f:
-
         data = await c.scatter([0, 1, 2])
         await c.publish_dataset(data=data)
 
@@ -152,7 +151,6 @@ async def test_publish_bag(s, a, b):
     async with Client(s.address, asynchronous=True) as c, Client(
         s.address, asynchronous=True
     ) as f:
-
         bag = db.from_sequence([0, 1, 2])
         bagp = c.persist(bag)
 

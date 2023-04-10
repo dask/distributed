@@ -4,7 +4,7 @@ channels:
   - defaults
 dependencies:
   - python=3.8
-  - click=7.0
+  - click=8.0
   - cloudpickle=1.5.0
   - cytoolz=0.10.1
   - jinja2=2.10.3
@@ -18,7 +18,7 @@ dependencies:
   - toolz=0.10.0
   - tornado=6.0.3
   - urllib3=1.24.3
-  - zict=2.1.0
+  - zict=2.2.0
   # Distributed depends on the latest version of Dask
   - pip
   - pip:

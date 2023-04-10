@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 from dask.utils import parse_bytes
 
@@ -19,7 +19,7 @@ class CommShardsBuffer(ShardsBuffer):
 
     **State**
 
-    -   shards: dict[str, list[bytes]]
+    -   shards: dict[str, list[ShardType]]
 
         This is our in-memory buffer of data waiting to be sent to other workers.
 
@@ -29,28 +29,30 @@ class CommShardsBuffer(ShardsBuffer):
 
     State
     -----
-    memory_limit: str
-        A maximum amount of memory to use across the process, like "1 GiB"
-        This includes both data in shards and also in network communications
-    max_connections: int
-        The maximum number of connections to have out at once
-    max_message_size: str
-        The maximum size of a single message that we want to send
+    max_message_size: int
+        The maximum size in bytes of a single message that we want to send
 
     Parameters
     ----------
-    send: callable
+    send : callable
         How to send a list of shards to a worker
         Expects an address of the target worker (string)
         and a payload of shards (list of bytes) to send to that worker
+    memory_limiter : ResourceLimiter, optional
+        Limiter for memory usage (in bytes), or None if no limiting
+        should be applied. If the incoming data that has yet to be
+        processed exceeds this limit, then the buffer will block until
+        below the threshold. See :meth:`.write` for the implementation
+        of this scheme.
+    concurrency_limit : int
+        Number of background tasks to run.
     """
 
     max_message_size = parse_bytes("2 MiB")
-    memory_limit = parse_bytes("100 MiB")
 
     def __init__(
         self,
-        send: Callable[[str, list[bytes]], Awaitable[None]],
+        send: Callable[[str, list[tuple[Any, bytes]]], Awaitable[None]],
         memory_limiter: ResourceLimiter | None = None,
         concurrency_limit: int = 10,
     ):
@@ -61,10 +63,9 @@ class CommShardsBuffer(ShardsBuffer):
         )
         self.send = send
 
-    async def _process(self, address: str, shards: list[bytes]) -> None:
+    async def _process(self, address: str, shards: list[tuple[Any, bytes]]) -> None:
         """Send one message off to a neighboring worker"""
         with log_errors():
-
             # Consider boosting total_size a bit here to account for duplication
             with self.time("send"):
                 await self.send(address, shards)

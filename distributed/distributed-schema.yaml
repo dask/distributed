@@ -1021,6 +1021,11 @@ properties:
                 minimum: 0
                 description: |
                   The maximum number of Computations to remember.
+              nframes:
+                type: integer
+                minimum: 0
+                description: |
+                  The number of frames of code to capture, starting from the innermost frame.
               ignore-modules:
                 type: array
                 description: |
@@ -1141,6 +1146,19 @@ properties:
               host-cpu:
                 type: boolean
                 description: Should we include host-wide CPU usage, with very granular breakdown?
+              gil:
+                type: object
+                description: |
+                  Should we include GIL contention metrics, requires `gilknocker` to be installed.
+                properties:
+                  enabled:
+                    type: boolean
+                    description: Enable monitoring of GIL contention
+                  interval:
+                    type: string
+                    description: |
+                      GIL polling interval. More frequent polling will reflect a more accurate GIL
+                      contention metric but will be more likely to impact runtime performance.
 
       rmm:
         type: object

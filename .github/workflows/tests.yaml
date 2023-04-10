@@ -25,6 +25,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         environment: [mindeps, "3.8", "3.9", "3.10", "3.11"]
         queuing: [queue]
+        extra_packages: [null]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
         exclude:
@@ -45,6 +46,15 @@ jobs:
             environment: "3.9"
             queuing: no_queue
             partition: "not ci1"
+          # P2P rechunking - requires numpy and nothing else beyond mindeps (no pyarrow)
+          - os: ubuntu-latest
+            environment: mindeps
+            extra_packages: [numpy]
+            partition: "ci1"
+          - os: ubuntu-latest
+            environment: mindeps
+            extra_packages: [numpy]
+            partition: "not ci1"
 
         # Uncomment to stress-test the test suite for random failures.
         # Must also change `export TEST_ID` in first step below.
@@ -61,15 +71,15 @@ jobs:
       - name: Set $TEST_ID
         run: |
           export PARTITION_LABEL=$( echo "${{ matrix.partition }}" | sed "s/ //" )
-          export TEST_ID="${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.queuing }}-$PARTITION_LABEL"
+          export TEST_ID="${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.queuing || join(matrix.extra_packages, '_') }}-$PARTITION_LABEL"
           # Switch to this version for stress-test:
-          # export TEST_ID="${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.queuing }}-$PARTITION_LABEL-${{ matrix.run }}"
+          # export TEST_ID="$TEST_ID-${{ matrix.run }}"
           echo "TEST_ID: $TEST_ID"
           echo "TEST_ID=$TEST_ID" >> $GITHUB_ENV
         shell: bash
 
       - name: Checkout source
-        uses: actions/checkout@v3.3.0
+        uses: actions/checkout@v3.5.0
         with:
           fetch-depth: 0
 
@@ -118,6 +128,11 @@ jobs:
         run: |
           python -m pip install --no-deps -e .
 
+      - name: Extra Installs
+        if: ${{ matrix.extra_packages }}
+        shell: bash -l {0}
+        run: mamba install -y ${{ join(matrix.extra_packages, ' ') }}
+
       - name: mamba list
         shell: bash -l {0}
         run: mamba list
@@ -139,7 +154,7 @@ jobs:
         shell: bash -l {0}
         # No SIGALRM available on Windows
         if: ${{ matrix.os != 'windows-latest' }}
-        run: sed -i.bak 's/timeout_method = thread/timeout_method = signal/' setup.cfg
+        run: sed -i.bak 's/timeout_method = "thread"/timeout_method = "signal"/' pyproject.toml
 
       - name: Disable IPv6
         shell: bash -l {0}

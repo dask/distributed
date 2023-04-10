@@ -98,12 +98,13 @@ def test_timeout_sync(client):
 
 
 @gen_cluster(
+    client=True,
     config={
         "distributed.scheduler.locks.lease-validation-interval": "200ms",
         "distributed.scheduler.locks.lease-timeout": "200ms",
     },
 )
-async def test_release_semaphore_after_timeout(s, a, b):
+async def test_release_semaphore_after_timeout(c, s, a, b):
     sem = await Semaphore(name="x", max_leases=2)
     await sem.acquire()  # leases: 2 - 1 = 1
 
@@ -121,8 +122,8 @@ async def test_release_semaphore_after_timeout(s, a, b):
     assert not (await sem.acquire(timeout=0.1))
 
 
-@gen_cluster()
-async def test_async_ctx(s, a, b):
+@gen_cluster(client=True)
+async def test_async_ctx(c, s, a, b):
     sem = await Semaphore(name="x")
     async with sem:
         assert not await sem.acquire(timeout=0.025)
@@ -297,7 +298,6 @@ class FlakyConnectionPool(ConnectionPool):
 @gen_cluster(client=True)
 async def test_retry_acquire(c, s, a, b):
     with dask.config.set({"distributed.comm.retry.count": 1}):
-
         pool = await FlakyConnectionPool(failing_connections=1)
 
         semaphore = await Semaphore(
@@ -440,7 +440,6 @@ async def test_timeout_zero(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_getvalue(c, s, a, b):
-
     sem = await Semaphore()
 
     assert await sem.get_value() == 0
@@ -577,3 +576,34 @@ async def test_release_failure(c, s, a, b, caplog):
         assert ext.get_value(name) == 1  # lease is still registered
         while not (await semaphore.get_value() == 0):
             await asyncio.sleep(0.01)
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_unpickle_without_client(c, s):
+    """Ensure that the object properly pickle roundtrips even if no client, worker, etc. is active in the given context.
+
+    This typically happens if the object is being deserialized on the scheduler.
+    """
+    sem = await Semaphore()
+    pickled = pickle.dumps(sem)
+    await c.close()
+
+    # We do not want to initialize a client during unpickling
+    with pytest.raises(ValueError):
+        Client.current()
+
+    s2 = pickle.loads(pickled)
+
+    with pytest.raises(ValueError):
+        Client.current()
+
+    assert s2.scheduler is None
+    await asyncio.sleep(0)
+    assert not s2.refresh_callback.is_running()
+
+    with pytest.raises(RuntimeError, match="not properly initialized"):
+        await s2.acquire()
+
+    async with Client(s.address, asynchronous=True):
+        s3 = pickle.loads(pickled)
+        assert await s3.acquire()

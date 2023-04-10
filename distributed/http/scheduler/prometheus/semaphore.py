@@ -11,7 +11,6 @@ class SemaphoreMetricCollector(PrometheusCollector):
         self.subsystem = "semaphore"
 
     def collect(self):
-
         try:
             sem_ext = self.server.extensions["semaphores"]
         except KeyError:

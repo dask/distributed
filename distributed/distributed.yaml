@@ -270,6 +270,7 @@ distributed:
     nvml: True
     computations:
       max-history: 100
+      nframes: 0
       ignore-modules:
         - distributed
         - dask
@@ -310,6 +311,9 @@ distributed:
       interval: 500ms
       disk: true  # Monitor host-wide disk I/O
       host-cpu: false  # Monitor host-wide CPU usage, with very granular breakdown
+      gil: 
+        enabled: false  # Monitor GIL contention
+        interval: "1ms"  # Frequency to poll GIL
     event-loop: tornado
   rmm:
     pool-size: null
