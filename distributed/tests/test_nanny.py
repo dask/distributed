@@ -706,28 +706,24 @@ async def test_malloc_trim_threshold(c, s, a):
     using mimalloc by default. If it does, a thorough benchmarking exercise is needed.
     """
     da = pytest.importorskip("dask.array")
-
-    a = da.random.random(
-        2**29 // 8,  # 0.5 GiB,
-        chunks=160 * 2**10 // 8,  # 160 kiB
-    ).persist()
-    await wait(a)
+    arr = da.random.random(2**29 // 8, chunks="512 kiB")  # 0.5 GiB
+    arr = arr.persist()
+    await wait(arr)
     # Wait for heartbeat
-    while s.memory.process < 2**29:
-        await asyncio.sleep(0.01)
-    del a
+    await async_poll_for(lambda: s.memory.process > 2**29, timeout=5)
+    del arr
 
     # This is the delicate bit, as it relies on
     # 1. PyMem_Free() to be quick to invoke glibc free() when memory becomes available
     # 2. glibc free() to be quick to invoke the kernel's sbrk() when the same happens
     #
     # At the moment of writing, the readings are:
-    # - 122 MiB after starting a new worker
-    # - 139 MiB after computing a trivial dask.array collection
-    # - 185 MiB at the end of this test, with MALLOC_TRIM_THRESHOLD_=65536
-    # - 698 MiB at the end of this test, without MALLOC_TRIM_THRESHOLD_
-    while s.memory.process > 250 * 2**20:
-        await asyncio.sleep(0.01)
+    # - 132        MiB after starting a new worker
+    # - 670~725[1] MiB after arr has been fully computed
+    # - 156~210[1] MiB at the end of this test, with MALLOC_TRIM_THRESHOLD_=65536
+    # - 620~670[1] MiB at the end of this test, without MALLOC_TRIM_THRESHOLD_
+    # [1] depends on distributed.scheduler.worker-saturation
+    await async_poll_for(lambda: s.memory.process < 300 * 2**20, timeout=5)
 
 
 @gen_cluster(client=True, nthreads=[])
