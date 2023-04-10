@@ -637,6 +637,7 @@ class Cluster(SyncMethodMixin):
             )
         return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
 
+
 def _exponential_backoff(
     attempt: int, multiplier: float, exponential_base: float, max_interval: float
 ) -> float:
