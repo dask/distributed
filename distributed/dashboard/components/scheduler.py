@@ -3504,6 +3504,11 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
             and k[-1] in ("bytes", "seconds")
         )
         for (_type, function_name, operation, freq), value in items:
+
+            if operation not in self.operations:
+                self.substantial_change = True
+                self.operations.append(operation)
+
             if function_name not in self.data["functions"]:
                 self.substantial_change = True
                 self.function_selector.options.append(function_name)
@@ -3511,10 +3516,12 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
                 self.data["timestamp"].append(datetime.utcnow())
             idx = self.data["functions"].index(function_name)
 
-            while len(self.data[f"{operation}_value"]) != len(self.data["functions"]):
-                self.data[f"{operation}_value"].append(0)
-                self.data[f"{operation}_bytes"].append(0)
-                self.data[f"{operation}_text"].append("")
+            # Some function/operation combos missing, so need to keep columns aligned
+            for op in self.operations:
+                while len(self.data[f"{op}_value"]) != len(self.data["functions"]):
+                    self.data[f"{op}_value"].append(0)
+                    self.data[f"{op}_bytes"].append(0)
+                    self.data[f"{op}_text"].append("")
 
             if freq == "seconds":
                 self.data[f"{operation}_text"][idx] = format_time(value)
@@ -3523,9 +3530,6 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
                 self.data[f"{operation}_text"][idx] = format_bytes(value)
                 self.data[f"{operation}_bytes"][idx] = value
 
-            if operation not in self.operations:
-                self.substantial_change = True
-                self.operations.append(operation)
         data = self.data.copy()
 
         # If user has manually selected function(s) then we are only showing them.
