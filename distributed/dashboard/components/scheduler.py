@@ -46,7 +46,7 @@ from bokeh.models import (
 )
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.models.widgets.markups import Div
-from bokeh.palettes import Viridis11
+from bokeh.palettes import Viridis11, small_palettes
 from bokeh.plotting import figure
 from bokeh.themes import Theme
 from bokeh.transform import cumsum, factor_cmap, linear_cmap, stack
@@ -3399,7 +3399,7 @@ class _FinePerformanceMetricsGetData(DashboardComponent):
             for k, v in items
             if isinstance(k, tuple) and k[0] == "get-data" and k[-1] == "seconds"
         )
-        for (_type, operation, freq), value in items:
+        for (_type, operation, _freq), val in items:
             if operation not in self.data["operation"]:
                 self.substantial_change = True
                 self.data["operation"].append(operation)
@@ -3407,17 +3407,15 @@ class _FinePerformanceMetricsGetData(DashboardComponent):
             idx = self.data["operation"].index(operation)
             while idx >= len(self.data["operation_val"]):
                 self.data["operation_val"].append(float("NaN"))
-                self.data[f"operation_text"].append("")
+                self.data["operation_text"].append("")
 
-            self.data["operation_val"][idx] = value
-            self.data[f"operation_text"][idx] = format_time(value)
+            self.data["operation_val"][idx] = val
+            self.data["operation_text"][idx] = format_time(val)
 
         if self.data:
-            from bokeh.palettes import small_palettes
-
             self.source.data = dict(self.data)
             fig = figure(x_range=self.data["operation"], title="Get Data")
-            renderers = fig.vbar(
+            fig.vbar(
                 x="operation",
                 top="operation_val",
                 width=0.9,
@@ -3460,9 +3458,6 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
         self.init_root()
 
     def init_root(self):
-        from bokeh.layouts import column
-        from bokeh.palettes import small_palettes
-
         def handle_toggle(_toggle):
             self.toggle.label = (
                 "Bytes (Toggle for Values)"
@@ -3471,9 +3466,7 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
             )
             self.substantial_change = True
 
-        self.function_selector = MultiChoice(
-            title="Filter by function", value=[], options=[]
-        )
+        self.function_selector = MultiChoice(value=[], options=[])
         self.function_selector.placeholder = "Select specific functions"
         self.toggle = Toggle(label="Timing (Toggle for Bytes)")
         self.toggle.on_click(handle_toggle)
@@ -3496,7 +3489,7 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
             and k[0] == "execute"
             and k[-1] in ("bytes", "seconds")
         )
-        for (_type, function_name, operation, freq), value in items:
+        for (_type, function_name, operation, freq), val in items:
             if operation not in self.operations:
                 self.substantial_change = True
                 self.operations.append(operation)
@@ -3516,11 +3509,11 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
                     self.data[f"{op}_text"].append("")
 
             if freq == "seconds":
-                self.data[f"{operation}_text"][idx] = format_time(value)
-                self.data[f"{operation}_value"][idx] = value
+                self.data[f"{operation}_text"][idx] = format_time(val)
+                self.data[f"{operation}_value"][idx] = val
             elif freq == "bytes":
-                self.data[f"{operation}_text"][idx] = format_bytes(value)
-                self.data[f"{operation}_bytes"][idx] = value
+                self.data[f"{operation}_text"][idx] = format_bytes(val)
+                self.data[f"{operation}_bytes"][idx] = val
 
         data = self.data.copy()
 
@@ -3536,8 +3529,6 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
             n_show = len([d for d in data["timestamp"] if d > cutoff]) or 5
             for key in data:
                 data[key] = data[key][-n_show:]
-
-        from bokeh.palettes import Category20c, small_palettes
 
         piechart_data = dict()
         piechart_data["value"] = [sum(data[f"{op}_value"]) for op in self.operations]
