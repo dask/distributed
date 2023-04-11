@@ -30,6 +30,8 @@ class SystemMonitor:
     _last_host_cpu_counters: Any  # dynamically-defined psutil namedtuple
     _last_gil_contention: float  # 0-1 value
 
+    _cumulative_gil_contention: float
+
     gpu_name: str | None
     gpu_memory_total: int
 
@@ -108,6 +110,7 @@ class SystemMonitor:
                 self.monitor_gil_contention = False
             else:
                 self.quantities["gil_contention"] = deque(maxlen=maxlen)
+                self._cumulative_gil_contention = 0.0
                 raw_interval = dask.config.get(
                     "distributed.admin.system-monitor.gil.interval",
                 )
@@ -191,6 +194,7 @@ class SystemMonitor:
 
         if self.monitor_gil_contention:
             self._last_gil_contention = self._gilknocker.contention_metric
+            self._cumulative_gil_contention += self._last_gil_contention
             result["gil_contention"] = self._last_gil_contention
             self._gilknocker.reset_contention_metric()
 

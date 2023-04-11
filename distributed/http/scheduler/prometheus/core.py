@@ -52,6 +52,13 @@ class SchedulerMetricCollector(PrometheusCollector):
         )
         yield worker_states
 
+        if self.server.monitor.monitor_gil_contention:
+            yield CounterMetricFamily(
+                self.build_name("gil_contention"),
+                "GIL contention metric",
+                value=self.server.monitor._cumulative_gil_contention,
+            )
+
         tasks = GaugeMetricFamily(
             self.build_name("tasks"),
             "Number of tasks known by scheduler",
