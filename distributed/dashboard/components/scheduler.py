@@ -3473,7 +3473,10 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
             )
             self.substantial_change = True
 
-        self.function_selector = MultiChoice(value=[], options=[])
+        self.function_selector = MultiChoice(
+            title="Filter by function", value=[], options=[]
+        )
+        self.function_selector.placeholder = "Select specific functions"
         self.toggle = Toggle(label="Timing (Toggle for Bytes)")
         self.toggle.on_click(handle_toggle)
         self.barchart = figure()
@@ -3612,6 +3615,9 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
         if any(len(self.source.data[k]) != len(data[k]) for k in self.source.data):
             self.substantial_change = True
         self.source.data = dict(data)
+
+        # Show total number of functions to choose from
+        self.function_selector.title = f"Filter by function ({len(self.function_selector.options)}):"
 
         # replacing the child causes small blips if done every iteration vs updating renderers
         # but it's needed when new functions and/or operations show up to rerender plot
