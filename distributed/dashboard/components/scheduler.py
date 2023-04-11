@@ -3395,7 +3395,9 @@ class _FinePerformanceMetricsGetData(DashboardComponent):
     def update(self):
         items = self.scheduler.cumulative_worker_metrics.items()
         items = (
-            (k, v) for k, v in items if isinstance(k, tuple) and k[0] == "get-data"
+            (k, v)
+            for k, v in items
+            if isinstance(k, tuple) and k[0] == "get-data" and k[-1] == "seconds"
         )
         for (_type, operation, freq), value in items:
             if operation not in self.data["operation"]:
@@ -3405,14 +3407,10 @@ class _FinePerformanceMetricsGetData(DashboardComponent):
             idx = self.data["operation"].index(operation)
             while idx >= len(self.data["operation_val"]):
                 self.data["operation_val"].append(float("NaN"))
-                self.data["operation_log"].append(float("NaN"))
                 self.data[f"operation_text"].append("")
 
             self.data["operation_val"][idx] = value
-            self.data["operation_log"][idx] = np.log(value)
-
-            text = format_time(value) if freq == "seconds" else f"{value} {freq}"
-            self.data[f"operation_text"][idx] = text
+            self.data[f"operation_text"][idx] = format_time(value)
 
         if self.data:
             from bokeh.palettes import small_palettes
@@ -3421,14 +3419,14 @@ class _FinePerformanceMetricsGetData(DashboardComponent):
             fig = figure(x_range=self.data["operation"], title="Get Data")
             renderers = fig.vbar(
                 x="operation",
-                top="operation_log",
+                top="operation_val",
                 width=0.9,
                 source=self.source,
                 legend_field="operation",
                 line_color="white",
                 fill_color=factor_cmap(
                     "operation",
-                    palette=small_palettes["YlGnBu"][9][: len(self.data["operation"])],
+                    palette=small_palettes["YlGnBu"][len(self.data["operation"])],
                     factors=self.data["operation"],
                 ),
             )
@@ -3484,12 +3482,7 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
         self.root = column(
             self.function_selector,
             self.toggle,
-            row(
-                [
-                    self.piechart,
-                    self.barchart,
-                ]
-            ),
+            row([self.piechart, self.barchart]),
             sizing_mode="scale_width",
         )
 
@@ -3504,7 +3497,6 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
             and k[-1] in ("bytes", "seconds")
         )
         for (_type, function_name, operation, freq), value in items:
-
             if operation not in self.operations:
                 self.substantial_change = True
                 self.operations.append(operation)
@@ -3621,7 +3613,9 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
         self.source.data = dict(data)
 
         # Show total number of functions to choose from
-        self.function_selector.title = f"Filter by function ({len(self.function_selector.options)}):"
+        self.function_selector.title = (
+            f"Filter by function ({len(self.function_selector.options)}):"
+        )
 
         # replacing the child causes small blips if done every iteration vs updating renderers
         # but it's needed when new functions and/or operations show up to rerender plot
