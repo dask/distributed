@@ -55,7 +55,7 @@ jobs:
 
           # distributed pre-release build
           conda mambabuild continuous_integration/recipes/distributed \
-                           --channel /home/nfs/charlesb/dev/dask/nightly-version-fix/ \
+                           --channel dask/label/dev \
                            --no-anaconda-upload \
                            --output-folder .
 
