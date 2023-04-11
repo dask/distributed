@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import secrets
 import time
-from collections.abc import Hashable
+from collections.abc import Collection, Hashable
 from concurrent.futures import ProcessPoolExecutor
 from time import sleep
 
@@ -11,8 +10,8 @@ import pytest
 
 import dask
 
+import distributed
 from distributed import Event, Worker, wait
-from distributed.comm.utils import OFFLOAD_THRESHOLD
 from distributed.compatibility import WINDOWS
 from distributed.metrics import context_meter, meter
 from distributed.utils_test import (
@@ -25,14 +24,16 @@ from distributed.utils_test import (
 )
 
 
-def get_digests(w: Worker, allow: str | None = None) -> dict[Hashable, float]:
+def get_digests(w: Worker, allow: str | Collection[str] = ()) -> dict[Hashable, float]:
     # import pprint; pprint.pprint(dict(w.digests_total))
+    if isinstance(allow, str):
+        allow = (allow,)
     digests = {
         k: v
         for k, v in w.digests_total.items()
         if k
         not in {"latency", "tick-duration", "transfer-bandwidth", "transfer-duration"}
-        and (allow is None or allow in k)
+        and (any(a in k for a in allow) or not allow)
     }
     assert all(v >= 0 for v in digests.values()), digests
     return digests
@@ -80,6 +81,7 @@ async def test_task_lifecycle(c, s, a, b):
         # -> Run in thread
         ("execute", "z", "thread-cpu", "seconds"),
         ("execute", "z", "thread-noncpu", "seconds"),
+        ("execute", "z", "executor", "seconds"),
         # Spill output; added by _transition_to_memory
         ("execute", "z", "serialize", "seconds"),
         ("execute", "z", "compress", "seconds"),
@@ -150,15 +152,23 @@ async def test_run_spec_deserialization(c, s, a):
 
 
 @gen_cluster(client=True)
-async def test_offload(c, s, a, b):
+async def test_offload(c, s, a, b, monkeypatch):
     """Test that functions wrapped by offload() are metered"""
-    nbytes = int(OFFLOAD_THRESHOLD * 1.1)
-    x = c.submit(secrets.token_bytes, nbytes, key="x", workers=[a.address])
+    monkeypatch.setattr(distributed.comm.utils, "OFFLOAD_THRESHOLD", 1)
+    monkeypatch.setattr(distributed.worker, "OFFLOAD_THRESHOLD", 1)
+
+    x = c.submit(inc, 1, key="x", workers=[a.address])
     y = c.submit(lambda x: None, x, key="y", workers=[b.address])
     await y
 
-    assert 0 < a.digests_total["get-data", "serialize", "seconds"] < 1
-    assert 0 < b.digests_total["gather-dep", "deserialize", "seconds"] < 1
+    assert list(get_digests(b, {"offload", "serialize", "deserialize"})) == [
+        ("gather-dep", "offload", "seconds"),
+        ("gather-dep", "deserialize", "seconds"),
+        ("execute", "y", "offload", "seconds"),
+        ("execute", "y", "deserialize", "seconds"),
+        ("get-data", "offload", "seconds"),
+        ("get-data", "serialize", "seconds"),
+    ]
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -315,11 +325,7 @@ async def test_memory_monitor(c, s, a):
     x = c.submit(inc, 1, key="x")
     await async_poll_for(lambda: a.data.disk, timeout=5)
 
-    assert list(get_digests(a)) == [
-        ("execute", "x", "deserialize", "seconds"),
-        ("execute", "x", "thread-cpu", "seconds"),
-        ("execute", "x", "thread-noncpu", "seconds"),
-        ("execute", "x", "other", "seconds"),
+    assert list(get_digests(a, "memory-monitor")) == [
         ("memory-monitor", "serialize", "seconds"),
         ("memory-monitor", "compress", "seconds"),
         ("memory-monitor", "disk-write", "seconds"),
@@ -344,11 +350,13 @@ async def test_user_metrics_sync(c, s, a):
         ("execute", "x", "I/O", "seconds"),
         ("execute", "x", "thread-cpu", "seconds"),
         ("execute", "x", "thread-noncpu", "seconds"),
+        ("execute", "x", "executor", "seconds"),
         ("execute", "x", "other", "seconds"),
     ]
     assert get_digests(a)["execute", "x", "I/O", "seconds"] == 5
     assert get_digests(a)["execute", "x", "thread-cpu", "seconds"] == 0
     assert get_digests(a)["execute", "x", "thread-noncpu", "seconds"] == 0
+    assert get_digests(a)["execute", "x", "executor", "seconds"] == 0
     assert get_digests(a)["execute", "x", "other", "seconds"] == 0
 
 

@@ -67,7 +67,7 @@ from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
 from distributed.compatibility import WINDOWS
-from distributed.metrics import monotonic, time
+from distributed.metrics import context_meter, monotonic, time
 
 try:
     from dask.context import thread_state
@@ -1460,7 +1460,8 @@ def offload(
     run_in_executor_with_context
     https://bugs.python.org/issue34014
     """
-    return run_in_executor_with_context(_offload_executor, func, *args, **kwargs)
+    with context_meter.meter("offload"):
+        return run_in_executor_with_context(_offload_executor, func, *args, **kwargs)
 
 
 class EmptyContext:

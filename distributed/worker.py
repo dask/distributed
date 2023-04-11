@@ -2269,20 +2269,29 @@ class Worker(BaseWorker, ServerNode):
                         self.scheduler_delay,
                     )
                 elif "ThreadPoolExecutor" in str(type(e)):
-                    result = await run_in_executor_with_context(
-                        e,
-                        apply_function,
-                        function,
-                        args2,
-                        kwargs2,
-                        self.execution_state,
-                        key,
-                        self.active_threads,
-                        self.active_threads_lock,
-                        self.scheduler_delay,
-                    )
+                    # The 'executor' time metric should be almost zero most of the time,
+                    # e.g. thread synchronization overhead only, since thread-noncpu and
+                    # thread-cpu inside the thread detract from it. However, it may
+                    # become substantial in case of misalignment between the size of the
+                    # thread pool and the number of running tasks in the worker state
+                    # machine (e.g. https://github.com/dask/distributed/issues/5882)
+                    with context_meter.meter("executor"):
+                        result = await run_in_executor_with_context(
+                            e,
+                            apply_function,
+                            function,
+                            args2,
+                            kwargs2,
+                            self.execution_state,
+                            key,
+                            self.active_threads,
+                            self.active_threads_lock,
+                            self.scheduler_delay,
+                        )
                 else:
-                    # Can't capture contextvars across processes
+                    # Can't capture contextvars across processes. If this is a
+                    # ProcessPoolExecutor, the 'executor' time metric will show the
+                    # whole runtime inside the executor.
                     with context_meter.meter("executor"):
                         result = await self.loop.run_in_executor(
                             e,
