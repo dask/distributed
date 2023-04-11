@@ -26,16 +26,8 @@ dask_scheduler_clients
     Number of clients connected
 dask_scheduler_desired_workers
     Number of workers scheduler needs for task graph
-dask_scheduler_gil_contention
-    0-1 value representing GIL contention on scheduler
-
-    .. note::
-       Requires ``gilknocker`` to be installed, and 
-       ``distributed.admin.system-monitor.gil.enabled``
-       configuration to be set.
-
 dask_scheduler_gil_contention_total
-    Value representing cumulative total of GIL contention metrics since last scrape.
+    Value representing cumulative total of GIL contention.
 
     .. note::
        Requires ``gilknocker`` to be installed, and 
@@ -133,14 +125,6 @@ dask_worker_tasks
     Number of tasks at worker
 dask_worker_threads
     Number of worker threads
-dask_worker_gil_contention
-    0-1 value representing GIL contention on worker
-
-    .. note::
-       Requires ``gilknocker`` to be installed, and 
-       ``distributed.admin.system-monitor.gil.enabled``
-       configuration to be set.
-
 dask_worker_gil_contention_total
     Value representing cumulative total GIL contention on worker
 

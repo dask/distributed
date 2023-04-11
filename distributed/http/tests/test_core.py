@@ -76,11 +76,13 @@ async def test_prometheus_api_doc(c, s, a, _):
     }
     try:
         import gilknocker  # noqa: F401
+
+        gil_metrics = set()  # Already in worker_metrics
     except ImportError:
-        # Documented w/ notes about config and gilknocker requirements
-        for gm in gil_metrics:
-            documented.remove(gm)
-        gil_metrics = set()
+        gil_metrics = {
+            "dask_scheduler_gil_contention_total",
+            "dask_worker_gil_contention_total",
+        }
 
     implemented = scheduler_metrics | worker_metrics | crick_metrics | gil_metrics
     assert documented == implemented
