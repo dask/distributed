@@ -3462,8 +3462,8 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
         self.init_root()
 
     def init_root(self):
-        from bokeh.palettes import small_palettes
         from bokeh.layouts import column
+        from bokeh.palettes import small_palettes
 
         def handle_toggle(_toggle):
             self.toggle.label = (
@@ -3493,10 +3493,9 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
     @without_property_validation
     @log_errors
     def update(self):
-        items = self.scheduler.cumulative_worker_metrics.items()
         items = (
             (k, v)
-            for k, v in items
+            for k, v in self.scheduler.cumulative_worker_metrics.items()
             if isinstance(k, tuple)
             and k[0] == "execute"
             and k[-1] in ("bytes", "seconds")
@@ -3526,21 +3525,20 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
                 self.operations.append(operation)
         data = self.data.copy()
 
-        n_show = (
-            len(
-                [
-                    d
-                    for d in data["timestamp"]
-                    if d > datetime.utcnow() - timedelta(seconds=5)
-                ]
-            )
-            or 2
-        )
-        # Limit those being shown which have 'expired' to be displayed
-        for key in data:
-            data[key] = data[key][-n_show:]
+        # If user has manually selected function(s) then we are only showing them.
+        if len(self.function_selector.value):
+            indexes = [data["functions"].index(f) for f in self.function_selector.value]
+            for key, values in data.items():
+                data[key] = [values[idx] for idx in indexes]
 
-        from bokeh.palettes import small_palettes, Category20c
+        # Otherwise limit those being shown which have 'expired' to be displayed
+        else:
+            cutoff = datetime.utcnow() - timedelta(seconds=10)
+            n_show = len([d for d in data["timestamp"] if d > cutoff]) or 5
+            for key in data:
+                data[key] = data[key][-n_show:]
+
+        from bokeh.palettes import Category20c, small_palettes
 
         piechart_data = dict()
         piechart_data["value"] = [sum(data[f"{op}_value"]) for op in self.operations]
