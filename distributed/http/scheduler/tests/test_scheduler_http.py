@@ -107,6 +107,7 @@ async def test_prometheus(c, s, a, b):
     expected_metrics = {
         "dask_scheduler_clients",
         "dask_scheduler_desired_workers",
+        "dask_scheduler_gil_contention",
         "dask_scheduler_workers",
         "dask_scheduler_last_time",
         "dask_scheduler_tasks",
