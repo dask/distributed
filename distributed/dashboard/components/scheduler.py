@@ -3536,8 +3536,8 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
             )
             or 2
         )
+        # Limit those being shown which have 'expired' to be displayed
         for key in data:
-            self.substantial_change = True
             data[key] = data[key][-n_show:]
 
         from bokeh.palettes import small_palettes, Category20c
@@ -3549,7 +3549,7 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
             sum(data[f"{operation}_value"]) / sum(piechart_data["value"]) * 2 * math.pi
             for operation in self.operations
         ]
-        piechart_data["color"] = small_palettes["YlGnBu"][5][: len(self.operations)]
+        piechart_data["color"] = small_palettes["YlGnBu"][len(self.operations)]
         piechart_data["operation"] = self.operations
         self.piechart_source.data = piechart_data
 
@@ -3597,7 +3597,7 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
             x="functions",
             width=0.9,
             source=self.source,
-            color=small_palettes["YlGnBu"][5][: len(self.operations)],
+            color=small_palettes["YlGnBu"][len(self.operations)],
             legend_label=self.operations,
         )
         for vbar in renderers:
@@ -3611,6 +3611,8 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
             ]
             barchart.add_tools(HoverTool(tooltips=tooltips, renderers=[vbar]))
 
+        if any(len(self.source.data[k]) != len(data[k]) for k in self.source.data):
+            self.substantial_change = True
         self.source.data = dict(data)
 
         # replacing the child causes small blips if done every iteration vs updating renderers
