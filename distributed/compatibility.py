@@ -46,7 +46,7 @@ else:
         import numpy
 
         def randbytes(size):
-            return numpy.random.randint(255, size=size, dtype="u8").tobytes()
+            return numpy.random.randint(256, size=size, dtype="u1").tobytes()
 
     except ImportError:
         import secrets
