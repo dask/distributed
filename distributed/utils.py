@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import functools
 import importlib
@@ -25,6 +26,8 @@ from collections.abc import (
     Callable,
     Collection,
     Container,
+    Generator,
+    Iterator,
     KeysView,
     ValuesView,
 )
@@ -33,7 +36,6 @@ from concurrent.futures import (  # noqa: F401
     Executor,
     ThreadPoolExecutor,
 )
-from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from datetime import timedelta
 from functools import wraps
@@ -44,7 +46,7 @@ from time import sleep
 from types import ModuleType
 from typing import TYPE_CHECKING
 from typing import Any as AnyType
-from typing import ClassVar, Iterator, TypeVar, overload
+from typing import ClassVar, TypeVar, overload
 
 import click
 import psutil
@@ -567,7 +569,7 @@ class LoopRunner:
             try:
                 self._loop.add_callback(self._loop.stop)
                 self._loop_thread.join(timeout=timeout)
-                with suppress(KeyError):  # IOLoop can be missing
+                with contextlib.suppress(KeyError):  # IOLoop can be missing
                     self._loop.close()
             finally:
                 self._loop_thread = None
@@ -604,7 +606,7 @@ class LoopRunner:
         return self._loop
 
 
-@contextmanager
+@contextlib.contextmanager
 def set_thread_state(**kwargs):
     old = {}
     for k in kwargs:
@@ -626,7 +628,7 @@ def set_thread_state(**kwargs):
                 setattr(thread_state, k, v)
 
 
-@contextmanager
+@contextlib.contextmanager
 def tmp_text(filename, text):
     fn = os.path.join(tempfile.gettempdir(), filename)
     with open(fn, "w") as f:
@@ -789,6 +791,11 @@ def silence_logging(level, root="distributed"):
     """
     Change all StreamHandlers for the given logger to the given level
     """
+    warnings.warn(
+        "silence_logging is deprecated, call silence_logging_cmgr",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if isinstance(level, str):
         level = getattr(logging, level.upper())
 
@@ -800,6 +807,27 @@ def silence_logging(level, root="distributed"):
             handler.setLevel(level)
 
     return old
+
+
+@contextlib.contextmanager
+def silence_logging_cmgr(
+    level: str | int, root: str = "distributed"
+) -> Generator[None, None, None]:
+    """
+    Temporarily change all StreamHandlers for the given logger to the given level
+    """
+    if isinstance(level, str):
+        level = getattr(logging, level.upper())
+
+    logger = logging.getLogger(root)
+    with contextlib.ExitStack() as stack:
+        for handler in logger.handlers:
+            if isinstance(handler, logging.StreamHandler):
+                old = handler.level
+                if old != level:
+                    handler.setLevel(level)
+                    stack.callback(handler.setLevel, old)
+        yield
 
 
 @toolz.memoize
@@ -1051,7 +1079,7 @@ def import_file(path: str) -> list[ModuleType]:
         names_to_import.append(name)
     if ext == ".py":  # Ensure that no pyc file will be reused
         cache_file = cache_from_source(path)
-        with suppress(OSError):
+        with contextlib.suppress(OSError):
             os.remove(cache_file)
     if ext in (".egg", ".zip", ".pyz"):
         if path not in sys.path:
@@ -1227,7 +1255,7 @@ def iscoroutinefunction(f):
     return inspect.iscoroutinefunction(f) or gen.is_coroutine_function(f)
 
 
-@contextmanager
+@contextlib.contextmanager
 def warn_on_duration(duration: str | float | timedelta, msg: str) -> Iterator[None]:
     """Generate a UserWarning if the operation in this context takes longer than
     *duration* and print *msg*
