@@ -3424,7 +3424,9 @@ class _FinePerformanceMetricsGetData(DashboardComponent):
                 line_color="white",
                 fill_color=factor_cmap(
                     "operation",
-                    palette=small_palettes["YlGnBu"][len(self.data["operation"])],
+                    palette=small_palettes["YlGnBu"].get(
+                        len(self.data["operation"]), []
+                    ),
                     factors=self.data["operation"],
                 ),
             )
@@ -3537,7 +3539,7 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
             sum(data[f"{operation}_value"]) / sum(piechart_data["value"]) * 2 * math.pi
             for operation in self.operations
         ]
-        piechart_data["color"] = small_palettes["YlGnBu"][len(self.operations)]
+        piechart_data["color"] = small_palettes["YlGnBu"].get(len(self.operations), [])
         piechart_data["operation"] = self.operations
         self.piechart_source.data = piechart_data
 
@@ -3585,7 +3587,7 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
             x="functions",
             width=0.9,
             source=self.source,
-            color=small_palettes["YlGnBu"][len(self.operations)],
+            color=small_palettes["YlGnBu"].get(len(self.operations), []),
             legend_label=self.operations,
         )
         for vbar in renderers:
