@@ -42,17 +42,10 @@ else:
 if sys.version_info >= (3, 9):
     from random import randbytes
 else:
-    try:
-        import numpy
+    from random import getrandbits
 
-        def randbytes(size):
-            return numpy.random.randint(256, size=size, dtype="u1").tobytes()
-
-    except ImportError:
-        import secrets
-
-        def randbytes(size):
-            return secrets.token_bytes(size)
+    def randbytes(size):
+        return getrandbits(size * 8).to_bytes(size, 'little')
 
 
 if tornado.version_info >= (6, 2, 0, 0):
