@@ -190,6 +190,7 @@ module = [
     "distributed.system_monitor",
     "distributed.worker_memory",
     "distributed.worker_state_machine",
+    "distributed.config",
     "distributed.shuffle.*",
 ]
 allow_untyped_defs = false
