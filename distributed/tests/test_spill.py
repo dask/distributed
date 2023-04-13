@@ -3,16 +3,16 @@ from __future__ import annotations
 import array
 import os
 import random
-import secrets
 import uuid
 from pathlib import Path
 
 import pytest
 
+import dask.config
 from dask.sizeof import sizeof
 
 from distributed import profile
-from distributed.compatibility import WINDOWS
+from distributed.compatibility import WINDOWS, randbytes
 from distributed.metrics import meter
 from distributed.spill import SpillBuffer
 from distributed.utils import RateLimiterFilter
@@ -392,7 +392,7 @@ def test_metrics(tmp_path):
 
     a = "a" * 20_000  # <target, highly compressible
     b = "b"
-    c = secrets.token_bytes(30_000)  # <target, uncompressible
+    c = randbytes(30_000)  # <target, uncompressible
     d = "d" * 40_000  # >target, highly compressible
 
     with meter() as m:
@@ -442,3 +442,15 @@ def test_metrics(tmp_path):
     ]
     if not WINDOWS:  # Fiddly rounding; see distributed.metrics._WindowsTime
         assert sum(time_metrics.values()) <= m.delta
+
+
+@pytest.mark.parametrize(
+    "compression,minsize,maxsize",
+    [("zlib", 100, 500), (None, 20_000, 20_500)],
+)
+def test_compression_settings(tmp_path, compression, minsize, maxsize):
+    with dask.config.set({"distributed.comm.compression.spill": compression}):
+        buf = SpillBuffer(str(tmp_path), target=1)
+        x = "x" * 20_000
+        buf["x"] = x
+        assert minsize <= psize(tmp_path, x=x)[1] <= maxsize

@@ -3069,6 +3069,7 @@ async def assert_memory(
     client=True,
     Worker=Nanny,
     config={
+        "distributed.comm.compression.spill": "zlib",
         "distributed.worker.memory.recent-to-old-time": "4s",
         "distributed.worker.memory.spill": 0.7,
     },
@@ -3144,27 +3145,14 @@ async def test_memory(c, s, *nannies):
         ]
     )
 
-    # dask serialization compresses ("x" * 50 * 2**20) from 50 MiB to ~200 kiB.
+    # dask serialization compresses ("x" * 50 * 2**20) from 50 MiB to ~50 kiB.
     # Test that spilled reports the actual size on disk and not the output of
     # sizeof().
-    # FIXME https://github.com/dask/distributed/issues/5807
-    #       This would be more robust if we could just enable zlib compression in
-    #       @gen_cluster
-    from distributed.protocol.compression import default_compression
-
-    if default_compression:
-        await asyncio.gather(
-            assert_memory(a, "spilled", 0.1, 0.5, timeout=3),
-            assert_memory(b, "spilled", 0.1, 0.5, timeout=3),
-            assert_memory(s, "spilled", 0.2, 1.0, timeout=3.1),
-        )
-    else:
-        # Long timeout to allow spilling 100 MiB to disk
-        await asyncio.gather(
-            assert_memory(a, "spilled", 50, 51, timeout=10),
-            assert_memory(b, "spilled", 50, 51, timeout=10),
-            assert_memory(s, "spilled", 100, 102, timeout=10.1),
-        )
+    await asyncio.gather(
+        assert_memory(a, "spilled", 0.04, 0.08, timeout=3),
+        assert_memory(b, "spilled", 0.04, 0.08, timeout=3),
+        assert_memory(s, "spilled", 0.08, 0.16, timeout=3.1),
+    )
 
     # FIXME on Windows and MacOS we occasionally observe managed = 49 bytes
     await asyncio.gather(

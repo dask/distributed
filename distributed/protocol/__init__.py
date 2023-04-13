@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import suppress
 from functools import partial
 
-from distributed.protocol.compression import compressions, default_compression
+from distributed.protocol.compression import compressions
 from distributed.protocol.core import decompress, dumps, loads, maybe_compress, msgpack
 from distributed.protocol.cuda import cuda_deserialize, cuda_serialize
 from distributed.protocol.serialize import (

@@ -1,21 +1,16 @@
 from __future__ import annotations
 
 import sys
-from threading import Thread
-from time import sleep
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-import dask
 from dask.sizeof import sizeof
 
 from distributed.compatibility import WINDOWS
 from distributed.protocol import dumps, loads, maybe_compress, msgpack, to_serialize
-from distributed.protocol.compression import (
-    compressions,
-    default_compression,
-    get_default_compression,
-)
+from distributed.protocol.compression import compressions
 from distributed.protocol.cuda import cuda_deserialize, cuda_serialize
 from distributed.protocol.serialize import (
     Pickled,
@@ -36,79 +31,58 @@ def test_protocol():
         assert loads(dumps(msg)) == msg
 
 
-def test_default_compression():
-    """Test that the default compression algorithm is lz4 -> snappy -> None.
+def test_auto_compression():
+    """Test that the 'auto' compression algorithm is lz4 -> snappy -> None.
     If neither is installed, test that we don't fall back to the very slow zlib.
     """
     try:
         import lz4  # noqa: F401
 
-        assert default_compression == "lz4"
+        assert compressions["auto"] is compressions["lz4"]
         return
     except ImportError:
         pass
+
     try:
         import snappy  # noqa: F401
 
-        assert default_compression == "snappy"
+        assert compressions["auto"] is compressions["snappy"]
     except ImportError:
-        assert default_compression is None
+        assert compressions["auto"].name is None
 
 
-@pytest.mark.parametrize(
-    "config,default",
-    [
-        ("auto", default_compression),
-        (None, None),
-        ("zlib", "zlib"),
-        ("foo", ValueError),
-    ],
-)
-def test_compression_config(config, default):
-    with dask.config.set({"distributed.comm.compression": config}):
-        if type(default) is type and issubclass(default, Exception):
-            with pytest.raises(default):
-                assert get_default_compression()
-        else:
-            assert get_default_compression() == default
-
-
-@pytest.mark.skipif(default_compression is None, reason="requires lz4 or snappy")
 def test_compression_1():
     np = pytest.importorskip("numpy")
     x = np.ones(1000000)
     b = x.tobytes()
-    frames = dumps({"x": Serialize(b)})
+    frames = dumps({"x": Serialize(b)}, context={"compression": "zlib"})
     assert sum(map(nbytes, frames)) < nbytes(b)
     y = loads(frames)
     assert {"x": b} == y
 
 
-@pytest.mark.skipif(default_compression is None, reason="requires lz4 or snappy")
 def test_compression_2():
     np = pytest.importorskip("numpy")
     x = np.random.random(10000)
-    msg = dumps(to_serialize(x.data))
+    msg = dumps(to_serialize(x.data), context={"compression": "zlib"})
     compression = msgpack.loads(msg[1]).get("compression")
     assert all(c is None for c in compression)
 
 
-@pytest.mark.skipif(default_compression is None, reason="requires lz4 or snappy")
 def test_compression_3():
     np = pytest.importorskip("numpy")
     x = np.ones(1000000)
-    frames = dumps({"x": Serialize(x.data)})
+    frames = dumps({"x": Serialize(x.data)}, context={"compression": "zlib"})
     assert sum(map(nbytes, frames)) < x.nbytes
     y = loads(frames)
     assert {"x": x.data} == y
 
 
-@pytest.mark.skipif(default_compression is None, reason="requires lz4 or snappy")
 def test_compression_without_deserialization():
     np = pytest.importorskip("numpy")
     x = np.ones(1000000)
 
-    frames = dumps({"x": Serialize(x)})
+    frames = dumps({"x": Serialize(x)}, context={"compression": "zlib"})
     assert all(len(frame) < 1000000 for frame in frames)
 
     msg = loads(frames, deserialize=False)
@@ -122,8 +96,8 @@ def test_lz4_decompression_avoids_deep_copy():
     """
     pytest.importorskip("lz4")
     a = bytearray(1_000_000)
-    b = compressions["lz4"]["compress"](a)
-    c = compressions["lz4"]["decompress"](b)
+    b = compressions["lz4"].compress(a)
+    c = compressions["lz4"].decompress(b)
     assert isinstance(c, bytearray)
 
 
@@ -163,85 +137,68 @@ def test_maybe_compress(lib, compression):
         payload = b"0" * 10000
         rc, rd = maybe_compress(f(payload), compression=compression)
         assert rc == compression
-        assert compressions[rc]["decompress"](rd) == payload
+        assert compressions[rc].decompress(rd) == payload
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "lib,compression",
     [
-        (None, None),
         ("zlib", "zlib"),
         ("lz4", "lz4"),
         ("snappy", "snappy"),
         ("zstandard", "zstd"),
     ],
 )
-def test_compression_thread_safety(lib, compression):
+@pytest.mark.parametrize("dtype", [bytes, memoryview])
+def test_compression_thread_safety(lib, compression, dtype):
     if lib:
         pytest.importorskip(lib)
 
-    try_converters = [bytes, memoryview]
-    start = (
-        False  # signal variable to increase likelihood of hitting thread-safety issues
-    )
+    barrier = threading.Barrier(4)
+    expect = b"0" * 10000
+    payload = dtype(expect)
 
-    def test_compress_decompress(fn):
-        while not start:
-            sleep(0.001)
-
-        payload = b"123"
-        assert maybe_compress(fn(payload), compression=compression) == (None, payload)
-
-        payload = b"0" * 10000
-        rc, rd = maybe_compress(fn(payload), compression=compression)
-        assert rc == compression
-        assert compressions[rc]["decompress"](rd) == payload
-
-    for fn in try_converters:
-        threads = []
-        for _ in range(0, 100):
-            start = False
-            for _ in range(0, 10):
-                thread = Thread(target=test_compress_decompress, args=(fn,))
-                thread.start()
-                threads.append(thread)
-            start = True
-            for thr in threads:
-                thr.join()
-
-
-@pytest.mark.parametrize(
-    "lib,compression",
-    [
-        (None, None),
-        ("zlib", "zlib"),
-        ("lz4", "lz4"),
-        ("snappy", "snappy"),
-        ("zstandard", "zstd"),
-    ],
-)
-def test_maybe_compress_config_default(lib, compression):
-    if lib:
-        pytest.importorskip(lib)
-
-    try_converters = [bytes, memoryview]
-
-    with dask.config.set({"distributed.comm.compression": compression}):
-        for f in try_converters:
-            payload = b"123"
-            assert maybe_compress(f(payload)) == (None, payload)
-
-            payload = b"0" * 10000
-            rc, rd = maybe_compress(f(payload))
+    def compress_decompress():
+        barrier.wait()
+        for _ in range(2000):
+            rc, rd = maybe_compress(payload, compression=compression)
             assert rc == compression
-            assert compressions[rc]["decompress"](rd) == payload
+            assert compressions[rc].decompress(rd) == expect
+
+    with ThreadPoolExecutor(4) as ex:
+        futures = [ex.submit(compress_decompress) for _ in range(4)]
+        for future in futures:
+            future.result()
 
 
-@pytest.mark.skipif(default_compression is None, reason="requires lz4 or snappy")
+@pytest.mark.parametrize(
+    "lib,compression",
+    [
+        (None, None),
+        ("zlib", "zlib"),
+        ("lz4", "lz4"),
+        ("snappy", "snappy"),
+        ("zstandard", "zstd"),
+    ],
+)
+@pytest.mark.parametrize("dtype", [bytes, memoryview])
+def test_maybe_compress_compression(lib, compression, dtype):
+    if lib:
+        pytest.importorskip(lib)
+    payload = dtype(b"123")
+    assert maybe_compress(payload, compression=compression) == (None, payload)
+
+    payload = dtype(b"0" * 10000)
+    rc, rd = maybe_compress(payload, compression=compression)
+    assert rc == compression
+    assert compressions[rc].decompress(rd) == payload
+
+
 def test_maybe_compress_sample():
     np = pytest.importorskip("numpy")
     payload = np.random.randint(0, 255, size=10000).astype("u1").tobytes()
-    fmt, compressed = maybe_compress(payload)
+    fmt, compressed = maybe_compress(payload, compression="zlib")
     assert fmt is None
     assert compressed == payload
 
@@ -256,7 +213,6 @@ def test_large_bytes():
         assert len(frames[1]) < 1000
 
 
-@pytest.mark.skipif(default_compression is None, reason="requires lz4 or snappy")
 def test_large_messages():
     np = pytest.importorskip("numpy")
     if MEMORY_LIMIT < 8e9:
@@ -269,7 +225,7 @@ def test_large_messages():
         "y": {"a": Serialize(x), "b": b"small_bytes"},
     }
 
-    b = dumps(msg)
+    b = dumps(msg, context={"compression": "zlib"})
     msg2 = loads(b)
     assert msg["x"][1] == msg2["x"][1]
     assert msg["y"]["b"] == msg2["y"]["b"]
@@ -301,19 +257,18 @@ def test_loads_deserialize_False():
     assert result == 123
 
 
-@pytest.mark.skipif(default_compression is None, reason="requires lz4 or snappy")
 def test_loads_without_deserialization_avoids_compression():
     b = b"0" * 100000
 
     msg = {"x": 1, "data": to_serialize(b)}
-    frames = dumps(msg)
+    frames = dumps(msg, context={"compression": "zlib"})
 
     assert sum(map(nbytes, frames)) < 10000
 
     msg2 = loads(frames, deserialize=False)
     assert sum(map(nbytes, msg2["data"].frames)) < 10000
 
-    msg3 = dumps(msg2)
+    msg3 = dumps(msg2, context={"compression": "zlib"})
     msg4 = loads(msg3)
 
     assert msg4 == {"x": 1, "data": b"0" * 100000}
@@ -364,12 +319,11 @@ def test_dumps_loads_Serialized():
     assert result == result3
 
 
-@pytest.mark.skipif(default_compression is None, reason="requires lz4 or snappy")
 def test_maybe_compress_memoryviews():
     np = pytest.importorskip("numpy")
     x = np.arange(1000000, dtype="int64")
-    compression, payload = maybe_compress(x.data)
-    assert compression == default_compression
+    compression, payload = maybe_compress(x.data, compression="zlib")
+    assert compression == "zlib"
     assert len(payload) < x.nbytes * 0.75
 
 

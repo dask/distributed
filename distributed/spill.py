@@ -5,10 +5,12 @@ from collections import defaultdict
 from collections.abc import Hashable, Iterator, Mapping, Sized
 from contextlib import contextmanager
 from functools import partial
+from typing import Callable  # TODO import from collections.abc (requires Python >=3.9)
 from typing import Literal, NamedTuple, Protocol, cast
 
 from packaging.version import parse as parse_version
 
+import dask.config
 import zict
 
 from distributed.metrics import context_meter
@@ -287,11 +289,16 @@ class Slow(zict.Func[str, object, bytes]):
     total_weight: SpilledSize
 
     def __init__(self, spill_directory: str, max_weight: int | Literal[False] = False):
-        super().__init__(
-            partial(serialize_bytelist, on_error="raise"),
-            deserialize_bytes,
-            zict.File(spill_directory),
+        compression = dask.config.get("distributed.comm.compression.spill")
+        # File is a MutableMapping[str, bytes], but serialize_bytelist() returns
+        # list[bytes | bytearray | memorymapping], which File.__setitem__ actually
+        # accepts despite its signature. This is because MutableMapping doesn't allow
+        # for asymmetric VT in __getitem__ and __setitem__.
+        dump = cast(
+            Callable[[object], bytes],
+            partial(serialize_bytelist, compression=compression, on_error="raise"),
         )
+        super().__init__(dump, deserialize_bytes, zict.File(spill_directory))
         self.max_weight = max_weight
         self.weight_by_key = {}
         self.total_weight = SpilledSize(0, 0)
@@ -315,10 +322,7 @@ class Slow(zict.Func[str, object, bytes]):
 
         pickled_size = sum(
             frame.nbytes if isinstance(frame, memoryview) else len(frame)
-            # File is MutableMapping[str, bytes], but serialize_bytelist returns
-            # list[bytes | memorymapping], which files actually accepts despite its
-            # signature. This is because MutableMapping doesn't allow for asymmetric VT
-            # in __getitem__ and __setitem__.
+            # See note in __init__ about serialize_bytelist
             for frame in cast(list, pickled)
         )
 

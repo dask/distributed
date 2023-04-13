@@ -14,9 +14,8 @@ import dask
 from dask.utils import parse_timedelta
 
 from distributed.comm import registry
-from distributed.comm.addressing import parse_address
+from distributed.comm.addressing import get_address_host, parse_address, resolve_address
 from distributed.metrics import time
-from distributed.protocol.compression import get_default_compression
 from distributed.protocol.pickle import HIGHEST_PROTOCOL
 from distributed.utils import wait_for
 
@@ -113,12 +112,23 @@ class Comm(ABC):
     @property
     @abstractmethod
     def local_address(self) -> str:
-        """The local address. For logging and debugging purposes only."""
+        """The local address"""
 
     @property
     @abstractmethod
     def peer_address(self) -> str:
-        """The peer's address. For logging and debugging purposes only."""
+        """The peer's address"""
+
+    @property
+    def same_host(self) -> bool:
+        """Return True if the peer is on localhost; False otherwise"""
+        local_ipaddr = get_address_host(resolve_address(self.local_address))
+        peer_ipaddr = get_address_host(resolve_address(self.peer_address))
+
+        # Note: this is not the same as testing `peer_ipaddr == "127.0.0.1"`.
+        # When you start a Server, by default it starts listening on the LAN interface,
+        # so its advertised address will be 10.x or 192.168.x.
+        return local_ipaddr == peer_ipaddr
 
     @property
     def extra_info(self):
@@ -129,16 +139,52 @@ class Comm(ABC):
         """
         return {}
 
-    @staticmethod
-    def handshake_info():
+    def handshake_info(self) -> dict[str, Any]:
+        """Share environment information with the peer that may differ, i.e. compression
+        settings.
+
+        Notes
+        -----
+        By the time this method runs, the "auto" compression setting has been updated to
+        an actual compression algorithm. This matters if both peers had compression set
+        to 'auto' but only one has lz4 installed. See
+        distributed.protocol.compression._update_and_check_compression_settings()
+
+        See also
+        --------
+        handshake_configuration
+        """
+        if self.same_host:
+            client_compr = dask.config.get("distributed.comm.compression.localhost")
+            worker_compr = client_compr
+        else:
+            client_compr = dask.config.get("distributed.comm.compression.remote-client")
+            worker_compr = dask.config.get("distributed.comm.compression.remote-worker")
+
         return {
-            "compression": get_default_compression(),
+            "client-compression": client_compr,
+            "worker-compression": worker_compr,
             "python": tuple(sys.version_info)[:3],
             "pickle-protocol": HIGHEST_PROTOCOL,
         }
 
     @staticmethod
-    def handshake_configuration(local, remote):
+    def handshake_configuration(
+        local: dict[str, Any], remote: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Find a configuration that is suitable for both local and remote
+
+        Parameters
+        ----------
+        local
+            Output of handshake_info() in this process
+        remote
+            Output of handshake_info() on the remote host
+
+        See also
+        --------
+        handshake_info
+        """
         try:
             out = {
                 "pickle-protocol": min(
@@ -152,8 +198,14 @@ class Comm(ABC):
                 "and distributed on your client, scheduler, and worker machines"
             ) from e
 
-        if local["compression"] == remote["compression"]:
-            out["compression"] = local["compression"]
+        # Check flag set in handshake_overrides by client.py
+        if local.get("is_client") or remote.get("is_client"):
+            compression = "client-compression"
+        else:
+            # Also applies to scheduler, e.g. for scheduler->worker RPC calls
+            compression = "worker-compression"
+        if local[compression] == remote[compression]:
+            out["compression"] = local[compression]
         else:
             out["compression"] = None
 

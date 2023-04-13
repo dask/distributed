@@ -772,11 +772,35 @@ properties:
                     description: The maximum delay between retries
 
           compression:
-            type: string
-            description: |
-              The compression algorithm to use
-
-              This could be one of lz4, snappy, zstd
+            type: object
+            additionalProperties: false
+            properties:
+              remote-client:
+                enum: [null, false, auto, zlib, lz4, snappy, zstd]
+                description:
+                  Client connecting to a scheduler or worker on another host
+                  (unless it's a client created inside a task with get_client(), in
+                  which case it uses the setting for remote-worker).
+                  If your clients are connected to scheduler and workers by a very fast
+                  LAN, you may want to set this to false.
+              remote-worker:
+                enum: [null, false, auto, zlib, lz4, snappy, zstd]
+                description:
+                  Peer-to-peer worker comms across the network, as well as between
+                  scheduler and workers. If the connection between workers and between
+                  scheduler and workers is somewhat slow, you may want to set this to
+                  auto, lz4, or snappy.
+              localhost:
+                enum: [null, false, auto, zlib, lz4, snappy, zstd]
+                description: All network comms on the same host (e.g. on a LocalCluster)
+              spill:
+                enum: [null, false, auto, zlib, lz4, snappy, zstd]
+                description: Spill to disk (see distributed.worker.memory)
+            description:
+              The compression algorithm to use, depending on situation. 'auto' defaults
+              to lz4 if installed, otherwise to snappy if installed, otherwise to false.
+              zlib and zstd are only used if explicitly requested here. Uncompressible
+              data does not use any compression algorithm regardless of this setting.
 
           offload:
             type:
