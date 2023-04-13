@@ -1206,18 +1206,20 @@ class Worker(BaseWorker, ServerNode):
             msg = response["message"] if "message" in response else repr(response)
             logger.error(f"Unable to connect to scheduler: {msg}")
             raise ValueError(f"Unexpected response from register: {response!r}")
-        else:
-            await asyncio.gather(
-                *(
-                    self.plugin_add(name=name, plugin=plugin)
-                    for name, plugin in response["worker-plugins"].items()
-                )
-            )
-
-            logger.info("        Registered to: %26s", self.scheduler.address)
-            logger.info("-" * 49)
 
         self.batched_stream.start(comm)
+        self.status = Status.running
+
+        await asyncio.gather(
+            *(
+                self.plugin_add(name=name, plugin=plugin)
+                for name, plugin in response["worker-plugins"].items()
+            )
+        )
+
+        logger.info("        Registered to: %26s", self.scheduler.address)
+        logger.info("-" * 49)
+
         self.periodic_callbacks["keep-alive"].start()
         self.periodic_callbacks["heartbeat"].start()
         self.loop.add_callback(self.handle_scheduler, comm)
