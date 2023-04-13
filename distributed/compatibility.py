@@ -45,7 +45,7 @@ else:
     from random import getrandbits
 
     def randbytes(size):
-        return getrandbits(size * 8).to_bytes(size, 'little')
+        return getrandbits(size * 8).to_bytes(size, "little")
 
 
 if tornado.version_info >= (6, 2, 0, 0):

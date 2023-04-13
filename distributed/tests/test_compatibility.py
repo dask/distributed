@@ -19,6 +19,6 @@ def test_randbytes_seed():
     state = random.getstate()
     try:
         random.seed(0)
-        assert randbytes(8) == b'\xcd\x07,\xd8\xbeo\x9fb'
+        assert randbytes(8) == b"\xcd\x07,\xd8\xbeo\x9fb"
     finally:
         random.setstate(state)
