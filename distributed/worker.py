@@ -1196,7 +1196,6 @@ class Worker(BaseWorker, ServerNode):
                 middle = (_start + _end) / 2
                 self._update_latency(_end - start)
                 self.scheduler_delay = response["time"] - middle
-                self.status = Status.running
                 break
             except OSError:
                 logger.info("Waiting to connect to: %26s", self.scheduler.address)
