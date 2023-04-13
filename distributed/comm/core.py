@@ -227,15 +227,15 @@ class Listener(ABC):
             # Connector side will employ smaller timeouts and we should only
             # reach this if the comm is dead anyhow.
             await wait_for(comm.write(local_info), timeout=timeout)
-            handshake = await wait_for(comm.read(), timeout=timeout)
+            remote_info = await wait_for(comm.read(), timeout=timeout)
             # This would be better, but connections leak if worker is closed quickly
-            # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
+            # _, remote_info = await asyncio.gather(comm.write(local_info), comm.read())
         except Exception as e:
             with suppress(Exception):
                 await comm.close()
             raise CommClosedError(f"Comm {comm!r} closed.") from e
 
-        comm.remote_info = handshake
+        comm.remote_info = remote_info
         comm.remote_info["address"] = comm.peer_address
         comm.local_info = local_info
         comm.local_info["address"] = comm.local_address
@@ -324,10 +324,10 @@ async def connect(
         **(handshake_overrides or {}),
     }
     try:
-        # This would be better, but connections leak if worker is closed quickly
-        # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
-        handshake = await wait_for(comm.read(), time_left())
+        remote_info = await wait_for(comm.read(), time_left())
         await wait_for(comm.write(local_info), time_left())
+        # This would be better, but connections leak if worker is closed quickly
+        # _, remote_info = await asyncio.gather(comm.write(local_info), comm.read())
     except Exception as exc:
         with suppress(Exception):
             await comm.close()
@@ -335,10 +335,10 @@ async def connect(
             f"Timed out during handshake while connecting to {addr} after {timeout} s"
         ) from exc
 
-    comm.remote_info = handshake
-    comm.remote_info["address"] = comm._peer_addr
+    comm.remote_info = remote_info
+    comm.remote_info["address"] = comm.peer_address
     comm.local_info = local_info
-    comm.local_info["address"] = comm._local_addr
+    comm.local_info["address"] = comm.local_address
 
     comm.handshake_options = comm.handshake_configuration(
         comm.local_info, comm.remote_info

@@ -10,6 +10,12 @@ import dask
 
 from distributed import Client, Scheduler, Worker
 from distributed.comm import connect, listen, ws
+from distributed.comm.addressing import (
+    get_address_host,
+    get_address_host_port,
+    get_local_address_for,
+    resolve_address,
+)
 from distributed.comm.core import FatalCommClosedError
 from distributed.comm.registry import backends, get_backend
 from distributed.comm.tests.test_comms import check_tls_extra
@@ -174,10 +180,18 @@ async def test_http_and_comm_server(dashboard, protocol, security, port):
                 assert result == 11
 
 
-@pytest.mark.parametrize(
-    "protocol,sni",
-    [("ws://", True), ("ws://", False), ("wss://", True), ("wss://", False)],
-)
+@pytest.mark.parametrize("protocol", ["ws://", "wss://"])
+@pytest.mark.parametrize("port,expect_port", [(":123", 123), ("", 80)])
+def test_implicit_port(protocol, port, expect_port):
+    uri = protocol + "localhost" + port
+    assert get_address_host(uri) == "localhost"
+    assert get_address_host_port(uri) == ("localhost", expect_port)
+    assert get_local_address_for(uri) == protocol + "127.0.0.1"
+    assert resolve_address(uri) == protocol + "127.0.0.1" + port
+
+
+@pytest.mark.parametrize("protocol", ["ws://", "wss://"])
+@pytest.mark.parametrize("sni", [False, True])
 @gen_test(clean_kwargs={"instances": False})
 async def test_connection_made_with_extra_conn_args(protocol, sni):
     if protocol == "ws://":

@@ -697,17 +697,18 @@ class BaseTCPBackend(Backend):
     # Address handling
 
     def get_address_host(self, loc):
-        return parse_host_port(loc)[0]
+        return parse_host_port(loc, default_port=-1)[0]
 
     def get_address_host_port(self, loc):
         return parse_host_port(loc)
 
     def resolve_address(self, loc):
-        host, port = parse_host_port(loc)
-        return unparse_host_port(ensure_ip(host), port)
+        host, port = parse_host_port(loc, default_port=-1)
+        host = ensure_ip(host)
+        return unparse_host_port(host, port) if port != -1 else host
 
     def get_local_address_for(self, loc):
-        host, port = parse_host_port(loc)
+        host, port = parse_host_port(loc, default_port=-1)
         host = ensure_ip(host)
         if ":" in host:
             local_host = get_ipv6(host)

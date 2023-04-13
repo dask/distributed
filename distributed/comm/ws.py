@@ -459,10 +459,16 @@ class WSBackend(BaseTCPBackend):
     _connector_class = WSConnector
     _listener_class = WSListener
 
+    def get_address_host_port(self, loc):
+        return parse_host_port(loc, default_port=80)
+
 
 class WSSBackend(BaseTCPBackend):
     _connector_class = WSSConnector
     _listener_class = WSSListener
+
+    def get_address_host_port(self, loc):
+        return parse_host_port(loc, default_port=80)
 
 
 backends["ws"] = WSBackend()
