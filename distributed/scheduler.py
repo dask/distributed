@@ -32,7 +32,7 @@ from collections.abc import (
 )
 from contextlib import suppress
 from functools import partial
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, Tuple, cast, overload
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, cast, overload
 
 import psutil
 from sortedcontainers import SortedDict, SortedSet
@@ -4252,7 +4252,7 @@ class Scheduler(SchedulerState, ServerNode):
         user_priority: int | dict[str, int] = 0,
         actors: bool | list[str] | None = None,
         fifo_timeout: float = 0.0,
-        code: Tuple[str] | None = None,
+        code: tuple[str] | None = None,
         annotations: dict | None = None,
         stimulus_id: str | None = None,
     ) -> None:
