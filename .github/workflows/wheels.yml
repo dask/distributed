@@ -58,7 +58,9 @@ jobs:
       - name: Build wheel
         run: |
           # commit changes
-          git commit -am "Update distributed pinning"
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git commit -am "Update dask pinning"
 
           # create new nightly tag
           tag=${new_version}a`date +%y%m%d`
