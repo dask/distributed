@@ -93,6 +93,7 @@ from distributed.utils import (
     NoOpAwaitable,
     SyncMethodMixin,
     TimeoutError,
+    drop_internal_traceback,
     format_dashboard_link,
     has_keyword,
     import_term,
@@ -2212,6 +2213,7 @@ class Client(SyncMethodMixin):
                         except (KeyError, AttributeError):
                             exc = CancelledError(key)
                         else:
+                            traceback = drop_internal_traceback(traceback)
                             raise exception.with_traceback(traceback)
                         raise exc
                     if errors == "skip":
@@ -3215,6 +3217,10 @@ class Client(SyncMethodMixin):
                     should_rejoin = False
             try:
                 results = self.gather(packed, asynchronous=asynchronous, direct=direct)
+            except Exception:
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                exc_traceback = drop_internal_traceback(exc_traceback)
+                raise exc_value.with_traceback(exc_traceback)
             finally:
                 for f in futures.values():
                     f.release()

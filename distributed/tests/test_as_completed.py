@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import queue
 import random
+import sys
+import traceback
 from collections.abc import Iterator
 from operator import add
 from time import sleep
@@ -175,6 +177,27 @@ def test_as_completed_error(client):
     assert result == {x, y}
     assert x.status == "error"
     assert y.status == "finished"
+
+
+def throws_map_blocks(x, block_id=None):
+    if block_id is not None and block_id[0] % 2 == 0:
+        raise ValueError(f"Bad block id {block_id}")
+    return x / 2
+
+
+def test_map_blocks_error(client):
+    da = pytest.importorskip("dask.array")
+    arr = da.arange(30, chunks=3)
+    op = arr.map_blocks(throws_map_blocks)
+    try:
+        op.compute()
+    except Exception:
+        _, _, tb = sys.exc_info()
+        tb_levels = list(traceback.walk_tb(tb))
+        from pprint import pprint
+
+        print()
+        pprint(tb_levels)
 
 
 def test_as_completed_with_results(client):

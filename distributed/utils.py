@@ -413,6 +413,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
 
     if error:
         typ, exc, tb = error
+        tb = drop_internal_traceback(tb)
         raise exc.with_traceback(tb)
     else:
         return result
@@ -834,6 +835,42 @@ def ensure_ip(hostname):
 
 
 tblib.pickling_support.install()
+
+
+def drop_internal_traceback(exc_traceback):
+    internal_modules = [
+        os.path.join("dask", "dask", "base"),
+        os.path.join("dask", "dask", "core"),
+        os.path.join("dask", "dask", "optimization"),
+        os.path.join("distributed", "distributed", "worker"),
+        os.path.join("distributed", "distributed", "scheduler"),
+        os.path.join("distributed", "distributed", "client"),
+        os.path.join("distributed", "distributed", "utils"),
+        os.path.join("tornado", "gen.py"),
+    ]
+
+    def is_internal_module(filename):
+        return any(k in filename for k in internal_modules)
+
+    # while exc_traceback and is_internal_module(exc_traceback.tb_frame.f_code.co_filename):
+    #     exc_traceback = exc_traceback.tb_next
+    # if exc_traceback:
+    #     exc_traceback.tb_next = drop_internal_traceback(exc_traceback.tb_next)
+    # return exc_traceback
+
+    curr = exc_traceback
+    stack = []
+    while curr:
+        if not is_internal_module(curr.tb_frame.f_code.co_filename):
+            stack.append(curr)
+        curr = curr.tb_next
+
+    curr = None
+    for tb in reversed(stack):
+        tb.tb_next = curr
+        curr = tb
+
+    return curr
 
 
 def get_traceback():
