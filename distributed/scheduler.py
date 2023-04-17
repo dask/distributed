@@ -7872,6 +7872,7 @@ class Scheduler(SchedulerState, ServerNode):
         if self.transition_counter != self._idle_transition_counter:
             self._idle_transition_counter = self.transition_counter
             self.idle_since = None
+            return None
 
         if (
             self.queued
@@ -7879,9 +7880,11 @@ class Scheduler(SchedulerState, ServerNode):
             or any(ws.processing for ws in self.workers.values())
         ):
             self.idle_since = None
+            return None
 
         if not self.idle_since:
             self.idle_since = time()
+            return self.idle_since
 
         if self.jupyter:
             last_activity = (
@@ -7889,6 +7892,7 @@ class Scheduler(SchedulerState, ServerNode):
             )
             if last_activity > self.idle_since:
                 self.idle_since = last_activity
+                return self.idle_since
 
         if self.idle_timeout:
             if time() > self.idle_since + self.idle_timeout:
@@ -7898,7 +7902,6 @@ class Scheduler(SchedulerState, ServerNode):
                     format_time(self.idle_timeout),
                 )
                 self._ongoing_background_tasks.call_soon(self.close)
-
         return self.idle_since
 
     def adaptive_target(self, target_duration=None):
