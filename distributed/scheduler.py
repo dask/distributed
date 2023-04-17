@@ -4260,7 +4260,7 @@ class Scheduler(SchedulerState, ServerNode):
         user_priority: int | dict[str, int] = 0,
         actors: bool | list[str] | None = None,
         fifo_timeout: float = 0.0,
-        code: str | None = None,
+        code: tuple[str] | None = None,
         annotations: dict | None = None,
         stimulus_id: str | None = None,
     ) -> None:
