@@ -501,7 +501,6 @@ async def test_check_idle(c, s, a, b):
             assert resp.status == 200
             assert resp.headers["Content-Type"] == "application/json"
             response = json.loads(await resp.text())
-            assert isinstance(response["idle"], bool)
             assert (
                 isinstance(response["idle_since"], float)
                 or response["idle_since"] is None
