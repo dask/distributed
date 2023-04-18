@@ -2242,11 +2242,14 @@ async def test_collect_versions(c, s, a, b):
 @gen_cluster(client=True)
 async def test_idle_timeout(c, s, a, b):
     beginning = time()
+    assert s.check_idle() is not None
+    assert s.check_idle() is not None  # Repeated calls should still not be None
     s.idle_timeout = 0.500
     pc = PeriodicCallback(s.check_idle, 10)
     future = c.submit(slowinc, 1)
     while not s.tasks:
         await asyncio.sleep(0.01)
+    assert s.check_idle() is None
     pc.start()
     await future
     assert s.idle_since is None or s.idle_since > beginning

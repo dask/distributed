@@ -7910,7 +7910,7 @@ class Scheduler(SchedulerState, ServerNode):
                     format_time(self.idle_timeout),
                 )
                 self._ongoing_background_tasks.call_soon(self.close)
-        return None
+        return self.idle_since
 
     def adaptive_target(self, target_duration=None):
         """Desired number of workers based on the current workload
