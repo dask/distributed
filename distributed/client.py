@@ -3033,6 +3033,14 @@ class Client(SyncMethodMixin):
                 or fr.f_code.co_name in ("<listcomp>", "<dictcomp>")
             ):
                 continue
+
+            # Ignore IPython specific wrapping `async def run_code(...)` function
+            elif (
+                "IPython" in inspect.getframeinfo(fr).filename
+                and inspect.getframeinfo(fr).filename.endswith("interactiveshell.py")
+                and inspect.getframeinfo(fr).function == "run_code"
+            ):
+                continue
             try:
                 code.append(inspect.getsource(fr))
             except OSError:
