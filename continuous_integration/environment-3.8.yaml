@@ -14,6 +14,7 @@ dependencies:
   - cython  # Only tested here; also a dependency of crick
   - dask  # overridden by git tip below
   - filesystem-spec
+  - gilknocker>=0.4.0
   - h5py
   - ipykernel <6.22.0  # https://github.com/dask/distributed/issues/7688
   - ipywidgets <8.0.5  # https://github.com/dask/distributed/issues/7688
@@ -48,4 +49,3 @@ dependencies:
       - git+https://github.com/dask/dask
       - git+https://github.com/jcrist/crick  # Only tested here
       - keras
-      - gilknocker>=0.4.0
