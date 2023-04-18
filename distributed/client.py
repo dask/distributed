@@ -3034,11 +3034,11 @@ class Client(SyncMethodMixin):
             ):
                 continue
 
-            # Ignore IPython specific wrapping `async def run_code(...)` function
+            # Ignore IPython specific wrapping IPython interactive related functions
             elif (
-                "IPython" in inspect.getframeinfo(fr).filename
-                and inspect.getframeinfo(fr).filename.endswith("interactiveshell.py")
-                and inspect.getframeinfo(fr).function == "run_code"
+                hasattr(fr.f_back, "f_globals")
+                and sys.modules[fr.f_back.f_globals["__name__"]].__name__  # type: ignore
+                == "IPython.core.interactiveshell"
             ):
                 continue
             try:
