@@ -37,6 +37,8 @@ dask_scheduler_gil_contention_total
 
 dask_scheduler_workers
     Number of workers known by scheduler
+dask_scheduler_last_time_total
+    Cumulative SystemMonitor time
 dask_scheduler_tasks
     Number of tasks known by scheduler
 dask_scheduler_tasks_suspicious_total
