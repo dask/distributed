@@ -2242,11 +2242,14 @@ async def test_collect_versions(c, s, a, b):
 @gen_cluster(client=True)
 async def test_idle_timeout(c, s, a, b):
     beginning = time()
+    assert s.check_idle() is not None
+    assert s.check_idle() is not None  # Repeated calls should still not be None
     s.idle_timeout = 0.500
     pc = PeriodicCallback(s.check_idle, 10)
     future = c.submit(slowinc, 1)
     while not s.tasks:
         await asyncio.sleep(0.01)
+    assert s.check_idle() is None
     pc.start()
     await future
     assert s.idle_since is None or s.idle_since > beginning
@@ -2829,28 +2832,44 @@ async def test_too_many_groups(c, s, a, b):
 
 
 @gen_test()
-async def test_multiple_listeners():
-    with captured_logger("distributed.scheduler") as log:
-        async with Scheduler(dashboard_address=":0", protocol=["inproc", "tcp"]) as s:
-            async with Worker(s.listeners[0].contact_address) as a:
-                async with Worker(s.listeners[1].contact_address) as b:
-                    assert a.address.startswith("inproc")
-                    assert a.scheduler.address.startswith("inproc")
-                    assert b.address.startswith("tcp")
-                    assert b.scheduler.address.startswith("tcp")
+@pytest.mark.parametrize(
+    "dashboard_link_template,expected_dashboard_link",
+    (
+        ("{scheme}://{host}:{port}/status", r"dashboard at:\s*http://"),
+        ("{ENV_VAR_MISSING}", r"dashboard at:\s*:\d*"),
+    ),
+)
+async def test_multiple_listeners(dashboard_link_template, expected_dashboard_link):
+    with dask.config.set({"distributed.dashboard.link": dashboard_link_template}):
+        with captured_logger("distributed.scheduler") as log:
+            async with Scheduler(
+                dashboard_address=":0", protocol=["inproc", "tcp"]
+            ) as s:
+                async with Worker(s.listeners[0].contact_address) as a:
+                    async with Worker(s.listeners[1].contact_address) as b:
+                        assert a.address.startswith("inproc")
+                        assert a.scheduler.address.startswith("inproc")
+                        assert b.address.startswith("tcp")
+                        assert b.scheduler.address.startswith("tcp")
 
-                    async with Client(s.address, asynchronous=True) as c:
-                        futures = c.map(inc, range(20))
-                        await wait(futures)
+                        async with Client(s.address, asynchronous=True) as c:
+                            futures = c.map(inc, range(20))
+                            await wait(futures)
 
-                        # Force inter-worker communication both ways
-                        await c.submit(sum, futures, workers=[a.address])
-                        await c.submit(len, futures, workers=[b.address])
+                            # Force inter-worker communication both ways
+                            await c.submit(sum, futures, workers=[a.address])
+                            await c.submit(len, futures, workers=[b.address])
 
     log = log.getvalue()
     assert re.search(r"Scheduler at:\s*tcp://", log)
     assert re.search(r"Scheduler at:\s*inproc://", log)
-    assert re.search(r"dashboard at:\s*http://", log)
+
+    # Dashboard link formatting can fail if template contains env vars which aren't
+    # present. Don't kill scheduler, but revert to outputting the port and helpful msg
+    assert re.search(expected_dashboard_link, log)
+    if "ENV_VAR_MISSING" in dashboard_link_template:
+        msg = r"Failed to format dashboard link, unknown value: 'ENV_VAR_MISSING'"
+        assert re.search(msg, log)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)])

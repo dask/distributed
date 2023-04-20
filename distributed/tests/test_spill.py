@@ -20,8 +20,8 @@ from distributed.utils_test import captured_logger
 
 
 def psize(tmp_path: Path, **objs: object) -> tuple[int, int]:
-    # zict <= 2.2.0: tmp_path/key
-    # zict >= 2.3.0: tmp_path/key#0
+    # zict 2.2: tmp_path/key
+    # zict >=3.0: tmp_path/key#0
     fnames = tmp_path.glob("*")
     key_to_fname = {fname.name.split("#")[0]: fname for fname in fnames}
     return (

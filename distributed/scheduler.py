@@ -3872,7 +3872,15 @@ class Scheduler(SchedulerState, ServerNode):
         for name, server in self.services.items():
             if name == "dashboard":
                 addr = get_address_host(listener.contact_address)
-                link = format_dashboard_link(addr, server.port)
+                try:
+                    link = format_dashboard_link(addr, server.port)
+                # formatting dashboard link can fail if distributed.dashboard.link
+                # refers to non-existant env vars.
+                except KeyError as e:
+                    logger.warning(
+                        f"Failed to format dashboard link, unknown value: {e}"
+                    )
+                    link = f":{server.port}"
             else:
                 link = f"{listen_ip}:{server.port}"
             logger.info("%11s at:  %25s", name, link)
@@ -4252,7 +4260,7 @@ class Scheduler(SchedulerState, ServerNode):
         user_priority: int | dict[str, int] = 0,
         actors: bool | list[str] | None = None,
         fifo_timeout: float = 0.0,
-        code: str | None = None,
+        code: tuple[str] | None = None,
         annotations: dict | None = None,
         stimulus_id: str | None = None,
     ) -> None:
@@ -7902,7 +7910,7 @@ class Scheduler(SchedulerState, ServerNode):
                     format_time(self.idle_timeout),
                 )
                 self._ongoing_background_tasks.call_soon(self.close)
-        return None
+        return self.idle_since
 
     def adaptive_target(self, target_duration=None):
         """Desired number of workers based on the current workload
