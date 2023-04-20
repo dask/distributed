@@ -40,11 +40,11 @@ async def test_logs_deprecated():
 
 
 @gen_test()
-async def test_cluster_wait_for_worker(loop):
-    with LocalCluster(n_workers=2, loop=loop) as cluster:
+async def test_cluster_wait_for_worker():
+    async with LocalCluster(n_workers=2, asynchronous=True) as cluster:
         assert len(cluster.scheduler.workers) == 2
         cluster.scale(4)
-        cluster.wait_for_workers(4)
+        await cluster.wait_for_workers(4)
         assert all(
             [
                 worker["status"] == Status.running.name
