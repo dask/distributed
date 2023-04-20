@@ -41,17 +41,17 @@ async def test_logs_deprecated():
 
 @gen_test()
 async def test_cluster_wait_for_worker(loop):
-    with LocalCluster(n_workers=3, loop=loop) as cluster:
-        assert len(cluster.scheduler.workers) == 3
-        cluster.scale(10)
-        cluster.wait_for_workers(10)
+    with LocalCluster(n_workers=2, loop=loop) as cluster:
+        assert len(cluster.scheduler.workers) == 2
+        cluster.scale(4)
+        cluster.wait_for_workers(4)
         assert all(
             [
                 worker["status"] == Status.running.name
                 for _, worker in cluster.scheduler_info["workers"].items()
             ]
         )
-        assert len(cluster.scheduler.workers) == 10
+        assert len(cluster.scheduler.workers) == 4
 
 
 @gen_test()
