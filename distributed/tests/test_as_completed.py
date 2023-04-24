@@ -11,6 +11,8 @@ from time import sleep
 
 import pytest
 
+import dask
+
 from distributed.client import _as_completed, _first_completed, as_completed, wait
 from distributed.metrics import time
 from distributed.utils import CancelledError
@@ -185,19 +187,21 @@ def throws_map_blocks(x, block_id=None):
     return x / 2
 
 
-def test_map_blocks_error(client):
+@pytest.mark.parametrize("clean_traceback,expected_levels", [(True, 9), (False, 16)])
+def test_map_blocks_error(client, clean_traceback, expected_levels):
     da = pytest.importorskip("dask.array")
     arr = da.arange(30, chunks=3)
     op = arr.map_blocks(throws_map_blocks)
     try:
-        op.compute()
+        with dask.config.set(
+            {"distributed.exceptions.clean_traceback": clean_traceback}
+        ):
+            op.compute()
     except Exception:
         _, _, tb = sys.exc_info()
+        traceback.print_tb(tb)
         tb_levels = list(traceback.walk_tb(tb))
-        from pprint import pprint
-
-        print()
-        pprint(tb_levels)
+        assert len(tb_levels) == expected_levels
 
 
 def test_as_completed_with_results(client):

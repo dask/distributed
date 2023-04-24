@@ -315,6 +315,7 @@ class Future(WrappedKey):
         result = self.client.sync(self._result, callback_timeout=timeout, raiseit=False)
         if self.status == "error":
             typ, exc, tb = result
+            tb = drop_internal_traceback(tb)
             raise exc.with_traceback(tb)
         elif self.status == "cancelled":
             raise result
@@ -327,6 +328,7 @@ class Future(WrappedKey):
             exc = clean_exception(self._state.exception, self._state.traceback)
             if raiseit:
                 typ, exc, tb = exc
+                tb = drop_internal_traceback(tb)
                 raise exc.with_traceback(tb)
             else:
                 return exc
@@ -1558,6 +1560,7 @@ class Client(SyncMethodMixin):
 
                     if "status" in msg and "error" in msg["status"]:
                         typ, exc, tb = clean_exception(**msg)
+                        tb = drop_internal_traceback(tb)
                         raise exc.with_traceback(tb)
 
                     op = msg.pop("op")
@@ -2795,6 +2798,7 @@ class Client(SyncMethodMixin):
         )
         if response["status"] == "error":
             typ, exc, tb = clean_exception(**response)
+            tb = drop_internal_traceback(tb)
             raise exc.with_traceback(tb)
         else:
             return response["result"]
@@ -2869,6 +2873,7 @@ class Client(SyncMethodMixin):
             elif resp["status"] == "error":
                 # Exception raised by the remote function
                 _, exc, tb = clean_exception(**resp)
+                tb = drop_internal_traceback(tb)
                 exc = exc.with_traceback(tb)
             else:
                 assert resp["status"] == "OK"
@@ -4823,6 +4828,7 @@ class Client(SyncMethodMixin):
                 _, exc, tb = clean_exception(
                     response["exception"], response["traceback"]
                 )
+                tb = drop_internal_traceback(tb)
                 raise exc.with_traceback(tb)
         return responses
 
@@ -4911,6 +4917,7 @@ class Client(SyncMethodMixin):
             if response["status"] == "error":
                 exc = response["exception"]
                 tb = response["traceback"]
+                tb = drop_internal_traceback(tb)
                 raise exc.with_traceback(tb)
         return responses
 
@@ -5362,6 +5369,7 @@ class as_completed:
             future, result = res
             if self.raise_errors and future.status == "error":
                 typ, exc, tb = result
+                tb = drop_internal_traceback(tb)
                 raise exc.with_traceback(tb)
             elif future.status == "cancelled":
                 res = (res[0], CancelledError(future.key))

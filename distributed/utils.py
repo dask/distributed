@@ -94,6 +94,19 @@ no_default = "__no_default__"
 
 _forkserver_preload_set = False
 
+# used to trim the stack traces. Code frames that match these paths are dropped
+# from traceback if distributed.exceptions.clean_traceback is set
+internal_code = [
+    os.path.join("dask", "dask", "base"),
+    os.path.join("dask", "dask", "core"),
+    os.path.join("dask", "dask", "optimization"),
+    os.path.join("distributed", "distributed", "worker"),
+    os.path.join("distributed", "distributed", "scheduler"),
+    os.path.join("distributed", "distributed", "client"),
+    os.path.join("distributed", "distributed", "utils"),
+    os.path.join("tornado", "gen.py"),
+]
+
 
 def get_mp_context():
     """Create a multiprocessing context
@@ -838,30 +851,20 @@ tblib.pickling_support.install()
 
 
 def drop_internal_traceback(exc_traceback):
-    internal_modules = [
-        os.path.join("dask", "dask", "base"),
-        os.path.join("dask", "dask", "core"),
-        os.path.join("dask", "dask", "optimization"),
-        os.path.join("distributed", "distributed", "worker"),
-        os.path.join("distributed", "distributed", "scheduler"),
-        os.path.join("distributed", "distributed", "client"),
-        os.path.join("distributed", "distributed", "utils"),
-        os.path.join("tornado", "gen.py"),
-    ]
+    """Remove internal stack elements from traceback"""
 
-    def is_internal_module(filename):
-        return any(k in filename for k in internal_modules)
+    # if config flag is not set, do nothing
+    if dask.config.get("distributed.exceptions.clean_traceback", False) is False:
+        return exc_traceback
 
-    # while exc_traceback and is_internal_module(exc_traceback.tb_frame.f_code.co_filename):
-    #     exc_traceback = exc_traceback.tb_next
-    # if exc_traceback:
-    #     exc_traceback.tb_next = drop_internal_traceback(exc_traceback.tb_next)
-    # return exc_traceback
+    def is_internal_code(frame_code):
+        search_string = os.path.join(frame_code.co_filename, frame_code.co_name)
+        return any(pattern in search_string for pattern in internal_code)
 
     curr = exc_traceback
     stack = []
     while curr:
-        if not is_internal_module(curr.tb_frame.f_code.co_filename):
+        if not is_internal_code(curr.tb_frame.f_code):
             stack.append(curr)
         curr = curr.tb_next
 
