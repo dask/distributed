@@ -187,7 +187,7 @@ def throws_map_blocks(x, block_id=None):
     return x / 2
 
 
-@pytest.mark.parametrize("clean_traceback,expected_levels", [(True, 9), (False, 16)])
+@pytest.mark.parametrize("clean_traceback,expected_levels", [(True, 6), (False, 16)])
 def test_map_blocks_error(client, clean_traceback, expected_levels):
     da = pytest.importorskip("dask.array")
     arr = da.arange(30, chunks=3)

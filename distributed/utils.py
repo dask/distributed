@@ -97,13 +97,13 @@ _forkserver_preload_set = False
 # used to trim the stack traces. Code frames that match these paths are dropped
 # from traceback if distributed.exceptions.clean_traceback is set
 internal_code = [
-    os.path.join("dask", "dask", "base"),
-    os.path.join("dask", "dask", "core"),
-    os.path.join("dask", "dask", "optimization"),
-    os.path.join("distributed", "distributed", "worker"),
-    os.path.join("distributed", "distributed", "scheduler"),
-    os.path.join("distributed", "distributed", "client"),
-    os.path.join("distributed", "distributed", "utils"),
+    os.path.join("dask", "base.py"),
+    os.path.join("dask", "core.py"),
+    os.path.join("dask", "optimization.py"),
+    os.path.join("distributed", "worker.py"),
+    os.path.join("distributed", "scheduler.py"),
+    os.path.join("distributed", "client.py"),
+    os.path.join("distributed", "utils.py"),
     os.path.join("tornado", "gen.py"),
 ]
 
