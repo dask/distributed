@@ -1817,13 +1817,12 @@ async def test_closed_worker_returns_before_barrier(c, s):
 
         scheduler_extension.block_barrier.set()
 
-        await wait_for_state(key, "memory", s)
+        with pytest.raises(
+            RuntimeError, match=f"shuffle_barrier failed .* {shuffle_id}"
+        ):
+            await c.compute(out.x.size)
 
-        out = await c.compute(out.x.size)
-        y = await c.compute(df.x.size)
-        assert out == y
         blocking_extension.block_remove_worker.set()
-
         await c.close()
         await asyncio.gather(*[clean_worker(w) for w in workers])
         await clean_scheduler(s)

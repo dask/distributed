@@ -4982,13 +4982,25 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.transitions(recommendations, stimulus_id=stimulus_id)
 
+        awaitables = []
         for plugin in list(self.plugins.values()):
             try:
                 result = plugin.remove_worker(scheduler=self, worker=address)
                 if inspect.isawaitable(result):
-                    await result
+                    awaitables.append(result)
             except Exception as e:
                 logger.exception(e)
+        plugin_msgs = await asyncio.gather(*awaitables, return_exceptions=True)
+
+        plugins_exceptions = [msg for msg in plugin_msgs if isinstance(msg, Exception)]
+        if len(plugins_exceptions) >= 1:
+            if len(plugins_exceptions) > 1:
+                logger.error(
+                    "Multiple plugin exceptions raised. All exceptions will be logged, the first is raised."
+                )
+                for exc in plugins_exceptions:
+                    logger.error(repr(exc))
+            raise plugins_exceptions[0]
 
         if not self.workers:
             logger.info("Lost all workers")
