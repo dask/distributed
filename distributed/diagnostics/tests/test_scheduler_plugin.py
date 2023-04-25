@@ -134,9 +134,7 @@ async def test_async_and_sync_add_remove_worker(s):
         async def add_worker(self, scheduler, worker):
             assert scheduler is s
 
-            # Delay by a few event loop ticks
-            for _ in range(10):
-                await asyncio.sleep(0)
+            await asyncio.sleep(0)
             events.append((self.name, "add_worker", worker))
 
         async def remove_worker(self, scheduler, worker):
