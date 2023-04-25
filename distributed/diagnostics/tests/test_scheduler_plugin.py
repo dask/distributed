@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from distributed import Scheduler, SchedulerPlugin, Worker, get_worker
@@ -113,6 +115,64 @@ async def test_async_add_remove_worker(s):
     async with Worker(s.address):
         pass
     assert events == []
+
+
+@gen_cluster(nthreads=[])
+async def test_async_and_sync_remove_worker(s):
+    events = []
+
+    class MyAsyncPlugin(SchedulerPlugin):
+        name = "MyAsyncPlugin"
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.in_remove_worker = asyncio.Event()
+            self.block_remove_worker = asyncio.Event()
+
+        async def remove_worker(self, worker, scheduler):
+            assert scheduler is s
+            self.in_remove_worker.set()
+            await self.block_remove_worker.wait()
+            events.append(("async_remove_worker", worker))
+
+    class MySyncPlugin(SchedulerPlugin):
+        name = "MySyncPlugin"
+
+        def remove_worker(self, worker, scheduler):
+            assert scheduler is s
+            events.append(("sync_remove_worker", worker))
+
+    sync_plugin_a = MySyncPlugin()
+    sync_plugin_b = MySyncPlugin()
+
+    async_plugin = MyAsyncPlugin()
+    s.add_plugin(sync_plugin_a, name="a")
+    s.add_plugin(async_plugin)
+    s.add_plugin(sync_plugin_b, name="c")
+    assert events == []
+
+    async with Worker(s.address) as a:
+        async with Worker(s.address) as b:
+            pass
+    await async_plugin.in_remove_worker.wait()
+    assert events == [
+        ("sync_remove_worker", b.address),
+        ("sync_remove_worker", b.address),
+        ("sync_remove_worker", a.address),
+        ("sync_remove_worker", a.address),
+    ]
+
+    async_plugin.block_remove_worker.set()
+    await asyncio.sleep(0)
+
+    assert events == [
+        ("sync_remove_worker", b.address),
+        ("sync_remove_worker", b.address),
+        ("sync_remove_worker", a.address),
+        ("sync_remove_worker", a.address),
+        ("async_remove_worker", b.address),
+        ("async_remove_worker", a.address),
+    ]
 
 
 @gen_test()
