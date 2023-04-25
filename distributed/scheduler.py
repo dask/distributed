@@ -4994,13 +4994,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         plugins_exceptions = [msg for msg in plugin_msgs if isinstance(msg, Exception)]
         if len(plugins_exceptions) >= 1:
-            if len(plugins_exceptions) > 1:
-                logger.error(
-                    "Multiple plugin exceptions raised. All exceptions will be logged, the first is raised."
-                )
-                for exc in plugins_exceptions:
-                    logger.error(repr(exc))
-            raise plugins_exceptions[0]
+            for exc in plugins_exceptions:
+                logger.error(repr(exc))
 
         if not self.workers:
             logger.info("Lost all workers")
