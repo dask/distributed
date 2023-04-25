@@ -521,12 +521,6 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
                 id=self.id, run_id=self.run_id, key=key, worker=assigned_worker
             )
             raise Reschedule()
-        # assert self.worker_for[i] == self.local_address, (
-        #     f"Output partition {i} belongs on {self.worker_for[i]}, "
-        #     f"not {self.local_address}. "
-        # )
-        # # ^ NOTE: this check isn't necessary, just a nice validation to prevent incorrect
-        # # data in the case something has gone very wrong
 
         await self.flush_receive()
         try:
