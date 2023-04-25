@@ -1274,7 +1274,7 @@ async def test_basic_lowlevel_shuffle(
             all_parts = []
             for part, worker in worker_for_mapping.items():
                 s = local_shuffle_pool.shuffles[worker]
-                all_parts.append(s.get_output_partition(part))
+                all_parts.append(s.get_output_partition(part, f"key-{part}"))
 
             all_parts = await asyncio.gather(*all_parts)
 

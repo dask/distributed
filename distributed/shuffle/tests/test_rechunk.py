@@ -138,7 +138,7 @@ async def test_lowlevel_rechunk(
             all_chunks = np.empty(tuple(len(dim) for dim in new), dtype="O")
             for ix, worker in worker_for_mapping.items():
                 s = local_shuffle_pool.shuffles[worker]
-                all_chunks[ix] = await s.get_output_partition(ix)
+                all_chunks[ix] = await s.get_output_partition(ix, f"key-{ix}")
 
         finally:
             await asyncio.gather(*[s.close() for s in shuffles])
