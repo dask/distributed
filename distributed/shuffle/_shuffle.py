@@ -150,8 +150,6 @@ class P2PShuffleLayer(Layer):
         annotations: dict | None = None,
     ):
         check_minimal_arrow_version()
-        # annotations = annotations or {}
-        # annotations.update({"shuffle": lambda key: key[1]})
         self.name = name
         self.column = column
         self.npartitions = npartitions

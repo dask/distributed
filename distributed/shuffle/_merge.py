@@ -215,8 +215,6 @@ class HashJoinP2PLayer(Layer):
         self.n_partitions_right = n_partitions_right
         self.left_index = left_index
         self.right_index = right_index
-        # annotations = annotations or {}
-        # annotations.update({"shuffle": lambda key: key[-1]})
         super().__init__(annotations=annotations or {})
 
     def _cull_dependencies(
