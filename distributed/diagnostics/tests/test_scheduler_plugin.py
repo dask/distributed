@@ -175,6 +175,38 @@ async def test_async_and_sync_remove_worker(s):
     ]
 
 
+@gen_cluster(nthreads=[])
+async def test_failing_async_and_sync_remove_worker(s):
+    class MyAsyncPlugin(SchedulerPlugin):
+        name = "MyAsyncPlugin"
+
+        def __init__(self) -> None:
+            super().__init__()
+
+        async def remove_worker(self, worker, scheduler):
+            assert scheduler is s
+            await asyncio.sleep(0)
+            raise RuntimeError("Async remove_worker failed")
+
+    class MySyncPlugin(SchedulerPlugin):
+        name = "MySyncPlugin"
+
+        def remove_worker(self, worker, scheduler):
+            assert scheduler is s
+            raise RuntimeError("Sync remove_worker failed")
+
+    sync_plugin = MySyncPlugin()
+    async_plugin = MyAsyncPlugin()
+    s.add_plugin(sync_plugin)
+    s.add_plugin(async_plugin)
+    with captured_logger("distributed.scheduler") as logger:
+        async with Worker(s.address):
+            pass
+        while "Async remove_worker failed" not in logger.getvalue():
+            await asyncio.sleep(0)
+        assert "Sync remove_worker failed" in logger.getvalue()
+
+
 @gen_test()
 async def test_lifecycle():
     class LifeCycle(SchedulerPlugin):

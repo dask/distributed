@@ -4994,8 +4994,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         plugins_exceptions = [msg for msg in plugin_msgs if isinstance(msg, Exception)]
         for exc in plugins_exceptions:
-            logger.exception(exc)
-
+            logger.exception(exc, exc_info=exc)
         if not self.workers:
             logger.info("Lost all workers")
 
