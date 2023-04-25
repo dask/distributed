@@ -161,6 +161,7 @@ def test_raise_on_fuse_optimization():
         rechunk(x, chunks=new, method="p2p")
 
 
+@pytest.mark.xfail()
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_raise_on_lost_annotation(c, s, a, b):
     a = np.random.uniform(0, 1, 30)

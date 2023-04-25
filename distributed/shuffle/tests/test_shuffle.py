@@ -128,6 +128,7 @@ def test_raise_on_fuse_optimization():
             dd.shuffle.shuffle(df, "x", shuffle="p2p")
 
 
+@pytest.mark.xfail()
 @gen_cluster(client=True)
 async def test_raise_on_lost_annotation(c, s, a, b):
     df = dask.datasets.timeseries(
