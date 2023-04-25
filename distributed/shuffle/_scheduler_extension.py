@@ -105,6 +105,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
                 "shuffle_barrier": self.barrier,
                 "shuffle_get": self.get,
                 "shuffle_get_or_create": self.get_or_create,
+                "shuffle_restrict_task": self.restrict_task,
             }
         )
         self.heartbeats = defaultdict(lambda: defaultdict(dict))
@@ -121,6 +122,14 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         await self.scheduler.broadcast(
             msg=msg, workers=list(shuffle.participating_workers)
         )
+
+    async def restrict_task(
+        self, id: ShuffleId, run_id: int, key: str, worker: str
+    ) -> None:
+        shuffle = self.states[id]
+        if shuffle.run_id != run_id:
+            raise RuntimeError()
+        self.scheduler.set_restrictions({key: {worker}})
 
     def heartbeat(self, ws: WorkerState, data: dict) -> None:
         for shuffle_id, d in data.items():
@@ -161,27 +170,22 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         schema = spec["schema"]
         column = spec["column"]
         npartitions = spec["npartitions"]
+        parts_out = spec["parts_out"]
         assert schema is not None
         assert column is not None
         assert npartitions is not None
+        assert parts_out is not None
 
         workers = list(self.scheduler.workers)
         output_workers = set()
 
-        name = barrier_key(id)
         mapping = {}
 
-        for ts in self.scheduler.tasks[name].dependents:
-            part = get_partition_id(ts)
-            if ts.worker_restrictions:
-                output_worker = list(ts.worker_restrictions)[0]
-            else:
-                output_worker = get_worker_for_range_sharding(
-                    part, workers, npartitions
-                )
+        for part in parts_out:
+            # TODO: How do we deal with pre-existing worker restrictions?
+            output_worker = get_worker_for_range_sharding(part, workers, npartitions)
             mapping[part] = output_worker
             output_workers.add(output_worker)
-            self.scheduler.set_restrictions({ts.key: {output_worker}})
 
         return DataFrameShuffleState(
             id=id,

@@ -15,10 +15,12 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 
 import toolz
 
+from dask.context import thread_state
 from dask.utils import parse_bytes
 
 from distributed.core import PooledRPCCall
 from distributed.protocol import to_serialize
+from distributed.reschedule import Reschedule
 from distributed.shuffle._arrow import (
     convert_partition,
     deserialize_schema,
@@ -216,7 +218,9 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         """Add an input partition to the shuffle run"""
 
     @abc.abstractmethod
-    async def get_output_partition(self, i: T_partition_id) -> T_partition_type:
+    async def get_output_partition(
+        self, i: T_partition_id, key: str
+    ) -> T_partition_type:
         """Get an output partition to the shuffle run"""
 
 
@@ -354,16 +358,16 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
         await self._write_to_comm(out)
         return self.run_id
 
-    async def get_output_partition(self, i: NIndex) -> np.ndarray:
+    async def get_output_partition(self, i: NIndex, key: str) -> np.ndarray:
         self.raise_if_closed()
         assert self.transferred, "`get_output_partition` called before barrier task"
 
-        assert self.worker_for[i] == self.local_address, (
-            f"Output partition {i} belongs on {self.worker_for[i]}, "
-            f"not {self.local_address}. "
-        )
-        # ^ NOTE: this check isn't necessary, just a nice validation to prevent incorrect
-        # data in the case something has gone very wrong
+        assigned_worker = self.worker_for[i]
+        if not assigned_worker == self.local_address:
+            await self.scheduler.shuffle_restrict_task(
+                id=self.id, run_id=self.run_id, key=key, worker=assigned_worker
+            )
+            raise Reschedule()
 
         await self.flush_receive()
 
@@ -507,16 +511,22 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         await self._write_to_comm(out)
         return self.run_id
 
-    async def get_output_partition(self, i: int) -> pd.DataFrame:
+    async def get_output_partition(self, i: int, key: str) -> pd.DataFrame:
         self.raise_if_closed()
         assert self.transferred, "`get_output_partition` called before barrier task"
 
-        assert self.worker_for[i] == self.local_address, (
-            f"Output partition {i} belongs on {self.worker_for[i]}, "
-            f"not {self.local_address}. "
-        )
-        # ^ NOTE: this check isn't necessary, just a nice validation to prevent incorrect
-        # data in the case something has gone very wrong
+        assigned_worker = self.worker_for[i]
+        if not assigned_worker == self.local_address:
+            await self.scheduler.shuffle_restrict_task(
+                id=self.id, run_id=self.run_id, key=key, worker=assigned_worker
+            )
+            raise Reschedule()
+        # assert self.worker_for[i] == self.local_address, (
+        #     f"Output partition {i} belongs on {self.worker_for[i]}, "
+        #     f"not {self.local_address}. "
+        # )
+        # # ^ NOTE: this check isn't necessary, just a nice validation to prevent incorrect
+        # # data in the case something has gone very wrong
 
         await self.flush_receive()
         try:
@@ -763,6 +773,7 @@ class ShuffleWorkerExtension:
                     .to_pybytes(),
                     "npartitions": kwargs["npartitions"],
                     "column": kwargs["column"],
+                    "parts_out": kwargs["parts_out"],
                 },
                 worker=self.worker.address,
             )
@@ -900,7 +911,10 @@ class ShuffleWorkerExtension:
         Calling this for a ``shuffle_id`` which is unknown or incomplete is an error.
         """
         shuffle = self.get_shuffle_run(shuffle_id, run_id)
-        return sync(self.worker.loop, shuffle.get_output_partition, output_partition)
+        key = thread_state.key
+        return sync(
+            self.worker.loop, shuffle.get_output_partition, output_partition, key
+        )
 
 
 def split_by_worker(

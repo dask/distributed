@@ -136,6 +136,7 @@ def merge_transfer(
     id: ShuffleId,
     input_partition: int,
     npartitions: int,
+    parts_out: set[int],
 ):
     return shuffle_transfer(
         input=input,
@@ -143,6 +144,7 @@ def merge_transfer(
         input_partition=input_partition,
         npartitions=npartitions,
         column=_HASH_COLUMN_NAME,
+        parts_out=parts_out,
     )
 
 
@@ -213,9 +215,9 @@ class HashJoinP2PLayer(Layer):
         self.n_partitions_right = n_partitions_right
         self.left_index = left_index
         self.right_index = right_index
-        annotations = annotations or {}
-        annotations.update({"shuffle": lambda key: key[-1]})
-        super().__init__(annotations=annotations)
+        # annotations = annotations or {}
+        # annotations.update({"shuffle": lambda key: key[-1]})
+        super().__init__(annotations=annotations or {})
 
     def _cull_dependencies(
         self, keys: Iterable[str], parts_out: Iterable[str] | None = None
@@ -340,6 +342,7 @@ class HashJoinP2PLayer(Layer):
                 token_left,
                 i,
                 self.npartitions,
+                self.parts_out,
             )
         for i in range(self.n_partitions_right):
             transfer_keys_right.append((name_right, i))
@@ -349,6 +352,7 @@ class HashJoinP2PLayer(Layer):
                 token_right,
                 i,
                 self.npartitions,
+                self.parts_out,
             )
 
         _barrier_key_left = barrier_key(ShuffleId(token_left))

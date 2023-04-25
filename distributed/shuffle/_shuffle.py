@@ -9,6 +9,7 @@ from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 
+from distributed.reschedule import Reschedule
 from distributed.shuffle._arrow import check_dtype_support, check_minimal_arrow_version
 
 logger = logging.getLogger("distributed.shuffle")
@@ -56,6 +57,7 @@ def shuffle_transfer(
     input_partition: int,
     npartitions: int,
     column: str,
+    parts_out: set[int],
 ) -> int:
     try:
         return _get_worker_extension().add_partition(
@@ -65,6 +67,7 @@ def shuffle_transfer(
             input_partition=input_partition,
             npartitions=npartitions,
             column=column,
+            parts_out=parts_out,
         )
     except Exception as e:
         raise RuntimeError(f"shuffle_transfer failed during shuffle {id}") from e
@@ -77,6 +80,8 @@ def shuffle_unpack(
         return _get_worker_extension().get_output_partition(
             id, barrier_run_id, output_partition
         )
+    except Reschedule as e:
+        raise e
     except Exception as e:
         raise RuntimeError(f"shuffle_unpack failed during shuffle {id}") from e
 
@@ -145,8 +150,8 @@ class P2PShuffleLayer(Layer):
         annotations: dict | None = None,
     ):
         check_minimal_arrow_version()
-        annotations = annotations or {}
-        annotations.update({"shuffle": lambda key: key[1]})
+        # annotations = annotations or {}
+        # annotations.update({"shuffle": lambda key: key[1]})
         self.name = name
         self.column = column
         self.npartitions = npartitions
@@ -156,7 +161,7 @@ class P2PShuffleLayer(Layer):
         else:
             self.parts_out = set(range(self.npartitions))
         self.npartitions_input = npartitions_input
-        super().__init__(annotations=annotations)
+        super().__init__(annotations=annotations or {})
 
     def __repr__(self) -> str:
         return (
@@ -246,6 +251,7 @@ class P2PShuffleLayer(Layer):
                 i,
                 self.npartitions,
                 self.column,
+                self.parts_out,
             )
 
         dsk[_barrier_key] = (shuffle_barrier, token, transfer_keys)

@@ -86,6 +86,7 @@ from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
 from distributed.protocol import pickle, to_serialize
 from distributed.pubsub import PubSubWorkerExtension
+from distributed.reschedule import Reschedule
 from distributed.security import Security
 from distributed.shuffle import ShuffleWorkerExtension
 from distributed.sizeof import safe_sizeof as sizeof
@@ -2815,20 +2816,6 @@ def secede():
             stimulus_id=f"secede-{time()}",
         ),
     )
-
-
-class Reschedule(Exception):
-    """Reschedule this task
-
-    Raising this exception will stop the current execution of the task and ask
-    the scheduler to reschedule this task, possibly on a different machine.
-
-    This does not guarantee that the task will move onto a different machine.
-    The scheduler will proceed through its normal heuristics to determine the
-    optimal machine to accept this task.  The machine will likely change if the
-    load across the cluster has significantly changed since first scheduling
-    the task.
-    """
 
 
 @overload
