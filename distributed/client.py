@@ -3022,6 +3022,7 @@ class Client(SyncMethodMixin):
             stacklevel = stacklevel if stacklevel > 0 else 1
 
         code: list[str] = []
+        is_ipython = False
         for i, (fr, _) in enumerate(traceback.walk_stack(sys._getframe().f_back), 1):
             if len(code) >= nframes:
                 break
@@ -3040,7 +3041,7 @@ class Client(SyncMethodMixin):
                 and sys.modules[fr.f_back.f_globals["__name__"]].__name__  # type: ignore
                 == "IPython.core.interactiveshell"
             ):
-                continue
+                is_ipython = True
             try:
                 code.append(inspect.getsource(fr))
             except OSError:
@@ -3056,8 +3057,7 @@ class Client(SyncMethodMixin):
                         # The current cell
                         code.append(ip.history_manager._i00)
                 break
-
-        return tuple(reversed(code))
+        return tuple(reversed(code))[-1 if is_ipython else 0 :]
 
     def _graph_to_futures(
         self,
