@@ -8,8 +8,6 @@ from functools import partial
 from typing import Callable  # TODO import from collections.abc (requires Python >=3.9)
 from typing import Literal, NamedTuple, Protocol, cast
 
-from packaging.version import parse as parse_version
-
 import dask.config
 import zict
 
@@ -21,8 +19,6 @@ from distributed.utils import RateLimiterFilter
 logger = logging.getLogger(__name__)
 logger.addFilter(RateLimiterFilter("Spill file on disk reached capacity"))
 logger.addFilter(RateLimiterFilter("Spill to disk failed"))
-
-has_zict_230 = parse_version(zict.__version__) >= parse_version("2.3.0")
 
 
 class SpilledSize(NamedTuple):
@@ -128,7 +124,6 @@ class SpillBuffer(zict.Buffer[str, object]):
             yield
         except MaxSpillExceeded as e:
             # key is in self.fast; no keys have been lost on eviction
-            # Note: requires zict > 2.0
             (key_e,) = e.args
             assert key_e in self.fast
             assert key_e not in self.slow
@@ -142,10 +137,7 @@ class SpillBuffer(zict.Buffer[str, object]):
             raise HandledError()
         except PickleError as e:
             key_e, orig_e = e.args
-            if parse_version(zict.__version__) <= parse_version("2.0.0"):
-                pass
-            else:
-                assert key_e in self.fast
+            assert key_e in self.fast
             assert key_e not in self.slow
             if key_e == key:
                 assert key is not None
@@ -290,10 +282,11 @@ class Slow(zict.Func[str, object, bytes]):
 
     def __init__(self, spill_directory: str, max_weight: int | Literal[False] = False):
         compression = dask.config.get("distributed.comm.compression.spill")
-        # File is a MutableMapping[str, bytes], but serialize_bytelist() returns
+        # File is MutableMapping[str, bytes], but serialize_bytelist returns
         # list[bytes | bytearray | memorymapping], which File.__setitem__ actually
-        # accepts despite its signature. This is because MutableMapping doesn't allow
-        # for asymmetric VT in __getitem__ and __setitem__.
+        # accepts despite its signature; File.__getitem__ actually returns
+        # bytearray. This headache is because MutableMapping doesn't allow for
+        # asymmetric VT in __getitem__ and __setitem__.
         dump = cast(
             Callable[[object], bytes],
             partial(serialize_bytelist, compression=compression, on_error="raise"),

@@ -19,6 +19,7 @@ from dask.widgets import get_template
 from distributed.compatibility import PeriodicCallback
 from distributed.core import Status
 from distributed.deploy.adaptive import Adaptive
+from distributed.metrics import time
 from distributed.objects import SchedulerInfo
 from distributed.utils import (
     Log,
@@ -31,6 +32,9 @@ from distributed.utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+no_default = "__no_default__"
 
 
 class Cluster(SyncMethodMixin):
@@ -581,6 +585,57 @@ class Cluster(SyncMethodMixin):
 
     def __hash__(self):
         return id(self)
+
+    async def _wait_for_workers(self, n_workers=0, timeout=None):
+        self.scheduler_info = SchedulerInfo(await self.scheduler_comm.identity())
+        if timeout:
+            deadline = time() + parse_timedelta(timeout)
+        else:
+            deadline = None
+
+        def running_workers(info):
+            return len(
+                [
+                    ws
+                    for ws in info["workers"].values()
+                    if ws["status"] == Status.running.name
+                ]
+            )
+
+        while n_workers and running_workers(self.scheduler_info) < n_workers:
+            if deadline and time() > deadline:
+                raise TimeoutError(
+                    "Only %d/%d workers arrived after %s"
+                    % (running_workers(self.scheduler_info), n_workers, timeout)
+                )
+            await asyncio.sleep(0.1)
+
+            self.scheduler_info = SchedulerInfo(await self.scheduler_comm.identity())
+
+    def wait_for_workers(
+        self, n_workers: int | str = no_default, timeout: float | None = None
+    ) -> None:
+        """Blocking call to wait for n workers before continuing
+
+        Parameters
+        ----------
+        n_workers : int
+            The number of workers
+        timeout : number, optional
+            Time in seconds after which to raise a
+            ``dask.distributed.TimeoutError``
+        """
+        if n_workers is no_default:
+            warnings.warn(
+                "Please specify the `n_workers` argument when using `Client.wait_for_workers`. Not specifying `n_workers` will no longer be supported in future versions.",
+                FutureWarning,
+            )
+            n_workers = 0
+        elif not isinstance(n_workers, int) or n_workers < 1:
+            raise ValueError(
+                f"`n_workers` must be a positive integer. Instead got {n_workers}."
+            )
+        return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
 
 
 def _exponential_backoff(

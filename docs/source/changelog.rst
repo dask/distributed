@@ -1,6 +1,68 @@
 Changelog
 =========
 
+.. _v2023.4.0:
+
+2023.4.0
+--------
+
+Released on April 14, 2023
+
+.. note::
+
+    With this release we are making a change which will require the Dask scheduler to have
+    consistent software and hardware capabilities as the client and workers.
+
+    It's always been recommended that your client and workers have a consistent software
+    and hardware environment so that data structures and dependencies can be pickled and passed
+    between them. However recent changes to the Dask scheduler mean that we now also require
+    your scheduler to have the same consistent environment as everything else.
+
+Enhancements
+^^^^^^^^^^^^
+- Meter queue time to the offload executor (:pr:`7758`) `crusaderky`_
+- Add GIL contention metric to Prometheus (:pr:`7651`) `Miles`_
+- Add methods ``Client.forward_logging()`` and ``Client.unforward_logging()``. (:pr:`7276`) `Max Bane`_
+- Optionally capture more frames in computations (:pr:`7656`) `Gabe Joseph`_
+- Consider Jupyter activity in idle timeout (:pr:`7687`) `Gabe Joseph`_
+- Add a dashboard component that displays RMM memory (:pr:`7718`) `Peter Andreas Entschev`_
+- Improve error message if ``shuffle``/``rechunk`` lost annotations (:pr:`7707`) `Hendrik Makait`_
+- Exception chaining in P2P shuffling (:pr:`7706`) `Hendrik Makait`_
+- Use pickle for graph submissions from client to scheduler (:pr:`7564`) `Florian Jetter`_
+
+Bug Fixes
+^^^^^^^^^
+- Fix crash on missing env var in dashboard link formatting (:pr:`7729`) `Miles`_
+- Fix ``randbytes()`` on Python 3.8 (:pr:`7771`) `crusaderky`_
+- Run scheduler of ``SubprocessCluster`` in subprocess (:pr:`7727`) `Hendrik Makait`_
+- Drop id from RMM dashboard component (:pr:`7739`) `James Bourbeau`_
+
+Maintenance
+^^^^^^^^^^^
+- Bump ``peter-evans/create-pull-request`` from 4 to 5 (:pr:`7766`)
+- Fix flaky ``test_malloc_trim_threshold`` in CI (:pr:`7764`) `crusaderky`_
+- Minor polish in ``spill`` and ``worker_memory_manager`` (:pr:`7752`) `crusaderky`_
+- Merge identical ``tool.mypy.overrides`` sections (:pr:`7749`) `Thomas Grainger`_
+- Add changelog section for 2023.3.2.1 (:pr:`7755`) `Charles Blackmon-Luca`_
+- Specify ``ts`` resolution explicitly in ``test_processing_chain`` (:pr:`7744`) `Patrick Hoefler`_
+- Unignore Sphinx ``ref.python`` (:pr:`7713`) `Thomas Grainger`_
+- Temporary fix for ``test_merge_by_multiple_columns`` with `pandas` 2.0 (:pr:`7747`) `James Bourbeau`_
+- Remove ``dask/gpu`` from gpuCI update reviewers (:pr:`7741`) `Charles Blackmon-Luca`_
+- Update gpuCI ``RAPIDS_VER`` to ``23.06`` (:pr:`7728`)
+- Remove test for ``DataFrame.to_hdf`` (:pr:`7735`) `Hendrik Makait`_
+- Test P2P shuffling with ``DataFrame.to_hdf`` (:pr:`7720`) `Hendrik Makait`_
+- ``scheduler.py`` typing - remove ``allow_incomplete_defs`` (:pr:`7721`) `Florian Jetter`_
+- Remove ``bokeh`` upper bound (:pr:`7413`) `James Bourbeau`_
+- Use declarative ``setuptools`` (:pr:`7629`) `Thomas Grainger`_
+- Store performance metrics on scheduler (:pr:`7701`) `Miles`_
+- Upgrade readthedocs config to ubuntu 22.04 and Python 3.11 (:pr:`7722`) `Thomas Grainger`_
+- Clean up legacy cruft from worker reconnection (:pr:`7712`) `crusaderky`_
+- Bump ``actions/checkout`` from 3.4.0 to 3.5.0 (:pr:`7711`)
+- Drop support for zict 2.1.0 (:pr:`7709`) `crusaderky`_
+- Fix ``mypy`` warning in ``test_client.py`` (:pr:`7710`) `crusaderky`_
+- Test P2P shuffling with ``DataFrame.categorize`` (:pr:`7708`) `Hendrik Makait`_
+
+
 .. _v2023.3.2.1:
 
 2023.3.2.1
@@ -4825,3 +4887,4 @@ significantly without many new features.
 .. _`Miles`: https://github.com/milesgranger
 .. _`Eugene Druzhynin`: https://github.com/eugene-graft
 .. _`ypogorelova`: https://github.com/ypogorelova
+.. _`Patrick Hoefler`: https://github.com/phofl

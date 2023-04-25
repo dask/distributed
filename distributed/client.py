@@ -1463,7 +1463,11 @@ class Client(SyncMethodMixin):
             raise ValueError(
                 f"`n_workers` must be a positive integer. Instead got {n_workers}."
             )
-        return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
+
+        if self.cluster is None:
+            return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
+
+        return self.cluster.wait_for_workers(n_workers, timeout)
 
     def _heartbeat(self):
         # Don't send heartbeat if scheduler comm or cluster are already closed

@@ -59,6 +59,12 @@ class SchedulerMetricCollector(PrometheusCollector):
                 value=self.server.monitor._cumulative_gil_contention,
             )
 
+        yield CounterMetricFamily(
+            self.build_name("last_time"),
+            "SystemMonitor last time",
+            value=self.server.monitor.last_time,
+        )
+
         tasks = GaugeMetricFamily(
             self.build_name("tasks"),
             "Number of tasks known by scheduler",
