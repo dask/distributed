@@ -8,6 +8,7 @@ import dask
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 
+from distributed.reschedule import Reschedule
 from distributed.shuffle._shuffle import (
     ShuffleId,
     ShuffleType,
@@ -57,6 +58,8 @@ def rechunk_unpack(
         return _get_worker_extension().get_output_partition(
             id, barrier_run_id, output_chunk
         )
+    except Reschedule as e:
+        raise e
     except Exception as e:
         raise RuntimeError(f"rechunk_unpack failed during shuffle {id}") from e
 

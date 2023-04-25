@@ -6,6 +6,7 @@ import itertools
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
+from itertools import product
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from distributed.diagnostics.plugin import SchedulerPlugin
@@ -208,18 +209,12 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         workers = list(self.scheduler.workers)
         output_workers = set()
 
-        name = barrier_key(id)
         mapping = {}
 
-        for ts in self.scheduler.tasks[name].dependents:
-            part = get_partition_id(ts)
-            if ts.worker_restrictions:
-                output_worker = list(ts.worker_restrictions)[0]
-            else:
-                output_worker = get_worker_for_hash_sharding(part, workers)
+        for part in product(*(range(len(c)) for c in new)):
+            output_worker = get_worker_for_hash_sharding(part, workers)
             mapping[part] = output_worker
             output_workers.add(output_worker)
-            self.scheduler.set_restrictions({ts.key: {output_worker}})
 
         return ArrayRechunkState(
             id=id,
