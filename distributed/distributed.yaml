@@ -163,6 +163,8 @@ distributed:
       # Set to false for no maximum.
       max-spill: false
 
+      spill-compression: auto  # See also: distributed.comm.compression
+
       # Interval between checks for the spill, pause, and terminate thresholds.
       # The target threshold is checked every time new data is inserted.
       monitor-interval: 100ms
@@ -217,11 +219,7 @@ distributed:
       delay:
          min: 1s  # the first non-zero delay between re-tries
          max: 20s  # the maximum delay between re-tries
-    compression:
-      remote-client: auto  # Client connecting to a scheduler or worker on another host
-      remote-worker: false  # Peer-to-peer worker comms across the network
-      localhost: false  # All network comms on the same host (e.g. on a LocalCluster)
-      spill: auto  # Spill to disk
+    compression: false  # See also: distributed.worker.memory.spill-compression
     shard: 64MiB
     offload: 10MiB # Size after which we choose to offload serialization to another thread
     default-scheme: tcp

@@ -6626,20 +6626,22 @@ def test_client_connectionpool_semaphore_loop(s, a, b, loop):
 
 
 @pytest.mark.slow
-@gen_cluster(
-    client=True,
-    nthreads=[],
-    config={"distributed.comm.compression.localhost": None},
-    timeout=60,
-)
+@gen_cluster(client=True, nthreads=[], config={"distributed.comm.compression": None})
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 async def test_mixed_compression(c, s):
     pytest.importorskip("lz4")
     da = pytest.importorskip("dask.array")
 
     async with Nanny(
-        s.address, nthreads=1, config={"distributed.comm.compression.localhost": "lz4"}
+        s.address,
+        host="127.0.0.2",
+        nthreads=1,
+        config={"distributed.comm.compression": "lz4"},
     ), Nanny(
-        s.address, nthreads=1, config={"distributed.comm.compression.localhost": "zlib"}
+        s.address,
+        host="127.0.0.3",
+        nthreads=1,
+        config={"distributed.comm.compression": "zlib"},
     ):
         await c.wait_for_workers(2)
         await c.get_versions()

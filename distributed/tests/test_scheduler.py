@@ -3088,9 +3088,9 @@ async def assert_memory(
     client=True,
     Worker=Nanny,
     config={
-        "distributed.comm.compression.spill": "zlib",
         "distributed.worker.memory.recent-to-old-time": "4s",
         "distributed.worker.memory.spill": 0.7,
+        "distributed.worker.memory.spill-compression": "zlib",
     },
     worker_kwargs={
         "heartbeat_interval": "20ms",

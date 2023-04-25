@@ -16,6 +16,7 @@ from dask.utils import parse_timedelta
 from distributed.comm import registry
 from distributed.comm.addressing import get_address_host, parse_address, resolve_address
 from distributed.metrics import time
+from distributed.protocol.compression import compressions
 from distributed.protocol.pickle import HIGHEST_PROTOCOL
 from distributed.utils import wait_for
 
@@ -155,15 +156,14 @@ class Comm(ABC):
         handshake_configuration
         """
         if self.same_host:
-            client_compr = dask.config.get("distributed.comm.compression.localhost")
-            worker_compr = client_compr
+            compression = None
         else:
-            client_compr = dask.config.get("distributed.comm.compression.remote-client")
-            worker_compr = dask.config.get("distributed.comm.compression.remote-worker")
+            compression = dask.config.get("distributed.comm.compression")
+            # resolve 'auto', in case it doesn't match between client and server
+            compression = compressions[compression].name
 
         return {
-            "client-compression": client_compr,
-            "worker-compression": worker_compr,
+            "compression": compression,
             "python": tuple(sys.version_info)[:3],
             "pickle-protocol": HIGHEST_PROTOCOL,
         }
@@ -198,14 +198,8 @@ class Comm(ABC):
                 "and distributed on your client, scheduler, and worker machines"
             ) from e
 
-        # Check flag set in handshake_overrides by client.py
-        if local.get("is_client") or remote.get("is_client"):
-            compression = "client-compression"
-        else:
-            # Also applies to scheduler, e.g. for scheduler->worker RPC calls
-            compression = "worker-compression"
-        if local[compression] == remote[compression]:
-            out["compression"] = local[compression]
+        if local["compression"] == remote["compression"]:
+            out["compression"] = local["compression"]
         else:
             out["compression"] = None
 

@@ -5,7 +5,6 @@ Includes utilities for determining whether or not to compress
 """
 from __future__ import annotations
 
-import warnings
 import zlib
 from collections.abc import Callable, Iterable
 from contextlib import suppress
@@ -101,55 +100,6 @@ with suppress(ImportError):
         return zstd_decompressor.decompress(data)
 
     compressions["zstd"] = Compression("zstd", zstd_compress, zstd_decompress)
-
-
-def _update_deprecated_compression_settings():
-    cfg = dask.config.get("distributed.comm.compression")
-    if isinstance(cfg, str) or cfg in (None, False):
-        warnings.warn(
-            "distributed.comm.compression has been split up. Please update your custom "
-            "config to match the structure of the defaults from distributed.yaml.",
-            FutureWarning,
-            stacklevel=1,
-        )
-        dask.config.set(
-            {
-                "distributed.comm.compression": {
-                    "remote-worker": cfg,
-                    "remote-client": cfg,
-                    "localhost": cfg,
-                    "spill": cfg,
-                }
-            }
-        )
-
-
-def _update_and_check_compression_settings(key: str) -> None:
-    """Validate compression settings in dask config; resolve 'auto' to support the
-    client having lz4 installed but not a worker/scheduler, or vice versa
-
-    See also
-    --------
-    distributed.comm.core.Comm.handshake_configuration
-    """
-    cfg = dask.config.get(key)
-    try:
-        cfg = compressions[cfg][0]
-    except KeyError:
-        raise ValueError(
-            f"Compression {key}={cfg} not found. Choices are: "
-            + ",".join(map(str, compressions))
-        )
-    dask.config.set({key: cfg})
-
-
-# Validate config at load time instead of the first time we need it
-# (spill may not happen until one reaches production!)
-_update_deprecated_compression_settings()
-_update_and_check_compression_settings("distributed.comm.compression.remote-worker")
-_update_and_check_compression_settings("distributed.comm.compression.remote-client")
-_update_and_check_compression_settings("distributed.comm.compression.localhost")
-_update_and_check_compression_settings("distributed.comm.compression.spill")
 
 
 def byte_sample(b: memoryview, size: int, n: int) -> memoryview:

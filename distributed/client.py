@@ -944,11 +944,6 @@ class Client(SyncMethodMixin):
             self.connection_args = self.security.get_connection_args("worker")
         else:
             self.connection_args = self.security.get_connection_args("client")
-            # Use compression settings from distributed.comm.compression.remote-client
-            # instead of distributed.comm.compression.remote-worker
-            self.connection_args.setdefault("handshake_overrides", {})[
-                "is_client"
-            ] = True
 
         self._asynchronous = asynchronous
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)

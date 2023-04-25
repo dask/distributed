@@ -127,15 +127,10 @@ async def test_collections(c, s, a, b):
     await x.persist()
 
 
-@pytest.mark.parametrize("compression", ["zlib", None])
-@gen_test()
-async def test_large_transfer(compression):
-    with dask.config.set({"distributed.comm.compression.localhost": compression}):
-        async with Scheduler(port=0, dashboard_address=":0", protocol="ws://") as s:
-            async with Worker(s.address, protocol="ws://"):
-                async with Client(s.address, asynchronous=True) as c:
-                    x = await c.scatter(randbytes(12_000_000))
-                    await c.gather(x)
+@gen_cluster(client=True, scheduler_kwargs={"protocol": "ws://"})
+async def test_large_transfer(c, s, a, b):
+    x = await c.scatter(randbytes(12_000_000))
+    await c.gather(x)
 
 
 @pytest.mark.parametrize(
