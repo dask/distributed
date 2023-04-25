@@ -103,6 +103,7 @@ async def test_async_add_remove_worker(s):
         async with Worker(s.address) as b:
             pass
 
+    assert len(events) == 4
     assert set(events) == {
         ("add_worker", a.address),
         ("add_worker", b.address),
@@ -118,93 +119,160 @@ async def test_async_add_remove_worker(s):
 
 
 @gen_cluster(nthreads=[])
-async def test_async_and_sync_remove_worker(s):
+async def test_async_and_sync_add_remove_worker(s):
     events = []
 
     class MyAsyncPlugin(SchedulerPlugin):
-        name = "MyAsyncPlugin"
+        name: str
 
-        def __init__(self) -> None:
+        def __init__(self, name: str) -> None:
             super().__init__()
+            self.name = name
             self.in_remove_worker = asyncio.Event()
             self.block_remove_worker = asyncio.Event()
 
-        async def remove_worker(self, worker, scheduler):
+        async def add_worker(self, scheduler, worker):
+            assert scheduler is s
+
+            # Delay by a few event loop ticks
+            for _ in range(10):
+                await asyncio.sleep(0)
+            events.append((self.name, "add_worker", worker))
+
+        async def remove_worker(self, scheduler, worker):
             assert scheduler is s
             self.in_remove_worker.set()
             await self.block_remove_worker.wait()
-            events.append(("async_remove_worker", worker))
+            events.append((self.name, "remove_worker", worker))
 
     class MySyncPlugin(SchedulerPlugin):
-        name = "MySyncPlugin"
+        name: str
+
+        def __init__(self, name: str):
+            self.name = name
+
+        def add_worker(self, worker, scheduler):
+            assert scheduler is s
+            events.append((self.name, "add_worker", worker))
 
         def remove_worker(self, worker, scheduler):
             assert scheduler is s
-            events.append(("sync_remove_worker", worker))
+            events.append((self.name, "remove_worker", worker))
 
-    sync_plugin_a = MySyncPlugin()
-    sync_plugin_b = MySyncPlugin()
+    sync_plugin_before = MySyncPlugin(name="before")
+    s.add_plugin(sync_plugin_before)
 
-    async_plugin = MyAsyncPlugin()
-    s.add_plugin(sync_plugin_a, name="a")
+    async_plugin = MyAsyncPlugin(name="async")
     s.add_plugin(async_plugin)
-    s.add_plugin(sync_plugin_b, name="c")
+
+    sync_plugin_after = MySyncPlugin(name="after")
+    s.add_plugin(sync_plugin_after)
     assert events == []
 
     async with Worker(s.address) as a:
+        assert len(events) == 3
+
+        # No ordering guarantees between these
+        assert set(events[:2]) == {
+            ("before", "add_worker", a.address),
+            ("after", "add_worker", a.address),
+        }
+        # Async add_worker happens after sync add_worker,
+        # but before code within the context manager is run
+        assert events[2] == ("async", "add_worker", a.address)
+        events.clear()
+
         async with Worker(s.address) as b:
-            pass
-    await async_plugin.in_remove_worker.wait()
-    assert events == [
-        ("sync_remove_worker", b.address),
-        ("sync_remove_worker", b.address),
-        ("sync_remove_worker", a.address),
-        ("sync_remove_worker", a.address),
-    ]
+            assert len(events) == 3
+            # No ordering guarantees between these
+            assert set(events[:2]) == {
+                ("before", "add_worker", b.address),
+                ("after", "add_worker", b.address),
+            }
+            # Async add_worker happens after sync add_worker,
+            # but before code within the context manager is run
+            assert events[2] == ("async", "add_worker", b.address)
+            events.clear()
+
+        await async_plugin.in_remove_worker.wait()
+        assert len(events) == 2
+        # No ordering guarantees between these
+        assert set(events) == {
+            ("before", "remove_worker", b.address),
+            ("after", "remove_worker", b.address),
+        }
+        events.clear()
+
+    assert len(events) == 2
+    # No ordering guarantees between these
+    assert set(events) == {
+        ("before", "remove_worker", a.address),
+        ("after", "remove_worker", a.address),
+    }
+    events.clear()
 
     async_plugin.block_remove_worker.set()
     await asyncio.sleep(0)
-
-    assert events == [
-        ("sync_remove_worker", b.address),
-        ("sync_remove_worker", b.address),
-        ("sync_remove_worker", a.address),
-        ("sync_remove_worker", a.address),
-        ("async_remove_worker", b.address),
-        ("async_remove_worker", a.address),
-    ]
+    # No ordering guarantees between these
+    assert len(events) == 2
+    assert set(events) == {
+        ("async", "remove_worker", a.address),
+        ("async", "remove_worker", b.address),
+    }
+    events.clear()
 
 
 @gen_cluster(nthreads=[])
-async def test_failing_async_and_sync_remove_worker(s):
+async def test_failing_async_add_remove_worker(s):
     class MyAsyncPlugin(SchedulerPlugin):
         name = "MyAsyncPlugin"
 
         def __init__(self) -> None:
             super().__init__()
 
-        async def remove_worker(self, worker, scheduler):
+        async def add_worker(self, scheduler, worker):
+            assert scheduler is s
+            await asyncio.sleep(0)
+            raise RuntimeError("Async add_worker failed")
+
+        async def remove_worker(self, scheduler, worker):
             assert scheduler is s
             await asyncio.sleep(0)
             raise RuntimeError("Async remove_worker failed")
 
+    plugin = MyAsyncPlugin()
+    s.add_plugin(plugin)
+    with captured_logger("distributed.scheduler") as logger:
+        async with Worker(s.address):
+            while "add_worker failed" not in logger.getvalue():
+                await asyncio.sleep(0)
+            pass
+        while "remove_worker failed" not in logger.getvalue():
+            await asyncio.sleep(0)
+
+
+@gen_cluster(nthreads=[])
+async def test_failing_sync_add_remove_worker(s):
     class MySyncPlugin(SchedulerPlugin):
         name = "MySyncPlugin"
 
-        def remove_worker(self, worker, scheduler):
-            assert scheduler is s
-            raise RuntimeError("Sync remove_worker failed")
+        def __init__(self) -> None:
+            super().__init__()
 
-    sync_plugin = MySyncPlugin()
-    async_plugin = MyAsyncPlugin()
-    s.add_plugin(sync_plugin)
-    s.add_plugin(async_plugin)
+        def add_worker(self, scheduler, worker):
+            assert scheduler is s
+            raise RuntimeError("Async add_worker failed")
+
+        def remove_worker(self, scheduler, worker):
+            assert scheduler is s
+            raise RuntimeError("Async remove_worker failed")
+
+    plugin = MySyncPlugin()
+    s.add_plugin(plugin)
     with captured_logger("distributed.scheduler") as logger:
         async with Worker(s.address):
-            pass
-        while "Async remove_worker failed" not in logger.getvalue():
-            await asyncio.sleep(0)
-        assert "Sync remove_worker failed" in logger.getvalue()
+            assert "add_worker failed" in logger.getvalue()
+        assert "remove_worker failed" in logger.getvalue()
 
 
 @gen_test()
