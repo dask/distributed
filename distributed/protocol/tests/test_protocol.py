@@ -299,9 +299,7 @@ def test_maybe_compress_auto():
     np = pytest.importorskip("numpy")
     x = np.arange(1000000, dtype="int64")
     compression, payload = maybe_compress(x.data)
-    assert compression in ("lz4", "snappy", None)
-    compression2, payload = maybe_compress(x.data, compression="auto")
-    assert compression2 == compression
+    assert compression == compressions["auto"].name
     assert len(payload) < x.nbytes * 0.75
 
 
