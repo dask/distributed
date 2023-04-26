@@ -342,15 +342,14 @@ class Server:
         io_loop=None,
         local_directory=None,
     ):
-        name = type(self).__name__.lower()
+        from distributed.nanny import Nanny
+
         if local_directory is None:
             local_directory = (
                 dask.config.get("temporary-directory") or tempfile.gettempdir()
             )
-            self._original_local_dir = local_directory
-            local_directory = os.path.join(local_directory, f"dask-{name}-space")
-        else:
-            self._original_local_dir = local_directory
+            local_directory = os.path.join(local_directory, "dask-worker-space")
+        self._original_local_dir = local_directory
 
         with warn_on_duration(
             "1s",
@@ -359,9 +358,13 @@ class Server:
             "Consider specifying a local-directory to point workers to write "
             "scratch data to a local disk.",
         ):
-            self._workspace = WorkSpace(local_directory)
-            self._workdir = self._workspace.new_work_dir(prefix=f"{name}-")
-            self.local_directory = self._workdir.dir_path
+            if isinstance(self, Nanny):
+                self.local_directory = WorkSpace(local_directory).base_dir
+            else:
+                self._workspace = WorkSpace(local_directory)
+                self._workdir = self._workspace.new_work_dir(prefix="worker-")
+                self.local_directory = self._workdir.dir_path
+
         if self.local_directory not in sys.path:
             sys.path.insert(0, self.local_directory)
 
