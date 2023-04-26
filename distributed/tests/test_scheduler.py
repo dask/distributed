@@ -52,6 +52,7 @@ from distributed.utils_test import (
     BrokenComm,
     assert_story,
     async_poll_for,
+    captured_handler,
     captured_logger,
     cluster,
     dec,
@@ -2728,17 +2729,20 @@ class FlakyConnectionPool(ConnectionPool):
 
 
 @gen_cluster(client=True)
-async def test_gather_failing_cnn_recover(c, s, a, b, caplog):
+async def test_gather_failing_cnn_recover(c, s, a, b):
     x = await c.scatter({"x": 1}, workers=a.address)
     rpc = await FlakyConnectionPool(failing_connections=1)
     with mock.patch.object(s, "rpc", rpc), dask.config.set(
         {"distributed.comm.retry.count": 1}
-    ), caplog.at_level(logging.INFO):
-        caplog.clear()
+    ), captured_handler(
+        logging.getLogger("distributed").handlers[0]
+    ) as distributed_log:
         res = await s.gather(keys=["x"])
-    assert [
-        record.message for record in caplog.records if record.levelno == logging.INFO
-    ] == ["Retrying get_data_from_worker after exception in attempt 0/1: "]
+    assert re.match(
+        r"\A\d+-\d+-\d+ \d+:\d+:\d+,\d+ - distributed.utils_comm - INFO - "
+        r"Retrying get_data_from_worker after exception in attempt 0/1: \n\Z",
+        distributed_log.getvalue(),
+    )
     assert res["status"] == "OK"
 
 

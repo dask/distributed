@@ -2245,14 +2245,16 @@ async def test_cancel_multi_client(s, a, b):
 
 
 @gen_cluster(nthreads=[("", 1)], client=True)
-async def test_cancel_before_known_to_scheduler(c, s, a, caplog):
+async def test_cancel_before_known_to_scheduler(c, s, a):
     f = c.submit(inc, 1)
+    f2 = c.submit(inc, f)
     await c.cancel([f])
+    assert f.cancelled()
 
     with pytest.raises(CancelledError):
-        await f
-    while f"Scheduler cancels key {f.key}" not in caplog.text:
-        await asyncio.sleep(0.05)
+        await f2
+
+    assert any(f"Scheduler cancels key {f.key}" in msg for _, msg in s.get_logs())
 
 
 @gen_cluster(client=True)

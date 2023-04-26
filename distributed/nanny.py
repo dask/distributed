@@ -52,7 +52,7 @@ from distributed.utils import (
     json_load_robust,
     log_errors,
     parse_ports,
-    silence_logging,
+    silence_logging_cmgr,
     wait_for,
 )
 from distributed.worker import Worker, run
@@ -164,6 +164,7 @@ class Nanny(ServerNode):
                 stacklevel=2,
             )
 
+        self.__exit_stack = stack = contextlib.ExitStack()
         self.process = None
         self._setup_logging(logger)
         self.loop = self.io_loop = IOLoop.current()
@@ -252,7 +253,7 @@ class Nanny(ServerNode):
         self.quiet = quiet
 
         if silence_logs:
-            silence_logging(level=silence_logs)
+            stack.enter_context(silence_logging_cmgr(level=silence_logs))
         self.silence_logs = silence_logs
 
         handlers = {
@@ -611,6 +612,7 @@ class Nanny(ServerNode):
         await self.rpc.close()
         self.status = Status.closed
         await super().close()
+        self.__exit_stack.__exit__(None, None, None)
         return "OK"
 
     async def _log_event(self, topic, msg):
