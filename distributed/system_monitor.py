@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-import warnings
 from collections import deque
 from typing import Any
 
@@ -104,9 +103,6 @@ class SystemMonitor:
             try:
                 from gilknocker import KnockKnock
             except ImportError:
-                warnings.warn(
-                    "Monitoring GIL requires `gilknocker` to be installed. `pip install gilknocker`"
-                )
                 self.monitor_gil_contention = False
             else:
                 self.quantities["gil_contention"] = deque(maxlen=maxlen)
