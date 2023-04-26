@@ -314,7 +314,7 @@ distributed:
       disk: true  # Monitor host-wide disk I/O
       host-cpu: false  # Monitor host-wide CPU usage, with very granular breakdown
       gil: 
-        enabled: false  # Monitor GIL contention
+        enabled: true  # Monitor GIL contention
         interval: "1ms"  # Frequency to poll GIL
     event-loop: tornado
   rmm:
