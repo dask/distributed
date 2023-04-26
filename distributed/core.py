@@ -342,12 +342,13 @@ class Server:
         io_loop=None,
         local_directory=None,
     ):
+        name = type(self).__name__.lower()
         if local_directory is None:
             local_directory = (
                 dask.config.get("temporary-directory") or tempfile.gettempdir()
             )
             self._original_local_dir = local_directory
-            local_directory = os.path.join(local_directory, "dask-worker-space")
+            local_directory = os.path.join(local_directory, f"dask-{name}-space")
         else:
             self._original_local_dir = local_directory
 
@@ -359,7 +360,7 @@ class Server:
             "scratch data to a local disk.",
         ):
             self._workspace = WorkSpace(local_directory)
-            self._workdir = self._workspace.new_work_dir(prefix="worker-")
+            self._workdir = self._workspace.new_work_dir(prefix=f"{name}-")
             self.local_directory = self._workdir.dir_path
         if self.local_directory not in sys.path:
             sys.path.insert(0, self.local_directory)
