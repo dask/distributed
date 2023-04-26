@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import os
 import sys
+import tempfile
 import threading
 import traceback
 import types
@@ -35,6 +37,7 @@ from distributed.comm import (
 )
 from distributed.compatibility import PeriodicCallback
 from distributed.counter import Counter
+from distributed.diskutils import WorkSpace
 from distributed.metrics import context_meter, time
 from distributed.system_monitor import SystemMonitor
 from distributed.utils import (
@@ -45,6 +48,7 @@ from distributed.utils import (
     recursive_to_dict,
     truncate_exception,
     wait_for,
+    warn_on_duration,
 )
 
 if TYPE_CHECKING:
@@ -303,6 +307,7 @@ class Server:
 
     default_ip = ""
     default_port = 0
+    local_directory: str
 
     def __init__(
         self,
@@ -316,7 +321,30 @@ class Server:
         connection_args=None,
         timeout=None,
         io_loop=None,
+        local_directory=None,
     ):
+        if local_directory is None:
+            local_directory = (
+                dask.config.get("temporary-directory") or tempfile.gettempdir()
+            )
+            self._original_local_dir = local_directory
+            local_directory = os.path.join(local_directory, "dask-worker-space")
+        else:
+            self._original_local_dir = local_directory
+
+        with warn_on_duration(
+            "1s",
+            "Creating scratch directories is taking a surprisingly long time. ({duration:.2f}s) "
+            "This is often due to running workers on a network file system. "
+            "Consider specifying a local-directory to point workers to write "
+            "scratch data to a local disk.",
+        ):
+            self._workspace = WorkSpace(local_directory)
+            self._workdir = self._workspace.new_work_dir(prefix="worker-")
+            self.local_directory = self._workdir.dir_path
+        if self.local_directory not in sys.path:
+            sys.path.insert(0, self.local_directory)
+
         if io_loop is not None:
             warnings.warn(
                 "The io_loop kwarg to Server is ignored and will be deprecated",

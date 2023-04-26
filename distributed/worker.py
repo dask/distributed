@@ -11,7 +11,6 @@ import os
 import pathlib
 import random
 import sys
-import tempfile
 import threading
 import warnings
 import weakref
@@ -111,7 +110,6 @@ from distributed.utils import (
     silence_logging_cmgr,
     thread_state,
     wait_for,
-    warn_on_duration,
 )
 from distributed.utils_comm import gather_from_workers, pack_data, retry_operation
 from distributed.utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
@@ -435,7 +433,6 @@ class Worker(BaseWorker, ServerNode):
     profile_cycle_interval: float
     workspace: WorkSpace
     _workdir: WorkDir
-    local_directory: str
     _client: Client | None
     bandwidth_workers: defaultdict[str, tuple[float, int]]
     bandwidth_types: defaultdict[type, tuple[float, int]]
@@ -598,32 +595,12 @@ class Worker(BaseWorker, ServerNode):
 
         self._setup_logging(logger)
 
-        if not local_directory:
-            local_directory = (
-                dask.config.get("temporary-directory") or tempfile.gettempdir()
-            )
-        local_directory = os.path.join(local_directory, "dask-worker-space")
-
-        with warn_on_duration(
-            "1s",
-            "Creating scratch directories is taking a surprisingly long time. ({duration:.2f}s) "
-            "This is often due to running workers on a network file system. "
-            "Consider specifying a local-directory to point workers to write "
-            "scratch data to a local disk.",
-        ):
-            self._workspace = WorkSpace(local_directory)
-            self._workdir = self._workspace.new_work_dir(prefix="worker-")
-            self.local_directory = self._workdir.dir_path
-
         if not preload:
             preload = dask.config.get("distributed.worker.preload")
         if not preload_argv:
             preload_argv = dask.config.get("distributed.worker.preload-argv")
         assert preload is not None
         assert preload_argv is not None
-        self.preloads = preloading.process_preloads(
-            self, preload, preload_argv, file_dir=self.local_directory
-        )
 
         self.death_timeout = parse_timedelta(death_timeout)
         if scheduler_file:
@@ -702,9 +679,6 @@ class Worker(BaseWorker, ServerNode):
         self.scheduler_delay = 0
         self.stream_comms = {}
 
-        if self.local_directory not in sys.path:
-            sys.path.insert(0, self.local_directory)
-
         self.plugins = {}
         self._pending_plugins = plugins
 
@@ -769,7 +743,12 @@ class Worker(BaseWorker, ServerNode):
             handlers=handlers,
             stream_handlers=stream_handlers,
             connection_args=self.connection_args,
+            local_directory=local_directory,
             **kwargs,
+        )
+
+        self.preloads = preloading.process_preloads(
+            self, preload, preload_argv, file_dir=self.local_directory
         )
         self.memory_manager = WorkerMemoryManager(
             self,

@@ -8,7 +8,6 @@ import logging
 import multiprocessing
 import os
 import shutil
-import tempfile
 import threading
 import uuid
 import warnings
@@ -39,7 +38,6 @@ from distributed.core import (
     error_message,
 )
 from distributed.diagnostics.plugin import _get_plugin_name
-from distributed.diskutils import WorkSpace
 from distributed.metrics import time
 from distributed.node import ServerNode
 from distributed.process import AsyncProcess
@@ -175,19 +173,6 @@ class Nanny(ServerNode):
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("worker")
 
-        if local_directory is None:
-            local_directory = (
-                dask.config.get("temporary-directory") or tempfile.gettempdir()
-            )
-            self._original_local_dir = local_directory
-            local_directory = os.path.join(local_directory, "dask-worker-space")
-        else:
-            self._original_local_dir = local_directory
-
-        # Create directory if it doesn't exist and test for write access.
-        # In case of PermissionError, change the name.
-        self.local_directory = WorkSpace(local_directory).base_dir
-
         self.preload = preload
         if self.preload is None:
             self.preload = dask.config.get("distributed.worker.preload")
@@ -199,6 +184,24 @@ class Nanny(ServerNode):
             preload_nanny = dask.config.get("distributed.nanny.preload")
         if preload_nanny_argv is None:
             preload_nanny_argv = dask.config.get("distributed.nanny.preload-argv")
+
+        handlers = {
+            "instantiate": self.instantiate,
+            "kill": self.kill,
+            "restart": self.restart,
+            "get_logs": self.get_logs,
+            # cannot call it 'close' on the rpc side for naming conflict
+            "terminate": self.close,
+            "close_gracefully": self.close_gracefully,
+            "run": self.run,
+            "plugin_add": self.plugin_add,
+            "plugin_remove": self.plugin_remove,
+        }
+        super().__init__(
+            handlers=handlers,
+            connection_args=self.connection_args,
+            local_directory=local_directory,
+        )
 
         self.preloads = preloading.process_preloads(
             self, preload_nanny, preload_nanny_argv, file_dir=self.local_directory
@@ -221,7 +224,7 @@ class Nanny(ServerNode):
                 protocol = protocol_address[0]
 
         self._given_worker_port = worker_port
-        self.nthreads = nthreads or CPU_COUNT
+        self.nthreads: int = nthreads or CPU_COUNT
         self.reconnect = reconnect
         self.validate = validate
         self.resources = resources
@@ -256,23 +259,7 @@ class Nanny(ServerNode):
             stack.enter_context(silence_logging_cmgr(level=silence_logs))
         self.silence_logs = silence_logs
 
-        handlers = {
-            "instantiate": self.instantiate,
-            "kill": self.kill,
-            "restart": self.restart,
-            "get_logs": self.get_logs,
-            # cannot call it 'close' on the rpc side for naming conflict
-            "terminate": self.close,
-            "close_gracefully": self.close_gracefully,
-            "run": self.run,
-            "plugin_add": self.plugin_add,
-            "plugin_remove": self.plugin_remove,
-        }
-
         self.plugins: dict[str, NannyPlugin] = {}
-
-        super().__init__(handlers=handlers, connection_args=self.connection_args)
-
         self.scheduler = self.rpc(self.scheduler_addr)
         self.memory_manager = NannyMemoryManager(self, memory_limit=memory_limit)
 
