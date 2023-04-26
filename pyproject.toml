@@ -62,6 +62,7 @@ dask-worker = "distributed.cli.dask_worker:main"
 [tool.setuptools]
 include-package-data = true
 zip-safe = false
+package-dir = {"" = "."}
 
 [tool.setuptools.packages.find]
 exclude = ["*tests*"]
