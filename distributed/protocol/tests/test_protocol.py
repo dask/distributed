@@ -28,9 +28,10 @@ from distributed.utils import nbytes
 
 @pytest.fixture(params=[None, "zlib", "lz4", "snappy", "zstd"])
 def compression(request):
-    lib = "zstandard" if request.param == "zstd" else request.param
-    if lib:
-        pytest.importorskip(lib)
+    if request.param == "zstd":
+        pytest.importorskip("zstandard")
+    elif request.param:
+        pytest.importorskip(request.param)
     return request.param
 
 
@@ -131,8 +132,25 @@ def test_small_and_big():
     d = {"x": (1, 2, 3), "y": b"0" * 10000000}
     L = dumps(d)
     assert loads(L) == d
-    # assert loads([small_header, small]) == {'x': [1, 2, 3]}
-    # assert loads([big_header, big]) == {'y': d['y']}
+
+
+@pytest.mark.parametrize("dtype", [bytes, memoryview])
+def test_maybe_compress(compression, dtype):
+    payload = dtype(b"123")
+    assert maybe_compress(payload, compression=compression) == (None, payload)
+
+    payload = dtype(b"0" * 10000)
+    rc, rd = maybe_compress(payload, compression=compression)
+    assert rc == compression
+    assert compressions[rc].decompress(rd) == payload
+
+
+def test_maybe_compress_sample(compression):
+    np = pytest.importorskip("numpy")
+    payload = np.random.randint(0, 255, size=10000).astype("u1").tobytes()
+    fmt, compressed = maybe_compress(payload, compression=compression)
+    assert fmt is None
+    assert compressed == payload
 
 
 @pytest.mark.slow
@@ -153,25 +171,6 @@ def test_compression_thread_safety(compression, dtype):
         futures = [ex.submit(compress_decompress) for _ in range(4)]
         for future in futures:
             future.result()
-
-
-@pytest.mark.parametrize("dtype", [bytes, memoryview])
-def test_maybe_compress(compression, dtype):
-    payload = dtype(b"123")
-    assert maybe_compress(payload, compression=compression) == (None, payload)
-
-    payload = dtype(b"0" * 10000)
-    rc, rd = maybe_compress(payload, compression=compression)
-    assert rc == compression
-    assert compressions[rc].decompress(rd) == payload
-
-
-def test_maybe_compress_sample():
-    np = pytest.importorskip("numpy")
-    payload = np.random.randint(0, 255, size=10000).astype("u1").tobytes()
-    fmt, compressed = maybe_compress(payload, compression="zlib")
-    assert fmt is None
-    assert compressed == payload
 
 
 @pytest.mark.parametrize("dtype", [bytes, memoryview])
@@ -287,12 +286,13 @@ def test_dumps_loads_Serialized():
     assert result == result3
 
 
-def test_maybe_compress_memoryviews():
+def test_maybe_compress_memoryviews(compression):
     np = pytest.importorskip("numpy")
     x = np.arange(1000000, dtype="int64")
-    compression, payload = maybe_compress(x.data, compression="zlib")
-    assert compression == "zlib"
-    assert len(payload) < x.nbytes * 0.75
+    actual_compression, payload = maybe_compress(x.data, compression=compression)
+    assert actual_compression == compression
+    if compression:
+        assert len(payload) < x.nbytes * 0.75
 
 
 def test_maybe_compress_auto():
