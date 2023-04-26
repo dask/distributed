@@ -73,6 +73,7 @@ from distributed.core import (
     coerce_to_address,
     context_meter_to_server_digest,
     error_message,
+    loads_function,
     pingpong,
 )
 from distributed.core import rpc as RPCType
@@ -96,7 +97,6 @@ from distributed.utils import (
     _maybe_complex,
     get_ip,
     has_arg,
-    import_file,
     in_async_call,
     is_python_shutting_down,
     iscoroutinefunction,
@@ -1262,35 +1262,6 @@ class Worker(BaseWorker, ServerNode):
             await self.handle_stream(comm)
         finally:
             await self.close(reason="worker-handle-scheduler-connection-broken")
-
-    async def upload_file(
-        self, filename: str, data: str | bytes, load: bool = True
-    ) -> dict[str, Any]:
-        out_filename = os.path.join(self.local_directory, filename)
-
-        def func(data):
-            if isinstance(data, str):
-                data = data.encode()
-            with open(out_filename, "wb") as f:
-                f.write(data)
-                f.flush()
-                os.fsync(f.fileno())
-            return data
-
-        if len(data) < 10000:
-            data = func(data)
-        else:
-            data = await offload(func, data)
-
-        if load:
-            try:
-                import_file(out_filename)
-                cache_loads.data.clear()
-            except Exception as e:
-                logger.exception(e)
-                raise e
-
-        return {"status": "OK", "nbytes": len(data)}
 
     def keys(self) -> list[str]:
         return list(self.data)
@@ -2893,21 +2864,6 @@ async def get_data_from_worker(
 
 
 job_counter = [0]
-
-
-cache_loads = LRU(maxsize=100)
-
-
-def loads_function(bytes_object):
-    """Load a function from bytes, cache bytes"""
-    if len(bytes_object) < 100000:
-        try:
-            result = cache_loads[bytes_object]
-        except KeyError:
-            result = pickle.loads(bytes_object)
-            cache_loads[bytes_object] = result
-        return result
-    return pickle.loads(bytes_object)
 
 
 @context_meter.meter("deserialize")

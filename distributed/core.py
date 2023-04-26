@@ -26,6 +26,7 @@ import dask
 from dask.utils import parse_timedelta
 
 from distributed import profile, protocol
+from distributed.collections import LRU
 from distributed.comm import (
     Comm,
     CommClosedError,
@@ -39,12 +40,15 @@ from distributed.compatibility import PeriodicCallback
 from distributed.counter import Counter
 from distributed.diskutils import WorkSpace
 from distributed.metrics import context_meter, time
+from distributed.protocol import pickle
 from distributed.system_monitor import SystemMonitor
 from distributed.utils import (
     NoOpAwaitable,
     get_traceback,
     has_keyword,
+    import_file,
     iscoroutinefunction,
+    offload,
     recursive_to_dict,
     truncate_exception,
     wait_for,
@@ -58,6 +62,21 @@ if TYPE_CHECKING:
     R = TypeVar("R")
     T = TypeVar("T")
     Coro = Coroutine[Any, Any, T]
+
+
+cache_loads = LRU(maxsize=100)
+
+
+def loads_function(bytes_object):
+    """Load a function from bytes, cache bytes"""
+    if len(bytes_object) < 100000:
+        try:
+            result = cache_loads[bytes_object]
+        except KeyError:
+            result = pickle.loads(bytes_object)
+            cache_loads[bytes_object] = result
+        return result
+    return pickle.loads(bytes_object)
 
 
 class Status(Enum):
@@ -464,6 +483,35 @@ class Server:
         )
 
         self.__stopped = False
+
+    async def upload_file(
+        self, filename: str, data: str | bytes, load: bool = True
+    ) -> dict[str, Any]:
+        out_filename = os.path.join(self.local_directory, filename)
+
+        def func(data):
+            if isinstance(data, str):
+                data = data.encode()
+            with open(out_filename, "wb") as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+            return data
+
+        if len(data) < 10000:
+            data = func(data)
+        else:
+            data = await offload(func, data)
+
+        if load:
+            try:
+                import_file(out_filename)
+                cache_loads.data.clear()
+            except Exception as e:
+                logger.exception(e)
+                raise e
+
+        return {"status": "OK", "nbytes": len(data)}
 
     def _shift_counters(self):
         for counter in self.counters.values():
