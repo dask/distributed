@@ -603,22 +603,7 @@ class Worker(BaseWorker, ServerNode):
         assert preload_argv is not None
 
         self.death_timeout = parse_timedelta(death_timeout)
-        if scheduler_file:
-            cfg = json_load_robust(scheduler_file, timeout=self.death_timeout)
-            scheduler_addr = cfg["address"]
-        elif scheduler_ip is None and dask.config.get("scheduler-address", None):
-            scheduler_addr = dask.config.get("scheduler-address")
-        elif scheduler_port is None:
-            scheduler_addr = coerce_to_address(scheduler_ip)
-        else:
-            scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
         self.contact_address = contact_address
-
-        if protocol is None:
-            protocol_address = scheduler_addr.split("://")
-            if len(protocol_address) == 2:
-                protocol = protocol_address[0]
-            assert protocol
 
         self._start_port = port
         self._start_host = host
@@ -631,7 +616,6 @@ class Worker(BaseWorker, ServerNode):
                     f"got {host_address}"
                 )
         self._interface = interface
-        self._protocol = protocol
 
         nthreads = nthreads or CPU_COUNT
         if resources is None:
@@ -750,6 +734,24 @@ class Worker(BaseWorker, ServerNode):
         self.preloads = preloading.process_preloads(
             self, preload, preload_argv, file_dir=self.local_directory
         )
+
+        if scheduler_file:
+            cfg = json_load_robust(scheduler_file, timeout=self.death_timeout)
+            scheduler_addr = cfg["address"]
+        elif scheduler_ip is None and dask.config.get("scheduler-address", None):
+            scheduler_addr = dask.config.get("scheduler-address")
+        elif scheduler_port is None:
+            scheduler_addr = coerce_to_address(scheduler_ip)
+        else:
+            scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
+
+        if protocol is None:
+            protocol_address = scheduler_addr.split("://")
+            if len(protocol_address) == 2:
+                protocol = protocol_address[0]
+            assert protocol
+        self._protocol = protocol
+
         self.memory_manager = WorkerMemoryManager(
             self,
             data=data,
