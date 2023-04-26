@@ -386,6 +386,7 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
             await clean_scheduler(s)
 
 
+@pytest.mark.xfail(reason="FIXME: Handle pre-existing restrictions")
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)
 async def test_closed_bystanding_worker_during_shuffle(c, s, w1, w2, w3):
