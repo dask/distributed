@@ -11,7 +11,7 @@ from distributed.utils_test import gen_cluster
 
 
 @pytest.fixture(scope="function")
-def compression_counters(monkeypatch):
+def compression_counters():
     counters = [0, 0]
 
     def compress(v):

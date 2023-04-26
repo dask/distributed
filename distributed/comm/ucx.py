@@ -278,6 +278,11 @@ class UCX(Comm):
     def peer_address(self) -> str:
         return self._peer_addr
 
+    @property
+    def same_host(self) -> bool:
+        """Unlike in TCP, local_address can be blank"""
+        return super().same_host if self._local_addr else False
+
     @log_errors
     async def write(
         self,

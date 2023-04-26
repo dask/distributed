@@ -9,7 +9,7 @@ import pytest
 import dask.config
 from dask.sizeof import sizeof
 
-from distributed.compatibility import WINDOWS, randbytes
+from distributed.compatibility import WINDOWS
 from distributed.protocol import dumps, loads, maybe_compress, msgpack, to_serialize
 from distributed.protocol.compression import compressions, get_compression_settings
 from distributed.protocol.cuda import cuda_deserialize, cuda_serialize
@@ -23,8 +23,15 @@ from distributed.protocol.serialize import (
     deserialize,
     serialize,
 )
-from distributed.system import MEMORY_LIMIT
 from distributed.utils import nbytes
+
+
+@pytest.fixture(params=[None, "zlib", "lz4", "snappy", "zstd"])
+def compression(request):
+    lib = "zstandard" if request.param == "zstd" else request.param
+    if lib:
+        pytest.importorskip(lib)
+    return request.param
 
 
 def test_protocol():
@@ -128,47 +135,9 @@ def test_small_and_big():
     # assert loads([big_header, big]) == {'y': d['y']}
 
 
-@pytest.mark.parametrize(
-    "lib,compression",
-    [
-        (None, None),
-        ("zlib", "zlib"),
-        ("lz4", "lz4"),
-        ("snappy", "snappy"),
-        ("zstandard", "zstd"),
-    ],
-)
-def test_maybe_compress(lib, compression):
-    if lib:
-        pytest.importorskip(lib)
-
-    try_converters = [bytes, memoryview]
-
-    for f in try_converters:
-        payload = b"123"
-        assert maybe_compress(f(payload), compression=compression) == (None, payload)
-
-        payload = b"0" * 10000
-        rc, rd = maybe_compress(f(payload), compression=compression)
-        assert rc == compression
-        assert compressions[rc].decompress(rd) == payload
-
-
 @pytest.mark.slow
-@pytest.mark.parametrize(
-    "lib,compression",
-    [
-        ("zlib", "zlib"),
-        ("lz4", "lz4"),
-        ("snappy", "snappy"),
-        ("zstandard", "zstd"),
-    ],
-)
 @pytest.mark.parametrize("dtype", [bytes, memoryview])
-def test_compression_thread_safety(lib, compression, dtype):
-    if lib:
-        pytest.importorskip(lib)
-
+def test_compression_thread_safety(compression, dtype):
     barrier = threading.Barrier(4)
     expect = b"0" * 10000
     payload = dtype(expect)
@@ -186,20 +155,8 @@ def test_compression_thread_safety(lib, compression, dtype):
             future.result()
 
 
-@pytest.mark.parametrize(
-    "lib,compression",
-    [
-        (None, None),
-        ("zlib", "zlib"),
-        ("lz4", "lz4"),
-        ("snappy", "snappy"),
-        ("zstandard", "zstd"),
-    ],
-)
 @pytest.mark.parametrize("dtype", [bytes, memoryview])
-def test_maybe_compress_compression(lib, compression, dtype):
-    if lib:
-        pytest.importorskip(lib)
+def test_maybe_compress(compression, dtype):
     payload = dtype(b"123")
     assert maybe_compress(payload, compression=compression) == (None, payload)
 
@@ -217,26 +174,30 @@ def test_maybe_compress_sample():
     assert compressed == payload
 
 
-def test_large_bytes():
-    for tp in (bytes, bytearray):
-        msg = {"x": to_serialize(tp(b"0" * 1000000)), "y": 1}
-        frames = dumps(msg)
-        msg["x"] = msg["x"].data
-        assert loads(frames) == msg
-        assert len(frames[0]) < 1000
-        assert len(frames[1]) < 1000
+@pytest.mark.parametrize("dtype", [bytes, memoryview])
+def test_large_bytes(dtype):
+    payload = dtype(b"0" * 1000000)
+    msg = {"x": to_serialize(payload), "y": 1}
+    frames = dumps(msg)
+    msg["x"] = msg["x"].data
+    assert loads(frames) == msg
+    assert len(frames[0]) < 1000
+    assert len(frames[1]) < 1000
 
 
-@pytest.mark.skipif(MEMORY_LIMIT < 8e9, reason="insufficient memory")
-def test_large_messages():
-    x = randbytes(200000000)
+@pytest.mark.slow
+def test_large_messages(compression):
+    x = "x" * 200_000_000
 
     msg = {
         "x": [to_serialize(x), b"small_bytes"],
         "y": {"a": to_serialize(x), "b": b"small_bytes"},
     }
 
-    b = dumps(msg, context={"compression": "zlib"})
+    b = dumps(msg, context={"compression": compression})
+    if compression is not None:
+        assert sum(len(frame) for frame in b) < len(x)
+
     msg2 = loads(b)
     assert msg["x"][1] == msg2["x"][1]
     assert msg["y"]["b"] == msg2["y"]["b"]
@@ -245,11 +206,7 @@ def test_large_messages():
 
 
 def test_large_messages_map():
-    if MEMORY_LIMIT < 8e9:
-        pytest.skip("insufficient memory")
-
-    x = {i: "mystring_%d" % i for i in range(100000)}
-
+    x = {i: "mystring_%d" % i for i in range(100_000)}
     b = dumps(x)
     x2 = loads(b)
     assert x == x2
