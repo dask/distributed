@@ -8,12 +8,11 @@ from functools import partial
 from typing import Callable  # TODO import from collections.abc (requires Python >=3.9)
 from typing import Literal, NamedTuple, Protocol, cast
 
-import dask.config
 import zict
 
 from distributed.metrics import context_meter
 from distributed.protocol import deserialize_bytes, serialize_bytelist
-from distributed.protocol.compression import compressions
+from distributed.protocol.compression import get_compression_settings
 from distributed.sizeof import safe_sizeof
 from distributed.utils import RateLimiterFilter
 
@@ -282,10 +281,9 @@ class Slow(zict.Func[str, object, bytes]):
     total_weight: SpilledSize
 
     def __init__(self, spill_directory: str, max_weight: int | Literal[False] = False):
-        compression = dask.config.get("distributed.worker.memory.spill-compression")
-        # Weed out config errors as soon as we start, without waiting for spilling
-        # (which may or may not happen)
-        compression = compressions[compression].name
+        compression = get_compression_settings(
+            "distributed.worker.memory.spill-compression"
+        )
 
         # File is MutableMapping[str, bytes], but serialize_bytelist returns
         # list[bytes | bytearray | memorymapping], which File.__setitem__ actually

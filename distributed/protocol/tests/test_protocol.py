@@ -6,11 +6,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+import dask.config
 from dask.sizeof import sizeof
 
-from distributed.compatibility import WINDOWS
+from distributed.compatibility import WINDOWS, randbytes
 from distributed.protocol import dumps, loads, maybe_compress, msgpack, to_serialize
-from distributed.protocol.compression import compressions
+from distributed.protocol.compression import compressions, get_compression_settings
 from distributed.protocol.cuda import cuda_deserialize, cuda_serialize
 from distributed.protocol.serialize import (
     Pickled,
@@ -31,24 +32,37 @@ def test_protocol():
         assert loads(dumps(msg)) == msg
 
 
+def test_get_compression_settings():
+    with dask.config.set({"test123": None}):
+        assert get_compression_settings("test123") is None
+    with dask.config.set({"test123": False}):
+        assert get_compression_settings("test123") is None
+    with dask.config.set({"test123": "zlib"}):
+        assert get_compression_settings("test123") == "zlib"
+    with dask.config.set({"test123": "hello"}):
+        with pytest.raises(ValueError, match="Invalid.*test123=hello.*zlib"):
+            get_compression_settings("test123")
+
+
 def test_auto_compression():
     """Test that the 'auto' compression algorithm is lz4 -> snappy -> None.
     If neither is installed, test that we don't fall back to the very slow zlib.
     """
-    try:
-        import lz4  # noqa: F401
+    with dask.config.set({"test123": "auto"}):
+        try:
+            import lz4  # noqa: F401
 
-        assert compressions["auto"] is compressions["lz4"]
-        return
-    except ImportError:
-        pass
+            assert get_compression_settings("test123") == "lz4"
+            return
+        except ImportError:
+            pass
 
-    try:
-        import snappy  # noqa: F401
+        try:
+            import snappy  # noqa: F401
 
-        assert compressions["auto"] is compressions["snappy"]
-    except ImportError:
-        assert compressions["auto"].name is None
+            assert get_compression_settings("test123") == "snappy"
+        except ImportError:
+            assert get_compression_settings("test123") is None
 
 
 def test_compression_1():
@@ -213,24 +227,21 @@ def test_large_bytes():
         assert len(frames[1]) < 1000
 
 
+@pytest.mark.skipif(MEMORY_LIMIT < 8e9, reason="insufficient memory")
 def test_large_messages():
-    np = pytest.importorskip("numpy")
-    if MEMORY_LIMIT < 8e9:
-        pytest.skip("insufficient memory")
-
-    x = np.random.randint(0, 255, size=200000000, dtype="u1")
+    x = randbytes(200000000)
 
     msg = {
-        "x": [Serialize(x), b"small_bytes"],
-        "y": {"a": Serialize(x), "b": b"small_bytes"},
+        "x": [to_serialize(x), b"small_bytes"],
+        "y": {"a": to_serialize(x), "b": b"small_bytes"},
     }
 
     b = dumps(msg, context={"compression": "zlib"})
     msg2 = loads(b)
     assert msg["x"][1] == msg2["x"][1]
     assert msg["y"]["b"] == msg2["y"]["b"]
-    assert (msg["x"][0].data == msg2["x"][0]).all()
-    assert (msg["y"]["a"].data == msg2["y"]["a"]).all()
+    assert msg["x"][0].data == msg2["x"][0]
+    assert msg["y"]["a"].data == msg2["y"]["a"]
 
 
 def test_large_messages_map():

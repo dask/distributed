@@ -102,6 +102,21 @@ with suppress(ImportError):
     compressions["zstd"] = Compression("zstd", zstd_compress, zstd_decompress)
 
 
+def get_compression_settings(key: str) -> str | None:
+    """Fetch and validate compression settings, with a nice error message in case of
+    failure. This also resolves 'auto', which may differ between different hosts of the
+    same cluster.
+    """
+    name = dask.config.get(key)
+    try:
+        return compressions[name].name
+    except KeyError:
+        valid = ",".join(repr(n) for n in compressions)
+        raise ValueError(
+            f"Invalid compression setting {key}={name}. Valid options are {valid}."
+        )
+
+
 def byte_sample(b: memoryview, size: int, n: int) -> memoryview:
     """Sample a bytestring from many locations
 

@@ -454,10 +454,3 @@ def test_compression_settings(tmp_path, compression, minsize, maxsize):
         x = "x" * 20_000
         buf["x"] = x
         assert minsize <= psize(tmp_path, x=x)[1] <= maxsize
-
-
-def test_invalid_compression_settings(tmp_path):
-    """Don't need to wait for actual spilling to verify compression settings"""
-    with dask.config.set({"distributed.worker.memory.spill-compression": "bad"}):
-        with pytest.raises(KeyError, match="bad"):
-            SpillBuffer(str(tmp_path), target=1)

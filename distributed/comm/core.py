@@ -16,7 +16,7 @@ from dask.utils import parse_timedelta
 from distributed.comm import registry
 from distributed.comm.addressing import get_address_host, parse_address, resolve_address
 from distributed.metrics import time
-from distributed.protocol.compression import compressions
+from distributed.protocol.compression import get_compression_settings
 from distributed.protocol.pickle import HIGHEST_PROTOCOL
 from distributed.utils import wait_for
 
@@ -158,9 +158,7 @@ class Comm(ABC):
         if self.same_host:
             compression = None
         else:
-            compression = dask.config.get("distributed.comm.compression")
-            # resolve 'auto', in case it doesn't match between client and server
-            compression = compressions[compression].name
+            compression = get_compression_settings("distributed.comm.compression")
 
         return {
             "compression": compression,
