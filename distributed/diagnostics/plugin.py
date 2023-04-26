@@ -287,6 +287,21 @@ def _get_plugin_name(plugin: SchedulerPlugin | WorkerPlugin | NannyPlugin) -> st
         return funcname(type(plugin)) + "-" + str(uuid.uuid4())
 
 
+class SchedulerUploadFile(SchedulerPlugin):
+    name = "upload_file"
+
+    def __init__(self, filepath):
+        """
+        Initialize the plugin by reading in the data from the given file.
+        """
+        self.filename = os.path.basename(filepath)
+        with open(filepath, "rb") as f:
+            self.data = f.read()
+
+    async def start(self, scheduler: Scheduler) -> None:
+        await scheduler.upload_file(self.filename, self.data)
+
+
 class PackageInstall(WorkerPlugin, abc.ABC):
     """Abstract parent class for a worker plugin to install a set of packages
 

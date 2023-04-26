@@ -1484,10 +1484,21 @@ async def test_upload_file(c, s, a, b):
 
         return myfile.f()
 
+    worker_spaces = [p for p in sys.path if "dask-worker" in p]
+    scheduler_space = [p for p in sys.path if "dask-scheduler" in p]
+    assert len(scheduler_space) == 1
+
     with save_sys_modules():
         for value in [123, 456]:
-            with tmp_text("myfile.py", f"def f():\n    return {value}") as fn:
+            code = f"def f():\n    return {value}"
+            with tmp_text("myfile.py", code) as fn:
                 await c.upload_file(fn)
+
+            # Confirm workers _and_ scheduler got the file
+            for space in worker_spaces + scheduler_space:
+                file = pathlib.Path(space).joinpath("myfile.py")
+                assert file.is_file()
+                assert file.read_text() == code
 
             x = c.submit(g, pure=False)
             result = await x
