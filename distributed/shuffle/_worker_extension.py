@@ -363,7 +363,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
         assert self.transferred, "`get_output_partition` called before barrier task"
 
         assigned_worker = self.worker_for[i]
-        if not assigned_worker == self.local_address:
+        if assigned_worker != self.local_address:
             await self.scheduler.shuffle_restrict_task(
                 id=self.id, run_id=self.run_id, key=key, worker=assigned_worker
             )
@@ -516,7 +516,7 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         assert self.transferred, "`get_output_partition` called before barrier task"
 
         assigned_worker = self.worker_for[i]
-        if not assigned_worker == self.local_address:
+        if assigned_worker != self.local_address:
             await self.scheduler.shuffle_restrict_task(
                 id=self.id, run_id=self.run_id, key=key, worker=assigned_worker
             )
