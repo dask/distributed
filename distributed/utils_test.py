@@ -114,11 +114,8 @@ _offload_executor.submit(lambda: None).result()  # create thread during import
 
 
 class _Watch:
-    def __init__(self, duration: float):
+    def __init__(self, duration: float) -> None:
         self.duration = duration
-        self.started_at = None
-
-    def start(self) -> None:
         self.started_at = time()
 
     def elapsed(self) -> float:
@@ -933,7 +930,6 @@ def gen_cluster(
     if is_debugging():
         timeout = 3600
     watch = _Watch(timeout)
-    watch.start()
     scheduler_kwargs = merge(
         dict(
             dashboard=False,
