@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from tornado.ioloop import PeriodicCallback
+from distributed.compatibility import PeriodicCallback
 
 if TYPE_CHECKING:
-    # circular dependencies
+    # Optional runtime dependencies
+    import pandas as pd
+
+    # Circular dependencies
     from distributed.client import Client
     from distributed.scheduler import Scheduler
 
@@ -57,7 +61,7 @@ class MemorySampler:
         client: Client | None = None,
         measure: str = "process",
         interval: float = 0.5,
-    ):
+    ) -> Any:
         """Context manager that records memory usage in the cluster.
         This is synchronous if the client is synchronous and
         asynchronous if the client is asynchronous.
@@ -92,7 +96,7 @@ class MemorySampler:
     @contextmanager
     def _sample_sync(
         self, label: str | None, client: Client, measure: str, interval: float
-    ):
+    ) -> Iterator[None]:
         key = client.sync(
             client.scheduler.memory_sampler_start,
             client=client.id,
@@ -108,7 +112,7 @@ class MemorySampler:
     @asynccontextmanager
     async def _sample_async(
         self, label: str | None, client: Client, measure: str, interval: float
-    ):
+    ) -> AsyncIterator[None]:
         key = await client.scheduler.memory_sampler_start(
             client=client.id, measure=measure, interval=interval
         )
@@ -118,7 +122,7 @@ class MemorySampler:
             samples = await client.scheduler.memory_sampler_stop(key=key)
             self.samples[label or key] = samples
 
-    def to_pandas(self, *, align: bool = False):
+    def to_pandas(self, *, align: bool = False) -> pd.DataFrame:
         """Return the data series as a pandas.Dataframe.
 
         Parameters
@@ -131,7 +135,7 @@ class MemorySampler:
         import pandas as pd
 
         ss = {}
-        for (label, s_list) in self.samples.items():
+        for label, s_list in self.samples.items():
             assert s_list  # There's always at least one sample
             s = pd.DataFrame(s_list).set_index(0)[1]
             s.index = pd.to_datetime(s.index, unit="s")
@@ -151,7 +155,7 @@ class MemorySampler:
 
         return df
 
-    def plot(self, *, align: bool = False, **kwargs):
+    def plot(self, *, align: bool = False, **kwargs: Any) -> Any:
         """Plot data series collected so far
 
         Parameters
@@ -160,6 +164,10 @@ class MemorySampler:
             See :meth:`~distributed.diagnostics.MemorySampler.to_pandas`
         kwargs
             Passed verbatim to :meth:`pandas.DataFrame.plot`
+
+        Returns
+        =======
+        Output of :meth:`pandas.DataFrame.plot`
         """
         df = self.to_pandas(align=align) / 2**30
         return df.plot(
@@ -182,7 +190,7 @@ class MemorySamplerExtension:
         self.scheduler.handlers["memory_sampler_stop"] = self.stop
         self.samples = {}
 
-    def start(self, comm, client: str, measure: str, interval: float) -> str:
+    def start(self, client: str, measure: str, interval: float) -> str:
         """Start periodically sampling memory"""
         assert not measure.startswith("_")
         assert isinstance(getattr(self.scheduler.memory, measure), int)
@@ -196,7 +204,7 @@ class MemorySamplerExtension:
                 nbytes = getattr(self.scheduler.memory, measure)
                 self.samples[key].append((ts, nbytes))
             else:
-                self.stop(comm, key)
+                self.stop(key)
 
         pc = PeriodicCallback(sample, interval * 1000)
         self.scheduler.periodic_callbacks["MemorySampler-" + key] = pc
@@ -208,7 +216,7 @@ class MemorySamplerExtension:
 
         return key
 
-    def stop(self, comm, key: str):
+    def stop(self, key: str) -> list[tuple[float, int]]:
         """Stop sampling and return the samples"""
         pc = self.scheduler.periodic_callbacks.pop("MemorySampler-" + key)
         pc.stop()

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import uuid
@@ -5,9 +7,8 @@ from collections import defaultdict, deque
 
 from dask.utils import parse_timedelta
 
-from distributed.client import Client
-from distributed.utils import TimeoutError, log_errors
-from distributed.worker import get_worker
+from distributed.utils import TimeoutError, log_errors, wait_for
+from distributed.worker import get_client
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ class LockExtension:
                 self.events[name].append(event)
                 future = event.wait()
                 if timeout is not None:
-                    future = asyncio.wait_for(future, timeout)
+                    future = wait_for(future, timeout)
                 try:
                     await future
                 except TimeoutError:
@@ -93,14 +94,27 @@ class Lock:
     """
 
     def __init__(self, name=None, client=None):
-        try:
-            self.client = client or Client.current()
-        except ValueError:
-            # Initialise new client
-            self.client = get_worker().client
+        self._client = client
         self.name = name or "lock-" + uuid.uuid4().hex
         self.id = uuid.uuid4().hex
         self._locked = False
+
+    @property
+    def client(self):
+        if not self._client:
+            try:
+                self._client = get_client()
+            except ValueError:
+                pass
+        return self._client
+
+    def _verify_running(self):
+        if not self.client:
+            raise RuntimeError(
+                f"{type(self)} object not properly initialized. This can happen"
+                " if the object is being deserialized outside of the context of"
+                " a Client or Worker."
+            )
 
     def acquire(self, blocking=True, timeout=None):
         """Acquire the lock
@@ -123,8 +137,9 @@ class Lock:
 
         Returns
         -------
-        True or False whether or not it sucessfully acquired the lock
+        True or False whether or not it successfully acquired the lock
         """
+        self._verify_running()
         timeout = parse_timedelta(timeout)
 
         if not blocking:
@@ -143,6 +158,7 @@ class Lock:
 
     def release(self):
         """Release the lock if already acquired"""
+        self._verify_running()
         if not self.locked():
             raise ValueError("Lock is not yet acquired")
         result = self.client.sync(

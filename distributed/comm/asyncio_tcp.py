@@ -5,16 +5,14 @@ import collections
 import logging
 import os
 import socket
+import ssl
 import struct
 import sys
 import weakref
+from asyncio.selector_events import _SelectorSocketTransport  # type: ignore
+from collections.abc import Callable
 from itertools import islice
 from typing import Any
-
-try:
-    import ssl
-except ImportError:
-    ssl = None  # type: ignore
 
 import dask
 
@@ -60,7 +58,7 @@ def coalesce_buffers(
     concat: list[bytes] = []  # A list of buffers to concatenate
     csize = 0  # The total size of the concatenated buffers
 
-    def flush():
+    def flush() -> None:
         nonlocal csize
         if concat:
             if len(concat) == 1:
@@ -100,20 +98,50 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
         time), a smaller value is likely more performant.
     """
 
-    def __init__(self, on_connection=None, min_read_size=128 * 1024):
+    on_connection: Callable[[DaskCommProtocol], None] | None
+    _loop: asyncio.AbstractEventLoop
+    #: A queue of received messages
+    _queue: asyncio.Queue | None
+    #: The corresponding transport, set on `connection_made`
+    _transport: asyncio.WriteTransport | _ZeroCopyWriter | None
+    #: Is the protocol paused?
+    _paused: bool
+    #: If the protocol is paused, this holds a future to wait on until it's unpaused.
+    _drain_waiter: asyncio.Future | None
+    #: A future for waiting until the protocol is actually closed
+    _closed_waiter: asyncio.Future
+
+    _using_default_buffer: bool
+    _default_len: int
+    _default_buffer: memoryview
+    #: Index in default_buffer pointing to the first unparsed byte
+    _default_start: int
+    #: Index in default_buffer pointing to the last written byte
+    _default_end: int
+
+    _nframes: int | None
+    _frame_lengths: list[int] | None
+    _frames: list[memoryview] | None
+    #: current frame to parse
+    _frame_index: int | None
+    #: nbytes left for parsing current frame
+    _frame_nbytes_needed: int
+    _frame_nbytes_remaining: int
+
+    __slots__ = tuple(__annotations__)
+
+    def __init__(
+        self,
+        on_connection: Callable[[DaskCommProtocol], None] | None = None,
+        min_read_size: int = 128 * 1024,
+    ):
         super().__init__()
         self.on_connection = on_connection
         self._loop = asyncio.get_running_loop()
-        # A queue of received messages
         self._queue = asyncio.Queue()
-        # The corresponding transport, set on `connection_made`
         self._transport = None
-        # Is the protocol paused?
         self._paused = False
-        # If the protocol is paused, this holds a future to wait on until it's
-        # unpaused.
-        self._drain_waiter: asyncio.Future | None = None
-        # A future for waiting until the protocol is actually closed
+        self._drain_waiter = None
         self._closed_waiter = self._loop.create_future()
 
         # In the interest of reducing the number of `recv` calls, we always
@@ -125,51 +153,52 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
 
         # Per-message state
         self._using_default_buffer = True
-
         self._default_len = max(min_read_size, 16)  # need at least 16 bytes of buffer
         self._default_buffer = host_array(self._default_len)
-        # Index in default_buffer pointing to the first unparsed byte
         self._default_start = 0
-        # Index in default_buffer pointing to the last written byte
         self._default_end = 0
 
         # Each message is composed of one or more frames, these attributes
         # are filled in as the message is parsed, and cleared once a message
         # is fully parsed.
-        self._nframes: int | None = None
-        self._frame_lengths: list[int] | None = None
-        self._frames: list[memoryview] | None = None
-        self._frame_index: int | None = None  # current frame to parse
-        self._frame_nbytes_needed: int = 0  # nbytes left for parsing current frame
+        self._nframes = None
+        self._frame_lengths = None
+        self._frames = None
+        self._frame_index = None
+        self._frame_nbytes_needed = 0
+        self._frame_nbytes_remaining = 0
 
     @property
-    def local_addr(self):
+    def local_addr(self) -> str:
         if self.is_closed:
             return "<closed>"
+        assert self._transport is not None
         sockname = self._transport.get_extra_info("sockname")
         if sockname is not None:
             return unparse_host_port(*sockname[:2])
         return "<unknown>"
 
     @property
-    def peer_addr(self):
+    def peer_addr(self) -> str:
         if self.is_closed:
             return "<closed>"
+        assert self._transport is not None
         peername = self._transport.get_extra_info("peername")
         if peername is not None:
             return unparse_host_port(*peername[:2])
         return "<unknown>"
 
     @property
-    def is_closed(self):
+    def is_closed(self) -> bool:
         return self._transport is None
 
-    def _abort(self):
+    def _abort(self) -> None:
         if not self.is_closed:
             self._transport, transport = None, self._transport
-            transport.abort()
+            assert transport is not None
+            transport.abort()  # type: ignore[unreachable]
 
-    def _close_from_finalizer(self, comm_repr):
+    def _close_from_finalizer(self, comm_repr: str) -> None:
         if not self.is_closed:
             logger.warning(f"Closing dangling comm `{comm_repr}`")
             try:
@@ -178,38 +207,44 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
                 # This happens if the event loop is already closed
                 pass
 
-    async def _close(self):
+    async def _close(self) -> None:
         if not self.is_closed:
             self._transport, transport = None, self._transport
-            transport.close()
+            assert transport is not None
+            transport.close()  # type: ignore[unreachable]
         await self._closed_waiter
 
-    def connection_made(self, transport):
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
         # XXX: When using asyncio, the default builtin transport makes
         # excessive copies when buffering. For the case of TCP on asyncio (no
         # TLS) we patch around that with a wrapper class that handles the write
         # side with minimal copying.
-        if type(transport) is asyncio.selector_events._SelectorSocketTransport:
-            transport = _ZeroCopyWriter(self, transport)
-        self._transport = transport
-        # Set the buffer limits to something more optimal for large data transfer.
-        self._transport.set_write_buffer_limits(high=512 * 1024)  # 512 KiB
+        if type(transport) is _SelectorSocketTransport:
+            self._transport = _ZeroCopyWriter(self, transport)
+        else:
+            assert isinstance(transport, asyncio.WriteTransport)
+            self._transport = transport
+
+        # Set the buffer limits to something more optimal for large data transfer
+        # (512 KiB).
+        self._transport.set_write_buffer_limits(high=512 * 1024)  # type: ignore
         if self.on_connection is not None:
             self.on_connection(self)
 
-    def get_buffer(self, sizehint):
+    def get_buffer(self, sizehint: object) -> memoryview:
         """Get a buffer to read into for this read event"""
         # Read into the default buffer if there are no frames or the current
-        # frame is small. Otherwise read directly into the current frame.
+        # frame is small. Otherwise, read directly into the current frame.
         if self._frames is None or self._frame_nbytes_needed < self._default_len:
             self._using_default_buffer = True
             return self._default_buffer[self._default_end :]
         else:
             self._using_default_buffer = False
+            assert self._frame_index is not None
             frame = self._frames[self._frame_index]
             return frame[-self._frame_nbytes_needed :]
 
-    def buffer_updated(self, nbytes):
+    def buffer_updated(self, nbytes: int) -> None:
         if nbytes == 0:
             return
 
@@ -221,12 +256,14 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
             if not self._frames_check_remaining():
                 self._message_completed()
 
-    def _parse_default_buffer(self):
+    def _parse_default_buffer(self) -> None:
         """Parse all messages in the default buffer."""
         while True:
             if self._nframes is None:
                 if not self._parse_nframes():
                     break
+            assert self._nframes is not None
+            assert self._frame_lengths is not None
             if len(self._frame_lengths) < self._nframes:
                 if not self._parse_frame_lengths():
                     break
@@ -234,7 +271,7 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
                 break
         self._reset_default_buffer()
 
-    def _parse_nframes(self):
+    def _parse_nframes(self) -> bool:
         """Fill in `_nframes` from the default buffer. Returns True if
         successful, False if more data is needed"""
         # TODO: we drop the message total size prefix (sent as part of the
@@ -250,9 +287,11 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
             return True
         return False
 
-    def _parse_frame_lengths(self):
+    def _parse_frame_lengths(self) -> bool:
         """Fill in `_frame_lengths` from the default buffer. Returns True if
         successful, False if more data is needed"""
+        assert self._nframes is not None
+        assert self._frame_lengths is not None
         needed = self._nframes - len(self._frame_lengths)
         available = (self._default_end - self._default_start) // 8
         n_read = min(available, needed)
@@ -272,11 +311,14 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
             return True
         return False
 
-    def _frames_check_remaining(self):
+    def _frames_check_remaining(self) -> bool:
         # Current frame not filled
         if self._frame_nbytes_needed:
             return True
         # Advance until next non-empty frame
+        assert self._frame_index is not None
+        assert self._nframes is not None
+        assert self._frame_lengths is not None
         while True:
             self._frame_index += 1
             if self._frame_index < self._nframes:
@@ -287,7 +329,7 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
                 # No non-empty frames remain
                 return False
 
-    def _parse_frames(self):
+    def _parse_frames(self) -> bool:
         """Fill in `_frames` from the default buffer. Returns True if
         successful, False if more data is needed"""
         while True:
@@ -300,6 +342,8 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
             if not available:
                 return False
 
+            assert self._frames is not None
+            assert self._frame_index is not None
             frame = self._frames[self._frame_index]
             n_read = min(self._frame_nbytes_needed, available)
             frame[
@@ -309,7 +353,7 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
             self._default_start += n_read
             self._frame_nbytes_needed -= n_read
 
-    def _reset_default_buffer(self):
+    def _reset_default_buffer(self) -> None:
         """Reset the default buffer for the next read event"""
         start = self._default_start
         end = self._default_end
@@ -324,19 +368,21 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
             self._default_start = 0
             self._default_end = 0
 
-    def _message_completed(self):
+    def _message_completed(self) -> None:
         """Push a completed message to the queue and reset per-message state"""
+        assert self._queue is not None
         self._queue.put_nowait(self._frames)
         self._nframes = None
         self._frames = None
         self._frame_lengths = None
         self._frame_nbytes_remaining = 0
 
-    def connection_lost(self, exc=None):
+    def connection_lost(self, exc: BaseException | None = None) -> None:
         self._transport = None
         self._closed_waiter.set_result(None)
 
         # Unblock read, if any
+        assert self._queue is not None
         self._queue.put_nowait(_COMM_CLOSED)
 
         # Unblock write, if any
@@ -347,10 +393,10 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
                 if not waiter.done():
                     waiter.set_exception(CommClosedError("Connection closed"))
 
-    def pause_writing(self):
+    def pause_writing(self) -> None:
         self._paused = True
 
-    def resume_writing(self):
+    def resume_writing(self) -> None:
         self._paused = False
 
         waiter = self._drain_waiter
@@ -399,6 +445,7 @@ class DaskCommProtocol(asyncio.BufferedProtocol):
         else:
             buffers = coalesce_buffers([header, *frames])
 
+        assert self._transport is not None
         if len(buffers) > 1:
             self._transport.writelines(buffers)
         else:
@@ -412,7 +459,7 @@ class TCP(Comm):
 
     def __init__(
         self,
-        protocol,
+        protocol: DaskCommProtocol,
         local_addr: str,
         peer_addr: str,
         deserialize: bool = True,
@@ -432,7 +479,7 @@ class TCP(Comm):
         # Fill in any extra info about this comm
         self._extra_info = self._get_extra_info()
 
-    def _get_extra_info(self):
+    def _get_extra_info(self) -> dict[str, Any]:
         return {}
 
     @property
@@ -473,17 +520,17 @@ class TCP(Comm):
         nbytes = await self._protocol.write(frames)
         return nbytes
 
-    async def close(self):
+    async def close(self) -> None:
         """Flush and close the comm"""
         await self._protocol._close()
         self._finalizer.detach()
 
-    def abort(self):
+    def abort(self) -> None:
         """Hard close the comm"""
         self._protocol._abort()
         self._finalizer.detach()
 
-    def closed(self):
+    def closed(self) -> bool:
         return self._protocol.is_closed
 
     @property
@@ -492,7 +539,8 @@ class TCP(Comm):
 
 
 class TLS(TCP):
-    def _get_extra_info(self):
+    def _get_extra_info(self) -> dict[str, Any]:
+        assert self._protocol._transport is not None
         get = self._protocol._transport.get_extra_info
         return {"peercert": get("peercert"), "cipher": get("cipher")}
 
@@ -508,7 +556,7 @@ def _expect_tls_context(connection_args):
     return ctx
 
 
-def _error_if_require_encryption(address, **kwargs):
+def _error_if_require_encryption(address: str, **kwargs: Any) -> None:
     if kwargs.get("require_encryption"):
         raise RuntimeError(
             "encryption required by Dask configuration, "
@@ -532,7 +580,7 @@ class TCPConnector(Connector):
         peer_addr = self.prefix + address
         return self.comm_class(protocol, local_addr, peer_addr, deserialize=deserialize)
 
-    def _get_extra_kwargs(self, address, **kwargs):
+    def _get_extra_kwargs(self, address: str, **kwargs: Any) -> dict[str, Any]:
         _error_if_require_encryption(address, **kwargs)
         return {}
 
@@ -541,7 +589,7 @@ class TLSConnector(TCPConnector):
     prefix = "tls://"
     comm_class = TLS
 
-    def _get_extra_kwargs(self, address, **kwargs):
+    def _get_extra_kwargs(self, address: str, **kwargs: Any) -> dict[str, Any]:
         ctx = _expect_tls_context(kwargs)
         return {"ssl": ctx}
 
@@ -568,7 +616,7 @@ class TCPListener(Listener):
         self._extra_kwargs = self._get_extra_kwargs(address, **kwargs)
         self.bound_address = None
 
-    def _get_extra_kwargs(self, address, **kwargs):
+    def _get_extra_kwargs(self, address: str, **kwargs: Any) -> dict[str, Any]:
         _error_if_require_encryption(address, **kwargs)
         return {}
 
@@ -666,7 +714,7 @@ class TCPListener(Listener):
 
         return servers
 
-    async def start(self):
+    async def start(self) -> None:
         loop = asyncio.get_running_loop()
         if not self.ip and not self.port:
             servers = await self._start_all_interfaces_with_random_port()
@@ -681,7 +729,7 @@ class TCPListener(Listener):
             ]
         self._servers = servers
 
-    def stop(self):
+    def stop(self) -> None:
         # Stop listening
         for server in self._servers:
             server.close()
@@ -704,14 +752,14 @@ class TCPListener(Listener):
         return self.bound_address
 
     @property
-    def listen_address(self):
+    def listen_address(self) -> str:
         """
         The listening address as a string.
         """
         return self.prefix + unparse_host_port(*self.get_host_port())
 
     @property
-    def contact_address(self):
+    def contact_address(self) -> str:
         """
         The contact address as a string.
         """
@@ -724,7 +772,7 @@ class TLSListener(TCPListener):
     prefix = "tls://"
     comm_class = TLS
 
-    def _get_extra_kwargs(self, address, **kwargs):
+    def _get_extra_kwargs(self, address: str, **kwargs: Any) -> dict[str, Any]:
         ctx = _expect_tls_context(kwargs)
         return {"ssl": ctx}
 
@@ -733,7 +781,7 @@ class TCPBackend(Backend):
     _connector_class = TCPConnector
     _listener_class = TCPListener
 
-    def get_connector(self):
+    def get_connector(self) -> Connector:
         return self._connector_class()
 
     def get_listener(self, loc, handle_comm, deserialize, **connection_args):
@@ -773,13 +821,23 @@ class _ZeroCopyWriter:
     Note that this workaround isn't used with the windows ProactorEventLoop or
     uvloop."""
 
+    protocol: DaskCommProtocol
+    transport: _SelectorSocketTransport
+    _loop: asyncio.AbstractEventLoop
+    #: A deque of buffers to send
+    _buffers: collections.deque[memoryview]
+    #: The total size of all bytes left to send in _buffers
+    _size: int
+    #: Is the backing protocol paused?
+    _protocol_paused: bool
+
     # We use sendmsg for scatter IO if it's available. Since bookkeeping
     # scatter IO has a small cost, we want to minimize the amount of processing
     # we do for each send call. We assume the system send buffer is < 4 MiB
     # (which would be very large), and set a limit on the number of buffers to
     # pass to sendmsg.
     if hasattr(socket.socket, "sendmsg"):
-        # Note: can't use WINDOWS constant as it upsets mypy
+        # Note: WINDOWS constant doesn't work with `mypy --platform win32`
         if sys.platform == "win32":
             SENDMSG_MAX_COUNT = 16  # No os.sysconf available
         else:
@@ -790,7 +848,7 @@ class _ZeroCopyWriter:
     else:
         SENDMSG_MAX_COUNT = 1  # sendmsg not supported, use send instead
 
-    def __init__(self, protocol, transport):
+    def __init__(self, protocol: DaskCommProtocol, transport: _SelectorSocketTransport):
         self.protocol = protocol
         self.transport = transport
         self._loop = asyncio.get_running_loop()
@@ -813,7 +871,7 @@ class _ZeroCopyWriter:
             assert hasattr(self._loop, attr)
 
         # A deque of buffers to send
-        self._buffers: collections.deque[memoryview] = collections.deque()
+        self._buffers = collections.deque()
         # The total size of all bytes left to send in _buffers
         self._size = 0
         # Is the backing protocol paused?
@@ -821,7 +879,11 @@ class _ZeroCopyWriter:
         # Initialize the buffer limits
         self.set_write_buffer_limits()
 
-    def set_write_buffer_limits(self, high: int = None, low: int = None):
+    def set_write_buffer_limits(
+        self,
+        high: int | None = None,
+        low: int | None = None,
+    ) -> None:
         """Set the write buffer limits"""
         # Copied almost verbatim from asyncio.transports._FlowControlMixin
         if high is None:
@@ -835,19 +897,19 @@ class _ZeroCopyWriter:
         self._low_water = low
         self._maybe_pause_protocol()
 
-    def _maybe_pause_protocol(self):
+    def _maybe_pause_protocol(self) -> None:
         """If the high water mark has been reached, pause the protocol"""
         if not self._protocol_paused and self._size > self._high_water:
             self._protocol_paused = True
             self.protocol.pause_writing()
 
-    def _maybe_resume_protocol(self):
+    def _maybe_resume_protocol(self) -> None:
         """If the low water mark has been reached, unpause the protocol"""
         if self._protocol_paused and self._size <= self._low_water:
             self._protocol_paused = False
             self.protocol.resume_writing()
 
-    def _buffer_clear(self):
+    def _buffer_clear(self) -> None:
         """Clear the send buffer"""
         self._buffers.clear()
         self._size = 0
@@ -903,7 +965,8 @@ class _ZeroCopyWriter:
                 if not data:
                     return
             # Not all was written; register write handler.
-            self._loop._add_writer(transport._sock_fd, self._on_write_ready)
+            # Don't use the public API add_writer; it makes test_tcp_deserialize fail
+            self._loop._add_writer(transport._sock_fd, self._on_write_ready)  # type: ignore[attr-defined]
 
         # Add it to the buffer.
         self._buffer_append(data)
@@ -929,7 +992,8 @@ class _ZeroCopyWriter:
             if not self._buffers:
                 return
             # Not all was written; register write handler.
-            self._loop._add_writer(self.transport._sock_fd, self._on_write_ready)
+            # Don't use the public API add_writer; it makes test_tcp_deserialize fail
+            self._loop._add_writer(self.transport._sock_fd, self._on_write_ready)  # type: ignore[attr-defined]
 
         self._maybe_pause_protocol()
 
@@ -964,13 +1028,15 @@ class _ZeroCopyWriter:
         except (SystemExit, KeyboardInterrupt):
             raise
         except BaseException as exc:
-            self._loop._remove_writer(transport._sock_fd)
+            # Don't use the public API remove_writer; it makes test_tcp_deserialize fail
+            self._loop._remove_writer(transport._sock_fd)  # type: ignore[attr-defined]
             self._buffers.clear()
             transport._fatal_error(exc, "Fatal write error on socket transport")
         else:
             self._maybe_resume_protocol()
             if not self._buffers:
-                self._loop._remove_writer(transport._sock_fd)
+                # Don't use the public API remove_writer; it makes test_tcp_deserialize fail
+                self._loop._remove_writer(transport._sock_fd)  # type: ignore[attr-defined]
                 if transport._closing:
                     transport._call_connection_lost(None)
                 elif transport._eof:

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import os
 import sys
@@ -26,7 +28,7 @@ from distributed.comm.registry import backends, get_backend
 from distributed.compatibility import to_thread
 from distributed.metrics import time
 from distributed.protocol import Serialized, deserialize, serialize, to_serialize
-from distributed.utils import get_ip, get_ipv6, mp_context
+from distributed.utils import get_ip, get_ipv6, get_mp_context, wait_for
 from distributed.utils_test import (
     gen_test,
     get_cert,
@@ -79,7 +81,9 @@ tls_kwargs = dict(
 )
 
 
-async def get_comm_pair(listen_addr, listen_args={}, connect_args={}, **kwargs):
+async def get_comm_pair(listen_addr, listen_args=None, connect_args=None, **kwargs):
+    listen_args = listen_args or {}
+    connect_args = connect_args or {}
     q = asyncio.Queue()
 
     async def handle_comm(comm):
@@ -271,8 +275,9 @@ async def test_tcp_specific(tcp):
     assert set(l) == {1234} | set(range(N))
 
 
+@pytest.mark.parametrize("sni", [None, "localhost"])
 @gen_test()
-async def test_tls_specific(tcp):
+async def test_tls_specific(tcp, sni):
     """
     Test concrete TLS API.
     """
@@ -299,7 +304,9 @@ async def test_tls_specific(tcp):
 
     async def client_communicate(key, delay=0):
         addr = "%s:%d" % (host, port)
-        comm = await connect(listener.contact_address, ssl_context=client_ctx)
+        comm = await connect(
+            listener.contact_address, ssl_context=client_ctx, server_hostname=sni
+        )
         try:
             assert comm.peer_address == "tls://" + addr
             check_tls_extra(comm.extra_info)
@@ -335,7 +342,7 @@ async def test_comm_failure_threading(tcp):
 
     async def sleep_for_60ms():
         max_thread_count = 0
-        for x in range(60):
+        for _ in range(60):
             await asyncio.sleep(0.001)
             thread_count = threading.active_count()
             if thread_count > max_thread_count:
@@ -377,7 +384,7 @@ async def check_inproc_specific(run_client):
         try:
             assert comm.peer_address.startswith("inproc://" + addr_head)
             client_addresses.add(comm.peer_address)
-            for i in range(N_MSGS):
+            for _ in range(N_MSGS):
                 msg = await comm.read()
                 msg["op"] = "pong"
                 await comm.write(msg)
@@ -397,7 +404,7 @@ async def check_inproc_specific(run_client):
             comm = await connect(listener.contact_address)
             try:
                 assert comm.peer_address == "inproc://" + listener_addr
-                for i in range(N_MSGS):
+                for _ in range(N_MSGS):
                     await comm.write({"op": "ping", "data": key})
                     if delay:
                         await asyncio.sleep(delay)
@@ -430,7 +437,7 @@ async def run_coro(func, *args, **kwargs):
 async def run_coro_in_thread(func, *args, **kwargs):
     async def run_with_timeout():
         t = asyncio.create_task(func(*args, **kwargs))
-        return await asyncio.wait_for(t, timeout=10)
+        return await wait_for(t, timeout=10)
 
     return await to_thread(asyncio.run, run_with_timeout())
 
@@ -487,8 +494,8 @@ async def check_client_server(
     addr,
     check_listen_addr=None,
     check_contact_addr=None,
-    listen_args={},
-    connect_args={},
+    listen_args=None,
+    connect_args=None,
 ):
     """
     Abstract client / server test.
@@ -738,12 +745,16 @@ async def test_tls_reject_certificate(tcp):
 #
 
 
-async def check_comm_closed_implicit(addr, delay=None, listen_args={}, connect_args={}):
+async def check_comm_closed_implicit(
+    addr, delay=None, listen_args=None, connect_args=None
+):
+    listen_args = listen_args or {}
+    connect_args = connect_args or {}
+
     async def handle_comm(comm):
         await comm.close()
 
     async with listen(addr, handle_comm, **listen_args) as listener:
-
         comm = await connect(listener.contact_address, **connect_args)
         with pytest.raises(CommClosedError):
             await comm.write({})
@@ -769,7 +780,9 @@ async def test_inproc_comm_closed_implicit():
     await check_comm_closed_implicit(inproc.new_address())
 
 
-async def check_comm_closed_explicit(addr, listen_args={}, connect_args={}):
+async def check_comm_closed_explicit(addr, listen_args=None, connect_args=None):
+    listen_args = listen_args or {}
+    connect_args = connect_args or {}
     a, b = await get_comm_pair(addr, listen_args=listen_args, connect_args=connect_args)
     a_read = a.read()
     b_read = b.read()
@@ -857,8 +870,15 @@ async def test_inproc_comm_closed_explicit_2():
     await comm.close()
 
 
+class CustomBase(BaseException):
+    # We don't want to interfere with KeyboardInterrupts or CancelledErrors for
+    # this test
+    ...
+
+
+@pytest.mark.parametrize("exc_type", [BufferError, CustomBase])
 @gen_test()
-async def test_comm_closed_on_buffer_error(tcp):
+async def test_comm_closed_on_write_error(tcp, exc_type):
     # Internal errors from comm.stream.write, such as
     # BufferError should lead to the stream being closed
     # and not re-used. See GitHub #4133
@@ -868,12 +888,29 @@ async def test_comm_closed_on_buffer_error(tcp):
     reader, writer = await get_tcp_comm_pair()
 
     def _write(data):
-        raise BufferError
+        raise exc_type()
 
     writer.stream.write = _write
-    with pytest.raises(BufferError):
+    with pytest.raises(exc_type):
         await writer.write("x")
-    assert writer.stream is None
+
+    assert writer.closed()
+
+    await reader.close()
+    await writer.close()
+
+
+@gen_test()
+async def test_comm_closed_on_read_error(tcp):
+    if tcp is asyncio_tcp:
+        pytest.skip("Not applicable for asyncio")
+
+    reader, writer = await get_tcp_comm_pair()
+
+    with pytest.raises(asyncio.TimeoutError):
+        await wait_for(reader.read(), 0.01)
+
+    assert reader.closed()
 
     await reader.close()
     await writer.close()
@@ -898,7 +935,6 @@ async def test_retry_connect(tcp, monkeypatch):
 
     class UnreliableConnector(tcp.TCPConnector):
         def __init__(self):
-
             self.num_failures = 2
             self.failures = 0
             super().__init__()
@@ -994,7 +1030,7 @@ async def check_many_listeners(addr):
     listeners = []
     N = 100
 
-    for i in range(N):
+    for _ in range(N):
         listener = await listen(addr, handle_comm)
         listeners.append(listener)
 
@@ -1328,6 +1364,6 @@ def test_register_backend_entrypoint(tmp_path):
     (dist_info / "entry_points.txt").write_bytes(
         b"[distributed.comm.backends]\nudp = dask_udp:udp_backend\n"
     )
-    with mp_context.Pool(1) as pool:
+    with get_mp_context().Pool(1) as pool:
         assert pool.apply(_get_backend_on_path, args=(tmp_path,)) == 1
     pool.join()

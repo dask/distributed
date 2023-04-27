@@ -7,12 +7,18 @@ import warnings
 import weakref
 from collections.abc import Callable
 from ssl import SSLError
+from typing import Any
 
 from tornado import web
 from tornado.httpclient import HTTPClientError, HTTPRequest
 from tornado.httpserver import HTTPServer
 from tornado.iostream import StreamClosedError
-from tornado.websocket import WebSocketClosedError, WebSocketHandler, websocket_connect
+from tornado.websocket import (
+    WebSocketClientConnection,
+    WebSocketClosedError,
+    WebSocketHandler,
+    websocket_connect,
+)
 
 import dask
 
@@ -47,7 +53,7 @@ BIG_BYTES_SHARD_SIZE = dask.utils.parse_bytes(
 
 
 class WSHandler(WebSocketHandler):
-    def __init__(
+    def __init__(  # type: ignore[no-untyped-def]
         self,
         application,
         request,
@@ -99,7 +105,12 @@ class WSHandler(WebSocketHandler):
 
 
 class WSHandlerComm(Comm):
-    def __init__(self, handler, deserialize: bool = True, allow_offload: bool = True):
+    def __init__(
+        self,
+        handler: WSHandler,
+        deserialize: bool = True,
+        allow_offload: bool = True,
+    ):
         self.handler = handler
         self.allow_offload = allow_offload
         super().__init__(deserialize=deserialize)
@@ -158,7 +169,9 @@ class WSHandlerComm(Comm):
 
     @property
     def peer_address(self) -> str:
-        return self.handler.request.remote_ip + ":0"
+        ip = self.handler.request.remote_ip
+        assert isinstance(ip, str)
+        return ip + ":0"
 
     def closed(self):
         return (
@@ -175,7 +188,12 @@ class WSHandlerComm(Comm):
 class WS(Comm):
     prefix = "ws://"
 
-    def __init__(self, sock, deserialize: bool = True, allow_offload: bool = True):
+    def __init__(
+        self,
+        sock: WebSocketClientConnection,
+        deserialize: bool = True,
+        allow_offload: bool = True,
+    ):
         self._closed = False
         super().__init__(deserialize=deserialize)
         self.sock = sock
@@ -187,7 +205,9 @@ class WS(Comm):
         self._read_extra()
 
     def _get_finalizer(self):
-        def finalize(sock=self.sock, r=repr(self)):
+        r = repr(self)
+
+        def finalize(sock=self.sock, r=r):
             if not sock.close_code:
                 logger.info("Closing dangling websocket in %s", r)
                 sock.close()
@@ -298,9 +318,9 @@ class WSListener(Listener):
         self,
         address: str,
         handler: Callable,
-        deserialize=True,
-        allow_offload=False,
-        **connection_args,
+        deserialize: bool = True,
+        allow_offload: bool = False,
+        **connection_args: Any,
     ):
         if not address.startswith(self.prefix):
             address = f"{self.prefix}{address}"
@@ -421,8 +441,18 @@ class WSSConnector(WSConnector):
     comm_class = WSS
 
     def _get_connect_args(self, **connection_args):
-        ctx = connection_args.get("ssl_context")
-        return {"ssl_options": ctx, **connection_args.get("extra_conn_args", {})}
+        wss_args = {
+            "ssl_options": connection_args.get("ssl_context"),
+            **connection_args.get("extra_conn_args", {}),
+        }
+
+        if connection_args.get("server_hostname"):
+            wss_args["headers"] = {
+                **wss_args.get("headers", {}),
+                **{"Host": connection_args["server_hostname"]},
+            }
+
+        return wss_args
 
 
 class WSBackend(BaseTCPBackend):

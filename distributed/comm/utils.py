@@ -1,12 +1,14 @@
+from __future__ import annotations
+
 import logging
 import math
 import socket
 
 import dask
-from dask.sizeof import sizeof
 from dask.utils import parse_bytes
 
 from distributed import protocol
+from distributed.sizeof import safe_sizeof as sizeof
 from distributed.utils import get_ip, get_ipv6, nbytes, offload
 
 logger = logging.getLogger(__name__)

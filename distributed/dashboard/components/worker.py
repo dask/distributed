@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import math
 import os
@@ -17,6 +19,7 @@ from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.palettes import RdBu
 from bokeh.plotting import figure
 from bokeh.themes import Theme
+from jinja2 import Environment, FileSystemLoader
 from tlz import merge, partition_all
 
 from dask.utils import format_bytes, format_time
@@ -28,14 +31,11 @@ from distributed.dashboard.components.shared import (
     ProfileTimePlot,
     SystemMonitor,
 )
-from distributed.dashboard.utils import transpose, update
+from distributed.dashboard.utils import _DATATABLE_STYLESHEETS_KWARGS, transpose, update
 from distributed.metrics import time
 from distributed.utils import log_errors
 
 logger = logging.getLogger(__name__)
-
-from jinja2 import Environment, FileSystemLoader
-
 env = Environment(
     loader=FileSystemLoader(
         os.path.join(os.path.dirname(__file__), "..", "..", "http", "templates")
@@ -78,7 +78,10 @@ class StateTable(DashboardComponent):
         columns = {name: TableColumn(field=name, title=name) for name in names}
 
         table = DataTable(
-            source=self.source, columns=[columns[n] for n in names], height=70
+            source=self.source,
+            columns=[columns[n] for n in names],
+            height=70,
+            **_DATATABLE_STYLESHEETS_KWARGS,
         )
         self.root = table
 
@@ -88,10 +91,10 @@ class StateTable(DashboardComponent):
         w = self.worker
         d = {
             "Stored": [len(w.data)],
-            "Executing": ["%d / %d" % (w.executing_count, w.nthreads)],
-            "Ready": [len(w.ready)],
-            "Waiting": [w.waiting_for_data_count],
-            "Connections": [len(w.in_flight_workers)],
+            "Executing": ["%d / %d" % (w.state.executing_count, w.state.nthreads)],
+            "Ready": [len(w.state.ready)],
+            "Waiting": [len(w.state.waiting)],
+            "Connections": [w.state.transfer_incoming_count],
             "Serving": [len(w._comms)],
         }
         update(self.source, d)
@@ -114,8 +117,8 @@ class CommunicatingStream(DashboardComponent):
             "total",
         ]
 
-        self.incoming = ColumnDataSource({name: [] for name in names})
-        self.outgoing = ColumnDataSource({name: [] for name in names})
+        self.transfer_incoming = ColumnDataSource({name: [] for name in names})
+        self.transfer_outgoing = ColumnDataSource({name: [] for name in names})
 
         x_range = DataRange1d(range_padding=0)
         y_range = DataRange1d(range_padding=0)
@@ -131,7 +134,7 @@ class CommunicatingStream(DashboardComponent):
         )
 
         fig.rect(
-            source=self.incoming,
+            source=self.transfer_incoming,
             x="middle",
             y="y",
             width="duration",
@@ -140,7 +143,7 @@ class CommunicatingStream(DashboardComponent):
             alpha="alpha",
         )
         fig.rect(
-            source=self.outgoing,
+            source=self.transfer_outgoing,
             x="middle",
             y="y",
             width="duration",
@@ -159,28 +162,41 @@ class CommunicatingStream(DashboardComponent):
 
         self.root = fig
 
-        self.last_incoming = 0
-        self.last_outgoing = 0
+        self.last_transfer_incoming_count_total = 0
+        self.last_transfer_outgoing_count_total = 0
         self.who = dict()
 
     @without_property_validation
     @log_errors
     def update(self):
-        outgoing = self.worker.outgoing_transfer_log
-        n = self.worker.outgoing_count - self.last_outgoing
-        outgoing = [outgoing[-i].copy() for i in range(1, n + 1)]
-        self.last_outgoing = self.worker.outgoing_count
+        transfer_outgoing_log = self.worker.transfer_outgoing_log
+        n = (
+            self.worker.transfer_outgoing_count_total
+            - self.last_transfer_outgoing_count_total
+        )
+        transfer_outgoing_log = [
+            transfer_outgoing_log[-i].copy() for i in range(1, n + 1)
+        ]
+        self.last_transfer_outgoing_count_total = (
+            self.worker.transfer_outgoing_count_total
+        )
 
-        incoming = self.worker.incoming_transfer_log
-        n = self.worker.incoming_count - self.last_incoming
-        incoming = [incoming[-i].copy() for i in range(1, n + 1)]
-        self.last_incoming = self.worker.incoming_count
+        transfer_incoming_log = self.worker.transfer_incoming_log
+        n = (
+            self.worker.state.transfer_incoming_count_total
+            - self.last_transfer_incoming_count_total
+        )
+        transfer_incoming_log = [
+            transfer_incoming_log[-i].copy() for i in range(1, n + 1)
+        ]
+        self.last_transfer_incoming_count_total = (
+            self.worker.state.transfer_incoming_count_total
+        )
 
         for [msgs, source] in [
-            [incoming, self.incoming],
-            [outgoing, self.outgoing],
+            [transfer_incoming_log, self.transfer_incoming],
+            [transfer_outgoing_log, self.transfer_outgoing],
         ]:
-
             for msg in msgs:
                 if "compressed" in msg:
                     del msg["compressed"]
@@ -225,7 +241,7 @@ class CommunicatingTimeSeries(DashboardComponent):
         fig = figure(
             title="Communication History",
             x_axis_type="datetime",
-            y_range=[-0.1, worker.total_out_connections + 0.5],
+            y_range=[-0.1, worker.state.transfer_incoming_count_limit + 0.5],
             height=150,
             tools="",
             x_range=x_range,
@@ -247,7 +263,7 @@ class CommunicatingTimeSeries(DashboardComponent):
             {
                 "x": [time() * 1000],
                 "out": [len(self.worker._comms)],
-                "in": [len(self.worker.in_flight_workers)],
+                "in": [self.worker.state.transfer_incoming_count],
             },
             10000,
         )
@@ -263,7 +279,7 @@ class ExecutingTimeSeries(DashboardComponent):
         fig = figure(
             title="Executing History",
             x_axis_type="datetime",
-            y_range=[-0.1, worker.nthreads + 0.1],
+            y_range=[-0.1, worker.state.nthreads + 0.1],
             height=150,
             tools="",
             x_range=x_range,
@@ -281,7 +297,7 @@ class ExecutingTimeSeries(DashboardComponent):
     @log_errors
     def update(self):
         self.source.stream(
-            {"x": [time() * 1000], "y": [self.worker.executing_count]}, 1000
+            {"x": [time() * 1000], "y": [self.worker.state.executing_count]}, 1000
         )
 
 

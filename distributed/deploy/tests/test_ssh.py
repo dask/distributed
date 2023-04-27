@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pytest
 
 pytest.importorskip("asyncssh")
@@ -208,24 +210,6 @@ async def test_config_inherited_by_subprocess(loop):
             async with Client(cluster, asynchronous=True) as client:
                 result = await client.submit(f, 1)
                 assert result == 101
-
-
-@gen_test()
-async def test_unimplemented_options():
-    with pytest.raises(Exception):
-        async with SSHCluster(
-            ["127.0.0.1"] * 3,
-            connect_kwargs=dict(known_hosts=None),
-            asynchronous=True,
-            worker_kwargs={
-                "nthreads": 2,
-                "memory_limit": "2 GiB",
-                "death_timeout": "5s",
-                "unimplemented_option": 2,
-            },
-            scheduler_kwargs={"idle_timeout": "5s"},
-        ) as cluster:
-            assert cluster
 
 
 @gen_test()

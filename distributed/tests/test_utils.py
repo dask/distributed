@@ -1,14 +1,20 @@
+from __future__ import annotations
+
 import asyncio
 import contextvars
 import functools
 import io
+import logging
+import multiprocessing
 import os
 import queue
 import socket
 import traceback
 import warnings
+import xml
 from array import array
 from collections import deque
+from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from time import sleep
 
 import pytest
@@ -23,16 +29,19 @@ from distributed.utils import (
     Log,
     Logs,
     LoopRunner,
+    RateLimiterFilter,
     TimeoutError,
     _maybe_complex,
     ensure_ip,
     ensure_memoryview,
     format_dashboard_link,
     get_ip_interface,
+    get_mp_context,
     get_traceback,
     is_kernel,
     is_valid_xml,
     iscoroutinefunction,
+    json_load_robust,
     log_errors,
     nbytes,
     offload,
@@ -40,6 +49,7 @@ from distributed.utils import (
     parse_ports,
     read_block,
     recursive_to_dict,
+    run_in_executor_with_context,
     seek_delimiter,
     set_thread_state,
     sync,
@@ -159,6 +169,18 @@ def test_get_ip_interface():
     assert get_ip_interface(iface) == "127.0.0.1"
     with pytest.raises(ValueError, match=f"'__notexist'.+network interface.+'{iface}'"):
         get_ip_interface("__notexist")
+
+
+@pytest.mark.skipif(
+    WINDOWS, reason="Windows doesn't support different multiprocessing contexts"
+)
+def test_get_mp_context():
+    # this will need updated if the default multiprocessing context changes from spawn.
+    assert get_mp_context() is multiprocessing.get_context("spawn")
+    with dask.config.set({"distributed.worker.multiprocessing-method": "forkserver"}):
+        assert get_mp_context() is multiprocessing.get_context("forkserver")
+    with dask.config.set({"distributed.worker.multiprocessing-method": "fork"}):
+        assert get_mp_context() is multiprocessing.get_context("fork")
 
 
 def test_truncate_exception():
@@ -371,25 +393,49 @@ def assert_not_running(loop):
             q.get(timeout=0.02)
 
 
+_loop_not_running_property_warning = functools.partial(
+    pytest.warns,
+    DeprecationWarning,
+    match=r"Accessing the loop property while the loop is not running is deprecated",
+)
+_explicit_loop_is_not_running_warning = functools.partial(
+    pytest.warns,
+    DeprecationWarning,
+    match=r"Constructing LoopRunner\(loop=loop\) without a running loop is deprecated",
+)
+_implicit_loop_is_not_running_warning = functools.partial(
+    pytest.warns,
+    DeprecationWarning,
+    match=r"Constructing a LoopRunner\(asynchronous=True\) without a running loop is deprecated",
+)
+
+
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
+@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
 def test_loop_runner(loop_in_thread):
     # Implicit loop
     loop = IOLoop()
     loop.make_current()
     runner = LoopRunner()
-    assert runner.loop not in (loop, loop_in_thread)
+    with _loop_not_running_property_warning():
+        assert runner.loop not in (loop, loop_in_thread)
     assert not runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
     runner.start()
     assert runner.is_started()
     assert_running(runner.loop)
     runner.stop()
     assert not runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
 
     # Explicit loop
     loop = IOLoop()
-    runner = LoopRunner(loop=loop)
-    assert runner.loop is loop
+    with _explicit_loop_is_not_running_warning():
+        runner = LoopRunner(loop=loop)
+    with _loop_not_running_property_warning():
+        assert runner.loop is loop
     assert not runner.is_started()
     assert_not_running(loop)
     runner.start()
@@ -413,38 +459,52 @@ def test_loop_runner(loop_in_thread):
     # Implicit loop, asynchronous=True
     loop = IOLoop()
     loop.make_current()
-    runner = LoopRunner(asynchronous=True)
-    assert runner.loop is loop
+    with _implicit_loop_is_not_running_warning():
+        runner = LoopRunner(asynchronous=True)
+    with _loop_not_running_property_warning():
+        assert runner.loop is loop
     assert not runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
     runner.start()
     assert runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
     runner.stop()
     assert not runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
 
     # Explicit loop, asynchronous=True
     loop = IOLoop()
-    runner = LoopRunner(loop=loop, asynchronous=True)
-    assert runner.loop is loop
+    with _explicit_loop_is_not_running_warning():
+        runner = LoopRunner(loop=loop, asynchronous=True)
+    with _loop_not_running_property_warning():
+        assert runner.loop is loop
     assert not runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
     runner.start()
     assert runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
     runner.stop()
     assert not runner.is_started()
-    assert_not_running(runner.loop)
+    with _loop_not_running_property_warning():
+        assert_not_running(runner.loop)
 
 
+@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
+@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
 def test_two_loop_runners(loop_in_thread):
     # Loop runners tied to the same loop should cooperate
 
     # ABCCBA
     loop = IOLoop()
-    a = LoopRunner(loop=loop)
-    b = LoopRunner(loop=loop)
+    with _explicit_loop_is_not_running_warning():
+        a = LoopRunner(loop=loop)
+    with _explicit_loop_is_not_running_warning():
+        b = LoopRunner(loop=loop)
     assert_not_running(loop)
     a.start()
     assert_running(loop)
@@ -462,8 +522,10 @@ def test_two_loop_runners(loop_in_thread):
 
     # ABCABC
     loop = IOLoop()
-    a = LoopRunner(loop=loop)
-    b = LoopRunner(loop=loop)
+    with _explicit_loop_is_not_running_warning():
+        a = LoopRunner(loop=loop)
+    with _explicit_loop_is_not_running_warning():
+        b = LoopRunner(loop=loop)
     assert_not_running(loop)
     a.start()
     assert_running(loop)
@@ -536,7 +598,16 @@ def test_warn_on_duration():
             sleep(0.100)
 
     assert record
-    assert any("foo" in str(rec.message) for rec in record)
+
+    with pytest.warns(UserWarning) as record:
+        with warn_on_duration("1ms", "{duration:.4f}"):
+            start = time()
+            sleep(0.100)
+            measured = time() - start
+
+    assert record
+    assert len(record) == 1
+    assert float(str(record[0].message)) >= float(str(f"{measured:.4f}"))
 
 
 def test_logs():
@@ -552,7 +623,7 @@ def test_logs():
 
 def test_is_valid_xml():
     assert is_valid_xml("<a>foo</a>")
-    with pytest.raises(Exception):
+    with pytest.raises(xml.etree.ElementTree.ParseError):
         assert is_valid_xml("<a>foo")
 
 
@@ -594,6 +665,37 @@ def test_parse_ports():
 
 
 @gen_test()
+async def test_run_in_executor_with_context():
+    class MyExecutor(Executor):
+        call_count = 0
+
+        def submit(self, __fn, *args, **kwargs):
+            self.call_count += 1
+            f = Future()
+            f.set_result(__fn(*args, **kwargs))
+            return f
+
+    ex = MyExecutor()
+    out = await run_in_executor_with_context(ex, inc, 1)
+    assert out == 2
+    assert ex.call_count == 1
+
+
+@gen_test()
+async def test_run_in_executor_with_context_preserves_contextvars():
+    var = contextvars.ContextVar("var")
+
+    with ThreadPoolExecutor(2) as ex:
+
+        async def set_var(v: str) -> None:
+            var.set(v)
+            r = await run_in_executor_with_context(ex, var.get)
+            assert r == v
+
+        await asyncio.gather(set_var("foo"), set_var("bar"))
+
+
+@gen_test()
 async def test_offload():
     assert (await offload(inc, 1)) == 2
     assert (await offload(lambda x, y: x + y, 1, y=2)) == 3
@@ -603,7 +705,7 @@ async def test_offload():
 async def test_offload_preserves_contextvars():
     var = contextvars.ContextVar("var")
 
-    async def set_var(v: str):
+    async def set_var(v: str) -> None:
         var.set(v)
         r = await offload(var.get)
         assert r == v
@@ -820,7 +922,6 @@ async def test_log_errors():
 
     # Use the logger of the caller module
     with captured_logger("test_utils") as caplog:
-
         # Context manager
         with log_errors():
             pass
@@ -920,3 +1021,39 @@ async def test_log_errors():
                 raise CustomError("err7")
 
     assert caplog.getvalue().startswith("err7\n")
+
+
+def test_load_json_robust_timeout(tmp_path):
+    path = tmp_path / "foo.json"
+    with pytest.raises(TimeoutError):
+        json_load_robust(path, timeout=0.01)
+
+    with ThreadPoolExecutor() as tpe:
+        fut = tpe.submit(json_load_robust, path, timeout=30)
+        import json
+
+        with open(path, "w") as fd:
+            json.dump({"foo": "bar"}, fd)
+
+        assert fut.result() == {"foo": "bar"}
+
+    assert json_load_robust(path) == {"foo": "bar"}
+
+
+def test_rate_limiter_filter(caplog):
+    logger = logging.getLogger("test_rate_limiter_filter")
+    logger.addFilter(RateLimiterFilter(r"Hello .*", rate="10ms"))
+    logger.warning("Hello Al!")  # Match
+    logger.warning("Hello Bianca!")  # Match and <10ms
+    logger.warning("Hello %s!", "Charlie")  # Match and <10ms, with args
+    logger.warning("Goodbye Al!")  # No match
+    sleep(0.02)
+    logger.warning("Hello again!")  # Match and >10ms
+    RateLimiterFilter.reset_timer("test_rate_limiter_filter")
+    logger.warning("Hello once more!")  # Match and <10ms, but after calling clear()
+    assert [record.msg for record in caplog.records] == [
+        "Hello Al!",
+        "Goodbye Al!",
+        "Hello again!",
+        "Hello once more!",
+    ]

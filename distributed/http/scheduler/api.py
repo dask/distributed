@@ -63,9 +63,25 @@ class AdaptiveTargetHandler(RequestHandler):
             self.write(json.dumps({"Error": "Internal Server Error"}))
 
 
+class CheckIdleHandler(RequestHandler):
+    def get(self):
+        self.set_header("Content-Type", "application/json")
+        scheduler = self.server
+        try:
+            idle_since = scheduler.check_idle()
+            response = {
+                "idle_since": idle_since,
+            }
+            self.write(json.dumps(response))
+        except Exception as e:
+            self.set_status(500, str(e))
+            self.write(json.dumps({"Error": "Internal Server Error"}))
+
+
 routes: list[tuple] = [
     ("/api/v1", APIHandler, {}),
     ("/api/v1/retire_workers", RetireWorkersHandler, {}),
     ("/api/v1/get_workers", GetWorkersHandler, {}),
     ("/api/v1/adaptive_target", AdaptiveTargetHandler, {}),
+    ("/api/v1/check_idle", CheckIdleHandler, {}),
 ]

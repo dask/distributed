@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pytest
 
 from distributed.counter import Counter
@@ -19,8 +21,8 @@ except ImportError:
         ),
     ],
 )
-def test_digest(loop, CD, size):
-    c = CD(loop=loop)
+def test_digest(CD, size):
+    c = CD()
     c.add(1)
     c.add(2)
     assert size(c.components[0]) == 2
@@ -38,10 +40,10 @@ def test_digest(loop, CD, size):
     assert sum(size(d) for d in c.components) == c.size()
 
 
-def test_counter(loop):
-    c = Counter(loop=loop)
+def test_counter():
+    c = Counter()
     c.add(1)
 
-    for i in range(5):
+    for _ in range(5):
         c.shift()
         assert abs(sum(cc[1] for cc in c.components) - 1) < 1e-13

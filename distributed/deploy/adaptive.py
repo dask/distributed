@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from inspect import isawaitable
 
@@ -74,7 +76,7 @@ class Adaptive(AdaptiveCore):
     :meth:`Adaptive.workers_to_close` to control when the cluster should be
     resized. The default implementation checks if there are too many tasks
     per worker or too little memory available (see
-    :meth:`Scheduler.adaptive_target`).
+    :meth:`distributed.Scheduler.adaptive_target`).
     The values for interval, min, max, wait_count and target_duration can be
     specified in the dask config under the distributed.adaptive key.
     '''
@@ -158,7 +160,7 @@ class Adaptive(AdaptiveCore):
 
         return await super().recommendations(target)
 
-    async def workers_to_close(self, target: int):
+    async def workers_to_close(self, target: int) -> list[str]:
         """
         Determine which, if any, workers should potentially be removed from
         the cluster.

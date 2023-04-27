@@ -108,7 +108,7 @@ def info_frame(frame: FrameType) -> dict[str, Any]:
 
 def process(
     frame: FrameType,
-    child,
+    child: object | None,
     state: dict[str, Any],
     *,
     stop: str | None = None,
@@ -155,15 +155,20 @@ def process(
     merge
     """
     if depth is None:
-        depth = sys.getrecursionlimit() - 50
-    if depth <= 0:
-        return None
+        # Cut off rather conservatively since the output of the profiling
+        # sometimes need to be recursed into as well, e.g. for serialization
+        # which can cause recursion errors later on since this can generate
+        # deeply nested dictionaries
+        depth = min(250, sys.getrecursionlimit() // 4)
+
     if any(frame.f_code.co_filename.endswith(o) for o in omit):
         return None
 
     prev = frame.f_back
-    if prev is not None and (
-        stop is None or not prev.f_code.co_filename.endswith(stop)
+    if (
+        depth > 0
+        and prev is not None
+        and (stop is None or not prev.f_code.co_filename.endswith(stop))
     ):
         new_state = process(prev, frame, state, stop=stop, depth=depth - 1)
         if new_state is None:
@@ -325,7 +330,6 @@ def _watch(
     omit: Collection[str],
     stop: Callable[[], bool],
 ) -> None:
-
     recent = create()
     last = time()
 
@@ -521,7 +525,11 @@ def _remove_py_stack(frames):
         yield entry
 
 
-def llprocess(frames, child, state: dict[str, Any] | None) -> dict[str, Any] | None:
+def llprocess(  # type: ignore[no-untyped-def]
+    frames,
+    child: object | None,
+    state: dict[str, Any] | None,
+) -> dict[str, Any] | None:
     """Add counts from low level profile information onto existing state
 
     This uses the ``stacktrace`` module to collect low level stack trace

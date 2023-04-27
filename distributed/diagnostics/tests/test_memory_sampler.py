@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import time
 
@@ -111,7 +113,7 @@ async def test_pandas_multiseries(c, s, a, b, align):
     pd = pytest.importorskip("pandas")
 
     ms = MemorySampler()
-    for (label, interval, final_sleep) in (("foo", 0.15, 1.0), ("bar", 0.2, 0.6)):
+    for label, interval, final_sleep in (("foo", 0.15, 1.0), ("bar", 0.2, 0.6)):
         async with ms.sample(label, measure="managed", interval=interval):
             x = c.submit(lambda: 1, key="x")
             await x

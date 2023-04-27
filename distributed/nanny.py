@@ -1,22 +1,25 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import errno
+import functools
 import logging
+import multiprocessing
 import os
 import shutil
+import tempfile
 import threading
 import uuid
 import warnings
 import weakref
 from collections.abc import Collection
-from contextlib import suppress
 from inspect import isawaitable
 from queue import Empty
 from time import sleep as sync_sleep
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Callable, ClassVar, Literal
 
-from tornado import gen
+from toolz import merge
 from tornado.ioloop import IOLoop
 
 import dask
@@ -27,13 +30,16 @@ from distributed import preloading
 from distributed.comm import get_address_host
 from distributed.comm.addressing import address_from_user_args
 from distributed.core import (
+    AsyncTaskGroupClosedError,
     CommClosedError,
+    ErrorMessage,
     RPCClosed,
     Status,
     coerce_to_address,
     error_message,
 )
 from distributed.diagnostics.plugin import _get_plugin_name
+from distributed.diskutils import WorkSpace
 from distributed.metrics import time
 from distributed.node import ServerNode
 from distributed.process import AsyncProcess
@@ -41,13 +47,13 @@ from distributed.proctitle import enable_proctitle_on_children
 from distributed.protocol import pickle
 from distributed.security import Security
 from distributed.utils import (
-    TimeoutError,
     get_ip,
+    get_mp_context,
     json_load_robust,
     log_errors,
-    mp_context,
     parse_ports,
-    silence_logging,
+    silence_logging_cmgr,
+    wait_for,
 )
 from distributed.worker import Worker, run
 from distributed.worker_memory import (
@@ -65,7 +71,7 @@ logger = logging.getLogger(__name__)
 class Nanny(ServerNode):
     """A process to manage worker processes
 
-    The nanny spins up Worker processes, watches then, and kills or restarts
+    The nanny spins up Worker processes, watches them, and kills or restarts
     them as necessary. It is necessary if you want to use the
     ``Client.restart`` method, or to restart the worker automatically if
     it gets to the terminate fraction of its memory limit.
@@ -80,11 +86,25 @@ class Nanny(ServerNode):
         ensured to be set in the Worker process as well. This argument allows to
         overwrite or otherwise set environment variables for the Worker. It is
         also possible to set environment variables using the option
-        `distributed.nanny.environ`. Precedence as follows
+        ``distributed.nanny.environ``. Precedence as follows
 
             1. Nanny arguments
             2. Existing environment variables
             3. Dask configuration
+
+        .. note::
+           Some environment variables, like ``OMP_NUM_THREADS``, must be set before
+           importing numpy to have effect. Others, like ``MALLOC_TRIM_THRESHOLD_`` (see
+           :ref:`memtrim`), must be set before starting the Linux process. Such
+           variables would be ineffective if set here or in
+           ``distributed.nanny.environ``; they must be set in
+           ``distributed.nanny.pre-spawn-environ`` so that they are set before spawning
+           the subprocess, even if this means poisoning the process running the Nanny.
+
+           For the same reason, be warned that changing
+           ``distributed.worker.multiprocessing-method`` from ``spawn`` to ``fork`` or
+           ``forkserver`` may inhibit some environment variables; if you do, you should
+           set the variables yourself in the shell before you start ``dask-worker``.
 
     See Also
     --------
@@ -92,14 +112,17 @@ class Nanny(ServerNode):
     """
 
     _instances: ClassVar[weakref.WeakSet[Nanny]] = weakref.WeakSet()
-    process = None
+    process: WorkerProcess | None
     memory_manager: NannyMemoryManager
+
+    env: dict[str, str]
+    pre_spawn_env: dict[str, str]
 
     # Inputs to parse_ports()
     _given_worker_port: int | str | Collection[int] | None
     _start_port: int | str | Collection[int] | None
 
-    def __init__(
+    def __init__(  # type: ignore[no-untyped-def]
         self,
         scheduler_ip=None,
         scheduler_port=None,
@@ -107,7 +130,6 @@ class Nanny(ServerNode):
         worker_port: int | str | Collection[int] | None = 0,
         nthreads=None,
         loop=None,
-        local_dir=None,
         local_directory=None,
         services=None,
         name=None,
@@ -134,8 +156,18 @@ class Nanny(ServerNode):
         config=None,
         **worker_kwargs,
     ):
+        if loop is not None:
+            warnings.warn(
+                "the `loop` kwarg to `Nanny` is ignored, and will be removed in a future release. "
+                "The Nanny always binds to the current loop.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+        self.__exit_stack = stack = contextlib.ExitStack()
+        self.process = None
         self._setup_logging(logger)
-        self.loop = loop or IOLoop.current()
+        self.loop = self.io_loop = IOLoop.current()
 
         if isinstance(security, dict):
             security = Security(**security)
@@ -143,20 +175,18 @@ class Nanny(ServerNode):
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("worker")
 
-        if local_dir is not None:
-            warnings.warn("The local_dir keyword has moved to local_directory")
-            local_directory = local_dir
-
         if local_directory is None:
-            local_directory = dask.config.get("temporary-directory") or os.getcwd()
+            local_directory = (
+                dask.config.get("temporary-directory") or tempfile.gettempdir()
+            )
             self._original_local_dir = local_directory
             local_directory = os.path.join(local_directory, "dask-worker-space")
         else:
             self._original_local_dir = local_directory
 
-        self.local_directory = local_directory
-        if not os.path.exists(self.local_directory):
-            os.makedirs(self.local_directory, exist_ok=True)
+        # Create directory if it doesn't exist and test for write access.
+        # In case of PermissionError, change the name.
+        self.local_directory = WorkSpace(local_directory).base_dir
 
         self.preload = preload
         if self.preload is None:
@@ -174,8 +204,9 @@ class Nanny(ServerNode):
             self, preload_nanny, preload_nanny_argv, file_dir=self.local_directory
         )
 
+        self.death_timeout = parse_timedelta(death_timeout)
         if scheduler_file:
-            cfg = json_load_robust(scheduler_file)
+            cfg = json_load_robust(scheduler_file, timeout=self.death_timeout)
             self.scheduler_addr = cfg["address"]
         elif scheduler_ip is None and dask.config.get("scheduler-address"):
             self.scheduler_addr = dask.config.get("scheduler-address")
@@ -194,23 +225,17 @@ class Nanny(ServerNode):
         self.reconnect = reconnect
         self.validate = validate
         self.resources = resources
-        self.death_timeout = parse_timedelta(death_timeout)
 
         self.Worker = Worker if worker_class is None else worker_class
-        config_environ = dask.config.get("distributed.nanny.environ", {})
-        if not isinstance(config_environ, dict):
-            raise TypeError(
-                "distributed.nanny.environ configuration must be of type dict. "
-                f"Instead got {type(config_environ)}"
-            )
-        self.env = config_environ.copy()
-        for k in self.env:
-            if k in os.environ:
-                self.env[k] = os.environ[k]
-        if env:
-            self.env.update(env)
-        self.env = {k: str(v) for k, v in self.env.items()}
-        self.config = config or dask.config.config
+
+        self.pre_spawn_env = _get_env_variables("distributed.nanny.pre-spawn-environ")
+        self.env = merge(
+            self.pre_spawn_env,
+            _get_env_variables("distributed.nanny.environ"),
+            {k: str(v) for k, v in env.items()} if env else {},
+        )
+
+        self.config = merge(dask.config.config, config or {})
         worker_kwargs.update(
             {
                 "port": worker_port,
@@ -228,15 +253,15 @@ class Nanny(ServerNode):
         self.quiet = quiet
 
         if silence_logs:
-            silence_logging(level=silence_logs)
+            stack.enter_context(silence_logging_cmgr(level=silence_logs))
         self.silence_logs = silence_logs
 
         handlers = {
             "instantiate": self.instantiate,
             "kill": self.kill,
             "restart": self.restart,
-            # cannot call it 'close' on the rpc side for naming conflict
             "get_logs": self.get_logs,
+            # cannot call it 'close' on the rpc side for naming conflict
             "terminate": self.close,
             "close_gracefully": self.close_gracefully,
             "run": self.run,
@@ -246,9 +271,7 @@ class Nanny(ServerNode):
 
         self.plugins: dict[str, NannyPlugin] = {}
 
-        super().__init__(
-            handlers=handlers, io_loop=self.loop, connection_args=self.connection_args
-        )
+        super().__init__(handlers=handlers, connection_args=self.connection_args)
 
         self.scheduler = self.rpc(self.scheduler_addr)
         self.memory_manager = NannyMemoryManager(self, memory_limit=memory_limit)
@@ -283,14 +306,15 @@ class Nanny(ServerNode):
         if worker_address is None:
             return
 
-        allowed_errors = (TimeoutError, CommClosedError, EnvironmentError, RPCClosed)
-        with suppress(allowed_errors):
-            await asyncio.wait_for(
+        try:
+            await wait_for(
                 self.scheduler.unregister(
                     address=self.worker_address, stimulus_id=f"nanny-close-{time()}"
                 ),
                 timeout,
             )
+        except (asyncio.TimeoutError, CommClosedError, OSError, RPCClosed):
+            pass
 
     @property
     def worker_address(self):
@@ -299,12 +323,6 @@ class Nanny(ServerNode):
     @property
     def worker_dir(self):
         return None if self.process is None else self.process.worker_dir
-
-    @property
-    def local_dir(self):
-        """For API compatibility with Nanny"""
-        warnings.warn("The local_dir attribute has moved to local_directory")
-        return self.local_directory
 
     async def start_unsafe(self):
         """Start nanny, start local process, start watching"""
@@ -351,7 +369,7 @@ class Nanny(ServerNode):
         response = await self.instantiate()
 
         if response != Status.running:
-            await self.close()
+            await self.close(reason="nanny-start-failed")
             return
 
         assert self.worker_address
@@ -360,17 +378,17 @@ class Nanny(ServerNode):
 
         return self
 
-    async def kill(self, timeout=2):
+    async def kill(self, timeout: float = 2, reason: str = "nanny-kill") -> None:
         """Kill the local worker process
 
         Blocks until both the process is down and the scheduler is properly
         informed
         """
         if self.process is None:
-            return "OK"
+            return
 
         deadline = time() + timeout
-        await self.process.kill(timeout=0.8 * (deadline - time()))
+        await self.process.kill(reason=reason, timeout=0.8 * (deadline - time()))
 
     async def instantiate(self) -> Status:
         """Start a local worker process
@@ -399,24 +417,25 @@ class Nanny(ServerNode):
             self.process = WorkerProcess(
                 worker_kwargs=worker_kwargs,
                 silence_logs=self.silence_logs,
-                on_exit=self._on_exit_sync,
+                on_exit=self._on_worker_exit_sync,
                 worker=self.Worker,
                 env=self.env,
+                pre_spawn_env=self.pre_spawn_env,
                 config=self.config,
             )
 
         if self.death_timeout:
             try:
-                result = await asyncio.wait_for(
-                    self.process.start(), self.death_timeout
-                )
-            except TimeoutError:
+                result = await wait_for(self.process.start(), self.death_timeout)
+            except asyncio.TimeoutError:
                 logger.error(
                     "Timed out connecting Nanny '%s' to scheduler '%s'",
                     self,
                     self.scheduler_addr,
                 )
-                await self.close(timeout=self.death_timeout)
+                await self.close(
+                    timeout=self.death_timeout, reason="nanny-instantiate-timeout"
+                )
                 raise
 
         else:
@@ -424,7 +443,7 @@ class Nanny(ServerNode):
                 result = await self.process.start()
             except Exception:
                 logger.error("Failed to start process", exc_info=True)
-                await self.close()
+                await self.close(reason="nanny-instantiate-failed")
                 raise
         return result
 
@@ -450,7 +469,7 @@ class Nanny(ServerNode):
                 msg = error_message(e)
                 return msg
         if getattr(plugin, "restart", False):
-            await self.restart()
+            await self.restart(reason=f"nanny-plugin-{name}-restart")
 
         return {"status": "OK"}
 
@@ -469,19 +488,23 @@ class Nanny(ServerNode):
 
         return {"status": "OK"}
 
-    async def restart(self, timeout=30):
+    async def restart(
+        self, timeout: float = 30, reason: str = "nanny-restart"
+    ) -> Literal["OK", "timed out"] | ErrorMessage:
         async def _():
             if self.process is not None:
-                await self.kill()
+                await self.kill(reason=reason)
                 await self.instantiate()
 
         try:
-            await asyncio.wait_for(_(), timeout)
-        except TimeoutError:
+            await wait_for(_(), timeout)
+        except asyncio.TimeoutError:
             logger.error(
                 f"Restart timed out after {timeout}s; returning before finished"
             )
             return "timed out"
+        except Exception as e:
+            return error_message(e)
         else:
             return "OK"
 
@@ -491,23 +514,29 @@ class Nanny(ServerNode):
     def run(self, comm, *args, **kwargs):
         return run(self, comm, *args, **kwargs)
 
-    def _on_exit_sync(self, exitcode):
-        self.loop.add_callback(self._on_exit, exitcode)
+    def _on_worker_exit_sync(self, exitcode):
+        try:
+            self._ongoing_background_tasks.call_soon(self._on_worker_exit, exitcode)
+        except (
+            AsyncTaskGroupClosedError
+        ):  # Async task group has already been closed, so the nanny is already clos(ed|ing).
+            pass
 
     @log_errors
-    async def _on_exit(self, exitcode):
+    async def _on_worker_exit(self, exitcode):
         if self.status not in (
             Status.init,
             Status.closing,
             Status.closed,
             Status.closing_gracefully,
+            Status.failed,
         ):
             try:
                 await self._unregister()
             except OSError:
                 logger.exception("Failed to unregister")
                 if not self.reconnect:
-                    await self.close()
+                    await self.close(reason="nanny-unregister-failed")
                     return
 
         try:
@@ -515,11 +544,12 @@ class Nanny(ServerNode):
                 Status.closing,
                 Status.closed,
                 Status.closing_gracefully,
+                Status.failed,
             ):
                 logger.warning("Restarting worker")
                 await self.instantiate()
             elif self.status == Status.closing_gracefully:
-                await self.close()
+                await self.close(reason="nanny-close-gracefully")
 
         except Exception:
             logger.error(
@@ -534,15 +564,20 @@ class Nanny(ServerNode):
         warnings.warn("Worker._close has moved to Worker.close", stacklevel=2)
         return self.close(*args, **kwargs)
 
-    def close_gracefully(self):
+    def close_gracefully(self, reason: str = "nanny-close-gracefully") -> None:
         """
         A signal that we shouldn't try to restart workers if they go away
 
         This is used as part of the cluster shutdown process.
         """
         self.status = Status.closing_gracefully
+        logger.info(
+            "Closing Nanny gracefully at %r. Reason: %s", self.address_safe, reason
+        )
 
-    async def close(self, timeout=5):
+    async def close(
+        self, timeout: float = 5, reason: str = "nanny-close"
+    ) -> Literal["OK"]:
         """
         Close the worker process, stop all comms.
         """
@@ -554,10 +589,7 @@ class Nanny(ServerNode):
             return "OK"
 
         self.status = Status.closing
-        logger.info(
-            "Closing Nanny at %r.",
-            self.address_safe,
-        )
+        logger.info("Closing Nanny at %r. Reason: %s", self.address_safe, reason)
 
         for preload in self.preloads:
             await preload.teardown()
@@ -573,13 +605,14 @@ class Nanny(ServerNode):
         self.stop()
         try:
             if self.process is not None:
-                await self.kill(timeout=timeout)
+                await self.kill(timeout=timeout, reason=reason)
         except Exception:
-            pass
+            logger.exception("Error in Nanny killing Worker subprocess")
         self.process = None
         await self.rpc.close()
         self.status = Status.closed
         await super().close()
+        self.__exit_stack.__exit__(None, None, None)
         return "OK"
 
     async def _log_event(self, topic, msg):
@@ -589,12 +622,16 @@ class Nanny(ServerNode):
         )
 
     def log_event(self, topic, msg):
-        self.loop.add_callback(self._log_event, topic, msg)
+        self._ongoing_background_tasks.call_soon(self._log_event, topic, msg)
 
 
 class WorkerProcess:
     running: asyncio.Event
     stopped: asyncio.Event
+
+    process: AsyncProcess | None
+    env: dict[str, str]
+    pre_spawn_env: dict[str, str]
 
     # The interval how often to check the msg queue for init
     _init_msg_interval = 0.05
@@ -606,6 +643,7 @@ class WorkerProcess:
         on_exit,
         worker,
         env,
+        pre_spawn_env,
         config,
     ):
         self.status = Status.init
@@ -615,7 +653,18 @@ class WorkerProcess:
         self.process = None
         self.Worker = worker
         self.env = env
-        self.config = config
+        self.pre_spawn_env = pre_spawn_env
+        self.config = config.copy()
+
+        # Ensure default clients don't propagate to subprocesses
+        try:
+            from distributed.client import default_client
+
+            default_client()
+            self.config.pop("scheduler", None)
+            self.config.pop("shuffle", None)
+        except ValueError:
+            pass
 
         # Initialized when worker is ready
         self.worker_dir = None
@@ -632,23 +681,23 @@ class WorkerProcess:
             await self.running.wait()
             return self.status
 
-        self.init_result_q = init_q = mp_context.Queue()
-        self.child_stop_q = mp_context.Queue()
+        self.init_result_q = init_q = get_mp_context().Queue()
+        self.child_stop_q = get_mp_context().Queue()
         uid = uuid.uuid4().hex
 
         self.process = AsyncProcess(
-            target=self._run,
-            name="Dask Worker process (from Nanny)",
-            kwargs=dict(
-                worker_kwargs=self.worker_kwargs,
+            target=functools.partial(
+                self._run,
                 silence_logs=self.silence_logs,
                 init_result_q=self.init_result_q,
                 child_stop_q=self.child_stop_q,
                 uid=uid,
-                Worker=self.Worker,
+                worker_factory=functools.partial(self.Worker, **self.worker_kwargs),
                 env=self.env,
                 config=self.config,
             ),
+            name="Dask Worker process (from Nanny)",
+            kwargs=dict(),
         )
         self.process.daemon = dask.config.get("distributed.worker.daemon", default=True)
         self.process.set_exit_callback(self._on_exit)
@@ -656,19 +705,23 @@ class WorkerProcess:
         self.stopped = asyncio.Event()
         self.status = Status.starting
 
+        # Set selected environment variables before spawning the subprocess.
+        # See note in Nanny docstring.
+        os.environ.update(self.pre_spawn_env)
+
         try:
             await self.process.start()
         except OSError:
             logger.exception("Nanny failed to start process", exc_info=True)
-            self.process.terminate()
+            # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
+            await self.process.terminate()
             self.status = Status.failed
-            return self.status
         try:
             msg = await self._wait_until_connected(uid)
         except Exception:
-            logger.exception("Failed to connect to process")
+            # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
+            await self.process.terminate()
             self.status = Status.failed
-            self.process.terminate()
             raise
         if not msg:
             return self.status
@@ -706,6 +759,7 @@ class WorkerProcess:
 
     def mark_stopped(self):
         if self.status != Status.stopped:
+            assert self.process is not None
             r = self.process.exitcode
             assert r is not None
             if r != 0:
@@ -726,10 +780,20 @@ class WorkerProcess:
             if self.on_exit is not None:
                 self.on_exit(r)
 
-    async def kill(self, timeout: float = 2, executor_wait: bool = True):
+    async def kill(
+        self,
+        timeout: float = 2,
+        executor_wait: bool = True,
+        reason: str = "workerprocess-kill",
+    ) -> None:
         """
         Ensure the worker process is stopped, waiting at most
-        *timeout* seconds before terminating it abruptly.
+        ``timeout * 0.8`` seconds before killing it abruptly.
+
+        When `kill` returns, the worker process has been joined.
+
+        If the worker process does not terminate within ``timeout`` seconds,
+        even after being killed, `asyncio.TimeoutError` is raised.
         """
         deadline = time() + timeout
 
@@ -738,32 +802,52 @@ class WorkerProcess:
         if self.status == Status.stopping:
             await self.stopped.wait()
             return
-        assert self.status in (Status.starting, Status.running)
+        # If the process is not properly up it will not watch the closing queue
+        # and we may end up leaking this process
+        # Therefore wait for it to be properly started before killing it
+        if self.status == Status.starting:
+            await self.running.wait()
+
+        assert self.status in (
+            Status.running,
+            Status.failed,  # process failed to start, but hasn't been joined yet
+        ), self.status
         self.status = Status.stopping
-        logger.info("Nanny asking worker to close")
+        logger.info("Nanny asking worker to close. Reason: %s", reason)
 
         process = self.process
-        self.child_stop_q.put(
+        assert process
+        queue = self.child_stop_q
+        assert queue
+        wait_timeout = timeout * 0.8
+        queue.put(
             {
                 "op": "stop",
-                "timeout": max(0, deadline - time()) * 0.8,
+                "timeout": wait_timeout,
                 "executor_wait": executor_wait,
+                "reason": reason,
             }
         )
         await asyncio.sleep(0)  # otherwise we get broken pipe errors
-        self.child_stop_q.close()
+        queue.close()
+        del queue
 
-        while process.is_alive() and time() < deadline:
-            await asyncio.sleep(0.05)
-
-        if process.is_alive():
-            logger.warning(
-                f"Worker process still alive after {timeout} seconds, killing"
-            )
+        try:
             try:
-                await process.terminate()
-            except Exception as e:
-                logger.error("Failed to kill worker process: %s", e)
+                await process.join(wait_timeout)
+                return
+            except asyncio.TimeoutError:
+                pass
+
+            logger.warning(
+                f"Worker process still alive after {wait_timeout} seconds, killing"
+            )
+            await process.kill()
+            await process.join(max(0, deadline - time()))
+        except ValueError as e:
+            if "invalid operation on closed AsyncProcess" in str(e):
+                return
+            raise
 
     async def _wait_until_connected(self, uid):
         while True:
@@ -781,9 +865,6 @@ class WorkerProcess:
                 continue
 
             if "exception" in msg:
-                logger.error(
-                    "Failed while trying to start worker process: %s", msg["exception"]
-                )
                 raise msg["exception"]
             else:
                 return msg
@@ -791,84 +872,66 @@ class WorkerProcess:
     @classmethod
     def _run(
         cls,
-        worker_kwargs,
-        silence_logs,
-        init_result_q,
-        child_stop_q,
-        uid,
-        env,
-        config,
-        Worker,
-    ):  # pragma: no cover
-        try:
-            os.environ.update(env)
-            dask.config.set(config)
-            try:
-                from dask.multiprocessing import initialize_worker_process
-            except ImportError:  # old Dask version
-                pass
-            else:
-                initialize_worker_process()
-
-            if silence_logs:
-                logger.setLevel(silence_logs)
-
-            IOLoop.clear_instance()
-            loop = IOLoop()
-            loop.make_current()
-            worker = Worker(**worker_kwargs)
-
-            async def do_stop(timeout=5, executor_wait=True):
-                try:
-                    await worker.close(
-                        nanny=False,
-                        executor_wait=executor_wait,
-                        timeout=timeout,
-                    )
-                finally:
-                    loop.stop()
-
-            def watch_stop_q():
-                """
-                Wait for an incoming stop message and then stop the
-                worker cleanly.
-                """
-                try:
-                    msg = child_stop_q.get()
-                except (TypeError, OSError, EOFError):
-                    logger.error("Worker process died unexpectedly")
-                    msg = {"op": "stop"}
-                finally:
-                    child_stop_q.close()
-                    assert msg["op"] == "stop", msg
-                    del msg["op"]
-                    loop.add_callback(do_stop, **msg)
-
-            thread = threading.Thread(
-                target=watch_stop_q, name="Nanny stop queue watch"
+        silence_logs: bool,
+        init_result_q: multiprocessing.Queue,
+        child_stop_q: multiprocessing.Queue,
+        uid: str,
+        env: dict,
+        config: dict,
+        worker_factory: Callable[[], Worker],
+    ) -> None:  # pragma: no cover
+        async def do_stop(
+            *,
+            worker: Worker,
+            timeout: float = 5,
+            executor_wait: bool = True,
+            reason: str = "workerprocess-stop",
+        ) -> None:
+            await worker.close(
+                nanny=False,
+                executor_wait=executor_wait,
+                timeout=timeout,
+                reason=reason,
             )
-            thread.daemon = True
-            thread.start()
 
-            async def run():
-                """
-                Try to start worker and inform parent of outcome.
-                """
-                try:
-                    await worker
-                except Exception as e:
-                    logger.exception("Failed to start worker")
-                    init_result_q.put({"uid": uid, "exception": e})
-                    init_result_q.close()
-                    # If we hit an exception here we need to wait for a least
-                    # one interval for the outside to pick up this message.
-                    # Otherwise we arrive in a race condition where the process
-                    # cleanup wipes the queue before the exception can be
-                    # properly handled. See also
-                    # WorkerProcess._wait_until_connected (the 2 is for good
-                    # measure)
-                    sync_sleep(cls._init_msg_interval * 2)
-                else:
+        def watch_stop_q(loop: IOLoop, worker: Worker) -> None:
+            """
+            Wait for an incoming stop message and then stop the
+            worker cleanly.
+            """
+            try:
+                msg = child_stop_q.get()
+            except (TypeError, OSError, EOFError):
+                logger.error("Worker process died unexpectedly")
+                msg = {"op": "stop"}
+            finally:
+                child_stop_q.close()
+                assert msg["op"] == "stop", msg
+                del msg["op"]
+                loop.add_callback(do_stop, worker=worker, **msg)
+
+        async def run() -> None:
+            """
+            Try to start worker and inform parent of outcome.
+            """
+            failure_type: str | None = "initialize"
+            try:
+                worker = worker_factory()
+                failure_type = "start"
+                thread = threading.Thread(
+                    target=functools.partial(
+                        watch_stop_q,
+                        worker=worker,
+                        loop=IOLoop.current(),
+                    ),
+                    name="Nanny stop queue watch",
+                    daemon=True,
+                )
+                thread.start()
+                stack.callback(thread.join, timeout=2)
+                async with worker:
+                    failure_type = None
+
                     try:
                         assert worker.address
                     except ValueError:
@@ -884,31 +947,57 @@ class WorkerProcess:
                         init_result_q.close()
                         await worker.finished()
                         logger.info("Worker closed")
+            except Exception as e:
+                if failure_type is None:
+                    raise
 
-        except Exception as e:
-            logger.exception("Failed to initialize Worker")
-            init_result_q.put({"uid": uid, "exception": e})
-            init_result_q.close()
-            # If we hit an exception here we need to wait for a least one
-            # interval for the outside to pick up this message. Otherwise we
-            # arrive in a race condition where the process cleanup wipes the
-            # queue before the exception can be properly handled. See also
-            # WorkerProcess._wait_until_connected (the 2 is for good measure)
-            sync_sleep(cls._init_msg_interval * 2)
-        else:
-            try:
-                loop.run_sync(run)
-            except (TimeoutError, gen.TimeoutError):
-                # Loop was stopped before wait_until_closed() returned, ignore
-                pass
-            except KeyboardInterrupt:
-                # At this point the loop is not running thus we have to run
-                # do_stop() explicitly.
-                loop.run_sync(do_stop)
-            finally:
-                with suppress(ValueError):
+                logger.exception(f"Failed to {failure_type} worker")
+                init_result_q.put({"uid": uid, "exception": e})
+                init_result_q.close()
+                # If we hit an exception here we need to wait for a least
+                # one interval for the outside to pick up this message.
+                # Otherwise we arrive in a race condition where the process
+                # cleanup wipes the queue before the exception can be
+                # properly handled. See also
+                # WorkerProcess._wait_until_connected (the 3 is for good
+                # measure)
+                sync_sleep(cls._init_msg_interval * 3)
+
+        with contextlib.ExitStack() as stack:
+
+            @stack.callback
+            def close_stop_q() -> None:
+                try:
                     child_stop_q.put({"op": "stop"})  # usually redundant
-                with suppress(ValueError):
+                except ValueError:
+                    pass
+
+                try:
                     child_stop_q.close()  # usually redundant
+                except ValueError:
+                    pass
                 child_stop_q.join_thread()
-                thread.join(timeout=2)
+
+            os.environ.update(env)
+            dask.config.refresh()
+            dask.config.set(config)
+
+            from dask.multiprocessing import default_initializer
+
+            default_initializer()
+
+            if silence_logs:
+                logger.setLevel(silence_logs)
+
+            asyncio.run(run())
+
+
+def _get_env_variables(config_key: str) -> dict[str, str]:
+    cfg = dask.config.get(config_key)
+    if not isinstance(cfg, dict):
+        raise TypeError(  # pragma: nocover
+            f"{config_key} configuration must be of type dict. Instead got {type(cfg)}"
+        )
+    # Override dask config with explicitly defined env variables from the OS
+    cfg = {k: os.environ.get(k, str(v)) for k, v in cfg.items()}
+    return cfg

@@ -1,7 +1,11 @@
+from __future__ import annotations
+
 import gc
 import logging
 import threading
 from collections import deque
+
+import psutil
 
 from dask.utils import format_bytes
 
@@ -145,12 +149,7 @@ class GCDiagnosis:
     def enable(self):
         assert not self._enabled
         self._fractional_timer = FractionalTimer(n_samples=self.N_SAMPLES)
-        try:
-            import psutil
-        except ImportError:
-            self._proc = None
-        else:
-            self._proc = psutil.Process()
+        self._proc = psutil.Process()
 
         cb = self._gc_callback
         assert cb not in gc.callbacks
@@ -179,10 +178,7 @@ class GCDiagnosis:
         # don't waste time measuring them
         if info["generation"] != 2:
             return
-        if self._proc is not None:
-            rss = self._proc.memory_info().rss
-        else:
-            rss = 0
+        rss = self._proc.memory_info().rss
         if phase == "start":
             self._fractional_timer.start_timing()
             self._gc_rss_before = rss

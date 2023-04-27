@@ -8,7 +8,7 @@ import sys
 import weakref
 from abc import ABC, abstractmethod
 from contextlib import suppress
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import dask
 from dask.utils import parse_timedelta
@@ -16,8 +16,9 @@ from dask.utils import parse_timedelta
 from distributed.comm import registry
 from distributed.comm.addressing import parse_address
 from distributed.metrics import time
-from distributed.protocol import pickle
 from distributed.protocol.compression import get_default_compression
+from distributed.protocol.pickle import HIGHEST_PROTOCOL
+from distributed.utils import wait_for
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +134,7 @@ class Comm(ABC):
         return {
             "compression": get_default_compression(),
             "python": tuple(sys.version_info)[:3],
-            "pickle-protocol": pickle.HIGHEST_PROTOCOL,
+            "pickle-protocol": HIGHEST_PROTOCOL,
         }
 
     @staticmethod
@@ -214,7 +215,9 @@ class Listener(ABC):
 
         return _().__await__()
 
-    async def on_connection(self, comm: Comm, handshake_overrides=None):
+    async def on_connection(
+        self, comm: Comm, handshake_overrides: dict[str, Any] | None = None
+    ) -> None:
         local_info = {**comm.handshake_info(), **(handshake_overrides or {})}
 
         timeout = dask.config.get("distributed.comm.timeouts.connect")
@@ -223,8 +226,8 @@ class Listener(ABC):
             # Timeout is to ensure that we'll terminate connections eventually.
             # Connector side will employ smaller timeouts and we should only
             # reach this if the comm is dead anyhow.
-            await asyncio.wait_for(comm.write(local_info), timeout=timeout)
-            handshake = await asyncio.wait_for(comm.read(), timeout=timeout)
+            await wait_for(comm.write(local_info), timeout=timeout)
+            handshake = await wait_for(comm.read(), timeout=timeout)
             # This would be better, but connections leak if worker is closed quickly
             # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
         except Exception as e:
@@ -278,7 +281,7 @@ async def connect(
 
     backoff_base = 0.01
     attempt = 0
-
+    logger.debug("Establishing connection to %s", loc)
     # Prefer multiple small attempts than one long attempt. This should protect
     # primarily from DNS race conditions
     # gh3104, gh4176, gh4167
@@ -286,7 +289,7 @@ async def connect(
     active_exception = None
     while time_left() > 0:
         try:
-            comm = await asyncio.wait_for(
+            comm = await wait_for(
                 connector.connect(loc, deserialize=deserialize, **connection_args),
                 timeout=min(intermediate_cap, time_left()),
             )
@@ -297,7 +300,7 @@ async def connect(
         except (asyncio.TimeoutError, OSError) as exc:
             active_exception = exc
 
-            # As descibed above, the intermediate timeout is used to distributed
+            # As described above, the intermediate timeout is used to distributed
             # initial, bulk connect attempts homogeneously. In particular with
             # the jitter upon retries we should not be worred about overloading
             # any more DNS servers
@@ -323,8 +326,8 @@ async def connect(
     try:
         # This would be better, but connections leak if worker is closed quickly
         # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
-        handshake = await asyncio.wait_for(comm.read(), time_left())
-        await asyncio.wait_for(comm.write(local_info), time_left())
+        handshake = await wait_for(comm.read(), time_left())
+        await wait_for(comm.write(local_info), time_left())
     except Exception as exc:
         with suppress(Exception):
             await comm.close()

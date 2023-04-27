@@ -1,13 +1,14 @@
+from __future__ import annotations
+
 import logging
 from collections import deque
 
 import dask
-from dask.utils import format_time, parse_timedelta
+from dask.utils import format_time, key_split, parse_timedelta
 
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.diagnostics.progress_stream import color_of
 from distributed.metrics import time
-from distributed.utils import key_split
 
 logger = logging.getLogger(__name__)
 

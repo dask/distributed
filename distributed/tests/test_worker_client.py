@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import random
 import threading
@@ -204,7 +206,7 @@ def test_dont_override_default_get(loop):
         loop=loop, processes=False, set_as_default=True, dashboard_address=":0"
     ) as c:
         assert dask.base.get_scheduler() == c.get
-        for i in range(2):
+        for _ in range(2):
             b2.compute()
 
         assert dask.base.get_scheduler() == c.get
@@ -254,6 +256,7 @@ def test_secede_without_stealing_issue_1262():
     Tests that seceding works with the Stealing extension disabled
     https://github.com/dask/distributed/issues/1262
     """
+
     # run the loop as an inner function so all workers are closed
     # and exceptions can be examined
     @gen_cluster(client=True, scheduler_kwargs={"extensions": {}})
@@ -270,8 +273,6 @@ def test_secede_without_stealing_issue_1262():
     c, s, a, b, f = secede_test()
 
     assert f == 2
-    # ensure no workers had errors
-    assert all([f.exception() is None for f in s._worker_coroutines])
 
 
 @gen_cluster(client=True)
@@ -321,6 +322,7 @@ async def test_submit_different_names(s, a, b):
 async def test_secede_does_not_claim_worker(c, s, a, b):
     """A seceded task must not block the task running it. Tasks scheduled from
     within should be evenly distributed"""
+
     # https://github.com/dask/distributed/issues/5332
     def get_addr(x):
         w = get_worker()

@@ -6,6 +6,7 @@ import sys
 import warnings
 import weakref
 from json import dumps
+from typing import Any
 
 import dask
 import dask.config
@@ -45,7 +46,7 @@ class Process(ProcessInterface):
 
 
 class Worker(Process):
-    """A Remote Dask Worker controled by SSH
+    """A Remote Dask Worker controlled by SSH
 
     Parameters
     ----------
@@ -60,11 +61,11 @@ class Worker(Process):
     remote_python: str
         Path to Python on remote node to run this worker.
     kwargs: dict
-        These will be passed through the dask-worker CLI to the
+        These will be passed through the dask worker CLI to the
         dask.distributed.Worker class
     """
 
-    def __init__(
+    def __init__(  # type: ignore[no-untyped-def]
         self,
         scheduler: str,
         address: str,
@@ -203,19 +204,23 @@ class Scheduler(Process):
     remote_python: str
         Path to Python on remote node to run this scheduler.
     kwargs: dict
-        These will be passed through the dask-scheduler CLI to the
+        These will be passed through the dask scheduler CLI to the
         dask.distributed.Scheduler class
     """
 
     def __init__(
-        self, address: str, connect_options: dict, kwargs: dict, remote_python=None
+        self,
+        address: str,
+        connect_options: dict,
+        kwargs: dict,
+        remote_python: str | None = None,
     ):
         super().__init__()
 
         self.address = address
         self.kwargs = kwargs
         self.connect_options = connect_options
-        self.remote_python = remote_python
+        self.remote_python = remote_python or sys.executable
 
     async def start(self):
         try:
@@ -245,9 +250,6 @@ class Scheduler(Process):
                 raise Exception(
                     "Scheduler failed to set DASK_INTERNAL_INHERIT_CONFIG variable "
                 )
-
-        if not self.remote_python:
-            self.remote_python = sys.executable
 
         cmd = " ".join(
             [
@@ -296,14 +298,14 @@ old_cluster_kwargs = {
 
 def SSHCluster(
     hosts: list[str] | None = None,
-    connect_options: dict | list[dict] = {},
-    worker_options: dict = {},
-    scheduler_options: dict = {},
+    connect_options: dict | list[dict] | None = None,
+    worker_options: dict | None = None,
+    scheduler_options: dict | None = None,
     worker_module: str = "deprecated",
     worker_class: str = "distributed.Nanny",
     remote_python: str | list[str] | None = None,
-    **kwargs,
-):
+    **kwargs: Any,
+) -> SpecCluster:
     """Deploy a Dask cluster using SSH
 
     The SSHCluster function deploys a Dask Scheduler and Workers for you on a
@@ -325,22 +327,22 @@ def SSHCluster(
 
     Parameters
     ----------
-    hosts : list[str]
+    hosts
         List of hostnames or addresses on which to launch our cluster.
         The first will be used for the scheduler and the rest for workers.
-    connect_options : dict or list of dict, optional
+    connect_options
         Keywords to pass through to :func:`asyncssh.connect`.
         This could include things such as ``port``, ``username``, ``password``
         or ``known_hosts``. See docs for :func:`asyncssh.connect` and
         :class:`asyncssh.SSHClientConnectionOptions` for full information.
         If a list it must have the same length as ``hosts``.
-    worker_options : dict, optional
+    worker_options
         Keywords to pass on to workers.
-    scheduler_options : dict, optional
+    scheduler_options
         Keywords to pass on to scheduler.
-    worker_class: str
+    worker_class
         The python class to use to create the worker(s).
-    remote_python : str or list of str, optional
+    remote_python
         Path to Python on remote nodes.
 
     Examples
@@ -391,6 +393,10 @@ def SSHCluster(
     dask.distributed.Worker
     asyncssh.connect
     """
+    connect_options = connect_options or {}
+    worker_options = worker_options or {}
+    scheduler_options = scheduler_options or {}
+
     if worker_module != "deprecated":
         raise ValueError(
             "worker_module has been deprecated in favor of worker_class. "
@@ -406,7 +412,7 @@ def SSHCluster(
             "This will be removed in the future"
         )
         kwargs.setdefault("worker_addrs", hosts)
-        return OldSSHCluster(**kwargs)
+        return OldSSHCluster(**kwargs)  # type: ignore
 
     if not hosts:
         raise ValueError(

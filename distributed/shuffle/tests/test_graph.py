@@ -1,26 +1,22 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
 
 import pytest
 
 pd = pytest.importorskip("pandas")
 pytest.importorskip("dask.dataframe")
+pytest.importorskip("pyarrow")
 
 import dask
 import dask.dataframe as dd
 from dask.blockwise import Blockwise
 from dask.utils_test import hlg_layer_topological
 
-from distributed.shuffle.shuffle_extension import ShuffleWorkerExtension
 from distributed.utils_test import gen_cluster
 
-if TYPE_CHECKING:
-    from distributed import Client, Scheduler, Worker
 
-
-def test_basic(client: Client):
+def test_basic(client):
     df = dd.demo.make_timeseries(freq="15D", partition_freq="30D")
     df["name"] = df["name"].astype("string[python]")
     shuffled = df.shuffle("id", shuffle="p2p")
@@ -33,12 +29,59 @@ def test_basic(client: Client):
     # ^ NOTE: this works because `assert_eq` sorts the rows before comparing
 
 
+@pytest.mark.parametrize("dtype", ["csingle", "cdouble", "clongdouble"])
+def test_raise_on_complex_numbers(dtype):
+    df = dd.from_pandas(
+        pd.DataFrame({"x": pd.array(range(10), dtype=dtype)}), npartitions=5
+    )
+    with pytest.raises(
+        TypeError, match=f"p2p does not support data of type '{df.x.dtype}'"
+    ):
+        df.shuffle("x", shuffle="p2p")
+
+
+@pytest.mark.xfail(
+    reason="Ordinary string columns are also objects and we can't distinguish them from custom objects from meta alone."
+)
+def test_raise_on_custom_objects(c, s, a, b):
+    class Stub:
+        def __init__(self, value: int) -> None:
+            self.value = value
+
+    df = dd.from_pandas(
+        pd.DataFrame({"x": pd.array([Stub(i) for i in range(10)], dtype="object")}),
+        npartitions=5,
+    )
+    with pytest.raises(TypeError, match="p2p does not support custom objects"):
+        df.shuffle("x", shuffle="p2p")
+
+
+def test_raise_on_sparse_data():
+    df = dd.from_pandas(
+        pd.DataFrame({"x": pd.array(range(10), dtype="Sparse[float64]")}), npartitions=5
+    )
+    with pytest.raises(TypeError, match="p2p does not support sparse data"):
+        df.shuffle("x", shuffle="p2p")
+
+
+def test_raise_on_non_string_column_name():
+    df = dd.from_pandas(pd.DataFrame({"a": range(10), 1: range(10)}), npartitions=5)
+    with pytest.raises(TypeError, match="p2p requires all column names to be str"):
+        df.shuffle("a", shuffle="p2p")
+
+
+def test_does_not_raise_on_stringified_numeric_column_name():
+    df = dd.from_pandas(pd.DataFrame({"a": range(10), "1": range(10)}), npartitions=5)
+    df.shuffle("a", shuffle="p2p")
+
+
 @gen_cluster([("", 2)] * 4, client=True)
-async def test_basic_state(c: Client, s: Scheduler, *workers: Worker):
+async def test_basic_state(c, s, *workers):
     df = dd.demo.make_timeseries(freq="15D", partition_freq="30D")
+    df["name"] = df["name"].astype("string[python]")
     shuffled = df.shuffle("id", shuffle="p2p")
 
-    exts: list[ShuffleWorkerExtension] = [w.extensions["shuffle"] for w in workers]
+    exts = [w.extensions["shuffle"] for w in workers]
     for ext in exts:
         assert not ext.shuffles
 
@@ -53,7 +96,7 @@ async def test_basic_state(c: Client, s: Scheduler, *workers: Worker):
     assert all(not ext.shuffles for ext in exts)
 
 
-def test_multiple_linear(client: Client):
+def test_multiple_linear(client):
     df = dd.demo.make_timeseries(freq="15D", partition_freq="30D")
     df["name"] = df["name"].astype("string[python]")
     s1 = df.shuffle("id", shuffle="p2p")

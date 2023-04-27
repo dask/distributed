@@ -9,7 +9,7 @@ on:
 # When this workflow is queued, automatically cancel any previous running
 # or pending jobs from the same branch
 concurrency:
-  group: ${{ github.ref }}
+  group: tests-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -23,20 +23,41 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.8", "3.9", "3.10"]
+        environment: [mindeps, "3.8", "3.9", "3.10", "3.11"]
+        queuing: [queue]
+        extra_packages: [null]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
         exclude:
           - os: macos-latest
-            python-version: 3.9
+            environment: "3.9"
+          - os: macos-latest
+            environment: "3.10"
+          - os: macos-latest
+            environment: mindeps
+          - os: windows-latest
+            environment: mindeps
         include:
-          - partition: "ci1"
-            partition-label: "ci1"
-          - partition: "not ci1"
-            partition-label: "notci1"
+          - os: ubuntu-latest
+            environment: "3.9"
+            queuing: no_queue
+            partition: "ci1"
+          - os: ubuntu-latest
+            environment: "3.9"
+            queuing: no_queue
+            partition: "not ci1"
+          # P2P rechunking - requires numpy and nothing else beyond mindeps (no pyarrow)
+          - os: ubuntu-latest
+            environment: mindeps
+            extra_packages: [numpy]
+            partition: "ci1"
+          - os: ubuntu-latest
+            environment: mindeps
+            extra_packages: [numpy]
+            partition: "not ci1"
 
         # Uncomment to stress-test the test suite for random failures.
-        # Must also change env.TEST_ID below.
+        # Must also change `export TEST_ID` in first step below.
         # This will take a LONG time and delay all PRs across the whole github.com/dask!
         # To avoid hamstringing other people, change 'on: [push, pull_request]' above
         # to just 'on: [push]'; this way the stress test will run exclusively in your
@@ -44,41 +65,73 @@ jobs:
         # run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
     env:
-      TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}
-      # TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.partition-label }}-${{ matrix.run }}
+      CONDA_FILE: continuous_integration/environment-${{ matrix.environment }}.yaml
 
     steps:
+      - name: Set $TEST_ID
+        run: |
+          export PARTITION_LABEL=$( echo "${{ matrix.partition }}" | sed "s/ //" )
+          export TEST_ID="${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.queuing || join(matrix.extra_packages, '_') }}-$PARTITION_LABEL"
+          # Switch to this version for stress-test:
+          # export TEST_ID="$TEST_ID-${{ matrix.run }}"
+          echo "TEST_ID: $TEST_ID"
+          echo "TEST_ID=$TEST_ID" >> $GITHUB_ENV
+        shell: bash
+
       - name: Checkout source
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3.5.2
         with:
           fetch-depth: 0
 
       - name: Setup Conda Environment
-        uses: conda-incubator/setup-miniconda@v2
+        uses: conda-incubator/setup-miniconda@v2.2.0
         with:
           miniforge-variant: Mambaforge
           miniforge-version: latest
           condarc-file: continuous_integration/condarc
           use-mamba: true
-          python-version: ${{ matrix.python-version }}
-          environment-file: continuous_integration/environment-${{ matrix.python-version }}.yaml
           activate-environment: dask-distributed
 
       - name: Show conda options
         shell: bash -l {0}
         run: conda config --show
 
-      - name: Hack around https://github.com/ipython/ipython/issues/12197
-        # This upstream issue causes an interpreter crash when running
-        # distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-        shell: bash -l {0}
-        if: ${{ matrix.os == 'windows-latest' && matrix.python-version == '3.9' }}
-        run: mamba uninstall ipython
+      - name: Check if caching is enabled
+        uses: xarray-contrib/ci-trigger@v1.2
+        id: skip-caching
+        with:
+          keyword: "[skip-caching]"
+
+      - name: Get Date
+        if: steps.skip-caching.outputs.trigger-found != 'true'
+        id: get-date
+        run: echo "::set-output name=today::$(/bin/date -u '+%Y%m%d')"
+        shell: bash
+
+      - name: Cache Conda env
+        if: steps.skip-caching.outputs.trigger-found != 'true'
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.CONDA }}/envs
+          key: conda-${{ matrix.os }}-${{ steps.get-date.outputs.today }}-${{ hashFiles(env.CONDA_FILE) }}-${{ env.CACHE_NUMBER }}
+        env:
+          # Increase this value to reset cache if continuous_integration/environment-${{ matrix.environment }}.yaml has not changed
+          CACHE_NUMBER: 0
+        id: cache
+
+      - name: Update environment
+        run: mamba env update -n dask-distributed -f ${{ env.CONDA_FILE }}
+        if: steps.skip-caching.outputs.trigger-found == 'true' || steps.cache.outputs.cache-hit != 'true'
 
       - name: Install
         shell: bash -l {0}
         run: |
           python -m pip install --no-deps -e .
+
+      - name: Extra Installs
+        if: ${{ matrix.extra_packages }}
+        shell: bash -l {0}
+        run: mamba install -y ${{ join(matrix.extra_packages, ' ') }}
 
       - name: mamba list
         shell: bash -l {0}
@@ -101,20 +154,34 @@ jobs:
         shell: bash -l {0}
         # No SIGALRM available on Windows
         if: ${{ matrix.os != 'windows-latest' }}
-        run: sed -i.bak 's/timeout_method = thread/timeout_method = signal/' setup.cfg
+        run: sed -i.bak 's/timeout_method = "thread"/timeout_method = "signal"/' pyproject.toml
+
+      - name: Disable IPv6
+        shell: bash -l {0}
+        # FIXME ipv6-related failures on Ubuntu github actions CI
+        # https://github.com/dask/distributed/issues/4514
+        if: ${{ matrix.os  == 'ubuntu-latest' }}
+        run: echo "DISABLE_IPV6=1" >> $GITHUB_ENV
+
+      - name: Set up dask env for job queuing
+        shell: bash -l {0}
+        if: ${{ matrix.queuing == 'no_queue' }}
+        run: echo "DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=inf" >> $GITHUB_ENV
+
+      - name: Print host info
+        # host_info.py imports numpy, which isn't a direct dependency of distributed
+        if: matrix.environment != 'mindeps'
+        shell: bash -l {0}
+        run: |
+          python continuous_integration/scripts/host_info.py
 
       - name: Test
         id: run_tests
         shell: bash -l {0}
         env:
           PYTHONFAULTHANDLER: 1
+          MINDEPS: ${{ matrix.environment == 'mindeps' }}
         run: |
-          if [[ "${{ matrix.os }}" = "ubuntu-latest" ]]; then
-              # FIXME ipv6-related failures on Ubuntu github actions CI
-              # https://github.com/dask/distributed/issues/4514
-              export DISABLE_IPV6=1
-          fi
-
           source continuous_integration/scripts/set_ulimit.sh
           set -o pipefail
           mkdir reports
@@ -142,24 +209,40 @@ jobs:
       #   if: ${{ failure() }}
       #   uses: mxschmitt/action-tmate@v3
 
+      # https://community.codecov.com/t/files-missing-from-report/3902/7
+      # The coverage file being created records filenames at the distributed/ directory
+      # as opposed to root. This is causing filename mismatches in Codecov.
+      # This step edits `coverage.xml` in-file by adding `distributed` to all filenames.
+      - name: Prepare coverage report
+        if: ${{ matrix.os != 'windows-latest' }}
+        shell: bash -l {0}
+        run: sed -i'' -e 's/filename="/filename="distributed\//g' coverage.xml
+
+      # Do not upload coverage reports for cron jobs
       - name: Coverage
-        uses: codecov/codecov-action@v1
+        if: github.event_name != 'schedule'
+        uses: codecov/codecov-action@v3
+        with:
+          name: ${{ env.TEST_ID }}
+          # See https://community.codecov.com/t/upload-issues-unable-to-locate-build-via-github-actions-api/3954
+          token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload test results
         # ensure this runs even if pytest fails
         if: >
           always() &&
           (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure')
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ env.TEST_ID }}
           path: reports
+
       - name: Upload gen_cluster dumps for failed tests
         # ensure this runs even if pytest fails
         if: >
           always() &&
           (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure')
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ env.TEST_ID }}_cluster_dumps
           path: test_cluster_dump
@@ -173,7 +256,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Upload
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: Event File
           path: ${{ github.event_path }}

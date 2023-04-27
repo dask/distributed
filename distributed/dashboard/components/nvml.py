@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import math
 
 from bokeh.core.properties import without_property_validation
@@ -17,10 +19,7 @@ from dask.utils import format_bytes
 from distributed.dashboard.components import DashboardComponent, add_periodic_callback
 from distributed.dashboard.components.scheduler import BOKEH_THEME, TICKS_1024, env
 from distributed.dashboard.utils import update
-from distributed.diagnostics import nvml
 from distributed.utils import log_errors
-
-NVML_ENABLED = nvml.device_get_count() > 0
 
 
 class GPUCurrentLoad(DashboardComponent):
@@ -47,7 +46,6 @@ class GPUCurrentLoad(DashboardComponent):
         memory = figure(
             title="GPU Memory",
             tools="",
-            id="bk-gpu-memory-worker-plot",
             width=int(width / 2),
             name="gpu_memory_histogram",
             **kwargs,
@@ -65,7 +63,6 @@ class GPUCurrentLoad(DashboardComponent):
         utilization = figure(
             title="GPU Utilization",
             tools="",
-            id="bk-gpu-utilization-worker-plot",
             width=int(width / 2),
             name="gpu_utilization_histogram",
             **kwargs,

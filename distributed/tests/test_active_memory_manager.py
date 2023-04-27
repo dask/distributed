@@ -3,25 +3,39 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import warnings
+from collections.abc import Iterator
 from contextlib import contextmanager
-from time import sleep
-from typing import Literal
+from typing import Any, Literal
 
 import pytest
 
-from distributed import Nanny, wait
+import dask.config
+
+from distributed import Event, Lock, Scheduler, wait
 from distributed.active_memory_manager import (
     ActiveMemoryManagerExtension,
     ActiveMemoryManagerPolicy,
+    RetireWorker,
 )
 from distributed.core import Status
-from distributed.utils_test import captured_logger, gen_cluster, inc, slowinc
-
-NO_AMM_START = {"distributed.scheduler.active-memory-manager.start": False}
+from distributed.utils_test import (
+    NO_AMM,
+    BlockedGatherDep,
+    assert_story,
+    captured_logger,
+    gen_cluster,
+    gen_test,
+    inc,
+    lock_inc,
+    slowinc,
+    wait_for_state,
+)
+from distributed.worker_state_machine import AcquireReplicasEvent
 
 
 @contextmanager
-def assert_amm_log(expect: list[str]):
+def assert_amm_log(expect: list[str]) -> Iterator[None]:
     with captured_logger(
         "distributed.active_memory_manager", level=logging.DEBUG
     ) as logger:
@@ -77,11 +91,13 @@ def demo_config(
     candidates: list[int] | None = None,
     start: bool = False,
     interval: float = 0.1,
-):
+    measure: str = "managed",
+) -> dict[str, Any]:
     """Create a dask config for AMM with DemoPolicy"""
     return {
         "distributed.scheduler.active-memory-manager.start": start,
         "distributed.scheduler.active-memory-manager.interval": interval,
+        "distributed.scheduler.active-memory-manager.measure": measure,
         "distributed.scheduler.active-memory-manager.policies": [
             {
                 "class": "distributed.tests.test_active_memory_manager.DemoPolicy",
@@ -233,7 +249,7 @@ async def test_multi_start(c, s, a, b):
     assert len(s.tasks["z"].who_has) == 1
 
 
-@gen_cluster(client=True, config=NO_AMM_START)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_not_registered(c, s, a, b):
     futures = await c.scatter({"x": 1}, broadcast=True)
     assert len(s.tasks["x"].who_has) == 2
@@ -250,16 +266,17 @@ async def test_not_registered(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-def test_client_proxy_sync(client):
-    assert not client.amm.running()
-    client.amm.start()
-    assert client.amm.running()
-    client.amm.stop()
-    assert not client.amm.running()
-    client.amm.run_once()
+def test_client_proxy_sync(client_no_amm):
+    c = client_no_amm
+    assert not c.amm.running()
+    c.amm.start()
+    assert c.amm.running()
+    c.amm.stop()
+    assert not c.amm.running()
+    c.amm.run_once()
 
 
-@gen_cluster(client=True, config=NO_AMM_START)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_client_proxy_async(c, s, a, b):
     assert not await c.amm.running()
     await c.amm.start()
@@ -301,7 +318,7 @@ async def test_drop_with_waiter(c, s, a, b):
     assert not y2.done()
 
 
-@gen_cluster(client=True, config=NO_AMM_START)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_double_drop(c, s, a, b):
     """An AMM drop policy runs once to drop one of the two replicas of a key.
     Then it runs again, before the recommendations from the first iteration had the time
@@ -339,25 +356,15 @@ async def test_double_drop_stress(c, s, a, b):
     assert len(s.tasks["x"].who_has) == 1
 
 
-@pytest.mark.slow
-@gen_cluster(
-    nthreads=[("", 1)] * 4,
-    Worker=Nanny,
-    client=True,
-    worker_kwargs={"memory_limit": "2 GiB"},
-    config=demo_config("drop", n=1),
-)
-async def test_drop_from_worker_with_least_free_memory(c, s, *nannies):
-    a1, a2, a3, a4 = s.workers.keys()
+@gen_cluster(nthreads=[("", 1)] * 4, client=True, config=demo_config("drop", n=1))
+async def test_drop_from_worker_with_least_free_memory(c, s, *workers):
     ws1, ws2, ws3, ws4 = s.workers.values()
 
     futures = await c.scatter({"x": 1}, broadcast=True)
     assert s.tasks["x"].who_has == {ws1, ws2, ws3, ws4}
-    # Allocate enough RAM to be safely more than unmanaged memory
-    clog = c.submit(lambda: "x" * 2**29, workers=[a3])  # 512 MiB
-    # await wait(clog) is not enough; we need to wait for the heartbeats
-    while ws3.memory.optimistic < 2**29:
-        await asyncio.sleep(0.01)
+    clog = c.submit(lambda: "x" * 100, workers=[ws3.address])
+    await wait(clog)
+
     s.extensions["amm"].run_once()
 
     while s.tasks["x"].who_has != {ws1, ws2, ws4}:
@@ -438,7 +445,6 @@ async def test_drop_prefers_paused_workers(c, s, *workers):
     assert ws not in ts.who_has
 
 
-@pytest.mark.slow
 @gen_cluster(client=True, config=demo_config("drop"))
 async def test_drop_with_paused_workers_with_running_tasks_1(c, s, a, b):
     """If there is exactly 1 worker that holds a replica of a task that isn't paused or
@@ -449,17 +455,18 @@ async def test_drop_with_paused_workers_with_running_tasks_1(c, s, a, b):
     a is paused and with dependent tasks executing on it
     b is running and has no dependent tasks
     """
-    x = (await c.scatter({"x": 1}, broadcast=True))["x"]
-    y = c.submit(slowinc, x, delay=2.5, key="y", workers=[a.address])
+    lock = Lock()
+    async with lock:
+        x = (await c.scatter({"x": 1}, broadcast=True))["x"]
+        y = c.submit(lock_inc, x, lock=lock, key="y", workers=[a.address])
+        await wait_for_state("y", "executing", a)
 
-    while "y" not in a.tasks or a.tasks["y"].state != "executing":
-        await asyncio.sleep(0.01)
-    a.status = Status.paused
-    while s.workers[a.address].status != Status.paused:
-        await asyncio.sleep(0.01)
-    assert a.tasks["y"].state == "executing"
+        a.status = Status.paused
+        while s.workers[a.address].status != Status.paused:
+            await asyncio.sleep(0.01)
+        assert a.state.tasks["y"].state == "executing"
 
-    s.extensions["amm"].run_once()
+        s.extensions["amm"].run_once()
     await y
     assert len(s.tasks["x"].who_has) == 2
 
@@ -484,7 +491,6 @@ async def test_drop_with_paused_workers_with_running_tasks_2(c, s, a, b):
     assert {ws.address for ws in s.tasks["x"].who_has} == {b.address}
 
 
-@pytest.mark.slow
 @pytest.mark.parametrize("pause", [True, False])
 @gen_cluster(client=True, config=demo_config("drop"))
 async def test_drop_with_paused_workers_with_running_tasks_3_4(c, s, a, b, pause):
@@ -500,26 +506,26 @@ async def test_drop_with_paused_workers_with_running_tasks_3_4(c, s, a, b, pause
     a is running and with dependent tasks executing on it
     b is running and has no dependent tasks
     """
-    x = (await c.scatter({"x": 1}, broadcast=True))["x"]
-    y = c.submit(slowinc, x, delay=2.5, key="y", workers=[a.address])
-    while "y" not in a.tasks or a.tasks["y"].state != "executing":
-        await asyncio.sleep(0.01)
+    lock = Lock()
+    async with lock:
+        x = (await c.scatter({"x": 1}, broadcast=True))["x"]
+        y = c.submit(lock_inc, x, lock, key="y", workers=[a.address])
+        await wait_for_state("y", "executing", a)
 
-    if pause:
-        a.status = Status.paused
-        b.status = Status.paused
-        while any(ws.status != Status.paused for ws in s.workers.values()):
-            await asyncio.sleep(0.01)
+        if pause:
+            a.status = Status.paused
+            b.status = Status.paused
+            while any(ws.status != Status.paused for ws in s.workers.values()):
+                await asyncio.sleep(0.01)
 
-    assert s.tasks["y"].state == "processing"
-    assert a.tasks["y"].state == "executing"
+        assert s.tasks["y"].state == "processing"
+        assert a.state.tasks["y"].state == "executing"
 
-    s.extensions["amm"].run_once()
+        s.extensions["amm"].run_once()
     await y
     assert {ws.address for ws in s.tasks["x"].who_has} == {a.address}
 
 
-@pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)] * 3, config=demo_config("drop"))
 async def test_drop_with_paused_workers_with_running_tasks_5(c, s, w1, w2, w3):
     """If there is exactly 1 worker that holds a replica of a task that isn't paused or
@@ -531,29 +537,31 @@ async def test_drop_with_paused_workers_with_running_tasks_5(c, s, w1, w2, w3):
     w2 is running and has no dependent tasks
     w3 is running and with dependent tasks executing on it
     """
-    x = (await c.scatter({"x": 1}, broadcast=True))["x"]
-    y1 = c.submit(slowinc, x, delay=2.5, key="y1", workers=[w1.address])
-    y2 = c.submit(slowinc, x, delay=2.5, key="y2", workers=[w3.address])
+    lock = Lock()
+    async with lock:
+        x = (await c.scatter({"x": 1}, broadcast=True))["x"]
+        y1 = c.submit(lock_inc, x, lock=lock, key="y1", workers=[w1.address])
+        y2 = c.submit(lock_inc, x, lock=lock, key="y2", workers=[w3.address])
 
-    def executing() -> bool:
-        return (
-            "y1" in w1.tasks
-            and w1.tasks["y1"].state == "executing"
-            and "y2" in w3.tasks
-            and w3.tasks["y2"].state == "executing"
-        )
+        def executing() -> bool:
+            return (
+                "y1" in w1.state.tasks
+                and w1.state.tasks["y1"].state == "executing"
+                and "y2" in w3.state.tasks
+                and w3.state.tasks["y2"].state == "executing"
+            )
 
-    while not executing():
-        await asyncio.sleep(0.01)
-    w1.status = Status.paused
-    while s.workers[w1.address].status != Status.paused:
-        await asyncio.sleep(0.01)
-    assert executing()
+        while not executing():
+            await asyncio.sleep(0.01)
+        w1.status = Status.paused
+        while s.workers[w1.address].status != Status.paused:
+            await asyncio.sleep(0.01)
+        assert executing()
 
-    s.extensions["amm"].run_once()
-    while {ws.address for ws in s.tasks["x"].who_has} != {w1.address, w3.address}:
-        await asyncio.sleep(0.01)
-    assert executing()
+        s.extensions["amm"].run_once()
+        while {ws.address for ws in s.tasks["x"].who_has} != {w1.address, w3.address}:
+            await asyncio.sleep(0.01)
+        assert executing()
 
 
 @gen_cluster(nthreads=[("", 1)] * 4, client=True, config=demo_config("replicate", n=2))
@@ -601,27 +609,14 @@ async def test_double_replicate_stress(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-@pytest.mark.slow
-@gen_cluster(
-    nthreads=[("", 1)] * 4,
-    Worker=Nanny,
-    client=True,
-    worker_kwargs={"memory_limit": "2 GiB"},
-    config=demo_config("replicate", n=1),
-)
-async def test_replicate_to_worker_with_most_free_memory(c, s, *nannies):
-    a1, a2, a3, a4 = s.workers.keys()
+@gen_cluster(nthreads=[("", 1)] * 4, client=True, config=demo_config("replicate", n=1))
+async def test_replicate_to_worker_with_most_free_memory(c, s, *workers):
     ws1, ws2, ws3, ws4 = s.workers.values()
 
-    futures = await c.scatter({"x": 1}, workers=[a1])
+    x = await c.scatter({"x": 1}, workers=[ws1.address])
+    clogs = await c.scatter([2, 3], workers=[ws2.address, ws4.address])
+
     assert s.tasks["x"].who_has == {ws1}
-    # Allocate enough RAM to be safely more than unmanaged memory
-    clog2 = c.submit(lambda: "x" * 2**29, workers=[a2])  # 512 MiB
-    clog4 = c.submit(lambda: "x" * 2**29, workers=[a4])  # 512 MiB
-    # await wait(clog) is not enough; we need to wait for the heartbeats
-    for ws in (ws2, ws4):
-        while ws.memory.optimistic < 2**29:
-            await asyncio.sleep(0.01)
     s.extensions["amm"].run_once()
 
     while s.tasks["x"].who_has != {ws1, ws3}:
@@ -688,6 +683,17 @@ async def test_replicate_avoids_paused_workers_2(c, s, a, b):
     s.extensions["amm"].run_once()
     await asyncio.sleep(0.2)
     assert "x" not in b.data
+
+
+@gen_test()
+async def test_bad_measure():
+    with dask.config.set(
+        {"distributed.scheduler.active-memory-manager.measure": "notexist"}
+    ):
+        with pytest.raises(ValueError) as e:
+            await Scheduler(dashboard_address=":0")
+
+    assert "measure must be one of " in str(e.value)
 
 
 @gen_cluster(
@@ -771,25 +777,26 @@ async def test_RetireWorker_no_remove(c, s, a, b):
     while s.tasks["x"].who_has != {s.workers[b.address]}:
         await asyncio.sleep(0.01)
     assert a.address in s.workers
+    assert a.status == Status.closing_gracefully
+    assert s.workers[a.address].status == Status.closing_gracefully
     # Policy has been removed without waiting for worker to disappear from
     # Scheduler.workers
     assert not s.extensions["amm"].policies
 
 
-@pytest.mark.slow
 @pytest.mark.parametrize("use_ReduceReplicas", [False, True])
 @gen_cluster(
     client=True,
-    Worker=Nanny,
     config={
         "distributed.scheduler.active-memory-manager.start": True,
         "distributed.scheduler.active-memory-manager.interval": 0.1,
+        "distributed.scheduler.active-memory-manager.measure": "managed",
         "distributed.scheduler.active-memory-manager.policies": [
             {"class": "distributed.active_memory_manager.ReduceReplicas"},
         ],
     },
 )
-async def test_RetireWorker_with_ReduceReplicas(c, s, *nannies, use_ReduceReplicas):
+async def test_RetireWorker_with_ReduceReplicas(c, s, *workers, use_ReduceReplicas):
     """RetireWorker and ReduceReplicas work well with each other.
 
     If ReduceReplicas is enabled,
@@ -810,12 +817,12 @@ async def test_RetireWorker_with_ReduceReplicas(c, s, *nannies, use_ReduceReplic
     if not use_ReduceReplicas:
         s.extensions["amm"].policies.clear()
 
-    x = c.submit(lambda: "x" * 2**26, key="x", workers=[ws_a.address])  # 64 MiB
-    y = c.submit(lambda: "y" * 2**26, key="y", workers=[ws_a.address])  # 64 MiB
+    x = c.submit(lambda: "x", key="x", workers=[ws_a.address])
+    y = c.submit(lambda: "y", key="y", workers=[ws_a.address])
     z = c.submit(lambda x: None, x, key="z", workers=[ws_b.address])  # copy x to ws_b
     # Make sure that the worker NOT being retired has the most RAM usage to test that
     # it is not being picked first since there's a retiring worker.
-    w = c.submit(lambda: "w" * 2**28, key="w", workers=[ws_b.address])  # 256 MiB
+    w = c.submit(lambda: "w" * 100, key="w", workers=[ws_b.address])
     await wait([x, y, z, w])
 
     await c.retire_workers([ws_a.address], remove=False)
@@ -825,7 +832,7 @@ async def test_RetireWorker_with_ReduceReplicas(c, s, *nannies, use_ReduceReplic
     assert {ts.key for ts in ws_b.has_what} == {"x", "y", "z", "w"}
 
 
-@gen_cluster(client=True, nthreads=[("", 1)] * 3, config=NO_AMM_START)
+@gen_cluster(client=True, nthreads=[("", 1)] * 3, config=NO_AMM)
 async def test_RetireWorker_all_replicas_are_being_retired(c, s, w1, w2, w3):
     """There are multiple replicas of a key, but they all reside on workers that are
     being retired
@@ -866,8 +873,8 @@ async def test_RetireWorker_no_recipients(c, s, w1, w2, w3, w4):
     assert set(out) in ({w1.address, w3.address}, {w1.address, w4.address})
     assert not s.extensions["amm"].policies
     assert set(s.workers) in ({w2.address, w3.address}, {w2.address, w4.address})
-    # After a Scheduler -> Worker -> WorkerState roundtrip, workers that failed to
-    # retire went back from closing_gracefully to running and can run tasks
+    # After a Scheduler -> Worker -> Scheduler roundtrip, workers that failed to retire
+    # went back from closing_gracefully to running and can run tasks
     while any(ws.status != Status.running for ws in s.workers.values()):
         await asyncio.sleep(0.01)
     assert await c.submit(inc, 1) == 2
@@ -896,59 +903,225 @@ async def test_RetireWorker_all_recipients_are_paused(c, s, a, b):
     assert not s.extensions["amm"].policies
     assert set(s.workers) == {a.address, b.address}
 
-    # After a Scheduler -> Worker -> WorkerState roundtrip, workers that failed to
+    # After a Scheduler -> Worker -> Scheduler roundtrip, workers that failed to
     # retire went back from closing_gracefully to running and can run tasks
     while ws_a.status != Status.running:
         await asyncio.sleep(0.01)
     assert await c.submit(inc, 1) == 2
 
 
-# FIXME can't drop runtime of this test below 10s; see distributed#5585
-@pytest.mark.slow
 @gen_cluster(
     client=True,
-    Worker=Nanny,
-    nthreads=[("", 1)] * 3,
     config={
-        "distributed.scheduler.worker-ttl": "500ms",
+        # Don't use one-off AMM instance
         "distributed.scheduler.active-memory-manager.start": True,
-        "distributed.scheduler.active-memory-manager.interval": 0.1,
         "distributed.scheduler.active-memory-manager.policies": [],
     },
 )
-async def test_RetireWorker_faulty_recipient(c, s, *nannies):
-    """RetireWorker requests to replicate a key onto a unresponsive worker.
+async def test_RetireWorker_new_keys_arrive_after_all_keys_moved_away(c, s, a, b):
+    """
+    If all keys have been moved off a worker, but then new keys arrive (due to task
+    completion or `gather_dep`) before the worker has actually closed, make sure we
+    still retire it (instead of hanging forever).
+
+    This test is timing-sensitive. If it runs too slowly, it *should* `pytest.skip`
+    itself.
+
+    See https://github.com/dask/distributed/issues/6223 for motivation.
+    """
+    ws_a = s.workers[a.address]
+    ws_b = s.workers[b.address]
+    event = Event()
+
+    # Put 200 keys on the worker, so `_track_retire_worker` will sleep for 0.5s
+    xs = c.map(lambda x: x, range(200), workers=[a.address])
+    await wait(xs)
+
+    # Put an extra task on the worker, which we will allow to complete once the `xs`
+    # have been replicated.
+    extra = c.submit(
+        lambda: event.wait("2s"),
+        workers=[a.address],
+        allow_other_workers=True,
+        key="extra",
+    )
+    await wait_for_state(extra.key, "executing", a)
+
+    t = asyncio.create_task(c.retire_workers([a.address]))
+
+    amm = s.extensions["amm"]
+    while not amm.policies:
+        await asyncio.sleep(0)
+    policy = next(iter(amm.policies))
+    assert isinstance(policy, RetireWorker)
+
+    # Wait for all `xs` to be replicated.
+    while len(ws_b.has_what) != len(xs):
+        await asyncio.sleep(0)
+
+    # `_track_retire_worker` _should_ now be sleeping for 0.5s, because there were >=200
+    # keys on A. In this test, everything from the beginning of the transfers needs to
+    # happen within 0.5s.
+
+    # Simulate waiting for the policy to run again.
+    # Note that the interval at which the policy runs is inconsequential for this test.
+    amm.run_once()
+
+    # The policy has removed itself, because all `xs` have been replicated.
+    assert not amm.policies
+    assert policy.done(), {ts.key: ts.who_has for ts in ws_a.has_what}
+
+    # But what if a new key arrives now while `_track_retire_worker` is still (maybe)
+    # sleeping? Let `extra` complete and wait for it to hit the scheduler.
+    await event.set()
+    await wait(extra)
+
+    if a.address not in s.workers:
+        # It took more than 0.5s to get here, and the scheduler closed our worker. Dang.
+        pytest.xfail(
+            "Timing didn't work out: `_track_retire_worker` finished before "
+            "`extra` completed."
+        )
+
+    # `retire_workers` doesn't hang
+    await t
+    assert a.address not in s.workers
+    assert not amm.policies
+
+    # `extra` was not transferred from `a` to `b`. Instead, it was recomputed on `b`.
+    story = b.state.story(extra.key)
+    assert_story(
+        story,
+        [
+            (extra.key, "compute-task", "released"),
+            (extra.key, "released", "waiting", "waiting", {"extra": "ready"}),
+            (extra.key, "waiting", "ready", "ready", {"extra": "executing"}),
+        ],
+    )
+
+    # `extra` completes successfully and is fetched from the other worker.
+    await extra.result()
+
+
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.scheduler.worker-ttl": "500ms",
+        "distributed.scheduler.active-memory-manager.start": True,
+        "distributed.scheduler.active-memory-manager.interval": 0.05,
+        "distributed.scheduler.active-memory-manager.measure": "managed",
+        "distributed.scheduler.active-memory-manager.policies": [],
+    },
+)
+async def test_RetireWorker_faulty_recipient(c, s, w1, w2):
+    """RetireWorker requests to replicate a key onto an unresponsive worker.
     The AMM will iterate multiple times, repeating the command, until eventually the
     scheduler declares the worker dead and removes it from the pool; at that point the
     AMM will choose another valid worker and complete the job.
     """
-    # ws1 is being retired
-    # ws2 has the lowest RAM usage and is chosen as a recipient, but is unresponsive
-    ws1, ws2, ws3 = s.workers.values()
-    f = c.submit(lambda: "x", key="x", workers=[ws1.address])
-    await wait(f)
-    assert s.tasks["x"].who_has == {ws1}
+    # w1 is being retired
+    # w3 has the lowest RAM usage and is chosen as a recipient, but is unresponsive
 
-    # Fill ws3 with 200 MB of managed memory
-    # We're using plenty to make sure it's safely more than the unmanaged memory of ws2
-    clutter = c.map(lambda i: "x" * 4_000_000, range(50), workers=[ws3.address])
-    await wait([f] + clutter)
-    while ws3.memory.process < 200_000_000:
-        # Wait for heartbeat
-        await asyncio.sleep(0.01)
-    assert ws2.memory.process < ws3.memory.process
+    x = c.submit(lambda: 123, key="x", workers=[w1.address])
+    await wait(x)
+    # Fill w2 with dummy data so that it's got the highest memory usage
+    # among the workers that are not being retired (w2 and w3).
+    clutter = await c.scatter(456, workers=[w2.address])
 
-    # Make ws2 unresponsive
-    clog_fut = asyncio.create_task(c.run(sleep, 3600, workers=[ws2.address]))
+    async with BlockedGatherDep(s.address) as w3:
+        await c.wait_for_workers(3)
+
+        retire_fut = asyncio.create_task(c.retire_workers([w1.address]))
+        # w3 is chosen as the recipient for x, because it's got the lowest memory usage
+        await w3.in_gather_dep.wait()
+
+        # AMM unfruitfully sends to w3 a new {op: acquire-replicas} message every 0.05s
+        while (
+            sum(isinstance(ev, AcquireReplicasEvent) for ev in w3.state.stimulus_log)
+            < 3
+        ):
+            await asyncio.sleep(0.01)
+
+        assert not retire_fut.done()
+
+    # w3 has been shut down. At this point, AMM switches to w2.
+    await retire_fut
+
+    assert w1.address not in s.workers
+    assert w3.address not in s.workers
+    assert dict(w2.data) == {"x": 123, clutter.key: 456}
+
+
+class Counter:
+    def __init__(self):
+        self.n = 0
+
+    def increment(self):
+        self.n += 1
+
+
+@gen_cluster(client=True, config=demo_config("drop"))
+async def test_dont_drop_actors(c, s, a, b):
+    x = c.submit(Counter, key="x", actor=True, workers=[a.address])
+    y = c.submit(lambda cnt: cnt.increment(), x, key="y", workers=[b.address])
+    await wait([x, y])
+    assert len(s.tasks["x"].who_has) == 2
+    s.extensions["amm"].run_once()
     await asyncio.sleep(0.2)
-    assert ws2.address in s.workers
+    assert len(s.tasks["x"].who_has) == 2
 
-    await c.retire_workers([ws1.address])
-    assert ws1.address not in s.workers
-    # The AMM tried over and over to send the data to ws2, until it was declared dead
-    assert ws2.address not in s.workers
-    assert s.tasks["x"].who_has == {ws3}
-    clog_fut.cancel()
+
+@gen_cluster(client=True, config=demo_config("replicate"))
+async def test_dont_replicate_actors(c, s, a, b):
+    x = c.submit(Counter, key="x", actor=True)
+    await wait(x)
+    assert len(s.tasks["x"].who_has) == 1
+    s.extensions["amm"].run_once()
+    await asyncio.sleep(0.2)
+    assert len(s.tasks["x"].who_has) == 1
+
+
+@pytest.mark.parametrize("has_proxy", [False, True])
+@gen_cluster(client=True, config=NO_AMM)
+async def test_RetireWorker_with_actor(c, s, a, b, has_proxy):
+    """A worker holding one or more original actor objects cannot be retired"""
+    x = c.submit(Counter, key="x", actor=True, workers=[a.address])
+    await wait(x)
+    assert "x" in a.state.actors
+
+    if has_proxy:
+        y = c.submit(
+            lambda cnt: cnt.increment().result(), x, key="y", workers=[b.address]
+        )
+        await wait(y)
+        assert "x" in b.data
+        assert "y" in b.data
+
+    with captured_logger("distributed.active_memory_manager", logging.WARNING) as log:
+        out = await c.retire_workers([a.address])
+    assert out == {}
+    assert "it holds actor(s)" in log.getvalue()
+    assert "x" in a.state.actors
+
+    if has_proxy:
+        assert "x" in b.data
+        assert "y" in b.data
+
+
+@gen_cluster(client=True, config=NO_AMM)
+async def test_RetireWorker_with_actor_proxy(c, s, a, b):
+    """A worker holding an Actor proxy object can be retired as normal."""
+    x = c.submit(Counter, key="x", actor=True, workers=[a.address])
+    y = c.submit(lambda cnt: cnt.increment().result(), x, key="y", workers=[b.address])
+    await wait(y)
+    assert "x" in a.state.actors
+    assert "x" in b.data
+    assert "y" in b.data
+
+    out = await c.retire_workers([b.address])
+    assert out.keys() == {b.address}
+    assert "x" in a.state.actors
+    assert "y" in a.data
 
 
 class DropEverything(ActiveMemoryManagerPolicy):
@@ -977,26 +1150,41 @@ async def tensordot_stress(c):
     da = pytest.importorskip("dask.array")
 
     rng = da.random.RandomState(0)
-    a = rng.random((20, 20), chunks=(1, 1))
-    b = (a @ a.T).sum().round(3)
-    assert await c.compute(b) == 2134.398
+    a = rng.random((10, 10), chunks=(1, 1))
+    # dask.array.core.PerformanceWarning: Increasing number of chunks by factor of 10
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        b = (a @ a.T).sum().round(3)
+    assert await c.compute(b) == 245.394
 
 
 @pytest.mark.slow
-@pytest.mark.avoid_ci(reason="distributed#5371")
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 4,
-    Worker=Nanny,
+    config=NO_AMM,
+)
+async def test_noamm_stress(c, s, *workers):
+    """Test the tensordot_stress helper without AMM. This is to figure out if a
+    stability issue is AMM-specific or not.
+    """
+    await tensordot_stress(c)
+
+
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 4,
     config={
         "distributed.scheduler.active-memory-manager.start": True,
         "distributed.scheduler.active-memory-manager.interval": 0.1,
+        "distributed.scheduler.active-memory-manager.measure": "managed",
         "distributed.scheduler.active-memory-manager.policies": [
             {"class": "distributed.tests.test_active_memory_manager.DropEverything"},
         ],
     },
 )
-async def test_drop_stress(c, s, *nannies):
+async def test_drop_stress(c, s, *workers):
     """A policy which suggests dropping everything won't break a running computation,
     but only slow it down.
 
@@ -1006,20 +1194,19 @@ async def test_drop_stress(c, s, *nannies):
 
 
 @pytest.mark.slow
-@pytest.mark.avoid_ci(reason="distributed#5371")
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 4,
-    Worker=Nanny,
     config={
         "distributed.scheduler.active-memory-manager.start": True,
         "distributed.scheduler.active-memory-manager.interval": 0.1,
+        "distributed.scheduler.active-memory-manager.measure": "managed",
         "distributed.scheduler.active-memory-manager.policies": [
             {"class": "distributed.active_memory_manager.ReduceReplicas"},
         ],
     },
 )
-async def test_ReduceReplicas_stress(c, s, *nannies):
+async def test_ReduceReplicas_stress(c, s, *workers):
     """Running ReduceReplicas compulsively won't break a running computation. Unlike
     test_drop_stress above, this test does not stop running after a few seconds - the
     policy must not disrupt the computation too much.
@@ -1028,25 +1215,22 @@ async def test_ReduceReplicas_stress(c, s, *nannies):
 
 
 @pytest.mark.slow
-@pytest.mark.avoid_ci(reason="distributed#5371")
 @pytest.mark.parametrize("use_ReduceReplicas", [False, True])
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 10,
-    Worker=Nanny,
     config={
         "distributed.scheduler.active-memory-manager.start": True,
-        # If interval is too low, then the AMM will rerun while tasks have not yet have
-        # the time to migrate. This is OK if it happens occasionally, but if this
-        # setting is too aggressive the cluster will get flooded with repeated comm
-        # requests.
-        "distributed.scheduler.active-memory-manager.interval": 2.0,
+        "distributed.scheduler.active-memory-manager.interval": 0.1,
+        "distributed.scheduler.active-memory-manager.measure": "managed",
         "distributed.scheduler.active-memory-manager.policies": [
             {"class": "distributed.active_memory_manager.ReduceReplicas"},
         ],
     },
+    scheduler_kwargs={"transition_counter_max": 500_000},
+    worker_kwargs={"transition_counter_max": 500_000},
 )
-async def test_RetireWorker_stress(c, s, *nannies, use_ReduceReplicas):
+async def test_RetireWorker_stress(c, s, *workers, use_ReduceReplicas):
     """It is safe to retire the best part of a cluster in the middle of a computation"""
     if not use_ReduceReplicas:
         s.extensions["amm"].policies.clear()

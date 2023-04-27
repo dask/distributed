@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from distributed.cluster_dump import DumpArtefact
 from distributed.diagnostics.cluster_dump import ClusterDump
 from distributed.utils_test import gen_cluster, inc

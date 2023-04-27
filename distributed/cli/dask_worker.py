@@ -5,7 +5,6 @@ import atexit
 import gc
 import logging
 import os
-import signal
 import sys
 import warnings
 from collections.abc import Iterator
@@ -14,7 +13,7 @@ from typing import Any
 
 import click
 from tlz import valmap
-from tornado.ioloop import IOLoop, TimeoutError
+from tornado.ioloop import TimeoutError
 
 import dask
 from dask.system import CPU_COUNT
@@ -36,7 +35,7 @@ logger = logging.getLogger("distributed.dask_worker")
 pem_file_option_type = click.Path(exists=True, resolve_path=True)
 
 
-@click.command(context_settings=dict(ignore_unknown_options=True))
+@click.command(name="worker", context_settings=dict(ignore_unknown_options=True))
 @click.argument("scheduler", type=str, required=False)
 @click.option(
     "--tls-ca-file",
@@ -75,9 +74,6 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "will use ports 3000, 3001, ..., 3025, 3026.",
 )
 @click.option(
-    "--bokeh-port", type=int, default=None, help="Deprecated.  See --dashboard-address"
-)
-@click.option(
     "--dashboard-address",
     type=str,
     default=":0",
@@ -89,13 +85,6 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     default=True,
     required=False,
     help="Launch the Dashboard [default: --dashboard]",
-)
-@click.option(
-    "--bokeh/--no-bokeh",
-    "bokeh",
-    default=None,
-    help="Deprecated.  See --dashboard/--no-dashboard.",
-    required=False,
 )
 @click.option(
     "--listen-address",
@@ -129,15 +118,6 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 )
 @click.option("--nthreads", type=int, default=0, help="Number of threads per process.")
 @click.option(
-    "--nprocs",
-    type=str,
-    default=None,
-    show_default=True,
-    help="Deprecated. Use '--nworkers' instead. Number of worker processes to "
-    "launch. If negative, then (CPU_COUNT + 1 + nprocs) is used. "
-    "Set to 'auto' to set nprocs and nthreads dynamically based on CPU_COUNT",
-)
-@click.option(
     "--nworkers",
     "n_workers",  # This sets the Python argument name
     type=str,
@@ -169,11 +149,6 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     """,
 )
 @click.option(
-    "--reconnect/--no-reconnect",
-    default=None,
-    help="Deprecated, has no effect. Passing --reconnect is an error. [default: --no-reconnect]",
-)
-@click.option(
     "--nanny/--no-nanny",
     default=True,
     help="Start workers in nanny process for management [default: --nanny]",
@@ -195,7 +170,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     type=str,
     default=None,
     help="Filename to JSON encoded scheduler information. "
-    "Use with dask-scheduler --scheduler-file",
+    "Use with dask scheduler --scheduler-file",
 )
 @click.option(
     "--death-timeout",
@@ -215,8 +190,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option(
     "--lifetime-stagger",
     type=str,
-    default="0 seconds",
-    show_default=True,
+    default=None,
     help="Random amount by which to stagger lifetime values",
 )
 @click.option(
@@ -229,8 +203,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option(
     "--lifetime-restart/--no-lifetime-restart",
     "lifetime_restart",
-    default=False,
-    show_default=True,
+    default=None,
     required=False,
     help="Whether or not to restart the worker after the lifetime lapses. "
     "This assumes that you are using the --lifetime and --nanny keywords",
@@ -254,8 +227,14 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     help="Module that should be loaded by each nanny "
     'like "foo.bar" or "/path/to/foo.py"',
 )
+@click.option(
+    "--scheduler-sni",
+    type=str,
+    default=None,
+    help="Scheduler SNI (if different from scheduler hostname)",
+)
 @click.version_option()
-def main(
+def main(  # type: ignore[no-untyped-def]
     scheduler,
     host,
     worker_port: str | None,
@@ -263,15 +242,12 @@ def main(
     contact_address,
     nanny_port: str | None,
     nthreads,
-    nprocs,
     n_workers,
     nanny,
     name,
     pid_file,
     resources,
     dashboard,
-    bokeh,
-    bokeh_port,
     scheduler_file,
     dashboard_prefix,
     tls_ca_file,
@@ -280,40 +256,22 @@ def main(
     dashboard_address,
     worker_class,
     preload_nanny,
-    reconnect,
     **kwargs,
 ):
+    """Launch a Dask worker attached to an existing scheduler"""
+
+    if "dask-worker" in sys.argv[0]:
+        warnings.warn(
+            "dask-worker is deprecated and will be removed in a future release; use `dask worker` instead",
+            FutureWarning,
+            stacklevel=1,
+        )
+
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
     gc.set_threshold(g0 * 3, g1 * 3, g2 * 3)
 
     enable_proctitle_on_current()
     enable_proctitle_on_children()
-
-    if bokeh_port is not None:  # pragma: no cover
-        warnings.warn(
-            "The --bokeh-port flag has been renamed to --dashboard-address. "
-            "Consider adding ``--dashboard-address :%d`` " % bokeh_port
-        )
-        dashboard_address = bokeh_port
-    if bokeh is not None:
-        warnings.warn(
-            "The --bokeh/--no-bokeh flag has been renamed to --dashboard/--no-dashboard. "
-        )
-        dashboard = bokeh
-    if reconnect is not None:
-        if reconnect:
-            logger.error(
-                "The `--reconnect` option has been removed. "
-                "To improve cluster stability, workers now always shut down in the face of network disconnects. "
-                "For details, or if this is an issue for you, see https://github.com/dask/distributed/issues/6350."
-            )
-            sys.exit(1)
-        else:
-            logger.warning(
-                "The `--no-reconnect/--reconnect` flag is deprecated, and will be removed in a future release. "
-                "Worker reconnection is now always disabled, so `--no-reconnect` is unnecessary. "
-                "See https://github.com/dask/distributed/issues/6350 for details.",
-            )
 
     sec = {
         k: v
@@ -324,19 +282,6 @@ def main(
         ]
         if v is not None
     }
-
-    if nprocs is not None and n_workers is not None:
-        logger.error(
-            "Both --nprocs and --nworkers were specified. Use --nworkers only."
-        )
-        sys.exit(1)
-    elif nprocs is not None:
-        warnings.warn(
-            "The --nprocs flag will be removed in a future release. It has been "
-            "renamed to --nworkers.",
-            FutureWarning,
-        )
-        n_workers = nprocs
 
     if n_workers == "auto":
         n_workers, nthreads = nprocesses_nthreads()
@@ -439,7 +384,7 @@ def main(
     ):
         raise ValueError(
             "Need to provide scheduler address like\n"
-            "dask-worker SCHEDULER_ADDRESS:8786"
+            "dask worker SCHEDULER_ADDRESS:8786"
         )
 
     with suppress(TypeError, ValueError):
@@ -448,14 +393,11 @@ def main(
     signal_fired = False
 
     async def run():
-        loop = IOLoop.current()
-
         nannies = [
             t(
                 scheduler,
                 scheduler_file=scheduler_file,
                 nthreads=nthreads,
-                loop=loop,
                 resources=resources,
                 security=sec,
                 contact_address=contact_address,
@@ -479,7 +421,7 @@ def main(
         async def wait_for_signals_and_close():
             """Wait for SIGINT or SIGTERM and close all nannies upon receiving one of those signals"""
             nonlocal signal_fired
-            await wait_for_signals([signal.SIGINT, signal.SIGTERM])
+            await wait_for_signals()
 
             signal_fired = True
             if nanny:
@@ -519,7 +461,7 @@ def _apportion_ports(
 
     Returns
     =======
-    List of kwargs to pass to the Worker or Nanny construtors
+    List of kwargs to pass to the Worker or Nanny constructors
     """
     seen = set()
 

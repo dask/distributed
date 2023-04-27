@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import copy
 import pickle
 from array import array
@@ -31,9 +33,13 @@ from distributed.protocol import (
     serialize_bytes,
     to_serialize,
 )
-from distributed.protocol.serialize import check_dask_serializable
+from distributed.protocol.compression import default_compression
+from distributed.protocol.serialize import (
+    _is_msgpack_serializable,
+    check_dask_serializable,
+)
 from distributed.utils import ensure_memoryview, nbytes
-from distributed.utils_test import gen_test, inc
+from distributed.utils_test import NO_AMM, gen_test, inc
 
 
 class MyObj:
@@ -173,7 +179,7 @@ def test_nested_deserialize():
 
 def test_serialize_iterate_collection():
     # Use iterate_collection to ensure elements of
-    # a collection will be serialized seperately
+    # a collection will be serialized separately
 
     arr = "special-data"
     sarr = Serialized(*serialize(arr))
@@ -206,7 +212,7 @@ async def test_object_in_graph(c, s, a, b):
     assert result.data == 123
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config=NO_AMM)
 async def test_scatter(c, s, a, b):
     o = MyObj(123)
     [future] = await c._scatter([o])
@@ -277,9 +283,9 @@ def test_serialize_bytes(kwargs):
         assert str(x) == str(y)
 
 
+@pytest.mark.skipif(default_compression is None, reason="requires lz4 or snappy")
 @pytest.mark.skipif(np is None, reason="Test needs numpy")
 def test_serialize_list_compress():
-    pytest.importorskip("lz4")
     x = np.ones(1000000)
     L = serialize_bytelist(x)
     assert sum(map(nbytes, L)) < x.nbytes / 2
@@ -448,7 +454,7 @@ async def test_profile_nested_sizeof():
     original = outer = {}
     inner = {}
 
-    for i in range(n):
+    for _ in range(n):
         outer["children"] = inner
         outer, inner = inner, {}
 
@@ -590,6 +596,27 @@ def test_ser_memoryview_object():
         serialize(data_in, on_error="raise")
 
 
+def test_ser_empty_1d_memoryview():
+    mv = memoryview(b"")
+
+    # serialize empty `memoryview`
+    header, frames = serialize(mv)
+    assert frames[0] == mv
+    # deserialize empty `memoryview`
+    mv2 = deserialize(header, frames)
+    assert type(mv2) == type(mv)
+    assert mv2.format == mv.format
+    assert mv2 == mv
+
+
+def test_ser_empty_nd_memoryview():
+    mv = memoryview(b"12").cast("B", (1, 2))[:0]
+
+    # serialize empty `memoryview`
+    with pytest.raises(TypeError):
+        serialize(mv, on_error="raise")
+
+
 @gen_cluster(client=True, Worker=Nanny)
 async def test_large_pickled_object(c, s, a, b):
     np = pytest.importorskip("numpy")
@@ -602,3 +629,24 @@ async def test_large_pickled_object(c, s, a, b):
     y = await c.scatter(x, workers=[a.worker_address])
     z = c.submit(lambda x: x, y, workers=[b.worker_address])
     await z
+
+
+def test__is_msgpack_serializable():
+    assert _is_msgpack_serializable(None)
+    assert _is_msgpack_serializable("a")
+    assert _is_msgpack_serializable(1)
+    assert _is_msgpack_serializable(1.0)
+    assert _is_msgpack_serializable(b"0")
+    assert _is_msgpack_serializable({"a": "b"})
+    assert _is_msgpack_serializable(["a"])
+    assert _is_msgpack_serializable(("a",))
+
+    class C:
+        def __hash__(self):
+            return 5
+
+    assert not _is_msgpack_serializable(["a", C()])
+    assert not _is_msgpack_serializable(("a", C()))
+    assert not _is_msgpack_serializable(C())
+    assert not _is_msgpack_serializable({C(): "foo"})
+    assert not _is_msgpack_serializable({"foo": C()})

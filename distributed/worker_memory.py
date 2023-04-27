@@ -25,67 +25,99 @@ import logging
 import os
 import sys
 import warnings
-from collections.abc import Callable, MutableMapping
+from collections.abc import Callable, Hashable, MutableMapping
 from contextlib import suppress
 from functools import partial
-from typing import TYPE_CHECKING, Any, Container, Literal, cast
+from typing import TYPE_CHECKING, Any, Container, Literal, Union, cast
 
 import psutil
-from tornado.ioloop import PeriodicCallback
 
 import dask.config
 from dask.system import CPU_COUNT
 from dask.utils import format_bytes, parse_bytes, parse_timedelta
 
 from distributed import system
-from distributed.compatibility import WINDOWS
+from distributed.compatibility import WINDOWS, PeriodicCallback
 from distributed.core import Status
-from distributed.metrics import monotonic
+from distributed.metrics import context_meter, monotonic
 from distributed.spill import ManualEvictProto, SpillBuffer
-from distributed.utils import log_errors
+from distributed.utils import RateLimiterFilter, has_arg, log_errors
 from distributed.utils_perf import ThrottledGC
 
 if TYPE_CHECKING:
+    # TODO import from typing (requires Python >=3.10)
+    from typing_extensions import TypeAlias
+
     # Circular imports
     from distributed.nanny import Nanny
     from distributed.worker import Worker
 
-logger = logging.getLogger(__name__)
+    # TODO move outside of TYPE_CHECKING (requires Python >=3.9)
+    WorkerDataParameter: TypeAlias = Union[
+        # pre-initialized
+        MutableMapping[str, object],
+        # constructor
+        Callable[[], MutableMapping[str, object]],
+        # constructor, passed worker.local_directory
+        Callable[[str], MutableMapping[str, object]],
+        # (constructor, kwargs to constructor)
+        tuple[Callable[..., MutableMapping[str, object]], dict[str, Any]],
+        # initialize internally
+        None,
+    ]
+else:
+    WorkerDataParameter = object
+
+worker_logger = logging.getLogger("distributed.worker.memory")
+worker_logger.addFilter(RateLimiterFilter(r"Unmanaged memory use is high"))
+nanny_logger = logging.getLogger("distributed.nanny.memory")
 
 
 class WorkerMemoryManager:
-    data: MutableMapping[str, Any]  # {task key: task payload}
+    """Management of worker memory usage
+
+    Parameters
+    ----------
+    worker
+        Worker to manage
+
+    For meaning of the remaining parameters, see the matching
+    parameter names in :class:`~.distributed.worker.Worker`.
+
+    Notes
+    -----
+
+    If data is a callable and has the argument ``worker_local_directory`` in its
+    signature, it will be filled with the worker's attr:``local_directory``.
+
+    """
+
+    data: MutableMapping[str, object]  # {task key: task payload}
     memory_limit: int | None
     memory_target_fraction: float | Literal[False]
     memory_spill_fraction: float | Literal[False]
     memory_pause_fraction: float | Literal[False]
     max_spill: int | Literal[False]
     memory_monitor_interval: float
-    _memory_monitoring: bool
     _throttled_gc: ThrottledGC
 
     def __init__(
         self,
         worker: Worker,
         *,
+        nthreads: int,
         memory_limit: str | float = "auto",
         # This should be None most of the times, short of a power user replacing the
         # SpillBuffer with their own custom dict-like
-        data: (
-            MutableMapping[str, Any]  # pre-initialised
-            | Callable[[], MutableMapping[str, Any]]  # constructor
-            | tuple[
-                Callable[..., MutableMapping[str, Any]], dict[str, Any]
-            ]  # (constructor, kwargs to constructor)
-            | None  # create internally
-        ) = None,
+        data: WorkerDataParameter = None,
         # Deprecated parameters; use dask.config instead
         memory_target_fraction: float | Literal[False] | None = None,
         memory_spill_fraction: float | Literal[False] | None = None,
         memory_pause_fraction: float | Literal[False] | None = None,
     ):
-        self.memory_limit = parse_memory_limit(memory_limit, worker.nthreads)
-
+        self.memory_limit = parse_memory_limit(
+            memory_limit, nthreads, logger=worker_logger
+        )
         self.memory_target_fraction = _parse_threshold(
             "distributed.worker.memory.target",
             "memory_target_fraction",
@@ -108,9 +140,22 @@ class WorkerMemoryManager:
         if isinstance(data, MutableMapping):
             self.data = data
         elif callable(data):
-            self.data = data()
+            if has_arg(data, "worker_local_directory"):
+                data = cast("Callable[[str], MutableMapping[str, object]]", data)
+                self.data = data(worker.local_directory)
+            else:
+                data = cast("Callable[[], MutableMapping[str, object]]", data)
+                self.data = data()
         elif isinstance(data, tuple):
-            self.data = data[0](**data[1])
+            func, kwargs = data
+            if not callable(func):
+                raise ValueError("Expecting a callable")
+            if has_arg(func, "worker_local_directory"):
+                self.data = func(
+                    worker_local_directory=worker.local_directory, **kwargs
+                )
+            else:
+                self.data = func(**kwargs)
         elif self.memory_limit and (
             self.memory_target_fraction or self.memory_spill_fraction
         ):
@@ -129,7 +174,10 @@ class WorkerMemoryManager:
         else:
             self.data = {}
 
-        self._memory_monitoring = False
+        if not isinstance(self.data, MutableMapping):
+            raise TypeError(f"Worker.data must be a MutableMapping; got {self.data}")
+        if self.data:
+            raise ValueError("Worker.data must be empty at initialization time")
 
         self.memory_monitor_interval = parse_timedelta(
             dask.config.get("distributed.worker.memory.monitor-interval"),
@@ -145,13 +193,12 @@ class WorkerMemoryManager:
             pc = PeriodicCallback(
                 # Don't store worker as self.worker to avoid creating a circular
                 # dependency. We could have alternatively used a weakref.
-                # FIXME annotations: https://github.com/tornadoweb/tornado/issues/3117
-                partial(self.memory_monitor, worker),  # type: ignore
+                partial(self.memory_monitor, worker),
                 self.memory_monitor_interval * 1000,
             )
             worker.periodic_callbacks["memory_monitor"] = pc
 
-        self._throttled_gc = ThrottledGC(logger=logger)
+        self._throttled_gc = ThrottledGC(logger=worker_logger)
 
     @log_errors
     async def memory_monitor(self, worker: Worker) -> None:
@@ -161,18 +208,12 @@ class WorkerMemoryManager:
         If process memory rises above the pause threshold (80%), stop execution of new
         tasks.
         """
-        if self._memory_monitoring:
-            return
-        self._memory_monitoring = True
-        try:
-            # Don't use psutil directly; instead read from the same API that is used
-            # to send info to the Scheduler (e.g. for the benefit of Active Memory
-            # Manager) and which can be easily mocked in unit tests.
-            memory = worker.monitor.get_process_memory()
-            self._maybe_pause_or_unpause(worker, memory)
-            await self._maybe_spill(worker, memory)
-        finally:
-            self._memory_monitoring = False
+        # Don't use psutil directly; instead read from the same API that is used
+        # to send info to the Scheduler (e.g. for the benefit of Active Memory
+        # Manager) and which can be easily mocked in unit tests.
+        memory = worker.monitor.get_process_memory()
+        self._maybe_pause_or_unpause(worker, memory)
+        await self._maybe_spill(worker, memory)
 
     def _maybe_pause_or_unpause(self, worker: Worker, memory: int) -> None:
         if self.memory_pause_fraction is False:
@@ -185,7 +226,7 @@ class WorkerMemoryManager:
             # Try to free some memory while in paused state
             self._throttled_gc.collect()
             if worker.status == Status.running:
-                logger.warning(
+                worker_logger.warning(
                     "Worker is at %d%% memory usage. Pausing worker.  "
                     "Process memory: %s -- Worker memory limit: %s",
                     int(frac * 100),
@@ -196,7 +237,7 @@ class WorkerMemoryManager:
                 )
                 worker.status = Status.paused
         elif worker.status == Status.paused:
-            logger.warning(
+            worker_logger.warning(
                 "Worker is at %d%% memory usage. Resuming worker. "
                 "Process memory: %s -- Worker memory limit: %s",
                 int(frac * 100),
@@ -208,6 +249,9 @@ class WorkerMemoryManager:
             worker.status = Status.running
 
     async def _maybe_spill(self, worker: Worker, memory: int) -> None:
+        """If process memory is above the ``spill`` threshold, evict keys until it goes
+        below the ``target`` threshold
+        """
         if self.memory_spill_fraction is False:
             return
 
@@ -215,18 +259,41 @@ class WorkerMemoryManager:
         # fast property and evict() methods. Dask-CUDA uses this.
         if not hasattr(self.data, "fast") or not hasattr(self.data, "evict"):
             return
-        data = cast(ManualEvictProto, self.data)
 
         assert self.memory_limit
         frac = memory / self.memory_limit
         if frac <= self.memory_spill_fraction:
             return
 
-        total_spilled = 0
-        logger.debug(
+        worker_logger.debug(
             "Worker is at %.0f%% memory usage. Start spilling data to disk.",
             frac * 100,
         )
+
+        def metrics_callback(label: Hashable, value: float, unit: str) -> None:
+            if not isinstance(label, tuple):
+                label = (label,)
+            worker.digest_metric(("memory-monitor", *label, unit), value)
+
+        # Work around bug with Tornado 6.2 PeriodicCallback, which does not properly
+        # insulate contextvars. Without this hack, you would see metrics that are
+        # clearly emitted by Worker.execute labelled with 'memory-monitor'.So we're
+        # wrapping our change in contextvars (inside add_callback) inside create_task(),
+        # which copies and insulates the context.
+        async def _() -> None:
+            with context_meter.add_callback(metrics_callback):
+                # Measure delta between the measures from the SpillBuffer and the total
+                # end-to-end duration of _spill
+                await self._spill(worker, memory)
+
+        await asyncio.create_task(_(), name="memory-monitor-spill")
+        # End work around
+
+    async def _spill(self, worker: Worker, memory: int) -> None:
+        """Evict keys until the process memory goes below the ``target`` threshold"""
+        assert self.memory_limit
+        total_spilled = 0
+
         # Implement hysteresis cycle where spilling starts at the spill threshold and
         # stops at the target threshold. Normally that here the target threshold defines
         # process memory, whereas normally it defines reported managed memory (e.g.
@@ -238,9 +305,11 @@ class WorkerMemoryManager:
         need = memory - target
         last_checked_for_pause = last_yielded = monotonic()
 
+        data = cast(ManualEvictProto, self.data)
+
         while memory > target:
             if not data.fast:
-                logger.warning(
+                worker_logger.warning(
                     "Unmanaged memory use is high. This may indicate a memory leak "
                     "or the memory may not be released to the OS; see "
                     "https://distributed.dask.org/en/latest/worker-memory.html#memory-not-released-back-to-the-os "
@@ -286,19 +355,15 @@ class WorkerMemoryManager:
                 last_yielded = monotonic()
 
         if count:
-            logger.debug(
+            worker_logger.debug(
                 "Moved %d tasks worth %s to disk",
                 count,
                 format_bytes(total_spilled),
             )
 
     def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
-        info = {
-            k: v
-            for k, v in self.__dict__.items()
-            if not k.startswith("_") and k != "data" and k not in exclude
-        }
-        info["data"] = list(self.data)
+        info = {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
+        info["data"] = dict.fromkeys(self.data)
         return info
 
 
@@ -314,7 +379,9 @@ class NannyMemoryManager:
         *,
         memory_limit: str | float = "auto",
     ):
-        self.memory_limit = parse_memory_limit(memory_limit, nanny.nthreads)
+        self.memory_limit = parse_memory_limit(
+            memory_limit, nanny.nthreads, logger=nanny_logger
+        )
         self.memory_terminate_fraction = dask.config.get(
             "distributed.worker.memory.terminate"
         )
@@ -352,7 +419,7 @@ class NannyMemoryManager:
             return
 
         if self._last_terminated_pid != process.pid:
-            logger.warning(
+            nanny_logger.warning(
                 f"Worker {nanny.worker_address} (pid={process.pid}) exceeded "
                 f"{self.memory_terminate_fraction * 100:.0f}% memory budget. "
                 "Restarting...",
@@ -374,7 +441,7 @@ class NannyMemoryManager:
             # seconds and, if the worker did it, any task that was running and leaking
             # would continue to do so for the whole duration of the cleanup, increasing
             # the risk of going beyond 100%.
-            logger.warning(
+            nanny_logger.warning(
                 f"Worker {nanny.worker_address} (pid={process.pid}) is slow to %s",
                 # On Windows, kill() is an alias to terminate()
                 "terminate; trying again"
@@ -385,11 +452,15 @@ class NannyMemoryManager:
 
 
 def parse_memory_limit(
-    memory_limit: str | float, nthreads: int, total_cores: int = CPU_COUNT
+    memory_limit: str | float | None,
+    nthreads: int,
+    total_cores: int = CPU_COUNT,
+    *,
+    logger: logging.Logger,
 ) -> int | None:
     if memory_limit is None:
         return None
-
+    orig = memory_limit
     if memory_limit == "auto":
         memory_limit = int(system.MEMORY_LIMIT * min(1, nthreads / total_cores))
     with suppress(ValueError, TypeError):
@@ -405,7 +476,15 @@ def parse_memory_limit(
     assert isinstance(memory_limit, int)
     if memory_limit == 0:
         return None
-    return min(memory_limit, system.MEMORY_LIMIT)
+    if system.MEMORY_LIMIT < memory_limit:
+        logger.warning(
+            "Ignoring provided memory limit %s due to system memory limit of %s",
+            orig,
+            format_bytes(system.MEMORY_LIMIT),
+        )
+        return system.MEMORY_LIMIT
+    else:
+        return memory_limit
 
 
 def _parse_threshold(
@@ -438,20 +517,20 @@ class DeprecatedMemoryManagerAttribute:
     def __set_name__(self, owner: type, name: str) -> None:
         self.name = name
 
-    def __get__(self, instance: Nanny | Worker | None, _):
+    def __get__(self, instance: Nanny | Worker | None, owner: type) -> Any:
         if instance is None:
             # This is triggered by Sphinx
             return None  # pragma: nocover
         _warn_deprecated(instance, self.name)
         return getattr(instance.memory_manager, self.name)
 
-    def __set__(self, instance: Nanny | Worker, value) -> None:
+    def __set__(self, instance: Nanny | Worker, value: Any) -> None:
         _warn_deprecated(instance, self.name)
         setattr(instance.memory_manager, self.name, value)
 
 
 class DeprecatedMemoryMonitor:
-    def __get__(self, instance: Nanny | Worker | None, owner):
+    def __get__(self, instance: Nanny | Worker | None, owner: type) -> Any:
         if instance is None:
             # This is triggered by Sphinx
             return None  # pragma: nocover

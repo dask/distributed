@@ -1,6 +1,7 @@
+from __future__ import annotations
+
 import asyncio
 import weakref
-from statistics import mean
 
 import tlz as toolz
 from bokeh.core.properties import without_property_validation
@@ -54,7 +55,6 @@ class Processing(DashboardComponent):
             title="Processing and Pending",
             tools="",
             x_range=x_range,
-            id="bk-processing-stacks-plot",
             **kwargs,
         )
         fig.quad(
@@ -289,7 +289,7 @@ class ProfileTimePlot(DashboardComponent):
         if metadata is not None and metadata["counts"]:
             self.task_names = ["All"] + sorted(metadata["keys"])
             self.select.options = self.task_names
-            if self.key:
+            if self.key and self.key in metadata["keys"]:
                 ts = metadata["keys"][self.key]
             else:
                 ts = metadata["counts"]
@@ -502,14 +502,14 @@ class SystemMonitor(DashboardComponent):
         self.bandwidth.line(
             source=self.source,
             x="time",
-            y="read_bytes",
+            y="host_net_io.read_bps",
             color="red",
             legend_label="read",
         )
         self.bandwidth.line(
             source=self.source,
             x="time",
-            y="write_bytes",
+            y="host_net_io.write_bps",
             color="blue",
             legend_label="write",
         )
@@ -558,6 +558,9 @@ class SystemMonitor(DashboardComponent):
     @without_property_validation
     @log_errors
     def update(self):
+        def mean(x):
+            return sum(x) / len(x)
+
         self.source.stream(self.get_data(), 1000)
         self.label_source.data["cpu"] = [
             "{}: {:.1f}%".format(f.__name__, f(self.source.data["cpu"]))

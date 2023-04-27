@@ -1,8 +1,12 @@
+from __future__ import annotations
+
 import pytest
-from packaging.version import parse as parse_version
 
 np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
+
+from packaging.version import parse as parse_version
+from pandas.testing import assert_frame_equal, assert_index_equal, assert_series_equal
 
 import dask
 import dask.bag as db
@@ -11,15 +15,6 @@ import dask.dataframe as dd
 from distributed.client import wait
 from distributed.utils_test import gen_cluster
 
-PANDAS_VERSION = parse_version(pd.__version__)
-PANDAS_GT_100 = PANDAS_VERSION >= parse_version("1.0.0")
-
-if PANDAS_GT_100:
-    import pandas.testing as tm  # noqa: F401
-else:
-    import pandas.util.testing as tm  # noqa: F401
-
-
 dfs = [
     pd.DataFrame({"x": [1, 2, 3]}, index=[0, 10, 20]),
     pd.DataFrame({"x": [4, 5, 6]}, index=[30, 40, 50]),
@@ -27,18 +22,24 @@ dfs = [
 ]
 
 
+ignore_single_machine_warning = pytest.mark.filterwarnings(
+    "ignore:Running on a single-machine scheduler:UserWarning"
+)
+
+
 def assert_equal(a, b):
     assert type(a) == type(b)
     if isinstance(a, pd.DataFrame):
-        tm.assert_frame_equal(a, b)
+        assert_frame_equal(a, b)
     elif isinstance(a, pd.Series):
-        tm.assert_series_equal(a, b)
+        assert_series_equal(a, b)
     elif isinstance(a, pd.Index):
-        tm.assert_index_equal(a, b)
+        assert_index_equal(a, b)
     else:
         assert a == b
 
 
+@ignore_single_machine_warning
 @gen_cluster(client=True)
 async def test_dataframes(c, s, a, b):
     df = pd.DataFrame(
@@ -53,7 +54,7 @@ async def test_dataframes(c, s, a, b):
     remote = c.compute(rdf)
     result = await remote
 
-    tm.assert_frame_equal(result, ldf.compute(scheduler="sync"))
+    assert_frame_equal(result, ldf.compute(scheduler="sync"))
 
     exprs = [
         lambda df: df.x.mean(),
@@ -72,11 +73,15 @@ async def test_dataframes(c, s, a, b):
         assert_equal(local, remote)
 
 
-@gen_cluster(client=True)
+@ignore_single_machine_warning
+@gen_cluster(
+    client=True,
+    # FIXME https://github.com/dask/distributed/issues/7566
+    config={"distributed.scheduler.validate": False},
+)
 async def test_dask_array_collections(c, s, a, b):
     import dask.array as da
 
-    s.validate = False
     x_dsk = {("x", i, j): np.random.random((3, 3)) for i in range(3) for j in range(2)}
     y_dsk = {("y", i, j): np.random.random((3, 3)) for i in range(2) for j in range(3)}
     x_futures = await c.scatter(x_dsk)
@@ -97,14 +102,21 @@ async def test_dask_array_collections(c, s, a, b):
     ]
 
     for expr in exprs:
-        local = expr(x_local, y_local).compute(scheduler="sync")
+        z_local = expr(x_local, y_local)
+        o_local = z_local.compute(scheduler="sync")
 
-        remote = c.compute(expr(x_remote, y_remote))
-        remote = await remote
+        z_remote = expr(x_remote, y_remote)
+        o_remote = await c.compute(z_remote)
+        np.testing.assert_equal(o_local, o_remote)
 
-        assert np.all(local == remote)
 
-
+@pytest.mark.skipif(
+    (
+        parse_version(dask.__version__) < parse_version("2023.2.2")
+        and parse_version(dask.__version__) >= parse_version("2023.2.1")
+    ),
+    reason="https://github.com/dask/dask/pull/10005",
+)
 @gen_cluster(client=True)
 async def test_bag_groupby_tasks_default(c, s, a, b):
     b = db.range(100, npartitions=10)
@@ -159,6 +171,7 @@ async def test_loc(c, s, a, b):
     await future
 
 
+@ignore_single_machine_warning
 def test_dataframe_groupby_tasks(client):
     df = make_time_dataframe()
 
@@ -169,12 +182,12 @@ def test_dataframe_groupby_tasks(client):
     for ind in [lambda x: "A", lambda x: x.A]:
         a = df.groupby(ind(df)).apply(len)
         b = ddf.groupby(ind(ddf)).apply(len, meta=(None, int))
-        assert_equal(a, b.compute(scheduler="sync").sort_index())
+        assert_equal(a, b.compute().sort_index())
         assert not any("partd" in k[0] for k in b.dask)
 
         a = df.groupby(ind(df)).B.apply(len)
         b = ddf.groupby(ind(ddf)).B.apply(len, meta=("B", int))
-        assert_equal(a, b.compute(scheduler="sync").sort_index())
+        assert_equal(a, b.compute().sort_index())
         assert not any("partd" in k[0] for k in b.dask)
 
     with pytest.raises((NotImplementedError, ValueError)):
@@ -183,7 +196,7 @@ def test_dataframe_groupby_tasks(client):
     a = df.groupby(["A", "B"]).apply(len)
     b = ddf.groupby(["A", "B"]).apply(len, meta=(None, int))
 
-    assert_equal(a, b.compute(scheduler="sync").sort_index())
+    assert_equal(a, b.compute().sort_index())
 
 
 @gen_cluster(client=True)

@@ -82,7 +82,7 @@ def pytest_addoption(parser):
     )
 
 
-def pytest_configure(config) -> None:
+def pytest_configure(config: pytest.Config) -> None:
     leaks = config.getvalue("leaks")
     if not leaks:
         return
@@ -154,11 +154,12 @@ class DemoChecker(ResourceChecker, name="demo"):
 
 class FDChecker(ResourceChecker, name="fds"):
     def measure(self) -> int:
-        # Note: can't use WINDOWS constant as it upsets mypy
+        # Note: WINDOWS constant doesn't work with `mypy --platform win32`
         if sys.platform == "win32":
             # Don't use num_handles(); you'll get tens of thousands of reported leaks
             return 0
-        return psutil.Process().num_fds()
+        else:
+            return psutil.Process().num_fds()
 
     def has_leak(self, before: int, after: int) -> bool:
         return after > before
@@ -295,7 +296,7 @@ class TracemallocMemoryChecker(ResourceChecker, name="tracemalloc"):
         self,
         before: tuple[int, tracemalloc.Snapshot],
         after: tuple[int, tracemalloc.Snapshot],
-    ):
+    ) -> bool:
         return after[0] > before[0] + self.LEAK_THRESHOLD
 
     def format(

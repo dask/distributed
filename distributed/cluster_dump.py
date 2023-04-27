@@ -7,7 +7,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import IO, Any, Awaitable, Callable, Collection, Literal
 
-import fsspec
 import msgpack
 
 from distributed._stories import scheduler_story as _scheduler_story
@@ -48,7 +47,7 @@ async def write_state(
         if not url.endswith(suffix):
             url += suffix
 
-        def writer(state: dict, f: IO):
+        def writer(state: dict, f: IO) -> None:
             # YAML adds unnecessary `!!python/tuple` tags; convert tuples to lists to avoid them.
             # Unnecessary for msgpack, since tuples and lists are encoded the same.
             yaml.dump(_tuple_to_list(state), f)
@@ -60,6 +59,10 @@ async def write_state(
 
     # Eagerly open the file to catch any errors before doing the full dump
     # NOTE: `compression="infer"` will automatically use gzip via the `.gz` suffix
+    # This module is the only place where fsspec is used and it is a relatively
+    # heavy import. Do lazy import to reduce import time
+    import fsspec
+
     with fsspec.open(url, mode, compression="infer", **storage_options) as f:
         state = await get_state()
         # Write from a thread so we don't block the event loop quite as badly
@@ -67,7 +70,7 @@ async def write_state(
         await to_thread(writer, state, f)
 
 
-def load_cluster_dump(url: str, **kwargs) -> dict:
+def load_cluster_dump(url: str, **kwargs: Any) -> dict:
     """Loads a cluster dump from a disk artefact
 
     Parameters
@@ -95,6 +98,9 @@ def load_cluster_dump(url: str, **kwargs) -> dict:
         raise ValueError(f"url ({url}) must have a .msgpack.gz or .yaml suffix")
 
     kwargs.setdefault("compression", "infer")
+    # This module is the only place where fsspec is used and it is a relatively
+    # heavy import. Do lazy import to reduce import time
+    import fsspec
 
     with fsspec.open(url, mode, **kwargs) as f:
         return reader(f)
@@ -115,7 +121,7 @@ class DumpArtefact(Mapping):
         self.dump = state
 
     @classmethod
-    def from_url(cls, url: str, **kwargs) -> DumpArtefact:
+    def from_url(cls, url: str, **kwargs: Any) -> DumpArtefact:
         """Loads a cluster dump from a disk artefact
 
         Parameters
@@ -142,7 +148,7 @@ class DumpArtefact(Mapping):
     def __len__(self):
         return len(self.dump)
 
-    def _extract_tasks(self, state: str | None, context: dict):
+    def _extract_tasks(self, state: str | None, context: dict[str, dict]) -> list[dict]:
         if state:
             return [v for v in context.values() if v["state"] == state]
         else:
@@ -235,7 +241,7 @@ class DumpArtefact(Mapping):
             or not isinstance(responsive_workers[w], dict)
         ]
 
-    def _compact_state(self, state: dict, expand_keys: set[str]):
+    def _compact_state(self, state: dict, expand_keys: set[str]) -> dict[str, dict]:
         """Compacts ``state`` keys into a general key,
         unless the key is in ``expand_keys``"""
         assert "general" not in state
@@ -264,7 +270,7 @@ class DumpArtefact(Mapping):
             "transition_log",
             "workers",
         ),
-    ):
+    ) -> None:
         """
         Splits the Dump Artefact into a tree of yaml files with
         ``root_dir`` as it's base.

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import os
 import socket
@@ -56,9 +58,8 @@ def async_ssh(cmd_dict):
             break
 
         except (SSHException, PasswordRequiredException) as e:
-
             print(
-                "[ dask-ssh ] : "
+                "[ dask ssh ] : "
                 + bcolors.FAIL
                 + "SSH connection error when connecting to {addr}:{port} "
                 "to run '{cmd}'".format(
@@ -85,7 +86,7 @@ def async_ssh(cmd_dict):
             retries += 1
             if retries >= 3:
                 print(
-                    "[ dask-ssh ] : "
+                    "[ dask ssh ] : "
                     + bcolors.FAIL
                     + "SSH connection failed after 3 retries. Exiting."
                     + bcolors.ENDC
@@ -264,7 +265,6 @@ def start_worker(
     remote_dask_worker="distributed.cli.dask_worker",
     local_directory=None,
 ):
-
     cmd = (
         "{python} -m {remote_dask_worker} "
         "{scheduler_addr}:{scheduler_port} "
@@ -354,7 +354,6 @@ class SSHCluster:
         local_directory=None,
         **kwargs,
     ):
-
         self.scheduler_addr = scheduler_addr
         self.scheduler_port = scheduler_port
         self.nthreads = nthreads
@@ -426,7 +425,7 @@ class SSHCluster:
 
         # Start worker nodes
         self.workers = []
-        for i, addr in enumerate(worker_addrs):
+        for addr in worker_addrs:
             self.add_worker(addr)
 
     @gen.coroutine
@@ -456,7 +455,6 @@ class SSHCluster:
         return "%s:%d" % (self.scheduler_addr, self.scheduler_port)
 
     def monitor_remote_processes(self):
-
         # Form a list containing all processes, since we treat them equally from here on out.
         all_processes = [self.scheduler] + self.workers
 

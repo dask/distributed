@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import gc
 import os
@@ -5,19 +7,16 @@ import signal
 import sys
 import threading
 import weakref
-from datetime import timedelta
 from time import sleep
 
 import psutil
 import pytest
-from tornado import gen
 from tornado.ioloop import IOLoop
-from tornado.locks import Event
 
-from distributed.compatibility import WINDOWS
+from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.metrics import time
 from distributed.process import AsyncProcess
-from distributed.utils import mp_context
+from distributed.utils import get_mp_context, wait_for
 from distributed.utils_test import gen_test, nodebug
 
 
@@ -34,10 +33,10 @@ def exit_now(rc=0):
     sys.exit(rc)
 
 
-def exit_with_signal(signum):
+def exit_with_sigint():
     signal.signal(signal.SIGINT, signal.SIG_DFL)
+    os.kill(os.getpid(), signal.SIGINT)
     while True:
-        os.kill(os.getpid(), signum)
         sleep(0.01)
 
 
@@ -54,8 +53,8 @@ def threads_info(q):
 @nodebug
 @gen_test()
 async def test_simple():
-    to_child = mp_context.Queue()
-    from_child = mp_context.Queue()
+    to_child = get_mp_context().Queue()
+    from_child = get_mp_context().Queue()
 
     proc = AsyncProcess(target=feed, args=(to_child, from_child))
     assert not proc.is_alive()
@@ -78,7 +77,8 @@ async def test_simple():
     assert proc.exitcode is None
 
     t1 = time()
-    await proc.join(timeout=0.02)
+    with pytest.raises(asyncio.TimeoutError):
+        await proc.join(timeout=0.02)
     dt = time() - t1
     assert 0.2 >= dt >= 0.001
     assert proc.is_alive()
@@ -145,7 +145,7 @@ async def test_simple():
 
 @gen_test()
 async def test_exitcode():
-    q = mp_context.Queue()
+    q = get_mp_context().Queue()
 
     proc = AsyncProcess(target=exit, kwargs={"q": q})
     proc.daemon = True
@@ -157,45 +157,58 @@ async def test_exitcode():
     assert proc.exitcode is None
 
     q.put(5)
-    await proc.join(timeout=30)
+    await proc.join()
     assert not proc.is_alive()
     assert proc.exitcode == 5
 
 
-@pytest.mark.skipif(WINDOWS, reason="POSIX only")
+def assert_exit_code(proc: AsyncProcess, expect: signal.Signals) -> None:
+    # Note: WINDOWS constant as doesn't work with `mypy --platform win32`
+    if sys.platform == "win32":
+        # multiprocessing.Process.terminate() sets exit code -15 like in Linux, but
+        # os.kill(pid, signal.SIGTERM) sets exit code +15
+        assert proc.exitcode in (-expect, expect)
+    elif MACOS:
+        # FIXME this happens very frequently on GitHub MacOSX CI. Reason unknown.
+        if expect != signal.SIGKILL and proc.exitcode == -signal.SIGKILL:
+            raise pytest.xfail(reason="https://github.com/dask/distributed/issues/6393")
+        assert proc.exitcode == -expect
+    else:
+        assert LINUX
+        assert proc.exitcode == -expect
+
+
 @gen_test()
-async def test_signal():
-    proc = AsyncProcess(target=exit_with_signal, args=(signal.SIGINT,))
-    proc.daemon = True
+async def test_sigint_from_same_process():
+    proc = AsyncProcess(target=exit_with_sigint)
     assert not proc.is_alive()
     assert proc.exitcode is None
 
     await proc.start()
-    await proc.join(timeout=30)
+    await proc.join()
 
     assert not proc.is_alive()
-    # Can be 255 with forkserver, see https://bugs.python.org/issue30589
-    assert proc.exitcode in (-signal.SIGINT, 255)
+    assert_exit_code(proc, signal.SIGINT)
 
+
+@gen_test()
+async def test_sigterm_from_parent_process():
     proc = AsyncProcess(target=wait)
     await proc.start()
     os.kill(proc.pid, signal.SIGTERM)
-    await proc.join(timeout=30)
-
+    await proc.join()
     assert not proc.is_alive()
-    assert proc.exitcode in (-signal.SIGTERM, 255)
+    assert_exit_code(proc, signal.SIGTERM)
 
 
 @gen_test()
 async def test_terminate():
     proc = AsyncProcess(target=wait)
-    proc.daemon = True
     await proc.start()
     await proc.terminate()
-
     await proc.join()
     assert not proc.is_alive()
-    assert proc.exitcode in (-signal.SIGTERM, 255)
+    assert_exit_code(proc, signal.SIGTERM)
 
 
 @gen_test()
@@ -222,15 +235,11 @@ async def test_close():
 
 @gen_test()
 async def test_exit_callback():
-    to_child = mp_context.Queue()
-    from_child = mp_context.Queue()
-    evt = Event()
+    to_child = get_mp_context().Queue()
+    from_child = get_mp_context().Queue()
+    evt = asyncio.Event()
 
-    # FIXME: this breaks if changed to async def...
-    @gen.coroutine
     def on_stop(_proc):
-        assert _proc is proc
-        yield gen.moment
         evt.set()
 
     # Normal process exit
@@ -245,7 +254,7 @@ async def test_exit_callback():
     assert not evt.is_set()
 
     to_child.put(None)
-    await evt.wait(timedelta(seconds=5))
+    await wait_for(evt.wait(), 5)
     assert evt.is_set()
     assert not proc.is_alive()
 
@@ -261,7 +270,7 @@ async def test_exit_callback():
     assert not evt.is_set()
 
     await proc.terminate()
-    await evt.wait(timedelta(seconds=5))
+    await wait_for(evt.wait(), 5)
     assert evt.is_set()
 
 
@@ -270,7 +279,7 @@ async def test_child_main_thread():
     """
     The main thread in the child should be called "MainThread".
     """
-    q = mp_context.Queue()
+    q = get_mp_context().Queue()
     proc = AsyncProcess(target=threads_info, args=(q,))
     await proc.start()
     await proc.join()
@@ -324,14 +333,14 @@ def kill_target(ev):
 @pytest.mark.skipif(WINDOWS, reason="Needs SIGKILL")
 @gen_test()
 async def test_kill():
-    ev = mp_context.Event()
+    ev = get_mp_context().Event()
     proc = AsyncProcess(target=kill_target, args=(ev,))
     await proc.start()
     ev.wait()
     await proc.kill()
     await proc.join()
     assert not proc.is_alive()
-    assert proc.exitcode in (-signal.SIGKILL, 255)
+    assert proc.exitcode == -signal.SIGKILL
 
 
 def _worker_process(worker_ready, child_pipe):
@@ -362,7 +371,7 @@ def _parent_process(child_pipe):
 
     async def parent_process_coroutine():
         IOLoop.current()
-        worker_ready = mp_context.Event()
+        worker_ready = get_mp_context().Event()
 
         worker = AsyncProcess(target=_worker_process, args=(worker_ready, child_pipe))
 
@@ -378,7 +387,7 @@ def _parent_process(child_pipe):
 
     async def run_with_timeout():
         t = asyncio.create_task(parent_process_coroutine())
-        return await asyncio.wait_for(t, timeout=10)
+        return await wait_for(t, timeout=10)
 
     asyncio.run(run_with_timeout())
     raise RuntimeError("this should be unreachable due to os._exit")
@@ -399,10 +408,10 @@ def test_asyncprocess_child_teardown_on_parent_exit():
                   \________ <--   child_pipe   <-- ________/
     """
     # When child_pipe is closed, the children_alive pipe unblocks.
-    children_alive, child_pipe = mp_context.Pipe(duplex=False)
+    children_alive, child_pipe = get_mp_context().Pipe(duplex=False)
 
     try:
-        parent = mp_context.Process(target=_parent_process, args=(child_pipe,))
+        parent = get_mp_context().Process(target=_parent_process, args=(child_pipe,))
         parent.start()
 
         # Close our reference to child_pipe so that the child has the only one.
