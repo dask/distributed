@@ -3248,17 +3248,17 @@ async def test_get_scheduler_default_client_config_interleaving(s):
         assert dask.base.get_scheduler() == dask.local.get_sync
         with dask.config.set(scheduler="threads"):
             assert dask.base.get_scheduler() == dask.threaded.get
-            c = await Client(s.address, set_as_default=False, asynchronous=True)
+            client = await Client(s.address, set_as_default=False, asynchronous=True)
             try:
                 assert dask.base.get_scheduler() == dask.threaded.get
             finally:
-                await c.close()
+                await client.close()
 
-            c = await Client(s.address, set_as_default=True, asynchronous=True)
+            client = await Client(s.address, set_as_default=True, asynchronous=True)
             try:
-                assert dask.base.get_scheduler() == c.get
+                assert dask.base.get_scheduler() == client.get
             finally:
-                await c.close()
+                await client.close()
             assert dask.base.get_scheduler() == dask.threaded.get
 
             # FIXME: As soon as async with uses as_current this will be true as well
@@ -3274,15 +3274,18 @@ async def test_get_scheduler_default_client_config_interleaving(s):
                     assert sc == client.get
                 assert dask.base.get_scheduler() == dask.threaded.get
             finally:
-                await c.close()
+                await client.close()
 
-            client = await Client(s.address, set_as_default=False, asynchronous=True)
+            # If it comes to a race between default and current, current wins
+            client = await Client(s.address, set_as_default=True, asynchronous=True)
+            client2 = await Client(s.address, set_as_default=False, asynchronous=True)
             try:
-                with client.as_current():
-                    assert dask.base.get_scheduler() == client.get
-                assert dask.base.get_scheduler() == dask.threaded.get
+                with client2.as_current():
+                    assert dask.base.get_scheduler() == client2.get
+                assert dask.base.get_scheduler() == client.get
             finally:
-                await c.close()
+                await client.close()
+                await client2.close()
 
             assert dask.base.get_scheduler() == dask.threaded.get
 
@@ -3293,6 +3296,8 @@ async def test_get_scheduler_default_client_config_interleaving(s):
             assert dask.base.get_scheduler() == c.get
             with dask.config.set(scheduler="threads"):
                 assert dask.base.get_scheduler() == dask.threaded.get
+                with c.as_current():
+                    assert dask.base.get_scheduler() == c.get
         finally:
             await c.close()
 
