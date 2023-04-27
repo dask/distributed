@@ -4207,13 +4207,19 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.stream_comms[address] = BatchedSend(interval="5ms", loop=self.loop)
 
+        awaitables = []
         for plugin in list(self.plugins.values()):
             try:
                 result = plugin.add_worker(scheduler=self, worker=address)
                 if result is not None and inspect.isawaitable(result):
-                    await result
+                    awaitables.append(result)
             except Exception as e:
                 logger.exception(e)
+
+        plugin_msgs = await asyncio.gather(*awaitables, return_exceptions=True)
+        plugins_exceptions = [msg for msg in plugin_msgs if isinstance(msg, Exception)]
+        for exc in plugins_exceptions:
+            logger.exception(exc, exc_info=exc)
 
         if ws.status == Status.running:
             self.transitions(
@@ -4982,13 +4988,19 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.transitions(recommendations, stimulus_id=stimulus_id)
 
+        awaitables = []
         for plugin in list(self.plugins.values()):
             try:
                 result = plugin.remove_worker(scheduler=self, worker=address)
                 if inspect.isawaitable(result):
-                    await result
+                    awaitables.append(result)
             except Exception as e:
                 logger.exception(e)
+
+        plugin_msgs = await asyncio.gather(*awaitables, return_exceptions=True)
+        plugins_exceptions = [msg for msg in plugin_msgs if isinstance(msg, Exception)]
+        for exc in plugins_exceptions:
+            logger.exception(exc, exc_info=exc)
 
         if not self.workers:
             logger.info("Lost all workers")
