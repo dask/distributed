@@ -25,8 +25,8 @@ from distributed.dashboard.components.scheduler import (
     AggregateAction,
     ClusterMemory,
     ComputePerKey,
+    Contention,
     CurrentLoad,
-    EventLoop,
     Events,
     Hardware,
     MemoryByKey,
@@ -108,7 +108,7 @@ async def test_basic(c, s, a, b):
         SystemMonitor,
         Occupancy,
         StealingTimeSeries,
-        EventLoop,
+        Contention,
     ]:
         ss = component(s)
 
@@ -546,7 +546,6 @@ async def test_WorkerTable_custom_metric_overlap_with_core_metric(c, s, a, b):
 
 @gen_cluster(client=True, worker_kwargs={"memory_limit": 0})
 async def test_WorkerTable_with_memory_limit_as_0(c, s, a, b):
-
     wt = WorkerTable(s)
     wt.update()
     assert all(wt.source.data.values())
@@ -1118,13 +1117,19 @@ async def test_shuffling(c, s, a, b):
     dd = pytest.importorskip("dask.dataframe")
     ss = Shuffling(s)
 
-    df = dask.datasets.timeseries()
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-02-01",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
     df2 = dd.shuffle.shuffle(df, "x", shuffle="p2p").persist()
     start = time()
-    while not ss.source.data["disk_read"]:
+    while not ss.source.data["comm_written"]:
         ss.update()
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0)
         assert time() < start + 5
+    await df2
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True}, timeout=60)

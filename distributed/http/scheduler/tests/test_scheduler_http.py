@@ -12,10 +12,12 @@ from tornado.httpclient import AsyncHTTPClient, HTTPClientError
 import dask.config
 from dask.sizeof import sizeof
 
-from distributed import Lock, Scheduler
+from distributed import Event, Lock, Scheduler
 from distributed.client import wait
+from distributed.core import Status
 from distributed.utils import is_valid_xml
 from distributed.utils_test import (
+    async_poll_for,
     div,
     fetch_metrics,
     fetch_metrics_body,
@@ -24,6 +26,7 @@ from distributed.utils_test import (
     inc,
     lock_inc,
     slowinc,
+    wait_for_state,
 )
 
 DEFAULT_ROUTES = dask.config.get("distributed.scheduler.http.routes")
@@ -104,10 +107,15 @@ async def test_prometheus(c, s, a, b):
     expected_metrics = {
         "dask_scheduler_clients",
         "dask_scheduler_desired_workers",
+        "dask_scheduler_gil_contention",
         "dask_scheduler_workers",
+        "dask_scheduler_last_time",
         "dask_scheduler_tasks",
         "dask_scheduler_tasks_suspicious",
         "dask_scheduler_tasks_forgotten",
+        "dask_scheduler_tasks_output_bytes",
+        "dask_scheduler_tasks_compute_seconds",
+        "dask_scheduler_tasks_transfer_seconds",
         "dask_scheduler_prefix_state_totals",
         "dask_scheduler_tick_count",
         "dask_scheduler_tick_duration_maximum_seconds",
@@ -231,6 +239,71 @@ async def test_prometheus_collect_task_prefix_counts(c, s, a, b):
 
     prefix_state_counts = await fetch_metrics()
     assert prefix_state_counts.get(("div", "erred")) == 1
+
+
+@gen_cluster(
+    client=True,
+    config={"distributed.worker.memory.monitor-interval": "10ms"},
+    timeout=3,
+)
+async def test_prometheus_collect_worker_states(c, s, a, b):
+    pytest.importorskip("prometheus_client")
+    from prometheus_client.parser import text_string_to_metric_families
+
+    http_client = AsyncHTTPClient()
+
+    async def fetch_metrics():
+        port = s.http_server.port
+        response = await http_client.fetch(f"http://localhost:{port}/metrics")
+        txt = response.body.decode("utf8")
+        families = {
+            family.name: family for family in text_string_to_metric_families(txt)
+        }
+        return {
+            sample.labels["state"]: sample.value
+            for sample in families["dask_scheduler_workers"].samples
+        }
+
+    assert await fetch_metrics() == {
+        "idle": 2,
+        "partially_saturated": 0,
+        "saturated": 0,
+        "paused_or_retiring": 0,
+    }
+
+    ev = Event()
+    x = c.submit(lambda ev: ev.wait(), ev, key="x", workers=[a.address])
+    await wait_for_state("x", "processing", s)
+    assert await fetch_metrics() == {
+        "idle": 1,
+        "partially_saturated": 1,
+        "saturated": 0,
+        "paused_or_retiring": 0,
+    }
+
+    y = c.submit(lambda ev: ev.wait(), ev, key="y", workers=[a.address])
+    z = c.submit(lambda ev: ev.wait(), ev, key="z", workers=[a.address])
+    await wait_for_state("y", "processing", s)
+    await wait_for_state("z", "processing", s)
+
+    assert await fetch_metrics() == {
+        "idle": 1,
+        "partially_saturated": 0,
+        "saturated": 1,
+        "paused_or_retiring": 0,
+    }
+
+    a.monitor.get_process_memory = lambda: 2**40
+    sa = s.workers[a.address]
+    await async_poll_for(lambda: sa.status == Status.paused, timeout=2)
+    assert await fetch_metrics() == {
+        "idle": 1,
+        "partially_saturated": 0,
+        "saturated": 0,
+        "paused_or_retiring": 1,
+    }
+
+    await ev.set()
 
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})
@@ -410,3 +483,27 @@ async def test_adaptive_target(c, s, a, b):
             assert resp.headers["Content-Type"] == "application/json"
             num_workers = json.loads(await resp.text())["workers"]
             assert num_workers == 0
+
+
+@gen_cluster(
+    client=True,
+    clean_kwargs={"threads": False},
+    config={
+        "distributed.scheduler.http.routes": DEFAULT_ROUTES
+        + ["distributed.http.scheduler.api"]
+    },
+)
+async def test_check_idle(c, s, a, b):
+    aiohttp = pytest.importorskip("aiohttp")
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            "http://localhost:%d/api/v1/check_idle" % s.http_server.port
+        ) as resp:
+            assert resp.status == 200
+            assert resp.headers["Content-Type"] == "application/json"
+            response = json.loads(await resp.text())
+            assert (
+                isinstance(response["idle_since"], float)
+                or response["idle_since"] is None
+            )

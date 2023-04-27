@@ -7,11 +7,9 @@ from unittest import mock
 
 import pytest
 from packaging.version import parse as parse_version
-from tlz import valmap
 
 from distributed.client import wait
 from distributed.utils_test import dec, gen_cluster, gen_tls_cluster, inc, throws
-from distributed.worker import dumps_task
 
 ipywidgets = pytest.importorskip("ipywidgets")
 
@@ -142,38 +140,6 @@ async def test_multi_progressbar_widget(c, s, a, b):
 
 
 @mock_widget()
-@gen_cluster()
-async def test_multi_progressbar_widget_after_close(s, a, b):
-    s.update_graph(
-        tasks=valmap(
-            dumps_task,
-            {
-                "x-1": (inc, 1),
-                "x-2": (inc, "x-1"),
-                "x-3": (inc, "x-2"),
-                "y-1": (dec, "x-3"),
-                "y-2": (dec, "y-1"),
-                "e": (throws, "y-2"),
-                "other": (inc, 123),
-            },
-        ),
-        keys=["e"],
-        dependencies={
-            "x-2": {"x-1"},
-            "x-3": {"x-2"},
-            "y-1": {"x-3"},
-            "y-2": {"y-1"},
-            "e": {"y-2"},
-        },
-    )
-
-    p = MultiProgressWidget(["x-1", "x-2", "x-3"], scheduler=s.address)
-    await p.listen()
-
-    assert "x" in p.bars
-
-
-@mock_widget()
 def test_values(client):
     L = [client.submit(inc, i) for i in range(5)]
     wait(L)
@@ -232,32 +198,17 @@ def test_progressbar_cancel(client):
 
 
 @mock_widget()
-@gen_cluster()
-async def test_multibar_complete(s, a, b):
-    s.update_graph(
-        tasks=valmap(
-            dumps_task,
-            {
-                "x-1": (inc, 1),
-                "x-2": (inc, "x-1"),
-                "x-3": (inc, "x-2"),
-                "y-1": (dec, "x-3"),
-                "y-2": (dec, "y-1"),
-                "e": (throws, "y-2"),
-                "other": (inc, 123),
-            },
-        ),
-        keys=["e"],
-        dependencies={
-            "x-2": {"x-1"},
-            "x-3": {"x-2"},
-            "y-1": {"x-3"},
-            "y-2": {"y-1"},
-            "e": {"y-2"},
-        },
-    )
+@gen_cluster(client=True)
+async def test_multibar_complete(c, s, a, b):
+    x1 = c.submit(inc, 1, key="x-1")
+    x2 = c.submit(inc, x1, key="x-2")
+    x3 = c.submit(inc, x2, key="x-3")
+    y1 = c.submit(dec, x3, key="y-1")
+    y2 = c.submit(dec, y1, key="y-2")
+    e = c.submit(throws, y2, key="e")
+    other = c.submit(inc, 123, key="other")
 
-    p = MultiProgressWidget(["e"], scheduler=s.address, complete=True)
+    p = MultiProgressWidget([e.key], scheduler=s.address, complete=True)
     await p.listen()
 
     assert p._last_response["all"] == {"x": 3, "y": 2, "e": 1}

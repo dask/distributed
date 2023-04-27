@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from time import time
 
 import prometheus_client
@@ -14,12 +15,13 @@ from distributed.scheduler import ALL_TASK_STATES, Scheduler
 
 
 class SchedulerMetricCollector(PrometheusCollector):
+    server: Scheduler
+
     def __init__(self, server: Scheduler):
         super().__init__(server)
         self.subsystem = "scheduler"
 
-    def collect(self):
-
+    def collect(self) -> Iterator[GaugeMetricFamily | CounterMetricFamily]:
         yield GaugeMetricFamily(
             self.build_name("clients"),
             "Number of clients connected",
@@ -37,10 +39,31 @@ class SchedulerMetricCollector(PrometheusCollector):
             "Number of workers known by scheduler",
             labels=["state"],
         )
-        worker_states.add_metric(["connected"], len(self.server.workers))
-        worker_states.add_metric(["saturated"], len(self.server.saturated))
         worker_states.add_metric(["idle"], len(self.server.idle))
+        worker_states.add_metric(
+            ["partially_saturated"],
+            len(self.server.running)
+            - len(self.server.idle)
+            - len(self.server.saturated),
+        )
+        worker_states.add_metric(["saturated"], len(self.server.saturated))
+        worker_states.add_metric(
+            ["paused_or_retiring"], len(self.server.workers) - len(self.server.running)
+        )
         yield worker_states
+
+        if self.server.monitor.monitor_gil_contention:
+            yield CounterMetricFamily(
+                self.build_name("gil_contention"),
+                "GIL contention metric",
+                value=self.server.monitor._cumulative_gil_contention,
+            )
+
+        yield CounterMetricFamily(
+            self.build_name("last_time"),
+            "SystemMonitor last time",
+            value=self.server.monitor.last_time,
+        )
 
         tasks = GaugeMetricFamily(
             self.build_name("tasks"),
@@ -77,6 +100,40 @@ class SchedulerMetricCollector(PrometheusCollector):
             if state != "forgotten":
                 tasks.add_metric([state], task_counter.get(state, 0.0))
         yield tasks
+
+        time_spent_compute_tasks = CounterMetricFamily(
+            self.build_name("tasks_compute"),
+            "Total amount of compute time spent in each prefix",
+            labels=["task_prefix_name"],
+            unit="seconds",
+        )
+
+        for tp in self.server.task_prefixes.values():
+            time_spent_compute_tasks.add_metric([tp.name], tp.all_durations["compute"])
+        yield time_spent_compute_tasks
+
+        time_spent_transfer_tasks = CounterMetricFamily(
+            self.build_name("tasks_transfer"),
+            "Total amount of transfer time spent in each prefix",
+            labels=["task_prefix_name"],
+            unit="seconds",
+        )
+
+        for tp in self.server.task_prefixes.values():
+            time_spent_transfer_tasks.add_metric(
+                [tp.name], tp.all_durations["transfer"]
+            )
+        yield time_spent_transfer_tasks
+
+        nbytes_tasks = GaugeMetricFamily(
+            self.build_name("tasks_output"),
+            "Current number of bytes in memory (without duplicates) for each prefix",
+            labels=["task_prefix_name"],
+            unit="bytes",
+        )
+        for tp in self.server.task_prefixes.values():
+            nbytes_tasks.add_metric([tp.name], tp.nbytes_total)
+        yield nbytes_tasks
 
         prefix_state_counts = CounterMetricFamily(
             self.build_name("prefix_state_totals"),

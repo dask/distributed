@@ -28,7 +28,7 @@ from distributed.comm.registry import backends, get_backend
 from distributed.compatibility import to_thread
 from distributed.metrics import time
 from distributed.protocol import Serialized, deserialize, serialize, to_serialize
-from distributed.utils import get_ip, get_ipv6, get_mp_context
+from distributed.utils import get_ip, get_ipv6, get_mp_context, wait_for
 from distributed.utils_test import (
     gen_test,
     get_cert,
@@ -437,7 +437,7 @@ async def run_coro(func, *args, **kwargs):
 async def run_coro_in_thread(func, *args, **kwargs):
     async def run_with_timeout():
         t = asyncio.create_task(func(*args, **kwargs))
-        return await asyncio.wait_for(t, timeout=10)
+        return await wait_for(t, timeout=10)
 
     return await to_thread(asyncio.run, run_with_timeout())
 
@@ -755,7 +755,6 @@ async def check_comm_closed_implicit(
         await comm.close()
 
     async with listen(addr, handle_comm, **listen_args) as listener:
-
         comm = await connect(listener.contact_address, **connect_args)
         with pytest.raises(CommClosedError):
             await comm.write({})
@@ -909,7 +908,7 @@ async def test_comm_closed_on_read_error(tcp):
     reader, writer = await get_tcp_comm_pair()
 
     with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(reader.read(), 0.01)
+        await wait_for(reader.read(), 0.01)
 
     assert reader.closed()
 
@@ -936,7 +935,6 @@ async def test_retry_connect(tcp, monkeypatch):
 
     class UnreliableConnector(tcp.TCPConnector):
         def __init__(self):
-
             self.num_failures = 2
             self.failures = 0
             super().__init__()

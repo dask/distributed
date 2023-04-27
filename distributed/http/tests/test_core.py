@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pathlib
+from unittest import mock
 
 import pytest
 from tornado.httpclient import AsyncHTTPClient
@@ -16,15 +17,32 @@ async def test_scheduler(c, s, a, b):
     assert response.code == 200
 
 
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_prometheus_api_doc(c, s, a):
+@mock.patch("warnings.warn", return_value=None)
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    config={"distributed.admin.system-monitor.gil.enabled": True},
+)
+async def test_prometheus_api_doc(c, s, a, _):
     """Test that the Sphinx documentation of Prometheus endpoints matches the
     implementation.
     """
     pytest.importorskip("prometheus_client")
 
-    # Some metrics only appear after a task is executed
-    await c.submit(inc, 1)
+    documented = set()
+    root_dir = pathlib.Path(__file__).parent.parent.parent.parent
+    with open(root_dir / "docs" / "source" / "prometheus.rst") as fh:
+        for row in fh:
+            row = row.strip()
+            if row.startswith("dask_"):
+                documented.add(row)
+
+    # Some metrics only appear if there are tasks on the cluster
+    fut = c.submit(inc, 1)
+    await fut
+
+    a.data.evict()
+
     # Semaphore metrics only appear after semaphores are used
     sem = await Semaphore()
     await sem.acquire()
@@ -49,14 +67,15 @@ async def test_prometheus_api_doc(c, s, a):
             "dask_worker_transfer_bandwidth_median_bytes",
         }
 
-    implemented = scheduler_metrics | worker_metrics | crick_metrics
+    try:
+        import gilknocker  # noqa: F401
 
-    documented = set()
-    root_dir = pathlib.Path(__file__).parent.parent.parent.parent
-    with open(root_dir / "docs" / "source" / "prometheus.rst") as fh:
-        for row in fh:
-            row = row.strip()
-            if row.startswith("dask_"):
-                documented.add(row)
+        gil_metrics = set()  # Already in worker_metrics
+    except ImportError:
+        gil_metrics = {
+            "dask_scheduler_gil_contention_total",
+            "dask_worker_gil_contention_total",
+        }
 
+    implemented = scheduler_metrics | worker_metrics | crick_metrics | gil_metrics
     assert documented == implemented

@@ -10,10 +10,10 @@ from tlz import merge
 
 from dask.utils import parse_timedelta, stringify
 
-from distributed.client import Client, Future
+from distributed.client import Future
 from distributed.metrics import time
-from distributed.utils import TimeoutError, log_errors
-from distributed.worker import get_client, get_worker
+from distributed.utils import TimeoutError, log_errors, wait_for
+from distributed.worker import get_client
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,7 @@ class VariableExtension:
                     await self.started.acquire()
                     await self.started.wait()
 
-                await asyncio.wait_for(_(), timeout=left)
+                await wait_for(_(), timeout=left)
             finally:
                 self.started.release()
 
@@ -136,10 +136,6 @@ class Variable:
     it is wise not to send too much.  If you want to share a large amount of
     data then ``scatter`` it and share the future instead.
 
-    .. warning::
-
-       This object is experimental and has known issues in Python 2
-
     Parameters
     ----------
     name: string (optional)
@@ -165,13 +161,26 @@ class Variable:
     Queue: shared multi-producer/multi-consumer queue between clients
     """
 
-    def __init__(self, name=None, client=None, maxsize=0):
-        try:
-            self.client = client or Client.current()
-        except ValueError:
-            # Initialise new client
-            self.client = get_worker().client
+    def __init__(self, name=None, client=None):
+        self._client = client
         self.name = name or "variable-" + uuid.uuid4().hex
+
+    @property
+    def client(self):
+        if not self._client:
+            try:
+                self._client = get_client()
+            except ValueError:
+                pass
+        return self._client
+
+    def _verify_running(self):
+        if not self.client:
+            raise RuntimeError(
+                f"{type(self)} object not properly initialized. This can happen"
+                " if the object is being deserialized outside of the context of"
+                " a Client or Worker."
+            )
 
     async def _set(self, value):
         if isinstance(value, Future):
@@ -189,6 +198,7 @@ class Variable:
         value : Future or object
             Must be either a Future or a msgpack-encodable value
         """
+        self._verify_running()
         return self.client.sync(self._set, value, **kwargs)
 
     async def _get(self, timeout=None):
@@ -221,6 +231,7 @@ class Variable:
             Instead of number of seconds, it is also possible to specify
             a timedelta in string format, e.g. "200ms".
         """
+        self._verify_running()
         timeout = parse_timedelta(timeout)
         return self.client.sync(self._get, timeout=timeout, **kwargs)
 
@@ -229,17 +240,9 @@ class Variable:
 
         Caution, this affects all clients currently pointing to this variable.
         """
+        self._verify_running()
         if self.client.status == "running":  # TODO: can leave zombie futures
             self.client._send_to_scheduler({"op": "variable_delete", "name": self.name})
 
-    def __getstate__(self):
-        return (self.name, self.client.scheduler.address)
-
-    def __setstate__(self, state):
-        name, address = state
-        try:
-            client = get_client(address)
-            assert client.scheduler.address == address
-        except (AttributeError, AssertionError):
-            client = Client(address, set_as_default=False)
-        self.__init__(name=name, client=client)
+    def __reduce__(self):
+        return Variable, (self.name,)

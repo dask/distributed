@@ -27,6 +27,7 @@ from bokeh.models import (
     DataRange1d,
     FactorRange,
     GroupFilter,
+    HelpTool,
     HoverTool,
     HTMLTemplateFormatter,
     NumberFormatter,
@@ -344,7 +345,7 @@ class ClusterMemory(DashboardComponent, MemoryColor):
         self.root.yaxis.visible = False
         self.root.ygrid.visible = False
 
-        self.root.toolbar_location = None
+        self.root.toolbar_location = "above"
         self.root.yaxis.visible = False
 
         hover = HoverTool(
@@ -372,7 +373,11 @@ class ClusterMemory(DashboardComponent, MemoryColor):
                             </div>
                             """,
         )
-        self.root.add_tools(hover)
+        help_ = HelpTool(
+            redirect="https://docs.dask.org/en/stable/dashboard.html#bytes-stored-and-bytes-per-worker",
+            description="Description of bytes stored plots",
+        )
+        self.root.add_tools(hover, help_)
 
     def _cluster_memory_color(self) -> str:
         colors = {
@@ -2213,7 +2218,10 @@ def task_stream_figure(clear_interval="20s", **kwargs):
     )
 
     tap = TapTool(callback=OpenURL(url="./profile?key=@name"))
-
+    help_ = HelpTool(
+        redirect="https://docs.dask.org/en/stable/dashboard.html#task-stream",
+        description="A description of the TaskStream and its color palette.",
+    )
     root.add_tools(
         hover,
         tap,
@@ -2221,6 +2229,7 @@ def task_stream_figure(clear_interval="20s", **kwargs):
         ResetTool(),
         PanTool(dimensions="width"),
         WheelZoomTool(dimensions="width"),
+        help_,
     )
     if ExportTool:  # type: ignore
         export = ExportTool()
@@ -2655,7 +2664,6 @@ class TaskGroupGraph(DashboardComponent):
 
     @without_property_validation
     def update(self):
-
         if self.scheduler.transition_counter == self.old_counter:
             return
         self.old_counter = self.scheduler.transition_counter
@@ -2707,7 +2715,6 @@ class TaskGroupGraph(DashboardComponent):
         durations = set()
         nbytes = set()
         for tg in self.scheduler.task_groups.values():
-
             if tg.duration and tg.nbytes_total:
                 durations.add(tg.duration)
                 nbytes.add(tg.nbytes_total)
@@ -2719,7 +2726,6 @@ class TaskGroupGraph(DashboardComponent):
 
         box_dim = {}
         for key, tg in self.scheduler.task_groups.items():
-
             comp_tasks = (
                 tg.states["released"] + tg.states["memory"] + tg.states["erred"]
             )
@@ -2733,7 +2739,6 @@ class TaskGroupGraph(DashboardComponent):
                 and len(durations) > 1
                 and len(nbytes) > 1
             ):
-
                 # scale duration (width)
                 width_box = self.compute_size(
                     tg.duration / comp_tasks * tot_tasks,
@@ -3164,7 +3169,7 @@ class TaskProgress(DashboardComponent):
             name="task_progress",
             x_range=x_range,
             y_range=y_range,
-            toolbar_location=None,
+            toolbar_location="above",
             tools="",
             min_border_bottom=50,
             **kwargs,
@@ -3304,7 +3309,11 @@ class TaskProgress(DashboardComponent):
                 </div>
                 """,
         )
-        self.root.add_tools(hover)
+        help_ = HelpTool(
+            redirect="https://docs.dask.org/en/stable/dashboard.html#progress",
+            description="A description of the progress bars plot.",
+        )
+        self.root.add_tools(hover, help_)
 
     @without_property_validation
     @log_errors
@@ -3366,57 +3375,99 @@ class TaskProgress(DashboardComponent):
         )
 
 
-class EventLoop(DashboardComponent):
-    """Event Loop Health"""
+class Contention(DashboardComponent):
+    """
+    Event Loop Health (and GIL Contention, if configured)
+    """
 
     @log_errors
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
-        self.source = ColumnDataSource(
-            {
-                "names": ["Scheduler", "Workers"],
-                "values": [0, 0],
-                "text": ["0", "0"],
-            }
-        )
-
-        self.root = figure(
-            title="Event Loop Health",
-            x_range=["Scheduler", "Workers"],
-            y_range=[
-                0,
-                parse_timedelta(dask.config.get("distributed.admin.tick.interval"))
-                * 25,
+        self.data = dict(
+            names=[
+                ("Scheduler", "Event Loop"),
+                ("Scheduler", "GIL Contention"),
+                ("Workers", "Event Loop"),
+                ("Workers", "GIL Contention"),
             ],
+            values=[0, 0, 0, 0],
+            text=["0s", "0%", "0s", "0%"],
+        )
+        title = "Event Loop & GIL Contention"
+
+        # Remove GIL related names/values if not monitoring GIL
+        if not self.scheduler.monitor.monitor_gil_contention:
+            title = "Event Loop"
+            for key in self.data:
+                self.data[key] = self.data[key][::2]
+
+        self.source = ColumnDataSource(data=self.data)
+        self.root = figure(
+            title=title,
+            x_range=FactorRange(*self.data["names"]),
+            y_range=(0, 1),
             tools="",
             toolbar_location="above",
             **kwargs,
         )
-        self.root.vbar(x="names", top="values", width=0.9, source=self.source)
+        self.root.vbar(
+            x="names",
+            top="values",
+            width=0.9,
+            line_color="white",
+            source=self.source,
+            fill_color=factor_cmap(
+                field_name="names",
+                palette=["#b8e0ce", "#81aae4"],
+                factors=["Event Loop", "GIL Contention"],
+                start=1,
+                end=2,
+            ),
+        )
 
+        self.root.x_range.group_padding = 0.25
         self.root.xaxis.minor_tick_line_alpha = 0
         self.root.ygrid.visible = True
         self.root.xgrid.visible = False
 
-        hover = HoverTool(tooltips=[("Interval", "@text s")], mode="vline")
+        hover = HoverTool(
+            tooltips=[("Name", "@names"), ("Value", "@text")], mode="vline"
+        )
         self.root.add_tools(hover)
 
     @without_property_validation
     @log_errors
     def update(self):
         s = self.scheduler
+        monitor_gil = s.monitor.monitor_gil_contention
 
-        data = {
-            "names": ["Scheduler", "Workers"],
-            "values": [
-                s._tick_interval_observed,
-                sum(w.metrics["event_loop_interval"] for w in s.workers.values())
-                / (len(s.workers) or 1),
-            ],
-        }
-        data["text"] = [format_time(x) for x in data["values"]]
+        self.data["values"] = [
+            s._tick_interval_observed,
+            self.gil_contention_scheduler,
+            sum(w.metrics["event_loop_interval"] for w in s.workers.values())
+            / (len(s.workers) or 1),
+            self.gil_contention_workers,
+        ][:: 1 if monitor_gil else 2]
 
-        update(self.source, data)
+        # Format event loop as time and GIL (if configured) as %
+        self.data["text"] = [
+            f"{x * 100:.1f}%" if i % 2 and monitor_gil else format_time(x)
+            for i, x in enumerate(self.data["values"])
+        ]
+        update(self.source, self.data)
+
+    @property
+    def gil_contention_workers(self) -> float:
+        workers = self.scheduler.workers
+        if workers:
+            return sum(
+                w.metrics.get("gil_contention", 0) for w in workers.values()
+            ) / len(workers)
+        return float("NaN")
+
+    @property
+    def gil_contention_scheduler(self) -> float:
+        return self.scheduler.monitor.recent().get("gil_contention", float("NaN"))
 
 
 class ExceptionsTable(DashboardComponent):
@@ -4062,7 +4113,7 @@ def shuffling_doc(scheduler, extra, doc):
     timeseries = SystemTimeseries(
         scheduler, width=1600, height=200, follow_interval=3000
     )
-    event_loop = EventLoop(scheduler, width=200, height=400)
+    event_loop = Contention(scheduler, width=200, height=400)
 
     add_periodic_callback(doc, shuffling, 200)
     add_periodic_callback(doc, workers_memory, 200)
@@ -4248,16 +4299,22 @@ def status_doc(scheduler, extra, doc):
 
     doc.add_root(workers_memory.root)
 
-    tab1 = TabPanel(child=processing_root, title="Processing")
-    tab2 = TabPanel(child=cpu_root, title="CPU")
-    tab3 = TabPanel(child=occupancy_root, title="Occupancy")
-    tab4 = TabPanel(child=workers_transfer_bytes.root, title="Data Transfer")
+    tabs = [
+        TabPanel(child=processing_root, title="Processing"),
+        TabPanel(child=cpu_root, title="CPU"),
+        TabPanel(child=occupancy_root, title="Occupancy"),
+        TabPanel(child=workers_transfer_bytes.root, title="Data Transfer"),
+    ]
 
-    proc_tabs = Tabs(
-        tabs=[tab1, tab2, tab3, tab4],
-        name="processing_tabs",
-        sizing_mode="stretch_both",
+    help_ = HelpTool(
+        redirect="https://docs.dask.org/en/stable/dashboard.html#task-processing-cpu-utilization-occupancy-data-transfer",
+        description="A description of Task Processing/CPU Utilization/Occupancy",
     )
+    for tab in tabs:
+        tab.child.toolbar_location = "above"
+        tab.child.add_tools(help_)
+
+    proc_tabs = Tabs(tabs=tabs, name="processing_tabs", sizing_mode="stretch_both")
     doc.add_root(proc_tabs)
 
     task_stream = TaskStream(

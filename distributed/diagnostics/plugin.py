@@ -24,13 +24,10 @@ logger = logging.getLogger(__name__)
 class SchedulerPlugin:
     """Interface to extend the Scheduler
 
-    The scheduler operates by triggering and responding to events like
-    ``task_finished``, ``update_graph``, ``task_erred``, etc..
-
-    A plugin enables custom code to run at each of those same events.  The
-    scheduler will run the analogous methods on this class when each event is
-    triggered.  This runs user code within the scheduler thread that can
-    perform arbitrary operations in synchrony with the scheduler itself.
+    A plugin enables custom hooks to run when specific events occur.  The    scheduler will run the methods of this plugin whenever the corresponding
+    method of the scheduler is run.  This runs user code within the scheduler
+    thread that can perform arbitrary operations in synchrony with the scheduler
+    itself.
 
     Plugins are often used for diagnostics and measurement, but have full
     access to the scheduler and could in principle affect core scheduling.
@@ -77,11 +74,45 @@ class SchedulerPlugin:
     def update_graph(
         self,
         scheduler: Scheduler,
+        *,
+        client: str,
         keys: set[str],
-        restrictions: dict[str, float],
+        tasks: list[str],
+        annotations: dict[str, dict[str, Any]],
+        priority: dict[str, tuple[int | float, ...]],
+        dependencies: dict[str, set],
         **kwargs: Any,
     ) -> None:
-        """Run when a new graph / tasks enter the scheduler"""
+        """Run when a new graph / tasks enter the scheduler
+
+        Parameters
+        ----------
+            scheduler:
+                The `Scheduler` instance.
+            client:
+                The unique Client id.
+            keys:
+                The keys the Client is interested in when calling `update_graph`.
+            tasks:
+                The
+            annotations:
+                Fully resolved annotations as applied to the tasks in the format::
+
+                    {
+                        "annotation": {
+                            "key": "value,
+                            ...
+                        },
+                        ...
+                    }
+            priority:
+                Task calculated priorities as assigned to the tasks.
+            dependencies:
+                A mapping that maps a key to its dependencies.
+            **kwargs:
+                It is recommended to allow plugins to accept more parameters to
+                ensure future compatibility.
+        """
 
     def restart(self, scheduler: Scheduler) -> None:
         """Run when the scheduler restarts itself"""
@@ -95,6 +126,14 @@ class SchedulerPlugin:
         **kwargs: Any,
     ) -> None:
         """Run whenever a task changes state
+
+        For a description of the transition mechanism and the available states,
+        see :ref:`Scheduler task states <scheduler-task-state>`.
+
+        .. warning::
+
+            This is an advanced feature and the transition mechanism and details
+            of task states are subject to change without deprecation cycle.
 
         Parameters
         ----------
@@ -110,12 +149,36 @@ class SchedulerPlugin:
         """
 
     def add_worker(self, scheduler: Scheduler, worker: str) -> None | Awaitable[None]:
-        """Run when a new worker enters the cluster"""
+        """Run when a new worker enters the cluster
+
+        If this method is synchronous, it is immediately and synchronously executed
+        without ``Scheduler.add_worker`` ever yielding to the event loop.
+        If it is asynchronous, it will be awaited after all synchronous
+        ``SchedulerPlugin.add_worker`` hooks have executed.
+
+        .. warning::
+
+            There are no guarantees about the execution order between individual
+            ``SchedulerPlugin.add_worker`` hooks and the ordering may be subject
+            to change without deprecation cycle.
+        """
 
     def remove_worker(
         self, scheduler: Scheduler, worker: str
     ) -> None | Awaitable[None]:
-        """Run when a worker leaves the cluster"""
+        """Run when a worker leaves the cluster
+
+        If this method is synchronous, it is immediately and synchronously executed
+        without ``Scheduler.remove_worker`` ever yielding to the event loop.
+        If it is asynchronous, it will be awaited after all synchronous
+        ``SchedulerPlugin.remove_worker`` hooks have executed.
+
+        .. warning::
+
+            There are no guarantees about the execution order between individual
+            ``SchedulerPlugin.remove_worker`` hooks and the ordering may be subject
+            to change without deprecation cycle.
+        """
 
     def add_client(self, scheduler: Scheduler, client: str) -> None:
         """Run when a new client connects"""
@@ -131,8 +194,7 @@ class WorkerPlugin:
     """Interface to extend the Worker
 
     A worker plugin enables custom code to run at different stages of the Workers'
-    lifecycle: at setup, during task state transitions, when a task or dependency
-    is released, and at teardown.
+    lifecycle.
 
     A plugin enables custom code to run at each of step of a Workers's life. Whenever such
     an event happens, the corresponding method on this class will be called. Note that the
@@ -173,16 +235,22 @@ class WorkerPlugin:
         """
 
     def teardown(self, worker):
-        """Run when the worker to which the plugin is attached to is closed"""
+        """Run when the worker to which the plugin is attached is closed, or
+        when the plugin is removed."""
 
     def transition(self, key, start, finish, **kwargs):
         """
-        Throughout the lifecycle of a task (see :doc:`Worker <worker>`), Workers are
-        instructed by the scheduler to compute certain tasks, resulting in transitions
-        in the state of each task. The Worker owning the task is then notified of this
-        state transition.
+        Throughout the lifecycle of a task (see :doc:`Worker State
+        <worker-state>`), Workers are instructed by the scheduler to compute
+        certain tasks, resulting in transitions in the state of each task. The
+        Worker owning the task is then notified of this state transition.
 
         Whenever a task changes its state, this method will be called.
+
+        .. warning::
+
+            This is an advanced feature and the transition mechanism and details
+            of task states are subject to change without deprecation cycle.
 
         Parameters
         ----------
@@ -290,7 +358,13 @@ class PackageInstall(WorkerPlugin, abc.ABC):
         from distributed.semaphore import Semaphore
 
         async with (
-            await Semaphore(max_leases=1, name=socket.gethostname(), register=True)
+            await Semaphore(
+                max_leases=1,
+                name=socket.gethostname(),
+                register=True,
+                scheduler_rpc=worker.scheduler,
+                loop=worker.loop,
+            )
         ):
             if not await self._is_installed(worker):
                 logger.info(
@@ -523,6 +597,87 @@ class UploadFile(WorkerPlugin):
             filename=self.filename, data=self.data, load=True
         )
         assert len(self.data) == response["nbytes"]
+
+
+class ForwardLoggingPlugin(WorkerPlugin):
+    """
+    A ``WorkerPlugin`` to forward python logging records from worker to client.
+    See :meth:`Client.forward_logging` for full documentation and usage. Needs
+    to be used in coordination with :meth:`Client.subscribe_topic`, the details
+    of which :meth:`Client.forward_logging` handles for you.
+
+    Parameters
+    ----------
+    logger_name : str
+        The name of the logger to begin forwarding.
+
+    level : str | int
+        Optionally restrict forwarding to ``LogRecord``s of this level or
+        higher, even if the forwarded logger's own level is lower.
+
+    topic : str
+        The name of the topic to which to the worker should log the forwarded log
+        records.
+    """
+
+    def __init__(self, logger_name, level, topic):
+        self.logger_name = logger_name
+        self.level = level
+        self.topic = topic
+        self.handler = None
+
+    def setup(self, worker):
+        self.handler = _ForwardingLogHandler(worker, self.topic, level=self.level)
+        logger = logging.getLogger(self.logger_name)
+        logger.addHandler(self.handler)
+
+    def teardown(self, worker):
+        if self.handler is not None:
+            logger = logging.getLogger(self.logger_name)
+            logger.removeHandler(self.handler)
+
+
+class _ForwardingLogHandler(logging.Handler):
+    """
+    Handler class that gets installed inside workers by
+    :class:`ForwardLoggingPlugin`. Not intended to be instantiated by the user
+    directly.
+
+    In each affected worker, ``ForwardLoggingPlugin`` adds an instance of this
+    handler to one or more loggers (possibly the root logger). Tasks running on
+    the worker may then use the affected logger as normal, with the side effect
+    that any ``LogRecord``s handled by the logger (or by a logger below it in
+    the hierarchy) will be published to the dask client as a
+    ``topic`` event.
+    """
+
+    def __init__(self, worker, topic, level=logging.NOTSET):
+        super().__init__(level)
+        self.worker = worker
+        self.topic = topic
+
+    def prepare_record_attributes(self, record):
+        # Adapted from the CPython standard library's
+        # logging.handlers.SocketHandler.makePickle; see its source at:
+        # https://github.com/python/cpython/blob/main/Lib/logging/handlers.py
+        ei = record.exc_info
+        if ei:
+            # just to get traceback text into record.exc_text ...
+            _ = self.format(record)
+        # If msg or args are objects, they may not be available on the receiving
+        # end. So we convert the msg % args to a string, save it as msg and zap
+        # the args.
+        d = dict(record.__dict__)
+        d["msg"] = record.getMessage()
+        d["args"] = None
+        d["exc_info"] = None
+        # delete 'message' if present: redundant with 'msg'
+        d.pop("message", None)
+        return d
+
+    def emit(self, record):
+        attributes = self.prepare_record_attributes(record)
+        self.worker.log_event(self.topic, attributes)
 
 
 class Environ(NannyPlugin):

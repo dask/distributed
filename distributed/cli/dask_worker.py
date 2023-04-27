@@ -264,6 +264,7 @@ def main(  # type: ignore[no-untyped-def]
         warnings.warn(
             "dask-worker is deprecated and will be removed in a future release; use `dask worker` instead",
             FutureWarning,
+            stacklevel=1,
         )
 
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653

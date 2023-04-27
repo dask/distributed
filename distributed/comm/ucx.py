@@ -332,7 +332,7 @@ class UCX(Comm):
             for each_frame in send_frames:
                 await self.ep.send(each_frame)
             return sum(sizes)
-        except (ucp.exceptions.UCXBaseException):
+        except ucp.exceptions.UCXBaseException:
             self.abort()
             raise CommClosedError("While writing, the connection was closed")
 
@@ -416,7 +416,7 @@ class UCX(Comm):
         if self._ep is not None:
             try:
                 await self.ep.send(struct.pack("?Q", True, 0))
-            except (
+            except (  # noqa: B030
                 ucp.exceptions.UCXError,
                 ucp.exceptions.UCXCloseError,
                 ucp.exceptions.UCXCanceled,

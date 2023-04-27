@@ -150,6 +150,7 @@ def main(
         warnings.warn(
             "dask-ssh is deprecated and will be removed in a future release; use `dask ssh` instead",
             FutureWarning,
+            stacklevel=1,
         )
 
     try:
