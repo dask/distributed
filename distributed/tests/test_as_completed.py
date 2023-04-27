@@ -9,10 +9,11 @@ from time import sleep
 
 import pytest
 
+from distributed import TimeoutError
 from distributed.client import _as_completed, _first_completed, as_completed, wait
 from distributed.metrics import time
 from distributed.utils import CancelledError
-from distributed.utils_test import gen_cluster, inc, throws
+from distributed.utils_test import gen_cluster, inc, slowinc, throws
 
 
 @gen_cluster(client=True)
@@ -29,6 +30,31 @@ async def test_as_completed_async(c, s, a, b):
 
     result = await _first_completed([x, y, z])
     assert result in [x, y, z]
+
+
+@gen_cluster(client=True)
+async def test_as_completed_timeout_async(c, s, a, b):
+    x = c.submit(inc, 1)
+    y = c.submit(inc, 1)
+    z = c.submit(slowinc, 2, delay=1)
+
+    seq = as_completed([x, y, z], timeout="0.5s")
+    await seq.__anext__()
+    await seq.__anext__()
+    with pytest.raises(TimeoutError):
+        await seq.__anext__()
+
+
+def test_as_completed_timeout_sync(client):
+    x = client.submit(inc, 1)
+    y = client.submit(inc, 1)
+    z = client.submit(slowinc, 2, delay=1)
+
+    seq = as_completed([x, y, z], timeout="0.5s")
+    next(seq)
+    next(seq)
+    with pytest.raises(TimeoutError):
+        next(seq)
 
 
 def test_as_completed_sync(client):

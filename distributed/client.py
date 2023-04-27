@@ -78,7 +78,7 @@ from distributed.diagnostics.plugin import (
     WorkerPlugin,
     _get_plugin_name,
 )
-from distributed.metrics import time
+from distributed.metrics import monotonic, time
 from distributed.objects import HasWhat, SchedulerInfo, WhoHas
 from distributed.protocol import to_serialize
 from distributed.protocol.pickle import dumps, loads
@@ -5226,6 +5226,12 @@ class as_completed:
     raise_errors: bool (True)
         Whether we should raise when the result of a future raises an
         exception; only affects behavior when `with_results=True`.
+    timeout: int (optional)
+        The returned iterator raises a ``dask.distributed.TimeoutError``
+        if `__next__()` or `__anext__()` is called and the result
+        isn't available after timeout seconds from the original call to
+        `as_completed()`. If timeout is not specified or None, there is no limit
+        to the wait time.
 
     Examples
     --------
@@ -5262,7 +5268,15 @@ class as_completed:
     3
     """
 
-    def __init__(self, futures=None, loop=None, with_results=False, raise_errors=True):
+    def __init__(
+        self,
+        futures=None,
+        loop=None,
+        with_results=False,
+        raise_errors=True,
+        *,
+        timeout=None,
+    ):
         if futures is None:
             futures = []
         self.futures = defaultdict(lambda: 0)
@@ -5272,6 +5286,11 @@ class as_completed:
         self.thread_condition = threading.Condition()
         self.with_results = with_results
         self.raise_errors = raise_errors
+
+        if timeout is not None:
+            self._end_time = parse_timedelta(timeout) + monotonic()
+        else:
+            self._end_time = None
 
         if futures:
             self.update(futures)
@@ -5370,6 +5389,8 @@ class as_completed:
 
     def __next__(self):
         while self.queue.empty():
+            if self._end_time is not None and (self._end_time - monotonic()) < 0:
+                raise TimeoutError()
             if self.is_empty():
                 raise StopIteration()
             with self.thread_condition:
@@ -5377,6 +5398,11 @@ class as_completed:
         return self._get_and_raise()
 
     async def __anext__(self):
+        if self._end_time is None:
+            return await self._anext()
+        return await wait_for(self._anext(), self._end_time - monotonic())
+
+    async def _anext(self):
         if not self.futures and self.queue.empty():
             raise StopAsyncIteration
         while self.queue.empty():
