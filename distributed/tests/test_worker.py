@@ -217,8 +217,9 @@ async def test_upload_file(c, s, a, b):
     result = await future
     assert result == 123
 
-    await c.close()
     await s.close()
+    await c.close()
+
     assert not os.path.exists(os.path.join(a.local_directory, "foobar.py"))
 
 

@@ -80,7 +80,7 @@ from distributed.core import rpc as RPCType
 from distributed.core import send_recv
 from distributed.diagnostics import nvml, rmm
 from distributed.diagnostics.plugin import _get_plugin_name
-from distributed.diskutils import WorkDir, WorkSpace
+from distributed.diskutils import WorkSpace
 from distributed.http import get_handlers
 from distributed.metrics import context_meter, thread_time, time
 from distributed.node import ServerNode
@@ -432,7 +432,6 @@ class Worker(BaseWorker, ServerNode):
     latency: float
     profile_cycle_interval: float
     workspace: WorkSpace
-    _workdir: WorkDir
     _client: Client | None
     bandwidth_workers: defaultdict[str, tuple[float, int]]
     bandwidth_types: defaultdict[type, tuple[float, int]]
@@ -1550,7 +1549,6 @@ class Worker(BaseWorker, ServerNode):
                         c.close()
 
         await self.scheduler.close_rpc()
-        self._workdir.release()
 
         self.stop_services()
 

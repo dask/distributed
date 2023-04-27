@@ -38,7 +38,7 @@ from distributed.comm import (
 )
 from distributed.compatibility import PeriodicCallback
 from distributed.counter import Counter
-from distributed.diskutils import WorkSpace
+from distributed.diskutils import WorkDir, WorkSpace
 from distributed.metrics import context_meter, time
 from distributed.protocol import pickle
 from distributed.system_monitor import SystemMonitor
@@ -327,6 +327,8 @@ class Server:
     default_ip = ""
     default_port = 0
     local_directory: str
+    _workspace: WorkSpace
+    _workdir: None | WorkDir
 
     def __init__(
         self,
@@ -361,10 +363,12 @@ class Server:
             "Consider specifying a local-directory to point workers to write "
             "scratch data to a local disk.",
         ):
+            self._workspace = WorkSpace(local_directory)
+
             if isinstance(self, Nanny):
-                self.local_directory = WorkSpace(local_directory).base_dir
+                self._workdir = None
+                self.local_directory = self._workspace.base_dir
             else:
-                self._workspace = WorkSpace(local_directory)
                 self._workdir = self._workspace.new_work_dir(prefix="worker-")
                 self.local_directory = self._workdir.dir_path
 
@@ -655,6 +659,9 @@ class Server:
     def stop(self):
         if self.__stopped:
             return
+
+        if self._workdir is not None:
+            self._workdir.release()
 
         self.monitor.close()
 
