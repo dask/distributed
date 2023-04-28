@@ -543,7 +543,8 @@ class Server:
             except Exception as exc:
                 await _close_on_failure(exc)
                 raise RuntimeError(f"{type(self).__name__} failed to start.") from exc
-            self.status = Status.running
+            if self.status == Status.init:
+                self.status = Status.running
         return self
 
     async def __aenter__(self):

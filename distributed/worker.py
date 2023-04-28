@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import bisect
 import builtins
+import contextlib
 import errno
 import logging
 import math
@@ -108,7 +109,7 @@ from distributed.utils import (
     recursive_to_dict,
     run_in_executor_with_context,
     set_thread_state,
-    silence_logging,
+    silence_logging_cmgr,
     thread_state,
     wait_for,
     warn_on_duration,
@@ -551,6 +552,7 @@ class Worker(BaseWorker, ServerNode):
                 DeprecationWarning,
                 stacklevel=2,
             )
+        self.__exit_stack = stack = contextlib.ExitStack()
         self.nanny = nanny
         self._lock = threading.Lock()
 
@@ -662,7 +664,7 @@ class Worker(BaseWorker, ServerNode):
 
         self.extensions = {}
         if silence_logs:
-            silence_logging(level=silence_logs)
+            stack.enter_context(silence_logging_cmgr(level=silence_logs))
 
         if isinstance(security, dict):
             security = Security(**security)
@@ -1197,7 +1199,6 @@ class Worker(BaseWorker, ServerNode):
                 middle = (_start + _end) / 2
                 self._update_latency(_end - start)
                 self.scheduler_delay = response["time"] - middle
-                self.status = Status.running
                 break
             except OSError:
                 logger.info("Waiting to connect to: %26s", self.scheduler.address)
@@ -1208,18 +1209,20 @@ class Worker(BaseWorker, ServerNode):
             msg = response["message"] if "message" in response else repr(response)
             logger.error(f"Unable to connect to scheduler: {msg}")
             raise ValueError(f"Unexpected response from register: {response!r}")
-        else:
-            await asyncio.gather(
-                *(
-                    self.plugin_add(name=name, plugin=plugin)
-                    for name, plugin in response["worker-plugins"].items()
-                )
-            )
-
-            logger.info("        Registered to: %26s", self.scheduler.address)
-            logger.info("-" * 49)
 
         self.batched_stream.start(comm)
+        self.status = Status.running
+
+        await asyncio.gather(
+            *(
+                self.plugin_add(name=name, plugin=plugin)
+                for name, plugin in response["worker-plugins"].items()
+            )
+        )
+
+        logger.info("        Registered to: %26s", self.scheduler.address)
+        logger.info("-" * 49)
+
         self.periodic_callbacks["keep-alive"].start()
         self.periodic_callbacks["heartbeat"].start()
         self.loop.add_callback(self.handle_scheduler, comm)
@@ -1651,6 +1654,7 @@ class Worker(BaseWorker, ServerNode):
         self.status = Status.closed
         await ServerNode.close(self)
 
+        self.__exit_stack.__exit__(None, None, None)
         setproctitle("dask worker [closed]")
         return "OK"
 

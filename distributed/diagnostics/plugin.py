@@ -149,12 +149,36 @@ class SchedulerPlugin:
         """
 
     def add_worker(self, scheduler: Scheduler, worker: str) -> None | Awaitable[None]:
-        """Run when a new worker enters the cluster"""
+        """Run when a new worker enters the cluster
+
+        If this method is synchronous, it is immediately and synchronously executed
+        without ``Scheduler.add_worker`` ever yielding to the event loop.
+        If it is asynchronous, it will be awaited after all synchronous
+        ``SchedulerPlugin.add_worker`` hooks have executed.
+
+        .. warning::
+
+            There are no guarantees about the execution order between individual
+            ``SchedulerPlugin.add_worker`` hooks and the ordering may be subject
+            to change without deprecation cycle.
+        """
 
     def remove_worker(
         self, scheduler: Scheduler, worker: str
     ) -> None | Awaitable[None]:
-        """Run when a worker leaves the cluster"""
+        """Run when a worker leaves the cluster
+
+        If this method is synchronous, it is immediately and synchronously executed
+        without ``Scheduler.remove_worker`` ever yielding to the event loop.
+        If it is asynchronous, it will be awaited after all synchronous
+        ``SchedulerPlugin.remove_worker`` hooks have executed.
+
+        .. warning::
+
+            There are no guarantees about the execution order between individual
+            ``SchedulerPlugin.remove_worker`` hooks and the ordering may be subject
+            to change without deprecation cycle.
+        """
 
     def add_client(self, scheduler: Scheduler, client: str) -> None:
         """Run when a new client connects"""

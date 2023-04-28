@@ -32,6 +32,7 @@ async def test_prometheus(c, s, a):
     )
     expected_metrics = {
         "dask_worker_concurrent_fetch_requests",
+        "dask_worker_gil_contention_total",
         "dask_worker_latency_seconds",
         "dask_worker_memory_bytes",
         "dask_worker_spill_bytes_total",
