@@ -207,6 +207,22 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
     async def receive(self, data: list[tuple[T_transfer_shard_id, bytes]]) -> None:
         await self._receive(data)
 
+    async def _ensure_output_worker(self, i: T_partition_id, key: str) -> None:
+        assigned_worker = self._get_assigned_worker(i)
+
+        if assigned_worker != self.local_address:
+            result = await self.scheduler.shuffle_restrict_task(
+                id=self.id, run_id=self.run_id, key=key, worker=assigned_worker
+            )
+            if result["status"] == "error":
+                raise RuntimeError(result["message"])
+            assert result["status"] == "OK"
+            raise Reschedule()
+
+    @abc.abstractmethod
+    def _get_assigned_worker(self, i: T_partition_id) -> str:
+        """Get the address of the worker assigned to the output partition"""
+
     @abc.abstractmethod
     async def _receive(self, data: list[tuple[T_transfer_shard_id, bytes]]) -> None:
         """Receive shards belonging to output partitions of this shuffle run"""
@@ -362,12 +378,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
         self.raise_if_closed()
         assert self.transferred, "`get_output_partition` called before barrier task"
 
-        assigned_worker = self.worker_for[i]
-        if assigned_worker != self.local_address:
-            await self.scheduler.shuffle_restrict_task(
-                id=self.id, run_id=self.run_id, key=key, worker=assigned_worker
-            )
-            raise Reschedule()
+        await self._ensure_output_worker(i, key)
 
         await self.flush_receive()
 
@@ -378,6 +389,9 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
             return convert_chunk(data, subdims)
 
         return await self.offload(_)
+
+    def _get_assigned_worker(self, i: NIndex) -> str:
+        return self.worker_for[i]
 
 
 class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
@@ -515,12 +529,7 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         self.raise_if_closed()
         assert self.transferred, "`get_output_partition` called before barrier task"
 
-        assigned_worker = self.worker_for[i]
-        if assigned_worker != self.local_address:
-            await self.scheduler.shuffle_restrict_task(
-                id=self.id, run_id=self.run_id, key=key, worker=assigned_worker
-            )
-            raise Reschedule()
+        await self._ensure_output_worker(i, key)
 
         await self.flush_receive()
         try:
@@ -534,6 +543,9 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         except KeyError:
             out = self.schema.empty_table().to_pandas()
         return out
+
+    def _get_assigned_worker(self, i: int) -> str:
+        return self.worker_for[i]
 
 
 class ShuffleWorkerExtension:
@@ -781,7 +793,7 @@ class ShuffleWorkerExtension:
             )
         else:  # pragma: no cover
             raise TypeError(type)
-        if result["status"] == "ERROR":
+        if result["status"] == "error":
             raise RuntimeError(result["message"])
         assert result["status"] == "OK"
 

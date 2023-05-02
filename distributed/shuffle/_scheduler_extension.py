@@ -127,12 +127,13 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
 
     async def restrict_task(
         self, id: ShuffleId, run_id: int, key: str, worker: str
-    ) -> None:
+    ) -> dict:
         shuffle = self.states[id]
         if shuffle.run_id != run_id:
-            raise RuntimeError()
+            return {"status": "error", "message": "Stale shuffle"}
         ts = self.scheduler.tasks[key]
         self._set_restriction(ts, worker)
+        return {"status": "OK"}
 
     def heartbeat(self, ws: WorkerState, data: dict) -> None:
         for shuffle_id, d in data.items():
@@ -141,7 +142,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
 
     def get(self, id: ShuffleId, worker: str) -> dict[str, Any]:
         if exception := self.erred_shuffles.get(id):
-            return {"status": "ERROR", "message": str(exception)}
+            return {"status": "error", "message": str(exception)}
         state = self.states[id]
         state.participating_workers.add(worker)
         return state.to_msg()
