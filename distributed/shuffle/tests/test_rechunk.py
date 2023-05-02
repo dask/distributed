@@ -18,11 +18,11 @@ from dask.array.utils import assert_eq
 
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._rechunk import ShardID, rechunk_slicing
-from distributed.shuffle._scheduler_extension import get_worker_for_range_sharding
+from distributed.shuffle._scheduler_extension import get_worker_for_hash_sharding
 from distributed.shuffle._shuffle import ShuffleId
 from distributed.shuffle._worker_extension import ArrayRechunkRun
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
-from distributed.utils_test import gen_cluster, gen_test, raises_with_cause
+from distributed.utils_test import gen_cluster, gen_test
 
 
 class ArrayRechunkTestPool(AbstractShuffleTestPool):
@@ -91,9 +91,7 @@ async def test_lowlevel_rechunk(
 
     new_indices = list(product(*(range(len(dim)) for dim in new)))
     for i, idx in enumerate(new_indices):
-        worker_for_mapping[idx] = get_worker_for_range_sharding(
-            i, workers, len(new_indices)
-        )
+        worker_for_mapping[idx] = get_worker_for_hash_sharding(i, workers)
 
     assert len(set(worker_for_mapping.values())) == min(n_workers, len(new_indices))
 
@@ -161,9 +159,8 @@ def test_raise_on_fuse_optimization():
         rechunk(x, chunks=new, method="p2p")
 
 
-@pytest.mark.xfail()
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
-async def test_raise_on_lost_annotation(c, s, a, b):
+async def test_recover_from_lost_annotation(c, s, a, b):
     a = np.random.uniform(0, 1, 30)
     x = da.from_array(a, chunks=((10,) * 3,))
     new = ((6,) * 5,)
@@ -174,13 +171,7 @@ async def test_raise_on_lost_annotation(c, s, a, b):
         if name.startswith("rechunk-p2p"):
             del layer.annotations["shuffle"]
 
-    with raises_with_cause(
-        RuntimeError,
-        "rechunk_transfer failed",
-        RuntimeError,
-        "lost its ``shuffle`` annotation",
-    ):
-        await c.compute(x2)
+    assert np.all(await c.compute(x2) == a)
 
 
 @pytest.mark.parametrize("config_value", ["tasks", "p2p", None])
