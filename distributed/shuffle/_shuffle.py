@@ -4,7 +4,6 @@ import logging
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Iterable, Iterator, NewType
 
-import dask
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
@@ -99,12 +98,6 @@ def rearrange_by_column_p2p(
     npartitions: int | None = None,
 ) -> DataFrame:
     from dask.dataframe import DataFrame
-
-    if dask.config.get("optimization.fuse.active"):
-        raise RuntimeError(
-            "P2P shuffling requires the fuse optimization to be turned off. "
-            "Set the 'optimization.fuse.active' config to False to deactivate."
-        )
 
     check_dtype_support(df._meta)
     npartitions = npartitions or df.npartitions
