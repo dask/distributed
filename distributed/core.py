@@ -350,8 +350,8 @@ class Server:
                 dask.config.get("temporary-directory") or tempfile.gettempdir()
             )
 
-        if "dask-worker-space" not in str(local_directory):
-            local_directory = os.path.join(local_directory, "dask-worker-space")
+        if "dask-scratch-space" not in str(local_directory):
+            local_directory = os.path.join(local_directory, "dask-scratch-space")
 
         self._original_local_dir = local_directory
 
