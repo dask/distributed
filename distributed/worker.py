@@ -594,13 +594,6 @@ class Worker(BaseWorker, ServerNode):
 
         self._setup_logging(logger)
 
-        if not preload:
-            preload = dask.config.get("distributed.worker.preload")
-        if not preload_argv:
-            preload_argv = dask.config.get("distributed.worker.preload-argv")
-        assert preload is not None
-        assert preload_argv is not None
-
         self.death_timeout = parse_timedelta(death_timeout)
         self.contact_address = contact_address
 
@@ -729,6 +722,13 @@ class Worker(BaseWorker, ServerNode):
             local_directory=local_directory,
             **kwargs,
         )
+
+        if not preload:
+            preload = dask.config.get("distributed.worker.preload")
+        if not preload_argv:
+            preload_argv = dask.config.get("distributed.worker.preload-argv")
+        assert preload is not None
+        assert preload_argv is not None
 
         self.preloads = preloading.process_preloads(
             self, preload, preload_argv, file_dir=self.local_directory
