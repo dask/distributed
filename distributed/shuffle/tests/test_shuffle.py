@@ -954,9 +954,9 @@ async def test_crashed_worker_after_shuffle(c, s, a):
 
         await in_event.wait()
         await n.process.process.kill()
-        block_event.set()
-        with pytest.raises(RuntimeError):
-            await fut
+        await block_event.set()
+
+        await fut
 
         await c.close()
         await clean_worker(a)
@@ -979,8 +979,7 @@ async def test_crashed_worker_after_shuffle_persisted(c, s, a):
 
         await n.process.process.kill()
 
-        with pytest.raises(RuntimeError):
-            await c.compute(out.sum())
+        await c.compute(out.sum())
 
         await c.close()
         await clean_worker(a)

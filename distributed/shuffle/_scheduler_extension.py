@@ -130,7 +130,8 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         shuffle = self.states[id]
         if shuffle.run_id != run_id:
             raise RuntimeError()
-        self.scheduler.set_restrictions({key: {worker}})
+        ts = self.scheduler.tasks[key]
+        self._set_restriction(ts, worker)
 
     def heartbeat(self, ws: WorkerState, data: dict) -> None:
         for shuffle_id, d in data.items():
@@ -226,6 +227,19 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             participating_workers=output_workers.copy(),
         )
 
+    def _set_restriction(self, ts: TaskState, worker: str) -> None:
+        assert "shuffle_original_restrictions" not in ts.annotations
+        ts.annotations["shuffle_original_restrictions"] = ts.worker_restrictions.copy()
+        self.scheduler.set_restrictions({ts.key: {worker}})
+
+    def _unset_restriction(self, ts: TaskState) -> None:
+        # shuffle_original_restrictions is only set if the task was first scheduled
+        # on the wrong worker
+        if "shuffle_original_restrictions" not in ts.annotations:
+            return
+        original_restrictions = ts.annotations.pop("shuffle_original_restrictions")
+        self.scheduler.set_restrictions({ts.key: original_restrictions})
+
     def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
         from time import time
 
@@ -246,7 +260,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
                 for dt in barrier_task.dependents:
                     if worker not in dt.worker_restrictions:
                         continue
-                    dt.worker_restrictions.clear()
+                    self._unset_restriction(dt)
                     recs.update({dt.key: "waiting"})
                 # TODO: Do we need to handle other states?
 
@@ -291,6 +305,10 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self.erred_shuffles.pop(id, None)
         with contextlib.suppress(KeyError):
             del self.heartbeats[id]
+
+        barrier_task = self.scheduler.tasks[barrier_key(id)]
+        for dt in barrier_task.dependents:
+            self._unset_restriction(dt)
 
     def restart(self, scheduler: Scheduler) -> None:
         self.states.clear()
