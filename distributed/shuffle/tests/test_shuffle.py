@@ -44,13 +44,7 @@ from distributed.shuffle._worker_extension import (
 )
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
 from distributed.utils import Deadline
-from distributed.utils_test import (
-    cluster,
-    gen_cluster,
-    gen_test,
-    raises_with_cause,
-    wait_for_state,
-)
+from distributed.utils_test import cluster, gen_cluster, gen_test, wait_for_state
 from distributed.worker_state_machine import TaskState as WorkerTaskState
 
 try:
@@ -133,29 +127,25 @@ def test_raise_on_fuse_optimization():
             dd.shuffle.shuffle(df, "x", shuffle="p2p")
 
 
-@pytest.mark.xfail()
 @gen_cluster(client=True)
-async def test_raise_on_lost_annotation(c, s, a, b):
+async def test_recover_from_lost_annotation(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
-    df = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
 
     # Manually drop "shuffle" annotation
     for layer in df.dask.layers.values():
         if isinstance(layer, P2PShuffleLayer):
             del layer.annotations["shuffle"]
 
-    with raises_with_cause(
-        RuntimeError,
-        "shuffle_transfer failed",
-        RuntimeError,
-        "lost its ``shuffle`` annotation",
-    ):
-        await c.compute(df)
+    x, y = c.compute([df.x.size, out.x.size])
+    x = await x
+    y = await y
+    assert x == y
 
     await clean_worker(a)
     await clean_worker(b)
@@ -391,7 +381,6 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
             await clean_scheduler(s)
 
 
-@pytest.mark.xfail(reason="FIXME: Handle pre-existing restrictions")
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)
 async def test_closed_bystanding_worker_during_shuffle(c, s, w1, w2, w3):
@@ -1234,7 +1223,7 @@ async def test_basic_lowlevel_shuffle(
 
     for part in range(npartitions):
         worker_for_mapping[part] = get_worker_for_range_sharding(
-            part, workers, npartitions
+            npartitions, part, workers
         )
     assert len(set(worker_for_mapping.values())) == min(n_workers, npartitions)
     schema = pa.Schema.from_pandas(dfs[0])
@@ -1309,7 +1298,7 @@ async def test_error_offload(tmp_path, loop_in_thread):
 
     for part in range(npartitions):
         worker_for_mapping[part] = w = get_worker_for_range_sharding(
-            part, workers, npartitions
+            npartitions, part, workers
         )
         partitions_for_worker[w].append(part)
     schema = pa.Schema.from_pandas(dfs[0])
@@ -1363,7 +1352,7 @@ async def test_error_send(tmp_path, loop_in_thread):
 
     for part in range(npartitions):
         worker_for_mapping[part] = w = get_worker_for_range_sharding(
-            part, workers, npartitions
+            npartitions, part, workers
         )
         partitions_for_worker[w].append(part)
     schema = pa.Schema.from_pandas(dfs[0])
@@ -1416,7 +1405,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
 
     for part in range(npartitions):
         worker_for_mapping[part] = w = get_worker_for_range_sharding(
-            part, workers, npartitions
+            npartitions, part, workers
         )
         partitions_for_worker[w].append(part)
     schema = pa.Schema.from_pandas(dfs[0])

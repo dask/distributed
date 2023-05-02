@@ -6,8 +6,9 @@ import itertools
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
+from functools import partial
 from itertools import product
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Iterable, Sequence
 
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.shuffle._rechunk import ChunkedAxes, NIndex
@@ -178,16 +179,10 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         assert npartitions is not None
         assert parts_out is not None
 
-        workers = list(self.scheduler.workers)
-        output_workers = set()
+        pick_worker = partial(get_worker_for_range_sharding, npartitions)
 
-        mapping = {}
-
-        for part in parts_out:
-            # TODO: How do we deal with pre-existing worker restrictions?
-            output_worker = get_worker_for_range_sharding(part, workers, npartitions)
-            mapping[part] = output_worker
-            output_workers.add(output_worker)
+        mapping = self._pin_output_workers(id, parts_out, pick_worker)
+        output_workers = set(mapping.values())
 
         return DataFrameShuffleState(
             id=id,
@@ -199,6 +194,40 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             participating_workers=output_workers.copy(),
         )
 
+    def _pin_output_workers(
+        self,
+        id: ShuffleId,
+        output_partitions: Iterable[Any],
+        pick: Callable[[Any, Sequence[str]], str],
+    ) -> dict[Any, str]:
+        mapping = {}
+        barrier = self.scheduler.tasks[barrier_key(id)]
+
+        if barrier.worker_restrictions:
+            workers = list(barrier.worker_restrictions)
+        else:
+            workers = list(self.scheduler.workers)
+
+        for partition in output_partitions:
+            worker = pick(partition, workers)
+            mapping[partition] = worker
+
+        for dt in barrier.dependents:
+            try:
+                partition = dt.annotations["shuffle"]
+            except KeyError:
+                continue
+
+            if dt.worker_restrictions:
+                worker = pick(partition, list(dt.worker_restrictions))
+                mapping[partition] = worker
+            else:
+                worker = mapping[partition]
+
+            self._set_restriction(dt, worker)
+
+        return mapping
+
     def _create_array_rechunk_state(
         self, id: ShuffleId, spec: dict[str, Any]
     ) -> ArrayRechunkState:
@@ -207,15 +236,9 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         assert old is not None
         assert new is not None
 
-        workers = list(self.scheduler.workers)
-        output_workers = set()
-
-        mapping = {}
-
-        for part in product(*(range(len(c)) for c in new)):
-            output_worker = get_worker_for_hash_sharding(part, workers)
-            mapping[part] = output_worker
-            output_workers.add(output_worker)
+        parts_out = product(*(range(len(c)) for c in new))
+        mapping = self._pin_output_workers(id, parts_out, get_worker_for_hash_sharding)
+        output_workers = set(mapping.values())
 
         return ArrayRechunkState(
             id=id,
@@ -228,7 +251,10 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         )
 
     def _set_restriction(self, ts: TaskState, worker: str) -> None:
-        assert "shuffle_original_restrictions" not in ts.annotations
+        if "shuffle_original_restrictions" in ts.annotations:
+            # This may occur if multiple barriers share the same output task,
+            # e.g. in a hash join.
+            return
         ts.annotations["shuffle_original_restrictions"] = ts.worker_restrictions.copy()
         self.scheduler.set_restrictions({ts.key: {worker}})
 
@@ -316,28 +342,17 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self.erred_shuffles.clear()
 
 
-def get_partition_id(ts: TaskState) -> Any:
-    """Get the output partition ID of this task state."""
-    try:
-        return ts.annotations["shuffle"]
-    except KeyError:
-        raise RuntimeError(
-            f"{ts} has lost its ``shuffle`` annotation. This may be caused by "
-            "unintended optimization during graph generation. "
-            "Please report this problem on GitHub and link it to "
-            "the tracking issue at https://github.com/dask/distributed/issues/7716."
-        )
-
-
 def get_worker_for_range_sharding(
-    output_partition: int, workers: list[str], npartitions: int
+    npartitions: int, output_partition: int, workers: Sequence[str]
 ) -> str:
     """Get address of target worker for this output partition using range sharding"""
     i = len(workers) * output_partition // npartitions
     return workers[i]
 
 
-def get_worker_for_hash_sharding(output_partition: NIndex, workers: list[str]) -> str:
+def get_worker_for_hash_sharding(
+    output_partition: NIndex, workers: Sequence[str]
+) -> str:
     """Get address of target worker for this output partition using hash sharding"""
     i = hash(output_partition) % len(workers)
     return workers[i]
