@@ -368,7 +368,8 @@ class Server:
                 self._workdir = None
                 self.local_directory = self._workspace.base_dir
             else:
-                self._workdir = self._workspace.new_work_dir(prefix="worker-")
+                name = type(self).__name__.lower()
+                self._workdir = self._workspace.new_work_dir(prefix=f"{name}-")
                 self.local_directory = self._workdir.dir_path
 
         if self.local_directory not in sys.path:
