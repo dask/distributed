@@ -201,6 +201,7 @@ class Nanny(ServerNode):
             handlers=handlers,
             connection_args=self.connection_args,
             local_directory=local_directory,
+            needs_workdir=False,
         )
 
         self.preloads = preloading.process_preloads(

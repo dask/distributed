@@ -343,9 +343,8 @@ class Server:
         timeout=None,
         io_loop=None,
         local_directory=None,
+        needs_workdir=True,
     ):
-        from distributed.nanny import Nanny
-
         if local_directory is None:
             local_directory = (
                 dask.config.get("temporary-directory") or tempfile.gettempdir()
@@ -365,7 +364,7 @@ class Server:
         ):
             self._workspace = WorkSpace(local_directory)
 
-            if isinstance(self, Nanny):
+            if not needs_workdir:  # eg. Nanny will not need a WorkDir
                 self._workdir = None
                 self.local_directory = self._workspace.base_dir
             else:
