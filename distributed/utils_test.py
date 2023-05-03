@@ -929,7 +929,6 @@ def gen_cluster(
     )
     if is_debugging():
         timeout = 3600
-    watch = _Watch(timeout)
     scheduler_kwargs = merge(
         dict(
             dashboard=False,
@@ -941,7 +940,6 @@ def gen_cluster(
     worker_kwargs = merge(
         dict(
             memory_limit=system.MEMORY_LIMIT,
-            death_timeout=min(15, int(watch.leftover())),
             transition_counter_max=50_000,
         ),
         worker_kwargs,
@@ -955,6 +953,8 @@ def gen_cluster(
         @config_for_cluster_tests(**{"distributed.comm.timeouts.connect": "5s"})
         @clean(**clean_kwargs)
         def test_func(*outer_args, **kwargs):
+            watch = _Watch(timeout)
+
             @contextlib.asynccontextmanager
             async def _client_factory(s):
                 if client:
@@ -981,7 +981,10 @@ def gen_cluster(
                                 security=security,
                                 Worker=Worker,
                                 scheduler_kwargs=scheduler_kwargs,
-                                worker_kwargs=worker_kwargs,
+                                worker_kwargs=merge(
+                                    {"death_timeout": min(15, int(watch.leftover()))},
+                                    worker_kwargs,
+                                ),
                             )
                         except Exception as e:
                             logger.error(
