@@ -181,7 +181,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             raise RuntimeError(
                 f"Barrier task with key {key!r} does not exist. This may be caused by "
                 "task fusion during graph generation. Please let us know that you ran "
-                "into this by leaving a comment at distributed#XXX."
+                "into this by leaving a comment at distributed#7816."
             )
 
     def _create_dataframe_shuffle_state(

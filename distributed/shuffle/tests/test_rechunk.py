@@ -207,7 +207,7 @@ async def test_rechunk_4d(c, s, *ws):
     new = ((10,),) * 4
     x2 = rechunk(x, chunks=new, method="p2p")
     assert x2.chunks == new
-    # FIXME: distributed#XXX
+    # FIXME: distributed#7816
     with raises_with_cause(
         RuntimeError, "rechunk_transfer failed", RuntimeError, "Barrier task"
     ):
