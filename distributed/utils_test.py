@@ -1024,6 +1024,7 @@ def gen_cluster(
 
                         except asyncio.TimeoutError:
                             assert task
+                            elapsed = watch.elapsed()
                             buffer = io.StringIO()
                             # This stack indicates where the coro/test is suspended
                             task.print_stack(file=buffer)
@@ -1049,7 +1050,7 @@ def gen_cluster(
                             # uninteresting boilerplate from utils_test and asyncio
                             # and not from the code being tested.
                             raise asyncio.TimeoutError(
-                                f"Test timeout ({timeout}) hit after {watch.elapsed()}s.\n"
+                                f"Test timeout ({timeout}) hit after {elapsed}s.\n"
                                 "========== Test stack trace starts here ==========\n"
                                 f"{buffer.getvalue()}"
                             ) from None
