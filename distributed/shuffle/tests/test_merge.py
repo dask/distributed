@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from distributed.shuffle._merge import hash_join
+from distributed.shuffle.tests.utils import invoke_annotation_chaos
 from distributed.utils_test import gen_cluster
 
 dd = pytest.importorskip("dask.dataframe")
@@ -36,7 +37,8 @@ def list_eq(aa, bb):
 
 @pytest.mark.parametrize("how", ["inner", "left", "right", "outer"])
 @gen_cluster(client=True)
-async def test_basic_merge(c, s, a, b, how):
+async def test_basic_merge(c, s, a, b, how, lose_annotations):
+    await invoke_annotation_chaos(lose_annotations, c)
     A = pd.DataFrame({"x": [1, 2, 3, 4, 5, 6], "y": [1, 1, 2, 2, 3, 4]})
     a = dd.repartition(A, [0, 4, 5])
 
@@ -72,7 +74,8 @@ async def test_basic_merge(c, s, a, b, how):
 
 @pytest.mark.parametrize("how", ["inner", "outer", "left", "right"])
 @gen_cluster(client=True)
-async def test_merge(c, s, a, b, how):
+async def test_merge(c, s, a, b, how, lose_annotations):
+    await invoke_annotation_chaos(lose_annotations, c)
     A = pd.DataFrame({"x": [1, 2, 3, 4, 5, 6], "y": [1, 1, 2, 2, 3, 4]})
     a = dd.repartition(A, [0, 4, 5])
 

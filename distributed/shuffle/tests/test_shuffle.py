@@ -32,7 +32,7 @@ from distributed.shuffle._scheduler_extension import (
     ShuffleSchedulerExtension,
     get_worker_for_range_sharding,
 )
-from distributed.shuffle._shuffle import P2PShuffleLayer, ShuffleId, barrier_key
+from distributed.shuffle._shuffle import ShuffleId, barrier_key
 from distributed.shuffle._worker_extension import (
     DataFrameShuffleRun,
     ShuffleRun,
@@ -42,7 +42,10 @@ from distributed.shuffle._worker_extension import (
     split_by_partition,
     split_by_worker,
 )
-from distributed.shuffle.tests.utils import AbstractShuffleTestPool
+from distributed.shuffle.tests.utils import (
+    AbstractShuffleTestPool,
+    invoke_annotation_chaos,
+)
 from distributed.utils import Deadline
 from distributed.utils_test import cluster, gen_cluster, gen_test, wait_for_state
 from distributed.worker_state_machine import TaskState as WorkerTaskState
@@ -97,7 +100,8 @@ async def test_minimal_version(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_basic_integration(c, s, a, b):
+async def test_basic_integration(c, s, a, b, lose_annotations):
+    await invoke_annotation_chaos(lose_annotations, c)
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -105,31 +109,6 @@ async def test_basic_integration(c, s, a, b):
         freq="10 s",
     )
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    x, y = c.compute([df.x.size, out.x.size])
-    x = await x
-    y = await y
-    assert x == y
-
-    await clean_worker(a)
-    await clean_worker(b)
-    await clean_scheduler(s)
-
-
-@gen_cluster(client=True)
-async def test_recover_from_lost_annotation(c, s, a, b):
-    df = dask.datasets.timeseries(
-        start="2000-01-01",
-        end="2000-01-10",
-        dtypes={"x": float, "y": float},
-        freq="10 s",
-    )
-    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-
-    # Manually drop "shuffle" annotation
-    for layer in df.dask.layers.values():
-        if isinstance(layer, P2PShuffleLayer):
-            del layer.annotations["shuffle"]
-
     x, y = c.compute([df.x.size, out.x.size])
     x = await x
     y = await y
@@ -155,7 +134,8 @@ def test_shuffle_before_categorize(loop_in_thread):
 
 
 @gen_cluster(client=True)
-async def test_concurrent(c, s, a, b):
+async def test_concurrent(c, s, a, b, lose_annotations):
+    await invoke_annotation_chaos(lose_annotations, c)
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",

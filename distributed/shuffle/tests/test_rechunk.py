@@ -151,24 +151,9 @@ async def test_lowlevel_rechunk(
         )
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
-async def test_recover_from_lost_annotation(c, s, a, b):
-    a = np.random.uniform(0, 1, 30)
-    x = da.from_array(a, chunks=((10,) * 3,))
-    new = ((6,) * 5,)
-    x2 = rechunk(x, chunks=new, method="p2p")
-
-    # Manually drop "shuffle" annotation
-    for name, layer in x2.dask.layers.items():
-        if name.startswith("rechunk-p2p"):
-            del layer.annotations["shuffle"]
-
-    assert np.all(await c.compute(x2) == a)
-
-
 @pytest.mark.parametrize("config_value", ["tasks", "p2p", None])
 @pytest.mark.parametrize("keyword", ["tasks", "p2p", None])
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_configuration(c, s, *ws, config_value, keyword):
     """Try rechunking a random 1d matrix
 
@@ -192,7 +177,7 @@ async def test_rechunk_configuration(c, s, *ws, config_value, keyword):
     assert np.all(await c.compute(x2) == a)
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_2d(c, s, *ws):
     """Try rechunking a random 2d matrix
 
@@ -208,7 +193,7 @@ async def test_rechunk_2d(c, s, *ws):
     assert np.all(await c.compute(x2) == a)
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_4d(c, s, *ws):
     """Try rechunking a random 4d matrix
 
@@ -225,7 +210,7 @@ async def test_rechunk_4d(c, s, *ws):
     assert np.all(await c.compute(x2) == a)
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_expand(c, s, *ws):
     """
     See Also
@@ -238,7 +223,7 @@ async def test_rechunk_expand(c, s, *ws):
     assert np.all(await c.compute(y) == a)
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_expand2(c, s, *ws):
     """
     See Also
@@ -258,7 +243,7 @@ async def test_rechunk_expand2(c, s, *ws):
             assert np.all(y == orig)
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_method(c, s, *ws):
     """Test rechunking can be done as a method of dask array.
 
@@ -275,7 +260,7 @@ async def test_rechunk_method(c, s, *ws):
     assert np.all(await c.compute(x2) == a)
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_blockshape(c, s, *ws):
     """Test that blockshape can be used.
 
@@ -293,7 +278,7 @@ async def test_rechunk_blockshape(c, s, *ws):
     assert np.all(await c.compute(check1) == a)
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_dtype(c, s, *ws):
     """
     See Also
@@ -304,7 +289,7 @@ async def test_dtype(c, s, *ws):
     assert x.rechunk(chunks=(1,), method="p2p").dtype == x.dtype
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_with_dict(c, s, *ws):
     """
     See Also
@@ -328,7 +313,7 @@ async def test_rechunk_with_dict(c, s, *ws):
     assert y.chunks == ((4, 4, 4, 4, 4, 4), (24,))
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_with_empty_input(c, s, *ws):
     """
     See Also
@@ -341,7 +326,7 @@ async def test_rechunk_with_empty_input(c, s, *ws):
         x.rechunk(chunks=(), method="p2p")
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_with_null_dimensions(c, s, *ws):
     """
     See Also
@@ -359,7 +344,7 @@ async def test_rechunk_with_null_dimensions(c, s, *ws):
     )
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_with_integer(c, s, *ws):
     """
     See Also
@@ -372,7 +357,7 @@ async def test_rechunk_with_integer(c, s, *ws):
     assert (await c.compute(x) == await c.compute(y)).all()
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_0d(c, s, *ws):
     """
     See Also
@@ -389,7 +374,7 @@ async def test_rechunk_0d(c, s, *ws):
 @pytest.mark.parametrize(
     "arr", [da.array([]), da.array([[], []]), da.array([[[]], [[]]])]
 )
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_empty_array(c, s, *ws, arr):
     """
     See Also
@@ -400,7 +385,7 @@ async def test_rechunk_empty_array(c, s, *ws, arr):
     assert arr.size == 0
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_empty(c, s, *ws):
     """
     See Also
@@ -413,7 +398,7 @@ async def test_rechunk_empty(c, s, *ws):
     assert_eq(await c.compute(x), await c.compute(y))
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_zero_dim_array(c, s, *ws):
     """
     See Also
@@ -426,7 +411,7 @@ async def test_rechunk_zero_dim_array(c, s, *ws):
     assert_eq(await c.compute(x), await c.compute(y))
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_zero_dim_array_II(c, s, *ws):
     """
     See Also
@@ -439,7 +424,7 @@ async def test_rechunk_zero_dim_array_II(c, s, *ws):
     assert_eq(await c.compute(x), await c.compute(y))
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_same(c, s, *ws):
     """
     See Also
@@ -451,7 +436,7 @@ async def test_rechunk_same(c, s, *ws):
     assert x is y
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_with_zero_placeholders(c, s, *ws):
     """
     See Also
@@ -464,7 +449,7 @@ async def test_rechunk_with_zero_placeholders(c, s, *ws):
     assert x.chunks == y.chunks
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_minus_one(c, s, *ws):
     """
     See Also
@@ -477,7 +462,7 @@ async def test_rechunk_minus_one(c, s, *ws):
     assert_eq(await c.compute(x), await c.compute(y))
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_warning(c, s, *ws):
     """
     See Also
@@ -491,7 +476,7 @@ async def test_rechunk_warning(c, s, *ws):
     assert not w
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_unknown_from_pandas(c, s, *ws):
     """
     See Also
@@ -513,7 +498,7 @@ async def test_rechunk_unknown_from_pandas(c, s, *ws):
     assert_eq(await c.compute(result), await c.compute(expected))
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_unknown_from_array(c, s, *ws):
     """
     See Also
@@ -546,7 +531,7 @@ async def test_rechunk_unknown_from_array(c, s, *ws):
         (da.ones(shape=(10, 10), chunks=(10, 2)), (None, (5, 5))),
     ],
 )
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_unknown(c, s, *ws, x, chunks):
     """
     See Also
@@ -562,7 +547,7 @@ async def test_rechunk_unknown(c, s, *ws, x, chunks):
     assert_eq(await c.compute(result), await c.compute(expected))
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_unknown_explicit(c, s, *ws):
     """
     See Also
@@ -586,7 +571,7 @@ def assert_chunks_match(left, right):
             assert x == y
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_unknown_raises(c, s, *ws):
     """
     See Also
@@ -600,7 +585,7 @@ async def test_rechunk_unknown_raises(c, s, *ws):
         x.rechunk((None, (5, 5, 5)), method="p2p")
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_zero_dim(c, s, *ws):
     """
     See Also
@@ -613,7 +598,7 @@ async def test_rechunk_zero_dim(c, s, *ws):
     assert len(await c.compute(x)) == 0
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_empty_chunks(c, s, *ws):
     """
     See Also
@@ -626,7 +611,7 @@ async def test_rechunk_empty_chunks(c, s, *ws):
 
 
 @pytest.mark.skip(reason="FIXME: We should avoid P2P in this case")
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_avoid_needless_chunking(c, s, *ws):
     x = da.ones(16, chunks=2)
     y = x.rechunk(8, method="p2p")
@@ -644,7 +629,7 @@ async def test_rechunk_avoid_needless_chunking(c, s, *ws):
         (20, (1, 1, 1, 1, 6, 2, 1, 7), 5, (5, 5, 5, 5)),
     ],
 )
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_auto_1d(c, s, *ws, shape, chunks, bs, expected):
     """
     See Also
@@ -656,7 +641,7 @@ async def test_rechunk_auto_1d(c, s, *ws, shape, chunks, bs, expected):
     assert y.chunks == (expected,)
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_auto_2d(c, s, *ws):
     """
     See Also
@@ -684,7 +669,7 @@ async def test_rechunk_auto_2d(c, s, *ws):
     assert y.chunks[0] == (4, 4, 4, 4, 4)  # limited by largest
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_auto_3d(c, s, *ws):
     """
     See Also
@@ -701,7 +686,7 @@ async def test_rechunk_auto_3d(c, s, *ws):
 
 
 @pytest.mark.parametrize("n", [100, 1000])
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_auto_image_stack(c, s, *ws, n):
     """
     See Also
@@ -727,7 +712,7 @@ async def test_rechunk_auto_image_stack(c, s, *ws, n):
         assert z.chunks == ((1,) * n, (362, 362, 276), (362, 362, 276))
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_down(c, s, *ws):
     """
     See Also
@@ -751,7 +736,7 @@ async def test_rechunk_down(c, s, *ws):
         assert z.chunks == ((10,) * 10, (104,) * 9 + (64,), (1000,))
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_zero(c, s, *ws):
     """
     See Also
@@ -764,7 +749,7 @@ async def test_rechunk_zero(c, s, *ws):
         assert y.chunks == ((1,) * 10,)
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_bad_keys(c, s, *ws):
     """
     See Also
@@ -795,7 +780,7 @@ async def test_rechunk_bad_keys(c, s, *ws):
     assert "-100" in str(info.value)
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_with_zero(c, s, *ws):
     """
     See Also
