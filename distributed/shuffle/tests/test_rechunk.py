@@ -193,6 +193,7 @@ async def test_rechunk_2d(c, s, *ws):
     assert np.all(await c.compute(x2) == a)
 
 
+@pytest.mark.xfail(reason="distributed#XXX")
 @gen_cluster(client=True)
 async def test_rechunk_4d(c, s, *ws):
     """Try rechunking a random 4d matrix

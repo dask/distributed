@@ -56,6 +56,11 @@ except ImportError:
     pa = None
 
 
+@pytest.fixture(params=[0, 0.3, 1], ids=["none", "some", "all"])
+def lose_annotations(request):
+    return request.param
+
+
 async def clean_worker(
     worker: Worker, interval: float = 0.01, timeout: int | None = None
 ) -> None:
