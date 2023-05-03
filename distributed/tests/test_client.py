@@ -6690,21 +6690,32 @@ def test_client_connectionpool_semaphore_loop(s, a, b, loop):
 
 
 @pytest.mark.slow
-@gen_cluster(nthreads=[], timeout=60)
-async def test_mixed_compression(s):
+@gen_cluster(client=True, nthreads=[], config={"distributed.comm.compression": None})
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
+async def test_mixed_compression(c, s):
     pytest.importorskip("lz4")
     da = pytest.importorskip("dask.array")
+
     async with Nanny(
-        s.address, nthreads=1, config={"distributed.comm.compression": None}
+        s.address,
+        host="127.0.0.2",
+        nthreads=1,
+        config={"distributed.comm.compression": "lz4"},
+    ), Nanny(
+        s.address,
+        host="127.0.0.3",
+        nthreads=1,
+        config={"distributed.comm.compression": "zlib"},
     ):
-        async with Nanny(
-            s.address, nthreads=1, config={"distributed.comm.compression": "lz4"}
-        ):
-            async with Client(s.address, asynchronous=True) as c:
-                await c.get_versions()
-                x = da.ones((10000, 10000))
-                y = x + x.T
-                await c.compute(y.sum())
+        await c.wait_for_workers(2)
+        await c.get_versions()
+
+        x = da.ones((10000, 10000))
+        # get_data between Worker with lz4 and Worker with zlib
+        y = x + x.T
+        # get_data from Worker with lz4 and Worker with zlib to Client with None
+        out = await c.gather(y)
+        assert out.shape == (10000, 10000)
 
 
 def test_futures_in_subgraphs(loop_in_thread):
