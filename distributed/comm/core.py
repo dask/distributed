@@ -263,7 +263,8 @@ class Listener(ABC):
     ) -> None:
         local_info = {**comm.handshake_info(), **(handshake_overrides or {})}
 
-        _, handshake = await asyncio.gather(comm.write(local_info), comm.read())
+        await comm.write(local_info)
+        handshake = await comm.read()
 
         comm.remote_info = handshake
         comm.remote_info["address"] = comm.peer_address
@@ -353,7 +354,8 @@ async def connect(
         **comm.handshake_info(),
         **(handshake_overrides or {}),
     }
-    _, handshake = await asyncio.gather(comm.write(local_info), comm.read())
+    await comm.write(local_info)
+    handshake = await comm.read()
 
     comm.remote_info = handshake
     comm.remote_info["address"] = comm._peer_addr
