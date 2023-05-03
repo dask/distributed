@@ -64,6 +64,7 @@ from distributed.protocol import deserialize
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.security import Security
 from distributed.utils import (
+    Deadline,
     DequeHandler,
     _offload_executor,
     get_ip,
@@ -111,19 +112,6 @@ logging_levels = {
 
 _TEST_TIMEOUT = 30
 _offload_executor.submit(lambda: None).result()  # create thread during import
-
-
-class _Watch:
-    def __init__(self, duration: float) -> None:
-        self.duration = duration
-        self.started_at = time()
-
-    def elapsed(self) -> float:
-        assert self.started_at
-        return time() - self.started_at
-
-    def leftover(self) -> float:
-        return max(0, self.duration - self.elapsed())
 
 
 # Dask configuration to completely disable the Active Memory Manager.
@@ -953,7 +941,7 @@ def gen_cluster(
         @config_for_cluster_tests(**{"distributed.comm.timeouts.connect": "5s"})
         @clean(**clean_kwargs)
         def test_func(*outer_args, **kwargs):
-            watch = _Watch(timeout)
+            deadline = Deadline.after(timeout)
 
             @contextlib.asynccontextmanager
             async def _client_factory(s):
@@ -982,7 +970,11 @@ def gen_cluster(
                                 Worker=Worker,
                                 scheduler_kwargs=scheduler_kwargs,
                                 worker_kwargs=merge(
-                                    {"death_timeout": min(15, int(watch.leftover()))},
+                                    {
+                                        "death_timeout": min(
+                                            15, int(deadline.remaining)
+                                        )
+                                    },
                                     worker_kwargs,
                                 ),
                             )
@@ -1017,14 +1009,14 @@ def gen_cluster(
                             coro = func(*args, *outer_args, **kwargs)
                             task = asyncio.create_task(coro)
                             coro2 = utils_wait_for(
-                                asyncio.shield(task), timeout=watch.leftover()
+                                asyncio.shield(task), timeout=deadline.remaining
                             )
                             result = await coro2
                             validate_state(s, *workers)
 
                         except asyncio.TimeoutError:
                             assert task
-                            elapsed = watch.elapsed()
+                            elapsed = deadline.elapsed
                             buffer = io.StringIO()
                             # This stack indicates where the coro/test is suspended
                             task.print_stack(file=buffer)
@@ -1083,7 +1075,7 @@ def gen_cluster(
                         ]
 
                     try:
-                        while watch.leftover():
+                        while deadline.remaining:
                             gc.collect()
                             if not get_unclosed():
                                 break
