@@ -22,7 +22,7 @@ from distributed.shuffle._scheduler_extension import get_worker_for_hash_shardin
 from distributed.shuffle._shuffle import ShuffleId
 from distributed.shuffle._worker_extension import ArrayRechunkRun
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
-from distributed.utils_test import gen_cluster, gen_test
+from distributed.utils_test import gen_cluster, gen_test, raises_with_cause
 
 
 class ArrayRechunkTestPool(AbstractShuffleTestPool):
@@ -193,7 +193,6 @@ async def test_rechunk_2d(c, s, *ws):
     assert np.all(await c.compute(x2) == a)
 
 
-@pytest.mark.xfail(reason="distributed#XXX")
 @gen_cluster(client=True)
 async def test_rechunk_4d(c, s, *ws):
     """Try rechunking a random 4d matrix
@@ -208,7 +207,12 @@ async def test_rechunk_4d(c, s, *ws):
     new = ((10,),) * 4
     x2 = rechunk(x, chunks=new, method="p2p")
     assert x2.chunks == new
-    assert np.all(await c.compute(x2) == a)
+    # FIXME: distributed#XXX
+    with raises_with_cause(
+        RuntimeError, "rechunk_transfer failed", RuntimeError, "Barrier task"
+    ):
+        await c.compute(x2)
+    # assert np.all(await c.compute(x2) == a)
 
 
 @gen_cluster(client=True)

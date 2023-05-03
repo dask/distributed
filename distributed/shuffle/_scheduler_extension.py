@@ -157,6 +157,11 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         try:
             return self.get(id, worker)
         except KeyError:
+            # FIXME: The current implementation relies on the barrier task to be
+            # known by its name. If the name has been mangled, we cannot guarantee
+            # that the shuffle works as intended and should fail instead.
+            self._raise_if_barrier_unknown(id)
+
             state: ShuffleState
             if type == ShuffleType.DATAFRAME:
                 state = self._create_dataframe_shuffle_state(id, spec)
@@ -167,6 +172,17 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             self.states[id] = state
             state.participating_workers.add(worker)
             return state.to_msg()
+
+    def _raise_if_barrier_unknown(self, id: ShuffleId) -> None:
+        key = barrier_key(id)
+        try:
+            self.scheduler.tasks[key]
+        except KeyError:
+            raise RuntimeError(
+                f"Barrier task with key {key!r} does not exist. This may be caused by "
+                "task fusion during graph generation. Please let us know that you ran "
+                "into this by leaving a comment at distributed#XXX."
+            )
 
     def _create_dataframe_shuffle_state(
         self, id: ShuffleId, spec: dict[str, Any]
