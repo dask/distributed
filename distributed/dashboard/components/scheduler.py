@@ -3405,36 +3405,42 @@ class _PerfMetricsSendData(DashboardComponent):
                 self.data["operation"].append(operation)
 
             idx = self.data["operation"].index(operation)
-            while idx >= len(self.data["operation_val"]):
-                self.data["operation_val"].append(float("NaN"))
-                self.data["operation_text"].append("")
+            while idx >= len(self.data["value"]):
+                self.data["value"].append(float("NaN"))
+            self.data["value"][idx] = val
 
-            self.data["operation_val"][idx] = val
-            self.data["operation_text"][idx] = format_time(val)
+        self.data["text"] = [format_time(n) for n in self.data["value"]]
+        self.data["angle"] = [
+            value / sum(self.data["value"]) * 2 * math.pi
+            for value in self.data["value"]
+        ]
+        self.data["color"] = small_palettes["YlGnBu"].get(
+            len(self.data["operation"]), []
+        )
 
         if self.data:
             self.source.data = dict(self.data)
-            fig = figure(x_range=self.data["operation"], title="Send data, by activity")
-            fig.vbar(
-                x="operation",
-                top="operation_val",
-                width=0.9,
-                source=self.source,
-                legend_field="operation",
+            fig = figure(
+                height=500,
+                title="Send data, by activity",
+                tools="hover",
+                tooltips="@{operation}: @text",
+                x_range=(-0.5, 1.0),
+            )
+            fig.wedge(
+                x=0,
+                y=1,
+                radius=0.4,
+                start_angle=cumsum("angle", include_zero=True),
+                end_angle=cumsum("angle"),
                 line_color="white",
-                fill_color=factor_cmap(
-                    "operation",
-                    palette=small_palettes["YlGnBu"].get(
-                        len(self.data["operation"]), []
-                    ),
-                    factors=self.data["operation"],
-                ),
+                fill_color="color",
+                legend_field="operation",
+                source=self.source,
             )
-            hover = HoverTool(
-                tooltips=[("Name", "@operation"), ("Value", "@operation_text")],
-                mode="vline",
-            )
-            fig.add_tools(hover)
+            fig.axis.axis_label = None
+            fig.axis.visible = False
+            fig.grid.grid_line_color = None
 
             if self.substantial_change:
                 self.root.children[0] = fig
