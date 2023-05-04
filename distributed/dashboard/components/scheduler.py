@@ -3377,7 +3377,7 @@ class TaskProgress(DashboardComponent):
         )
 
 
-class _FinePerformanceMetricsGetData(DashboardComponent):
+class _PerfMetricsSendData(DashboardComponent):
     @log_errors
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
@@ -3414,7 +3414,7 @@ class _FinePerformanceMetricsGetData(DashboardComponent):
 
         if self.data:
             self.source.data = dict(self.data)
-            fig = figure(x_range=self.data["operation"], title="Get Data")
+            fig = figure(x_range=self.data["operation"], title="Send data, by activity")
             fig.vbar(
                 x="operation",
                 top="operation_val",
@@ -3443,7 +3443,7 @@ class _FinePerformanceMetricsGetData(DashboardComponent):
                 self.fig = fig
 
 
-class _FinePerformanceMetricsByExecution(DashboardComponent):
+class _PerfMetricsExecutionByPrefixAndActivity(DashboardComponent):
     """
     Stacked bar-chart displaying breakdown of function execution times
     between de/serialization, thread-non/cpu, etc.
@@ -3545,7 +3545,7 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
 
         piechart = figure(
             height=500,
-            title="Execution total by operation",
+            title="Task execution, by activity",
             tools="hover",
             tooltips="@{operation}: @text",
             x_range=(-0.5, 1.0),
@@ -3570,7 +3570,7 @@ class _FinePerformanceMetricsByExecution(DashboardComponent):
         barchart = figure(
             x_range=data["functions"],
             height=500,
-            title="Fine Performance Metrics by execution",
+            title="Task execution, by prefix",
             tools="pan,wheel_zoom,box_zoom,reset",
             sizing_mode="scale_width",
         )
@@ -3629,25 +3629,22 @@ class FinePerformanceMetrics(DashboardComponent):
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
 
-        self.fine_perf_metrics_by_execution = _FinePerformanceMetricsByExecution(
+        self.metrics_by_prefix_and_activity = _PerfMetricsExecutionByPrefixAndActivity(
             scheduler, **kwargs
         )
-        self.fine_perf_metrics_get_data = _FinePerformanceMetricsGetData(
-            scheduler, **kwargs
-        )
+        self.metrics_send_data = _PerfMetricsSendData(scheduler, **kwargs)
         self.root = column(
             [
-                self.fine_perf_metrics_by_execution.root,
-                self.fine_perf_metrics_get_data.root,
+                self.metrics_by_prefix_and_activity.root,
+                self.metrics_send_data.root,
             ]
         )
-        self.source = ColumnDataSource(dict())
 
     @without_property_validation
     @log_errors
     def update(self):
-        self.fine_perf_metrics_by_execution.update()
-        self.fine_perf_metrics_get_data.update()
+        self.metrics_by_prefix_and_activity.update()
+        self.metrics_send_data.update()
 
 
 class Contention(DashboardComponent):
