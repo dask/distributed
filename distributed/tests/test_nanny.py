@@ -13,11 +13,6 @@ from unittest import mock
 
 import psutil
 import pytest
-
-from distributed.diagnostics.plugin import WorkerPlugin
-
-pytestmark = pytest.mark.gpu
-
 from tlz import first
 from tornado.ioloop import IOLoop
 
@@ -28,6 +23,7 @@ from distributed import Nanny, Scheduler, Worker, profile, rpc, wait, worker
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status
 from distributed.diagnostics import SchedulerPlugin
+from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.utils import TimeoutError, get_mp_context, parse_ports
@@ -39,7 +35,7 @@ from distributed.utils_test import (
     raises_with_cause,
 )
 
-pytestmark = pytest.mark.ci1
+pytestmark = [pytest.mark.ci1, pytest.mark.gpu]
 
 
 @gen_cluster(Worker=Nanny)
