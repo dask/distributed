@@ -45,7 +45,7 @@ from distributed.node import ServerNode
 from distributed.process import AsyncProcess
 from distributed.proctitle import enable_proctitle_on_children
 from distributed.protocol import pickle
-from distributed.protocol.serialize import _is_msgpack_serializable
+from distributed.protocol.serialize import _is_dumpable
 from distributed.security import Security
 from distributed.utils import (
     get_ip,
@@ -637,7 +637,7 @@ class Nanny(ServerNode):
         --------
         Client.log_event
         """
-        if not _is_msgpack_serializable(msg):
+        if not _is_dumpable(msg):
             raise TypeError(
                 f"Message must be msgpack serializable. Got {type(msg)=} instead."
             )

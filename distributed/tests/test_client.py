@@ -76,7 +76,7 @@ from distributed.client import (
 from distributed.cluster_dump import load_cluster_dump
 from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, WINDOWS
-from distributed.core import Status
+from distributed.core import Status, error_message
 from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.metrics import time
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
@@ -7480,7 +7480,20 @@ async def test_log_event_msgpack(c, s, a, b):
 
         await c.log_event("test-topic", C())
     await c.log_event("test-topic", "bar")
-    assert [msg[1] for msg in s.get_events("test-topic")] == ["foo", "bar"]
+    await c.log_event("test-topic", error_message(Exception()))
+
+    # assertion reversed for mock.ANY.__eq__(Serialized())
+    assert [
+        "foo",
+        "bar",
+        {
+            "status": "error",
+            "exception": mock.ANY,
+            "traceback": mock.ANY,
+            "exception_text": "Exception()",
+            "traceback_text": "",
+        },
+    ] == [msg[1] for msg in s.get_events("test-topic")]
 
 
 @gen_cluster(client=True)

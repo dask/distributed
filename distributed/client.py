@@ -47,7 +47,7 @@ from dask.utils import (
 from dask.widgets import get_template
 
 from distributed.core import ErrorMessage
-from distributed.protocol.serialize import _is_msgpack_serializable
+from distributed.protocol.serialize import _is_dumpable
 from distributed.utils import wait_for
 
 try:
@@ -4397,7 +4397,7 @@ class Client(SyncMethodMixin):
         >>> from time import time
         >>> client.log_event("current-time", time())
         """
-        if not _is_msgpack_serializable(msg):
+        if not _is_dumpable(msg):
             raise TypeError(
                 f"Message must be msgpack serializable. Got {type(msg)=} instead."
             )

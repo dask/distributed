@@ -26,7 +26,7 @@ from dask.utils import tmpfile
 
 from distributed import Nanny, Scheduler, Worker, profile, rpc, wait, worker
 from distributed.compatibility import LINUX, WINDOWS
-from distributed.core import CommClosedError, Status
+from distributed.core import CommClosedError, Status, error_message
 from distributed.diagnostics import SchedulerPlugin
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
@@ -768,8 +768,20 @@ async def test_log_event(c, s):
         with pytest.raises(TypeError, match="msgpack"):
             n.log_event("test-topic", C())
         n.log_event("test-topic", "bar")
+        n.log_event("test-topic", error_message(Exception()))
 
         # Worker unaffected
         assert await c.submit(lambda x: x + 1, 1) == 2
 
-    assert [msg[1] for msg in s.get_events("test-topic")] == ["foo", "bar"]
+    # assertion reversed for mock.ANY.__eq__(Serialized())
+    assert [
+        "foo",
+        "bar",
+        {
+            "status": "error",
+            "exception": mock.ANY,
+            "traceback": mock.ANY,
+            "exception_text": "Exception()",
+            "traceback_text": "",
+        },
+    ] == [msg[1] for msg in s.get_events("test-topic")]

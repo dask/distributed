@@ -882,8 +882,21 @@ async def test_log_event(c, s, a):
 
     # Worker still works
     await c.submit(log_event, "bar")
+    await c.submit(log_event, error_message(Exception()))
 
-    assert [msg[1] for msg in s.get_events("test-topic")] == ["foo", "bar"]
+    # assertion reversed for mock.ANY.__eq__(Serialized())
+    assert [
+        "foo",
+        "bar",
+        {
+            "status": "error",
+            "exception": mock.ANY,
+            "traceback": mock.ANY,
+            "exception_text": "Exception()",
+            "traceback_text": "",
+            "worker": a.address,
+        },
+    ] == [msg[1] for msg in s.get_events("test-topic")]
 
 
 @gen_cluster(client=True)
