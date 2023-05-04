@@ -3592,9 +3592,8 @@ class _PerfMetricsExecutionByPrefixAndActivity(DashboardComponent):
         )
         for vbar in renderers:
             tooltips = [
-                (vbar.name, "@$name"),
                 (
-                    "Text",
+                    vbar.name,
                     f"@{{{vbar.name.replace('_bytes', '').replace('_value', '')}_text}}",
                 ),
                 ("function", "@functions"),
