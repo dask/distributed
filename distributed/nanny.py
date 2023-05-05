@@ -186,7 +186,7 @@ class Nanny(ServerNode):
 
         # Create directory if it doesn't exist and test for write access.
         # In case of PermissionError, change the name.
-        self.local_directory = WorkSpace(local_directory).base_dir
+        self.local_directory = WorkSpace(local_directory.format(**os.environ)).base_dir
 
         self.preload = preload
         if self.preload is None:
