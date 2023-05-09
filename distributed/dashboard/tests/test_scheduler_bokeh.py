@@ -335,13 +335,13 @@ async def test_FinePerformanceMetrics(c, s, a, b):
 
     futures = c.map(slowinc, range(10), delay=0.001)
     await wait(futures)
-    await asyncio.sleep(0.5)  # wait for metrics to arrive
+    await asyncio.sleep(1)  # wait for metrics to arrive
+
+    assert not cl.task_exec_data
 
     cl.update()
-    d = dict(cl.metrics_by_prefix_and_activity.data)
-    ops = cl.metrics_by_prefix_and_activity.operations.copy()
-    assert ops  # Have some activities, 'deserialize', 'execution', etc
-    assert d  # Have metrics
+    assert cl.task_exec_data
+    assert cl.task_exec_data["functions"] == ["slowinc"]
 
 
 @gen_cluster(client=True)

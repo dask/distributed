@@ -3377,92 +3377,21 @@ class TaskProgress(DashboardComponent):
         )
 
 
-class _PerfMetricsSendData(DashboardComponent):
-    @log_errors
-    def __init__(self, scheduler, **kwargs):
-        self.scheduler = scheduler
-        self.data = defaultdict(list)
-        self.source = ColumnDataSource(data=dict())
-        self.substantial_change = False
-        self.init_root()
-
-    def init_root(self):
-        self.fig = figure()
-        self.root = row([self.fig])
-
-    @without_property_validation
-    @log_errors
-    def update(self):
-        items = self.scheduler.cumulative_worker_metrics.items()
-        items = (
-            (k, v)
-            for k, v in items
-            if isinstance(k, tuple) and k[0] == "get-data" and k[-1] == "seconds"
-        )
-        for (_type, operation, _freq), val in items:
-            if operation not in self.data["operation"]:
-                self.substantial_change = True
-                self.data["operation"].append(operation)
-
-            idx = self.data["operation"].index(operation)
-            while idx >= len(self.data["value"]):
-                self.data["value"].append(float("NaN"))
-            self.data["value"][idx] = val
-
-        self.data["text"] = [format_time(n) for n in self.data["value"]]
-        self.data["angle"] = [
-            value / sum(self.data["value"]) * 2 * math.pi
-            for value in self.data["value"]
-        ]
-        self.data["color"] = small_palettes["YlGnBu"].get(
-            len(self.data["operation"]), []
-        )
-
-        if self.data:
-            self.source.data = dict(self.data)
-            fig = figure(
-                height=500,
-                title="Send data, by activity",
-                tools="hover",
-                tooltips="@{operation}: @text",
-                x_range=(-0.5, 1.0),
-            )
-            fig.wedge(
-                x=0,
-                y=1,
-                radius=0.4,
-                start_angle=cumsum("angle", include_zero=True),
-                end_angle=cumsum("angle"),
-                line_color="white",
-                fill_color="color",
-                legend_field="operation",
-                source=self.source,
-            )
-            fig.axis.axis_label = None
-            fig.axis.visible = False
-            fig.grid.grid_line_color = None
-
-            if self.substantial_change:
-                self.root.children[0] = fig
-                self.substantial_change = False
-            else:
-                self.fig = fig
-
-
-class _PerfMetricsExecutionByPrefixAndActivity(DashboardComponent):
+class FinePerformanceMetrics(DashboardComponent):
     """
-    Stacked bar-chart displaying breakdown of function execution times
-    between de/serialization, thread-non/cpu, etc.
+    The main overview of the Fine Performance Metrics page.
     """
 
     @log_errors
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
-        self.data = defaultdict(list)
-        self.source = ColumnDataSource(data=dict())
-        self.piechart_source = ColumnDataSource(data=dict())
+        self.senddata = defaultdict(list)
+        self.sendsrc = ColumnDataSource(data=dict())
+        self.task_exec_data = defaultdict(list)
+        self.task_exec_by_prefix_src = ColumnDataSource(data=dict())
+        self.task_exec_by_activity_src = ColumnDataSource(data=dict())
         self.substantial_change = False
-        self.operations = []
+        self.task_operations = []
         self.init_root()
 
     def init_root(self):
@@ -3478,12 +3407,14 @@ class _PerfMetricsExecutionByPrefixAndActivity(DashboardComponent):
         self.function_selector.placeholder = "Select specific functions"
         self.toggle = Toggle(label="Timing (Toggle for Bytes)")
         self.toggle.on_click(handle_toggle)
-        self.barchart = figure()
-        self.piechart = figure()
+        self.task_exec_by_activity_chart = figure()
+        self.task_exec_by_prefix_chart = figure()
+        self.senddata_by_activity_chart = figure()
         self.root = column(
             self.function_selector,
             self.toggle,
-            row([self.piechart, self.barchart]),
+            row([self.task_exec_by_prefix_chart, self.task_exec_by_activity_chart]),
+            row([self.senddata_by_activity_chart]),
             sizing_mode="scale_width",
         )
 
@@ -3493,38 +3424,57 @@ class _PerfMetricsExecutionByPrefixAndActivity(DashboardComponent):
         items = (
             (k, v)
             for k, v in self.scheduler.cumulative_worker_metrics.items()
-            if isinstance(k, tuple)
-            and k[0] == "execute"
-            and k[-1] in ("bytes", "seconds")
+            if isinstance(k, tuple) and k[-1] in ("bytes", "seconds")
         )
-        for (_type, function_name, operation, freq), val in items:
-            if operation not in self.operations:
-                self.substantial_change = True
-                self.operations.append(operation)
+        for (type, *parts), val in items:
+            if type == "get-data":
+                operation, freq = parts
+                if operation not in self.senddata["operation"]:
+                    self.substantial_change = True
+                    self.senddata["operation"].append(operation)
 
-            if function_name not in self.data["functions"]:
-                self.substantial_change = True
-                self.function_selector.options.append(function_name)
-                self.data["functions"].append(function_name)
-                self.data["timestamp"].append(datetime.utcnow())
-            idx = self.data["functions"].index(function_name)
+                idx = self.senddata["operation"].index(operation)
+                while idx >= len(self.senddata[f"{operation}_value"]):
+                    self.senddata[f"{operation}_bytes"].append(0)
+                    self.senddata[f"{operation}_value"].append(0)
+                    self.senddata[f"{operation}_text"].append(0)
+                if freq == "bytes":
+                    self.senddata[f"{operation}_text"][idx] = format_bytes(val)
+                    self.senddata[f"{operation}_bytes"][idx] = val
+                elif freq == "seconds":
+                    self.senddata[f"{operation}_text"][idx] = format_time(val)
+                    self.senddata[f"{operation}_value"][idx] = val
 
-            # Some function/operation combos missing, so need to keep columns aligned
-            for op in self.operations:
-                while len(self.data[f"{op}_value"]) != len(self.data["functions"]):
-                    self.data[f"{op}_value"].append(0)
-                    self.data[f"{op}_bytes"].append(0)
-                    self.data[f"{op}_text"].append("")
+            elif type == "execute":
+                function_name, operation, freq = parts
+                if operation not in self.task_operations:
+                    self.substantial_change = True
+                    self.task_operations.append(operation)
 
-            if freq == "seconds":
-                self.data[f"{operation}_text"][idx] = format_time(val)
-                self.data[f"{operation}_value"][idx] = val
-            elif freq == "bytes":
-                self.data[f"{operation}_text"][idx] = format_bytes(val)
-                self.data[f"{operation}_bytes"][idx] = val
+                if function_name not in self.task_exec_data["functions"]:
+                    self.substantial_change = True
+                    self.function_selector.options.append(function_name)
+                    self.task_exec_data["functions"].append(function_name)
+                    self.task_exec_data["timestamp"].append(datetime.utcnow())
+                idx = self.task_exec_data["functions"].index(function_name)
 
-        data = self.data.copy()
+                # Some function/operation combos missing, so need to keep columns aligned
+                for op in self.task_operations:
+                    while len(self.task_exec_data[f"{op}_value"]) != len(
+                        self.task_exec_data["functions"]
+                    ):
+                        self.task_exec_data[f"{op}_value"].append(0)
+                        self.task_exec_data[f"{op}_bytes"].append(0)
+                        self.task_exec_data[f"{op}_text"].append("")
 
+                if freq == "seconds":
+                    self.task_exec_data[f"{operation}_text"][idx] = format_time(val)
+                    self.task_exec_data[f"{operation}_value"][idx] = val
+                elif freq == "bytes":
+                    self.task_exec_data[f"{operation}_text"][idx] = format_bytes(val)
+                    self.task_exec_data[f"{operation}_bytes"][idx] = val
+
+        data = self.task_exec_data.copy()
         # If user has manually selected function(s) then we are only showing them.
         if len(self.function_selector.value):
             indexes = [data["functions"].index(f) for f in self.function_selector.value]
@@ -3537,12 +3487,35 @@ class _PerfMetricsExecutionByPrefixAndActivity(DashboardComponent):
             n_show = len([d for d in data["timestamp"] if d > cutoff]) or 5
             for key in data:
                 data[key] = data[key][-n_show:]
+        self.task_exec_data = data.copy()
 
+        # Show total number of functions to choose from
+        self.function_selector.title = (
+            f"Filter by function ({len(self.function_selector.options)}):"
+        )
+
+        task_exec_piechart = self._build_task_execution_by_activity_chart()
+        task_exec_barchart = self._build_task_execution_by_prefix_chart()
+        senddata_piechart = self._build_senddata_chart()
+
+        # replacing the child causes small blips if done every iteration vs updating renderers
+        # but it's needed when new functions and/or operations show up to rerender plot
+        if self.substantial_change:
+            self.root.children[-2].children[0] = task_exec_barchart
+            self.root.children[-2].children[1] = task_exec_piechart
+            self.root.children[-1].children[0] = senddata_piechart
+            self.substantial_change = False
+        else:
+            self.task_exec_by_prefix_chart.renderers = task_exec_piechart.renderers
+            self.task_exec_by_activity_chart.renderers = task_exec_barchart.renderers
+            self.senddata_by_activity_chart.renderers = senddata_piechart.renderers
+
+    def _build_task_execution_by_activity_chart(self):
         show_bytes = self.toggle.active
         piechart_data = dict()
         piechart_data["value"] = [
-            sum(data[f"{op}_{'bytes' if show_bytes else 'value'}"])
-            for op in self.operations
+            sum(self.task_exec_data[f"{op}_{'bytes' if show_bytes else 'value'}"])
+            for op in self.task_operations
         ]
         piechart_data["text"] = [
             format_bytes(n) if show_bytes else format_time(n)
@@ -3550,18 +3523,24 @@ class _PerfMetricsExecutionByPrefixAndActivity(DashboardComponent):
         ]
         piechart_data["angle"] = [
             (
-                sum(data[f"{operation}_{'bytes' if show_bytes else 'value'}"])
+                sum(
+                    self.task_exec_data[
+                        f"{operation}_{'bytes' if show_bytes else 'value'}"
+                    ]
+                )
                 / sum(piechart_data["value"])
                 if sum(piechart_data["value"])
                 else 0  # may not have any bytes movement reported, avoid divide by zero
             )
             * 2
             * math.pi
-            for operation in self.operations
+            for operation in self.task_operations
         ]
-        piechart_data["color"] = small_palettes["YlGnBu"].get(len(self.operations), [])
-        piechart_data["operation"] = self.operations
-        self.piechart_source.data = piechart_data
+        piechart_data["color"] = small_palettes["YlGnBu"].get(
+            len(self.task_operations), []
+        )
+        piechart_data["operation"] = self.task_operations
+        self.task_exec_by_activity_src.data = piechart_data
 
         piechart = figure(
             height=500,
@@ -3574,7 +3553,7 @@ class _PerfMetricsExecutionByPrefixAndActivity(DashboardComponent):
         piechart.axis.visible = False
         piechart.grid.grid_line_color = None
 
-        piechart_renderers = piechart.wedge(
+        piechart.wedge(
             x=0,
             y=1,
             radius=0.4,
@@ -3583,11 +3562,13 @@ class _PerfMetricsExecutionByPrefixAndActivity(DashboardComponent):
             line_color="white",
             fill_color="color",
             legend_field="operation",
-            source=self.piechart_source,
+            source=self.task_exec_by_activity_src,
         )
+        return piechart
 
+    def _build_task_execution_by_prefix_chart(self):
         barchart = figure(
-            x_range=data["functions"],
+            x_range=self.task_exec_data["functions"],
             height=500,
             title="Task execution, by prefix",
             tools="pan,wheel_zoom,box_zoom,reset",
@@ -3599,15 +3580,15 @@ class _PerfMetricsExecutionByPrefixAndActivity(DashboardComponent):
         renderers = barchart.vbar_stack(
             [
                 name
-                for name in data.keys()
+                for name in self.task_exec_data.keys()
                 if name.endswith("bytes" if self.toggle.active else "value")
-                and len(data[name])
+                and len(self.task_exec_data[name])
             ],
             x="functions",
             width=0.9,
-            source=self.source,
-            color=small_palettes["YlGnBu"].get(len(self.operations), []),
-            legend_label=self.operations,
+            source=self.task_exec_by_prefix_src,
+            color=small_palettes["YlGnBu"].get(len(self.task_operations), []),
+            legend_label=self.task_operations,
         )
         for vbar in renderers:
             tooltips = [
@@ -3619,51 +3600,65 @@ class _PerfMetricsExecutionByPrefixAndActivity(DashboardComponent):
             ]
             barchart.add_tools(HoverTool(tooltips=tooltips, renderers=[vbar]))
 
-        if any(len(self.source.data[k]) != len(data[k]) for k in self.source.data):
+        if any(
+            len(self.task_exec_by_prefix_src.data[k]) != len(self.task_exec_data[k])
+            for k in self.task_exec_by_prefix_src.data
+        ):
             self.substantial_change = True
-        self.source.data = dict(data)
+        self.task_exec_by_prefix_src.data = dict(self.task_exec_data)
+        barchart.renderers = renderers
+        return barchart
 
-        # Show total number of functions to choose from
-        self.function_selector.title = (
-            f"Filter by function ({len(self.function_selector.options)}):"
+    def _build_senddata_chart(self):
+        show_bytes = self.toggle.active
+
+        senddata = dict()
+        senddata["operation"] = self.senddata["operation"]
+        senddata["value"] = [
+            (sum(self.senddata[f"{op}_{'bytes' if show_bytes else 'value'}"]))
+            for op in self.senddata["operation"]
+        ]
+        senddata["text"] = [
+            format_bytes(n) if show_bytes else format_time(n) for n in senddata["value"]
+        ]
+        senddata["angle"] = [
+            (
+                (
+                    sum(self.senddata[f"{op}_{'bytes' if show_bytes else 'value'}"])
+                    / sum(senddata["value"])
+                )
+                if sum(senddata["value"])
+                else 0.0
+            )
+            * 2
+            * math.pi
+            for op in senddata["operation"]
+        ]
+        senddata["color"] = small_palettes["YlGnBu"].get(len(senddata["operation"]), [])
+
+        self.sendsrc.data = senddata
+        senddata_piechart = figure(
+            height=500,
+            title="Send data, by activity",
+            tools="hover",
+            tooltips="@{operation}: @text",
+            x_range=(-0.5, 1.0),
         )
-
-        # replacing the child causes small blips if done every iteration vs updating renderers
-        # but it's needed when new functions and/or operations show up to rerender plot
-        if self.substantial_change:
-            self.root.children[-1].children[0] = barchart
-            self.root.children[-1].children[1] = piechart
-            self.substantial_change = False
-        else:
-            self.barchart.renderers = renderers
-            self.piechart.renderers = [piechart_renderers]
-
-
-class FinePerformanceMetrics(DashboardComponent):
-    """
-    The main overview of the Fine Performance Metrics page.
-    """
-
-    @log_errors
-    def __init__(self, scheduler, **kwargs):
-        self.scheduler = scheduler
-
-        self.metrics_by_prefix_and_activity = _PerfMetricsExecutionByPrefixAndActivity(
-            scheduler, **kwargs
+        senddata_piechart.wedge(
+            x=0,
+            y=1,
+            radius=0.4,
+            start_angle=cumsum("angle", include_zero=True),
+            end_angle=cumsum("angle"),
+            line_color="white",
+            fill_color="color",
+            legend_field="operation",
+            source=self.sendsrc,
         )
-        self.metrics_send_data = _PerfMetricsSendData(scheduler, **kwargs)
-        self.root = column(
-            [
-                self.metrics_by_prefix_and_activity.root,
-                self.metrics_send_data.root,
-            ]
-        )
-
-    @without_property_validation
-    @log_errors
-    def update(self):
-        self.metrics_by_prefix_and_activity.update()
-        self.metrics_send_data.update()
+        senddata_piechart.axis.axis_label = None
+        senddata_piechart.axis.visible = False
+        senddata_piechart.grid.grid_line_color = None
+        return senddata_piechart
 
 
 class Contention(DashboardComponent):
