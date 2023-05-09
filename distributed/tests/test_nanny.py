@@ -363,23 +363,23 @@ async def test_local_directory(s):
         with dask.config.set(temporary_directory=fn):
             async with Nanny(s.address) as n:
                 assert n.local_directory.startswith(fn)
-                assert "dask-worker-space" in n.local_directory
-                assert n.process.worker_dir.count("dask-worker-space") == 1
+                assert "dask-scratch-space" in n.local_directory
+                assert n.process.worker_dir.count("dask-scratch-space") == 1
 
 
 @pytest.mark.skipif(WINDOWS, reason="Need POSIX filesystem permissions and UIDs")
 @gen_cluster(nthreads=[])
 async def test_unwriteable_dask_worker_space(s, tmp_path):
-    os.mkdir(f"{tmp_path}/dask-worker-space", mode=0o500)
+    os.mkdir(f"{tmp_path}/dask-scratch-space", mode=0o500)
     with pytest.raises(PermissionError):
-        open(f"{tmp_path}/dask-worker-space/tryme", "w")
+        open(f"{tmp_path}/dask-scratch-space/tryme", "w")
 
     with dask.config.set(temporary_directory=tmp_path):
         async with Nanny(s.address) as n:
             assert n.local_directory == os.path.join(
-                tmp_path, f"dask-worker-space-{os.getuid()}"
+                tmp_path, f"dask-scratch-space-{os.getuid()}"
             )
-            assert n.process.worker_dir.count(f"dask-worker-space-{os.getuid()}") == 1
+            assert n.process.worker_dir.count(f"dask-scratch-space-{os.getuid()}") == 1
 
 
 def _noop(x):

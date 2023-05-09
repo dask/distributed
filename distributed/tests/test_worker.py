@@ -217,8 +217,9 @@ async def test_upload_file(c, s, a, b):
     result = await future
     assert result == 123
 
-    await c.close()
     await s.close()
+    await c.close()
+
     assert not os.path.exists(os.path.join(a.local_directory, "foobar.py"))
 
 
@@ -978,7 +979,7 @@ def test_worker_dir(worker, tmp_path):
 
 @gen_cluster(client=True, nthreads=[], config={"temporary-directory": None})
 async def test_default_worker_dir(c, s):
-    expect = os.path.join(tempfile.gettempdir(), "dask-worker-space")
+    expect = os.path.join(tempfile.gettempdir(), "dask-scratch-space")
 
     async with Worker(s.address) as w:
         assert os.path.dirname(w.local_directory) == expect
@@ -1385,7 +1386,7 @@ async def test_local_directory(s, tmp_path):
     with dask.config.set(temporary_directory=str(tmp_path)):
         async with Worker(s.address) as w:
             assert w.local_directory.startswith(str(tmp_path))
-            assert "dask-worker-space" in w.local_directory
+            assert "dask-scratch-space" in w.local_directory
 
 
 @gen_cluster(nthreads=[])
@@ -1393,7 +1394,7 @@ async def test_local_directory_make_new_directory(s, tmp_path):
     async with Worker(s.address, local_directory=str(tmp_path / "foo" / "bar")) as w:
         assert w.local_directory.startswith(str(tmp_path))
         assert "foo" in w.local_directory
-        assert "dask-worker-space" in w.local_directory
+        assert "dask-scratch-space" in w.local_directory
 
 
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
