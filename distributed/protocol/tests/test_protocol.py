@@ -26,12 +26,12 @@ from distributed.protocol.serialize import (
 from distributed.utils import nbytes
 
 
-@pytest.fixture(params=[None, "zlib", "lz4", "snappy", "zstd"])
+@pytest.fixture(params=[None, "zlib", "lz4", "snappy", "zstd", "cramjam.lz4"])
 def compression(request):
     if request.param == "zstd":
         pytest.importorskip("zstandard")
     elif request.param:
-        pytest.importorskip(request.param)
+        pytest.importorskip(request.param.split(".")[0])
     return request.param
 
 
@@ -57,6 +57,14 @@ def test_auto_compression():
     If neither is installed, test that we don't fall back to the very slow zlib.
     """
     with dask.config.set({"test123": "auto"}):
+        try:
+            import cramjam  # noqa: F401
+
+            assert get_compression_settings("test123") == "cramjam.lz4"
+            return
+        except ImportError:
+            pass
+
         try:
             import lz4  # noqa: F401
 
@@ -142,7 +150,7 @@ def test_maybe_compress(compression, dtype):
     payload = dtype(b"0" * 10000)
     rc, rd = maybe_compress(payload, compression=compression)
     assert rc == compression
-    assert compressions[rc].decompress(rd) == payload
+    assert dtype(compressions[rc].decompress(rd)) == payload
 
 
 def test_maybe_compress_sample(compression):
@@ -165,7 +173,7 @@ def test_compression_thread_safety(compression, dtype):
         for _ in range(2000):
             rc, rd = maybe_compress(payload, compression=compression)
             assert rc == compression
-            assert compressions[rc].decompress(rd) == expect
+            assert bytes(compressions[rc].decompress(rd)) == expect
 
     with ThreadPoolExecutor(4) as ex:
         futures = [ex.submit(compress_decompress) for _ in range(4)]

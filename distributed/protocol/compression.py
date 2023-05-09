@@ -82,6 +82,19 @@ with suppress(ImportError):
 
 
 with suppress(ImportError):
+    import cramjam
+
+    # TODO change to 2.7.0. This is a hack to make it work with 2.7.0-rc3.
+    if parse_version(cramjam.__version__) < parse_version("2.6.99"):
+        raise ImportError("Need cramjam >= 2.7.0")
+
+    compressions["cramjam.lz4"] = Compression(
+        "cramjam.lz4", cramjam.lz4.compress_block, cramjam.lz4.decompress_block
+    )
+    compressions["auto"] = compressions["cramjam.lz4"]
+
+
+with suppress(ImportError):
     import zstandard
 
     # Required for Python Buffer Protocol support.
