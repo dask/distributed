@@ -217,6 +217,12 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     ) -> dict[Any, str]:
         """Pin the outputs of a P2P shuffle to specific workers.
 
+        Parameters
+        ----------
+        id: ID of the shuffle to pin
+        output_partitions: Output partition IDs to pin
+        pick: Function that picks a worker given a partition ID and sequence of worker
+
         .. note:
             This function assumes that the barrier task and the output tasks share
             the same worker restrictions.
