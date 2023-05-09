@@ -3538,11 +3538,25 @@ class _PerfMetricsExecutionByPrefixAndActivity(DashboardComponent):
             for key in data:
                 data[key] = data[key][-n_show:]
 
+        show_bytes = self.toggle.active
         piechart_data = dict()
-        piechart_data["value"] = [sum(data[f"{op}_value"]) for op in self.operations]
-        piechart_data["text"] = [format_time(n) for n in piechart_data["value"]]
+        piechart_data["value"] = [
+            sum(data[f"{op}_{'bytes' if show_bytes else 'value'}"])
+            for op in self.operations
+        ]
+        piechart_data["text"] = [
+            format_bytes(n) if show_bytes else format_time(n)
+            for n in piechart_data["value"]
+        ]
         piechart_data["angle"] = [
-            sum(data[f"{operation}_value"]) / sum(piechart_data["value"]) * 2 * math.pi
+            (
+                sum(data[f"{operation}_{'bytes' if show_bytes else 'value'}"])
+                / sum(piechart_data["value"])
+                if sum(piechart_data["value"])
+                else 0  # may not have any bytes movement reported, avoid divide by zero
+            )
+            * 2
+            * math.pi
             for operation in self.operations
         ]
         piechart_data["color"] = small_palettes["YlGnBu"].get(len(self.operations), [])
@@ -3560,7 +3574,7 @@ class _PerfMetricsExecutionByPrefixAndActivity(DashboardComponent):
         piechart.axis.visible = False
         piechart.grid.grid_line_color = None
 
-        renderers = piechart.wedge(
+        piechart_renderers = piechart.wedge(
             x=0,
             y=1,
             radius=0.4,
@@ -3571,7 +3585,6 @@ class _PerfMetricsExecutionByPrefixAndActivity(DashboardComponent):
             legend_field="operation",
             source=self.piechart_source,
         )
-        self.piechart.renderers = [renderers]
 
         barchart = figure(
             x_range=data["functions"],
@@ -3623,6 +3636,7 @@ class _PerfMetricsExecutionByPrefixAndActivity(DashboardComponent):
             self.substantial_change = False
         else:
             self.barchart.renderers = renderers
+            self.piechart.renderers = [piechart_renderers]
 
 
 class FinePerformanceMetrics(DashboardComponent):
