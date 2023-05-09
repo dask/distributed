@@ -902,7 +902,7 @@ async def test_crashed_worker_after_shuffle(c, s, a):
     async with Nanny(s.address, nthreads=1) as n:
         df = df = dask.datasets.timeseries(
             start="2000-01-01",
-            end="2000-01-10",
+            end="2000-03-01",
             dtypes={"x": float, "y": float},
             freq="100 s",
             seed=42,
