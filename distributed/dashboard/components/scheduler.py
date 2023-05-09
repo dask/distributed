@@ -3388,6 +3388,7 @@ class FinePerformanceMetrics(DashboardComponent):
         self.senddata = defaultdict(list)
         self.sendsrc = ColumnDataSource(data=dict())
         self.task_exec_data = defaultdict(list)
+        self.task_exec_data_limited = defaultdict(list)
         self.task_exec_by_prefix_src = ColumnDataSource(data=dict())
         self.task_exec_by_activity_src = ColumnDataSource(data=dict())
         self.substantial_change = False
@@ -3421,7 +3422,7 @@ class FinePerformanceMetrics(DashboardComponent):
     @without_property_validation
     @log_errors
     def update(self):
-        items = (
+        items = sorted(
             (k, v)
             for k, v in self.scheduler.cumulative_worker_metrics.items()
             if isinstance(k, tuple) and k[-1] in ("bytes", "seconds")
@@ -3487,7 +3488,7 @@ class FinePerformanceMetrics(DashboardComponent):
             n_show = len([d for d in data["timestamp"] if d > cutoff]) or 5
             for key in data:
                 data[key] = data[key][-n_show:]
-        self.task_exec_data = data.copy()
+        self.task_exec_data_limited = data.copy()
 
         # Show total number of functions to choose from
         self.function_selector.title = (
@@ -3514,7 +3515,11 @@ class FinePerformanceMetrics(DashboardComponent):
         show_bytes = self.toggle.active
         piechart_data = dict()
         piechart_data["value"] = [
-            sum(self.task_exec_data[f"{op}_{'bytes' if show_bytes else 'value'}"])
+            sum(
+                self.task_exec_data_limited[
+                    f"{op}_{'bytes' if show_bytes else 'value'}"
+                ]
+            )
             for op in self.task_operations
         ]
         piechart_data["text"] = [
@@ -3524,7 +3529,7 @@ class FinePerformanceMetrics(DashboardComponent):
         piechart_data["angle"] = [
             (
                 sum(
-                    self.task_exec_data[
+                    self.task_exec_data_limited[
                         f"{operation}_{'bytes' if show_bytes else 'value'}"
                     ]
                 )
@@ -3568,7 +3573,7 @@ class FinePerformanceMetrics(DashboardComponent):
 
     def _build_task_execution_by_prefix_chart(self):
         barchart = figure(
-            x_range=self.task_exec_data["functions"],
+            x_range=self.task_exec_data_limited["functions"],
             height=500,
             title="Task execution, by prefix",
             tools="pan,wheel_zoom,box_zoom,reset",
@@ -3580,9 +3585,9 @@ class FinePerformanceMetrics(DashboardComponent):
         renderers = barchart.vbar_stack(
             [
                 name
-                for name in self.task_exec_data.keys()
+                for name in self.task_exec_data_limited.keys()
                 if name.endswith("bytes" if self.toggle.active else "value")
-                and len(self.task_exec_data[name])
+                and len(self.task_exec_data_limited[name])
             ],
             x="functions",
             width=0.9,
@@ -3601,11 +3606,12 @@ class FinePerformanceMetrics(DashboardComponent):
             barchart.add_tools(HoverTool(tooltips=tooltips, renderers=[vbar]))
 
         if any(
-            len(self.task_exec_by_prefix_src.data[k]) != len(self.task_exec_data[k])
+            len(self.task_exec_by_prefix_src.data[k])
+            != len(self.task_exec_data_limited[k])
             for k in self.task_exec_by_prefix_src.data
         ):
             self.substantial_change = True
-        self.task_exec_by_prefix_src.data = dict(self.task_exec_data)
+        self.task_exec_by_prefix_src.data = dict(self.task_exec_data_limited)
         barchart.renderers = renderers
         return barchart
 
