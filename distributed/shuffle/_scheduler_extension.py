@@ -125,7 +125,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             msg=msg, workers=list(shuffle.participating_workers)
         )
 
-    async def restrict_task(
+   def restrict_task(
         self, id: ShuffleId, run_id: int, key: str, worker: str
     ) -> dict:
         shuffle = self.states[id]
