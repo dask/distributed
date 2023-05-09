@@ -125,9 +125,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             msg=msg, workers=list(shuffle.participating_workers)
         )
 
-   def restrict_task(
-        self, id: ShuffleId, run_id: int, key: str, worker: str
-    ) -> dict:
+    def restrict_task(self, id: ShuffleId, run_id: int, key: str, worker: str) -> dict:
         shuffle = self.states[id]
         if shuffle.run_id != run_id:
             return {"status": "error", "message": "Stale shuffle"}
@@ -217,6 +215,12 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         output_partitions: Iterable[Any],
         pick: Callable[[Any, Sequence[str]], str],
     ) -> dict[Any, str]:
+        """Pin the outputs of a P2P shuffle to specific workers.
+
+        .. note:
+            This function assumes that the barrier task and the output tasks share
+            the same worker restrictions.
+        """
         mapping = {}
         barrier = self.scheduler.tasks[barrier_key(id)]
 
