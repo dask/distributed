@@ -1486,8 +1486,15 @@ async def test_upload_file(c, s, a, b):
 
     with save_sys_modules():
         for value in [123, 456]:
-            with tmp_text("myfile.py", f"def f():\n    return {value}") as fn:
+            code = f"def f():\n    return {value}"
+            with tmp_text("myfile.py", code) as fn:
                 await c.upload_file(fn)
+
+            # Confirm workers _and_ scheduler got the file
+            for server in [s, a, b]:
+                file = pathlib.Path(server.local_directory).joinpath("myfile.py")
+                assert file.is_file()
+                assert file.read_text() == code
 
             x = c.submit(g, pure=False)
             result = await x
@@ -3238,6 +3245,68 @@ def test_default_get(loop_in_thread):
                 assert dask.base.get_scheduler() == c2.get
             assert dask.base.get_scheduler() == c1.get
         assert dask.base.get_scheduler() == pre_get
+
+
+@gen_cluster(config={"scheduler": "sync"}, nthreads=[])
+async def test_get_scheduler_default_client_config_interleaving(s):
+    # This test is using context managers intentionally. We should not refactor
+    # this to use it in more places to make the client closing cleaner.
+    with pytest.warns(UserWarning):
+        assert dask.base.get_scheduler() == dask.local.get_sync
+        with dask.config.set(scheduler="threads"):
+            assert dask.base.get_scheduler() == dask.threaded.get
+            client = await Client(s.address, set_as_default=False, asynchronous=True)
+            try:
+                assert dask.base.get_scheduler() == dask.threaded.get
+            finally:
+                await client.close()
+
+            client = await Client(s.address, set_as_default=True, asynchronous=True)
+            try:
+                assert dask.base.get_scheduler() == client.get
+            finally:
+                await client.close()
+            assert dask.base.get_scheduler() == dask.threaded.get
+
+            # FIXME: As soon as async with uses as_current this will be true as well
+            # async with Client(s.address, set_as_default=False, asynchronous=True) as c:
+            #     assert dask.base.get_scheduler() == c.get
+            # assert dask.base.get_scheduler() == dask.threaded.get
+
+            client = await Client(s.address, set_as_default=False, asynchronous=True)
+            try:
+                assert dask.base.get_scheduler() == dask.threaded.get
+                with client.as_current():
+                    sc = dask.base.get_scheduler()
+                    assert sc == client.get
+                assert dask.base.get_scheduler() == dask.threaded.get
+            finally:
+                await client.close()
+
+            # If it comes to a race between default and current, current wins
+            client = await Client(s.address, set_as_default=True, asynchronous=True)
+            client2 = await Client(s.address, set_as_default=False, asynchronous=True)
+            try:
+                with client2.as_current():
+                    assert dask.base.get_scheduler() == client2.get
+                assert dask.base.get_scheduler() == client.get
+            finally:
+                await client.close()
+                await client2.close()
+
+            assert dask.base.get_scheduler() == dask.threaded.get
+
+        assert dask.base.get_scheduler() == dask.local.get_sync
+
+        client = await Client(s.address, set_as_default=True, asynchronous=True)
+        try:
+            assert dask.base.get_scheduler() == client.get
+            with dask.config.set(scheduler="threads"):
+                assert dask.base.get_scheduler() == dask.threaded.get
+                with client.as_current():
+                    assert dask.base.get_scheduler() == client.get
+        finally:
+            await client.close()
 
 
 @gen_cluster(client=True)
@@ -6628,21 +6697,32 @@ def test_client_connectionpool_semaphore_loop(s, a, b, loop):
 
 
 @pytest.mark.slow
-@gen_cluster(nthreads=[], timeout=60)
-async def test_mixed_compression(s):
+@gen_cluster(client=True, nthreads=[], config={"distributed.comm.compression": None})
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
+async def test_mixed_compression(c, s):
     pytest.importorskip("lz4")
     da = pytest.importorskip("dask.array")
+
     async with Nanny(
-        s.address, nthreads=1, config={"distributed.comm.compression": None}
+        s.address,
+        host="127.0.0.2",
+        nthreads=1,
+        config={"distributed.comm.compression": "lz4"},
+    ), Nanny(
+        s.address,
+        host="127.0.0.3",
+        nthreads=1,
+        config={"distributed.comm.compression": "zlib"},
     ):
-        async with Nanny(
-            s.address, nthreads=1, config={"distributed.comm.compression": "lz4"}
-        ):
-            async with Client(s.address, asynchronous=True) as c:
-                await c.get_versions()
-                x = da.ones((10000, 10000))
-                y = x + x.T
-                await c.compute(y.sum())
+        await c.wait_for_workers(2)
+        await c.get_versions()
+
+        x = da.ones((10000, 10000))
+        # get_data between Worker with lz4 and Worker with zlib
+        y = x + x.T
+        # get_data from Worker with lz4 and Worker with zlib to Client with None
+        out = await c.gather(y)
+        assert out.shape == (10000, 10000)
 
 
 def test_futures_in_subgraphs(loop_in_thread):

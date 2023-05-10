@@ -659,13 +659,14 @@ def sizeof_serialized(obj):
     return sizeof(obj.header) + sizeof(obj.frames)
 
 
-def serialize_bytelist(x, **kwargs):
+def serialize_bytelist(
+    x: object, compression: str | None | Literal[False] = "auto", **kwargs: Any
+) -> list[bytes | bytearray | memoryview]:
     header, frames = serialize_and_split(x, **kwargs)
     if frames:
-        compression, frames = zip(*map(maybe_compress, frames))
-    else:
-        compression = []
-    header["compression"] = compression
+        header["compression"], frames = zip(
+            *(maybe_compress(frame, compression=compression) for frame in frames)
+        )
     header["count"] = len(frames)
 
     header = msgpack.dumps(header, use_bin_type=True)

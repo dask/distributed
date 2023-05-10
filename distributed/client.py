@@ -74,6 +74,7 @@ from distributed.core import (
 from distributed.diagnostics.plugin import (
     ForwardLoggingPlugin,
     NannyPlugin,
+    SchedulerUploadFile,
     UploadFile,
     WorkerPlugin,
     _get_plugin_name,
@@ -970,7 +971,8 @@ class Client(SyncMethodMixin):
 
         self._start_arg = address
         self._set_as_default = set_as_default
-
+        if set_as_default:
+            self._set_config = dask.config.set(scheduler="dask.distributed")
         self._event_handlers = {}
 
         self._stream_handlers = {
@@ -1054,10 +1056,11 @@ class Client(SyncMethodMixin):
         context manager will be automatically attached to this Client.
         """
         tok = _current_client.set(self)
-        try:
-            yield
-        finally:
-            _current_client.reset(tok)
+        with dask.config.set(scheduler="dask.distributed"):
+            try:
+                yield
+            finally:
+                _current_client.reset(tok)
 
     @classmethod
     def current(cls, allow_global=True):
@@ -1669,6 +1672,11 @@ class Client(SyncMethodMixin):
         with log_errors():
             _del_global_client(self)
             self._scheduler_identity = {}
+            if self._set_as_default and not _get_global_client():
+                with suppress(AttributeError):
+                    # clear the dask.config set keys
+                    with self._set_config:
+                        pass
             if self.get == dask.config.get("get", None):
                 del dask.config.config["get"]
 
@@ -3727,10 +3735,18 @@ class Client(SyncMethodMixin):
         >>> from mylibrary import myfunc  # doctest: +SKIP
         >>> L = client.map(myfunc, seq)  # doctest: +SKIP
         """
-        return self.register_worker_plugin(
-            UploadFile(filename),
-            name=filename + str(uuid.uuid4()),
-        )
+        name = filename + str(uuid.uuid4())
+
+        async def _():
+            results = await asyncio.gather(
+                self.register_scheduler_plugin(
+                    SchedulerUploadFile(filename), name=name
+                ),
+                self.register_worker_plugin(UploadFile(filename), name=name),
+            )
+            return results[1]  # Results from workers upload
+
+        return self.sync(_)
 
     async def _rebalance(self, futures=None, workers=None):
         if futures is not None:
