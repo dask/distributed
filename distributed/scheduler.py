@@ -1776,6 +1776,19 @@ class SchedulerState:
             collection.clear()  # type: ignore
 
     @property
+    def fully_idle(self) -> bool:
+        """Return True iff there are no tasks that haven't finished computing.
+
+        Unlike testing `self.total_occupancy`, this property returns False if there are
+        long-running tasks, no-worker, or queued tasks (due to not having any workers).
+        """
+        return all(
+            count == 0 or state in {"memory", "error", "released", "forgotten"}
+            for tg in self.task_groups.values()
+            for state, count in tg.states.items()
+        )
+
+    @property
     def total_occupancy(self) -> float:
         return self._calc_occupancy(
             self._task_prefix_count_global,
@@ -4325,7 +4338,7 @@ class Scheduler(SchedulerState, ServerNode):
                 keys=lost_keys, client=client, stimulus_id=stimulus_id
             )
 
-        if self.total_occupancy > 1e-9 and self.computations:
+        if not self.fully_idle and self.computations:
             # Still working on something. Assign new tasks to same computation
             computation = self.computations[-1]
         else:
