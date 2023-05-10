@@ -1,7 +1,11 @@
+from __future__ import annotations
+
 import pickle
 from datetime import timedelta
 
-from distributed import Event
+import pytest
+
+from distributed import Client, Event
 from distributed.utils_test import gen_cluster
 
 
@@ -218,3 +222,33 @@ async def test_two_events_on_workers(c, s, a, b):
 
     assert not s.extensions["events"]._events
     assert not s.extensions["events"]._waiter_count
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_unpickle_without_client(c, s):
+    """Ensure that the object properly pickle roundtrips even if no client, worker, etc. is active in the given context.
+
+    This typically happens if the object is being deserialized on the scheduler.
+    """
+    obj = await Event()
+    pickled = pickle.dumps(obj)
+    await c.close()
+
+    # We do not want to initialize a client during unpickling
+    with pytest.raises(ValueError):
+        Client.current()
+
+    obj2 = pickle.loads(pickled)
+
+    with pytest.raises(ValueError):
+        Client.current()
+
+    assert obj2.client is None
+
+    with pytest.raises(RuntimeError, match="not properly initialized"):
+        await obj2.set()
+
+    async with Client(s.address, asynchronous=True):
+        obj3 = pickle.loads(pickled)
+        await obj3.set()
+        await obj3.wait()

@@ -1,12 +1,55 @@
+from __future__ import annotations
+
+import abc
 import asyncio
 import functools
+import sys
 import threading
+from dataclasses import dataclass
+from datetime import timedelta
+from typing import Generic, Literal, NoReturn, TypeVar
 
-from .client import Future
-from .protocol import to_serialize
-from .utils import iscoroutinefunction, sync, thread_state
-from .utils_comm import WrappedKey
-from .worker import get_client, get_worker
+from tornado.ioloop import IOLoop
+
+from distributed.client import Future
+from distributed.protocol import to_serialize
+from distributed.utils import iscoroutinefunction, sync, thread_state
+from distributed.utils_comm import WrappedKey
+from distributed.worker import get_client, get_worker
+
+_T = TypeVar("_T")
+
+if sys.version_info >= (3, 9):
+    from collections.abc import Awaitable, Generator
+else:
+    from typing import Awaitable, Generator
+
+if sys.version_info >= (3, 10):
+    from asyncio import Event as _LateLoopEvent
+else:
+    # In python 3.10 asyncio.Lock and other primitives no longer support
+    # passing a loop kwarg to bind to a loop running in another thread
+    # e.g. calling from Client(asynchronous=False). Instead the loop is bound
+    # as late as possible: when calling any methods that wait on or wake
+    # Future instances. See: https://bugs.python.org/issue42392
+    class _LateLoopEvent:
+        def __init__(self) -> None:
+            self._event: asyncio.Event | None = None
+
+        def set(self) -> None:
+            if self._event is None:
+                self._event = asyncio.Event()
+
+            self._event.set()
+
+        def is_set(self) -> bool:
+            return self._event is not None and self._event.is_set()
+
+        async def wait(self) -> bool:
+            if self._event is None:
+                self._event = asyncio.Event()
+
+            return await self._event.wait()
 
 
 class Actor(WrappedKey):
@@ -14,7 +57,7 @@ class Actor(WrappedKey):
 
     An actor allows remote control of a stateful object living on a remote
     worker.  Method calls on this object trigger operations on the remote
-    object and return ActorFutures on which we can block to get results.
+    object and return BaseActorFutures on which we can block to get results.
 
     Examples
     --------
@@ -36,7 +79,7 @@ class Actor(WrappedKey):
     >>> counter
     <Actor: Counter, key=Counter-1234abcd>
 
-    Calling methods on this object immediately returns deferred ``ActorFuture``
+    Calling methods on this object immediately returns deferred ``BaseActorFuture``
     objects.  You can call ``.result()`` on these objects to block and get the
     result of the function call.
 
@@ -52,20 +95,22 @@ class Actor(WrappedKey):
         super().__init__(key)
         self._cls = cls
         self._address = address
+        self._key = key
         self._future = None
-        if worker:
-            self._worker = worker
-            self._client = None
-        else:
+        self._worker = worker
+        self._client = None
+        self._try_bind_worker_client()
+
+    def _try_bind_worker_client(self):
+        if not self._worker:
             try:
-                # TODO: `get_worker` may return the wrong worker instance for async local clusters (most tests)
-                # when run outside of a task (when deserializing a key pointing to an Actor, etc.)
                 self._worker = get_worker()
             except ValueError:
                 self._worker = None
+        if not self._client:
             try:
                 self._client = get_client()
-                self._future = Future(key, inform=self._worker is None)
+                self._future = Future(self._key, inform=False)
                 # ^ When running on a worker, only hold a weak reference to the key, otherwise the key could become unreleasable.
             except ValueError:
                 self._client = None
@@ -78,13 +123,17 @@ class Actor(WrappedKey):
 
     @property
     def _io_loop(self):
+        if self._worker is None and self._client is None:
+            self._try_bind_worker_client()
         if self._worker:
-            return self._worker.io_loop
+            return self._worker.loop
         else:
-            return self._client.io_loop
+            return self._client.loop
 
     @property
     def _scheduler_rpc(self):
+        if self._worker is None and self._client is None:
+            self._try_bind_worker_client()
         if self._worker:
             return self._worker.scheduler
         else:
@@ -92,6 +141,8 @@ class Actor(WrappedKey):
 
     @property
     def _worker_rpc(self):
+        if self._worker is None and self._client is None:
+            self._try_bind_worker_client()
         if self._worker:
             return self._worker.rpc(self._address)
         else:
@@ -121,12 +172,11 @@ class Actor(WrappedKey):
         return sorted(o)
 
     def __getattr__(self, key):
-
         if self._future and self._future.status not in ("finished", "pending"):
             raise ValueError(
                 "Worker holding Actor was lost.  Status: " + self._future.status
             )
-
+        self._try_bind_worker_client()
         if (
             self._worker
             and self._worker.address == self._address
@@ -140,9 +190,7 @@ class Actor(WrappedKey):
                 return attr
 
             elif callable(attr):
-                return lambda *args, **kwargs: ActorFuture(
-                    None, self._io_loop, result=attr(*args, **kwargs)
-                )
+                return lambda *args, **kwargs: EagerActorFuture(attr(*args, **kwargs))
             else:
                 return attr
 
@@ -165,17 +213,19 @@ class Actor(WrappedKey):
                             await self._future
                             return await run_actor_function_on_worker()
                         else:
-                            raise OSError("Unable to contact Actor's worker")
-                    return result
+                            exc = OSError("Unable to contact Actor's worker")
+                            return _Error(exc)
+                    if result["status"] == "OK":
+                        return _OK(result["result"])
+                    return _Error(result["exception"])
 
-                q = asyncio.Queue(loop=self._io_loop.asyncio_loop)
+                actor_future = ActorFuture(io_loop=self._io_loop)
 
-                async def wait_then_add_to_queue():
-                    x = await run_actor_function_on_worker()
-                    await q.put(x)
+                async def wait_then_set_result():
+                    actor_future._set_result(await run_actor_function_on_worker())
 
-                self._io_loop.add_callback(wait_then_add_to_queue)
-                return ActorFuture(q, self._io_loop)
+                self._io_loop.add_callback(wait_then_set_result)
+                return actor_future
 
             return func
 
@@ -215,10 +265,10 @@ class ProxyRPC:
         return func
 
 
-class ActorFuture:
+class BaseActorFuture(abc.ABC, Awaitable[_T]):
     """Future to an actor's method call
 
-    Whenever you call a method on an Actor you get an ActorFuture immediately
+    Whenever you call a method on an Actor you get a BaseActorFuture immediately
     while the computation happens in the background.  You can call ``.result``
     to block and collect the full result
 
@@ -227,34 +277,72 @@ class ActorFuture:
     Actor
     """
 
-    def __init__(self, q, io_loop, result=None):
-        self.q = q
-        self.io_loop = io_loop
-        if result:
-            self._cached_result = result
-        self.status = "pending"
+    @abc.abstractmethod
+    def result(self, timeout: str | timedelta | float | None = None) -> _T:
+        ...  # pragma: nocover
 
-    def __await__(self):
+    @abc.abstractmethod
+    def done(self) -> bool:
+        ...  # pragma: nocover
+
+    def __repr__(self) -> Literal["<ActorFuture>"]:
+        return "<ActorFuture>"
+
+
+@dataclass(frozen=True, eq=False)
+class EagerActorFuture(BaseActorFuture[_T]):
+    """Future to an actor's method call when an actor calls another actor on the same worker"""
+
+    _result: _T
+
+    def __await__(self) -> Generator[object, None, _T]:
+        return self._result
+        yield  # type: ignore[unreachable]
+
+    def result(self, timeout: object = None) -> _T:
+        return self._result
+
+    def done(self) -> Literal[True]:
+        return True
+
+
+@dataclass(frozen=True, eq=False)
+class _OK(Generic[_T]):
+    _v: _T
+
+    def unwrap(self) -> _T:
+        return self._v
+
+
+@dataclass(frozen=True, eq=False)
+class _Error:
+    _e: Exception
+
+    def unwrap(self) -> NoReturn:
+        raise self._e
+
+
+class ActorFuture(BaseActorFuture[_T]):
+    def __init__(self, io_loop: IOLoop):
+        self._io_loop = io_loop
+        self._event = _LateLoopEvent()
+        self._out: _Error | _OK[_T] | None = None
+
+    def __await__(self) -> Generator[object, None, _T]:
         return self._result().__await__()
 
-    def done(self):
-        return self.status != "pending"
+    def done(self) -> bool:
+        return self._event.is_set()
 
-    async def _result(self, raiseit=True):
-        if not hasattr(self, "_cached_result"):
-            out = await self.q.get()
-            if out["status"] == "OK":
-                self.status = "finished"
-                self._cached_result = out["result"]
-            else:
-                self.status = "error"
-                self._cached_result = out["exception"]
-        if self.status == "error":
-            raise self._cached_result
-        return self._cached_result
+    async def _result(self) -> _T:
+        await self._event.wait()
+        out = self._out
+        assert out is not None
+        return out.unwrap()
 
-    def result(self, timeout=None):
-        return sync(self.io_loop, self._result, callback_timeout=timeout)
+    def _set_result(self, out: _Error | _OK[_T]) -> None:
+        self._out = out
+        self._event.set()
 
-    def __repr__(self):
-        return "<ActorFuture>"
+    def result(self, timeout: str | timedelta | float | None = None) -> _T:
+        return sync(self._io_loop, self._result, callback_timeout=timeout)

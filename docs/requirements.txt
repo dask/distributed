@@ -4,5 +4,5 @@ toolz
 cloudpickle
 git+https://github.com/dask/dask
 sphinx
-dask-sphinx-theme>=1.3.5
+dask-sphinx-theme>=3.0.0
 sphinx-click

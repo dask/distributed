@@ -115,16 +115,16 @@ However accessing an attribute or calling a method will trigger a communication
 to the remote worker, run the method on the remote worker in a separate thread
 pool, and then communicate the result back to the calling side.  For attribute
 access these operations block and return when finished, for method calls they
-return an ``ActorFuture`` immediately.
+return an ``BaseActorFuture`` immediately.
 
 .. code-block:: python
 
-   >>> future = counter.increment()  # Immediately returns an ActorFuture
+   >>> future = counter.increment()  # Immediately returns a BaseActorFuture
    >>> future.result()               # Block until finished and result arrives
    1
 
-``ActorFuture`` are similar to normal Dask ``Future`` objects, but not as fully
-featured.  They curently *only* support the ``result`` method and nothing else.
+``BaseActorFuture`` are similar to normal Dask ``Future`` objects, but not as fully
+featured.  They currently *only* support the ``result`` method and nothing else.
 They don't currently work with any other Dask functions that expect futures,
 like ``as_completed``, ``wait``, or ``client.gather``.  They can't be placed
 into additional submit or map calls to form dependencies.  They communicate
@@ -167,14 +167,14 @@ workers have only a single thread for actors, but this may change in the
 future.
 
 The result is sent back immediately to the calling side, and is not stored on
-the worker with the actor.  It is cached on the ``ActorFuture`` object.
+the worker with the actor.  It is cached on the ``BaseActorFuture`` object.
 
 
 Calling from coroutines and async/await
 ---------------------------------------
 
 If you use actors within a coroutine or async/await function then actor methods
-and attrbute access will return Tornado futures
+and attribute access will return Tornado futures
 
 .. code-block:: python
 
@@ -227,5 +227,7 @@ Actors offer advanced capabilities, but with some cost:
     computations no diagnostics are available about these computations.
 3.  **No Load balancing:** Actors are allocated onto workers evenly, without
     serious consideration given to avoiding communication.
-4.  **Experimental:** Actors are a new feature and subject to change without
-    warning
+4.  **No dynamic clusters:** Actors cannot be migrated to other workers.
+    A worker holding an actor can be retired neither through
+    :meth:`~distributed.Client.retire_workers` nor through
+    :class:`~distributed.deploy.Adaptive`.

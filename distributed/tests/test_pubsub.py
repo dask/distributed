@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 from datetime import timedelta
 from time import sleep
@@ -30,7 +32,7 @@ async def test_speed(c, s, a, b):
         if start:
             pub.put(msg)  # other sub may not have started yet
 
-        for i in range(n):
+        for _ in range(n):
             msg = next(sub)
             pub.put(msg)
             # if i % 100 == 0:
@@ -52,7 +54,7 @@ async def test_speed(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[])
 async def test_client(c, s):
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError, match="No worker found"):
         get_worker()
     sub = Sub("a")
     pub = Pub("a")
@@ -83,7 +85,7 @@ async def test_client_worker(c, s, a, b):
     await wait(futures)
 
     L = []
-    for i in range(10):
+    for _ in range(10):
         result = await sub.get()
         L.append(result)
 

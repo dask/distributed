@@ -17,7 +17,7 @@ to various exceptions appearing when you interact with your local client, such a
 
 Note the special case of ``KilledWorker``: this means that a particular task was
 tried on a worker, and it died, and then the same task was sent to another worker,
-which also died. After a configurable number of deaths (config key "
+which also died. After a configurable number of deaths (config key
 ``distributed.scheduler.allowed-failures``), Dask decides to blame the
 task itself, and returns this exception. Note, that it is possible for a task to be
 unfairly blamed - the worker happened to die while the task was active, perhaps
@@ -86,8 +86,7 @@ as you would for ordinary exceptions happening during task execution.
 Specifically for connectivity problems (e.g., timeout exceptions in the worker
 logs), you will need to diagnose your networking infrastructure, which is more
 complicated than can be described here. Commonly, it may involve logging into
-the machine running the affected worker
-(although you can :ref:`ipylaunch`).
+the machine running the affected worker.
 
 Killed by Nanny
 '''''''''''''''
@@ -102,7 +101,7 @@ interrupting any work in progress. The log will show a message like
     Worker exceeded X memory budget. Restarting
 
 Where X is the memory fraction. You can set this critical fraction using
-the configuration, see :ref:`memman`. If you have an external system for
+the configuration, see :doc:`worker-memory`. If you have an external system for
 watching memory usage provided by your cluster infrastructure (HPC,
 kubernetes, etc.), then it may be reasonable to turn off this memory
 limit. Indeed, in these cases, restarts might be handled for you too, so

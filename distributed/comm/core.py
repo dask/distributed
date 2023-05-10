@@ -1,21 +1,24 @@
+from __future__ import annotations
+
 import asyncio
 import inspect
 import logging
 import random
 import sys
 import weakref
-from abc import ABC, abstractmethod, abstractproperty
+from abc import ABC, abstractmethod
 from contextlib import suppress
+from typing import Any, ClassVar
 
 import dask
 from dask.utils import parse_timedelta
 
-from ..metrics import time
-from ..protocol import pickle
-from ..protocol.compression import get_default_compression
-from ..utils import TimeoutError
-from . import registry
-from .addressing import parse_address
+from distributed.comm import registry
+from distributed.comm.addressing import get_address_host, parse_address, resolve_address
+from distributed.metrics import time
+from distributed.protocol.compression import get_compression_settings
+from distributed.protocol.pickle import HIGHEST_PROTOCOL
+from distributed.utils import wait_for
 
 logger = logging.getLogger(__name__)
 
@@ -40,15 +43,21 @@ class Comm(ABC):
     depending on the underlying transport's characteristics.
     """
 
-    _instances = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[Comm]] = weakref.WeakSet()
+    name: str | None
+    local_info: dict
+    remote_info: dict
+    handshake_options: dict
+    deserialize: bool
 
-    def __init__(self):
+    def __init__(self, deserialize: bool = True):
         self._instances.add(self)
         self.allow_offload = True  # for deserialization in utils.from_frames
         self.name = None
         self.local_info = {}
         self.remote_info = {}
         self.handshake_options = {}
+        self.deserialize = deserialize
 
     # XXX add set_close_callback()?
 
@@ -61,7 +70,7 @@ class Comm(ABC):
 
         Parameters
         ----------
-        deserializers : Optional[Dict[str, Tuple[Callable, Callable, bool]]]
+        deserializers : dict[str, tuple[Callable, Callable, bool]] | None
             An optional dict appropriate for distributed.protocol.deserialize.
             See :ref:`serialization` for more.
         """
@@ -76,7 +85,7 @@ class Comm(ABC):
         Parameters
         ----------
         msg
-        on_error : Optional[str]
+        on_error : str | None
             The behavior when serialization fails. See
             ``distributed.protocol.core.dumps`` for valid values.
         """
@@ -99,21 +108,28 @@ class Comm(ABC):
 
     @abstractmethod
     def closed(self):
-        """
-        Return whether the stream is closed.
-        """
+        """Return whether the stream is closed."""
 
-    @abstractproperty
-    def local_address(self):
-        """
-        The local address.  For logging and debugging purposes only.
-        """
+    @property
+    @abstractmethod
+    def local_address(self) -> str:
+        """The local address"""
 
-    @abstractproperty
-    def peer_address(self):
-        """
-        The peer's address.  For logging and debugging purposes only.
-        """
+    @property
+    @abstractmethod
+    def peer_address(self) -> str:
+        """The peer's address"""
+
+    @property
+    def same_host(self) -> bool:
+        """Return True if the peer is on localhost; False otherwise"""
+        local_ipaddr = get_address_host(resolve_address(self.local_address))
+        peer_ipaddr = get_address_host(resolve_address(self.peer_address))
+
+        # Note: this is not the same as testing `peer_ipaddr == "127.0.0.1"`.
+        # When you start a Server, by default it starts listening on the LAN interface,
+        # so its advertised address will be 10.x or 192.168.x.
+        return local_ipaddr == peer_ipaddr
 
     @property
     def extra_info(self):
@@ -124,16 +140,49 @@ class Comm(ABC):
         """
         return {}
 
-    @staticmethod
-    def handshake_info():
+    def handshake_info(self) -> dict[str, Any]:
+        """Share environment information with the peer that may differ, i.e. compression
+        settings.
+
+        Notes
+        -----
+        By the time this method runs, the "auto" compression setting has been updated to
+        an actual compression algorithm. This matters if both peers had compression set
+        to 'auto' but only one has lz4 installed. See
+        distributed.protocol.compression._update_and_check_compression_settings()
+
+        See also
+        --------
+        handshake_configuration
+        """
+        if self.same_host:
+            compression = None
+        else:
+            compression = get_compression_settings("distributed.comm.compression")
+
         return {
-            "compression": get_default_compression(),
+            "compression": compression,
             "python": tuple(sys.version_info)[:3],
-            "pickle-protocol": pickle.HIGHEST_PROTOCOL,
+            "pickle-protocol": HIGHEST_PROTOCOL,
         }
 
     @staticmethod
-    def handshake_configuration(local, remote):
+    def handshake_configuration(
+        local: dict[str, Any], remote: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Find a configuration that is suitable for both local and remote
+
+        Parameters
+        ----------
+        local
+            Output of handshake_info() in this process
+        remote
+            Output of handshake_info() on the remote host
+
+        See also
+        --------
+        handshake_info
+        """
         try:
             out = {
                 "pickle-protocol": min(
@@ -178,13 +227,15 @@ class Listener(ABC):
         communications, but prevents accepting new ones.
         """
 
-    @abstractproperty
+    @property
+    @abstractmethod
     def listen_address(self):
         """
         The listening address as a URI string.
         """
 
-    @abstractproperty
+    @property
+    @abstractmethod
     def contact_address(self):
         """
         An address this listener can be contacted on.  This can be
@@ -196,7 +247,7 @@ class Listener(ABC):
         await self.start()
         return self
 
-    async def __aexit__(self, *exc):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         future = self.stop()
         if inspect.isawaitable(future):
             await future
@@ -208,7 +259,9 @@ class Listener(ABC):
 
         return _().__await__()
 
-    async def on_connection(self, comm: Comm, handshake_overrides=None):
+    async def on_connection(
+        self, comm: Comm, handshake_overrides: dict[str, Any] | None = None
+    ) -> None:
         local_info = {**comm.handshake_info(), **(handshake_overrides or {})}
 
         timeout = dask.config.get("distributed.comm.timeouts.connect")
@@ -217,8 +270,8 @@ class Listener(ABC):
             # Timeout is to ensure that we'll terminate connections eventually.
             # Connector side will employ smaller timeouts and we should only
             # reach this if the comm is dead anyhow.
-            await asyncio.wait_for(comm.write(local_info), timeout=timeout)
-            handshake = await asyncio.wait_for(comm.read(), timeout=timeout)
+            await wait_for(comm.write(local_info), timeout=timeout)
+            handshake = await wait_for(comm.read(), timeout=timeout)
             # This would be better, but connections leak if worker is closed quickly
             # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
         except Exception as e:
@@ -227,9 +280,9 @@ class Listener(ABC):
             raise CommClosedError(f"Comm {comm!r} closed.") from e
 
         comm.remote_info = handshake
-        comm.remote_info["address"] = comm._peer_addr
+        comm.remote_info["address"] = comm.peer_address
         comm.local_info = local_info
-        comm.local_info["address"] = comm._local_addr
+        comm.local_info["address"] = comm.local_address
 
         comm.handshake_options = comm.handshake_configuration(
             comm.local_info, comm.remote_info
@@ -272,7 +325,7 @@ async def connect(
 
     backoff_base = 0.01
     attempt = 0
-
+    logger.debug("Establishing connection to %s", loc)
     # Prefer multiple small attempts than one long attempt. This should protect
     # primarily from DNS race conditions
     # gh3104, gh4176, gh4167
@@ -280,23 +333,25 @@ async def connect(
     active_exception = None
     while time_left() > 0:
         try:
-            comm = await asyncio.wait_for(
+            comm = await wait_for(
                 connector.connect(loc, deserialize=deserialize, **connection_args),
                 timeout=min(intermediate_cap, time_left()),
             )
             break
         except FatalCommClosedError:
             raise
-        # CommClosed, EnvironmentError inherit from OSError
-        except (TimeoutError, OSError) as exc:
+        # Note: CommClosed inherits from OSError
+        except (asyncio.TimeoutError, OSError) as exc:
             active_exception = exc
 
-            # The intermediate capping is mostly relevant for the initial
-            # connect. Afterwards we should be more forgiving
-            intermediate_cap = intermediate_cap * 1.5
+            # As described above, the intermediate timeout is used to distributed
+            # initial, bulk connect attempts homogeneously. In particular with
+            # the jitter upon retries we should not be worred about overloading
+            # any more DNS servers
+            intermediate_cap = timeout
             # FullJitter see https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
 
-            upper_cap = min(time_left(), backoff_base * (2 ** attempt))
+            upper_cap = min(time_left(), backoff_base * (2**attempt))
             backoff = random.uniform(0, upper_cap)
             attempt += 1
             logger.debug(
@@ -315,8 +370,8 @@ async def connect(
     try:
         # This would be better, but connections leak if worker is closed quickly
         # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
-        handshake = await asyncio.wait_for(comm.read(), time_left())
-        await asyncio.wait_for(comm.write(local_info), time_left())
+        handshake = await wait_for(comm.read(), time_left())
+        await wait_for(comm.write(local_info), time_left())
     except Exception as exc:
         with suppress(Exception):
             await comm.close()

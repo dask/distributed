@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import functools
 import traceback
 
@@ -5,8 +7,9 @@ import pytest
 
 h5py = pytest.importorskip("h5py")
 
+from dask.utils import tmpfile
+
 from distributed.protocol import deserialize, serialize
-from distributed.utils import tmpfile
 
 
 def silence_h5py_issue775(func):

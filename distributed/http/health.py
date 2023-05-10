@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from tornado import web
 
 
@@ -7,4 +9,4 @@ class HealthHandler(web.RequestHandler):
         self.set_header("Content-Type", "text/plain")
 
 
-routes = [("/health", HealthHandler, {})]
+routes: list[tuple] = [("/health", HealthHandler, {})]

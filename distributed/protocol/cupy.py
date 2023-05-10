@@ -1,17 +1,27 @@
 """
 Efficient serialization GPU arrays.
 """
+from __future__ import annotations
+
 import copyreg
 
 import cupy
 
-from .cuda import cuda_deserialize, cuda_serialize
-from .serialize import dask_deserialize, dask_serialize, register_generic
+from distributed.protocol.cuda import cuda_deserialize, cuda_serialize
+from distributed.protocol.serialize import (
+    dask_deserialize,
+    dask_serialize,
+    register_generic,
+)
 
 try:
-    from .rmm import dask_deserialize_rmm_device_buffer as dask_deserialize_cuda_buffer
+    from distributed.protocol.rmm import (
+        dask_deserialize_rmm_device_buffer as dask_deserialize_cuda_buffer,
+    )
 except ImportError:
-    from .numba import dask_deserialize_numba_array as dask_deserialize_cuda_buffer
+    from distributed.protocol.numba import (
+        dask_deserialize_numba_array as dask_deserialize_cuda_buffer,
+    )
 
 
 @cuda_serialize.register(cupy.ndarray)

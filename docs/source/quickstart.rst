@@ -31,14 +31,14 @@ This allows dask.distributed to use multiple machines as workers.
 
 Set up scheduler and worker processes on your local computer::
 
-   $ dask-scheduler
+   $ dask scheduler
    Scheduler started at 127.0.0.1:8786
 
-   $ dask-worker 127.0.0.1:8786
-   $ dask-worker 127.0.0.1:8786
-   $ dask-worker 127.0.0.1:8786
+   $ dask worker 127.0.0.1:8786
+   $ dask worker 127.0.0.1:8786
+   $ dask worker 127.0.0.1:8786
 
-.. note:: At least one ``dask-worker`` must be running after launching a
+.. note:: At least one ``dask worker`` must be running after launching a
           scheduler.
 
 Launch a Client and point it to the IP/port of the scheduler.

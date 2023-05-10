@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 
 import pytest
@@ -7,13 +9,12 @@ from distributed.client import wait
 from distributed.compatibility import LINUX
 from distributed.diagnostics.progress import (
     AllProgress,
+    GroupTiming,
     MultiProgress,
     Progress,
     SchedulerPlugin,
 )
-from distributed.metrics import time
-from distributed.scheduler import COMPILED
-from distributed.utils_test import dec, div, gen_cluster, inc, nodebug
+from distributed.utils_test import dec, div, gen_cluster, inc, nodebug, slowdec, slowinc
 
 
 def f(*args):
@@ -29,6 +30,7 @@ def h(*args):
 
 
 @nodebug
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True)
 async def test_many_Progress(c, s, a, b):
     x = c.submit(f, 1)
@@ -37,13 +39,10 @@ async def test_many_Progress(c, s, a, b):
 
     bars = [Progress(keys=[z], scheduler=s) for _ in range(10)]
     await asyncio.gather(*(bar.setup() for bar in bars))
-
     await z
 
-    start = time()
     while not all(b.status == "finished" for b in bars):
-        await asyncio.sleep(0.1)
-        assert time() < start + 5
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True)
@@ -90,13 +89,12 @@ async def test_robust_to_bad_plugin(c, s, a, b):
 
 def check_bar_completed(capsys, width=40):
     out, err = capsys.readouterr()
-    bar, percent, time = [i.strip() for i in out.split("\r")[-1].split("|")]
+    bar, percent, time = (i.strip() for i in out.split("\r")[-1].split("|"))
     assert bar == "[" + "#" * width + "]"
     assert percent == "100% Completed"
 
 
-@pytest.mark.flaky(condition=not COMPILED and LINUX, reruns=10, reruns_delay=5)
-@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
+@pytest.mark.flaky(condition=LINUX, reruns=10, reruns_delay=5)
 @gen_cluster(client=True, Worker=Nanny)
 async def test_AllProgress(c, s, a, b):
     x, y, z = c.map(inc, [1, 2, 3])
@@ -124,11 +122,8 @@ async def test_AllProgress(c, s, a, b):
 
     keys = {x.key, y.key, z.key}
     del x, y, z
-    import gc
 
-    gc.collect()
-
-    while any(k in s.who_has for k in keys):
+    while any(s.tasks[k].who_has for k in keys):
         await asyncio.sleep(0.01)
 
     assert p.state["released"]["inc"] == keys
@@ -143,9 +138,6 @@ async def test_AllProgress(c, s, a, b):
 
     tkey = t.key
     del xx, yy, zz, t
-    import gc
-
-    gc.collect()
 
     while tkey in s.tasks:
         await asyncio.sleep(0.01)
@@ -159,9 +151,6 @@ async def test_AllProgress(c, s, a, b):
 
     for i in range(4):
         future = c.submit(f, i)
-    import gc
-
-    gc.collect()
 
     await asyncio.sleep(1)
 
@@ -192,3 +181,35 @@ async def test_AllProgress_lost_key(c, s, a, b):
 
     while len(p.state["memory"]["inc"]) > 0:
         await asyncio.sleep(0.01)
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_group_timing(c, s, a, b):
+    p = GroupTiming(s)
+    s.add_plugin(p)
+
+    assert len(p.time) == 2
+    assert len(p.nthreads) == 2
+
+    futures1 = c.map(slowinc, range(10), delay=0.3)
+    futures2 = c.map(slowdec, range(10), delay=0.3)
+    await wait(futures1 + futures2)
+
+    assert len(p.time) > 2
+    assert len(p.nthreads) == len(p.time)
+    assert all([nt == s.total_nthreads for nt in p.nthreads])
+    assert "slowinc" in p.compute
+    assert "slowdec" in p.compute
+    assert all([len(v) == len(p.time) for v in p.compute.values()])
+    assert s.task_groups.keys() == p.compute.keys()
+    assert all(
+        [
+            abs(s.task_groups[k].all_durations["compute"] - sum(v)) < 1.0e-12
+            for k, v in p.compute.items()
+        ]
+    )
+
+    await s.restart()
+    assert len(p.time) == 2
+    assert len(p.nthreads) == 2
+    assert len(p.compute) == 0

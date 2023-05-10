@@ -1,10 +1,13 @@
+from __future__ import annotations
+
 import pytest
 
 netCDF4 = pytest.importorskip("netCDF4")
 np = pytest.importorskip("numpy")
 
+from dask.utils import tmpfile
+
 from distributed.protocol import deserialize, serialize
-from distributed.utils import tmpfile
 
 
 def create_test_dataset(fn):

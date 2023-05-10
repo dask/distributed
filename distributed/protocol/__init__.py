@@ -1,11 +1,11 @@
+from __future__ import annotations
+
 from contextlib import suppress
-from distutils.version import LooseVersion
 from functools import partial
 
-from .compression import compressions, default_compression
-from .core import decompress, dumps, loads, maybe_compress, msgpack
-from .cuda import cuda_deserialize, cuda_serialize
-from .serialize import (
+from distributed.protocol.core import decompress, dumps, loads, maybe_compress, msgpack
+from distributed.protocol.cuda import cuda_deserialize, cuda_serialize
+from distributed.protocol.serialize import (
     Serialize,
     Serialized,
     dask_deserialize,
@@ -26,43 +26,43 @@ from .serialize import (
 @dask_serialize.register_lazy("numpy")
 @dask_deserialize.register_lazy("numpy")
 def _register_numpy():
-    from . import numpy
+    from distributed.protocol import numpy
 
 
 @dask_serialize.register_lazy("scipy")
 @dask_deserialize.register_lazy("scipy")
 def _register_scipy():
-    from . import scipy
+    from distributed.protocol import scipy
 
 
 @dask_serialize.register_lazy("h5py")
 @dask_deserialize.register_lazy("h5py")
 def _register_h5py():
-    from . import h5py
+    from distributed.protocol import h5py
 
 
 @dask_serialize.register_lazy("netCDF4")
 @dask_deserialize.register_lazy("netCDF4")
 def _register_netcdf4():
-    from . import netcdf4
+    from distributed.protocol import netcdf4
 
 
 @dask_serialize.register_lazy("keras")
 @dask_deserialize.register_lazy("keras")
 def _register_keras():
-    from . import keras
+    from distributed.protocol import keras
 
 
 @dask_serialize.register_lazy("sparse")
 @dask_deserialize.register_lazy("sparse")
 def _register_sparse():
-    from . import sparse
+    from distributed.protocol import sparse
 
 
 @dask_serialize.register_lazy("pyarrow")
 @dask_deserialize.register_lazy("pyarrow")
 def _register_arrow():
-    from . import arrow
+    from distributed.protocol import arrow
 
 
 @dask_serialize.register_lazy("torch")
@@ -70,7 +70,7 @@ def _register_arrow():
 @dask_serialize.register_lazy("torchvision")
 @dask_deserialize.register_lazy("torchvision")
 def _register_torch():
-    from . import torch
+    from distributed.protocol import torch
 
 
 @cuda_serialize.register_lazy("cupy")
@@ -82,7 +82,7 @@ def _register_torch():
 @dask_serialize.register_lazy("cupyx")
 @dask_deserialize.register_lazy("cupyx")
 def _register_cupy():
-    from . import cupy
+    from distributed.protocol import cupy
 
 
 @cuda_serialize.register_lazy("numba")
@@ -90,7 +90,7 @@ def _register_cupy():
 @dask_serialize.register_lazy("numba")
 @dask_deserialize.register_lazy("numba")
 def _register_numba():
-    from . import numba
+    from distributed.protocol import numba
 
 
 @cuda_serialize.register_lazy("rmm")
@@ -98,7 +98,7 @@ def _register_numba():
 @dask_serialize.register_lazy("rmm")
 @dask_deserialize.register_lazy("rmm")
 def _register_rmm():
-    from . import rmm
+    from distributed.protocol import rmm
 
 
 @cuda_serialize.register_lazy("cudf")

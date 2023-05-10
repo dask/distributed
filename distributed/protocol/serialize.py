@@ -1,26 +1,37 @@
+from __future__ import annotations
+
+import codecs
 import importlib
 import traceback
 from array import array
 from enum import Enum
 from functools import partial
+from types import ModuleType
+from typing import Any, Literal
 
 import msgpack
 
 import dask
 from dask.base import normalize_token
+from dask.sizeof import sizeof
 from dask.utils import typename
 
-from ..utils import ensure_bytes, has_keyword
-from . import pickle
-from .compression import decompress, maybe_compress
-from .utils import frame_split_size, msgpack_opts, pack_frames_prelude, unpack_frames
-
-lazy_registrations = {}
+from distributed.metrics import context_meter
+from distributed.protocol import pickle
+from distributed.protocol.compression import decompress, maybe_compress
+from distributed.protocol.utils import (
+    frame_split_size,
+    merge_memoryviews,
+    msgpack_opts,
+    pack_frames_prelude,
+    unpack_frames,
+)
+from distributed.utils import ensure_memoryview, has_keyword
 
 dask_serialize = dask.utils.Dispatch("dask_serialize")
 dask_deserialize = dask.utils.Dispatch("dask_deserialize")
 
-_cached_allowed_modules = {}
+_cached_allowed_modules: dict[str, ModuleType] = {}
 
 
 def dask_dumps(x, context=None):
@@ -31,25 +42,34 @@ def dask_dumps(x, context=None):
     except TypeError:
         raise NotImplementedError(type_name)
     if has_keyword(dumps, "context"):
-        header, frames = dumps(x, context=context)
+        sub_header, frames = dumps(x, context=context)
     else:
-        header, frames = dumps(x)
+        sub_header, frames = dumps(x)
 
-    header["type"] = type_name
-    header["type-serialized"] = pickle.dumps(type(x), protocol=4)
-    header["serializer"] = "dask"
+    header = {
+        "sub-header": sub_header,
+        "type": type_name,
+        "type-serialized": pickle.dumps(type(x)),
+        "serializer": "dask",
+    }
     return header, frames
 
 
 def dask_loads(header, frames):
     typ = pickle.loads(header["type-serialized"])
     loads = dask_deserialize.dispatch(typ)
-    return loads(header, frames)
+    return loads(header["sub-header"], frames)
 
 
 def pickle_dumps(x, context=None):
     frames = [None]
-    buffer_callback = lambda f: frames.append(memoryview(f))
+    writeable = []
+
+    def buffer_callback(f):
+        f = memoryview(f)
+        frames.append(f)
+        writeable.append(not f.readonly)
+
     frames[0] = pickle.dumps(
         x,
         buffer_callback=buffer_callback,
@@ -57,8 +77,9 @@ def pickle_dumps(x, context=None):
     )
     header = {
         "serializer": "pickle",
-        "writeable": tuple(not f.readonly for f in frames[1:]),
+        "writeable": tuple(writeable),
     }
+
     return header, frames
 
 
@@ -69,21 +90,12 @@ def pickle_loads(header, frames):
     if not writeable:
         writeable = len(buffers) * (None,)
 
-    new = []
-    memoryviews = map(memoryview, buffers)
-    for w, mv in zip(writeable, memoryviews):
-        if w == mv.readonly:
-            if mv.readonly:
-                mv = memoryview(bytearray(mv))
-            else:
-                mv = memoryview(bytes(mv))
-            if mv.nbytes > 0:
-                mv = mv.cast(mv.format, mv.shape)
-            else:
-                mv = mv.cast(mv.format)
-        new.append(mv)
+    buffers = [
+        memoryview(bytearray(mv) if w else bytes(mv)) if w == mv.readonly else mv
+        for w, mv in zip(writeable, map(ensure_memoryview, buffers))
+    ]
 
-    return pickle.loads(x, buffers=new)
+    return pickle.loads(x, buffers=buffers)
 
 
 def import_allowed_module(name):
@@ -166,7 +178,7 @@ def msgpack_loads(header, frames):
 
 
 def serialization_error_loads(header, frames):
-    msg = "\n".join([ensure_bytes(frame).decode("utf8") for frame in frames])
+    msg = "\n".join([codecs.decode(frame, "utf8") for frame in frames])
     raise TypeError(msg)
 
 
@@ -197,9 +209,13 @@ def check_dask_serializable(x):
     return False
 
 
-def serialize(
-    x, serializers=None, on_error="message", context=None, iterate_collection=None
-):
+def serialize(  # type: ignore[no-untyped-def]
+    x: object,
+    serializers=None,
+    on_error: Literal["message" | "raise"] = "message",
+    context=None,
+    iterate_collection: bool | None = None,
+) -> tuple[dict[str, Any], list[bytes | memoryview]]:
     r"""
     Convert object to a header and list of bytestrings
 
@@ -244,7 +260,7 @@ def serialize(
     if serializers is None:
         serializers = ("dask", "pickle")  # TODO: get from configuration
 
-    # Handle obects that are marked as `Serialize`, or that are
+    # Handle objects that are marked as `Serialize`, or that are
     # already `Serialized` objects (don't want to serialize them twice)
     if isinstance(x, Serialized):
         return x.header, x.frames
@@ -257,6 +273,9 @@ def serialize(
             iterate_collection=True,
         )
 
+    # Note: don't use isinstance(), as it would match subclasses
+    # (e.g. namedtuple, defaultdict) which however would revert to the base class on a
+    # round-trip through msgpack
     if iterate_collection is None and type(x) in (list, set, tuple, dict):
         if type(x) is list and "msgpack" in serializers:
             # Note: "msgpack" will always convert lists to tuples
@@ -295,6 +314,7 @@ def serialize(
                 _header["key"] = k
                 headers_frames.append((_header, _frames))
         else:
+            assert isinstance(x, (list, set, tuple))
             headers_frames = [
                 serialize(
                     obj, serializers=serializers, on_error=on_error, context=context
@@ -304,16 +324,15 @@ def serialize(
 
         frames = []
         lengths = []
-        compressions = []
+        compressions: list[str | None] = []
         for _header, _frames in headers_frames:
             frames.extend(_frames)
             length = len(_frames)
             lengths.append(length)
             compressions.extend(_header.get("compression") or [None] * len(_frames))
 
-        headers = [obj[0] for obj in headers_frames]
         headers = {
-            "sub-headers": headers,
+            "sub-headers": [obj[0] for obj in headers_frames],
             "is-collection": True,
             "frame-lengths": lengths,
             "type-serialized": type(x).__name__,
@@ -323,6 +342,7 @@ def serialize(
         return headers, frames
 
     tb = ""
+    exc = None
 
     for name in serializers:
         dumps, _, wants_context = families[name]
@@ -332,21 +352,26 @@ def serialize(
             return header, frames
         except NotImplementedError:
             continue
-        except Exception:
+        except Exception as e:
+            exc = e
             tb = traceback.format_exc()
             break
-
-    msg = "Could not serialize object of type %s." % type(x).__name__
+    type_x = type(x)
+    if isinstance(x, (ToPickle, Serialize)):
+        type_x = type(x.data)
+    msg = f"Could not serialize object of type {type_x.__name__}"
     if on_error == "message":
-        frames = [msg]
+        txt_frames = [msg]
         if tb:
-            frames.append(tb[:100000])
+            txt_frames.append(tb[:100000])
 
-        frames = [frame.encode() for frame in frames]
+        frames = [frame.encode() for frame in txt_frames]
 
         return {"serializer": "error"}, frames
     elif on_error == "raise":
-        raise TypeError(msg, str(x)[:10000])
+        raise TypeError(msg, str(x)[:10000]) from exc
+    else:  # pragma: nocover
+        raise ValueError(f"{on_error=}; expected 'message' or 'raise'")
 
 
 def deserialize(header, frames, deserializers=None):
@@ -357,7 +382,7 @@ def deserialize(header, frames, deserializers=None):
     ----------
     header : dict
     frames : list of bytes
-    deserializers : Optional[Dict[str, Tuple[Callable, Callable, bool]]]
+    deserializers : dict[str, tuple[Callable, Callable, bool]] | None
         An optional dict mapping a name to a (de)serializer.
         See `dask_serialize` and `dask_deserialize` for more.
 
@@ -407,10 +432,11 @@ def deserialize(header, frames, deserializers=None):
     return loads(header, frames)
 
 
+@context_meter.meter("serialize")
 def serialize_and_split(
     x, serializers=None, on_error="message", context=None, size=None
 ):
-    """Serialize and split compressable frames
+    """Serialize and split compressible frames
 
     This function is a drop-in replacement of `serialize()` that calls `serialize()`
     followed by `frame_split_size()` on frames that should be compressed.
@@ -443,7 +469,7 @@ def serialize_and_split(
             out_compression.append(compression)
     assert len(out_compression) == len(out_frames)
 
-    # Notice, in order to match msgpack's implicit convertion to tuples,
+    # Notice, in order to match msgpack's implicit conversion to tuples,
     # we convert to tuples here as well.
     header["split-num-sub-frames"] = tuple(num_sub_frames)
     header["split-offsets"] = tuple(offsets)
@@ -451,6 +477,7 @@ def serialize_and_split(
     return header, out_frames
 
 
+@context_meter.meter("deserialize")
 def merge_and_deserialize(header, frames, deserializers=None):
     """Merge and deserialize frames
 
@@ -462,15 +489,18 @@ def merge_and_deserialize(header, frames, deserializers=None):
     deserialize
     serialize_and_split
     """
-    merged_frames = []
     if "split-num-sub-frames" not in header:
         merged_frames = frames
     else:
+        merged_frames = []
         for n, offset in zip(header["split-num-sub-frames"], header["split-offsets"]):
-            if n == 1:
-                merged_frames.append(frames[offset])
-            else:
-                merged_frames.append(bytearray().join(frames[offset : offset + n]))
+            subframes = frames[offset : offset + n]
+            try:
+                merged = merge_memoryviews(subframes)
+            except (ValueError, TypeError):
+                merged = bytearray().join(subframes)
+
+            merged_frames.append(merged)
 
     return deserialize(header, merged_frames, deserializers=deserializers)
 
@@ -493,7 +523,7 @@ class Serialize:
         self.data = data
 
     def __repr__(self):
-        return "<Serialize: %s>" % str(self.data)
+        return f"<Serialize: {self.data}>"
 
     def __eq__(self, other):
         return isinstance(other, Serialize) and other.data == self.data
@@ -509,8 +539,7 @@ to_serialize = Serialize
 
 
 class Serialized:
-    """
-    An object that is already serialized into header and frames
+    """An object that is already serialized into header and frames
 
     Normal serialization operations pass these objects through.  This is
     typically used within the scheduler which accepts messages that contain
@@ -524,6 +553,54 @@ class Serialized:
     def __eq__(self, other):
         return (
             isinstance(other, Serialized)
+            and other.header == self.header
+            and other.frames == self.frames
+        )
+
+    def __ne__(self, other):
+        return not (self == other)
+
+
+class ToPickle:
+    """Mark an object that should be pickled
+
+    Both the scheduler and workers with automatically unpickle this
+    object on arrival.
+
+    Notice, this requires that the scheduler is allowed to use pickle.
+    If the configuration option "distributed.scheduler.pickle" is set
+    to False, the scheduler will raise an exception instead.
+    """
+
+    def __init__(self, data):
+        self.data = data
+
+    def __repr__(self):
+        return "<ToPickle: %s>" % str(self.data)
+
+    def __eq__(self, other):
+        return isinstance(other, type(self)) and other.data == self.data
+
+    def __ne__(self, other):
+        return not (self == other)
+
+    def __hash__(self):
+        return hash(self.data)
+
+
+class Pickled:
+    """An object that is already pickled into header and frames
+
+    Normal pickled objects are unpickled by the scheduler.
+    """
+
+    def __init__(self, header, frames):
+        self.header = header
+        self.frames = frames
+
+    def __eq__(self, other):
+        return (
+            isinstance(other, type(self))
             and other.header == self.header
             and other.frames == self.frames
         )
@@ -570,13 +647,26 @@ def nested_deserialize(x):
     return replace_inner(x)
 
 
-def serialize_bytelist(x, **kwargs):
+@sizeof.register(ToPickle)
+@sizeof.register(Serialize)
+def sizeof_serialize(obj):
+    return sizeof(obj.data)
+
+
+@sizeof.register(Pickled)
+@sizeof.register(Serialized)
+def sizeof_serialized(obj):
+    return sizeof(obj.header) + sizeof(obj.frames)
+
+
+def serialize_bytelist(
+    x: object, compression: str | None | Literal[False] = "auto", **kwargs: Any
+) -> list[bytes | bytearray | memoryview]:
     header, frames = serialize_and_split(x, **kwargs)
     if frames:
-        compression, frames = zip(*map(maybe_compress, frames))
-    else:
-        compression = []
-    header["compression"] = compression
+        header["compression"], frames = zip(
+            *(maybe_compress(frame, compression=compression) for frame in frames)
+        )
     header["count"] = len(frames)
 
     header = msgpack.dumps(header, use_bin_type=True)
@@ -680,7 +770,7 @@ def _deserialize_bytes(header, frames):
     if len(frames) == 1 and isinstance(frames[0], bytes):
         return frames[0]
     else:
-        return bytes().join(frames)
+        return b"".join(frames)
 
 
 @dask_deserialize.register(bytearray)
@@ -701,12 +791,11 @@ def _serialize_array(obj):
 @dask_deserialize.register(array)
 def _deserialize_array(header, frames):
     a = array(header["typecode"])
-    for f in map(memoryview, frames):
-        try:
-            f = f.cast("B")
-        except TypeError:
-            f = f.tobytes()
-        a.frombytes(f)
+    nframes = len(frames)
+    if nframes == 1:
+        a.frombytes(ensure_memoryview(frames[0]))
+    elif nframes > 1:
+        a.frombytes(b"".join(map(ensure_memoryview, frames)))
     return a
 
 
@@ -714,6 +803,8 @@ def _deserialize_array(header, frames):
 def _serialize_memoryview(obj):
     if obj.format == "O":
         raise ValueError("Cannot serialize `memoryview` containing Python objects")
+    if not obj and obj.ndim > 1:
+        raise ValueError("Cannot serialize empty non-1-D `memoryview`")
     header = {"format": obj.format, "shape": obj.shape}
     frames = [obj]
     return header, frames
@@ -722,10 +813,17 @@ def _serialize_memoryview(obj):
 @dask_deserialize.register(memoryview)
 def _deserialize_memoryview(header, frames):
     if len(frames) == 1:
-        out = memoryview(frames[0]).cast("B")
+        out = ensure_memoryview(frames[0])
     else:
         out = memoryview(b"".join(frames))
-    out = out.cast(header["format"], header["shape"])
+
+    # handle empty `memoryview`s
+    if out:
+        out = out.cast(header["format"], header["shape"])
+    else:
+        out = out.cast(header["format"])
+        assert out.shape == header["shape"]
+
     return out
 
 
@@ -740,11 +838,12 @@ def _is_msgpack_serializable(v):
         v is None
         or typ is str
         or typ is bool
+        or typ is bytes
         or typ is int
         or typ is float
         or isinstance(v, dict)
         and all(map(_is_msgpack_serializable, v.values()))
-        and all(typ is str for x in v.keys())
+        and all(type(x) is str for x in v.keys())
         or isinstance(v, (list, tuple))
         and all(map(_is_msgpack_serializable, v))
     )
@@ -757,7 +856,7 @@ class ObjectDictSerializer:
     def serialize(self, est):
         header = {
             "serializer": self.serializer,
-            "type-serialized": pickle.dumps(type(est), protocol=4),
+            "type-serialized": pickle.dumps(type(est)),
             "simple": {},
             "complex": {},
         }
@@ -774,6 +873,7 @@ class ObjectDictSerializer:
             else:
                 if isinstance(v, dict):
                     h, f = self.serialize(v)
+                    h = {"nested-dict": h}
                 else:
                     h, f = serialize(v, serializers=(self.serializer, "pickle"))
                 header["complex"][k] = {
@@ -795,7 +895,11 @@ class ObjectDictSerializer:
         for k, d in header["complex"].items():
             h = d["header"]
             f = frames[d["start"] : d["stop"]]
-            v = deserialize(h, f)
+            nested_dict = h.get("nested-dict")
+            if nested_dict:
+                v = self.deserialize(nested_dict, f)
+            else:
+                v = deserialize(h, f)
             dd[k] = v
 
         return obj

@@ -5,20 +5,17 @@
 
 """Implements ThreadPoolExecutor."""
 
+from __future__ import annotations
+
 __author__ = "Brian Quinlan (brian@sweetapp.com)"
 
 import atexit
 import itertools
-from concurrent.futures import _base
-
-try:
-    import queue
-except ImportError:
-    import Queue as queue
-
 import os
+import queue
 import threading
 import weakref
+from concurrent.futures import _base
 
 # Workers are created as daemon threads. This is done to allow the interpreter
 # to exit when there are still idle threads in a ThreadPoolExecutor's thread
@@ -34,7 +31,9 @@ import weakref
 # workers to exit when their work queues are empty and then waits until the
 # threads finish.
 
-_threads_queues = weakref.WeakKeyDictionary()
+_threads_queues: weakref.WeakKeyDictionary[
+    threading.Thread, queue.Queue
+] = weakref.WeakKeyDictionary()
 _shutdown = False
 
 
@@ -59,7 +58,7 @@ class _WorkItem:
         self.kwargs = kwargs
 
     def run(self):
-        if not self.future.set_running_or_notify_cancel():
+        if not self.future.set_running_or_notify_cancel():  # pragma: no cover
             return
 
         try:
@@ -94,7 +93,6 @@ def _worker(executor_reference, work_queue):
 
 
 class ThreadPoolExecutor(_base.Executor):
-
     # Used to assign unique thread names when thread_name_prefix is not supplied.
     _counter = itertools.count()
 
@@ -124,7 +122,7 @@ class ThreadPoolExecutor(_base.Executor):
 
     def submit(self, fn, *args, **kwargs):
         with self._shutdown_lock:
-            if self._shutdown:
+            if self._shutdown:  # pragma: no cover
                 raise RuntimeError("cannot schedule new futures after shutdown")
 
             f = _base.Future()

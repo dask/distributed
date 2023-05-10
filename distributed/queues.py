@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import uuid
@@ -5,9 +7,9 @@ from collections import defaultdict
 
 from dask.utils import parse_timedelta, stringify
 
-from .client import Client, Future
-from .utils import sync, thread_state
-from .worker import get_client, get_worker
+from distributed.client import Future
+from distributed.utils import wait_for
+from distributed.worker import get_client
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +45,7 @@ class QueueExtension:
             {"queue-future-release": self.future_release, "queue_release": self.release}
         )
 
-        self.scheduler.extensions["queues"] = self
-
-    def create(self, comm=None, name=None, client=None, maxsize=0):
+    def create(self, name=None, client=None, maxsize=0):
         logger.debug(f"Queue name: {name}")
         if name not in self.queues:
             self.queues[name] = asyncio.Queue(maxsize=maxsize)
@@ -53,7 +53,7 @@ class QueueExtension:
         else:
             self.client_refcount[name] += 1
 
-    def release(self, comm=None, name=None, client=None):
+    def release(self, name=None, client=None):
         if name not in self.queues:
             return
 
@@ -66,16 +66,14 @@ class QueueExtension:
             if keys:
                 self.scheduler.client_releases_keys(keys=keys, client="queue-%s" % name)
 
-    async def put(
-        self, comm=None, name=None, key=None, data=None, client=None, timeout=None
-    ):
+    async def put(self, name=None, key=None, data=None, client=None, timeout=None):
         if key is not None:
             record = {"type": "Future", "value": key}
             self.future_refcount[name, key] += 1
             self.scheduler.client_desires_keys(keys=[key], client="queue-%s" % name)
         else:
             record = {"type": "msgpack", "value": data}
-        await asyncio.wait_for(self.queues[name].put(record), timeout=timeout)
+        await wait_for(self.queues[name].put(record), timeout=timeout)
 
     def future_release(self, name=None, key=None, client=None):
         self.future_refcount[name, key] -= 1
@@ -83,7 +81,7 @@ class QueueExtension:
             self.scheduler.client_releases_keys(keys=[key], client="queue-%s" % name)
             del self.future_refcount[name, key]
 
-    async def get(self, comm=None, name=None, client=None, timeout=None, batch=False):
+    async def get(self, name=None, client=None, timeout=None, batch=False):
         def process(record):
             """Add task status if known"""
             if record["type"] == "Future":
@@ -113,17 +111,17 @@ class QueueExtension:
                         "integer batch sizes and timeouts"
                     )
                     raise NotImplementedError(msg)
-                for i in range(batch):
+                for _ in range(batch):
                     record = await q.get()
                     out.append(record)
             out = [process(o) for o in out]
             return out
         else:
-            record = await asyncio.wait_for(self.queues[name].get(), timeout=timeout)
+            record = await wait_for(self.queues[name].get(), timeout=timeout)
             record = process(record)
             return record
 
-    def qsize(self, comm=None, name=None, client=None):
+    def qsize(self, name=None, client=None):
         return self.queues[name].qsize()
 
 
@@ -141,7 +139,7 @@ class Queue:
 
     .. warning::
 
-       This object is experimental and has known issues in Python 2
+       This object is experimental
 
     Parameters
     ----------
@@ -169,39 +167,49 @@ class Queue:
     """
 
     def __init__(self, name=None, client=None, maxsize=0):
-        try:
-            self.client = client or Client.current()
-        except ValueError:
-            # Initialise new client
-            self.client = get_worker().client
+        self._client = client
         self.name = name or "queue-" + uuid.uuid4().hex
-        self._event_started = asyncio.Event()
-        if self.client.asynchronous or getattr(
-            thread_state, "on_event_loop_thread", False
-        ):
+        self.maxsize = maxsize
+        self._maybe_start()
 
-            async def _create_queue():
-                await self.client.scheduler.queue_create(
-                    name=self.name, maxsize=maxsize
-                )
-                self._event_started.set()
+    def _maybe_start(self):
+        if self.client:
+            if self.client.asynchronous:
+                self._started = asyncio.ensure_future(self._start())
+            else:
+                self.client.sync(self._start)
 
-            self.client.loop.add_callback(_create_queue)
-        else:
-            sync(
-                self.client.loop,
-                self.client.scheduler.queue_create,
-                name=self.name,
-                maxsize=maxsize,
+    @property
+    def client(self):
+        if not self._client:
+            try:
+                self._client = get_client()
+            except ValueError:
+                pass
+        return self._client
+
+    def _verify_running(self):
+        if not self.client:
+            raise RuntimeError(
+                f"{type(self)} object not properly initialized. This can happen"
+                " if the object is being deserialized outside of the context of"
+                " a Client or Worker."
             )
-            self._event_started.set()
+
+    async def _start(self):
+        await self.client.scheduler.queue_create(name=self.name, maxsize=self.maxsize)
+        return self
 
     def __await__(self):
-        async def _():
-            await self._event_started.wait()
-            return self
+        self._maybe_start()
+        if hasattr(self, "_started"):
+            return self._started.__await__()
+        else:
 
-        return _().__await__()
+            async def _():
+                return self
+
+            return _().__await__()
 
     async def _put(self, value, timeout=None):
         if isinstance(value, Future):
@@ -223,6 +231,7 @@ class Queue:
             Instead of number of seconds, it is also possible to specify
             a timedelta in string format, e.g. "200ms".
         """
+        self._verify_running()
         timeout = parse_timedelta(timeout)
         return self.client.sync(self._put, value, timeout=timeout, **kwargs)
 
@@ -240,11 +249,13 @@ class Queue:
             If an integer than return that many elements from the queue
             If False (default) then return one item at a time
         """
+        self._verify_running()
         timeout = parse_timedelta(timeout)
         return self.client.sync(self._get, timeout=timeout, batch=batch, **kwargs)
 
     def qsize(self, **kwargs):
         """Current number of elements in the queue"""
+        self._verify_running()
         return self.client.sync(self._qsize, **kwargs)
 
     async def _get(self, timeout=None, batch=False):
@@ -277,17 +288,9 @@ class Queue:
         return result
 
     def close(self):
+        self._verify_running()
         if self.client.status == "running":  # TODO: can leave zombie futures
             self.client._send_to_scheduler({"op": "queue_release", "name": self.name})
 
-    def __getstate__(self):
-        return (self.name, self.client.scheduler.address)
-
-    def __setstate__(self, state):
-        name, address = state
-        try:
-            client = get_client(address)
-            assert client.scheduler.address == address
-        except (AttributeError, AssertionError):
-            client = Client(address, set_as_default=False)
-        self.__init__(name=name, client=client)
+    def __reduce__(self):
+        return type(self), (self.name, None, self.maxsize)

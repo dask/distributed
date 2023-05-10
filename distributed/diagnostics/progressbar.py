@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import html
 import logging
 import sys
+import warnings
 import weakref
 from contextlib import suppress
 from timeit import default_timer
@@ -9,12 +12,18 @@ from tlz import valmap
 from tornado.ioloop import IOLoop
 
 import dask
+from dask.utils import key_split
 
-from ..client import default_client, futures_of
-from ..core import CommClosedError, coerce_to_address, connect
-from ..protocol.pickle import dumps
-from ..utils import LoopRunner, is_kernel, key_split
-from .progress import MultiProgress, Progress, format_time
+from distributed.client import default_client, futures_of
+from distributed.core import (
+    CommClosedError,
+    clean_exception,
+    coerce_to_address,
+    connect,
+)
+from distributed.diagnostics.progress import MultiProgress, Progress, format_time
+from distributed.protocol.pickle import dumps
+from distributed.utils import LoopRunner, is_kernel
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +113,8 @@ class ProgressBar:
 
 
 class TextProgressBar(ProgressBar):
+    __loop: IOLoop | None = None
+
     def __init__(
         self,
         keys,
@@ -115,13 +126,30 @@ class TextProgressBar(ProgressBar):
         start=True,
         **kwargs,
     ):
+        self._loop_runner = loop_runner = LoopRunner(loop=loop)
         super().__init__(keys, scheduler, interval, complete)
         self.width = width
-        self.loop = loop or IOLoop()
 
         if start:
-            loop_runner = LoopRunner(self.loop)
             loop_runner.run_sync(self.listen)
+
+    @property
+    def loop(self) -> IOLoop | None:
+        loop = self.__loop
+        if loop is None:
+            # If the loop is not running when this is called, the LoopRunner.loop
+            # property will raise a DeprecationWarning
+            # However subsequent calls might occur - eg atexit, where a stopped
+            # loop is still acceptable - so we cache access to the loop.
+            self.__loop = loop = self._loop_runner.loop
+        return loop
+
+    @loop.setter
+    def loop(self, value: IOLoop) -> None:
+        warnings.warn(
+            "setting the loop property is deprecated", DeprecationWarning, stacklevel=2
+        )
+        self.__loop = value
 
     def _draw_bar(self, remaining, all, **kwargs):
         frac = (1 - remaining / all) if all else 1.0
@@ -136,7 +164,7 @@ class TextProgressBar(ProgressBar):
             sys.stdout.flush()
 
     def _draw_stop(self, **kwargs):
-        sys.stdout.write("\r")
+        sys.stdout.write("\33[2K\r")
         sys.stdout.flush()
 
 
@@ -171,10 +199,13 @@ class ProgressWidget(ProgressBar):
 
     def _ipython_display_(self, **kwargs):
         IOLoop.current().add_callback(self.listen)
-        return self.widget._ipython_display_(**kwargs)
+        from IPython.display import display
+
+        display(self.widget, **kwargs)
 
     def _draw_stop(self, remaining, status, exception=None, **kwargs):
         if status == "error":
+            _, exception, _ = clean_exception(exception)
             self.bar.bar_style = "danger"
             self.elapsed_time.value = (
                 '<div style="padding: 0px 10px 5px 10px"><b>Exception</b> '
@@ -351,7 +382,9 @@ class MultiProgressWidget(MultiProgressBar):
 
     def _ipython_display_(self, **kwargs):
         IOLoop.current().add_callback(self.listen)
-        return self.widget._ipython_display_(**kwargs)
+        from IPython.display import display
+
+        display(self.widget, **kwargs)
 
     def _draw_stop(self, remaining, status, exception=None, key=None, **kwargs):
         for k, v in remaining.items():
@@ -361,6 +394,7 @@ class MultiProgressWidget(MultiProgressBar):
                 self.bars[k].bar_style = "danger"
 
         if status == "error":
+            _, exception, _ = clean_exception(exception)
             # self.bars[self.func(key)].bar_style = 'danger'  # TODO
             self.elapsed_time.value = (
                 '<div style="padding: 0px 10px 5px 10px"><b>Exception</b> '

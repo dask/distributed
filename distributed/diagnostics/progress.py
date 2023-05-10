@@ -1,15 +1,18 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 from collections import defaultdict
 from timeit import default_timer
+from typing import ClassVar
 
 from tlz import groupby, valmap
 
 from dask.base import tokenize
-from dask.utils import stringify
+from dask.utils import key_split, stringify
 
-from ..utils import key_split
-from .plugin import SchedulerPlugin
+from distributed.diagnostics.plugin import SchedulerPlugin
+from distributed.metrics import time
 
 logger = logging.getLogger(__name__)
 
@@ -291,3 +294,86 @@ class AllProgress(SchedulerPlugin):
     def restart(self, scheduler):
         self.all.clear()
         self.state.clear()
+
+
+class GroupTiming(SchedulerPlugin):
+    """Keep track of high-level timing information for task group progress"""
+
+    name: ClassVar[str] = "group-timing"
+    time: list[float]
+    compute: dict[str, list[float]]
+    nthreads: list[float]
+
+    def __init__(self, scheduler):
+        self.scheduler = scheduler
+
+        # Time bin size (in seconds). TODO: make this configurable?
+        self.dt = 1.0
+
+        # Initialize our data structures.
+        self._init()
+
+    def _init(self) -> None:
+        """Shared initializatoin code between __init__ and restart"""
+        now = time()
+
+        # Timestamps for tracking compute durations by task group.
+        # Start with length 2 so that we always can compute a valid dt later.
+        self.time = [now] * 2
+        # The amount of compute since the last timestamp
+        self.compute = {}
+        # The number of threads at the time
+        self.nthreads = [self.scheduler.total_nthreads] * 2
+
+    def transition(self, key, start, finish, *args, **kwargs):
+        # We are mostly interested in when tasks complete for now, so just look
+        # for when processing transitions to memory. Later we could also extend
+        # this if we can come up with useful visual channels to show it in.
+        if start == "processing" and finish == "memory":
+            startstops = kwargs.get("startstops")
+            if not startstops:
+                logger.warning(
+                    f"Task {key} finished processing, but timing information seems to "
+                    "be missing"
+                )
+                return
+
+            # Possibly extend the timeseries if another dt has passed
+            now = time()
+            self.time[-1] = now
+            while self.time[-1] - self.time[-2] > self.dt:
+                self.time[-1] = self.time[-2] + self.dt
+                self.time.append(now)
+                self.nthreads.append(self.scheduler.total_nthreads)
+                for g in self.compute.values():
+                    g.append(0.0)
+
+            # Get the task
+            task = self.scheduler.tasks[key]
+            group = task.group
+
+            # If the group is new, add it to the timeseries as if it has been
+            # here the whole time
+            if group.name not in self.compute:
+                self.compute[group.name] = [0.0] * len(self.time)
+
+            for startstop in startstops:
+                if startstop["action"] != "compute":
+                    continue
+                stop = startstop["stop"]
+                start = startstop["start"]
+                idx = len(self.time) - 1
+                # If the stop time is after the most recent bin,
+                # roll back the current index. Not clear how often this happens.
+                while idx > 0 and self.time[idx - 1] > stop:
+                    idx -= 1
+                # Allocate the timing information of the task to the time bins.
+                while idx > 0 and stop > start:
+                    delta = stop - max(self.time[idx - 1], start)
+                    self.compute[group.name][idx] += delta
+
+                    stop -= delta
+                    idx -= 1
+
+    def restart(self, scheduler):
+        self._init()

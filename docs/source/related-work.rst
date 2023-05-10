@@ -72,14 +72,14 @@ There are a couple of older projects that often get mentioned
 *   Pyro_:  Remote objects / RPC
 
 .. _Luigi: https://luigi.readthedocs.io/en/latest/
-.. _MPI4Py: http://mpi4py.readthedocs.io/en/stable/
+.. _MPI4Py: https://mpi4py.readthedocs.io/en/stable/
 .. _PyZMQ: https://github.com/zeromq/pyzmq
-.. _Celery: http://www.celeryproject.org/
+.. _Celery: https://docs.celeryq.dev/
 .. _`IPython Parallel`: https://ipyparallel.readthedocs.io/en/latest/
 .. _Scoop: https://github.com/soravux/scoop/
 .. _`concurrent.futures`: https://docs.python.org/3/library/concurrent.futures.html
-.. _Dispy: http://dispy.sourceforge.net/
-.. _Pyro: https://pythonhosted.org/Pyro4/
+.. _Dispy: https://dispy.org/
+.. _Pyro: https://pyro4.readthedocs.io/
 
 Relationship
 ------------

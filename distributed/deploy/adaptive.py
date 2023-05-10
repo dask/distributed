@@ -1,12 +1,16 @@
+from __future__ import annotations
+
 import logging
 from inspect import isawaitable
+
+from tornado.ioloop import IOLoop
 
 import dask.config
 from dask.utils import parse_timedelta
 
-from ..protocol import pickle
-from ..utils import log_errors
-from .adaptive_core import AdaptiveCore
+from distributed.deploy.adaptive_core import AdaptiveCore
+from distributed.protocol import pickle
+from distributed.utils import log_errors
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +76,7 @@ class Adaptive(AdaptiveCore):
     :meth:`Adaptive.workers_to_close` to control when the cluster should be
     resized. The default implementation checks if there are too many tasks
     per worker or too little memory available (see
-    :meth:`Scheduler.adaptive_target`).
+    :meth:`distributed.Scheduler.adaptive_target`).
     The values for interval, min, max, wait_count and target_duration can be
     specified in the dask config under the distributed.adaptive key.
     '''
@@ -156,7 +160,7 @@ class Adaptive(AdaptiveCore):
 
         return await super().recommendations(target)
 
-    async def workers_to_close(self, target: int):
+    async def workers_to_close(self, target: int) -> list[str]:
         """
         Determine which, if any, workers should potentially be removed from
         the cluster.
@@ -181,22 +185,23 @@ class Adaptive(AdaptiveCore):
             **self._workers_to_close_kwargs,
         )
 
+    @log_errors
     async def scale_down(self, workers):
         if not workers:
             return
-        with log_errors():
-            logger.info("Retiring workers %s", workers)
-            # Ask scheduler to cleanly retire workers
-            await self.scheduler.retire_workers(
-                names=workers,
-                remove=True,
-                close_workers=True,
-            )
 
-            # close workers more forcefully
-            f = self.cluster.scale_down(workers)
-            if isawaitable(f):
-                await f
+        logger.info("Retiring workers %s", workers)
+        # Ask scheduler to cleanly retire workers
+        await self.scheduler.retire_workers(
+            names=workers,
+            remove=True,
+            close_workers=True,
+        )
+
+        # close workers more forcefully
+        f = self.cluster.scale_down(workers)
+        if isawaitable(f):
+            await f
 
     async def scale_up(self, n):
         f = self.cluster.scale(n)
@@ -204,5 +209,9 @@ class Adaptive(AdaptiveCore):
             await f
 
     @property
-    def loop(self):
-        return self.cluster.loop
+    def loop(self) -> IOLoop:
+        """Override Adaptive.loop"""
+        if self.cluster:
+            return self.cluster.loop
+        else:
+            return IOLoop.current()

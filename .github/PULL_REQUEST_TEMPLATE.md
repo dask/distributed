@@ -1,3 +1,4 @@
-- [ ] Closes #xxxx
+Closes #xxxx
+
 - [ ] Tests added / passed
-- [ ] Passes `black distributed` / `flake8 distributed` / `isort distributed`
+- [ ] Passes `pre-commit run --all-files`

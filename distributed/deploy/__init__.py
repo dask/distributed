@@ -1,10 +1,13 @@
+from __future__ import annotations
+
 from contextlib import suppress
 
-from .adaptive import Adaptive
-from .cluster import Cluster
-from .local import LocalCluster
-from .spec import ProcessInterface, SpecCluster
-from .ssh import SSHCluster
+from distributed.deploy.adaptive import Adaptive
+from distributed.deploy.cluster import Cluster
+from distributed.deploy.local import LocalCluster
+from distributed.deploy.spec import ProcessInterface, SpecCluster
+from distributed.deploy.ssh import SSHCluster
+from distributed.deploy.subprocess import SubprocessCluster
 
 with suppress(ImportError):
-    from .ssh import SSHCluster
+    from distributed.deploy.ssh import SSHCluster

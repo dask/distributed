@@ -1,8 +1,9 @@
+from __future__ import annotations
+
+import asyncio
 import os
-import tempfile
 import warnings
 
-import numpy as np
 import pytest
 
 import dask
@@ -11,6 +12,8 @@ from distributed import Client, Scheduler, Worker
 from distributed.comm import connect, listen, ws
 from distributed.comm.core import FatalCommClosedError
 from distributed.comm.registry import backends, get_backend
+from distributed.comm.tests.test_comms import check_tls_extra
+from distributed.compatibility import randbytes
 from distributed.security import Security
 from distributed.utils_test import (
     gen_cluster,
@@ -18,11 +21,10 @@ from distributed.utils_test import (
     get_client_ssl_context,
     get_server_ssl_context,
     inc,
+    xfail_ssl_issue5601,
 )
 
-from .test_comms import check_tls_extra
-
-security = Security.temporary()
+pytestmark = pytest.mark.flaky(reruns=2)
 
 
 def test_registered():
@@ -33,10 +35,15 @@ def test_registered():
 
 @gen_test()
 async def test_listen_connect():
+    comm_closed = asyncio.Event()
+
     async def handle_comm(comm):
-        while True:
-            msg = await comm.read()
-            await comm.write(msg)
+        try:
+            while True:
+                msg = await comm.read()
+                await comm.write(msg)
+        finally:
+            comm_closed.set()
 
     async with listen("ws://", handle_comm) as listener:
         comm = await connect(listener.contact_address)
@@ -45,14 +52,20 @@ async def test_listen_connect():
         assert result == b"Hello!"
 
         await comm.close()
+        await comm_closed.wait()
 
 
 @gen_test()
 async def test_listen_connect_wss():
+    comm_closed = asyncio.Event()
+
     async def handle_comm(comm):
-        while True:
-            msg = await comm.read()
-            await comm.write(msg)
+        try:
+            while True:
+                msg = await comm.read()
+                await comm.write(msg)
+        finally:
+            comm_closed.set()
 
     server_ctx = get_server_ssl_context()
     client_ctx = get_client_ssl_context()
@@ -65,6 +78,7 @@ async def test_listen_connect_wss():
         result = await comm.read()
         assert result == b"Hello!"
         await comm.close()
+        await comm_closed.wait()
 
 
 @gen_test()
@@ -77,22 +91,24 @@ async def test_expect_ssl_context():
 
 
 @gen_test()
-async def test_expect_scheduler_ssl_when_sharing_server():
-    with tempfile.TemporaryDirectory() as tempdir:
-        key_path = os.path.join(tempdir, "dask.pem")
-        cert_path = os.path.join(tempdir, "dask.crt")
-        with open(key_path, "w") as f:
-            f.write(security.tls_scheduler_key)
-        with open(cert_path, "w") as f:
-            f.write(security.tls_scheduler_cert)
-        c = {
-            "distributed.scheduler.dashboard.tls.key": key_path,
-            "distributed.scheduler.dashboard.tls.cert": cert_path,
-        }
-        with dask.config.set(c):
-            with pytest.raises(RuntimeError):
-                async with Scheduler(protocol="ws://", dashboard=True, port=8787):
-                    pass
+async def test_expect_scheduler_ssl_when_sharing_server(tmp_path):
+    xfail_ssl_issue5601()
+    pytest.importorskip("cryptography")
+    security = Security.temporary()
+    key_path = os.path.join(str(tmp_path), "dask.pem")
+    cert_path = os.path.join(str(tmp_path), "dask.crt")
+    with open(key_path, "w") as f:
+        f.write(security.tls_scheduler_key)
+    with open(cert_path, "w") as f:
+        f.write(security.tls_scheduler_cert)
+    c = {
+        "distributed.scheduler.dashboard.tls.key": key_path,
+        "distributed.scheduler.dashboard.tls.cert": cert_path,
+    }
+    with dask.config.set(c):
+        with pytest.raises(RuntimeError):
+            async with Scheduler(protocol="ws://", dashboard=True, port=8787):
+                pass
 
 
 @gen_cluster(client=True, scheduler_kwargs={"protocol": "ws://"})
@@ -113,35 +129,29 @@ async def test_collections(c, s, a, b):
 
 @gen_cluster(client=True, scheduler_kwargs={"protocol": "ws://"})
 async def test_large_transfer(c, s, a, b):
-    np = pytest.importorskip("numpy")
-    await c.scatter(np.random.random(1_000_000))
+    x = await c.scatter(randbytes(12_000_000))
+    await c.gather(x)
 
 
-@pytest.mark.asyncio
-async def test_large_transfer_with_no_compression(cleanup):
-    np = pytest.importorskip("numpy")
-    with dask.config.set({"distributed.comm.compression": None}):
-        async with Scheduler(protocol="ws://") as s:
-            async with Worker(s.address, protocol="ws://"):
-                async with Client(s.address, asynchronous=True) as c:
-                    await c.scatter(np.random.random(1_500_000))
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "dashboard,protocol,security,port",
     [
         (True, "ws://", None, 8787),
-        (True, "wss://", security, 8787),
+        (True, "wss://", True, 8787),
         (False, "ws://", None, 8787),
-        (False, "wss://", security, 8787),
+        (False, "wss://", True, 8787),
         (True, "ws://", None, 8786),
-        (True, "wss://", security, 8786),
+        (True, "wss://", True, 8786),
         (False, "ws://", None, 8786),
-        (False, "wss://", security, 8786),
+        (False, "wss://", True, 8786),
     ],
 )
-async def test_http_and_comm_server(cleanup, dashboard, protocol, security, port):
+@gen_test()
+async def test_http_and_comm_server(dashboard, protocol, security, port):
+    if security:
+        xfail_ssl_issue5601()
+        pytest.importorskip("cryptography")
+        security = Security.temporary()
     async with Scheduler(
         protocol=protocol, dashboard=dashboard, port=port, security=security
     ) as s:
@@ -155,29 +165,47 @@ async def test_http_and_comm_server(cleanup, dashboard, protocol, security, port
                 assert result == 11
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "protocol,security",
-    [
-        (
-            "ws://",
-            Security(extra_conn_args={"headers": {"Authorization": "Token abcd"}}),
-        ),
-        (
-            "wss://",
-            Security.temporary(
-                extra_conn_args={"headers": {"Authorization": "Token abcd"}}
-            ),
-        ),
-    ],
+    "protocol,sni",
+    [("ws://", True), ("ws://", False), ("wss://", True), ("wss://", False)],
 )
-async def test_connection_made_with_extra_conn_args(cleanup, protocol, security):
+@gen_test(clean_kwargs={"instances": False})
+async def test_connection_made_with_extra_conn_args(protocol, sni):
+    if protocol == "ws://":
+        security = Security(
+            extra_conn_args={"headers": {"Authorization": "Token abcd"}}
+        )
+    else:
+        xfail_ssl_issue5601()
+        pytest.importorskip("cryptography")
+        security = Security.temporary(
+            extra_conn_args={"headers": {"Authorization": "Token abcd"}}
+        )
     async with Scheduler(
         protocol=protocol, security=security, dashboard_address=":0"
     ) as s:
         connection_args = security.get_connection_args("worker")
+        if sni:
+            connection_args["server_hostname"] = "sni.example.host"
         comm = await connect(s.address, **connection_args)
         assert comm.sock.request.headers.get("Authorization") == "Token abcd"
+
+        await comm.close()
+
+
+@gen_test(clean_kwargs={"instances": False})
+async def test_connection_made_with_sni():
+    xfail_ssl_issue5601()
+    pytest.importorskip("cryptography")
+    security = Security.temporary()
+    async with Scheduler(
+        protocol="wss://", security=security, dashboard_address=":0"
+    ) as s:
+        connection_args = security.get_connection_args("worker")
+        connection_args["server_hostname"] = "sni.example.host"
+        comm = await connect(s.address, **connection_args)
+        assert comm.sock.request.headers.get("Host") == "sni.example.host"
+
         await comm.close()
 
 
@@ -189,23 +217,30 @@ async def test_quiet_close():
         ):
             pass
 
-    # For some reason unrelated @coroutine warnings are showing up
-    record = [warning for warning in record if "coroutine" not in str(warning.message)]
-
     assert not record, record[0].message
 
 
 @gen_cluster(client=True, scheduler_kwargs={"protocol": "ws://"})
 async def test_ws_roundtrip(c, s, a, b):
+    np = pytest.importorskip("numpy")
     x = np.arange(100)
     future = await c.scatter(x)
     y = await future
     assert (x == y).all()
 
 
-@gen_cluster(client=True, security=security, scheduler_kwargs={"protocol": "wss://"})
-async def test_wss_roundtrip(c, s, a, b):
-    x = np.arange(100)
-    future = await c.scatter(x)
-    y = await future
-    assert (x == y).all()
+@gen_test()
+async def test_wss_roundtrip():
+    np = pytest.importorskip("numpy")
+    xfail_ssl_issue5601()
+    pytest.importorskip("cryptography")
+    security = Security.temporary()
+    async with Scheduler(
+        protocol="wss://", security=security, dashboard_address=":0"
+    ) as s:
+        async with Worker(s.address, security=security) as w:
+            async with Client(s.address, security=security, asynchronous=True) as c:
+                x = np.arange(100)
+                future = await c.scatter(x)
+                y = await future
+                assert (x == y).all()

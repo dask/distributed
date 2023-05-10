@@ -1,28 +1,38 @@
+from __future__ import annotations
+
 import functools
 import warnings
-from distutils.version import LooseVersion
 
-import bokeh
 from bokeh.application import Application
 from bokeh.application.handlers.function import FunctionHandler
 from bokeh.server.server import BokehTornado
-
-try:
-    from bokeh.server.util import create_hosts_allowlist
-except ImportError:
-    from bokeh.server.util import create_hosts_whitelist as create_hosts_allowlist
+from bokeh.server.util import create_hosts_allowlist
 
 import dask
 
-if LooseVersion(bokeh.__version__) < LooseVersion("1.0.0"):
+from distributed.dashboard.utils import BOKEH_VERSION
+from distributed.versions import BOKEH_REQUIREMENT
+
+# Set `prereleases=True` to allow for use with dev versions of `bokeh`
+if not BOKEH_REQUIREMENT.specifier.contains(BOKEH_VERSION, prereleases=True):
     warnings.warn(
-        "\nDask needs bokeh >= 1.0 for the dashboard."
+        f"\nDask needs {BOKEH_REQUIREMENT} for the dashboard."
+        f"\nYou have bokeh={BOKEH_VERSION}."
         "\nContinuing without the dashboard."
     )
-    raise ImportError("Dask needs bokeh >= 1.0")
+    raise ImportError(
+        f"Dask needs {BOKEH_REQUIREMENT} for the dashboard, not bokeh={BOKEH_VERSION}"
+    )
 
 
-def BokehApplication(applications, server, prefix="/", template_variables={}):
+if BOKEH_VERSION.major < 3:
+    from bokeh.models import Panel as TabPanel  # noqa: F401
+else:
+    from bokeh.models import TabPanel  # noqa: F401
+
+
+def BokehApplication(applications, server, prefix="/", template_variables=None):
+    template_variables = template_variables or {}
     prefix = "/" + prefix.strip("/") + "/" if prefix else "/"
 
     extra = {"prefix": prefix, **template_variables}

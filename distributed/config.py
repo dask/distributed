@@ -1,13 +1,15 @@
-import logging
+from __future__ import annotations
+
+import asyncio
 import logging.config
 import os
 import sys
+from typing import Any
 
 import yaml
 
 import dask
-
-from .compatibility import logging_names
+from dask.utils import import_required
 
 config = dask.config.config
 
@@ -64,7 +66,15 @@ dask.config.rename(aliases)
 logger = logging.getLogger(__name__)
 
 
-def _initialize_logging_old_style(config):
+if sys.version_info >= (3, 11):
+    _logging_get_level_names_mapping = logging.getLevelNamesMapping
+else:
+
+    def _logging_get_level_names_mapping() -> dict[str, int]:
+        return logging._nameToLevel.copy()
+
+
+def _initialize_logging_old_style(config: dict[Any, Any]) -> None:
     """
     Initialize logging using the "old-style" configuration scheme, e.g.:
         {
@@ -75,7 +85,7 @@ def _initialize_logging_old_style(config):
             }
         }
     """
-    loggers = {  # default values
+    loggers: dict[str, str | int] = {  # default values
         "distributed": "info",
         "distributed.client": "warning",
         "bokeh": "error",
@@ -91,37 +101,53 @@ def _initialize_logging_old_style(config):
             dask.config.get("distributed.admin.log-format", config=config)
         )
     )
-    for name, level in loggers.items():
-        if isinstance(level, str):
-            level = logging_names[level.upper()]
+    logging_names = _logging_get_level_names_mapping()
+    for name, raw_level in sorted(loggers.items()):
+        level = (
+            logging_names[raw_level.upper()]
+            if isinstance(raw_level, str)
+            else raw_level
+        )
         logger = logging.getLogger(name)
         logger.setLevel(level)
-        logger.handlers[:] = []
-        logger.addHandler(handler)
-        logger.propagate = False
+
+        # Ensure that we're not registering the logger twice in this hierarchy.
+        anc = logging.getLogger(None)
+        already_registered = False
+
+        for ancestor in name.split("."):
+            if anc.handlers:
+                already_registered = True
+                break
+            anc.getChild(ancestor)
+
+        if not already_registered:
+            logger.addHandler(handler)
+            logger.propagate = False
 
 
-def _initialize_logging_new_style(config):
+def _initialize_logging_new_style(config: dict[Any, Any]) -> None:
     """
     Initialize logging using logging's "Configuration dictionary schema".
     (ref.: https://docs.python.org/3/library/logging.config.html#configuration-dictionary-schema)
     """
     base_config = _find_logging_config(config)
-    logging.config.dictConfig(base_config.get("logging"))
+    logging.config.dictConfig(base_config.get("logging"))  # type: ignore[arg-type]
 
 
-def _initialize_logging_file_config(config):
+def _initialize_logging_file_config(config: dict[Any, Any]) -> None:
     """
     Initialize logging using logging's "Configuration file format".
     (ref.: https://docs.python.org/3/howto/logging.html#configuring-logging)
     """
     base_config = _find_logging_config(config)
     logging.config.fileConfig(
-        base_config.get("logging-file-config"), disable_existing_loggers=False
+        base_config.get("logging-file-config"),  # type: ignore[arg-type]
+        disable_existing_loggers=False,
     )
 
 
-def _find_logging_config(config):
+def _find_logging_config(config: dict[Any, Any]) -> dict[Any, Any]:
     """
     Look for the dictionary containing logging-specific configurations,
     starting in the 'distributed' dictionary and then trying the top-level
@@ -133,7 +159,7 @@ def _find_logging_config(config):
         return config
 
 
-def initialize_logging(config):
+def initialize_logging(config: dict[Any, Any]) -> None:
     base_config = _find_logging_config(config)
     if "logging-file-config" in base_config:
         if "logging" in base_config:
@@ -151,4 +177,31 @@ def initialize_logging(config):
             _initialize_logging_old_style(config)
 
 
+def initialize_event_loop(config: dict[Any, Any]) -> None:
+    event_loop = dask.config.get("distributed.admin.event-loop")
+    if event_loop == "uvloop":
+        uvloop = import_required(
+            "uvloop",
+            "The distributed.admin.event-loop configuration value "
+            "is set to 'uvloop' but the uvloop module is not installed"
+            "\n\n"
+            "Please either change the config value or install one of the following\n"
+            "    conda install uvloop\n"
+            "    pip install uvloop",
+        )
+        uvloop.install()
+    elif event_loop in {"asyncio", "tornado"}:
+        if sys.platform == "win32":
+            # WindowsProactorEventLoopPolicy is not compatible with tornado 6
+            # fallback to the pre-3.8 default of Selector
+            # https://github.com/tornadoweb/tornado/issues/2608
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    else:
+        raise ValueError(
+            "Expected distributed.admin.event-loop to be in ('asyncio', 'tornado', 'uvloop'), got %s"
+            % dask.config.get("distributed.admin.event-loop")
+        )
+
+
 initialize_logging(dask.config.config)
+initialize_event_loop(dask.config.config)

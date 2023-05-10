@@ -1,0 +1,18 @@
+digraph{
+    graph [
+        bgcolor="#FFFFFFF00",
+        rankdir=LR,
+        ];
+    released -> waiting;
+    waiting -> ready;
+    waiting -> constrained;
+    ready -> executing;
+    constrained -> executing;
+    executing -> "long-running";
+    executing -> memory;
+    executing -> error;
+    executing -> rescheduled;
+    "long-running" -> memory;
+    "long-running" -> error;
+    "long-running" -> rescheduled;
+}

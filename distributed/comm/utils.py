@@ -1,13 +1,15 @@
+from __future__ import annotations
+
 import logging
 import math
 import socket
 
 import dask
-from dask.sizeof import sizeof
 from dask.utils import parse_bytes
 
-from .. import protocol
-from ..utils import get_ip, get_ipv6, nbytes, offload
+from distributed import protocol
+from distributed.sizeof import safe_sizeof as sizeof
+from distributed.utils import get_ip, get_ipv6, nbytes, offload
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +18,26 @@ logger = logging.getLogger(__name__)
 OFFLOAD_THRESHOLD = dask.config.get("distributed.comm.offload")
 if isinstance(OFFLOAD_THRESHOLD, str):
     OFFLOAD_THRESHOLD = parse_bytes(OFFLOAD_THRESHOLD)
+
+
+# Find the function, `host_array()`, to use when allocating new host arrays
+try:
+    # Use NumPy, when available, to avoid memory initialization cost.
+    # A `bytearray` is zero-initialized using `calloc`, which we don't need.
+    # `np.empty` both skips the zero-initialization, and
+    # uses hugepages when available ( https://github.com/numpy/numpy/pull/14216 ).
+    import numpy
+
+    def numpy_host_array(n: int) -> memoryview:
+        return numpy.empty((n,), dtype="u1").data
+
+    host_array = numpy_host_array
+except ImportError:
+
+    def builtin_host_array(n: int) -> memoryview:
+        return memoryview(bytearray(n))
+
+    host_array = builtin_host_array
 
 
 async def to_frames(

@@ -39,9 +39,7 @@
                 <div class="dropdown-content">
                     <ul>
                         {% for plot in plots %}
-                        <li><a href="{{ plot }}">
-                                {{ " ".join(plot.split("-")[1:]).title().replace("Cpu", "CPU").replace("Gpu", "GPU") }}
-                            </a></li>
+                        <li><a href="{{ plot["url"] }}">{{ plot["name"] }}</a></li>
                         {% endfor %}
                     </ul>
                 </div>
@@ -51,6 +49,17 @@
                     <img src="statics/images/fa-bars.svg"></img>
                 </a>
             </li>
+            <li class="pull-right">
+                <a href="https://docs.dask.org/en/stable/" target="_blank">Documentation</a>
+            </li>
+            {% if jupyter %}
+            <li class="pull-right">
+                <a class="jupyter-link" href="jupyter/lab" target="_blank">
+                    <img src="statics/images/jupyter.svg" />
+                    Launch Jupyter
+                </a>
+            </li>
+            {% endif %}
         </ul>
     </div>
     <div class="content">
