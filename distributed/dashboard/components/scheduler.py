@@ -3620,8 +3620,7 @@ class FinePerformanceMetrics(DashboardComponent):
         piedata = {}
         piedata["activity"] = senddata["activity"]
         piedata["value"] = [
-            (sum(senddata[f"{op}_{self.unit_selected}"]))
-            for op in senddata["activity"]
+            (sum(senddata[f"{op}_{self.unit_selected}"])) for op in senddata["activity"]
         ]
         piedata["text"] = [self.format(self.unit_selected, v) for v in piedata["value"]]
         piedata["angle"] = [
