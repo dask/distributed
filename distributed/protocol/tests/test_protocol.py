@@ -9,7 +9,7 @@ import pytest
 import dask.config
 from dask.sizeof import sizeof
 
-from distributed.compatibility import WINDOWS
+from distributed.compatibility import WINDOWS, randbytes
 from distributed.protocol import dumps, loads, maybe_compress, msgpack, to_serialize
 from distributed.protocol.compression import compressions, get_compression_settings
 from distributed.protocol.cuda import cuda_deserialize, cuda_serialize
@@ -26,12 +26,12 @@ from distributed.protocol.serialize import (
 from distributed.utils import nbytes
 
 
-@pytest.fixture(params=[None, "zlib", "lz4", "snappy", "zstd"])
+@pytest.fixture(params=[None, "zlib", "lz4", "snappy", "zstd", "cramjam.lz4"])
 def compression(request):
     if request.param == "zstd":
         pytest.importorskip("zstandard")
     elif request.param:
-        pytest.importorskip(request.param)
+        pytest.importorskip(request.param.split(".")[0])
     return request.param
 
 
@@ -57,6 +57,14 @@ def test_auto_compression():
     If neither is installed, test that we don't fall back to the very slow zlib.
     """
     with dask.config.set({"test123": "auto"}):
+        try:
+            import cramjam  # noqa: F401
+
+            assert get_compression_settings("test123") == "cramjam.lz4"
+            return
+        except ImportError:
+            pass
+
         try:
             import lz4  # noqa: F401
 
@@ -142,7 +150,7 @@ def test_maybe_compress(compression, dtype):
     payload = dtype(b"0" * 10000)
     rc, rd = maybe_compress(payload, compression=compression)
     assert rc == compression
-    assert compressions[rc].decompress(rd) == payload
+    assert dtype(compressions[rc].decompress(rd)) == payload
 
 
 def test_maybe_compress_sample(compression):
@@ -165,7 +173,7 @@ def test_compression_thread_safety(compression, dtype):
         for _ in range(2000):
             rc, rd = maybe_compress(payload, compression=compression)
             assert rc == compression
-            assert compressions[rc].decompress(rd) == expect
+            assert bytes(compressions[rc].decompress(rd)) == expect
 
     with ThreadPoolExecutor(4) as ex:
         futures = [ex.submit(compress_decompress) for _ in range(4)]
@@ -363,3 +371,47 @@ def test_deeply_nested_structures():
 
     msg = gen_deeply_nested(sys.getrecursionlimit() // 4)
     assert isinstance(serialize(msg), tuple)
+
+
+def test_decompress_into(compression):
+    """An object is sharded into two frames and then compressed. When it's decompressed,
+    decompress_into (if available) is used to write both messages into the same buffer.
+    """
+    a = "".join(c * 2000 for c in "abcdefghij")
+    assert len(a) == 20_000
+    msg = to_serialize(a)
+    frames = dumps(msg, context={"compression": compression}, frame_split_size=10_000)
+
+    assert len(frames) == 5
+    if compression:
+        assert len(frames[2]) < 600
+        assert len(frames[3]) < 600
+    else:
+        assert len(frames[2]) == len(frames[3]) == 10_000
+
+    assert loads(frames) == a
+
+
+@pytest.mark.parametrize("swap", [False, True])
+def test_mixed_compression_for_subframes(compression, swap):
+    """Serialize an object that gets sharded into two subframes.
+    One subframe is compressed, the other isn't.
+    """
+    a = randbytes(10_000)
+    b = b"x" * 10_000
+    if swap:
+        a, b = b, a
+    msg = to_serialize(a + b)
+    frames = dumps(msg, context={"compression": compression}, frame_split_size=10_000)
+
+    assert len(frames) == 4
+    if swap and compression:
+        assert len(frames[2]) < 600
+        assert len(frames[3]) == 10_000
+    elif compression:
+        assert len(frames[2]) == 10_000
+        assert len(frames[3]) < 600
+    else:
+        assert len(frames[2]) == len(frames[3]) == 10_000
+
+    assert loads(frames) == a + b

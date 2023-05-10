@@ -597,12 +597,13 @@ properties:
                   Interval between checks for the spill, pause, and terminate thresholds
 
               spill-compression:
-                enum: [null, false, auto, zlib, lz4, snappy, zstd]
+                enum: [null, false, auto, zlib, lz4, snappy, zstd, cramjam.lz4]
                 description:
-                  The compression algorithm to use. 'auto' defaults to lz4 if installed,
-                  otherwise to snappy if installed, otherwise to false. zlib and zstd
-                  are only used if explicitly requested here. Uncompressible data is
-                  always uncompressed, regardless of this setting.
+                  The compression algorithm to use. 'auto' defaults to cramjam.lz4 if
+                  cramjam is installed, otherwise to lz4 if installed, otherwise to
+                  snappy if installed, otherwise to false. zlib and zstd are only used
+                  if explicitly requested here. Uncompressible data is always
+                  uncompressed, regardless of this setting.
                   See also distributed.comm.compression.
 
           http:
@@ -781,12 +782,13 @@ properties:
                     description: The maximum delay between retries
 
           compression:
-            enum: [null, false, auto, zlib, lz4, snappy, zstd]
+            enum: [null, false, auto, zlib, lz4, snappy, zstd, cramjam.lz4]
             description:
-              The compression algorithm to use. 'auto' defaults to lz4 if installed,
-              otherwise to snappy if installed, otherwise to false. zlib and zstd are
-              only used if explicitly requested here. Uncompressible data and transfers
-              on localhost are always uncompressed, regardless of this setting.
+              The compression algorithm to use. 'auto' defaults to cramjam.lz4 if
+              cramjam is installed, otherwise to lz4 if installed, otherwise to snappy
+              if installed, otherwise to false. zlib and zstd are only used if
+              explicitly requested here. Uncompressible data and transfers on localhost
+              are always uncompressed, regardless of this setting.
               See also distributed.worker.memory.spill-compression.
 
           offload:

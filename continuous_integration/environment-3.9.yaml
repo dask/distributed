@@ -51,3 +51,4 @@ dependencies:
   - pip:
       - git+https://github.com/dask/dask
       - keras
+      - cramjam==2.7.0rc3  # Only tested here

@@ -488,6 +488,7 @@ def merge_and_deserialize(header, frames, deserializers=None):
     --------
     deserialize
     serialize_and_split
+    decompress
     """
     if "split-num-sub-frames" not in header:
         merged_frames = frames
@@ -664,6 +665,10 @@ def serialize_bytelist(
 ) -> list[bytes | bytearray | memoryview]:
     header, frames = serialize_and_split(x, **kwargs)
     if frames:
+        header["uncompressed_size"] = [
+            frame.nbytes if isinstance(frame, memoryview) else len(frame)
+            for frame in frames
+        ]
         header["compression"], frames = zip(
             *(maybe_compress(frame, compression=compression) for frame in frames)
         )
@@ -687,7 +692,7 @@ def deserialize_bytes(b):
         header = msgpack.loads(header, raw=False, use_list=False)
     else:
         header = {}
-    frames = decompress(header, frames)
+    header, frames = decompress(header, frames)
     return merge_and_deserialize(header, frames)
 
 

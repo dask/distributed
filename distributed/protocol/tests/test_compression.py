@@ -22,7 +22,7 @@ def compression_counters():
         counters[1] += 1
         return zlib.decompress(v)
 
-    compressions["dummy"] = Compression("dummy", compress, decompress)
+    compressions["dummy"] = Compression("dummy", compress, decompress, None)
     yield counters
     del compressions["dummy"]
 

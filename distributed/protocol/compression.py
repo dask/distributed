@@ -6,7 +6,7 @@ Includes utilities for determining whether or not to compress
 from __future__ import annotations
 
 import zlib
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Sequence
 from contextlib import suppress
 from functools import partial
 from random import randint
@@ -32,13 +32,14 @@ class Compression(NamedTuple):
     name: None | str
     compress: Callable[[AnyBytes], AnyBytes]
     decompress: Callable[[AnyBytes], AnyBytes]
+    decompress_into: Callable[[AnyBytes, memoryview], None] | None
 
 
 compressions: dict[str | None | Literal[False], Compression] = {
-    None: Compression(None, identity, identity),
-    False: Compression(None, identity, identity),  # alias
-    "auto": Compression(None, identity, identity),
-    "zlib": Compression("zlib", zlib.compress, zlib.decompress),
+    None: Compression(None, identity, identity, None),
+    False: Compression(None, identity, identity, None),  # alias
+    "auto": Compression(None, identity, identity, None),
+    "zlib": Compression("zlib", zlib.compress, zlib.decompress, None),
 }
 
 
@@ -56,7 +57,9 @@ with suppress(ImportError):
     except TypeError:
         raise ImportError("Need snappy >= 0.5.3")
 
-    compressions["snappy"] = Compression("snappy", snappy.compress, snappy.decompress)
+    compressions["snappy"] = Compression(
+        "snappy", snappy.compress, snappy.decompress, None
+    )
     compressions["auto"] = compressions["snappy"]
 
 with suppress(ImportError):
@@ -64,7 +67,7 @@ with suppress(ImportError):
 
     # Required to use `lz4.block` APIs and Python Buffer Protocol support.
     if parse_version(lz4.__version__) < parse_version("0.23.1"):
-        raise ImportError("Need lz4 >= 0.23.1")
+        raise ImportError("Need lz4 >= 0.23.1")  # pragma: nocover
 
     import lz4.block
 
@@ -77,8 +80,25 @@ with suppress(ImportError):
         # larger ones are deep-copied between decompression and serialization anyway in
         # order to merge them.
         partial(lz4.block.decompress, return_bytearray=True),
+        None,
     )
     compressions["auto"] = compressions["lz4"]
+
+
+with suppress(ImportError):
+    import cramjam
+
+    # TODO change to 2.7.0. This is a hack to make it work with 2.7.0-rc3.
+    if parse_version(cramjam.__version__) < parse_version("2.6.99"):
+        raise ImportError("Need cramjam >= 2.7.0")  # pragma: nocover
+
+    compressions["cramjam.lz4"] = Compression(
+        "cramjam.lz4",
+        cramjam.lz4.compress_block,
+        cramjam.lz4.decompress_block,
+        cramjam.lz4.decompress_block_into,
+    )
+    compressions["auto"] = compressions["cramjam.lz4"]
 
 
 with suppress(ImportError):
@@ -86,7 +106,7 @@ with suppress(ImportError):
 
     # Required for Python Buffer Protocol support.
     if parse_version(zstandard.__version__) < parse_version("0.9.0"):
-        raise ImportError("Need zstandard >= 0.9.0")
+        raise ImportError("Need zstandard >= 0.9.0")  # pragma: nocover
 
     def zstd_compress(data):
         zstd_compressor = zstandard.ZstdCompressor(
@@ -99,7 +119,7 @@ with suppress(ImportError):
         zstd_decompressor = zstandard.ZstdDecompressor()
         return zstd_decompressor.decompress(data)
 
-    compressions["zstd"] = Compression("zstd", zstd_compress, zstd_decompress)
+    compressions["zstd"] = Compression("zstd", zstd_compress, zstd_decompress, None)
 
 
 def get_compression_settings(key: str) -> str | None:
@@ -196,9 +216,45 @@ def maybe_compress(
 
 
 @context_meter.meter("decompress")
-def decompress(header: dict[str, Any], frames: Iterable[AnyBytes]) -> list[AnyBytes]:
-    """Decompress frames according to information in the header"""
-    return [
-        compressions[name].decompress(frame)
-        for name, frame in zip(header["compression"], frames)
-    ]
+def decompress(
+    header: dict[str, Any], frames: Sequence[AnyBytes]
+) -> tuple[dict[str, Any], list[AnyBytes]]:
+    """Decompress frames according to information in the header.
+
+    See also
+    --------
+    merge_and_deserialize
+    """
+    from distributed.comm.utils import host_array
+
+    merged_frames: list[AnyBytes] = []
+    split_num_sub_frames: list[int] = []
+    split_offsets: list[int] = []
+
+    for n, offset in zip(header["split-num-sub-frames"], header["split-offsets"]):
+        compression_names = header["compression"][offset : offset + n]
+        compression = compressions[compression_names[0]]
+        subframes = frames[offset : offset + n]
+
+        if compression.decompress_into and len(set(compression_names)) == 1:
+            nbytes = header["uncompressed_size"][offset : offset + n]
+            merged = host_array(sum(nbytes))
+            merged_offset = 0
+            for frame_i, nbytes_i in zip(subframes, nbytes):
+                merged_i = merged[merged_offset : merged_offset + nbytes_i]
+                compression.decompress_into(frame_i, merged_i)
+                merged_offset += nbytes_i
+            merged_frames.append(merged)
+            split_num_sub_frames.append(1)
+            split_offsets.append(len(split_offsets))
+
+        else:
+            for name, frame in zip(compression_names, subframes):
+                merged_frames.append(compressions[name].decompress(frame))
+            split_num_sub_frames.append(n)
+            split_offsets.append(offset)
+
+    header = header.copy()
+    header["split-num-sub-frames"] = split_num_sub_frames
+    header["split-offsets"] = split_offsets
+    return header, merged_frames
