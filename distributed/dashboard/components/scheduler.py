@@ -37,10 +37,10 @@ from bokeh.models import (
     PanTool,
     Range1d,
     ResetTool,
+    Select,
     Tabs,
     TapTool,
     Title,
-    Toggle,
     VeeHead,
     WheelZoomTool,
 )
@@ -3396,28 +3396,29 @@ class FinePerformanceMetrics(DashboardComponent):
         self.init_root()
 
     def init_root(self):
-        def handle_toggle(_toggle):
-            self.toggle.label = (
-                "Bytes (Toggle for Values)"
-                if self.toggle.active
-                else "Timing (Toggle for Bytes)"
-            )
+        def handle_selector_chng(attr, old, new):
+            self.freq_selected = new
             self.substantial_change = True
 
         self.function_selector = MultiChoice(value=[], options=[])
         self.function_selector.placeholder = "Select specific functions"
-        self.toggle = Toggle(label="Timing (Toggle for Bytes)")
-        self.toggle.on_click(handle_toggle)
+        self.freq_selector = Select(title="Freq selection", options=[])
+        self.freq_selector.on_change("value", handle_selector_chng)
+        self.freq_selected = "seconds"
         self.task_exec_by_activity_chart = figure()
         self.task_exec_by_prefix_chart = figure()
         self.senddata_by_activity_chart = figure()
         self.root = column(
             self.function_selector,
-            self.toggle,
+            self.freq_selector,
             row([self.task_exec_by_prefix_chart, self.task_exec_by_activity_chart]),
             row([self.senddata_by_activity_chart]),
             sizing_mode="scale_width",
         )
+
+    def format(self, freq: str, val: Any) -> str:
+        formatters = {"bytes": format_bytes, "seconds": format_time}
+        return formatters.get(freq, str)(val)
 
     @without_property_validation
     @log_errors
@@ -3425,29 +3426,34 @@ class FinePerformanceMetrics(DashboardComponent):
         items = sorted(
             (k, v)
             for k, v in self.scheduler.cumulative_worker_metrics.items()
-            if isinstance(k, tuple) and k[-1] in ("bytes", "seconds")
+            if isinstance(k, tuple)
         )
         for (type, *parts), val in items:
             if type == "get-data":
                 operation, freq = parts
+
+                if freq not in self.freq_selector.options:
+                    # note append doesn't work here
+                    self.freq_selector.options += [freq]
+
                 if operation not in self.senddata["operation"]:
                     self.substantial_change = True
                     self.senddata["operation"].append(operation)
 
                 idx = self.senddata["operation"].index(operation)
-                while idx >= len(self.senddata[f"{operation}_value"]):
-                    self.senddata[f"{operation}_bytes"].append(0)
-                    self.senddata[f"{operation}_value"].append(0)
-                    self.senddata[f"{operation}_text"].append(0)
-                if freq == "bytes":
-                    self.senddata[f"{operation}_text"][idx] = format_bytes(val)
-                    self.senddata[f"{operation}_bytes"][idx] = val
-                elif freq == "seconds":
-                    self.senddata[f"{operation}_text"][idx] = format_time(val)
-                    self.senddata[f"{operation}_value"][idx] = val
+                while idx >= len(self.senddata[f"{operation}_{freq}"]):
+                    self.senddata[f"{operation}_{freq}"].append(0)
+                    self.senddata[f"{operation}_{freq}_text"].append("")
+                self.senddata[f"{operation}_{freq}_text"][idx] = self.format(freq, val)
+                self.senddata[f"{operation}_{freq}"][idx] = val
 
             elif type == "execute":
                 function_name, operation, freq = parts
+
+                if freq not in self.freq_selector.options:
+                    # note append doesn't work here
+                    self.freq_selector.options += [freq]
+
                 if operation not in self.task_operations:
                     self.substantial_change = True
                     self.task_operations.append(operation)
@@ -3461,19 +3467,16 @@ class FinePerformanceMetrics(DashboardComponent):
 
                 # Some function/operation combos missing, so need to keep columns aligned
                 for op in self.task_operations:
-                    while len(self.task_exec_data[f"{op}_value"]) != len(
+                    while len(self.task_exec_data[f"{op}_{freq}"]) != len(
                         self.task_exec_data["functions"]
                     ):
-                        self.task_exec_data[f"{op}_value"].append(0)
-                        self.task_exec_data[f"{op}_bytes"].append(0)
-                        self.task_exec_data[f"{op}_text"].append("")
+                        self.task_exec_data[f"{op}_{freq}"].append(0)
+                        self.task_exec_data[f"{op}_{freq}_text"].append("")
 
-                if freq == "seconds":
-                    self.task_exec_data[f"{operation}_text"][idx] = format_time(val)
-                    self.task_exec_data[f"{operation}_value"][idx] = val
-                elif freq == "bytes":
-                    self.task_exec_data[f"{operation}_text"][idx] = format_bytes(val)
-                    self.task_exec_data[f"{operation}_bytes"][idx] = val
+                self.task_exec_data[f"{operation}_{freq}"][idx] = val
+                self.task_exec_data[f"{operation}_{freq}_text"][idx] = self.format(
+                    freq, val
+                )
 
         data = self.task_exec_data.copy()
         # If user has manually selected function(s) then we are only showing them.
@@ -3495,9 +3498,13 @@ class FinePerformanceMetrics(DashboardComponent):
             f"Filter by function ({len(self.function_selector.options)}):"
         )
 
-        task_exec_piechart = self._build_task_execution_by_activity_chart()
-        task_exec_barchart = self._build_task_execution_by_prefix_chart()
-        senddata_piechart = self._build_senddata_chart()
+        task_exec_piechart = self._build_task_execution_by_activity_chart(
+            self.task_exec_data_limited.copy()
+        )
+        task_exec_barchart = self._build_task_execution_by_prefix_chart(
+            self.task_exec_data_limited.copy()
+        )
+        senddata_piechart = self._build_senddata_chart(self.senddata.copy())
 
         # replacing the child causes small blips if done every iteration vs updating renderers
         # but it's needed when new functions and/or operations show up to rerender plot
@@ -3511,28 +3518,20 @@ class FinePerformanceMetrics(DashboardComponent):
             self.task_exec_by_activity_chart.renderers = task_exec_barchart.renderers
             self.senddata_by_activity_chart.renderers = senddata_piechart.renderers
 
-    def _build_task_execution_by_activity_chart(self):
-        show_bytes = self.toggle.active
+    def _build_task_execution_by_activity_chart(
+        self, task_exec_data: defaultdict[str, list]
+    ) -> figure:
         piechart_data = dict()
         piechart_data["value"] = [
-            sum(
-                self.task_exec_data_limited[
-                    f"{op}_{'bytes' if show_bytes else 'value'}"
-                ]
-            )
+            sum(task_exec_data[f"{op}_{self.freq_selected}"])
             for op in self.task_operations
         ]
         piechart_data["text"] = [
-            format_bytes(n) if show_bytes else format_time(n)
-            for n in piechart_data["value"]
+            self.format(self.freq_selected, v) for v in piechart_data["value"]
         ]
         piechart_data["angle"] = [
             (
-                sum(
-                    self.task_exec_data_limited[
-                        f"{operation}_{'bytes' if show_bytes else 'value'}"
-                    ]
-                )
+                sum(task_exec_data[f"{operation}_{self.freq_selected}"])
                 / sum(piechart_data["value"])
                 if sum(piechart_data["value"])
                 else 0  # may not have any bytes movement reported, avoid divide by zero
@@ -3571,9 +3570,11 @@ class FinePerformanceMetrics(DashboardComponent):
         )
         return piechart
 
-    def _build_task_execution_by_prefix_chart(self):
+    def _build_task_execution_by_prefix_chart(
+        self, task_exec_data: defaultdict[str, list]
+    ) -> figure:
         barchart = figure(
-            x_range=self.task_exec_data_limited["functions"],
+            x_range=task_exec_data["functions"],
             height=500,
             title="Task execution, by prefix",
             tools="pan,wheel_zoom,box_zoom,reset",
@@ -3582,67 +3583,59 @@ class FinePerformanceMetrics(DashboardComponent):
         barchart.yaxis.visible = False
         barchart.xaxis.major_label_orientation = 0.2
         barchart.grid.grid_line_color = None
-        renderers = barchart.vbar_stack(
-            [
-                name
-                for name in self.task_exec_data_limited.keys()
-                if name.endswith("bytes" if self.toggle.active else "value")
-                and len(self.task_exec_data_limited[name])
-            ],
-            x="functions",
-            width=0.9,
-            source=self.task_exec_by_prefix_src,
-            color=small_palettes["YlGnBu"].get(len(self.task_operations), []),
-            legend_label=self.task_operations,
-        )
-        for vbar in renderers:
-            tooltips = [
-                (
-                    vbar.name,
-                    f"@{{{vbar.name.replace('_bytes', '').replace('_value', '')}_text}}",
-                ),
-                ("function", "@functions"),
-            ]
-            barchart.add_tools(HoverTool(tooltips=tooltips, renderers=[vbar]))
+        stackers = [
+            name for name in task_exec_data if name.endswith(self.freq_selected)
+        ]
+        if stackers:
+            renderers = barchart.vbar_stack(
+                stackers,
+                x="functions",
+                width=0.9,
+                source=self.task_exec_by_prefix_src,
+                color=small_palettes["YlGnBu"].get(len(self.task_operations), []),
+                legend_label=self.task_operations,
+            )
+            for vbar in renderers:
+                tooltips = [
+                    (
+                        vbar.name,
+                        f"@{{{vbar.name}_text}}",
+                    ),
+                    ("function", "@functions"),
+                ]
+                barchart.add_tools(HoverTool(tooltips=tooltips, renderers=[vbar]))
 
-        if any(
-            len(self.task_exec_by_prefix_src.data[k])
-            != len(self.task_exec_data_limited[k])
-            for k in self.task_exec_by_prefix_src.data
-        ):
-            self.substantial_change = True
-        self.task_exec_by_prefix_src.data = dict(self.task_exec_data_limited)
-        barchart.renderers = renderers
+            if any(
+                len(self.task_exec_by_prefix_src.data[k]) != len(task_exec_data[k])
+                for k in self.task_exec_by_prefix_src.data
+            ):
+                self.substantial_change = True
+
+            self.task_exec_by_prefix_src.data = dict(task_exec_data)
+            barchart.renderers = renderers
         return barchart
 
-    def _build_senddata_chart(self):
-        show_bytes = self.toggle.active
-
-        senddata = dict()
-        senddata["operation"] = self.senddata["operation"]
-        senddata["value"] = [
-            (sum(self.senddata[f"{op}_{'bytes' if show_bytes else 'value'}"]))
-            for op in self.senddata["operation"]
+    def _build_senddata_chart(self, senddata: defaultdict[str, list]) -> figure:
+        piedata = dict()
+        piedata["operation"] = senddata["operation"]
+        piedata["value"] = [
+            (sum(senddata[f"{op}_{self.freq_selected}"]))
+            for op in senddata["operation"]
         ]
-        senddata["text"] = [
-            format_bytes(n) if show_bytes else format_time(n) for n in senddata["value"]
-        ]
-        senddata["angle"] = [
+        piedata["text"] = [self.format(self.freq_selected, v) for v in piedata["value"]]
+        piedata["angle"] = [
             (
-                (
-                    sum(self.senddata[f"{op}_{'bytes' if show_bytes else 'value'}"])
-                    / sum(senddata["value"])
-                )
-                if sum(senddata["value"])
+                (sum(senddata[f"{op}_{self.freq_selected}"]) / sum(piedata["value"]))
+                if sum(piedata["value"])
                 else 0.0
             )
             * 2
             * math.pi
-            for op in senddata["operation"]
+            for op in piedata["operation"]
         ]
-        senddata["color"] = small_palettes["YlGnBu"].get(len(senddata["operation"]), [])
+        piedata["color"] = small_palettes["YlGnBu"].get(len(piedata["operation"]), [])
 
-        self.sendsrc.data = senddata
+        self.sendsrc.data = piedata
         senddata_piechart = figure(
             height=500,
             title="Send data, by activity",
