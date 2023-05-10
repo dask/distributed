@@ -970,11 +970,7 @@ def gen_cluster(
                                 Worker=Worker,
                                 scheduler_kwargs=scheduler_kwargs,
                                 worker_kwargs=merge(
-                                    {
-                                        "death_timeout": min(
-                                            15, int(deadline.remaining)
-                                        )
-                                    },
+                                    {"death_timeout": min(15, int(deadline.remaining))},
                                     worker_kwargs,
                                 ),
                             )
