@@ -64,6 +64,7 @@ from distributed.protocol import deserialize
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.security import Security
 from distributed.utils import (
+    Deadline,
     DequeHandler,
     _offload_executor,
     get_ip,
@@ -111,6 +112,7 @@ logging_levels = {
 
 _TEST_TIMEOUT = 30
 _offload_executor.submit(lambda: None).result()  # create thread during import
+
 
 # Dask configuration to completely disable the Active Memory Manager.
 # This is typically used with @gen_cluster(config=NO_AMM)
@@ -915,7 +917,6 @@ def gen_cluster(
     )
     if is_debugging():
         timeout = 3600
-
     scheduler_kwargs = merge(
         dict(
             dashboard=False,
@@ -927,7 +928,6 @@ def gen_cluster(
     worker_kwargs = merge(
         dict(
             memory_limit=system.MEMORY_LIMIT,
-            death_timeout=15,
             transition_counter_max=50_000,
         ),
         worker_kwargs,
@@ -941,6 +941,8 @@ def gen_cluster(
         @config_for_cluster_tests(**{"distributed.comm.timeouts.connect": "5s"})
         @clean(**clean_kwargs)
         def test_func(*outer_args, **kwargs):
+            deadline = Deadline.after(timeout)
+
             @contextlib.asynccontextmanager
             async def _client_factory(s):
                 if client:
@@ -967,7 +969,14 @@ def gen_cluster(
                                 security=security,
                                 Worker=Worker,
                                 scheduler_kwargs=scheduler_kwargs,
-                                worker_kwargs=worker_kwargs,
+                                worker_kwargs=merge(
+                                    {
+                                        "death_timeout": min(
+                                            15, int(deadline.remaining)
+                                        )
+                                    },
+                                    worker_kwargs,
+                                ),
                             )
                         except Exception as e:
                             logger.error(
@@ -999,12 +1008,15 @@ def gen_cluster(
                         try:
                             coro = func(*args, *outer_args, **kwargs)
                             task = asyncio.create_task(coro)
-                            coro2 = utils_wait_for(asyncio.shield(task), timeout)
+                            coro2 = utils_wait_for(
+                                asyncio.shield(task), timeout=deadline.remaining
+                            )
                             result = await coro2
                             validate_state(s, *workers)
 
                         except asyncio.TimeoutError:
                             assert task
+                            elapsed = deadline.elapsed
                             buffer = io.StringIO()
                             # This stack indicates where the coro/test is suspended
                             task.print_stack(file=buffer)
@@ -1030,7 +1042,7 @@ def gen_cluster(
                             # uninteresting boilerplate from utils_test and asyncio
                             # and not from the code being tested.
                             raise asyncio.TimeoutError(
-                                f"Test timeout after {timeout}s.\n"
+                                f"Test timeout ({timeout}) hit after {elapsed}s.\n"
                                 "========== Test stack trace starts here ==========\n"
                                 f"{buffer.getvalue()}"
                             ) from None
@@ -1063,8 +1075,7 @@ def gen_cluster(
                         ]
 
                     try:
-                        start = time()
-                        while time() < start + 60:
+                        while deadline.remaining:
                             gc.collect()
                             if not get_unclosed():
                                 break
