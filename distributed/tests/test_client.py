@@ -1486,8 +1486,15 @@ async def test_upload_file(c, s, a, b):
 
     with save_sys_modules():
         for value in [123, 456]:
-            with tmp_text("myfile.py", f"def f():\n    return {value}") as fn:
+            code = f"def f():\n    return {value}"
+            with tmp_text("myfile.py", code) as fn:
                 await c.upload_file(fn)
+
+            # Confirm workers _and_ scheduler got the file
+            for server in [s, a, b]:
+                file = pathlib.Path(server.local_directory).joinpath("myfile.py")
+                assert file.is_file()
+                assert file.read_text() == code
 
             x = c.submit(g, pure=False)
             result = await x

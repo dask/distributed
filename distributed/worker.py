@@ -11,7 +11,6 @@ import os
 import pathlib
 import random
 import sys
-import tempfile
 import threading
 import warnings
 import weakref
@@ -74,13 +73,14 @@ from distributed.core import (
     coerce_to_address,
     context_meter_to_server_digest,
     error_message,
+    loads_function,
     pingpong,
 )
 from distributed.core import rpc as RPCType
 from distributed.core import send_recv
 from distributed.diagnostics import nvml, rmm
 from distributed.diagnostics.plugin import _get_plugin_name
-from distributed.diskutils import WorkDir, WorkSpace
+from distributed.diskutils import WorkSpace
 from distributed.http import get_handlers
 from distributed.metrics import context_meter, thread_time, time
 from distributed.node import ServerNode
@@ -97,7 +97,6 @@ from distributed.utils import (
     _maybe_complex,
     get_ip,
     has_arg,
-    import_file,
     in_async_call,
     is_python_shutting_down,
     iscoroutinefunction,
@@ -111,7 +110,6 @@ from distributed.utils import (
     silence_logging_cmgr,
     thread_state,
     wait_for,
-    warn_on_duration,
 )
 from distributed.utils_comm import gather_from_workers, pack_data, retry_operation
 from distributed.utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
@@ -434,8 +432,6 @@ class Worker(BaseWorker, ServerNode):
     latency: float
     profile_cycle_interval: float
     workspace: WorkSpace
-    _workdir: WorkDir
-    local_directory: str
     _client: Client | None
     bandwidth_workers: defaultdict[str, tuple[float, int]]
     bandwidth_types: defaultdict[type, tuple[float, int]]
@@ -598,50 +594,8 @@ class Worker(BaseWorker, ServerNode):
 
         self._setup_logging(logger)
 
-        if not local_directory:
-            local_directory = (
-                dask.config.get("temporary-directory") or tempfile.gettempdir()
-            )
-        local_directory = os.path.join(local_directory, "dask-worker-space")
-
-        with warn_on_duration(
-            "1s",
-            "Creating scratch directories is taking a surprisingly long time. ({duration:.2f}s) "
-            "This is often due to running workers on a network file system. "
-            "Consider specifying a local-directory to point workers to write "
-            "scratch data to a local disk.",
-        ):
-            self._workspace = WorkSpace(local_directory)
-            self._workdir = self._workspace.new_work_dir(prefix="worker-")
-            self.local_directory = self._workdir.dir_path
-
-        if not preload:
-            preload = dask.config.get("distributed.worker.preload")
-        if not preload_argv:
-            preload_argv = dask.config.get("distributed.worker.preload-argv")
-        assert preload is not None
-        assert preload_argv is not None
-        self.preloads = preloading.process_preloads(
-            self, preload, preload_argv, file_dir=self.local_directory
-        )
-
         self.death_timeout = parse_timedelta(death_timeout)
-        if scheduler_file:
-            cfg = json_load_robust(scheduler_file, timeout=self.death_timeout)
-            scheduler_addr = cfg["address"]
-        elif scheduler_ip is None and dask.config.get("scheduler-address", None):
-            scheduler_addr = dask.config.get("scheduler-address")
-        elif scheduler_port is None:
-            scheduler_addr = coerce_to_address(scheduler_ip)
-        else:
-            scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
         self.contact_address = contact_address
-
-        if protocol is None:
-            protocol_address = scheduler_addr.split("://")
-            if len(protocol_address) == 2:
-                protocol = protocol_address[0]
-            assert protocol
 
         self._start_port = port
         self._start_host = host
@@ -654,7 +608,6 @@ class Worker(BaseWorker, ServerNode):
                     f"got {host_address}"
                 )
         self._interface = interface
-        self._protocol = protocol
 
         nthreads = nthreads or CPU_COUNT
         if resources is None:
@@ -701,9 +654,6 @@ class Worker(BaseWorker, ServerNode):
         self.name = name
         self.scheduler_delay = 0
         self.stream_comms = {}
-
-        if self.local_directory not in sys.path:
-            sys.path.insert(0, self.local_directory)
 
         self.plugins = {}
         self._pending_plugins = plugins
@@ -769,8 +719,38 @@ class Worker(BaseWorker, ServerNode):
             handlers=handlers,
             stream_handlers=stream_handlers,
             connection_args=self.connection_args,
+            local_directory=local_directory,
             **kwargs,
         )
+
+        if not preload:
+            preload = dask.config.get("distributed.worker.preload")
+        if not preload_argv:
+            preload_argv = dask.config.get("distributed.worker.preload-argv")
+        assert preload is not None
+        assert preload_argv is not None
+
+        self.preloads = preloading.process_preloads(
+            self, preload, preload_argv, file_dir=self.local_directory
+        )
+
+        if scheduler_file:
+            cfg = json_load_robust(scheduler_file, timeout=self.death_timeout)
+            scheduler_addr = cfg["address"]
+        elif scheduler_ip is None and dask.config.get("scheduler-address", None):
+            scheduler_addr = dask.config.get("scheduler-address")
+        elif scheduler_port is None:
+            scheduler_addr = coerce_to_address(scheduler_ip)
+        else:
+            scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
+
+        if protocol is None:
+            protocol_address = scheduler_addr.split("://")
+            if len(protocol_address) == 2:
+                protocol = protocol_address[0]
+            assert protocol
+        self._protocol = protocol
+
         self.memory_manager = WorkerMemoryManager(
             self,
             data=data,
@@ -1284,35 +1264,6 @@ class Worker(BaseWorker, ServerNode):
         finally:
             await self.close(reason="worker-handle-scheduler-connection-broken")
 
-    async def upload_file(
-        self, filename: str, data: str | bytes, load: bool = True
-    ) -> dict[str, Any]:
-        out_filename = os.path.join(self.local_directory, filename)
-
-        def func(data):
-            if isinstance(data, str):
-                data = data.encode()
-            with open(out_filename, "wb") as f:
-                f.write(data)
-                f.flush()
-                os.fsync(f.fileno())
-            return data
-
-        if len(data) < 10000:
-            data = func(data)
-        else:
-            data = await offload(func, data)
-
-        if load:
-            try:
-                import_file(out_filename)
-                cache_loads.data.clear()
-            except Exception as e:
-                logger.exception(e)
-                raise e
-
-        return {"status": "OK", "nbytes": len(data)}
-
     def keys(self) -> list[str]:
         return list(self.data)
 
@@ -1598,7 +1549,6 @@ class Worker(BaseWorker, ServerNode):
                         c.close()
 
         await self.scheduler.close_rpc()
-        self._workdir.release()
 
         self.stop_services()
 
@@ -2914,21 +2864,6 @@ async def get_data_from_worker(
 
 
 job_counter = [0]
-
-
-cache_loads = LRU(maxsize=100)
-
-
-def loads_function(bytes_object):
-    """Load a function from bytes, cache bytes"""
-    if len(bytes_object) < 100000:
-        try:
-            result = cache_loads[bytes_object]
-        except KeyError:
-            result = pickle.loads(bytes_object)
-            cache_loads[bytes_object] = result
-        return result
-    return pickle.loads(bytes_object)
 
 
 @context_meter.meter("deserialize")

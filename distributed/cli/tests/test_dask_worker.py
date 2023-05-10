@@ -723,11 +723,11 @@ def test_error_during_startup(monkeypatch, nanny, loop):
                 assert worker.wait(10) == 1
 
 
-@gen_cluster(nthreads=[], client=True)
-async def test_single_executable_deprecated(c, s):
-    with popen(["dask-worker", s.address], capture_output=True) as worker:
-        # ensure deprecation warning is emitted
-        wait_for_log_line(b"FutureWarning: dask-worker is deprecated", worker.stdout)
+def test_single_executable_deprecated():
+    assert (
+        b"FutureWarning: dask-worker is deprecated"
+        in subprocess.run(["dask-worker"], capture_output=True).stderr
+    )
 
 
 @pytest.mark.slow
