@@ -227,13 +227,6 @@ def decompress(
     """
     from distributed.comm.utils import host_array
 
-    if "split-num-sub-frames" not in header:
-        frames = [
-            compressions[name].decompress(frame)
-            for name, frame in zip(header["compression"], frames)
-        ]
-        return header, frames
-
     merged_frames: list[AnyBytes] = []
     split_num_sub_frames: list[int] = []
     split_offsets: list[int] = []
