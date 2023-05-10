@@ -44,6 +44,10 @@ def dumps(  # type: ignore[no-untyped-def]
 
         def _inplace_compress_frames(header, frames):
             compression = list(header.get("compression", [None] * len(frames)))
+            uncompressed_size = tuple(
+                frame.nbytes if isinstance(frame, memoryview) else len(frame)
+                for frame in frames
+            )
 
             for i in range(len(frames)):
                 if compression[i] is None:
@@ -52,6 +56,7 @@ def dumps(  # type: ignore[no-untyped-def]
                     )
 
             header["compression"] = tuple(compression)
+            header["uncompressed_size"] = uncompressed_size
 
         def create_serialized_sub_frames(obj: Serialized | Serialize) -> list:
             if isinstance(obj, Serialized):
@@ -134,7 +139,7 @@ def loads(frames, deserialize=True, deserializers=None):
                 sub_frames = frames[offset : offset + sub_header["num-sub-frames"]]
                 if deserialize:
                     if "compression" in sub_header:
-                        sub_frames = decompress(sub_header, sub_frames)
+                        sub_header, sub_frames = decompress(sub_header, sub_frames)
                     return merge_and_deserialize(
                         sub_header, sub_frames, deserializers=deserializers
                     )

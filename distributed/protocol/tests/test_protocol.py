@@ -9,7 +9,7 @@ import pytest
 import dask.config
 from dask.sizeof import sizeof
 
-from distributed.compatibility import WINDOWS
+from distributed.compatibility import WINDOWS, randbytes
 from distributed.protocol import dumps, loads, maybe_compress, msgpack, to_serialize
 from distributed.protocol.compression import compressions, get_compression_settings
 from distributed.protocol.cuda import cuda_deserialize, cuda_serialize
@@ -371,3 +371,47 @@ def test_deeply_nested_structures():
 
     msg = gen_deeply_nested(sys.getrecursionlimit() // 4)
     assert isinstance(serialize(msg), tuple)
+
+
+def test_decompress_into(compression):
+    """An object is sharded into two frames and then compressed. When it's decompressed,
+    decompress_into (if available) is used to write both messages into the same buffer.
+    """
+    a = "".join(c * 2000 for c in "abcdefghij")
+    assert len(a) == 20_000
+    msg = to_serialize(a)
+    frames = dumps(msg, context={"compression": compression}, frame_split_size=10_000)
+
+    assert len(frames) == 5
+    if compression:
+        assert len(frames[2]) < 600
+        assert len(frames[3]) < 600
+    else:
+        assert len(frames[2]) == len(frames[3]) == 10_000
+
+    assert loads(frames) == a
+
+
+@pytest.mark.parametrize("swap", [False, True])
+def test_mixed_compression_for_subframes(compression, swap):
+    """Serialize an object that gets sharded into two subframes.
+    One subframe is compressed, the other isn't.
+    """
+    a = randbytes(10_000)
+    b = b"x" * 10_000
+    if swap:
+        a, b = b, a
+    msg = to_serialize(a + b)
+    frames = dumps(msg, context={"compression": compression}, frame_split_size=10_000)
+
+    assert len(frames) == 4
+    if swap and compression:
+        assert len(frames[2]) < 600
+        assert len(frames[3]) == 10_000
+    elif compression:
+        assert len(frames[2]) == 10_000
+        assert len(frames[3]) < 600
+    else:
+        assert len(frames[2]) == len(frames[3]) == 10_000
+
+    assert loads(frames) == a + b
