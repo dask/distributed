@@ -47,7 +47,7 @@ from dask.utils import (
 from dask.widgets import get_template
 
 from distributed.core import ErrorMessage
-from distributed.utils import wait_for
+from distributed.utils import Deadline, wait_for
 
 try:
     from dask.delayed import single_key
@@ -78,7 +78,7 @@ from distributed.diagnostics.plugin import (
     WorkerPlugin,
     _get_plugin_name,
 )
-from distributed.metrics import monotonic, time
+from distributed.metrics import time
 from distributed.objects import HasWhat, SchedulerInfo, WhoHas
 from distributed.protocol import to_serialize
 from distributed.protocol.pickle import dumps, loads
@@ -5286,11 +5286,7 @@ class as_completed:
         self.thread_condition = threading.Condition()
         self.with_results = with_results
         self.raise_errors = raise_errors
-
-        if timeout is not None:
-            self._end_time = parse_timedelta(timeout) + monotonic()
-        else:
-            self._end_time = None
+        self._deadline = Deadline.after(parse_timedelta(timeout))
 
         if futures:
             self.update(futures)
@@ -5389,7 +5385,7 @@ class as_completed:
 
     def __next__(self):
         while self.queue.empty():
-            if self._end_time is not None and (self._end_time - monotonic()) < 0:
+            if self._deadline.expires and not self._deadline.remaining:
                 raise TimeoutError()
             if self.is_empty():
                 raise StopIteration()
@@ -5398,9 +5394,9 @@ class as_completed:
         return self._get_and_raise()
 
     async def __anext__(self):
-        if self._end_time is None:
+        if not self._deadline.expires:
             return await self._anext()
-        return await wait_for(self._anext(), self._end_time - monotonic())
+        return await wait_for(self._anext(), self._deadline.remaining)
 
     async def _anext(self):
         if not self.futures and self.queue.empty():
