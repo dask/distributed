@@ -67,7 +67,7 @@ with suppress(ImportError):
 
     # Required to use `lz4.block` APIs and Python Buffer Protocol support.
     if parse_version(lz4.__version__) < parse_version("0.23.1"):
-        raise ImportError("Need lz4 >= 0.23.1")
+        raise ImportError("Need lz4 >= 0.23.1")  # pragma: nocover
 
     import lz4.block
 
@@ -90,7 +90,7 @@ with suppress(ImportError):
 
     # TODO change to 2.7.0. This is a hack to make it work with 2.7.0-rc3.
     if parse_version(cramjam.__version__) < parse_version("2.6.99"):
-        raise ImportError("Need cramjam >= 2.7.0")
+        raise ImportError("Need cramjam >= 2.7.0")  # pragma: nocover
 
     compressions["cramjam.lz4"] = Compression(
         "cramjam.lz4",
@@ -106,7 +106,7 @@ with suppress(ImportError):
 
     # Required for Python Buffer Protocol support.
     if parse_version(zstandard.__version__) < parse_version("0.9.0"):
-        raise ImportError("Need zstandard >= 0.9.0")
+        raise ImportError("Need zstandard >= 0.9.0")  # pragma: nocover
 
     def zstd_compress(data):
         zstd_compressor = zstandard.ZstdCompressor(
