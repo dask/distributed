@@ -81,6 +81,7 @@ from distributed.core import send_recv
 from distributed.diagnostics import nvml, rmm
 from distributed.diagnostics.plugin import _get_plugin_name
 from distributed.diskutils import WorkSpace
+from distributed.exceptions import Reschedule
 from distributed.http import get_handlers
 from distributed.metrics import context_meter, thread_time, time
 from distributed.node import ServerNode
@@ -2788,20 +2789,6 @@ def secede():
             stimulus_id=f"secede-{time()}",
         ),
     )
-
-
-class Reschedule(Exception):
-    """Reschedule this task
-
-    Raising this exception will stop the current execution of the task and ask
-    the scheduler to reschedule this task, possibly on a different machine.
-
-    This does not guarantee that the task will move onto a different machine.
-    The scheduler will proceed through its normal heuristics to determine the
-    optimal machine to accept this task.  The machine will likely change if the
-    load across the cluster has significantly changed since first scheduling
-    the task.
-    """
 
 
 @overload
