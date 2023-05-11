@@ -195,7 +195,7 @@ async def wait_until_worker_has_tasks(
             [
                 key
                 for key, ts in scheduler.tasks.items()
-                if prefix in key and ts.state == "memory" and ws in ts.who_has
+                if prefix in key and ts.state == "memory" and {ws} == ts.who_has
             ]
         )
         < count
@@ -914,6 +914,7 @@ async def test_crashed_worker_after_shuffle(c, s, a):
             out = block(out, in_event, block_event)
         fut = c.compute(out)
 
+        await wait_until_worker_has_tasks("shuffle-p2p", n.worker_address, 1, s)
         await in_event.wait()
         await n.process.process.kill()
         await block_event.set()
@@ -937,6 +938,8 @@ async def test_crashed_worker_after_shuffle_persisted(c, s, a):
         )
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
         out = out.persist()
+
+        await wait_until_worker_has_tasks("shuffle-p2p", n.worker_address, 1, s)
         await out
 
         await n.process.process.kill()
