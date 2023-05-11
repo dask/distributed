@@ -3411,8 +3411,14 @@ class FinePerformanceMetrics(DashboardComponent):
         self.root = column(
             self.function_selector,
             self.unit_selector,
-            row([self.task_exec_by_prefix_chart, self.task_exec_by_activity_chart]),
-            row([self.senddata_by_activity_chart]),
+            row(
+                [
+                    self.task_exec_by_prefix_chart,
+                    self.task_exec_by_activity_chart,
+                    self.senddata_by_activity_chart,
+                ],
+                sizing_mode="stretch_width",
+            ),
             sizing_mode="scale_width",
         )
 
@@ -3510,9 +3516,9 @@ class FinePerformanceMetrics(DashboardComponent):
         # renderers, but it's needed when new functions and/or activities show up to
         # rerender plot
         if self.substantial_change:
-            self.root.children[-2].children[0] = task_exec_barchart
-            self.root.children[-2].children[1] = task_exec_piechart
-            self.root.children[-1].children[0] = senddata_piechart
+            self.root.children[-1].children[0] = task_exec_barchart
+            self.root.children[-1].children[1] = task_exec_piechart
+            self.root.children[-1].children[2] = senddata_piechart
             self.substantial_change = False
         else:
             self.task_exec_by_prefix_chart.renderers = task_exec_piechart.renderers
@@ -3549,6 +3555,7 @@ class FinePerformanceMetrics(DashboardComponent):
 
         piechart = figure(
             height=500,
+            sizing_mode="scale_both",
             title="Task execution, by activity",
             tools="hover",
             tooltips="@{activity}: @text",
@@ -3577,9 +3584,9 @@ class FinePerformanceMetrics(DashboardComponent):
         barchart = figure(
             x_range=task_exec_data["functions"],
             height=500,
+            sizing_mode="scale_both",
             title="Task execution, by function",
             tools="pan,wheel_zoom,box_zoom,reset",
-            sizing_mode="scale_width",
         )
         barchart.yaxis.visible = False
         barchart.xaxis.major_label_orientation = 0.2
@@ -3638,6 +3645,7 @@ class FinePerformanceMetrics(DashboardComponent):
         self.sendsrc.data = piedata
         senddata_piechart = figure(
             height=500,
+            sizing_mode="scale_both",
             title="Send data, by activity",
             tools="hover",
             tooltips="@{activity}: @text",
