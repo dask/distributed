@@ -1,6 +1,37 @@
 Changelog
 =========
 
+.. _v2023.4.1:
+
+2023.4.1
+--------
+
+Released on April 28, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Enable GIL monitoring when gilknocker installed (:pr:`7730`) `Miles`_
+- By default only set logging handler if no other handler has been set to avoid double logging (:pr:`7750`) `Thomas Grainger`_
+- Cluster wait (:pr:`6700`) `Iain Dorrington`_
+- Add Prometheus counter for ``SystemMonitor.last_time`` (:pr:`7785`) `Miles`_
+
+Bug Fixes
+^^^^^^^^^
+- Partial revert defaultclient config setting (:pr:`7803`) `Florian Jetter`_
+- Delay awaiting async ``SchedulerPlugin.{add|remove}_worker`` hooks in order to immediately execute all sync ones (:pr:`7799`) `Hendrik Makait`_
+- Fix ``check_idle`` not returning the correct value if no change to idleness (:pr:`7781`) `Jacob Tomlinson`_
+
+Maintenance
+^^^^^^^^^^^
+- Avoid warning when ``gilknocker`` not installed (:pr:`7808`) `James Bourbeau`_
+- Only set worker/nanny to ``Status.running`` if it is in ``Status.init`` (:pr:`7773`) `Thomas Grainger`_
+- Add ``--cov-config=pyproject.toml`` so config is always correctly loaded by ``pytest-cov`` (:pr:`7793`) `Thomas Grainger`_
+- ``gilknocker`` from conda-forge (:pr:`7791`) `James Bourbeau`_
+- Minor ``zict`` cleanup (:pr:`7783`) `crusaderky`_
+- Bump ``actions/checkout`` from 3.5.0 to 3.5.2 (:pr:`7784`)
+- Fix typing now that code is tuple of frame(s) (:pr:`7778`) `Nat Tabris`_
+
+
 .. _v2023.4.0:
 
 2023.4.0
