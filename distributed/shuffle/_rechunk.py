@@ -8,7 +8,7 @@ import dask
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 
-from distributed.reschedule import Reschedule
+from distributed.exceptions import Reschedule
 from distributed.shuffle._shuffle import (
     ShuffleId,
     ShuffleType,

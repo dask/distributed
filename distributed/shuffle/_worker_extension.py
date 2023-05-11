@@ -19,8 +19,8 @@ from dask.context import thread_state
 from dask.utils import parse_bytes
 
 from distributed.core import PooledRPCCall
+from distributed.exceptions import Reschedule
 from distributed.protocol import to_serialize
-from distributed.reschedule import Reschedule
 from distributed.shuffle._arrow import (
     convert_partition,
     deserialize_schema,

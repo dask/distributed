@@ -8,7 +8,7 @@ from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 
-from distributed.reschedule import Reschedule
+from distributed.exceptions import Reschedule
 from distributed.shuffle._arrow import check_dtype_support, check_minimal_arrow_version
 
 logger = logging.getLogger("distributed.shuffle")
