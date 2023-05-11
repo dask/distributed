@@ -912,14 +912,17 @@ async def test_crashed_worker_after_shuffle(c, s, a):
         block_event = Event()
         with dask.annotate(workers=[n.worker_address], allow_other_workers=True):
             out = block(out, in_event, block_event)
-        fut = c.compute(out)
+        out = c.compute(out)
 
         await wait_until_worker_has_tasks("shuffle-p2p", n.worker_address, 1, s)
         await in_event.wait()
         await n.process.process.kill()
         await block_event.set()
 
-        await fut
+        out = await out
+        result = out.x.size
+        expected = await c.compute(df.x.size)
+        assert result == expected
 
         await c.close()
         await clean_worker(a)
@@ -944,7 +947,10 @@ async def test_crashed_worker_after_shuffle_persisted(c, s, a):
 
         await n.process.process.kill()
 
-        await c.compute(out.sum())
+        result, expected = c.compute([out.x.size, df.x.size])
+        result = await result
+        expected = await expected
+        assert result == expected
 
         await c.close()
         await clean_worker(a)
