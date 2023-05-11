@@ -7708,6 +7708,12 @@ class Scheduler(SchedulerState, ServerNode):
         sysmon = SystemMonitor(self, last_count=last_count, sizing_mode="stretch_both")
         sysmon.update()
 
+        # Workers table
+        from distributed.dashboard.components.scheduler import WorkerTable
+
+        table = WorkerTable(self, report=True, sizing_mode="stretch_width")
+        table.update()
+
         # Scheduler logs
         from distributed.dashboard.components.scheduler import (
             _BOKEH_STYLES_KWARGS,
@@ -7763,6 +7769,7 @@ class Scheduler(SchedulerState, ServerNode):
         html = Div(text=html, **_BOKEH_STYLES_KWARGS)
 
         html = TabPanel(child=html, title="Summary")
+        table = TabPanel(child=table.root, title="Workers")
         compute = TabPanel(child=compute, title="Worker Profile (compute)")
         workers = TabPanel(child=workers, title="Worker Profile (administrative)")
         scheduler = TabPanel(
@@ -7781,6 +7788,7 @@ class Scheduler(SchedulerState, ServerNode):
         tabs = Tabs(
             tabs=[
                 html,
+                table,
                 task_stream,
                 system,
                 logs,

@@ -8,6 +8,7 @@ from collections import OrderedDict, defaultdict
 from collections.abc import Iterable
 from datetime import datetime
 from numbers import Number
+from statistics import mean
 from typing import Any, TypeVar
 
 import numpy as np
@@ -21,10 +22,13 @@ from bokeh.models import (
     BoxSelectTool,
     BoxZoomTool,
     CDSView,
+    CheckboxButtonGroup,
     ColorBar,
     ColumnDataSource,
+    CustomJS,
     CustomJSHover,
     DataRange1d,
+    DataTable,
     FactorRange,
     GroupFilter,
     HelpTool,
@@ -36,13 +40,13 @@ from bokeh.models import (
     PanTool,
     Range1d,
     ResetTool,
+    TableColumn,
     Tabs,
     TapTool,
     Title,
     VeeHead,
     WheelZoomTool,
 )
-from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.models.widgets.markups import Div
 from bokeh.palettes import Viridis11
 from bokeh.plotting import figure
@@ -3580,8 +3584,9 @@ class WorkerTable(DashboardComponent):
         "spilled_bytes",
     }
 
-    def __init__(self, scheduler, width=800, **kwargs):
+    def __init__(self, scheduler, width=800, report=False, **kwargs):
         self.scheduler = scheduler
+        self.count = 0
         self.names = [
             "name",
             "address",
@@ -3611,6 +3616,24 @@ class WorkerTable(DashboardComponent):
             }
             - self.excluded_names
         )
+        self.stat_names = [
+            "max_cpu",
+            "mean_cpu",
+            "max_memory",
+            "mean_memory",
+            "max_memory_percent",
+            "mean_memory_percent",
+            "max_num_fds",
+            "mean_num_fds",
+            "max_host_net_io.read_bps",
+            "mean_host_net_io.read_bps",
+            "max_host_net_io.write_bps",
+            "mean_host_net_io.write_bps",
+            "max_host_disk_io.read_bps",
+            "mean_host_disk_io.read_bps",
+            "max_host_disk_io.write_bps",
+            "mean_host_disk_io.write_bps",
+        ]
 
         table_names = [
             "name",
@@ -3642,9 +3665,27 @@ class WorkerTable(DashboardComponent):
             "host_net_io.write_bps": "net write",
             "host_disk_io.read_bps": "disk read",
             "host_disk_io.write_bps": "disk write",
+            "max_cpu": "max(cpu)",
+            "mean_cpu": "mean(cpu)",
+            "max_memory": "max(memory)",
+            "mean_memory": "mean(memory)",
+            "max_memory_percent": "max(memory %)",
+            "mean_memory_percent": "mean(memory %)",
+            "max_num_fds": "max(# fds)",
+            "mean_num_fds": "mean(# fds)",
+            "max_host_net_io.read_bps": "max(net read)",
+            "mean_host_net_io.read_bps": "mean(net read)",
+            "max_host_net_io.write_bps": "max(net read)",
+            "mean_host_net_io.write_bps": "mean(net read)",
+            "max_host_disk_io.read_bps": "max(disk read)",
+            "mean_host_disk_io.read_bps": "mean(disk read)",
+            "max_host_disk_io.write_bps": "max(disk read)",
+            "mean_host_disk_io.write_bps": "mean(disk read)",
         }
 
-        self.source = ColumnDataSource({k: [] for k in self.names})
+        self.source = ColumnDataSource(
+            {k: [] for k in self.names + self.extra_names + self.stat_names}
+        )
 
         columns = {
             name: TableColumn(field=name, title=column_title_renames.get(name, name))
@@ -3703,6 +3744,84 @@ class WorkerTable(DashboardComponent):
                 extra_table.columns[extra_names.index(name)].formatter = formatters[
                     name
                 ]
+
+        stat_names = ["name", "address"] + self.stat_names
+        stat_columns = {
+            name: TableColumn(
+                field=name,
+                title=column_title_renames.get(name, name),
+            )
+            for name in stat_names
+        }
+
+        for name in stat_names:
+            formatter = formatters.get(name.split("_", 1)[-1])
+            if formatter is not None:
+                stat_columns[name].formatter = formatter
+
+        stat_table = DataTable(
+            source=self.source,
+            columns=[
+                stat_columns[n]
+                for n in [
+                    "name",
+                    "address",
+                    "max_cpu",
+                    "mean_cpu",
+                    "max_memory",
+                    "mean_memory",
+                ]
+            ],
+            reorderable=True,
+            sortable=True,
+            width=width,
+            index_position=None,
+        )
+
+        column_choice = CheckboxButtonGroup(
+            labels=[
+                "cpu",
+                "memory",
+                "memory %",
+                "# fds",
+                "net read",
+                "net write",
+                "disk read",
+                "disk write",
+            ],
+            active=[0, 1],
+        )
+        column_choice_callback = """
+            var visible_columns = [columns["name"], columns["address"]]
+            for (var i = 0; i < this.active.length; i++) {
+                visible_columns.push(columns[names[this.active[i] * 2]])
+                visible_columns.push(columns[names[(this.active[i] * 2) + 1]])
+            }
+            table.columns = visible_columns;
+        """
+        # bokeh 3 replaces js_on_click with js_on_event
+        if BOKEH_VERSION.major < 3:
+            column_choice.js_on_click(
+                CustomJS(
+                    args=dict(
+                        table=stat_table, columns=stat_columns, names=self.stat_names
+                    ),
+                    code=column_choice_callback,
+                )
+            )
+        else:
+            column_choice.js_on_event(
+                "button_click",
+                CustomJS(
+                    args=dict(
+                        btn=column_choice,
+                        table=stat_table,
+                        columns=stat_columns,
+                        names=self.stat_names,
+                    ),
+                    code=column_choice_callback.replace("this", "btn"),
+                ),
+            )
 
         hover = HoverTool(
             point_policy="follow_mouse",
@@ -3770,7 +3889,9 @@ class WorkerTable(DashboardComponent):
         else:
             sizing_mode = {}
 
-        components = [cpu_plot, mem_plot, table]
+        components = [cpu_plot, mem_plot, table, column_choice, stat_table]
+        if report:
+            components = [column_choice, stat_table]
         if self.extra_names:
             components.append(extra_table)
 
@@ -3778,7 +3899,7 @@ class WorkerTable(DashboardComponent):
 
     @without_property_validation
     def update(self):
-        data = {name: [] for name in self.names + self.extra_names}
+        data = {name: [] for name in self.names + self.extra_names + self.stat_names}
         for i, ws in enumerate(
             sorted(self.scheduler.workers.values(), key=lambda ws: str(ws.name))
         ):
@@ -3807,14 +3928,37 @@ class WorkerTable(DashboardComponent):
             data["cpu"][-1] = ws.metrics["cpu"] / 100.0
             data["cpu_fraction"][-1] = ws.metrics["cpu"] / 100.0 / ws.nthreads
             data["nthreads"][-1] = ws.nthreads
+            for name in self.stat_names:
+                if name.startswith("max"):
+                    data[name].append(
+                        max(self.source.data[name][i + 1], data[name[4:]][-1])
+                        if self.source.data[name]
+                        else data[name[4:]][-1]
+                    )
+                elif name.startswith("mean"):
+                    data[name].append(
+                        (
+                            self.source.data[name][i + 1] * self.count
+                            + data[name[5:]][-1]
+                        )
+                        / (self.count + 1)
+                        if self.count
+                        else data[name[5:]][-1]
+                    )
 
-        for name in self.names + self.extra_names:
+        self.count += 1
+
+        for name in self.names + self.extra_names + self.stat_names:
             if name == "name":
                 data[name].insert(0, f"Total ({len(data[name])})")
                 continue
             try:
                 if len(self.scheduler.workers) == 0:
                     total_data = None
+                elif name.startswith("max"):
+                    total_data = max(data[name])
+                elif name.startswith("mean"):
+                    total_data = mean(data[name])
                 elif name == "memory_percent":
                     total_mem = sum(
                         ws.memory_limit for ws in self.scheduler.workers.values()
@@ -4192,7 +4336,7 @@ def exceptions_doc(scheduler, extra, doc):
 
 @log_errors
 def workers_doc(scheduler, extra, doc):
-    table = WorkerTable(scheduler)
+    table = WorkerTable(scheduler, sizing_mode="stretch_width")
     table.update()
     add_periodic_callback(doc, table, 500)
     doc.title = "Dask: Workers"
