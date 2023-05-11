@@ -21,7 +21,7 @@ from dask.utils import tmpfile
 
 from distributed import Nanny, Scheduler, Worker, profile, rpc, wait, worker
 from distributed.compatibility import LINUX, WINDOWS
-from distributed.core import CommClosedError, Status
+from distributed.core import CommClosedError, Status, error_message
 from distributed.diagnostics import SchedulerPlugin
 from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.metrics import time
@@ -751,3 +751,33 @@ async def test_worker_inherits_temp_config(c, s):
         async with Nanny(s.address):
             out = await c.submit(lambda: dask.config.get("test123"))
             assert out == 123
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_log_event(c, s):
+    async with Nanny(s.address) as n:
+        n.log_event("test-topic1", "foo")
+
+        class C:
+            pass
+
+        with pytest.raises(TypeError, match="msgpack"):
+            n.log_event("test-topic2", C())
+        n.log_event("test-topic3", "bar")
+        n.log_event("test-topic4", error_message(Exception()))
+
+        # Worker unaffected
+        assert await c.submit(lambda x: x + 1, 1) == 2
+
+    assert [msg[1] for msg in s.get_events("test-topic1")] == ["foo"]
+    assert [msg[1] for msg in s.get_events("test-topic3")] == ["bar"]
+    # assertion reversed for mock.ANY.__eq__(Serialized())
+    assert [
+        {
+            "status": "error",
+            "exception": mock.ANY,
+            "traceback": mock.ANY,
+            "exception_text": "Exception()",
+            "traceback_text": "",
+        },
+    ] == [msg[1] for msg in s.get_events("test-topic4")]
