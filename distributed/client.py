@@ -2016,12 +2016,12 @@ class Client(SyncMethodMixin):
             Whether or not the function is pure.  Set ``pure=False`` for
             impure functions like ``np.random.random``.
             See :ref:`pure functions` for more details.
-        batch_size : int, optional
+        batch_size : int, optional (default: just one batch whose size is the entire iterable)
             Submit tasks to the scheduler in batches of (at most)
             ``batch_size``.
-            Larger batch sizes can be useful for very large ``iterables``,
-            as the cluster can start processing tasks while later ones are
-            submitted asynchronously.
+            The tradeoff in batch size is that large batches avoid more per-batch overhead,
+            but batches that are too big can take a long time to submit and unreasonably delay
+            the cluster from starting its processing.
         **kwargs : dict
             Extra keyword arguments to send to the function.
             Large values will be included explicitly in the task graph.
