@@ -123,9 +123,7 @@ async def test_async_and_sync_add_remove_worker(s):
     events = []
 
     class MyAsyncPlugin(SchedulerPlugin):
-        name: str
-
-        def __init__(self, name: str) -> None:
+        def __init__(self, name):
             super().__init__()
             self.name = name
             self.in_remove_worker = asyncio.Event()
@@ -144,9 +142,7 @@ async def test_async_and_sync_add_remove_worker(s):
             events.append((self.name, "remove_worker", worker))
 
     class MySyncPlugin(SchedulerPlugin):
-        name: str
-
-        def __init__(self, name: str):
+        def __init__(self, name):
             self.name = name
 
         def add_worker(self, worker, scheduler):

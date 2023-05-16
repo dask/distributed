@@ -28,6 +28,7 @@ from distributed.dashboard.components.scheduler import (
     Contention,
     CurrentLoad,
     Events,
+    FinePerformanceMetrics,
     Hardware,
     MemoryByKey,
     MemoryColor,
@@ -326,6 +327,21 @@ async def test_WorkersMemory(c, s, a, b):
     # Empty rects are removed.
     assert llens in ({4}, {5}, {6})
     assert all(d["width"])
+
+
+@gen_cluster(client=True)
+async def test_FinePerformanceMetrics(c, s, a, b):
+    cl = FinePerformanceMetrics(s)
+
+    futures = c.map(slowinc, range(10), delay=0.001)
+    await wait(futures)
+    await asyncio.sleep(1)  # wait for metrics to arrive
+
+    assert not cl.task_exec_data
+
+    cl.update()
+    assert cl.task_exec_data
+    assert cl.task_exec_data["functions"] == ["slowinc"]
 
 
 @gen_cluster(client=True)
