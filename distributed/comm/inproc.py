@@ -200,6 +200,10 @@ class InProc(Comm):
     def peer_address(self) -> str:
         return self._peer_addr
 
+    @property
+    def same_host(self) -> bool:
+        return True
+
     async def read(self, deserializers="ignored"):
         if self._closed:
             raise CommClosedError()

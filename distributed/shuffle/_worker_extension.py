@@ -15,9 +15,11 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 
 import toolz
 
+from dask.context import thread_state
 from dask.utils import parse_bytes, typename
 
 from distributed.core import PooledRPCCall
+from distributed.exceptions import Reschedule
 from distributed.protocol import to_serialize
 from distributed.shuffle._arrow import (
     convert_partition,
@@ -205,6 +207,22 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
     async def receive(self, data: list[tuple[T_transfer_shard_id, bytes]]) -> None:
         await self._receive(data)
 
+    async def _ensure_output_worker(self, i: T_partition_id, key: str) -> None:
+        assigned_worker = self._get_assigned_worker(i)
+
+        if assigned_worker != self.local_address:
+            result = await self.scheduler.shuffle_restrict_task(
+                id=self.id, run_id=self.run_id, key=key, worker=assigned_worker
+            )
+            if result["status"] == "error":
+                raise RuntimeError(result["message"])
+            assert result["status"] == "OK"
+            raise Reschedule()
+
+    @abc.abstractmethod
+    def _get_assigned_worker(self, i: T_partition_id) -> str:
+        """Get the address of the worker assigned to the output partition"""
+
     @abc.abstractmethod
     async def _receive(self, data: list[tuple[T_transfer_shard_id, bytes]]) -> None:
         """Receive shards belonging to output partitions of this shuffle run"""
@@ -216,7 +234,9 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         """Add an input partition to the shuffle run"""
 
     @abc.abstractmethod
-    async def get_output_partition(self, i: T_partition_id) -> T_partition_type:
+    async def get_output_partition(
+        self, i: T_partition_id, key: str
+    ) -> T_partition_type:
         """Get an output partition to the shuffle run"""
 
 
@@ -354,16 +374,11 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
         await self._write_to_comm(out)
         return self.run_id
 
-    async def get_output_partition(self, i: NIndex) -> np.ndarray:
+    async def get_output_partition(self, i: NIndex, key: str) -> np.ndarray:
         self.raise_if_closed()
         assert self.transferred, "`get_output_partition` called before barrier task"
 
-        assert self.worker_for[i] == self.local_address, (
-            f"Output partition {i} belongs on {self.worker_for[i]}, "
-            f"not {self.local_address}. "
-        )
-        # ^ NOTE: this check isn't necessary, just a nice validation to prevent incorrect
-        # data in the case something has gone very wrong
+        await self._ensure_output_worker(i, key)
 
         await self.flush_receive()
 
@@ -374,6 +389,9 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
             return convert_chunk(data, subdims)
 
         return await self.offload(_)
+
+    def _get_assigned_worker(self, i: NIndex) -> str:
+        return self.worker_for[i]
 
 
 class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
@@ -514,16 +532,11 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
             return cudf.DataFrame.from_arrow(table)
         return table.to_pandas()
 
-    async def get_output_partition(self, i: int) -> pd.DataFrame:
+    async def get_output_partition(self, i: int, key: str) -> pd.DataFrame:
         self.raise_if_closed()
         assert self.transferred, "`get_output_partition` called before barrier task"
 
-        assert self.worker_for[i] == self.local_address, (
-            f"Output partition {i} belongs on {self.worker_for[i]}, "
-            f"not {self.local_address}. "
-        )
-        # ^ NOTE: this check isn't necessary, just a nice validation to prevent incorrect
-        # data in the case something has gone very wrong
+        await self._ensure_output_worker(i, key)
 
         await self.flush_receive()
         try:
@@ -537,6 +550,9 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         except KeyError:
             out = self._arrow_to_df(self.schema.empty_table())
         return out
+
+    def _get_assigned_worker(self, i: int) -> str:
+        return self.worker_for[i]
 
 
 class ShuffleWorkerExtension:
@@ -774,6 +790,7 @@ class ShuffleWorkerExtension:
                     .to_pybytes(),
                     "npartitions": kwargs["npartitions"],
                     "column": kwargs["column"],
+                    "parts_out": kwargs["parts_out"],
                 },
                 worker=self.worker.address,
             )
@@ -787,7 +804,7 @@ class ShuffleWorkerExtension:
             )
         else:  # pragma: no cover
             raise TypeError(type)
-        if result["status"] == "ERROR":
+        if result["status"] == "error":
             raise RuntimeError(result["message"])
         assert result["status"] == "OK"
 
@@ -911,7 +928,10 @@ class ShuffleWorkerExtension:
         Calling this for a ``shuffle_id`` which is unknown or incomplete is an error.
         """
         shuffle = self.get_shuffle_run(shuffle_id, run_id)
-        return sync(self.worker.loop, shuffle.get_output_partition, output_partition)
+        key = thread_state.key
+        return sync(
+            self.worker.loop, shuffle.get_output_partition, output_partition, key
+        )
 
 
 def split_by_worker(

@@ -47,6 +47,7 @@ from dask.utils import (
 from dask.widgets import get_template
 
 from distributed.core import ErrorMessage
+from distributed.protocol.serialize import _is_dumpable
 from distributed.utils import wait_for
 
 try:
@@ -74,6 +75,7 @@ from distributed.core import (
 from distributed.diagnostics.plugin import (
     ForwardLoggingPlugin,
     NannyPlugin,
+    SchedulerUploadFile,
     UploadFile,
     WorkerPlugin,
     _get_plugin_name,
@@ -970,7 +972,8 @@ class Client(SyncMethodMixin):
 
         self._start_arg = address
         self._set_as_default = set_as_default
-
+        if set_as_default:
+            self._set_config = dask.config.set(scheduler="dask.distributed")
         self._event_handlers = {}
 
         self._stream_handlers = {
@@ -1054,10 +1057,11 @@ class Client(SyncMethodMixin):
         context manager will be automatically attached to this Client.
         """
         tok = _current_client.set(self)
-        try:
-            yield
-        finally:
-            _current_client.reset(tok)
+        with dask.config.set(scheduler="dask.distributed"):
+            try:
+                yield
+            finally:
+                _current_client.reset(tok)
 
     @classmethod
     def current(cls, allow_global=True):
@@ -1458,7 +1462,11 @@ class Client(SyncMethodMixin):
             raise ValueError(
                 f"`n_workers` must be a positive integer. Instead got {n_workers}."
             )
-        return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
+
+        if self.cluster is None:
+            return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
+
+        return self.cluster.wait_for_workers(n_workers, timeout)
 
     def _heartbeat(self):
         # Don't send heartbeat if scheduler comm or cluster are already closed
@@ -1665,6 +1673,11 @@ class Client(SyncMethodMixin):
         with log_errors():
             _del_global_client(self)
             self._scheduler_identity = {}
+            if self._set_as_default and not _get_global_client():
+                with suppress(AttributeError):
+                    # clear the dask.config set keys
+                    with self._set_config:
+                        pass
             if self.get == dask.config.get("get", None):
                 del dask.config.config["get"]
 
@@ -2004,12 +2017,12 @@ class Client(SyncMethodMixin):
             Whether or not the function is pure.  Set ``pure=False`` for
             impure functions like ``np.random.random``.
             See :ref:`pure functions` for more details.
-        batch_size : int, optional
+        batch_size : int, optional (default: just one batch whose size is the entire iterable)
             Submit tasks to the scheduler in batches of (at most)
             ``batch_size``.
-            Larger batch sizes can be useful for very large ``iterables``,
-            as the cluster can start processing tasks while later ones are
-            submitted asynchronously.
+            The tradeoff in batch size is that large batches avoid more per-batch overhead,
+            but batches that are too big can take a long time to submit and unreasonably delay
+            the cluster from starting its processing.
         **kwargs : dict
             Extra keyword arguments to send to the function.
             Large values will be included explicitly in the task graph.
@@ -3723,10 +3736,18 @@ class Client(SyncMethodMixin):
         >>> from mylibrary import myfunc  # doctest: +SKIP
         >>> L = client.map(myfunc, seq)  # doctest: +SKIP
         """
-        return self.register_worker_plugin(
-            UploadFile(filename),
-            name=filename + str(uuid.uuid4()),
-        )
+        name = filename + str(uuid.uuid4())
+
+        async def _():
+            results = await asyncio.gather(
+                self.register_scheduler_plugin(
+                    SchedulerUploadFile(filename), name=name
+                ),
+                self.register_worker_plugin(UploadFile(filename), name=name),
+            )
+            return results[1]  # Results from workers upload
+
+        return self.sync(_)
 
     async def _rebalance(self, futures=None, workers=None):
         if futures is not None:
@@ -4392,6 +4413,10 @@ class Client(SyncMethodMixin):
         >>> from time import time
         >>> client.log_event("current-time", time())
         """
+        if not _is_dumpable(msg):
+            raise TypeError(
+                f"Message must be msgpack serializable. Got {type(msg)=} instead."
+            )
         return self.sync(self.scheduler.log_event, topic=topic, msg=msg)
 
     def get_events(self, topic: str | None = None):

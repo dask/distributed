@@ -70,7 +70,6 @@ class CheckIdleHandler(RequestHandler):
         try:
             idle_since = scheduler.check_idle()
             response = {
-                "idle": idle_since is None,
                 "idle_since": idle_since,
             }
             self.write(json.dumps(response))

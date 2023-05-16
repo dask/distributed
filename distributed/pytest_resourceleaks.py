@@ -232,6 +232,16 @@ class ChildProcess:
         return self.pid < other.pid
 
 
+def _samefile(f1: str, f2: str) -> bool:
+    """
+    Compare files ignoring a FileNotFoundError caused by zombie processes.
+    """
+    try:
+        return os.path.samefile(f1, f2)
+    except FileNotFoundError:
+        return False
+
+
 class ChildProcessesChecker(ResourceChecker, name="processes"):
     def measure(self) -> set[ChildProcess]:
         children = set()
@@ -241,7 +251,7 @@ class ChildProcessesChecker(ResourceChecker, name="processes"):
                 with c.oneshot():
                     if (
                         c.ppid() == p.pid
-                        and os.path.samefile(c.exe(), sys.executable)
+                        and _samefile(c.exe(), sys.executable)
                         and any(
                             # Skip multiprocessing resource tracker
                             a.startswith(
