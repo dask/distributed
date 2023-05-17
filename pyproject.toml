@@ -16,7 +16,6 @@ classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -24,7 +23,7 @@ classifiers = [
     "Topic :: System :: Distributed Computing",
 ]
 readme = "README.rst"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 dependencies = [
     "click >= 8.0",
     "cloudpickle >= 1.5.0",
@@ -163,7 +162,6 @@ timeout_method = "thread"
 timeout = 300
 
 [tool.mypy]
-# Silence errors about Python 3.9-style delayed type annotations on Python 3.8
 python_version = "3.9"
 # See https://github.com/python/mypy/issues/12286 for automatic multi-platform support
 platform = "linux"
