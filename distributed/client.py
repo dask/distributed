@@ -5727,13 +5727,10 @@ class performance_report:
     storage_options: dict, optional
          Any additional arguments to :func:`fsspec.open` when writing to a URL.
 
-     Examples
-     --------
-     >>> with performance_report(filename="myfile.html", stacklevel=1):
-     ...     x.compute()
-
-    $ python -m http.server
-    $ open myfile.html
+    Examples
+    --------
+    >>> with performance_report(filename="myfile.html", stacklevel=1):
+    ...     x.compute()
     """
 
     def __init__(
