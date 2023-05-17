@@ -1,0 +1,76 @@
+name: 'Tag merge requests'
+
+on:
+  pull_request:
+
+jobs:
+  tag-merge-request:
+    runs-on: ubuntu-latest
+    steps:
+      - name: File Changes Action
+        uses: trilom/file-changes-action@v1.2.4
+        continue-on-error: true
+        with:
+          prNumber: ${{ github.event.number }}
+
+      - name: update-tags
+        uses: actions/github-script@v5
+        continue-on-error: true
+        with:
+          script: |
+            const fs = require('fs');
+
+            // The set of labels that are managed by this action
+            const all_labels = ["small", "tiny", "tests-only", "docs-only"];
+            const new_labels = [];
+
+            // Read all files changed
+            const home = process.env.HOME;
+            const changed_files = JSON.parse(fs.readFileSync(`${home}/files.json`));
+            console.log(`Files changed: ${changed_files}`);
+
+            // Check if we have only changed tests or docs
+            const only_tests_changed = changed_files.every(
+              e => e.startsWith("distributed/tests/")
+            );
+            if (only_tests_changed) {
+              new_labels.push("tests-only");
+            }
+
+            const only_docs_changed = changed_files.every(
+              e => e.startsWith("docs/")
+            );
+            if (only_docs_changed) {
+              new_labels.push("docs-only");
+            }
+
+            // Are we a "tiny" MR?
+            const lines_changed = context.payload.pull_request.additions + context.payload.pull_request.deletions;
+            if (lines_changed < 10) {
+              new_labels.push("tiny");
+            } else if (lines_changed < 25) {
+              new_labels.push("small");
+            }
+
+            // Compute what labels we need to add or remove. First we grab all labels from the PR
+            const current_label_names = context.payload.pull_request.labels.map(label => label.name);
+            // Then we separate them into "unmanaged" and "managed" labels
+            const current_unmanaged_labels = current_label_names.filter(label => !all_labels.includes(label));
+
+            // We should update the MR with the union of unmanaged labels and any labels we need to add.
+            const labels_to_set = [...current_unmanaged_labels, ...new_labels];
+
+            console.log(`Lines changed: ${lines_changed}`);
+            console.log(`Current labels: ${JSON.stringify(current_label_names)}`);
+            console.log(`Unmanaged labels: ${JSON.stringify(current_unmanaged_labels)}`);
+            console.log(`Labels to set: ${JSON.stringify(labels_to_set)}`);
+
+            if (labels_to_set.length > 0) {
+              github.rest.issues.setLabels({
+                issue_number: context.payload.pull_request.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels: labels_to_set
+              });
+            }
+
