@@ -4359,10 +4359,6 @@ async def test_submit_dependency_of_erred_task(c, s, a, b):
         await y
 
 
-@pytest.mark.skipif(
-    condition=sys.version_info < (3, 9),
-    reason="flaky on python 3.8",
-)  # seems related to https://github.com/python/cpython/issues/86296
 @gen_cluster(client=True)
 async def test_tell_workers_when_peers_have_left(c, s, a, b):
     f = (await c.scatter({"f": 1}, workers=[a.address, b.address], broadcast=True))["f"]
