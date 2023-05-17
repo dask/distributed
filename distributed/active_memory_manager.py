@@ -435,7 +435,7 @@ if TYPE_CHECKING:
     from typing_extensions import TypeAlias
 
 SuggestionGenerator: TypeAlias = Generator[
-    Suggestion, Union[scheduler_module.WorkerState, None], None
+    Suggestion, Union["scheduler_module.WorkerState", None], None
 ]
 
 
