@@ -163,9 +163,6 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 DEFAULT_DATA_SIZE = parse_bytes(
     dask.config.get("distributed.scheduler.default-data-size")
 )
-
-RESOLVE_WORKER_HOSTNAME = dask.config.get("distributed.scheduler.resolve-worker-hostname")
-
 STIMULUS_ID_UNSET = "<stimulus_id unset>"
 
 DEFAULT_EXTENSIONS = {
@@ -3985,7 +3982,7 @@ class Scheduler(SchedulerState, ServerNode):
         comm=None,
         *,
         address,
-        resolve_address=RESOLVE_WORKER_HOSTNAME,
+        resolve_address: bool = True,
         now: float | None = None,
         resources: dict[str, float] | None = None,
         host_info: dict | None = None,
@@ -4099,7 +4096,7 @@ class Scheduler(SchedulerState, ServerNode):
         keys=(),
         nthreads=None,
         name=None,
-        resolve_address=RESOLVE_WORKER_HOSTNAME,
+        resolve_address=True,
         nbytes=None,
         types=None,
         now=None,
@@ -7321,7 +7318,7 @@ class Scheduler(SchedulerState, ServerNode):
                 self.resources[resource] = dr = {}
             del dr[worker]
 
-    def coerce_address(self, addr, resolve=RESOLVE_WORKER_HOSTNAME):
+    def coerce_address(self, addr, resolve=True):
         """
         Coerce possible input addresses to canonical form.
         *resolve* can be disabled for testing with fake hostnames.
