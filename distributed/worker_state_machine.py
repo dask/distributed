@@ -20,22 +20,14 @@ from collections.abc import (
     Iterator,
     Mapping,
     MutableMapping,
+    Sequence,
     Set,
 )
 from copy import copy
 from dataclasses import dataclass, field
 from functools import lru_cache, partial, singledispatchmethod, wraps
 from itertools import chain
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    ClassVar,
-    Literal,
-    NamedTuple,
-    Sequence,
-    TypedDict,
-    cast,
-)
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypedDict, cast
 
 from tlz import peekn
 

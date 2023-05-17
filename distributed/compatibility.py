@@ -14,39 +14,8 @@ MACOS = sys.platform == "darwin"
 WINDOWS = sys.platform == "win32"
 
 
-if sys.version_info >= (3, 9):
-    from asyncio import to_thread
-else:
-    import contextvars
-    import functools
-    from asyncio import events
-
-    async def to_thread(func, /, *args, **kwargs):
-        """Asynchronously run function *func* in a separate thread.
-        Any *args and **kwargs supplied for this function are directly passed
-        to *func*. Also, the current :class:`contextvars.Context` is propagated,
-        allowing context variables from the main thread to be accessed in the
-        separate thread.
-
-        Return a coroutine that can be awaited to get the eventual result of *func*.
-
-        backport from
-        https://github.com/python/cpython/blob/3f1ea163ea54513e00e0e9d5442fee1b639825cc/Lib/asyncio/threads.py#L12-L25
-        """
-        loop = events.get_running_loop()
-        ctx = contextvars.copy_context()
-        func_call = functools.partial(ctx.run, func, *args, **kwargs)
-        return await loop.run_in_executor(None, func_call)
-
-
-if sys.version_info >= (3, 9):
-    from random import randbytes
-else:
-    from random import getrandbits
-
-    def randbytes(size):
-        return getrandbits(size * 8).to_bytes(size, "little")
-
+from asyncio import to_thread
+from random import randbytes
 
 if tornado.version_info >= (6, 2, 0, 0):
     from tornado.ioloop import PeriodicCallback
@@ -60,8 +29,9 @@ else:
     import datetime
     import math
     import random
+    from collections.abc import Awaitable
     from inspect import isawaitable
-    from typing import Awaitable, Callable
+    from typing import Callable
 
     from tornado.ioloop import IOLoop
     from tornado.log import app_log

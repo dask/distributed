@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Awaitable, Collection, Mapping
 from pathlib import Path
-from typing import IO, Any, Awaitable, Callable, Collection, Literal
+from typing import IO, Any, Callable, Literal
 
 import msgpack
 

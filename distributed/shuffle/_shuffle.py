@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable, Iterator
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Iterable, Iterator, NewType
+from typing import TYPE_CHECKING, Any, NewType
 
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph

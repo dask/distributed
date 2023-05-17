@@ -25,10 +25,10 @@ import logging
 import os
 import sys
 import warnings
-from collections.abc import Callable, Hashable, MutableMapping
+from collections.abc import Callable, Container, Hashable, MutableMapping
 from contextlib import suppress
 from functools import partial
-from typing import TYPE_CHECKING, Any, Container, Literal, Union, cast
+from typing import TYPE_CHECKING, Any, Literal, Union, cast
 
 import psutil
 

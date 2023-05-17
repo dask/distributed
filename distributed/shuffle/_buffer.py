@@ -4,8 +4,8 @@ import asyncio
 import contextlib
 import logging
 from collections import defaultdict
-from collections.abc import Iterator
-from typing import Any, Generic, List, Sized, TypeVar
+from collections.abc import Iterator, Sized
+from typing import Any, Generic, List, TypeVar
 
 from distributed.metrics import time
 from distributed.shuffle._limiter import ResourceLimiter
@@ -17,7 +17,7 @@ ShardType = TypeVar("ShardType", bound=Sized)
 T = TypeVar("T")
 
 
-class _List(List[T]):
+class _List(list[T]):
     # This ensures that the distributed.protocol will not iterate over this collection
     pass
 

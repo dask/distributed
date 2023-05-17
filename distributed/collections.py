@@ -4,8 +4,12 @@ import heapq
 import itertools
 import weakref
 from collections import OrderedDict, UserDict
-from collections.abc import Callable, Hashable, Iterator
-from typing import MutableSet  # TODO move to collections.abc (requires Python >=3.9)
+from collections.abc import (  # TODO move to collections.abc (requires Python >=3.9)
+    Callable,
+    Hashable,
+    Iterator,
+    MutableSet,
+)
 from typing import Any, TypeVar, cast
 
 T = TypeVar("T", bound=Hashable)

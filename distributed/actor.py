@@ -19,10 +19,7 @@ from distributed.worker import get_client, get_worker
 
 _T = TypeVar("_T")
 
-if sys.version_info >= (3, 9):
-    from collections.abc import Awaitable, Generator
-else:
-    from typing import Awaitable, Generator
+from collections.abc import Awaitable, Generator
 
 if sys.version_info >= (3, 10):
     from asyncio import Event as _LateLoopEvent

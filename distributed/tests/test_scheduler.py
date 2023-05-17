@@ -9,10 +9,10 @@ import operator
 import pickle
 import re
 import sys
+from collections.abc import Collection
 from itertools import product
 from textwrap import dedent
 from time import sleep
-from typing import Collection
 from unittest import mock
 
 import cloudpickle
