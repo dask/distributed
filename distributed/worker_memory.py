@@ -28,7 +28,7 @@ import warnings
 from collections.abc import Callable, Hashable, MutableMapping
 from contextlib import suppress
 from functools import partial
-from typing import TYPE_CHECKING, Any, Container, Literal, cast
+from typing import TYPE_CHECKING, Any, Container, Literal, Union, cast
 
 import psutil
 
@@ -45,9 +45,28 @@ from distributed.utils import RateLimiterFilter, has_arg, log_errors
 from distributed.utils_perf import ThrottledGC
 
 if TYPE_CHECKING:
+    # TODO import from typing (requires Python >=3.10)
+    from typing_extensions import TypeAlias
+
     # Circular imports
     from distributed.nanny import Nanny
     from distributed.worker import Worker
+
+    # TODO move outside of TYPE_CHECKING (requires Python >=3.9)
+    WorkerDataParameter: TypeAlias = Union[
+        # pre-initialized
+        MutableMapping[str, object],
+        # constructor
+        Callable[[], MutableMapping[str, object]],
+        # constructor, passed worker.local_directory
+        Callable[[str], MutableMapping[str, object]],
+        # (constructor, kwargs to constructor)
+        tuple[Callable[..., MutableMapping[str, object]], dict[str, Any]],
+        # initialize internally
+        None,
+    ]
+else:
+    WorkerDataParameter = object
 
 worker_logger = logging.getLogger("distributed.worker.memory")
 worker_logger.addFilter(RateLimiterFilter(r"Unmanaged memory use is high"))
@@ -90,16 +109,7 @@ class WorkerMemoryManager:
         memory_limit: str | float = "auto",
         # This should be None most of the times, short of a power user replacing the
         # SpillBuffer with their own custom dict-like
-        data: (
-            MutableMapping[str, Any]  # pre-initialised
-            | Callable[[], MutableMapping[str, Any]]  # constructor
-            # constructor, passed worker.local_directory
-            | Callable[[str], MutableMapping[str, Any]]
-            | tuple[
-                Callable[..., MutableMapping[str, Any]], dict[str, Any]
-            ]  # (constructor, kwargs to constructor)
-            | None  # create internally
-        ) = None,
+        data: WorkerDataParameter = None,
         # Deprecated parameters; use dask.config instead
         memory_target_fraction: float | Literal[False] | None = None,
         memory_spill_fraction: float | Literal[False] | None = None,
@@ -131,10 +141,10 @@ class WorkerMemoryManager:
             self.data = data
         elif callable(data):
             if has_arg(data, "worker_local_directory"):
-                data = cast("Callable[[str], MutableMapping[str, Any]]", data)
+                data = cast("Callable[[str], MutableMapping[str, object]]", data)
                 self.data = data(worker.local_directory)
             else:
-                data = cast("Callable[[], MutableMapping[str, Any]]", data)
+                data = cast("Callable[[], MutableMapping[str, object]]", data)
                 self.data = data()
         elif isinstance(data, tuple):
             func, kwargs = data
@@ -164,6 +174,8 @@ class WorkerMemoryManager:
         else:
             self.data = {}
 
+        if not isinstance(self.data, MutableMapping):
+            raise TypeError(f"Worker.data must be a MutableMapping; got {self.data}")
         if self.data:
             raise ValueError("Worker.data must be empty at initialization time")
 

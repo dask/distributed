@@ -426,12 +426,6 @@ redirect_template = """\
 </html>
 """
 
-suppress_warnings = [
-    # more than one target found for cross-reference
-    # https://github.com/sphinx-doc/sphinx/issues/10400
-    "ref.python"
-]
-
 
 def copy_legacy_redirects(app, docname):
     if app.builder.name == "html":

@@ -3,14 +3,20 @@ from __future__ import annotations
 import pytest
 
 from distributed.shuffle._merge import hash_join
+from distributed.shuffle.tests.utils import invoke_annotation_chaos
 from distributed.utils_test import gen_cluster
 
 dd = pytest.importorskip("dask.dataframe")
 import pandas as pd
 
-from dask.dataframe._compat import tm
+from dask.dataframe._compat import PANDAS_GT_200, tm
 from dask.dataframe.utils import assert_eq
 from dask.utils_test import hlg_layer_topological
+
+
+@pytest.fixture(params=[0, 0.3, 1], ids=["none", "some", "all"])
+def lose_annotations(request):
+    return request.param
 
 
 def list_eq(aa, bb):
@@ -36,7 +42,8 @@ def list_eq(aa, bb):
 
 @pytest.mark.parametrize("how", ["inner", "left", "right", "outer"])
 @gen_cluster(client=True)
-async def test_basic_merge(c, s, a, b, how):
+async def test_basic_merge(c, s, a, b, how, lose_annotations):
+    await invoke_annotation_chaos(lose_annotations, c)
     A = pd.DataFrame({"x": [1, 2, 3, 4, 5, 6], "y": [1, 1, 2, 2, 3, 4]})
     a = dd.repartition(A, [0, 4, 5])
 
@@ -72,7 +79,8 @@ async def test_basic_merge(c, s, a, b, how):
 
 @pytest.mark.parametrize("how", ["inner", "outer", "left", "right"])
 @gen_cluster(client=True)
-async def test_merge(c, s, a, b, how):
+async def test_merge(c, s, a, b, how, lose_annotations):
+    await invoke_annotation_chaos(lose_annotations, c)
     A = pd.DataFrame({"x": [1, 2, 3, 4, 5, 6], "y": [1, 1, 2, 2, 3, 4]})
     a = dd.repartition(A, [0, 4, 5])
 
@@ -234,28 +242,46 @@ async def test_merge_by_multiple_columns(c, s, a, b, how):
             ddl = dd.from_pandas(pdl, lpart)
             ddr = dd.from_pandas(pdr, rpart)
 
+            expected = pdl.join(pdr, how=how)
             assert_eq(
                 await c.compute(ddl.join(ddr, how=how, shuffle="p2p")),
-                pdl.join(pdr, how=how),
-            )
-            assert_eq(
-                await c.compute(ddr.join(ddl, how=how, shuffle="p2p")),
-                pdr.join(pdl, how=how),
+                expected,
+                # FIXME: There's an discrepancy with an empty index for
+                # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
+                # Temporarily avoid index check until the discrepancy is fixed.
+                check_index=not (PANDAS_GT_200 and expected.index.empty),
             )
 
+            expected = pdr.join(pdl, how=how)
             assert_eq(
-                await c.compute(
-                    dd.merge(
-                        ddl,
-                        ddr,
-                        how=how,
-                        left_index=True,
-                        right_index=True,
-                        shuffle="p2p",
-                    )
-                ),
-                pd.merge(pdl, pdr, how=how, left_index=True, right_index=True),
+                await c.compute(ddr.join(ddl, how=how, shuffle="p2p")),
+                expected,
+                # FIXME: There's an discrepancy with an empty index for
+                # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
+                # Temporarily avoid index check until the discrepancy is fixed.
+                check_index=not (PANDAS_GT_200 and expected.index.empty),
             )
+
+            expected = pd.merge(pdl, pdr, how=how, left_index=True, right_index=True)
+            assert_eq(
+                await c.compute(
+                    dd.merge(
+                        ddl,
+                        ddr,
+                        how=how,
+                        left_index=True,
+                        right_index=True,
+                        shuffle="p2p",
+                    )
+                ),
+                expected,
+                # FIXME: There's an discrepancy with an empty index for
+                # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
+                # Temporarily avoid index check until the discrepancy is fixed.
+                check_index=not (PANDAS_GT_200 and expected.index.empty),
+            )
+
+            expected = pd.merge(pdr, pdl, how=how, left_index=True, right_index=True)
             assert_eq(
                 await c.compute(
                     dd.merge(
@@ -267,7 +293,11 @@ async def test_merge_by_multiple_columns(c, s, a, b, how):
                         shuffle="p2p",
                     )
                 ),
-                pd.merge(pdr, pdl, how=how, left_index=True, right_index=True),
+                expected,
+                # FIXME: There's an discrepancy with an empty index for
+                # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
+                # Temporarily avoid index check until the discrepancy is fixed.
+                check_index=not (PANDAS_GT_200 and expected.index.empty),
             )
 
             # hash join

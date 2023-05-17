@@ -1128,10 +1128,10 @@ async def test_pause_while_saturated(c, s, a, b):
 
 
 @gen_cluster(nthreads=[])
-async def test_worker_log_memory_limit_too_high(s, caplog):
-    async with Worker(s.address, memory_limit="1 PB"):
+async def test_worker_log_memory_limit_too_high(s):
+    async with Worker(s.address, memory_limit="1 PB") as worker:
         assert any(
-            "Ignoring provided memory limit" in record.msg for record in caplog.records
+            "Ignoring provided memory limit" in record.msg for record in worker.logs
         )
 
 
@@ -1144,13 +1144,12 @@ async def test_worker_log_memory_limit_too_high(s, caplog):
         "distributed.worker.memory.monitor-interval": "10ms",
     },
 )
-async def test_high_unmanaged_memory_warning(s, caplog):
+async def test_high_unmanaged_memory_warning(s):
     RateLimiterFilter.reset_timer("distributed.worker.memory")
-    async with Worker(s.address):
+    async with Worker(s.address) as worker:
         await asyncio.sleep(0.1)  # Enough for 10 runs of the memory monitors
     assert (
-        sum("Unmanaged memory use is high" in record.msg for record in caplog.records)
-        == 1
+        sum("Unmanaged memory use is high" in record.msg for record in worker.logs) == 1
     )  # Message is rate limited
 
 

@@ -28,7 +28,7 @@ requires-python = ">=3.8"
 dependencies = [
     "click >= 8.0",
     "cloudpickle >= 1.5.0",
-    "dask == 2023.3.2",
+    "dask == 2023.5.0",
     "jinja2 >= 2.10.3",
     "locket >= 1.0.0",
     "msgpack >= 1.0.0",
@@ -105,6 +105,7 @@ addopts = '''
 --ignore=.github
 --strict-markers
 --strict-config
+--cov-config=pyproject.toml
 -p no:asyncio
 -p no:legacypath'''
 filterwarnings = [
@@ -177,31 +178,24 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 warn_unreachable = true
 
+[[tool.mypy.overrides]]
 # FIXME must clean these modules up
 # Also look for 'mypy: disable-error-code' at the top of modules
-[[tool.mypy.overrides]]
-module = ["distributed.client"]
-allow_incomplete_defs = true
-[[tool.mypy.overrides]]
-module = ["distributed.worker"]
+module = ["distributed.client", "distributed.worker"]
 allow_incomplete_defs = true
 
+[[tool.mypy.overrides]]
 # Recent or recently overhauled modules featuring stricter validation
-[[tool.mypy.overrides]]
-module = ["distributed.active_memory_manager"]
+module = [
+    "distributed.active_memory_manager",
+    "distributed.system_monitor",
+    "distributed.worker_memory",
+    "distributed.worker_state_machine",
+    "distributed.config",
+    "distributed.shuffle.*",
+]
 allow_untyped_defs = false
-[[tool.mypy.overrides]]
-module = ["distributed.system_monitor"]
-allow_untyped_defs = false
-[[tool.mypy.overrides]]
-module = ["distributed.worker_memory"]
-allow_untyped_defs = false
-[[tool.mypy.overrides]]
-module = ["distributed.worker_state_machine"]
-allow_untyped_defs = false
-[[tool.mypy.overrides]]
-module = ["distributed.shuffle.*"]
-allow_untyped_defs = false
+
 [[tool.mypy.overrides]]
 module = ["distributed.shuffle.tests.*"]
 allow_untyped_defs = true

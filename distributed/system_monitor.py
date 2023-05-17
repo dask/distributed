@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-import warnings
 from collections import deque
 from typing import Any
 
@@ -29,6 +28,8 @@ class SystemMonitor:
     _last_disk_io_counters: Any  # psutil namedtuple
     _last_host_cpu_counters: Any  # dynamically-defined psutil namedtuple
     _last_gil_contention: float  # 0-1 value
+
+    _cumulative_gil_contention: float
 
     gpu_name: str | None
     gpu_memory_total: int
@@ -102,12 +103,10 @@ class SystemMonitor:
             try:
                 from gilknocker import KnockKnock
             except ImportError:
-                warnings.warn(
-                    "Monitoring GIL requires `gilknocker` to be installed. `pip install gilknocker`"
-                )
                 self.monitor_gil_contention = False
             else:
                 self.quantities["gil_contention"] = deque(maxlen=maxlen)
+                self._cumulative_gil_contention = 0.0
                 raw_interval = dask.config.get(
                     "distributed.admin.system-monitor.gil.interval",
                 )
@@ -191,6 +190,7 @@ class SystemMonitor:
 
         if self.monitor_gil_contention:
             self._last_gil_contention = self._gilknocker.contention_metric
+            self._cumulative_gil_contention += self._last_gil_contention
             result["gil_contention"] = self._last_gil_contention
             self._gilknocker.reset_contention_metric()
 
@@ -229,7 +229,4 @@ class SystemMonitor:
 
     def close(self) -> None:
         if self.monitor_gil_contention:
-            try:
-                self._gilknocker.stop()
-            except ValueError:  # Wasn't started or already stopped
-                pass
+            self._gilknocker.stop()

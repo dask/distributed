@@ -5,22 +5,20 @@ from collections import defaultdict
 from collections.abc import Hashable, Iterator, Mapping, Sized
 from contextlib import contextmanager
 from functools import partial
-from typing import Any, Literal, NamedTuple, Protocol, cast
-
-from packaging.version import parse as parse_version
+from typing import Callable  # TODO import from collections.abc (requires Python >=3.9)
+from typing import Literal, NamedTuple, Protocol, cast
 
 import zict
 
 from distributed.metrics import context_meter
 from distributed.protocol import deserialize_bytes, serialize_bytelist
+from distributed.protocol.compression import get_compression_settings
 from distributed.sizeof import safe_sizeof
 from distributed.utils import RateLimiterFilter
 
 logger = logging.getLogger(__name__)
 logger.addFilter(RateLimiterFilter("Spill file on disk reached capacity"))
 logger.addFilter(RateLimiterFilter("Spill to disk failed"))
-
-has_zict_230 = parse_version(zict.__version__) >= parse_version("2.3.0")
 
 
 class SpilledSize(NamedTuple):
@@ -68,8 +66,7 @@ class ManualEvictProto(Protocol):
         ...  # pragma: nocover
 
 
-# zict.Buffer[str, Any] requires zict >= 2.2.0
-class SpillBuffer(zict.Buffer):
+class SpillBuffer(zict.Buffer[str, object]):
     """MutableMapping that automatically spills out dask key/value pairs to disk when
     the total size of the stored data exceeds the target. If max_spill is provided the
     key/value pairs won't be spilled once this threshold has been reached.
@@ -97,7 +94,7 @@ class SpillBuffer(zict.Buffer):
         # If a value is still in use somewhere on the worker since the last time it was
         # unspilled, don't duplicate it
         slow = Slow(spill_directory, max_spill)
-        slow_cached = zict.Cache(slow, zict.WeakValueMapping())
+        slow_cached = zict.Cache(slow, zict.WeakValueMapping())  # type: ignore
 
         super().__init__(fast={}, slow=slow_cached, n=target, weight=_in_memory_weight)
         self.logged_pickle_errors = set()  # keys logged with pickle error
@@ -127,7 +124,6 @@ class SpillBuffer(zict.Buffer):
             yield
         except MaxSpillExceeded as e:
             # key is in self.fast; no keys have been lost on eviction
-            # Note: requires zict > 2.0
             (key_e,) = e.args
             assert key_e in self.fast
             assert key_e not in self.slow
@@ -141,10 +137,7 @@ class SpillBuffer(zict.Buffer):
             raise HandledError()
         except PickleError as e:
             key_e, orig_e = e.args
-            if parse_version(zict.__version__) <= parse_version("2.0.0"):
-                pass
-            else:
-                assert key_e in self.fast
+            assert key_e in self.fast
             assert key_e not in self.slow
             if key_e == key:
                 assert key is not None
@@ -164,7 +157,7 @@ class SpillBuffer(zict.Buffer):
                     self.logged_pickle_errors.add(key_e)
                 raise HandledError()
 
-    def __setitem__(self, key: str, value: Any) -> None:
+    def __setitem__(self, key: str, value: object) -> None:
         """If sizeof(value) < target, write key/value pair to self.fast; this may in
         turn cause older keys to be spilled from fast to slow.
         If sizeof(value) >= target, write key/value pair directly to self.slow instead.
@@ -209,7 +202,7 @@ class SpillBuffer(zict.Buffer):
         except HandledError:
             return -1
 
-    def __getitem__(self, key: str) -> Any:
+    def __getitem__(self, key: str) -> object:
         with self._capture_metrics():
             if key in self.fast:
                 # Note: don't log from self.fast.__getitem__, because that's called
@@ -227,21 +220,21 @@ class SpillBuffer(zict.Buffer):
         super().__delitem__(key)
         self.logged_pickle_errors.discard(key)
 
-    def pop(self, key: str, default: Any = None) -> Any:
+    def pop(self, key: str, default: object = None) -> object:
         raise NotImplementedError(
             "Are you calling .pop(key, None) as a way to discard a key if it exists?"
             "It may cause data to be read back from disk! Please use `del` instead."
         )
 
     @property
-    def memory(self) -> Mapping[str, Any]:
+    def memory(self) -> Mapping[str, object]:
         """Key/value pairs stored in RAM. Alias of zict.Buffer.fast.
         For inspection only - do not modify directly!
         """
         return self.fast
 
     @property
-    def disk(self) -> Mapping[str, Any]:
+    def disk(self) -> Mapping[str, object]:
         """Key/value pairs spilled out to disk. Alias of zict.Buffer.slow.
         For inspection only - do not modify directly!
         """
@@ -265,7 +258,7 @@ class SpillBuffer(zict.Buffer):
         return self._slow_uncached.total_weight
 
 
-def _in_memory_weight(key: str, value: Any) -> int:
+def _in_memory_weight(key: str, value: object) -> int:
     return safe_sizeof(value)
 
 
@@ -282,23 +275,31 @@ class HandledError(Exception):
     pass
 
 
-# zict.Func[str, Any] requires zict >= 2.2.0
-class Slow(zict.Func):
+class Slow(zict.Func[str, object, bytes]):
     max_weight: int | Literal[False]
     weight_by_key: dict[str, SpilledSize]
     total_weight: SpilledSize
 
     def __init__(self, spill_directory: str, max_weight: int | Literal[False] = False):
-        super().__init__(
-            partial(serialize_bytelist, on_error="raise"),
-            deserialize_bytes,
-            zict.File(spill_directory),
+        compression = get_compression_settings(
+            "distributed.worker.memory.spill-compression"
         )
+
+        # File is MutableMapping[str, bytes], but serialize_bytelist returns
+        # list[bytes | bytearray | memorymapping], which File.__setitem__ actually
+        # accepts despite its signature; File.__getitem__ actually returns
+        # bytearray. This headache is because MutableMapping doesn't allow for
+        # asymmetric VT in __getitem__ and __setitem__.
+        dump = cast(
+            Callable[[object], bytes],
+            partial(serialize_bytelist, compression=compression, on_error="raise"),
+        )
+        super().__init__(dump, deserialize_bytes, zict.File(spill_directory))
         self.max_weight = max_weight
         self.weight_by_key = {}
         self.total_weight = SpilledSize(0, 0)
 
-    def __getitem__(self, key: str) -> Any:
+    def __getitem__(self, key: str) -> object:
         with context_meter.meter("disk-read", "seconds"):
             pickled = self.d[key]
         context_meter.digest_metric("disk-read", 1, "count")
@@ -306,7 +307,7 @@ class Slow(zict.Func):
         out = self.load(pickled)
         return out
 
-    def __setitem__(self, key: str, value: Any) -> None:
+    def __setitem__(self, key: str, value: object) -> None:
         try:
             pickled = self.dump(value)
         except Exception as e:
@@ -317,7 +318,8 @@ class Slow(zict.Func):
 
         pickled_size = sum(
             frame.nbytes if isinstance(frame, memoryview) else len(frame)
-            for frame in pickled
+            # See note in __init__ about serialize_bytelist
+            for frame in cast(list, pickled)
         )
 
         # Thanks to Buffer.__setitem__, we never update existing

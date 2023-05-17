@@ -41,7 +41,7 @@ def test_registered(ucx_loop):
 
 
 async def get_comm_pair(
-    listen_addr="ucx://" + HOST, listen_args=None, connect_args=None, **kwargs
+    listen_addr=f"ucx://{HOST}", listen_args=None, connect_args=None, **kwargs
 ):
     listen_args = listen_args or {}
     connect_args = connect_args or {}

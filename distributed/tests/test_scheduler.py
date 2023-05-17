@@ -52,6 +52,7 @@ from distributed.utils_test import (
     BrokenComm,
     assert_story,
     async_poll_for,
+    captured_handler,
     captured_logger,
     cluster,
     dec,
@@ -2242,11 +2243,14 @@ async def test_collect_versions(c, s, a, b):
 @gen_cluster(client=True)
 async def test_idle_timeout(c, s, a, b):
     beginning = time()
+    assert s.check_idle() is not None
+    assert s.check_idle() is not None  # Repeated calls should still not be None
     s.idle_timeout = 0.500
     pc = PeriodicCallback(s.check_idle, 10)
     future = c.submit(slowinc, 1)
     while not s.tasks:
         await asyncio.sleep(0.01)
+    assert s.check_idle() is None
     pc.start()
     await future
     assert s.idle_since is None or s.idle_since > beginning
@@ -2725,17 +2729,20 @@ class FlakyConnectionPool(ConnectionPool):
 
 
 @gen_cluster(client=True)
-async def test_gather_failing_cnn_recover(c, s, a, b, caplog):
+async def test_gather_failing_cnn_recover(c, s, a, b):
     x = await c.scatter({"x": 1}, workers=a.address)
     rpc = await FlakyConnectionPool(failing_connections=1)
     with mock.patch.object(s, "rpc", rpc), dask.config.set(
         {"distributed.comm.retry.count": 1}
-    ), caplog.at_level(logging.INFO):
-        caplog.clear()
+    ), captured_handler(
+        logging.getLogger("distributed").handlers[0]
+    ) as distributed_log:
         res = await s.gather(keys=["x"])
-    assert [
-        record.message for record in caplog.records if record.levelno == logging.INFO
-    ] == ["Retrying get_data_from_worker after exception in attempt 0/1: "]
+    assert re.match(
+        r"\A\d+-\d+-\d+ \d+:\d+:\d+,\d+ - distributed.utils_comm - INFO - "
+        r"Retrying get_data_from_worker after exception in attempt 0/1: \n\Z",
+        distributed_log.getvalue(),
+    )
     assert res["status"] == "OK"
 
 
@@ -2829,28 +2836,44 @@ async def test_too_many_groups(c, s, a, b):
 
 
 @gen_test()
-async def test_multiple_listeners():
-    with captured_logger("distributed.scheduler") as log:
-        async with Scheduler(dashboard_address=":0", protocol=["inproc", "tcp"]) as s:
-            async with Worker(s.listeners[0].contact_address) as a:
-                async with Worker(s.listeners[1].contact_address) as b:
-                    assert a.address.startswith("inproc")
-                    assert a.scheduler.address.startswith("inproc")
-                    assert b.address.startswith("tcp")
-                    assert b.scheduler.address.startswith("tcp")
+@pytest.mark.parametrize(
+    "dashboard_link_template,expected_dashboard_link",
+    (
+        ("{scheme}://{host}:{port}/status", r"dashboard at:\s*http://"),
+        ("{ENV_VAR_MISSING}", r"dashboard at:\s*:\d*"),
+    ),
+)
+async def test_multiple_listeners(dashboard_link_template, expected_dashboard_link):
+    with dask.config.set({"distributed.dashboard.link": dashboard_link_template}):
+        with captured_logger("distributed.scheduler") as log:
+            async with Scheduler(
+                dashboard_address=":0", protocol=["inproc", "tcp"]
+            ) as s:
+                async with Worker(s.listeners[0].contact_address) as a:
+                    async with Worker(s.listeners[1].contact_address) as b:
+                        assert a.address.startswith("inproc")
+                        assert a.scheduler.address.startswith("inproc")
+                        assert b.address.startswith("tcp")
+                        assert b.scheduler.address.startswith("tcp")
 
-                    async with Client(s.address, asynchronous=True) as c:
-                        futures = c.map(inc, range(20))
-                        await wait(futures)
+                        async with Client(s.address, asynchronous=True) as c:
+                            futures = c.map(inc, range(20))
+                            await wait(futures)
 
-                        # Force inter-worker communication both ways
-                        await c.submit(sum, futures, workers=[a.address])
-                        await c.submit(len, futures, workers=[b.address])
+                            # Force inter-worker communication both ways
+                            await c.submit(sum, futures, workers=[a.address])
+                            await c.submit(len, futures, workers=[b.address])
 
     log = log.getvalue()
     assert re.search(r"Scheduler at:\s*tcp://", log)
     assert re.search(r"Scheduler at:\s*inproc://", log)
-    assert re.search(r"dashboard at:\s*http://", log)
+
+    # Dashboard link formatting can fail if template contains env vars which aren't
+    # present. Don't kill scheduler, but revert to outputting the port and helpful msg
+    assert re.search(expected_dashboard_link, log)
+    if "ENV_VAR_MISSING" in dashboard_link_template:
+        msg = r"Failed to format dashboard link, unknown value: 'ENV_VAR_MISSING'"
+        assert re.search(msg, log)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)])
@@ -3071,6 +3094,7 @@ async def assert_memory(
     config={
         "distributed.worker.memory.recent-to-old-time": "4s",
         "distributed.worker.memory.spill": 0.7,
+        "distributed.worker.memory.spill-compression": "zlib",
     },
     worker_kwargs={
         "heartbeat_interval": "20ms",
@@ -3144,27 +3168,14 @@ async def test_memory(c, s, *nannies):
         ]
     )
 
-    # dask serialization compresses ("x" * 50 * 2**20) from 50 MiB to ~200 kiB.
+    # dask serialization compresses ("x" * 50 * 2**20) from 50 MiB to ~50 kiB.
     # Test that spilled reports the actual size on disk and not the output of
     # sizeof().
-    # FIXME https://github.com/dask/distributed/issues/5807
-    #       This would be more robust if we could just enable zlib compression in
-    #       @gen_cluster
-    from distributed.protocol.compression import default_compression
-
-    if default_compression:
-        await asyncio.gather(
-            assert_memory(a, "spilled", 0.1, 0.5, timeout=3),
-            assert_memory(b, "spilled", 0.1, 0.5, timeout=3),
-            assert_memory(s, "spilled", 0.2, 1.0, timeout=3.1),
-        )
-    else:
-        # Long timeout to allow spilling 100 MiB to disk
-        await asyncio.gather(
-            assert_memory(a, "spilled", 50, 51, timeout=10),
-            assert_memory(b, "spilled", 50, 51, timeout=10),
-            assert_memory(s, "spilled", 100, 102, timeout=10.1),
-        )
+    await asyncio.gather(
+        assert_memory(a, "spilled", 0.04, 0.08, timeout=3),
+        assert_memory(b, "spilled", 0.04, 0.08, timeout=3),
+        assert_memory(s, "spilled", 0.08, 0.16, timeout=3.1),
+    )
 
     # FIXME on Windows and MacOS we occasionally observe managed = 49 bytes
     await asyncio.gather(

@@ -107,7 +107,9 @@ async def test_prometheus(c, s, a, b):
     expected_metrics = {
         "dask_scheduler_clients",
         "dask_scheduler_desired_workers",
+        "dask_scheduler_gil_contention",
         "dask_scheduler_workers",
+        "dask_scheduler_last_time",
         "dask_scheduler_tasks",
         "dask_scheduler_tasks_suspicious",
         "dask_scheduler_tasks_forgotten",
@@ -501,7 +503,6 @@ async def test_check_idle(c, s, a, b):
             assert resp.status == 200
             assert resp.headers["Content-Type"] == "application/json"
             response = json.loads(await resp.text())
-            assert isinstance(response["idle"], bool)
             assert (
                 isinstance(response["idle_since"], float)
                 or response["idle_since"] is None

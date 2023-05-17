@@ -76,7 +76,7 @@ from distributed.client import (
 from distributed.cluster_dump import load_cluster_dump
 from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, WINDOWS
-from distributed.core import Status
+from distributed.core import Status, error_message
 from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.metrics import time
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
@@ -1486,8 +1486,15 @@ async def test_upload_file(c, s, a, b):
 
     with save_sys_modules():
         for value in [123, 456]:
-            with tmp_text("myfile.py", f"def f():\n    return {value}") as fn:
+            code = f"def f():\n    return {value}"
+            with tmp_text("myfile.py", code) as fn:
                 await c.upload_file(fn)
+
+            # Confirm workers _and_ scheduler got the file
+            for server in [s, a, b]:
+                file = pathlib.Path(server.local_directory).joinpath("myfile.py")
+                assert file.is_file()
+                assert file.read_text() == code
 
             x = c.submit(g, pure=False)
             result = await x
@@ -2245,14 +2252,16 @@ async def test_cancel_multi_client(s, a, b):
 
 
 @gen_cluster(nthreads=[("", 1)], client=True)
-async def test_cancel_before_known_to_scheduler(c, s, a, caplog):
+async def test_cancel_before_known_to_scheduler(c, s, a):
     f = c.submit(inc, 1)
+    f2 = c.submit(inc, f)
     await c.cancel([f])
+    assert f.cancelled()
 
     with pytest.raises(CancelledError):
-        await f
-    while f"Scheduler cancels key {f.key}" not in caplog.text:
-        await asyncio.sleep(0.05)
+        await f2
+
+    assert any(f"Scheduler cancels key {f.key}" in msg for _, msg in s.get_logs())
 
 
 @gen_cluster(client=True)
@@ -3236,6 +3245,68 @@ def test_default_get(loop_in_thread):
                 assert dask.base.get_scheduler() == c2.get
             assert dask.base.get_scheduler() == c1.get
         assert dask.base.get_scheduler() == pre_get
+
+
+@gen_cluster(config={"scheduler": "sync"}, nthreads=[])
+async def test_get_scheduler_default_client_config_interleaving(s):
+    # This test is using context managers intentionally. We should not refactor
+    # this to use it in more places to make the client closing cleaner.
+    with pytest.warns(UserWarning):
+        assert dask.base.get_scheduler() == dask.local.get_sync
+        with dask.config.set(scheduler="threads"):
+            assert dask.base.get_scheduler() == dask.threaded.get
+            client = await Client(s.address, set_as_default=False, asynchronous=True)
+            try:
+                assert dask.base.get_scheduler() == dask.threaded.get
+            finally:
+                await client.close()
+
+            client = await Client(s.address, set_as_default=True, asynchronous=True)
+            try:
+                assert dask.base.get_scheduler() == client.get
+            finally:
+                await client.close()
+            assert dask.base.get_scheduler() == dask.threaded.get
+
+            # FIXME: As soon as async with uses as_current this will be true as well
+            # async with Client(s.address, set_as_default=False, asynchronous=True) as c:
+            #     assert dask.base.get_scheduler() == c.get
+            # assert dask.base.get_scheduler() == dask.threaded.get
+
+            client = await Client(s.address, set_as_default=False, asynchronous=True)
+            try:
+                assert dask.base.get_scheduler() == dask.threaded.get
+                with client.as_current():
+                    sc = dask.base.get_scheduler()
+                    assert sc == client.get
+                assert dask.base.get_scheduler() == dask.threaded.get
+            finally:
+                await client.close()
+
+            # If it comes to a race between default and current, current wins
+            client = await Client(s.address, set_as_default=True, asynchronous=True)
+            client2 = await Client(s.address, set_as_default=False, asynchronous=True)
+            try:
+                with client2.as_current():
+                    assert dask.base.get_scheduler() == client2.get
+                assert dask.base.get_scheduler() == client.get
+            finally:
+                await client.close()
+                await client2.close()
+
+            assert dask.base.get_scheduler() == dask.threaded.get
+
+        assert dask.base.get_scheduler() == dask.local.get_sync
+
+        client = await Client(s.address, set_as_default=True, asynchronous=True)
+        try:
+            assert dask.base.get_scheduler() == client.get
+            with dask.config.set(scheduler="threads"):
+                assert dask.base.get_scheduler() == dask.threaded.get
+                with client.as_current():
+                    assert dask.base.get_scheduler() == client.get
+        finally:
+            await client.close()
 
 
 @gen_cluster(client=True)
@@ -6634,21 +6705,32 @@ def test_client_connectionpool_semaphore_loop(s, a, b, loop):
 
 
 @pytest.mark.slow
-@gen_cluster(nthreads=[], timeout=60)
-async def test_mixed_compression(s):
+@gen_cluster(client=True, nthreads=[], config={"distributed.comm.compression": None})
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
+async def test_mixed_compression(c, s):
     pytest.importorskip("lz4")
     da = pytest.importorskip("dask.array")
+
     async with Nanny(
-        s.address, nthreads=1, config={"distributed.comm.compression": None}
+        s.address,
+        host="127.0.0.2",
+        nthreads=1,
+        config={"distributed.comm.compression": "lz4"},
+    ), Nanny(
+        s.address,
+        host="127.0.0.3",
+        nthreads=1,
+        config={"distributed.comm.compression": "zlib"},
     ):
-        async with Nanny(
-            s.address, nthreads=1, config={"distributed.comm.compression": "lz4"}
-        ):
-            async with Client(s.address, asynchronous=True) as c:
-                await c.get_versions()
-                x = da.ones((10000, 10000))
-                y = x + x.T
-                await c.compute(y.sum())
+        await c.wait_for_workers(2)
+        await c.get_versions()
+
+        x = da.ones((10000, 10000))
+        # get_data between Worker with lz4 and Worker with zlib
+        y = x + x.T
+        # get_data from Worker with lz4 and Worker with zlib to Client with None
+        out = await c.gather(y)
+        assert out.shape == (10000, 10000)
 
 
 def test_futures_in_subgraphs(loop_in_thread):
@@ -7476,6 +7558,32 @@ async def test_log_event_warn(c, s, a, b):
         await c.submit(no_category)
 
 
+@gen_cluster(client=True, nthreads=[])
+async def test_log_event_msgpack(c, s, a, b):
+    await c.log_event("test-topic", "foo")
+    with pytest.raises(TypeError, match="msgpack"):
+
+        class C:
+            pass
+
+        await c.log_event("test-topic", C())
+    await c.log_event("test-topic", "bar")
+    await c.log_event("test-topic", error_message(Exception()))
+
+    # assertion reversed for mock.ANY.__eq__(Serialized())
+    assert [
+        "foo",
+        "bar",
+        {
+            "status": "error",
+            "exception": mock.ANY,
+            "traceback": mock.ANY,
+            "exception_text": "Exception()",
+            "traceback_text": "",
+        },
+    ] == [msg[1] for msg in s.get_events("test-topic")]
+
+
 @gen_cluster(client=True)
 async def test_log_event_warn_dask_warns(c, s, a, b):
     from dask.distributed import warn
@@ -7628,6 +7736,106 @@ def test_print_local(capsys):
     print("Hello!", 123, sep=":")
     out, err = capsys.readouterr()
     assert "Hello!:123\n" == out
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_forward_logging(c, s, a, b):
+    # logger will be created with default config, which handles ERROR and above.
+    client_side_logger = logging.getLogger("test.logger")
+
+    # set up log forwarding on root logger
+    await c.forward_logging()
+
+    # a task that does some error logging. should be forwarded
+    def do_error():
+        logging.getLogger("test.logger").error("Hello error")
+
+    with captured_logger(client_side_logger) as log:
+        await c.submit(do_error)
+        assert "Hello error" in log.getvalue()
+
+    # task that does some error logging with exception traceback info
+    def do_exception():
+        try:
+            raise ValueError("wrong value")
+        except ValueError:
+            logging.getLogger("test.logger").error("oops", exc_info=True)
+
+    with captured_logger(client_side_logger) as log:
+        await c.submit(do_exception)
+        log_out = log.getvalue()
+        assert "oops" in log_out
+        assert "Traceback" in log_out
+        assert "ValueError: wrong value" in log_out
+
+    # a task that does some info logging. should NOT be forwarded
+    def do_info():
+        logging.getLogger("test.logger").info("Hello info")
+
+    with captured_logger(client_side_logger) as log:
+        await c.submit(do_info)
+        assert "Hello info" not in log.getvalue()
+
+    # If we set level appropriately on both client and worker side, then the
+    # info record SHOULD be forwarded
+    client_side_logger.setLevel(logging.INFO)
+
+    def do_info_2():
+        logger = logging.getLogger("test.logger")
+        logger.setLevel(logging.INFO)
+        logger.info("Hello info")
+
+    with captured_logger(client_side_logger) as log:
+        await c.submit(do_info_2)
+        assert "Hello info" in log.getvalue()
+
+    # stop forwarding logging; the client-side logger should no longer
+    # receive forwarded records
+    await c.unforward_logging()
+    with captured_logger(client_side_logger) as log:
+        await c.submit(do_error)
+        assert "Hello error" not in log.getvalue()
+
+    # logger-specific forwarding:
+    # we should get no forwarded records from do_error(), but we should get
+    # forwarded records from do_error_other().
+    client_side_other_logger = logging.getLogger("test.other_logger")
+    await c.forward_logging("test.other_logger")
+
+    def do_error_other():
+        logging.getLogger("test.other_logger").error("Hello error")
+
+    with captured_logger(client_side_logger) as log:
+        await c.submit(do_error)
+        # no record forwarded to test.logger
+        assert "Hello error" not in log.getvalue()
+    with captured_logger(client_side_other_logger) as log:
+        await c.submit(do_error_other)
+        # record forwarded to test.other_logger
+        assert "Hello error" in log.getvalue()
+    await c.unforward_logging("test.other_logger")
+
+    # test the optional `level` argument of forward_logging(). Same semantics as
+    # `level` of built-in logging.Handlers: restriction applied on top of the
+    # level of whatever logger the handler is added to
+    await c.forward_logging("test.yet_another_logger", logging.CRITICAL)
+    client_side_yet_another_logger = logging.getLogger("test.yet_another_logger")
+
+    def do_error_yet_another():
+        logging.getLogger("test.yet_another_logger").error("Hello error")
+
+    def do_critical_yet_another():
+        logging.getLogger("test.yet_another_logger").critical("Hello criticality")
+
+    with captured_logger(client_side_yet_another_logger) as log:
+        await c.submit(do_error_yet_another)
+        # no record forwarded to logger, even though the logger by default would
+        # handle ERRORs, because we are only forwarding CRITICAL and above
+        assert "Hello error" not in log.getvalue()
+    with captured_logger(client_side_yet_another_logger) as log:
+        await c.submit(do_critical_yet_another)
+        # record forwarded to logger
+        assert "Hello criticality" in log.getvalue()
 
 
 def _verify_cluster_dump(

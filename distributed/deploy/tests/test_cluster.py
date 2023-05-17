@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from tornado.ioloop import IOLoop
 
+from distributed import LocalCluster, Status
 from distributed.deploy.cluster import Cluster, _exponential_backoff
 from distributed.utils_test import gen_test
 
@@ -36,6 +37,21 @@ async def test_logs_deprecated():
     async with Cluster(asynchronous=True) as cluster:
         with pytest.warns(FutureWarning, match="get_logs"):
             cluster.logs()
+
+
+@gen_test()
+async def test_cluster_wait_for_worker():
+    async with LocalCluster(n_workers=2, asynchronous=True) as cluster:
+        assert len(cluster.scheduler.workers) == 2
+        cluster.scale(4)
+        await cluster.wait_for_workers(4)
+        assert all(
+            [
+                worker["status"] == Status.running.name
+                for _, worker in cluster.scheduler_info["workers"].items()
+            ]
+        )
+        assert len(cluster.scheduler.workers) == 4
 
 
 @gen_test()

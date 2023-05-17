@@ -26,8 +26,19 @@ dask_scheduler_clients
     Number of clients connected
 dask_scheduler_desired_workers
     Number of workers scheduler needs for task graph
+dask_scheduler_gil_contention_total
+    Value representing cumulative total of GIL contention,
+    in the form of summed percentages.
+
+    .. note::
+       Requires ``gilknocker`` to be installed, and 
+       ``distributed.admin.system-monitor.gil.enabled``
+       configuration to be set.
+
 dask_scheduler_workers
     Number of workers known by scheduler
+dask_scheduler_last_time_total
+    Cumulative SystemMonitor time
 dask_scheduler_tasks
     Number of tasks known by scheduler
 dask_scheduler_tasks_suspicious_total
@@ -117,6 +128,15 @@ dask_worker_tasks
     Number of tasks at worker
 dask_worker_threads
     Number of worker threads
+dask_worker_gil_contention_total
+    Value representing cumulative total GIL contention on worker,
+    in the form of summed percentages.
+
+    .. note::
+       Requires ``gilknocker`` to be installed, and
+       ``distributed.admin.system-monitor.gil.enabled``
+       configuration to be set.
+
 dask_worker_latency_seconds
     Latency of worker connection
 dask_worker_memory_bytes
