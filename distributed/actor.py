@@ -5,6 +5,7 @@ import asyncio
 import functools
 import sys
 import threading
+from collections.abc import Awaitable, Generator
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Generic, Literal, NoReturn, TypeVar
@@ -19,7 +20,6 @@ from distributed.worker import get_client, get_worker
 
 _T = TypeVar("_T")
 
-from collections.abc import Awaitable, Generator
 
 if sys.version_info >= (3, 10):
     from asyncio import Event as _LateLoopEvent
