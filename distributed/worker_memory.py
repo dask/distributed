@@ -52,21 +52,18 @@ if TYPE_CHECKING:
     from distributed.nanny import Nanny
     from distributed.worker import Worker
 
-    # TODO move outside of TYPE_CHECKING (requires Python >=3.9)
-    WorkerDataParameter: TypeAlias = Union[
-        # pre-initialized
-        MutableMapping[str, object],
-        # constructor
-        Callable[[], MutableMapping[str, object]],
-        # constructor, passed worker.local_directory
-        Callable[[str], MutableMapping[str, object]],
-        # (constructor, kwargs to constructor)
-        tuple[Callable[..., MutableMapping[str, object]], dict[str, Any]],
-        # initialize internally
-        None,
-    ]
-else:
-    WorkerDataParameter = object
+WorkerDataParameter: TypeAlias = Union[
+    # pre-initialized
+    MutableMapping[str, object],
+    # constructor
+    Callable[[], MutableMapping[str, object]],
+    # constructor, passed worker.local_directory
+    Callable[[str], MutableMapping[str, object]],
+    # (constructor, kwargs to constructor)
+    tuple[Callable[..., MutableMapping[str, object]], dict[str, Any]],
+    # initialize internally
+    None,
+]
 
 worker_logger = logging.getLogger("distributed.worker.memory")
 worker_logger.addFilter(RateLimiterFilter(r"Unmanaged memory use is high"))

@@ -27,7 +27,16 @@ from copy import copy
 from dataclasses import dataclass, field
 from functools import lru_cache, partial, singledispatchmethod, wraps
 from itertools import chain
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, TypedDict, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Literal,
+    NamedTuple,
+    TypedDict,
+    Union,
+    cast,
+)
 
 from tlz import peekn
 
@@ -1038,12 +1047,11 @@ class SecedeEvent(StateMachineEvent):
     compute_duration: float
 
 
-# TODO remove quotes (requires Python >=3.9)
 # {TaskState -> finish: TaskStateState | (finish: TaskStateState, transition *args)}
 # Not to be confused with distributed.scheduler.Recs
-Recs: TypeAlias = "dict[TaskState, TaskStateState | tuple]"
-Instructions: TypeAlias = "list[Instruction]"
-RecsInstrs: TypeAlias = "tuple[Recs, Instructions]"
+Recs: TypeAlias = dict[TaskState, Union[TaskStateState, tuple]]
+Instructions: TypeAlias = list[Instruction]
+RecsInstrs: TypeAlias = tuple[Recs, Instructions]
 
 
 def merge_recs_instructions(*args: RecsInstrs) -> RecsInstrs:

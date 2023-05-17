@@ -10,7 +10,7 @@ import abc
 import logging
 from collections import defaultdict
 from collections.abc import Generator
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Union
 
 import dask
 from dask.utils import parse_timedelta
@@ -434,10 +434,9 @@ if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
     from typing_extensions import TypeAlias
 
-# TODO remove quotes (requires Python >=3.9)
-SuggestionGenerator: TypeAlias = (
-    "Generator[Suggestion, scheduler_module.WorkerState | None, None]"
-)
+SuggestionGenerator: TypeAlias = Generator[
+    Suggestion, Union[scheduler_module.WorkerState, None], None
+]
 
 
 class ActiveMemoryManagerPolicy(abc.ABC):

@@ -2910,7 +2910,7 @@ def execute_task(task):
         return task
 
 
-cache_dumps = LRU(maxsize=100)
+cache_dumps: LRU[Callable[..., Any], bytes] = LRU(maxsize=100)
 
 _cache_lock = threading.Lock()
 

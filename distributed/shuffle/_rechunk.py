@@ -24,11 +24,10 @@ if TYPE_CHECKING:
     import dask.array as da
 
 
-# TODO remove quotes (requires Python >=3.9)
-ChunkedAxis: TypeAlias = "tuple[float, ...]"  # chunks must either be an int or NaN
-ChunkedAxes: TypeAlias = "tuple[ChunkedAxis, ...]"
-NIndex: TypeAlias = "tuple[int, ...]"
-NSlice: TypeAlias = "tuple[slice, ...]"
+ChunkedAxis: TypeAlias = tuple[float, ...]  # chunks must either be an int or NaN
+ChunkedAxes: TypeAlias = tuple[ChunkedAxis, ...]
+NIndex: TypeAlias = tuple[int, ...]
+NSlice: TypeAlias = tuple[slice, ...]
 
 
 def rechunk_transfer(
