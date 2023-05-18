@@ -2583,7 +2583,6 @@ class Client(SyncMethodMixin):
             local_worker = get_worker()
         except ValueError:
             local_worker = None
-
         return self.sync(
             self._scatter,
             data,
