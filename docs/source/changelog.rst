@@ -1,6 +1,37 @@
 Changelog
 =========
 
+.. _v2023.5.0:
+
+2023.5.0
+--------
+
+Released on May 12, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- ``Client.upload_file`` send to both Workers and Scheduler and rename scratch directory (:pr:`7802`) `Miles`_
+- Allow dashboard to be used with bokeh prereleases (:pr:`7814`) `James Bourbeau`_
+
+Bug Fixes
+^^^^^^^^^
+- Ensure log_event of non-msgpack serializable object do not kill servers (:pr:`7472`) `Florian Jetter`_
+- Fix ``test_nanny.py`` duplicated ``pytestmark`` definitions (:pr:`7819`) `Thomas Grainger`_
+- Fix flaky ``test_dask_worker.py::test_single_executable_deprecated`` (:pr:`7817`) `Thomas Grainger`_
+
+Maintenance
+^^^^^^^^^^^
+- Annotation-less P2P shuffling (:pr:`7801`) `Hendrik Makait`_
+- Fix docstring for ``batch_size`` in ``client.map`` (:pr:`7833`) `David Chudzicki`_
+- Refactor ``test_protocol.py`` (:pr:`7829`) `crusaderky`_
+- Lint #6496 (:pr:`7828`) `crusaderky`_
+- Remove hardcoded 60s timeout (:pr:`6496`) `Florian Jetter`_
+- Add ``__init__.py`` files to template and static directories (:pr:`7809`) `Thomas Grainger`_
+- Disable compression for fast comms (:pr:`7768`) `crusaderky`_
+- Avoid deprecated ``pd.api.types.is_sparse`` (:pr:`7813`) `James Bourbeau`_
+- Bump gpuCI ``PYTHON_VER`` from 3.8 to 3.9 (:pr:`7812`) `Charles Blackmon-Luca`_
+
+
 .. _v2023.4.1:
 
 2023.4.1

@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import os
 import socket
+import sys
 import threading
 import time as timemod
 import weakref
@@ -1238,6 +1239,29 @@ async def test_server_comms_mark_active_handlers():
             assert server2.outgoing_comms_active == 0
             assert server2.outgoing_comms_open == 1
             validate_dict(server)
+
+
+@gen_test()
+async def test_server_sys_path_local_directory_cleanup(tmp_path, monkeypatch):
+    local_directory = str(tmp_path / "dask-scratch-space")
+
+    # Ensure `local_directory` is removed from `sys.path` as part of the
+    # `Server` shutdown process
+    assert not any(i.startswith(local_directory) for i in sys.path)
+    async with Server({}, local_directory=local_directory):
+        assert sys.path[0].startswith(local_directory)
+    assert not any(i.startswith(local_directory) for i in sys.path)
+
+    # Ensure `local_directory` isn't removed from `sys.path` if it
+    # was already there before the `Server` started
+    monkeypatch.setattr("sys.path", [local_directory] + sys.path)
+    assert sys.path[0].startswith(local_directory)
+    # NOTE: `needs_workdir=False` is needed to make sure the same path added
+    # to `sys.path` above is used by the `Server` (a subdirectory is created
+    # by default).
+    async with Server({}, local_directory=local_directory, needs_workdir=False):
+        assert sys.path[0].startswith(local_directory)
+    assert sys.path[0].startswith(local_directory)
 
 
 @pytest.mark.parametrize("close_via_rpc", [True, False])

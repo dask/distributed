@@ -81,11 +81,13 @@ from distributed.core import send_recv
 from distributed.diagnostics import nvml, rmm
 from distributed.diagnostics.plugin import _get_plugin_name
 from distributed.diskutils import WorkSpace
+from distributed.exceptions import Reschedule
 from distributed.http import get_handlers
 from distributed.metrics import context_meter, thread_time, time
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
 from distributed.protocol import pickle, to_serialize
+from distributed.protocol.serialize import _is_dumpable
 from distributed.pubsub import PubSubWorkerExtension
 from distributed.security import Security
 from distributed.shuffle import ShuffleWorkerExtension
@@ -957,6 +959,24 @@ class Worker(BaseWorker, ServerNode):
         return self._deque_handler.deque
 
     def log_event(self, topic: str | Collection[str], msg: Any) -> None:
+        """Log an event under a given topic
+
+        Parameters
+        ----------
+        topic : str, list[str]
+            Name of the topic under which to log an event. To log the same
+            event under multiple topics, pass a list of topic names.
+        msg
+            Event message to log. Note this must be msgpack serializable.
+
+        See also
+        --------
+        Client.log_event
+        """
+        if not _is_dumpable(msg):
+            raise TypeError(
+                f"Message must be msgpack serializable. Got {type(msg)=} instead."
+            )
         full_msg = {
             "op": "log-event",
             "topic": topic,
@@ -2769,20 +2789,6 @@ def secede():
             stimulus_id=f"secede-{time()}",
         ),
     )
-
-
-class Reschedule(Exception):
-    """Reschedule this task
-
-    Raising this exception will stop the current execution of the task and ask
-    the scheduler to reschedule this task, possibly on a different machine.
-
-    This does not guarantee that the task will move onto a different machine.
-    The scheduler will proceed through its normal heuristics to determine the
-    optimal machine to accept this task.  The machine will likely change if the
-    load across the cluster has significantly changed since first scheduling
-    the task.
-    """
 
 
 @overload

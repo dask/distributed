@@ -849,6 +849,27 @@ def _is_msgpack_serializable(v):
     )
 
 
+def _is_dumpable(v):
+    typ = type(v)
+    return (
+        v is None
+        or typ is str
+        or typ is bool
+        or typ is bytes
+        or typ is int
+        or typ is float
+        or typ is Pickled
+        or typ is Serialize
+        or typ is Serialized
+        or typ is ToPickle
+        or isinstance(v, dict)
+        and all(map(_is_dumpable, v.values()))
+        and all(type(x) is str for x in v.keys())
+        or isinstance(v, (list, tuple))
+        and all(map(_is_dumpable, v))
+    )
+
+
 class ObjectDictSerializer:
     def __init__(self, serializer):
         self.serializer = serializer
