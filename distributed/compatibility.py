@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
 import sys
-from asyncio import to_thread
-from random import randbytes
+import warnings
 
 import tornado
 
@@ -18,6 +19,24 @@ MACOS = sys.platform == "darwin"
 WINDOWS = sys.platform == "win32"
 
 
+def to_thread(*args, **kwargs):
+    warnings.warn(
+        "to_thread is deprecated use asyncio.to_thread",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return asyncio.to_thread(*args, **kwargs)
+
+
+def randbytes(*args, **kwargs):
+    warnings.warn(
+        "randbytes is deprecated use random.randbytes",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return random.randbytes(*args, **kwargs)
+
+
 if tornado.version_info >= (6, 2, 0, 0):
     from tornado.ioloop import PeriodicCallback
 else:
@@ -29,7 +48,6 @@ else:
     # takes longer than the interval
     import datetime
     import math
-    import random
     from collections.abc import Awaitable
     from inspect import isawaitable
     from typing import Callable

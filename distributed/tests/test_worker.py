@@ -6,6 +6,7 @@ import importlib
 import itertools
 import logging
 import os
+import random
 import sys
 import tempfile
 import threading
@@ -43,7 +44,7 @@ from distributed import (
 )
 from distributed.comm.registry import backends
 from distributed.comm.utils import OFFLOAD_THRESHOLD
-from distributed.compatibility import LINUX, WINDOWS, randbytes, to_thread
+from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import (
@@ -599,7 +600,7 @@ async def test_io_loop_alternate_loop(s, loop):
             async with Worker(s.address, loop=loop) as w:
                 assert w.io_loop is w.loop is IOLoop.current()
 
-    await to_thread(asyncio.run, main())
+    await asyncio.to_thread(asyncio.run, main())
 
 
 @gen_cluster(client=True)
@@ -2808,7 +2809,7 @@ async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
         return res
 
     monkeypatch.setattr("distributed.worker.offload", custom_worker_offload)
-    obj = randbytes(OFFLOAD_THRESHOLD + 1)
+    obj = random.randbytes(OFFLOAD_THRESHOLD + 1)
     fut = c.submit(lambda _: 41, obj, workers=[a.address], allow_other_workers=True)
 
     await in_deserialize.wait()
@@ -3738,7 +3739,7 @@ async def test_forward_output(c, s, a, b, capsys):
 class EnsureOffloaded:
     def __init__(self, main_thread_id):
         self.main_thread_id = main_thread_id
-        self.data = randbytes(OFFLOAD_THRESHOLD + 1)
+        self.data = random.randbytes(OFFLOAD_THRESHOLD + 1)
 
     def __sizeof__(self):
         return len(self.data)

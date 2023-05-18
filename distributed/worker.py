@@ -65,7 +65,7 @@ from distributed.comm import Comm, connect, get_address_host, parse_address
 from distributed.comm import resolve_address as comm_resolve_address
 from distributed.comm.addressing import address_from_user_args
 from distributed.comm.utils import OFFLOAD_THRESHOLD
-from distributed.compatibility import PeriodicCallback, randbytes, to_thread
+from distributed.compatibility import PeriodicCallback
 from distributed.core import (
     ConnectionPool,
     PooledRPCCall,
@@ -1606,7 +1606,9 @@ class Worker(BaseWorker, ServerNode):
                 _close(executor=executor, wait=False)
             else:
                 try:
-                    await to_thread(_close, executor=executor, wait=executor_wait)
+                    await asyncio.to_thread(
+                        _close, executor=executor, wait=executor_wait
+                    )
                 except RuntimeError:  # Are we shutting down the process?
                     logger.error(
                         "Could not close executor %r by dispatching to thread. Trying synchronously.",
@@ -3443,7 +3445,7 @@ def benchmark_disk(
             names = list(map(str, range(100)))
             size = parse_bytes(size_str)
 
-            data = randbytes(size)
+            data = random.randbytes(size)
 
             start = time()
             total = 0
@@ -3474,7 +3476,7 @@ def benchmark_memory(
     out = {}
     for size_str in sizes:
         size = parse_bytes(size_str)
-        data = randbytes(size)
+        data = random.randbytes(size)
 
         start = time()
         total = 0
@@ -3507,7 +3509,7 @@ async def benchmark_network(
     async with rpc(address) as r:
         for size_str in sizes:
             size = parse_bytes(size_str)
-            data = to_serialize(randbytes(size))
+            data = to_serialize(random.randbytes(size))
 
             start = time()
             total = 0
