@@ -2354,9 +2354,9 @@ class Client(SyncMethodMixin):
         elif isinstance(futures, Iterator):
             return (self.gather(f, errors=errors, direct=direct) for f in futures)
         else:
-            if hasattr(thread_state, "execution_state"):  # within worker task
-                local_worker = thread_state.execution_state["worker"]
-            else:
+            try:
+                local_worker = get_worker()
+            except ValueError:
                 local_worker = None
             return self.sync(
                 self._gather,
@@ -2579,10 +2579,11 @@ class Client(SyncMethodMixin):
                 "Consider using a normal for loop and Client.submit"
             )
 
-        if hasattr(thread_state, "execution_state"):  # within worker task
-            local_worker = thread_state.execution_state["worker"]
-        else:
+        try:
+            local_worker = get_worker()
+        except ValueError:
             local_worker = None
+
         return self.sync(
             self._scatter,
             data,
