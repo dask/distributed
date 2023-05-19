@@ -101,6 +101,7 @@ _forkserver_preload_set = False
 internal_code = [
     os.path.join("dask", "base.py"),
     os.path.join("dask", "core.py"),
+    os.path.join("dask", "array", "core.py"),
     os.path.join("dask", "optimization.py"),
     os.path.join("distributed", "worker.py"),
     os.path.join("distributed", "scheduler.py"),
