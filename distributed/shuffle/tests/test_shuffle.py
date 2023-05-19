@@ -47,7 +47,13 @@ from distributed.shuffle.tests.utils import (
     invoke_annotation_chaos,
 )
 from distributed.utils import Deadline
-from distributed.utils_test import cluster, gen_cluster, gen_test, wait_for_state
+from distributed.utils_test import (
+    cluster,
+    gen_cluster,
+    gen_test,
+    raises_with_cause,
+    wait_for_state,
+)
 from distributed.worker_state_machine import TaskState as WorkerTaskState
 
 try:
@@ -123,6 +129,32 @@ async def test_basic_integration(c, s, a, b, lose_annotations, npartitions):
     x = await x
     y = await y
     assert x == y
+
+    await clean_worker(a)
+    await clean_worker(b)
+    await clean_scheduler(s)
+
+
+@pytest.mark.parametrize("npartitions", [None, 1, 20])
+@gen_cluster(client=True)
+async def test_shuffle_with_array_conversion(c, s, a, b, lose_annotations, npartitions):
+    await invoke_annotation_chaos(lose_annotations, c)
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p", npartitions=npartitions).values
+
+    if npartitions == 1:
+        # FIXME: distributed#7816
+        with raises_with_cause(
+            RuntimeError, "shuffle_transfer failed", RuntimeError, "Barrier task"
+        ):
+            await c.compute(out)
+    else:
+        await c.compute(out)
 
     await clean_worker(a)
     await clean_worker(b)

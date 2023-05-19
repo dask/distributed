@@ -218,7 +218,7 @@ async def test_rechunk_4d(c, s, *ws):
 
 @gen_cluster(client=True)
 async def test_rechunk_with_single_output_chunk_raises(c, s, *ws):
-    """
+    """See distributed#7816
 
     See Also
     --------
