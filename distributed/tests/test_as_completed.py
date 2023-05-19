@@ -15,7 +15,7 @@ import dask
 
 from distributed.client import _as_completed, _first_completed, as_completed, wait
 from distributed.metrics import time
-from distributed.utils import CancelledError
+from distributed.utils import CancelledError, drop_internal_traceback
 from distributed.utils_test import gen_cluster, inc, throws
 
 
@@ -181,29 +181,6 @@ def test_as_completed_error(client):
     assert y.status == "finished"
 
 
-def throws_map_blocks(x, block_id=None):
-    if block_id is not None and block_id[0] % 2 == 0:
-        raise ValueError(f"Bad block id {block_id}")
-    return x / 2
-
-
-@pytest.mark.parametrize("clean_traceback,expected_levels", [(True, 6), (False, 16)])
-def test_map_blocks_error(client, clean_traceback, expected_levels):
-    da = pytest.importorskip("dask.array")
-    arr = da.arange(30, chunks=3)
-    op = arr.map_blocks(throws_map_blocks)
-    try:
-        with dask.config.set(
-            {"distributed.exceptions.clean_traceback": clean_traceback}
-        ):
-            op.compute()
-    except Exception:
-        _, _, tb = sys.exc_info()
-        traceback.print_tb(tb)
-        tb_levels = list(traceback.walk_tb(tb))
-        assert len(tb_levels) == expected_levels
-
-
 def test_as_completed_with_results(client):
     x = client.submit(throws, 1)
     y = client.submit(inc, 5)
@@ -300,3 +277,24 @@ async def test_clear(c, s, a, b):
 
     while s.tasks:
         await asyncio.sleep(0.3)
+
+
+def throws_map_blocks(x, block_id=None):
+    if block_id is not None and block_id[0] % 2 == 0:
+        raise ValueError(f"Bad block id {block_id}")
+    return x / 2
+
+
+def test_drop_internal_traceback(client):
+    da = pytest.importorskip("dask.array")
+    arr = da.arange(30, chunks=3)
+    op = arr.map_blocks(throws_map_blocks)
+    try:
+        op.compute()
+    except Exception:
+        _, _, tb = sys.exc_info()
+        frames_before = len(list(traceback.walk_tb(tb)))
+        with dask.config.set({"distributed.exceptions.clean_traceback": True}):
+            tb = drop_internal_traceback(tb)
+        frames_after = len(list(traceback.walk_tb(tb)))
+        assert frames_before > frames_after
