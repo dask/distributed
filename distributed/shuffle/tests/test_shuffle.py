@@ -104,8 +104,9 @@ async def test_minimal_version(c, s, a, b):
         await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
 
 
+@pytest.mark.parametrize("npartitions", [None, 1, 20])
 @gen_cluster(client=True)
-async def test_basic_integration(c, s, a, b, lose_annotations):
+async def test_basic_integration(c, s, a, b, lose_annotations, npartitions):
     await invoke_annotation_chaos(lose_annotations, c)
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -113,7 +114,11 @@ async def test_basic_integration(c, s, a, b, lose_annotations):
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
-    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p", npartitions=npartitions)
+    if npartitions is None:
+        assert out.npartitions == df.npartitions
+    else:
+        assert out.npartitions == npartitions
     x, y = c.compute([df.x.size, out.x.size])
     x = await x
     y = await y
