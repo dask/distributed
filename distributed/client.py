@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import asynccontextmanager, contextmanager, suppress
 from contextvars import ContextVar
-from functools import partial
+from functools import partial, wraps
 from importlib.metadata import PackageNotFoundError, version
 from numbers import Number
 from queue import Queue as pyQueue
@@ -129,6 +129,41 @@ DEFAULT_EXTENSIONS = {
 }
 
 TOPIC_PREFIX_FORWARDED_LOG_RECORD = "forwarded-log-record"
+
+
+def _clean_excepthook(exc_type, exc_value, tb):
+    tb = drop_internal_traceback(tb)
+    sys.__excepthook__(exc_type, exc_value, tb)
+
+
+def _clean_ipython_traceback(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        etype, evalue, tb = sys.exc_info()
+        tb = drop_internal_traceback(tb)
+        kwargs["exc_tuple"] = etype, evalue, tb
+        value = func(*args, **kwargs)
+        return value
+
+    return wrapper
+
+
+sys.excepthook = _clean_excepthook
+
+
+# if ipython is available, also customize showtraceback
+try:
+    from IPython.core.interactiveshell import InteractiveShell
+
+    InteractiveShell.showtraceback = _clean_ipython_traceback(
+        InteractiveShell.showtraceback
+    )
+except:  # NOQA
+    pass
+
+
+def _restore_exception_hook():
+    sys.excepthook = sys.__excepthook__
 
 
 def _get_global_client() -> Client | None:
@@ -317,7 +352,6 @@ class Future(WrappedKey):
         result = self.client.sync(self._result, callback_timeout=timeout, raiseit=False)
         if self.status == "error":
             typ, exc, tb = result
-            tb = drop_internal_traceback(tb)
             raise exc.with_traceback(tb)
         elif self.status == "cancelled":
             raise result
@@ -330,7 +364,6 @@ class Future(WrappedKey):
             exc = clean_exception(self._state.exception, self._state.traceback)
             if raiseit:
                 typ, exc, tb = exc
-                tb = drop_internal_traceback(tb)
                 raise exc.with_traceback(tb)
             else:
                 return exc
@@ -1564,7 +1597,6 @@ class Client(SyncMethodMixin):
 
                     if "status" in msg and "error" in msg["status"]:
                         typ, exc, tb = clean_exception(**msg)
-                        tb = drop_internal_traceback(tb)
                         raise exc.with_traceback(tb)
 
                     op = msg.pop("op")
@@ -2225,7 +2257,6 @@ class Client(SyncMethodMixin):
                         except (KeyError, AttributeError):
                             exc = CancelledError(key)
                         else:
-                            traceback = drop_internal_traceback(traceback)
                             raise exception.with_traceback(traceback)
                         raise exc
                     if errors == "skip":
@@ -2807,7 +2838,6 @@ class Client(SyncMethodMixin):
         )
         if response["status"] == "error":
             typ, exc, tb = clean_exception(**response)
-            tb = drop_internal_traceback(tb)
             raise exc.with_traceback(tb)
         else:
             return response["result"]
@@ -2882,7 +2912,6 @@ class Client(SyncMethodMixin):
             elif resp["status"] == "error":
                 # Exception raised by the remote function
                 _, exc, tb = clean_exception(**resp)
-                tb = drop_internal_traceback(tb)
                 exc = exc.with_traceback(tb)
             else:
                 assert resp["status"] == "OK"
@@ -3233,7 +3262,6 @@ class Client(SyncMethodMixin):
                 results = self.gather(packed, asynchronous=asynchronous, direct=direct)
             except Exception:
                 exc_type, exc_value, exc_traceback = sys.exc_info()
-                exc_traceback = drop_internal_traceback(exc_traceback)
                 raise exc_value.with_traceback(exc_traceback)
             finally:
                 for f in futures.values():
@@ -4849,7 +4877,6 @@ class Client(SyncMethodMixin):
                 _, exc, tb = clean_exception(
                     response["exception"], response["traceback"]
                 )
-                tb = drop_internal_traceback(tb)
                 raise exc.with_traceback(tb)
         return responses
 
@@ -4938,7 +4965,6 @@ class Client(SyncMethodMixin):
             if response["status"] == "error":
                 exc = response["exception"]
                 tb = response["traceback"]
-                tb = drop_internal_traceback(tb)
                 raise exc.with_traceback(tb)
         return responses
 
@@ -5390,7 +5416,6 @@ class as_completed:
             future, result = res
             if self.raise_errors and future.status == "error":
                 typ, exc, tb = result
-                tb = drop_internal_traceback(tb)
                 raise exc.with_traceback(tb)
             elif future.status == "cancelled":
                 res = (res[0], CancelledError(future.key))
@@ -5869,3 +5894,4 @@ def _close_global_client():
 
 
 atexit.register(_close_global_client)
+atexit.register(_restore_exception_hook)

@@ -429,7 +429,6 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
 
     if error:
         typ, exc, tb = error
-        tb = drop_internal_traceback(tb)
         raise exc.with_traceback(tb)
     else:
         return result
@@ -893,7 +892,7 @@ def drop_internal_traceback(exc_traceback):
     curr = exc_traceback
     stack = []
     while curr:
-        if not is_internal_code(curr.tb_frame.f_code):
+        if not curr.tb_next or not is_internal_code(curr.tb_frame.f_code):
             stack.append(curr)
         curr = curr.tb_next
 
