@@ -1,6 +1,68 @@
 Changelog
 =========
 
+.. _v2023.5.0:
+
+2023.5.0
+--------
+
+Released on May 12, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- ``Client.upload_file`` send to both Workers and Scheduler and rename scratch directory (:pr:`7802`) `Miles`_
+- Allow dashboard to be used with bokeh prereleases (:pr:`7814`) `James Bourbeau`_
+
+Bug Fixes
+^^^^^^^^^
+- Ensure log_event of non-msgpack serializable object do not kill servers (:pr:`7472`) `Florian Jetter`_
+- Fix ``test_nanny.py`` duplicated ``pytestmark`` definitions (:pr:`7819`) `Thomas Grainger`_
+- Fix flaky ``test_dask_worker.py::test_single_executable_deprecated`` (:pr:`7817`) `Thomas Grainger`_
+
+Maintenance
+^^^^^^^^^^^
+- Annotation-less P2P shuffling (:pr:`7801`) `Hendrik Makait`_
+- Fix docstring for ``batch_size`` in ``client.map`` (:pr:`7833`) `David Chudzicki`_
+- Refactor ``test_protocol.py`` (:pr:`7829`) `crusaderky`_
+- Lint #6496 (:pr:`7828`) `crusaderky`_
+- Remove hardcoded 60s timeout (:pr:`6496`) `Florian Jetter`_
+- Add ``__init__.py`` files to template and static directories (:pr:`7809`) `Thomas Grainger`_
+- Disable compression for fast comms (:pr:`7768`) `crusaderky`_
+- Avoid deprecated ``pd.api.types.is_sparse`` (:pr:`7813`) `James Bourbeau`_
+- Bump gpuCI ``PYTHON_VER`` from 3.8 to 3.9 (:pr:`7812`) `Charles Blackmon-Luca`_
+
+
+.. _v2023.4.1:
+
+2023.4.1
+--------
+
+Released on April 28, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Enable GIL monitoring when gilknocker installed (:pr:`7730`) `Miles`_
+- By default only set logging handler if no other handler has been set to avoid double logging (:pr:`7750`) `Thomas Grainger`_
+- Cluster wait (:pr:`6700`) `Iain Dorrington`_
+- Add Prometheus counter for ``SystemMonitor.last_time`` (:pr:`7785`) `Miles`_
+
+Bug Fixes
+^^^^^^^^^
+- Partial revert defaultclient config setting (:pr:`7803`) `Florian Jetter`_
+- Delay awaiting async ``SchedulerPlugin.{add|remove}_worker`` hooks in order to immediately execute all sync ones (:pr:`7799`) `Hendrik Makait`_
+- Fix ``check_idle`` not returning the correct value if no change to idleness (:pr:`7781`) `Jacob Tomlinson`_
+
+Maintenance
+^^^^^^^^^^^
+- Avoid warning when ``gilknocker`` not installed (:pr:`7808`) `James Bourbeau`_
+- Only set worker/nanny to ``Status.running`` if it is in ``Status.init`` (:pr:`7773`) `Thomas Grainger`_
+- Add ``--cov-config=pyproject.toml`` so config is always correctly loaded by ``pytest-cov`` (:pr:`7793`) `Thomas Grainger`_
+- ``gilknocker`` from conda-forge (:pr:`7791`) `James Bourbeau`_
+- Minor ``zict`` cleanup (:pr:`7783`) `crusaderky`_
+- Bump ``actions/checkout`` from 3.5.0 to 3.5.2 (:pr:`7784`)
+- Fix typing now that code is tuple of frame(s) (:pr:`7778`) `Nat Tabris`_
+
+
 .. _v2023.4.0:
 
 2023.4.0

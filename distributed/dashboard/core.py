@@ -13,7 +13,8 @@ import dask
 from distributed.dashboard.utils import BOKEH_VERSION
 from distributed.versions import BOKEH_REQUIREMENT
 
-if BOKEH_VERSION not in BOKEH_REQUIREMENT.specifier:
+# Set `prereleases=True` to allow for use with dev versions of `bokeh`
+if not BOKEH_REQUIREMENT.specifier.contains(BOKEH_VERSION, prereleases=True):
     warnings.warn(
         f"\nDask needs {BOKEH_REQUIREMENT} for the dashboard."
         f"\nYou have bokeh={BOKEH_VERSION}."

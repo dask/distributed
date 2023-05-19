@@ -54,7 +54,7 @@ def test_split_by_worker():
     npartitions = 3
     for part in range(npartitions):
         worker_for_mapping[part] = get_worker_for_range_sharding(
-            part, workers, npartitions
+            npartitions, part, workers
         )
     worker_for = pd.Series(worker_for_mapping, name="_workers").astype("category")
     out = split_by_worker(df, "_partition", worker_for)
@@ -92,14 +92,14 @@ def test_split_by_worker_many_workers():
     worker_for_mapping = {}
     for part in range(npartitions):
         worker_for_mapping[part] = get_worker_for_range_sharding(
-            part, workers, npartitions
+            npartitions, part, workers
         )
     worker_for = pd.Series(worker_for_mapping, name="_workers").astype("category")
     out = split_by_worker(df, "_partition", worker_for)
-    assert get_worker_for_range_sharding(5, workers, npartitions) in out
-    assert get_worker_for_range_sharding(0, workers, npartitions) in out
-    assert get_worker_for_range_sharding(7, workers, npartitions) in out
-    assert get_worker_for_range_sharding(1, workers, npartitions) in out
+    assert get_worker_for_range_sharding(npartitions, 5, workers) in out
+    assert get_worker_for_range_sharding(npartitions, 0, workers) in out
+    assert get_worker_for_range_sharding(npartitions, 7, workers) in out
+    assert get_worker_for_range_sharding(npartitions, 1, workers) in out
 
     assert sum(map(len, out.values())) == len(df)
 

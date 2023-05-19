@@ -52,6 +52,7 @@ from distributed.utils_test import (
     BrokenComm,
     assert_story,
     async_poll_for,
+    captured_handler,
     captured_logger,
     cluster,
     dec,
@@ -2728,17 +2729,20 @@ class FlakyConnectionPool(ConnectionPool):
 
 
 @gen_cluster(client=True)
-async def test_gather_failing_cnn_recover(c, s, a, b, caplog):
+async def test_gather_failing_cnn_recover(c, s, a, b):
     x = await c.scatter({"x": 1}, workers=a.address)
     rpc = await FlakyConnectionPool(failing_connections=1)
     with mock.patch.object(s, "rpc", rpc), dask.config.set(
         {"distributed.comm.retry.count": 1}
-    ), caplog.at_level(logging.INFO):
-        caplog.clear()
+    ), captured_handler(
+        logging.getLogger("distributed").handlers[0]
+    ) as distributed_log:
         res = await s.gather(keys=["x"])
-    assert [
-        record.message for record in caplog.records if record.levelno == logging.INFO
-    ] == ["Retrying get_data_from_worker after exception in attempt 0/1: "]
+    assert re.match(
+        r"\A\d+-\d+-\d+ \d+:\d+:\d+,\d+ - distributed.utils_comm - INFO - "
+        r"Retrying get_data_from_worker after exception in attempt 0/1: \n\Z",
+        distributed_log.getvalue(),
+    )
     assert res["status"] == "OK"
 
 
@@ -3090,6 +3094,7 @@ async def assert_memory(
     config={
         "distributed.worker.memory.recent-to-old-time": "4s",
         "distributed.worker.memory.spill": 0.7,
+        "distributed.worker.memory.spill-compression": "zlib",
     },
     worker_kwargs={
         "heartbeat_interval": "20ms",
@@ -3163,27 +3168,14 @@ async def test_memory(c, s, *nannies):
         ]
     )
 
-    # dask serialization compresses ("x" * 50 * 2**20) from 50 MiB to ~200 kiB.
+    # dask serialization compresses ("x" * 50 * 2**20) from 50 MiB to ~50 kiB.
     # Test that spilled reports the actual size on disk and not the output of
     # sizeof().
-    # FIXME https://github.com/dask/distributed/issues/5807
-    #       This would be more robust if we could just enable zlib compression in
-    #       @gen_cluster
-    from distributed.protocol.compression import default_compression
-
-    if default_compression:
-        await asyncio.gather(
-            assert_memory(a, "spilled", 0.1, 0.5, timeout=3),
-            assert_memory(b, "spilled", 0.1, 0.5, timeout=3),
-            assert_memory(s, "spilled", 0.2, 1.0, timeout=3.1),
-        )
-    else:
-        # Long timeout to allow spilling 100 MiB to disk
-        await asyncio.gather(
-            assert_memory(a, "spilled", 50, 51, timeout=10),
-            assert_memory(b, "spilled", 50, 51, timeout=10),
-            assert_memory(s, "spilled", 100, 102, timeout=10.1),
-        )
+    await asyncio.gather(
+        assert_memory(a, "spilled", 0.04, 0.08, timeout=3),
+        assert_memory(b, "spilled", 0.04, 0.08, timeout=3),
+        assert_memory(s, "spilled", 0.08, 0.16, timeout=3.1),
+    )
 
     # FIXME on Windows and MacOS we occasionally observe managed = 49 bytes
     await asyncio.gather(

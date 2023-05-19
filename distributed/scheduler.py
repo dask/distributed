@@ -4207,13 +4207,19 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.stream_comms[address] = BatchedSend(interval="5ms", loop=self.loop)
 
+        awaitables = []
         for plugin in list(self.plugins.values()):
             try:
                 result = plugin.add_worker(scheduler=self, worker=address)
                 if result is not None and inspect.isawaitable(result):
-                    await result
+                    awaitables.append(result)
             except Exception as e:
                 logger.exception(e)
+
+        plugin_msgs = await asyncio.gather(*awaitables, return_exceptions=True)
+        plugins_exceptions = [msg for msg in plugin_msgs if isinstance(msg, Exception)]
+        for exc in plugins_exceptions:
+            logger.exception(exc, exc_info=exc)
 
         if ws.status == Status.running:
             self.transitions(
@@ -4982,13 +4988,19 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.transitions(recommendations, stimulus_id=stimulus_id)
 
+        awaitables = []
         for plugin in list(self.plugins.values()):
             try:
                 result = plugin.remove_worker(scheduler=self, worker=address)
                 if inspect.isawaitable(result):
-                    await result
+                    awaitables.append(result)
             except Exception as e:
                 logger.exception(e)
+
+        plugin_msgs = await asyncio.gather(*awaitables, return_exceptions=True)
+        plugins_exceptions = [msg for msg in plugin_msgs if isinstance(msg, Exception)]
+        for exc in plugins_exceptions:
+            logger.exception(exc, exc_info=exc)
 
         if not self.workers:
             logger.info("Lost all workers")
@@ -7806,6 +7818,20 @@ class Scheduler(SchedulerState, ServerNode):
         return results
 
     def log_event(self, topic: str | Collection[str], msg: Any) -> None:
+        """Log an event under a given topic
+
+        Parameters
+        ----------
+        topic : str, list[str]
+            Name of the topic under which to log an event. To log the same
+            event under multiple topics, pass a list of topic names.
+        msg
+            Event message to log. Note this must be msgpack serializable.
+
+        See also
+        --------
+        Client.log_event
+        """
         event = (time(), msg)
         if not isinstance(topic, str):
             for t in topic:

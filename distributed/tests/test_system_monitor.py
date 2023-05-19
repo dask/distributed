@@ -101,20 +101,22 @@ def test_host_cpu():
 def test_gil_contention():
     pytest.importorskip("gilknocker")
 
+    # Default enabled if gilknocker installed
     sm = SystemMonitor()
     a = sm.update()
-    assert "gil_contention" not in a
-
-    sm = SystemMonitor(monitor_gil_contention=True)
-    a = sm.update()
     assert "gil_contention" in a
-
-    with dask.config.set({"distributed.admin.system-monitor.gil.enabled": True}):
-        sm = SystemMonitor()
-        a = sm.update()
-        assert "gil_contention" in a
 
     assert sm._gilknocker.is_running
     sm.close()
     sm.close()  # Idempotent
     assert not sm._gilknocker.is_running
+
+    sm = SystemMonitor(monitor_gil_contention=False)
+    a = sm.update()
+    assert "gil_contention" not in a
+
+    assert dask.config.get("distributed.admin.system-monitor.gil.enabled")
+    with dask.config.set({"distributed.admin.system-monitor.gil.enabled": False}):
+        sm = SystemMonitor()
+        a = sm.update()
+        assert "gil_contention" not in a

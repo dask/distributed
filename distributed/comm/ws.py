@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 import struct
 import warnings
 import weakref
@@ -173,6 +174,16 @@ class WSHandlerComm(Comm):
         assert isinstance(ip, str)
         return ip + ":0"
 
+    @property
+    def same_host(self) -> bool:
+        """Override Comm.same_host, adding support for HTTP-only subdomains, which won't
+        have a port and that may not be known to the DNS service
+        """
+        try:
+            return super().same_host
+        except (ValueError, socket.gaierror):
+            return False
+
     def closed(self):
         return (
             self.handler.closed
@@ -284,6 +295,16 @@ class WS(Comm):
     @property
     def peer_address(self) -> str:
         return f"{self.prefix}{self.sock.parsed.netloc}"
+
+    @property
+    def same_host(self) -> bool:
+        """Override Comm.same_host, adding support for HTTP-only subdomains, which won't
+        have a port and that may not be known to the DNS service
+        """
+        try:
+            return super().same_host
+        except (ValueError, socket.gaierror):
+            return False
 
     def _read_extra(self):
         pass

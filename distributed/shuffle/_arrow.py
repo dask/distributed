@@ -21,7 +21,7 @@ def check_dtype_support(meta_input: pd.DataFrame) -> None:
                 f"p2p does not support data of type '{column.dtype}' found in column '{name}'."
             )
         # FIXME: PyArrow does not support sparse data: https://issues.apache.org/jira/browse/ARROW-8679
-        if pd.api.types.is_sparse(column):
+        if isinstance(column.dtype, pd.SparseDtype):
             raise TypeError("p2p does not support sparse data found in column '{name}'")
 
 
