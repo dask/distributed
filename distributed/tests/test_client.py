@@ -8261,7 +8261,7 @@ def throws_apply(x):
 
 
 def test_drop_internal_traceback(client):
-    with dask.config.set({"distributed.exceptions.clean_traceback": True}):
+    with dask.config.set({"distributed.admin.truncate-traceback": True}):
         # with array
         try:
             da = pytest.importorskip("dask.array")

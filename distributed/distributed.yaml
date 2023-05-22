@@ -309,6 +309,7 @@ distributed:
     log-length: 10000  # default length of logs to keep in memory
     log-format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     pdb-on-err: False       # enter debug mode on scheduling error
+    truncate-traceback: False
     system-monitor:
       interval: 500ms
       disk: true  # Monitor host-wide disk I/O

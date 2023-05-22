@@ -872,7 +872,7 @@ def drop_internal_traceback(exc_traceback):
     """Remove internal stack elements from traceback"""
 
     # if config flag is not set, do nothing
-    if dask.config.get("distributed.exceptions.clean_traceback", False) is False:
+    if dask.config.get("distributed.admin.truncate-traceback", False) is False:
         return exc_traceback
 
     curr = exc_traceback

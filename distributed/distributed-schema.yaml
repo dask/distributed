@@ -1143,6 +1143,10 @@ properties:
             type: boolean
             description: Enter Python Debugger on scheduling error
 
+          truncate-traceback:
+            type: boolean
+            description: Truncate traceback to only relevant frames, for better readability
+
           system-monitor:
             type: object
             description: |
