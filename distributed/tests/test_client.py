@@ -28,6 +28,7 @@ from time import sleep
 from typing import Any
 from unittest import mock
 
+import pandas as pd
 import psutil
 import pytest
 import yaml
@@ -36,6 +37,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 import dask.bag as db
+import dask.dataframe as dd
 from dask import delayed
 from dask.optimization import SubgraphCallable
 from dask.utils import (
@@ -84,6 +86,7 @@ from distributed.shuffle import check_minimal_arrow_version
 from distributed.sizeof import sizeof
 from distributed.utils import (
     NoOpAwaitable,
+    drop_internal_traceback,
     get_mp_context,
     is_valid_xml,
     open_port,
@@ -8245,3 +8248,44 @@ async def test_resolves_future_in_dict(c, s, a, b):
     outer_future = c.submit(identity, {"x": inner_future, "y": 2})
     result = await outer_future
     assert result == {"x": 1, "y": 2}
+
+
+def throws_map_blocks(x, block_id=None):
+    if block_id is not None and block_id[0] % 2 == 0:
+        raise ValueError(f"Bad block id {block_id}")
+    return x / 2
+
+
+def throws_apply(x):
+    if x % 2 == 0:
+        return x / 0
+    return x + 1
+
+
+def test_drop_internal_traceback(client):
+    def assert_traceback(tb):
+        before = len(list(traceback.walk_tb(tb)))
+        tb = drop_internal_traceback(tb)
+        after = len(list(traceback.walk_tb(tb)))
+        assert before > after
+        assert after <= 3
+
+    with dask.config.set({"distributed.exceptions.clean_traceback": True}):
+        # with array
+        try:
+            da = pytest.importorskip("dask.array")
+            arr = da.arange(30, chunks=3)
+            op = arr.map_blocks(throws_map_blocks)
+            op.compute()
+        except Exception:
+            _, _, tb = sys.exc_info()
+            assert_traceback(tb)
+        # with dataframe
+        try:
+            df = pd.DataFrame({"x": [1, 2, 3, 4], "y": [10, 20, 30, 40]})
+            ddf = dd.from_pandas(df, npartitions=2)
+            res = ddf.x.apply(throws_apply, meta=("x", int))
+            res.compute()
+        except Exception:
+            _, _, tb = sys.exc_info()
+            assert_traceback(tb)

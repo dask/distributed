@@ -96,20 +96,6 @@ no_default = "__no_default__"
 
 _forkserver_preload_set = False
 
-# used to trim the stack traces. Code frames that match these paths are dropped
-# from traceback if distributed.exceptions.clean_traceback is set
-internal_code = [
-    os.path.join("dask", "base.py"),
-    os.path.join("dask", "core.py"),
-    os.path.join("dask", "array", "core.py"),
-    os.path.join("dask", "optimization.py"),
-    os.path.join("distributed", "worker.py"),
-    os.path.join("distributed", "scheduler.py"),
-    os.path.join("distributed", "client.py"),
-    os.path.join("distributed", "utils.py"),
-    os.path.join("tornado", "gen.py"),
-]
-
 
 def get_mp_context():
     """Create a multiprocessing context
@@ -878,6 +864,10 @@ def ensure_ip(hostname):
 tblib.pickling_support.install()
 
 
+def is_client_code(filename):
+    return os.path.join("distributed", "client.py") in filename
+
+
 def drop_internal_traceback(exc_traceback):
     """Remove internal stack elements from traceback"""
 
@@ -885,19 +875,26 @@ def drop_internal_traceback(exc_traceback):
     if dask.config.get("distributed.exceptions.clean_traceback", False) is False:
         return exc_traceback
 
-    def is_internal_code(frame_code):
-        search_string = os.path.join(frame_code.co_filename, frame_code.co_name)
-        return any(pattern in search_string for pattern in internal_code)
-
     curr = exc_traceback
-    stack = []
+    has_client_frame = False
+    frames = []
     while curr:
-        if not curr.tb_next or not is_internal_code(curr.tb_frame.f_code):
-            stack.append(curr)
+        if len(frames) == 0:
+            # always keep first frame
+            frames.append(curr)
+        elif not curr.tb_next:
+            # always keep last frame
+            frames.append(curr)
+        elif is_client_code(curr.tb_frame.f_code.co_filename) and (
+            has_client_frame is False
+        ):
+            # keep one client frame
+            frames.append(curr)
+            has_client_frame = True
         curr = curr.tb_next
 
     curr = None
-    for tb in reversed(stack):
+    for tb in reversed(frames):
         tb.tb_next = curr
         curr = tb
 
