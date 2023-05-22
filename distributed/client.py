@@ -3042,7 +3042,7 @@ class Client(SyncMethodMixin):
                 == "IPython.core.interactiveshell"
             ):
                 if ipython_idx is None:
-                    ipython_idx = i + 1  # Everything past this index.
+                    ipython_idx = i - 2  # Everything past this index.
             try:
                 code.append(inspect.getsource(fr))
             except OSError:
