@@ -1518,7 +1518,8 @@ class SchedulerState:
     running: set[WorkerState]
     #: Workers that are currently in running state and not fully utilized
     #: Definition based on occupancy
-    #: (actually a SortedDict, but the sortedcontainers package isn't annotated)
+    #: (actually a SortedDict, but the sortedcontainers package isn't annotated).
+    #: Not to be confused with :meth:`is_idle`.
     idle: dict[str, WorkerState]
     #: Similar to `idle`
     #: Definition based on assigned tasks
@@ -1776,11 +1777,13 @@ class SchedulerState:
             collection.clear()  # type: ignore
 
     @property
-    def fully_idle(self) -> bool:
+    def is_idle(self) -> bool:
         """Return True iff there are no tasks that haven't finished computing.
 
         Unlike testing `self.total_occupancy`, this property returns False if there are
         long-running tasks, no-worker, or queued tasks (due to not having any workers).
+
+        Not to be confused with :ivar:`idle`.
         """
         return all(
             count == 0 or state in {"memory", "error", "released", "forgotten"}
@@ -4338,7 +4341,7 @@ class Scheduler(SchedulerState, ServerNode):
                 keys=lost_keys, client=client, stimulus_id=stimulus_id
             )
 
-        if not self.fully_idle and self.computations:
+        if not self.is_idle and self.computations:
             # Still working on something. Assign new tasks to same computation
             computation = self.computations[-1]
         else:
