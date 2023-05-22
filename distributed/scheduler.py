@@ -7831,6 +7831,20 @@ class Scheduler(SchedulerState, ServerNode):
         return results
 
     def log_event(self, topic: str | Collection[str], msg: Any) -> None:
+        """Log an event under a given topic
+
+        Parameters
+        ----------
+        topic : str, list[str]
+            Name of the topic under which to log an event. To log the same
+            event under multiple topics, pass a list of topic names.
+        msg
+            Event message to log. Note this must be msgpack serializable.
+
+        See also
+        --------
+        Client.log_event
+        """
         event = (time(), msg)
         if not isinstance(topic, str):
             for t in topic:

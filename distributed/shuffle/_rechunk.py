@@ -8,6 +8,7 @@ import dask
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 
+from distributed.exceptions import Reschedule
 from distributed.shuffle._shuffle import (
     ShuffleId,
     ShuffleType,
@@ -57,6 +58,8 @@ def rechunk_unpack(
         return _get_worker_extension().get_output_partition(
             id, barrier_run_id, output_chunk
         )
+    except Reschedule as e:
+        raise e
     except Exception as e:
         raise RuntimeError(f"rechunk_unpack failed during shuffle {id}") from e
 
@@ -69,12 +72,6 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
     if x.size == 0:
         # Special case for empty array, as the algorithm below does not behave correctly
         return da.empty(x.shape, chunks=chunks, dtype=x.dtype)
-
-    if dask.config.get("optimization.fuse.active") is not False:
-        raise RuntimeError(
-            "P2P rechunking requires the fuse optimization to be turned off. "
-            "Set the 'optimization.fuse.active' config to False to deactivate."
-        )
 
     dsk: dict = {}
     token = tokenize(x, chunks)
