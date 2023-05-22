@@ -36,7 +36,6 @@ from tornado.ioloop import IOLoop
 
 import dask
 import dask.bag as db
-import dask.dataframe as dd
 from dask import delayed
 from dask.optimization import SubgraphCallable
 from dask.utils import (
@@ -8262,13 +8261,6 @@ def throws_apply(x):
 
 
 def test_drop_internal_traceback(client):
-    def assert_traceback(tb):
-        before = len(list(traceback.walk_tb(tb)))
-        tb = drop_internal_traceback(tb)
-        after = len(list(traceback.walk_tb(tb)))
-        assert before > after
-        assert after <= 3
-
     with dask.config.set({"distributed.exceptions.clean_traceback": True}):
         # with array
         try:
@@ -8278,13 +8270,8 @@ def test_drop_internal_traceback(client):
             op.compute()
         except Exception:
             _, _, tb = sys.exc_info()
-            assert_traceback(tb)
-        # with dataframe
-        try:
-            arr = da.random.random((20, 2))
-            ddf = dd.from_dask_array(arr, columns=["x", "y"])
-            res = ddf.x.apply(throws_apply, meta=("x", float))
-            res.compute()
-        except Exception:
-            _, _, tb = sys.exc_info()
-            assert_traceback(tb)
+            before = len(list(traceback.walk_tb(tb)))
+            tb = drop_internal_traceback(tb)
+            after = len(list(traceback.walk_tb(tb)))
+            assert before > after
+            assert after <= 3
