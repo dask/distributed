@@ -868,8 +868,9 @@ def is_client_code(filename):
     return os.path.join("distributed", "client.py") in filename
 
 
-def drop_internal_traceback(exc_traceback):
-    """Remove internal stack elements from traceback"""
+def truncate_traceback(exc_traceback):
+    """Remove irrelevant stack elements from traceback. Will keep the first and last frame,
+    plus one frame from distributed/client.py."""
 
     # if config flag is not set, do nothing
     if dask.config.get("distributed.admin.truncate-traceback", False) is False:

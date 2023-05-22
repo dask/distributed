@@ -95,7 +95,6 @@ from distributed.utils import (
     NoOpAwaitable,
     SyncMethodMixin,
     TimeoutError,
-    drop_internal_traceback,
     format_dashboard_link,
     has_keyword,
     import_term,
@@ -104,6 +103,7 @@ from distributed.utils import (
     no_default,
     sync,
     thread_state,
+    truncate_traceback,
 )
 from distributed.utils_comm import (
     WrappedKey,
@@ -134,7 +134,7 @@ TOPIC_PREFIX_FORWARDED_LOG_RECORD = "forwarded-log-record"
 def _clean_excepthook(func):
     @wraps(func)
     def wrapper(exc_type, exc_value, tb):
-        tb = drop_internal_traceback(tb)
+        tb = truncate_traceback(tb)
         return func(exc_type, exc_value.with_traceback(tb), tb)
 
     return wrapper
@@ -144,7 +144,7 @@ def _clean_ipython_traceback(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
         etype, evalue, tb = sys.exc_info()
-        tb = drop_internal_traceback(tb)
+        tb = truncate_traceback(tb)
         kwargs["exc_tuple"] = etype, evalue, tb
         value = func(*args, **kwargs)
         return value

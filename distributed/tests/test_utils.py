@@ -9,6 +9,7 @@ import multiprocessing
 import os
 import queue
 import socket
+import sys
 import traceback
 import warnings
 import xml
@@ -55,6 +56,7 @@ from distributed.utils import (
     sync,
     thread_state,
     truncate_exception,
+    truncate_traceback,
     warn_on_duration,
 )
 from distributed.utils_test import (
@@ -1057,3 +1059,32 @@ def test_rate_limiter_filter(caplog):
         "Hello again!",
         "Hello once more!",
     ]
+
+
+def test_truncate_traceback():
+    def f1():
+        return 2 / 0
+
+    def f2():
+        return f1() + 5
+
+    def f3():
+        return f2() + 1
+
+    def f4():
+        return f3() - 2
+
+    def f5():
+        return f4() - 1
+
+    for func in (f1, f2, f3, f4, f5):
+        try:
+            func()
+        except Exception:  # noqa
+            _, _, tb = sys.exc_info()
+            before = len(list(traceback.walk_tb(tb)))
+            with dask.config.set({"distributed.admin.truncate-traceback": True}):
+                tb = truncate_traceback(tb)
+            after = len(list(traceback.walk_tb(tb)))
+            assert after <= before
+            assert after == 2

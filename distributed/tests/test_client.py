@@ -84,12 +84,12 @@ from distributed.shuffle import check_minimal_arrow_version
 from distributed.sizeof import sizeof
 from distributed.utils import (
     NoOpAwaitable,
-    drop_internal_traceback,
     get_mp_context,
     is_valid_xml,
     open_port,
     sync,
     tmp_text,
+    truncate_traceback,
 )
 from distributed.utils_test import (
     NO_AMM,
@@ -8260,7 +8260,7 @@ def throws_apply(x):
     return x + 1
 
 
-def test_drop_internal_traceback(client):
+def test_truncate_traceback(client):
     with dask.config.set({"distributed.admin.truncate-traceback": True}):
         # with array
         try:
@@ -8271,7 +8271,7 @@ def test_drop_internal_traceback(client):
         except Exception:
             _, _, tb = sys.exc_info()
             before = len(list(traceback.walk_tb(tb)))
-            tb = drop_internal_traceback(tb)
+            tb = truncate_traceback(tb)
             after = len(list(traceback.walk_tb(tb)))
             assert before > after
             assert after <= 3
