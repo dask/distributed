@@ -3026,9 +3026,13 @@ class Client(SyncMethodMixin):
             stacklevel = stacklevel if stacklevel > 0 else 1
 
         code: list[SourceCode] = []
-        for i, (fr, line_num) in enumerate(
+        for i, (fr, frame_line_num) in enumerate(
             traceback.walk_stack(sys._getframe().f_back), 1
         ):
+            # lineno from traceback is line number of file,
+            # we want the line number of this frame/code call.
+            line_num = frame_line_num - fr.f_code.co_firstlineno
+
             if len(code) >= nframes:
                 break
             if stacklevel is not None:

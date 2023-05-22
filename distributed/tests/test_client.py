@@ -114,6 +114,7 @@ from distributed.utils_test import (
     popen,
     raises_with_cause,
     randominc,
+    relative_frame_linenumber,
     save_sys_modules,
     slowadd,
     slowdec,
@@ -7116,18 +7117,22 @@ async def test_get_client_functions_spawn_clusters(c, s, a):
 def test_computation_code_walk_frames():
     test_function_code = inspect.getsource(test_computation_code_walk_frames)
     code = Client._get_computation_code()
-    line_num = inspect.getframeinfo(inspect.currentframe()).lineno - 1
+    line_num = relative_frame_linenumber(inspect.currentframe()) - 1
+
+    # Sanity check helper function works, called 6 lines down in this function
+    assert relative_frame_linenumber(inspect.currentframe()) == 6
 
     assert tuple(c.code for c in code) == (test_function_code,)
     assert tuple(c.line_number for c in code) == (line_num,)
 
     def nested_call():
+        code = Client._get_computation_code(nframes=2)
         nonlocal line_num
-        line_num = inspect.getframeinfo(inspect.currentframe()).lineno + 1
-        return Client._get_computation_code(nframes=2)
+        line_num = 1  # called on first line in this function
+        return code
 
     nested = nested_call()
-    nested_call_line_num = inspect.getframeinfo(inspect.currentframe()).lineno - 1
+    nested_call_line_num = relative_frame_linenumber(inspect.currentframe()) - 1
 
     assert len(nested) == 2
     assert nested[-1].code == inspect.getsource(nested_call)
@@ -7147,7 +7152,7 @@ def test_computation_code_walk_frames():
         import sys
 
         upper_frame_code = inspect.getsource(sys._getframe(1))
-        line_num = inspect.getframeinfo(sys._getframe(1)).lineno
+        line_num = relative_frame_linenumber(sys._getframe(1))
         code = Client._get_computation_code()
         assert tuple(c.code for c in code) == (upper_frame_code,)
         assert tuple(c.line_number for c in code) == (line_num,)
