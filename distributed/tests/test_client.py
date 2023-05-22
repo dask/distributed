@@ -28,7 +28,6 @@ from time import sleep
 from typing import Any
 from unittest import mock
 
-import pandas as pd
 import psutil
 import pytest
 import yaml
@@ -8257,7 +8256,7 @@ def throws_map_blocks(x, block_id=None):
 
 
 def throws_apply(x):
-    if x % 2 == 0:
+    if x > 0.5:
         return x / 0
     return x + 1
 
@@ -8282,9 +8281,9 @@ def test_drop_internal_traceback(client):
             assert_traceback(tb)
         # with dataframe
         try:
-            df = pd.DataFrame({"x": [1, 2, 3, 4], "y": [10, 20, 30, 40]})
-            ddf = dd.from_pandas(df, npartitions=2)
-            res = ddf.x.apply(throws_apply, meta=("x", int))
+            arr = da.random.random((20, 2))
+            ddf = dd.from_dask_array(arr, columns=["x", "y"])
+            res = ddf.x.apply(throws_apply, meta=("x", float))
             res.compute()
         except Exception:
             _, _, tb = sys.exc_info()
