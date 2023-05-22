@@ -131,9 +131,13 @@ DEFAULT_EXTENSIONS = {
 TOPIC_PREFIX_FORWARDED_LOG_RECORD = "forwarded-log-record"
 
 
-def _clean_excepthook(exc_type, exc_value, tb):
-    tb = drop_internal_traceback(tb)
-    sys.__excepthook__(exc_type, exc_value, tb)
+def _clean_excepthook(func):
+    @wraps(func)
+    def wrapper(exc_type, exc_value, tb):
+        tb = drop_internal_traceback(tb)
+        return func(exc_type, exc_value.with_traceback(tb), tb)
+
+    return wrapper
 
 
 def _clean_ipython_traceback(func):
@@ -148,7 +152,8 @@ def _clean_ipython_traceback(func):
     return wrapper
 
 
-sys.excepthook = _clean_excepthook
+original_excepthook = sys.excepthook
+sys.excepthook = _clean_excepthook(sys.excepthook)
 
 
 # if ipython is available, also customize showtraceback
@@ -163,7 +168,7 @@ except:  # NOQA
 
 
 def _restore_exception_hook():
-    sys.excepthook = sys.__excepthook__
+    sys.excepthook = original_excepthook
 
 
 def _get_global_client() -> Client | None:
