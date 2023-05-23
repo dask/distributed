@@ -7117,28 +7117,41 @@ async def test_get_client_functions_spawn_clusters(c, s, a):
 def test_computation_code_walk_frames():
     test_function_code = inspect.getsource(test_computation_code_walk_frames)
     code = Client._get_computation_code()
-    line_num = relative_frame_linenumber(inspect.currentframe()) - 1
+    lineno_relative = relative_frame_linenumber(inspect.currentframe()) - 1
+    lineno_frame = inspect.getframeinfo(inspect.currentframe()).lineno - 2
 
-    # Sanity check helper function works, called 6 lines down in this function
-    assert relative_frame_linenumber(inspect.currentframe()) == 6
+    # Sanity check helper function works, called 7 lines down in this function
+    assert relative_frame_linenumber(inspect.currentframe()) == 7
 
-    assert tuple(c.code for c in code) == (test_function_code,)
-    assert tuple(c.line_number for c in code) == (line_num,)
+    assert len(code) == 1
+    code = code[0]
+
+    assert code.code == test_function_code
+    assert code.lineno_frame == lineno_frame
+    assert code.lineno_relative == lineno_relative
+    assert code.filename == __file__
 
     def nested_call():
         code = Client._get_computation_code(nframes=2)
-        nonlocal line_num
-        line_num = 1  # called on first line in this function
+        nonlocal lineno_relative, lineno_frame
+        lineno_relative = 1  # called on first line in this function
+        lineno_frame = inspect.getframeinfo(inspect.currentframe()).lineno - 3
         return code
 
     nested = nested_call()
-    nested_call_line_num = relative_frame_linenumber(inspect.currentframe()) - 1
+    nested_call_lineno_relative = relative_frame_linenumber(inspect.currentframe()) - 1
+    nested_call_lineno_frame = inspect.getframeinfo(inspect.currentframe()).lineno - 2
 
     assert len(nested) == 2
     assert nested[-1].code == inspect.getsource(nested_call)
-    assert nested[-1].line_number == line_num
+    assert nested[-1].lineno_frame == lineno_frame
+    assert nested[-1].lineno_relative == lineno_relative
+    assert nested[-1].filename == __file__
+
     assert nested[-2].code == test_function_code
-    assert nested[-2].line_number == nested_call_line_num
+    assert nested[-2].lineno_frame == nested_call_lineno_frame
+    assert nested[-2].lineno_relative == nested_call_lineno_relative
+    assert nested[-2].filename == __file__
 
     with pytest.raises(TypeError, match="Ignored modules must be a list"):
         with dask.config.set(
@@ -7152,10 +7165,16 @@ def test_computation_code_walk_frames():
         import sys
 
         upper_frame_code = inspect.getsource(sys._getframe(1))
-        line_num = relative_frame_linenumber(sys._getframe(1))
+        lineno_relative = relative_frame_linenumber(sys._getframe(1))
+        lineno_frame = inspect.getframeinfo(sys._getframe(1)).lineno
         code = Client._get_computation_code()
-        assert tuple(c.code for c in code) == (upper_frame_code,)
-        assert tuple(c.line_number for c in code) == (line_num,)
+
+        assert len(code) == 1
+        code = code[0]
+
+        assert code.code == upper_frame_code
+        assert code.lineno_relative == lineno_relative
+        assert code.lineno_frame == lineno_frame
         assert nested_call()[-1].code == upper_frame_code
 
 

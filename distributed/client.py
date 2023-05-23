@@ -15,7 +15,7 @@ import traceback
 import uuid
 import warnings
 import weakref
-from collections import defaultdict, namedtuple
+from collections import defaultdict
 from collections.abc import Collection, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
@@ -25,7 +25,7 @@ from functools import partial
 from importlib.metadata import PackageNotFoundError, version
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import Any, ClassVar, Coroutine, Literal, Sequence, TypedDict
+from typing import Any, ClassVar, Coroutine, Literal, NamedTuple, Sequence, TypedDict
 
 from packaging.version import parse as parse_version
 from tlz import first, groupby, keymap, merge, partition_all, valmap
@@ -129,7 +129,12 @@ DEFAULT_EXTENSIONS = {
 
 TOPIC_PREFIX_FORWARDED_LOG_RECORD = "forwarded-log-record"
 
-SourceCode = namedtuple("SourceCode", "line_number,code")
+
+class SourceCode(NamedTuple):
+    code: str
+    lineno_frame: int
+    lineno_relative: int
+    filename: str
 
 
 def _get_global_client() -> Client | None:
@@ -3026,13 +3031,9 @@ class Client(SyncMethodMixin):
             stacklevel = stacklevel if stacklevel > 0 else 1
 
         code: list[SourceCode] = []
-        for i, (fr, frame_line_num) in enumerate(
+        for i, (fr, lineno_frame) in enumerate(
             traceback.walk_stack(sys._getframe().f_back), 1
         ):
-            # lineno from traceback is line number of file,
-            # we want the line number of this frame/code call.
-            line_num = frame_line_num - fr.f_code.co_firstlineno
-
             if len(code) >= nframes:
                 break
             if stacklevel is not None:
@@ -3043,8 +3044,15 @@ class Client(SyncMethodMixin):
                 or fr.f_code.co_name in ("<listcomp>", "<dictcomp>")
             ):
                 continue
+
+            kwargs = dict(
+                lineno_frame=lineno_frame,
+                lineno_relative=lineno_frame - fr.f_code.co_firstlineno,
+                filename=fr.f_code.co_filename,
+            )
+
             try:
-                code.append(SourceCode(line_num, inspect.getsource(fr)))
+                code.append(SourceCode(code=inspect.getsource(fr), **kwargs))  # type: ignore
             except OSError:
                 # Try to fine the source if we are in %%time or %%timeit magic.
                 if (
@@ -3056,7 +3064,7 @@ class Client(SyncMethodMixin):
                     ip = get_ipython()
                     if ip is not None:
                         # The current cell
-                        code.append(SourceCode(line_num, ip.history_manager._i00))
+                        code.append(SourceCode(code=ip.history_manager._i00, **kwargs))  # type: ignore
                 break
 
         return tuple(reversed(code))
