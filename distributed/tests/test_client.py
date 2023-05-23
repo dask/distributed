@@ -11,6 +11,7 @@ import os
 import pathlib
 import pickle
 import random
+import re
 import subprocess
 import sys
 import threading
@@ -7135,6 +7136,56 @@ def test_computation_code_walk_frames():
         code = Client._get_computation_code()
         assert code == (upper_frame_code,)
         assert nested_call()[-1] == upper_frame_code
+
+
+def run_code(code):
+    from IPython.core.interactiveshell import InteractiveShell
+
+    shell = InteractiveShell()
+    return shell.run_cell(code)
+
+
+@gen_cluster(client=True)
+async def test_computation_ignore_ipython_frames(c, s, a, b):
+    pytest.importorskip("IPython")
+
+    code = """
+    import dask
+    import time
+    from distributed import Client, LocalCluster
+
+    dask.config.set({"distributed.diagnostics.computations.nframes": 3})
+
+    cluster = LocalCluster(n_workers=1)
+    client = cluster.get_client()
+
+    def foo(x): print(x); return x;
+    def bar(x): return client.map(foo, range(x))
+
+    N = bar(3)
+
+    while True:
+        try:
+            code = client.cluster.scheduler.computations[-1].code
+        except IndexError:
+            time.sleep(0.01)  # Wait for computations
+        else:
+            break
+    code
+    """
+
+    # Need to run in process, otherwise conflicts with current event loop
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        result = executor.submit(run_code, code).result().result
+
+    assert len(result) == 1  # 1 computation
+    assert len(result[0]) == 2  # 2 frames, even with nframes 3 other is ipython code
+
+    def normalize(s):
+        return re.sub(r"\s+", " ", s).strip()
+
+    assert normalize(result[0][0]) == normalize(code)
+    assert normalize(result[0][1]) == "def bar(x): return client.map(foo, range(x))"
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
