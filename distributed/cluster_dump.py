@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from pathlib import Path
-from typing import IO, Any, Awaitable, Callable, Collection, Literal
+from typing import IO, Any, Literal
 
 import msgpack
 
 from distributed._stories import scheduler_story as _scheduler_story
 from distributed._stories import worker_story as _worker_story
-from distributed.compatibility import to_thread
 
 DEFAULT_CLUSTER_DUMP_FORMAT: Literal["msgpack" | "yaml"] = "msgpack"
 DEFAULT_CLUSTER_DUMP_EXCLUDE: Collection[str] = ("run_spec",)
@@ -67,7 +67,7 @@ async def write_state(
         state = await get_state()
         # Write from a thread so we don't block the event loop quite as badly
         # (the writer will still hold the GIL a lot though).
-        await to_thread(writer, state, f)
+        await asyncio.to_thread(writer, state, f)
 
 
 def load_cluster_dump(url: str, **kwargs: Any) -> dict:

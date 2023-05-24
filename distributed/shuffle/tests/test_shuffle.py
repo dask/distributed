@@ -7,10 +7,11 @@ import os
 import random
 import shutil
 from collections import defaultdict
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack
 from itertools import count
-from typing import Any, Mapping
+from typing import Any
 from unittest import mock
 
 import pytest
