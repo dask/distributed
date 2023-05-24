@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import socket
+import sys
 
 import pytest
 
@@ -8,6 +9,10 @@ from distributed.comm.tcp import TCPConnector
 
 
 # cover the `if e.errno != socket.EAI_NONAME` branch of tcp._getaddrinfo
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="getaddrinfo raises EAI_NONAME instead of EAI_ADDRFAMILY on Windows",
+)
 def test_getaddrinfo_invalid_af():
     with pytest.raises(socket.gaierror) as exc_info:
         (
