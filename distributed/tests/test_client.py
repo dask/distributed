@@ -8254,12 +8254,6 @@ def throws_map_blocks(x, block_id=None):
     return x / 2
 
 
-def throws_apply(x):
-    if x > 0.5:
-        return x / 0
-    return x + 1
-
-
 def test_truncate_traceback(client):
     with dask.config.set({"distributed.admin.truncate-traceback": True}):
         # with array
