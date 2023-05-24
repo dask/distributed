@@ -7138,46 +7138,41 @@ def test_computation_code_walk_frames():
         assert nested_call()[-1] == upper_frame_code
 
 
-def run_code(code):
+def test_computation_ignore_ipython_frames():
+    pytest.importorskip("IPython")
     from IPython.core.interactiveshell import InteractiveShell
 
     shell = InteractiveShell()
-    return shell.run_cell(code)
-
-
-@gen_cluster(client=True)
-async def test_computation_ignore_ipython_frames(c, s, a, b):
-    pytest.importorskip("IPython")
 
     code = """
     import dask
     import time
-    from distributed import Client, LocalCluster
+    from distributed import Client
 
     dask.config.set({"distributed.diagnostics.computations.nframes": 3})
 
-    cluster = LocalCluster(n_workers=1)
-    client = cluster.get_client()
+    with Client(processes=False) as client:
 
-    def foo(x): print(x); return x;
-    def bar(x): return client.map(foo, range(x))
+        def foo(x): return x;
+        def bar(x): return client.map(foo, range(x))
 
-    N = bar(3)
+        N = bar(3)
 
-    while True:
-        try:
-            code = client.cluster.scheduler.computations[-1].code
-        except IndexError:
-            time.sleep(0.01)  # Wait for computations
-        else:
-            break
+        while True:
+            try:
+                code = client.cluster.scheduler.computations[-1].code
+            except IndexError:
+                time.sleep(0.1)  # Wait for computations
+            else:
+                break
     code
     """
 
-    # Need to run in process, otherwise conflicts with current event loop
-    with concurrent.futures.ProcessPoolExecutor() as executor:
-        result = executor.submit(run_code, code).result().result
+    result = shell.run_cell(code)
+    result.raise_error()
 
+    result = result.result
+    assert result is not None
     assert len(result) == 1  # 1 computation
     assert len(result[0]) == 2  # 2 frames, even with nframes 3 other is ipython code
 
