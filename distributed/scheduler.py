@@ -1780,10 +1780,10 @@ class SchedulerState:
     def is_idle(self) -> bool:
         """Return True iff there are no tasks that haven't finished computing.
 
-        Unlike testing `self.total_occupancy`, this property returns False if there are
+        Unlike testing ``self.total_occupancy``, this property returns False if there are
         long-running tasks, no-worker, or queued tasks (due to not having any workers).
 
-        Not to be confused with :ivar:`idle`.
+        Not to be confused with ``idle``.
         """
         return all(
             count == 0 or state in {"memory", "error", "released", "forgotten"}
