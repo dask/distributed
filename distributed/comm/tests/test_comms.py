@@ -1366,3 +1366,17 @@ def test_register_backend_entrypoint(tmp_path):
     with get_mp_context().Pool(1) as pool:
         assert pool.apply(_get_backend_on_path, args=(tmp_path,)) == 1
     pool.join()
+
+
+@gen_test()
+async def test_connect_to_domain():
+    """
+    We avoid calling await asyncio.get_running_loop().getaddrinfo(...)
+    unless the hostname is non-numeric, this test is to cover that branch
+    """
+    q = asyncio.Queue()
+    async with listen("tcp://", q.put) as listener:
+        a = await connect(f"tcp://localhost:{listener.get_host_port()[1]}")
+        b = await q.get()
+        await a.close()
+        await b.close()
