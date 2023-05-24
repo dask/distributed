@@ -302,7 +302,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
     ):
-        from dask.array.rechunk import _old_to_new
+        from dask.array.rechunk import old_to_new
 
         super().__init__(
             id=id,
@@ -324,7 +324,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
         self.partitions_of = dict(partitions_of)
         self.worker_for = worker_for
         self._slicing = rechunk_slicing(old, new)
-        self._old_to_new = _old_to_new(old, new)
+        self._old_to_new = old_to_new(old, new)
 
     async def _receive(self, data: list[tuple[ArrayRechunkShardID, bytes]]) -> None:
         self.raise_if_closed()
