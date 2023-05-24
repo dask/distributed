@@ -8,10 +8,9 @@ import math
 import random
 import weakref
 from collections import defaultdict
-from collections.abc import Coroutine, Iterable, Mapping, Sequence
+from collections.abc import Callable, Coroutine, Iterable, Mapping, Sequence
 from operator import mul
 from time import sleep
-from typing import Callable
 
 import pytest
 from tlz import merge, sliding_window

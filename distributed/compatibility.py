@@ -48,9 +48,8 @@ else:
     # takes longer than the interval
     import datetime
     import math
-    from collections.abc import Awaitable
+    from collections.abc import Awaitable, Callable
     from inspect import isawaitable
-    from typing import Callable
 
     from tornado.ioloop import IOLoop
     from tornado.log import app_log

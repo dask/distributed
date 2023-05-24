@@ -12,11 +12,11 @@ import threading
 import uuid
 import warnings
 import weakref
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from inspect import isawaitable
 from queue import Empty
 from time import sleep as sync_sleep
-from typing import TYPE_CHECKING, Callable, ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 from toolz import merge
 from tornado.ioloop import IOLoop
