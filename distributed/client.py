@@ -643,11 +643,20 @@ class FutureState:
         """
         _, exception, traceback = clean_exception(exception, traceback)
 
-        if dask.config.get("distributed.admin.truncate-traceback", False) is True:
+        if (
+            dask.config.get("distributed.admin.truncate-traceback", False) is True
+            and key
+            and erred_on
+        ):
             # when Exception is logged or printed, its args are printed as well,
             # this makes it easier to communicate extra information without
             # wrapping it with a custom Exception
-            exception.args += ({"workers": erred_on, "task_key": key},)
+            worker_message = f"in task: {key}\non worker: {erred_on}"
+            if not exception.args:
+                exception.args = (worker_message,)
+            else:
+                arg0 = f"{exception.args[0]}\n{worker_message}"
+                exception.args = (arg0,) + exception.args[1:]
 
         self.status = "error"
         self.exception = exception
