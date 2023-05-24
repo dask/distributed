@@ -3022,43 +3022,37 @@ class Client(SyncMethodMixin):
             stacklevel = stacklevel if stacklevel > 0 else 1
 
         code: list[str] = []
-        ipython_idx = None
         for i, (fr, _) in enumerate(traceback.walk_stack(sys._getframe().f_back), 1):
             if len(code) >= nframes:
                 break
-            if stacklevel is not None:
-                if i != stacklevel:
-                    continue
+            elif stacklevel is not None and i != stacklevel:
+                continue
             elif pattern is not None and (
                 pattern.match(fr.f_globals.get("__name__", ""))
                 or fr.f_code.co_name in ("<listcomp>", "<dictcomp>")
             ):
                 continue
-
-            # Ignore IPython specific wrapping IPython interactive related functions
-            elif (
-                hasattr(fr.f_back, "f_globals")
-                and sys.modules[fr.f_back.f_globals["__name__"]].__name__  # type: ignore
-                == "IPython.core.interactiveshell"
-            ):
-                if ipython_idx is None:
-                    ipython_idx = i - 2  # Everything past this index.
             try:
                 code.append(inspect.getsource(fr))
             except OSError:
-                # Try to fine the source if we are in %%time or %%timeit magic.
-                if (
-                    fr.f_code.co_filename in {"<timed exec>", "<magic-timeit>"}
-                    and "IPython" in sys.modules
-                ):
+                try:
                     from IPython import get_ipython
 
                     ip = get_ipython()
                     if ip is not None:
                         # The current cell
                         code.append(ip.history_manager._i00)
+                except ImportError:
+                    pass  # No IPython
+
                 break
-        return tuple(reversed(code))[-ipython_idx if ipython_idx else 0 :]
+
+            # Ignore IPython related wrapping functions to user code
+            if hasattr(fr.f_back, "f_globals"):
+                module_name = sys.modules[fr.f_back.f_globals["__name__"]].__name__  # type: ignore
+                if module_name.endswith("interactiveshell"):
+                    break
+        return tuple(reversed(code))
 
     def _graph_to_futures(
         self,

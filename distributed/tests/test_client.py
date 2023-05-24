@@ -7146,39 +7146,41 @@ def run_in_ipython(code):
 
 
 @gen_cluster(client=False)
-async def test_computation_ignore_ipython_frames(s, a, b):
+@pytest.mark.parametrize("nframes", (2, 3))
+async def test_computation_ignore_ipython_frames(s, a, b, nframes):
     pytest.importorskip("IPython")
 
-    source_code = """
-import time
-import dask
-from distributed import Client
-dask.config.set({{"distributed.diagnostics.computations.nframes": 3}})
-with Client("{}") as client:
-    def foo(x): print(x); return x;
-    def bar(x): return client.map(foo, range(x))
+    source_code = f"""
+        import time
+        import dask
+        from distributed import Client
 
-    N = client.gather(bar(3))
-""".format(
-        s.address
-    )
+        dask.config.set({{"distributed.diagnostics.computations.nframes": {nframes}}})
+        with Client("{s.address}") as client:
+            def foo(x): print(x); return x;
+            def bar(x): return client.map(foo, range(x))
 
-    # When not running IPython in a new process, it did not shutdown
-    # properly and leaked a thread. There's should a way to fix this.
+            N = client.gather(bar(3))
+    """
+    # When not running IPython in a new process, it does not shutdown
+    # properly and leaks a thread. There should be a way to fix this.
+    # Seems to be another (deeper) issue that this shouldn't need
+    # a subprocess/thread/@gen_cluster/test at all, and ought to be able to run
+    # directly in InteractiveShell (and does) but requires `--reruns=1`
+    # due to some underlying lag in the asyncio if ran by itself, but will
+    # otherwise run fine in the suite of tests.
     with concurrent.futures.ProcessPoolExecutor() as executor:
-        result = await asyncio.get_running_loop().run_in_executor(
-            executor,
-            run_in_ipython,
-            source_code,
-        )
-    assert result.success
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(executor, run_in_ipython, source_code)
+
+    result.raise_error()
     computations = s.computations
 
     assert len(computations) == 1  # 1 computation
     computation = computations[0]
     assert len(computation.code) == 1  # 1 code
     code = computation.code[0]
-    assert len(code) == 2  # 2 frames, even with nframes 3 other is ipython code
+    assert len(code) == 2  # 2 frames when ignoring IPython frames
 
     def normalize(s):
         return re.sub(r"\s+", " ", s).strip()
