@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable, Iterator
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Iterable, Iterator, NewType
+from typing import TYPE_CHECKING, Any, NewType, Union
 
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
@@ -126,9 +127,8 @@ def rearrange_by_column_p2p(
     )
 
 
-# TODO remove quotes (requires Python >=3.9)
-_T_Key: TypeAlias = "tuple[str, int] | str"
-_T_LowLevelGraph: TypeAlias = "dict[_T_Key, tuple]"
+_T_Key: TypeAlias = Union[tuple[str, int], str]
+_T_LowLevelGraph: TypeAlias = dict[_T_Key, tuple]
 
 
 class P2PShuffleLayer(Layer):

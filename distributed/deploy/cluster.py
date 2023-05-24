@@ -161,11 +161,6 @@ class Cluster(SyncMethodMixin):
                     value=self._cluster_info.copy(),
                 )
                 err_count = 0
-            except asyncio.CancelledError:
-                # Task is being closed. When we drop Python < 3.8 we can drop
-                # this check (since CancelledError is not a subclass of
-                # Exception then).
-                break
             except Exception:
                 err_count += 1
                 # Only warn if multiple subsequent attempts fail, and only once
