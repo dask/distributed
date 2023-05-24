@@ -420,12 +420,6 @@ _NUMERIC_ONLY = socket.AI_NUMERICHOST | socket.AI_NUMERICSERV
 
 
 async def _getaddrinfo(host, port, *, family, type=socket.SOCK_STREAM):
-    # On Python3.8 we are observing problems, particularly on slow systems
-    # For additional info, see
-    # https://github.com/dask/distributed/pull/6847#issuecomment-1208179864
-    # https://github.com/dask/distributed/pull/6847
-    # https://github.com/dask/distributed/issues/6896
-    # https://github.com/dask/distributed/issues/6846
     # If host and port are numeric, then getaddrinfo doesn't block and we
     # can skip get_running_loop().getaddrinfo which is implemented by
     # running in a ThreadPoolExecutor. So we try first with the
