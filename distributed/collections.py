@@ -8,7 +8,7 @@ from collections.abc import Callable, Hashable, Iterator, MutableSet
 from typing import Any, TypeVar, cast
 
 T = TypeVar("T", bound=Hashable)
-K = TypeVar("K")
+K = TypeVar("K", bound=Hashable)
 V = TypeVar("V")
 
 
