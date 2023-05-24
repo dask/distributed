@@ -204,6 +204,29 @@ async def test_rechunk_4d(c, s, *ws):
     old = ((5, 5),) * 4
     a = np.random.uniform(0, 1, 10000).reshape((10,) * 4)
     x = da.from_array(a, chunks=old)
+    new = (
+        (10,),
+        (10,),
+        (10,),
+        (8, 2),
+    )  # This has been altered to return >1 output partition
+    x2 = rechunk(x, chunks=new, method="p2p")
+    assert x2.chunks == new
+    await c.compute(x2)
+    assert np.all(await c.compute(x2) == a)
+
+
+@gen_cluster(client=True)
+async def test_rechunk_with_single_output_chunk_raises(c, s, *ws):
+    """See distributed#7816
+
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_4d
+    """
+    old = ((5, 5),) * 4
+    a = np.random.uniform(0, 1, 10000).reshape((10,) * 4)
+    x = da.from_array(a, chunks=old)
     new = ((10,),) * 4
     x2 = rechunk(x, chunks=new, method="p2p")
     assert x2.chunks == new
@@ -212,7 +235,6 @@ async def test_rechunk_4d(c, s, *ws):
         RuntimeError, "rechunk_transfer failed", RuntimeError, "Barrier task"
     ):
         await c.compute(x2)
-    # assert np.all(await c.compute(x2) == a)
 
 
 @gen_cluster(client=True)
