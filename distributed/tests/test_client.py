@@ -7138,49 +7138,43 @@ def test_computation_code_walk_frames():
         assert nested_call()[-1] == upper_frame_code
 
 
-def test_computation_ignore_ipython_frames():
+@gen_cluster(client=False)
+async def test_computation_ignore_ipython_frames(s, a, b):
     pytest.importorskip("IPython")
     from IPython.core.interactiveshell import InteractiveShell
 
-    shell = InteractiveShell()
+    source_code = """
+import time
+import dask
+from distributed import Client
+dask.config.set({{"distributed.diagnostics.computations.nframes": 3}})
+with Client("{}") as client:
+    def foo(x): print(x); return x;
+    def bar(x): return client.map(foo, range(x))
 
-    code = """
-    import dask
-    import time
-    from distributed import Client
+    N = client.gather(bar(3))
+""".format(s.address)
 
-    dask.config.set({"distributed.diagnostics.computations.nframes": 3})
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+            result = await asyncio.get_running_loop().run_in_executor(
+                executor,
+                run_in_ipython,
+                source_code,
+            )
+    assert result.success
+    computations = s.computations
 
-    with Client(processes=False) as client:
-
-        def foo(x): return x;
-        def bar(x): return client.map(foo, range(x))
-
-        N = bar(3)
-
-        while True:
-            try:
-                code = client.cluster.scheduler.computations[-1].code
-            except IndexError:
-                time.sleep(0.1)  # Wait for computations
-            else:
-                break
-    code
-    """
-
-    result = shell.run_cell(code)
-    result.raise_error()
-
-    result = result.result
-    assert result is not None
-    assert len(result) == 1  # 1 computation
-    assert len(result[0]) == 2  # 2 frames, even with nframes 3 other is ipython code
+    assert len(computations) == 1  # 1 computation
+    computation = computations[0]
+    assert len(computation.code) == 1  # 1 code
+    code = computation.code[0]
+    assert len(code) == 2 # 2 frames, even with nframes 3 other is ipython code
 
     def normalize(s):
         return re.sub(r"\s+", " ", s).strip()
 
-    assert normalize(result[0][0]) == normalize(code)
-    assert normalize(result[0][1]) == "def bar(x): return client.map(foo, range(x))"
+    assert normalize(code[0]) == normalize(source_code)
+    assert normalize(code[1]) == "def bar(x): return client.map(foo, range(x))"
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
