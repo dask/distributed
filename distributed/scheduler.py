@@ -141,14 +141,13 @@ TaskStateState: TypeAlias = Literal[
 
 ALL_TASK_STATES: Set[TaskStateState] = set(TaskStateState.__args__)  # type: ignore
 
-# TODO remove quotes (requires Python >=3.9)
 # {task key -> finish state}
 # Not to be confused with distributed.worker_state_machine.Recs
-Recs: TypeAlias = "dict[str, TaskStateState]"
+Recs: TypeAlias = dict[str, TaskStateState]
 # {client or worker address: [{op: <key>, ...}, ...]}
-Msgs: TypeAlias = "dict[str, list[dict[str, Any]]]"
+Msgs: TypeAlias = dict[str, list[dict[str, Any]]]
 # (recommendations, client messages, worker messages)
-RecsMsgs: TypeAlias = "tuple[Recs, Msgs, Msgs]"
+RecsMsgs: TypeAlias = tuple[Recs, Msgs, Msgs]
 
 logger = logging.getLogger(__name__)
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")

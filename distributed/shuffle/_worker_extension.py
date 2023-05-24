@@ -240,7 +240,6 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         """Get an output partition to the shuffle run"""
 
 
-# TODO remove quotes on tuple (requires Python >=3.9)
 class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
     """State for a single active rechunk execution
 
