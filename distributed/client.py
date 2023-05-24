@@ -133,9 +133,9 @@ TOPIC_PREFIX_FORWARDED_LOG_RECORD = "forwarded-log-record"
 
 def _clean_excepthook(func):
     @wraps(func)
-    def wrapper(exc_type, exc_value, tb):
+    def wrapper(exc_type, exc, tb):
         tb = truncate_traceback(tb)
-        return func(exc_type, exc_value.with_traceback(tb), tb)
+        return func(exc_type, exc.with_traceback(tb), tb)
 
     return wrapper
 
@@ -143,9 +143,9 @@ def _clean_excepthook(func):
 def _clean_ipython_traceback(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
-        etype, evalue, tb = sys.exc_info()
+        exc_type, exc, tb = sys.exc_info()
         tb = truncate_traceback(tb)
-        kwargs["exc_tuple"] = etype, evalue, tb
+        kwargs["exc_tuple"] = exc_type, exc.with_traceback(tb), tb
         value = func(*args, **kwargs)
         return value
 
@@ -159,12 +159,12 @@ sys.excepthook = _clean_excepthook(sys.excepthook)
 # if ipython is available, also customize showtraceback
 try:
     from IPython.core.interactiveshell import InteractiveShell
-
+except ImportError:
+    pass
+else:
     InteractiveShell.showtraceback = _clean_ipython_traceback(
         InteractiveShell.showtraceback
     )
-except:  # NOQA
-    pass
 
 
 def _restore_exception_hook():
@@ -624,7 +624,7 @@ class FutureState:
         self.status = "pending"
         self._get_event().clear()
 
-    def set_error(self, exception, traceback):
+    def set_error(self, exception, traceback, erred_on, key):
         """Sets the error data
 
         Sets the status to 'error'. Sets the exception, the traceback,
@@ -636,8 +636,18 @@ class FutureState:
             The exception
         traceback: Exception
             The traceback
+        erred_on: set
+            Workers where it errored
+        key: tuple
+            Task key
         """
         _, exception, traceback = clean_exception(exception, traceback)
+
+        if dask.config.get("distributed.admin.truncate-traceback", False) is True:
+            # when Exception is logged or printed, its args are printed as well,
+            # this makes it easier to communicate extra information without
+            # wrapping it with a custom Exception
+            exception.args += ({"workers": erred_on, "task_key": key},)
 
         self.status = "error"
         self.exception = exception
@@ -1652,10 +1662,12 @@ class Client(SyncMethodMixin):
         if state is not None:
             state.retry()
 
-    def _handle_task_erred(self, key=None, exception=None, traceback=None):
+    def _handle_task_erred(
+        self, key=None, exception=None, traceback=None, erred_on=None
+    ):
         state = self.futures.get(key)
         if state is not None:
-            state.set_error(exception, traceback)
+            state.set_error(exception, traceback, erred_on, key)
 
     def _handle_restart(self):
         logger.info("Receive restart signal from scheduler")
