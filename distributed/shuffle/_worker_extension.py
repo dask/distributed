@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 import toolz
 
 from dask.context import thread_state
-from dask.utils import parse_bytes, typename
+from dask.utils import get_meta_library, parse_bytes
 
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
@@ -945,11 +945,11 @@ def split_by_worker(
     import numpy as np
     import pyarrow as pa
 
-    lib = typename(df).partition(".")[0]
-    if lib == "cudf":
-        import cudf
+    # Allow cudf-based data
+    lib = get_meta_library(df)
+    if hasattr(lib, "from_pandas"):
+        worker_for = lib.from_pandas(worker_for)
 
-        worker_for = cudf.from_pandas(worker_for)
     df = df.merge(
         right=worker_for.cat.codes.rename("_worker"),
         left_on=column,
