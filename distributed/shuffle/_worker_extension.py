@@ -945,9 +945,9 @@ def split_by_worker(
     import numpy as np
     import pyarrow as pa
 
-    # Allow cudf-based data
     lib = get_meta_library(df)
     if hasattr(lib, "from_pandas"):
+        # Allow cudf-based data
         worker_for = lib.from_pandas(worker_for)
 
     df = df.merge(
