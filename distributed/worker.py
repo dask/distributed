@@ -385,6 +385,9 @@ class Worker(BaseWorker, ServerNode):
     lifetime_restart: bool
         Whether or not to restart a worker after it has reached its lifetime
         Default False
+    drain: bool
+        The worker is allowed to complete its assigned worker before closing.
+        Default False. 
     kwargs: optional
         Additional parameters to ServerNode constructor
 
@@ -511,6 +514,7 @@ class Worker(BaseWorker, ServerNode):
         lifetime: Any | None = None,
         lifetime_stagger: Any | None = None,
         lifetime_restart: bool | None = None,
+        drain: bool = False,
         transition_counter_max: int | Literal[False] = False,
         ###################################
         # Parameters to WorkerMemoryManager
@@ -843,6 +847,8 @@ class Worker(BaseWorker, ServerNode):
                 lifetime, self.close_gracefully, reason="worker-lifetime-reached"
             )
         self.lifetime = lifetime
+
+        self.drain = drain
 
         Worker._instances.add(self)
 
@@ -1653,6 +1659,12 @@ class Worker(BaseWorker, ServerNode):
         )
         if restart is None:
             restart = self.lifetime_restart
+        
+        if self.drain:
+            logger.info(f"Draining worker")
+            while self.state.executed_count:
+                await asyncio.sleep(0.1)
+                
         await self.close(nanny=not restart, reason=reason)
 
     async def wait_until_closed(self):
