@@ -7138,10 +7138,16 @@ def test_computation_code_walk_frames():
         assert nested_call()[-1] == upper_frame_code
 
 
+def run_in_ipython(code):
+    from IPython.testing.globalipapp import start_ipython
+
+    shell = start_ipython()
+    return shell.run_cell(code)
+
+
 @gen_cluster(client=False)
 async def test_computation_ignore_ipython_frames(s, a, b):
     pytest.importorskip("IPython")
-    from IPython.core.interactiveshell import InteractiveShell
 
     source_code = """
 import time
@@ -7153,14 +7159,18 @@ with Client("{}") as client:
     def bar(x): return client.map(foo, range(x))
 
     N = client.gather(bar(3))
-""".format(s.address)
+""".format(
+        s.address
+    )
 
+    # When not running IPython in a new process, it did not shutdown
+    # properly and leaked a thread. There's should a way to fix this.
     with concurrent.futures.ProcessPoolExecutor() as executor:
-            result = await asyncio.get_running_loop().run_in_executor(
-                executor,
-                run_in_ipython,
-                source_code,
-            )
+        result = await asyncio.get_running_loop().run_in_executor(
+            executor,
+            run_in_ipython,
+            source_code,
+        )
     assert result.success
     computations = s.computations
 
@@ -7168,7 +7178,7 @@ with Client("{}") as client:
     computation = computations[0]
     assert len(computation.code) == 1  # 1 code
     code = computation.code[0]
-    assert len(code) == 2 # 2 frames, even with nframes 3 other is ipython code
+    assert len(code) == 2  # 2 frames, even with nframes 3 other is ipython code
 
     def normalize(s):
         return re.sub(r"\s+", " ", s).strip()
