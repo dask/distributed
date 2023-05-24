@@ -10,7 +10,9 @@ from distributed.compatibility import randbytes
 
 def test_randbytes():
     with pytest.warns(
-        DeprecationWarning, match=r"randbytes is deprecated use random\.randbytes"
+        DeprecationWarning,
+        match=r"randbytes is deprecated and will be removed in a future release; "
+        r"use random\.randbytes instead\.",
     ):
         x = randbytes(256_000)
     assert isinstance(x, bytes)
@@ -25,7 +27,9 @@ def test_randbytes_seed():
     try:
         random.seed(0)
         with pytest.warns(
-            DeprecationWarning, match=r"randbytes is deprecated use random\.randbytes"
+            DeprecationWarning,
+            match=r"randbytes is deprecated and will be removed in a future release; "
+            r"use random\.randbytes instead\.",
         ):
             assert randbytes(8) == b"\xcd\x07,\xd8\xbeo\x9fb"
     finally:

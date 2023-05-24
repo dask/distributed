@@ -21,7 +21,7 @@ WINDOWS = sys.platform == "win32"
 
 def to_thread(*args, **kwargs):
     warnings.warn(
-        "to_thread is deprecated use asyncio.to_thread",
+        "to_thread is deprecated and will be removed in a future release; use asyncio.to_thread instead.",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -30,7 +30,7 @@ def to_thread(*args, **kwargs):
 
 def randbytes(*args, **kwargs):
     warnings.warn(
-        "randbytes is deprecated use random.randbytes",
+        "randbytes is deprecated and will be removed in a future release; use random.randbytes instead.",
         DeprecationWarning,
         stacklevel=2,
     )
