@@ -463,6 +463,28 @@ async def test_rechunk_same(c, s, *ws):
     assert x is y
 
 
+def test_rechunk_same_fully_unknown():
+    dd = pytest.importorskip("dask.dataframe")
+    x = da.ones(shape=(10, 10), chunks=(5, 10))
+    y = dd.from_array(x).values
+    new_chunks = ((np.nan, np.nan), (10,))
+    assert y.chunks == new_chunks
+    result = y.rechunk(new_chunks)
+    assert y is result
+
+
+def test_rechunk_same_fully_unknown_floats():
+    """Similar to test_rechunk_same_fully_unknown but testing the behavior if
+    ``float("nan")`` is used instead of the recommended ``np.nan``
+    """
+    dd = pytest.importorskip("dask.dataframe")
+    x = da.ones(shape=(10, 10), chunks=(5, 10))
+    y = dd.from_array(x).values
+    new_chunks = ((float("nan"), float("nan")), (10,))
+    result = y.rechunk(new_chunks)
+    assert y is result
+
+
 @gen_cluster(client=True)
 async def test_rechunk_with_zero_placeholders(c, s, *ws):
     """
@@ -584,7 +606,7 @@ async def test_rechunk_unknown_explicit(c, s, *ws):
     dd = pytest.importorskip("dask.dataframe")
     x = da.ones(shape=(10, 10), chunks=(5, 2))
     y = dd.from_array(x).values
-    result = y.rechunk(((float("nan"), float("nan")), (5, 5)), method="p2p")
+    result = y.rechunk(((np.nan, np.nan), (5, 5)), method="p2p")
     expected = x.rechunk((None, (5, 5)), method="p2p")
     assert_chunks_match(result.chunks, expected.chunks)
     assert_eq(await c.compute(result), await c.compute(expected))
@@ -880,8 +902,8 @@ def test_rechunk_slicing_nan():
     --------
     dask.array.tests.test_rechunk.test_intersect_nan
     """
-    old_chunks = ((float("nan"), float("nan")), (8,))
-    new_chunks = ((float("nan"), float("nan")), (4, 4))
+    old_chunks = ((np.nan, np.nan), (8,))
+    new_chunks = ((np.nan, np.nan), (4, 4))
     result = rechunk_slicing(old_chunks, new_chunks)
     expected = {
         (0, 0): [
@@ -908,8 +930,8 @@ def test_rechunk_slicing_nan_single():
     --------
     dask.array.tests.test_rechunk.test_intersect_nan_single
     """
-    old_chunks = ((float("nan"),), (10,))
-    new_chunks = ((float("nan"),), (5, 5))
+    old_chunks = ((np.nan,), (10,))
+    new_chunks = ((np.nan,), (5, 5))
 
     result = rechunk_slicing(old_chunks, new_chunks)
     expected = {
@@ -927,8 +949,8 @@ def test_rechunk_slicing_nan_long():
     --------
     dask.array.tests.test_rechunk.test_intersect_nan_long
     """
-    old_chunks = (tuple([float("nan")] * 4), (10,))
-    new_chunks = (tuple([float("nan")] * 4), (5, 5))
+    old_chunks = (tuple([np.nan] * 4), (10,))
+    new_chunks = (tuple([np.nan] * 4), (5, 5))
     result = rechunk_slicing(old_chunks, new_chunks)
     expected = {
         (0, 0): [
