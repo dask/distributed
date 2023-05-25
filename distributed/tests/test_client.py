@@ -6,11 +6,13 @@ import functools
 import gc
 import inspect
 import logging
+import multiprocessing
 import operator
 import os
 import pathlib
 import pickle
 import random
+import re
 import subprocess
 import sys
 import threading
@@ -7150,6 +7152,58 @@ def test_computation_code_walk_frames():
         code = Client._get_computation_code()
         assert code == (upper_frame_code,)
         assert nested_call()[-1] == upper_frame_code
+
+
+def run_in_ipython(code):
+    from IPython.testing.globalipapp import start_ipython
+
+    shell = start_ipython()
+    return shell.run_cell(code)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("nframes", (2, 3))
+@gen_cluster()
+async def test_computation_ignore_ipython_frames(s, a, b, nframes):
+    pytest.importorskip("IPython")
+
+    source_code = f"""
+        import time
+        import dask
+        from distributed import Client
+
+        dask.config.set({{"distributed.diagnostics.computations.nframes": {nframes}}})
+        with Client("{s.address}") as client:
+            def foo(x): print(x); return x;
+            def bar(x): return client.map(foo, range(x))
+
+            N = client.gather(bar(3))
+    """
+    # When not running IPython in a new process, it does not shutdown
+    # properly and leaks a thread. There should be a way to fix this.
+    # Seems to be another (deeper) issue that this shouldn't need
+    # a subprocess/thread/@gen_cluster/test at all, and ought to be able to run
+    # directly in InteractiveShell (and does) but requires `--reruns=1`
+    # due to some underlying lag in the asyncio if ran by itself, but will
+    # otherwise run fine in the suite of tests.
+    ctx = multiprocessing.get_context("spawn")
+    with concurrent.futures.ProcessPoolExecutor(1, mp_context=ctx) as executor:
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(executor, run_in_ipython, source_code)
+
+    result.raise_error()
+    computations = s.computations
+
+    assert len(computations) == 1
+    assert len(computations[0].code) == 1
+    code = computations[0].code[0]
+    assert len(code) == 2  # 2 frames when ignoring IPython frames
+
+    def normalize(s):
+        return re.sub(r"\s+", " ", s).strip()
+
+    assert normalize(code[0]) == normalize(source_code)
+    assert normalize(code[1]) == "def bar(x): return client.map(foo, range(x))"
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
