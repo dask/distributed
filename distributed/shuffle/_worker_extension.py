@@ -301,7 +301,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
     ):
-        from dask.array.rechunk import _old_to_new
+        from dask.array.rechunk import old_to_new
 
         super().__init__(
             id=id,
@@ -315,6 +315,14 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
             memory_limiter_comms=memory_limiter_comms,
             memory_limiter_disk=memory_limiter_disk,
         )
+        from dask.array.core import normalize_chunks
+
+        # We rely on a canonical `np.nan` in `dask.array.rechunk.old_to_new`
+        # that passes an implicit identity check when testing for list equality.
+        # This does not work with (de)serialization, so we have to normalize the chunks
+        # here again to canonicalize `nan`s.
+        old = normalize_chunks(old)
+        new = normalize_chunks(new)
         self.old = old
         self.new = new
         partitions_of = defaultdict(list)
@@ -323,7 +331,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
         self.partitions_of = dict(partitions_of)
         self.worker_for = worker_for
         self._slicing = rechunk_slicing(old, new)
-        self._old_to_new = _old_to_new(old, new)
+        self._old_to_new = old_to_new(old, new)
 
     async def _receive(self, data: list[tuple[ArrayRechunkShardID, bytes]]) -> None:
         self.raise_if_closed()
