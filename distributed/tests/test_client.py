@@ -6,6 +6,7 @@ import functools
 import gc
 import inspect
 import logging
+import multiprocessing
 import operator
 import os
 import pathlib
@@ -7160,8 +7161,9 @@ def run_in_ipython(code):
     return shell.run_cell(code)
 
 
-@gen_cluster(client=False)
+@pytest.mark.slow
 @pytest.mark.parametrize("nframes", (2, 3))
+@gen_cluster()
 async def test_computation_ignore_ipython_frames(s, a, b, nframes):
     pytest.importorskip("IPython")
 
@@ -7184,17 +7186,17 @@ async def test_computation_ignore_ipython_frames(s, a, b, nframes):
     # directly in InteractiveShell (and does) but requires `--reruns=1`
     # due to some underlying lag in the asyncio if ran by itself, but will
     # otherwise run fine in the suite of tests.
-    with concurrent.futures.ProcessPoolExecutor() as executor:
+    ctx = multiprocessing.get_context("spawn")
+    with concurrent.futures.ProcessPoolExecutor(1, mp_context=ctx) as executor:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(executor, run_in_ipython, source_code)
 
     result.raise_error()
     computations = s.computations
 
-    assert len(computations) == 1  # 1 computation
-    computation = computations[0]
-    assert len(computation.code) == 1  # 1 code
-    code = computation.code[0]
+    assert len(computations) == 1
+    assert len(computations[0].code) == 1
+    code = computations[0].code[0]
     assert len(code) == 2  # 2 frames when ignoring IPython frames
 
     def normalize(s):
