@@ -16,7 +16,7 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Collection, Iterator
+from collections.abc import Collection, Coroutine, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import asynccontextmanager, contextmanager, suppress
@@ -25,7 +25,7 @@ from functools import partial
 from importlib.metadata import PackageNotFoundError, version
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import Any, ClassVar, Coroutine, Literal, NamedTuple, Sequence, TypedDict
+from typing import Any, ClassVar, Literal, NamedTuple, TypedDict
 
 from packaging.version import parse as parse_version
 from tlz import first, groupby, keymap, merge, partition_all, valmap
@@ -3020,12 +3020,10 @@ class Client(SyncMethodMixin):
                 "Ignored modules must be a list. Instead got "
                 f"({type(ignore_modules)}, {ignore_modules})"
             )
+        pattern: re.Pattern | None = None
         if stacklevel is None:
-            pattern: re.Pattern | None
             if ignore_modules:
                 pattern = re.compile("|".join([f"(?:{mod})" for mod in ignore_modules]))
-            else:
-                pattern = None
         else:
             # stacklevel 0 or less - shows dask internals which likely isn't helpful
             stacklevel = stacklevel if stacklevel > 0 else 1
@@ -3036,9 +3034,8 @@ class Client(SyncMethodMixin):
         ):
             if len(code) >= nframes:
                 break
-            if stacklevel is not None:
-                if i != stacklevel:
-                    continue
+            elif stacklevel is not None and i != stacklevel:
+                continue
             elif pattern is not None and (
                 pattern.match(fr.f_globals.get("__name__", ""))
                 or fr.f_code.co_name in ("<listcomp>", "<dictcomp>")
@@ -3054,19 +3051,23 @@ class Client(SyncMethodMixin):
             try:
                 code.append(SourceCode(code=inspect.getsource(fr), **kwargs))  # type: ignore
             except OSError:
-                # Try to fine the source if we are in %%time or %%timeit magic.
-                if (
-                    fr.f_code.co_filename in {"<timed exec>", "<magic-timeit>"}
-                    and "IPython" in sys.modules
-                ):
+                try:
                     from IPython import get_ipython
 
                     ip = get_ipython()
                     if ip is not None:
                         # The current cell
                         code.append(SourceCode(code=ip.history_manager._i00, **kwargs))  # type: ignore
+                except ImportError:
+                    pass  # No IPython
+
                 break
 
+            # Ignore IPython related wrapping functions to user code
+            if hasattr(fr.f_back, "f_globals"):
+                module_name = sys.modules[fr.f_back.f_globals["__name__"]].__name__  # type: ignore
+                if module_name.endswith("interactiveshell"):
+                    break
         return tuple(reversed(code))
 
     def _graph_to_futures(
@@ -5740,20 +5741,23 @@ class performance_report:
     mode: str, optional
         Mode parameter to pass to :func:`bokeh.io.output.output_file`. Defaults to ``None``.
 
+    storage_options: dict, optional
+         Any additional arguments to :func:`fsspec.open` when writing to a URL.
+
     Examples
     --------
     >>> with performance_report(filename="myfile.html", stacklevel=1):
     ...     x.compute()
-
-    $ python -m http.server
-    $ open myfile.html
     """
 
-    def __init__(self, filename="dask-report.html", stacklevel=1, mode=None):
+    def __init__(
+        self, filename="dask-report.html", stacklevel=1, mode=None, storage_options=None
+    ):
         self.filename = filename
         # stacklevel 0 or less - shows dask internals which likely isn't helpful
         self._stacklevel = stacklevel if stacklevel > 0 else 1
         self.mode = mode
+        self.storage_options = storage_options or {}
 
     async def __aenter__(self):
         self.start = time()
@@ -5763,6 +5767,8 @@ class performance_report:
         await get_client().get_task_stream(start=0, stop=0)  # ensure plugin
 
     async def __aexit__(self, exc_type, exc_value, traceback, code=None):
+        import fsspec
+
         client = get_client()
         if code is None:
             frames = client._get_computation_code(self._stacklevel + 1, nframes=1)
@@ -5770,7 +5776,9 @@ class performance_report:
         data = await client.scheduler.performance_report(
             start=self.start, last_count=self.last_count, code=code, mode=self.mode
         )
-        with open(self.filename, "w") as f:
+        with fsspec.open(
+            self.filename, mode="w", compression="infer", **self.storage_options
+        ) as f:
             f.write(data)
 
     def __enter__(self):

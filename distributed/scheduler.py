@@ -142,14 +142,13 @@ TaskStateState: TypeAlias = Literal[
 
 ALL_TASK_STATES: Set[TaskStateState] = set(TaskStateState.__args__)  # type: ignore
 
-# TODO remove quotes (requires Python >=3.9)
 # {task key -> finish state}
 # Not to be confused with distributed.worker_state_machine.Recs
-Recs: TypeAlias = "dict[str, TaskStateState]"
+Recs: TypeAlias = dict[str, TaskStateState]
 # {client or worker address: [{op: <key>, ...}, ...]}
-Msgs: TypeAlias = "dict[str, list[dict[str, Any]]]"
+Msgs: TypeAlias = dict[str, list[dict[str, Any]]]
 # (recommendations, client messages, worker messages)
-RecsMsgs: TypeAlias = "tuple[Recs, Msgs, Msgs]"
+RecsMsgs: TypeAlias = tuple[Recs, Msgs, Msgs]
 
 logger = logging.getLogger(__name__)
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
@@ -1519,7 +1518,8 @@ class SchedulerState:
     running: set[WorkerState]
     #: Workers that are currently in running state and not fully utilized
     #: Definition based on occupancy
-    #: (actually a SortedDict, but the sortedcontainers package isn't annotated)
+    #: (actually a SortedDict, but the sortedcontainers package isn't annotated).
+    #: Not to be confused with :meth:`is_idle`.
     idle: dict[str, WorkerState]
     #: Similar to `idle`
     #: Definition based on assigned tasks
@@ -1775,6 +1775,21 @@ class SchedulerState:
             self.replicated_tasks,
         ):
             collection.clear()  # type: ignore
+
+    @property
+    def is_idle(self) -> bool:
+        """Return True iff there are no tasks that haven't finished computing.
+
+        Unlike testing ``self.total_occupancy``, this property returns False if there are
+        long-running tasks, no-worker, or queued tasks (due to not having any workers).
+
+        Not to be confused with ``idle``.
+        """
+        return all(
+            count == 0 or state in {"memory", "error", "released", "forgotten"}
+            for tg in self.task_groups.values()
+            for state, count in tg.states.items()
+        )
 
     @property
     def total_occupancy(self) -> float:
@@ -4326,7 +4341,7 @@ class Scheduler(SchedulerState, ServerNode):
                 keys=lost_keys, client=client, stimulus_id=stimulus_id
             )
 
-        if self.total_occupancy > 1e-9 and self.computations:
+        if not self.is_idle and self.computations:
             # Still working on something. Assign new tasks to same computation
             computation = self.computations[-1]
         else:

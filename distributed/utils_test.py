@@ -24,11 +24,11 @@ import threading
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Generator, Iterator, Mapping
 from contextlib import contextmanager, nullcontext, suppress
 from itertools import count
 from time import sleep
-from typing import IO, Any, Generator, Iterator, Literal
+from typing import IO, Any, Literal
 
 import pytest
 import yaml

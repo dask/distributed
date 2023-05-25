@@ -64,7 +64,7 @@ if TYPE_CHECKING:
     Coro = Coroutine[Any, Any, T]
 
 
-cache_loads = LRU(maxsize=100)
+cache_loads: LRU[bytes, Callable[..., Any]] = LRU(maxsize=100)
 
 
 def loads_function(bytes_object):
@@ -372,8 +372,10 @@ class Server:
                 self._workdir = self._workspace.new_work_dir(prefix=f"{name}-")
                 self.local_directory = self._workdir.dir_path
 
+        self._updated_sys_path = False
         if self.local_directory not in sys.path:
             sys.path.insert(0, self.local_directory)
+            self._updated_sys_path = True
 
         if io_loop is not None:
             warnings.warn(
@@ -1043,6 +1045,10 @@ class Server:
 
             await self.rpc.close()
             await asyncio.gather(*[comm.close() for comm in list(self._comms)])
+
+            # Remove scratch directory from global sys.path
+            if self._updated_sys_path and sys.path[0] == self.local_directory:
+                sys.path.remove(self.local_directory)
         finally:
             self._event_finished.set()
 

@@ -6,11 +6,13 @@ import functools
 import gc
 import inspect
 import logging
+import multiprocessing
 import operator
 import os
 import pathlib
 import pickle
 import random
+import re
 import subprocess
 import sys
 import threading
@@ -6615,8 +6617,9 @@ async def test_run_on_scheduler_async_def_wait(c, s, a, b):
 
 @pytest.mark.slow
 @pytest.mark.skipif(WINDOWS, reason="frequently kills off the whole test suite")
+@pytest.mark.parametrize("local", [True, False])
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 2)
-async def test_performance_report(c, s, a, b):
+async def test_performance_report(c, s, a, b, local):
     pytest.importorskip("bokeh")
     da = pytest.importorskip("dask.array")
 
@@ -6629,8 +6632,15 @@ async def test_performance_report(c, s, a, b):
         """
         x = da.random.random((1000, 1000), chunks=(100, 100))
         with tmpfile(extension="html") as fn:
+            urlpath = fn
+            if not local:
+                pytest.importorskip("fsspec")
+                # Make it look like an fsspec path
+                urlpath = f"file://{fn}"
             async with performance_report(
-                filename=fn, stacklevel=stacklevel, mode=mode
+                filename=urlpath,
+                stacklevel=stacklevel,
+                mode=mode,
             ):
                 await c.compute((x + x.T).sum())
 
@@ -7176,6 +7186,58 @@ def test_computation_code_walk_frames():
         assert code.lineno_relative == lineno_relative
         assert code.lineno_frame == lineno_frame
         assert nested_call()[-1].code == upper_frame_code
+
+
+def run_in_ipython(code):
+    from IPython.testing.globalipapp import start_ipython
+
+    shell = start_ipython()
+    return shell.run_cell(code)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("nframes", (2, 3))
+@gen_cluster()
+async def test_computation_ignore_ipython_frames(s, a, b, nframes):
+    pytest.importorskip("IPython")
+
+    source_code = f"""
+        import time
+        import dask
+        from distributed import Client
+
+        dask.config.set({{"distributed.diagnostics.computations.nframes": {nframes}}})
+        with Client("{s.address}") as client:
+            def foo(x): print(x); return x;
+            def bar(x): return client.map(foo, range(x))
+
+            N = client.gather(bar(3))
+    """
+    # When not running IPython in a new process, it does not shutdown
+    # properly and leaks a thread. There should be a way to fix this.
+    # Seems to be another (deeper) issue that this shouldn't need
+    # a subprocess/thread/@gen_cluster/test at all, and ought to be able to run
+    # directly in InteractiveShell (and does) but requires `--reruns=1`
+    # due to some underlying lag in the asyncio if ran by itself, but will
+    # otherwise run fine in the suite of tests.
+    ctx = multiprocessing.get_context("spawn")
+    with concurrent.futures.ProcessPoolExecutor(1, mp_context=ctx) as executor:
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(executor, run_in_ipython, source_code)
+
+    result.raise_error()
+    computations = s.computations
+
+    assert len(computations) == 1
+    assert len(computations[0].code) == 1
+    code = computations[0].code[0]
+    assert len(code) == 2  # 2 frames when ignoring IPython frames
+
+    def normalize(s):
+        return re.sub(r"\s+", " ", s).strip()
+
+    assert normalize(code[0]) == normalize(source_code)
+    assert normalize(code[1]) == "def bar(x): return client.map(foo, range(x))"
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
