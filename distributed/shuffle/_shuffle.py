@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable, Iterator
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Iterable, Iterator, NewType
+from typing import TYPE_CHECKING, Any, NewType, Union
 
-import dask
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 
+from distributed.exceptions import Reschedule
 from distributed.shuffle._arrow import check_dtype_support, check_minimal_arrow_version
 
 logger = logging.getLogger("distributed.shuffle")
@@ -56,6 +57,7 @@ def shuffle_transfer(
     input_partition: int,
     npartitions: int,
     column: str,
+    parts_out: set[int],
 ) -> int:
     try:
         return _get_worker_extension().add_partition(
@@ -65,6 +67,7 @@ def shuffle_transfer(
             input_partition=input_partition,
             npartitions=npartitions,
             column=column,
+            parts_out=parts_out,
         )
     except Exception as e:
         raise RuntimeError(f"shuffle_transfer failed during shuffle {id}") from e
@@ -77,6 +80,8 @@ def shuffle_unpack(
         return _get_worker_extension().get_output_partition(
             id, barrier_run_id, output_partition
         )
+    except Reschedule as e:
+        raise e
     except Exception as e:
         raise RuntimeError(f"shuffle_unpack failed during shuffle {id}") from e
 
@@ -94,12 +99,6 @@ def rearrange_by_column_p2p(
     npartitions: int | None = None,
 ) -> DataFrame:
     from dask.dataframe import DataFrame
-
-    if dask.config.get("optimization.fuse.active"):
-        raise RuntimeError(
-            "P2P shuffling requires the fuse optimization to be turned off. "
-            "Set the 'optimization.fuse.active' config to False to deactivate."
-        )
 
     check_dtype_support(df._meta)
     npartitions = npartitions or df.npartitions
@@ -128,9 +127,8 @@ def rearrange_by_column_p2p(
     )
 
 
-# TODO remove quotes (requires Python >=3.9)
-_T_Key: TypeAlias = "tuple[str, int] | str"
-_T_LowLevelGraph: TypeAlias = "dict[_T_Key, tuple]"
+_T_Key: TypeAlias = Union[tuple[str, int], str]
+_T_LowLevelGraph: TypeAlias = dict[_T_Key, tuple]
 
 
 class P2PShuffleLayer(Layer):
@@ -145,8 +143,6 @@ class P2PShuffleLayer(Layer):
         annotations: dict | None = None,
     ):
         check_minimal_arrow_version()
-        annotations = annotations or {}
-        annotations.update({"shuffle": lambda key: key[1]})
         self.name = name
         self.column = column
         self.npartitions = npartitions
@@ -156,6 +152,8 @@ class P2PShuffleLayer(Layer):
         else:
             self.parts_out = set(range(self.npartitions))
         self.npartitions_input = npartitions_input
+        annotations = annotations or {}
+        annotations.update({"shuffle": lambda key: key[1]})
         super().__init__(annotations=annotations)
 
     def __repr__(self) -> str:
@@ -246,6 +244,7 @@ class P2PShuffleLayer(Layer):
                 i,
                 self.npartitions,
                 self.column,
+                self.parts_out,
             )
 
         dsk[_barrier_key] = (shuffle_barrier, token, transfer_keys)

@@ -12,7 +12,7 @@ import dask.config
 from dask.sizeof import sizeof
 
 from distributed import profile
-from distributed.compatibility import WINDOWS, randbytes
+from distributed.compatibility import WINDOWS
 from distributed.metrics import meter
 from distributed.spill import SpillBuffer
 from distributed.utils import RateLimiterFilter
@@ -392,7 +392,7 @@ def test_metrics(tmp_path):
 
     a = "a" * 20_000  # <target, highly compressible
     b = "b"
-    c = randbytes(30_000)  # <target, uncompressible
+    c = random.randbytes(30_000)  # <target, uncompressible
     d = "d" * 40_000  # >target, highly compressible
 
     with meter() as m:

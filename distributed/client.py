@@ -16,7 +16,7 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Collection, Iterator
+from collections.abc import Collection, Coroutine, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import asynccontextmanager, contextmanager, suppress
@@ -25,7 +25,7 @@ from functools import partial
 from importlib.metadata import PackageNotFoundError, version
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import Any, ClassVar, Coroutine, Literal, Sequence, TypedDict
+from typing import Any, ClassVar, Literal, TypedDict
 
 from packaging.version import parse as parse_version
 from tlz import first, groupby, keymap, merge, partition_all, valmap
@@ -47,6 +47,7 @@ from dask.utils import (
 from dask.widgets import get_template
 
 from distributed.core import ErrorMessage
+from distributed.protocol.serialize import _is_dumpable
 from distributed.utils import wait_for
 
 try:
@@ -74,6 +75,7 @@ from distributed.core import (
 from distributed.diagnostics.plugin import (
     ForwardLoggingPlugin,
     NannyPlugin,
+    SchedulerUploadFile,
     UploadFile,
     WorkerPlugin,
     _get_plugin_name,
@@ -2015,12 +2017,12 @@ class Client(SyncMethodMixin):
             Whether or not the function is pure.  Set ``pure=False`` for
             impure functions like ``np.random.random``.
             See :ref:`pure functions` for more details.
-        batch_size : int, optional
+        batch_size : int, optional (default: just one batch whose size is the entire iterable)
             Submit tasks to the scheduler in batches of (at most)
             ``batch_size``.
-            Larger batch sizes can be useful for very large ``iterables``,
-            as the cluster can start processing tasks while later ones are
-            submitted asynchronously.
+            The tradeoff in batch size is that large batches avoid more per-batch overhead,
+            but batches that are too big can take a long time to submit and unreasonably delay
+            the cluster from starting its processing.
         **kwargs : dict
             Extra keyword arguments to send to the function.
             Large values will be included explicitly in the task graph.
@@ -3735,10 +3737,18 @@ class Client(SyncMethodMixin):
         >>> from mylibrary import myfunc  # doctest: +SKIP
         >>> L = client.map(myfunc, seq)  # doctest: +SKIP
         """
-        return self.register_worker_plugin(
-            UploadFile(filename),
-            name=filename + str(uuid.uuid4()),
-        )
+        name = filename + str(uuid.uuid4())
+
+        async def _():
+            results = await asyncio.gather(
+                self.register_scheduler_plugin(
+                    SchedulerUploadFile(filename), name=name
+                ),
+                self.register_worker_plugin(UploadFile(filename), name=name),
+            )
+            return results[1]  # Results from workers upload
+
+        return self.sync(_)
 
     async def _rebalance(self, futures=None, workers=None):
         if futures is not None:
@@ -4404,6 +4414,10 @@ class Client(SyncMethodMixin):
         >>> from time import time
         >>> client.log_event("current-time", time())
         """
+        if not _is_dumpable(msg):
+            raise TypeError(
+                f"Message must be msgpack serializable. Got {type(msg)=} instead."
+            )
         return self.sync(self.scheduler.log_event, topic=topic, msg=msg)
 
     def get_events(self, topic: str | None = None):
@@ -5711,20 +5725,23 @@ class performance_report:
     mode: str, optional
         Mode parameter to pass to :func:`bokeh.io.output.output_file`. Defaults to ``None``.
 
+    storage_options: dict, optional
+         Any additional arguments to :func:`fsspec.open` when writing to a URL.
+
     Examples
     --------
     >>> with performance_report(filename="myfile.html", stacklevel=1):
     ...     x.compute()
-
-    $ python -m http.server
-    $ open myfile.html
     """
 
-    def __init__(self, filename="dask-report.html", stacklevel=1, mode=None):
+    def __init__(
+        self, filename="dask-report.html", stacklevel=1, mode=None, storage_options=None
+    ):
         self.filename = filename
         # stacklevel 0 or less - shows dask internals which likely isn't helpful
         self._stacklevel = stacklevel if stacklevel > 0 else 1
         self.mode = mode
+        self.storage_options = storage_options or {}
 
     async def __aenter__(self):
         self.start = time()
@@ -5734,6 +5751,8 @@ class performance_report:
         await get_client().get_task_stream(start=0, stop=0)  # ensure plugin
 
     async def __aexit__(self, exc_type, exc_value, traceback, code=None):
+        import fsspec
+
         client = get_client()
         if code is None:
             frames = client._get_computation_code(self._stacklevel + 1, nframes=1)
@@ -5741,7 +5760,9 @@ class performance_report:
         data = await client.scheduler.performance_report(
             start=self.start, last_count=self.last_count, code=code, mode=self.mode
         )
-        with open(self.filename, "w") as f:
+        with fsspec.open(
+            self.filename, mode="w", compression="infer", **self.storage_options
+        ) as f:
             f.write(data)
 
     def __enter__(self):

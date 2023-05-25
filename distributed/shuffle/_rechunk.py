@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import math
 from collections import defaultdict
-from itertools import product
+from itertools import compress, product
 from typing import TYPE_CHECKING, NamedTuple
 
 import dask
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 
+from distributed.exceptions import Reschedule
 from distributed.shuffle._shuffle import (
     ShuffleId,
     ShuffleType,
@@ -23,11 +25,10 @@ if TYPE_CHECKING:
     import dask.array as da
 
 
-# TODO remove quotes (requires Python >=3.9)
-ChunkedAxis: TypeAlias = "tuple[float, ...]"  # chunks must either be an int or NaN
-ChunkedAxes: TypeAlias = "tuple[ChunkedAxis, ...]"
-NIndex: TypeAlias = "tuple[int, ...]"
-NSlice: TypeAlias = "tuple[slice, ...]"
+ChunkedAxis: TypeAlias = tuple[float, ...]  # chunks must either be an int or NaN
+ChunkedAxes: TypeAlias = tuple[ChunkedAxis, ...]
+NIndex: TypeAlias = tuple[int, ...]
+NSlice: TypeAlias = tuple[slice, ...]
 
 
 def rechunk_transfer(
@@ -57,6 +58,8 @@ def rechunk_unpack(
         return _get_worker_extension().get_output_partition(
             id, barrier_run_id, output_chunk
         )
+    except Reschedule as e:
+        raise e
     except Exception as e:
         raise RuntimeError(f"rechunk_unpack failed during shuffle {id}") from e
 
@@ -70,10 +73,32 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
         # Special case for empty array, as the algorithm below does not behave correctly
         return da.empty(x.shape, chunks=chunks, dtype=x.dtype)
 
-    if dask.config.get("optimization.fuse.active") is not False:
-        raise RuntimeError(
-            "P2P rechunking requires the fuse optimization to be turned off. "
-            "Set the 'optimization.fuse.active' config to False to deactivate."
+    old_chunks = x.chunks
+    new_chunks = chunks
+
+    def is_unknown(dim: ChunkedAxis) -> bool:
+        return any(math.isnan(chunk) for chunk in dim)
+
+    old_is_unknown = [is_unknown(dim) for dim in old_chunks]
+    new_is_unknown = [is_unknown(dim) for dim in new_chunks]
+
+    if old_is_unknown != new_is_unknown or any(
+        new != old for new, old in compress(zip(old_chunks, new_chunks), old_is_unknown)
+    ):
+        raise ValueError(
+            "Chunks must be unchanging along dimensions with missing values.\n\n"
+            "A possible solution:\n  x.compute_chunk_sizes()"
+        )
+
+    old_known = [dim for dim, unknown in zip(old_chunks, old_is_unknown) if not unknown]
+    new_known = [dim for dim, unknown in zip(new_chunks, new_is_unknown) if not unknown]
+
+    old_sizes = [sum(o) for o in old_known]
+    new_sizes = [sum(n) for n in new_known]
+
+    if old_sizes != new_sizes:
+        raise ValueError(
+            f"Cannot change dimensions from {old_sizes!r} to {new_sizes!r}"
         )
 
     dsk: dict = {}

@@ -7,10 +7,11 @@ import os
 import random
 import shutil
 from collections import defaultdict
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack
 from itertools import count
-from typing import Any, Mapping
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -32,7 +33,7 @@ from distributed.shuffle._scheduler_extension import (
     ShuffleSchedulerExtension,
     get_worker_for_range_sharding,
 )
-from distributed.shuffle._shuffle import P2PShuffleLayer, ShuffleId, barrier_key
+from distributed.shuffle._shuffle import ShuffleId, barrier_key
 from distributed.shuffle._worker_extension import (
     DataFrameShuffleRun,
     ShuffleRun,
@@ -42,7 +43,10 @@ from distributed.shuffle._worker_extension import (
     split_by_partition,
     split_by_worker,
 )
-from distributed.shuffle.tests.utils import AbstractShuffleTestPool
+from distributed.shuffle.tests.utils import (
+    AbstractShuffleTestPool,
+    invoke_annotation_chaos,
+)
 from distributed.utils import Deadline
 from distributed.utils_test import (
     cluster,
@@ -57,6 +61,11 @@ try:
     import pyarrow as pa
 except ImportError:
     pa = None
+
+
+@pytest.fixture(params=[0, 0.3, 1], ids=["none", "some", "all"])
+def lose_annotations(request):
+    return request.param
 
 
 async def clean_worker(
@@ -102,15 +111,21 @@ async def test_minimal_version(c, s, a, b):
         await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
 
 
+@pytest.mark.parametrize("npartitions", [None, 1, 20])
 @gen_cluster(client=True)
-async def test_basic_integration(c, s, a, b):
+async def test_basic_integration(c, s, a, b, lose_annotations, npartitions):
+    await invoke_annotation_chaos(lose_annotations, c)
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
-    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p", npartitions=npartitions)
+    if npartitions is None:
+        assert out.npartitions == df.npartitions
+    else:
+        assert out.npartitions == npartitions
     x, y = c.compute([df.x.size, out.x.size])
     x = await x
     y = await y
@@ -121,40 +136,26 @@ async def test_basic_integration(c, s, a, b):
     await clean_scheduler(s)
 
 
-def test_raise_on_fuse_optimization():
-    df = dask.datasets.timeseries(
-        start="2000-01-01",
-        end="2000-01-10",
-        dtypes={"x": float, "y": float},
-        freq="10 s",
-    )
-    with dask.config.set({"optimization.fuse.active": True}):
-        with pytest.raises(RuntimeError, match="fuse optimization"):
-            dd.shuffle.shuffle(df, "x", shuffle="p2p")
-
-
+@pytest.mark.parametrize("npartitions", [None, 1, 20])
 @gen_cluster(client=True)
-async def test_raise_on_lost_annotation(c, s, a, b):
+async def test_shuffle_with_array_conversion(c, s, a, b, lose_annotations, npartitions):
+    await invoke_annotation_chaos(lose_annotations, c)
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
-    df = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p", npartitions=npartitions).values
 
-    # Manually drop "shuffle" annotation
-    for layer in df.dask.layers.values():
-        if isinstance(layer, P2PShuffleLayer):
-            del layer.annotations["shuffle"]
-
-    with raises_with_cause(
-        RuntimeError,
-        "shuffle_transfer failed",
-        RuntimeError,
-        "lost its ``shuffle`` annotation",
-    ):
-        await c.compute(df)
+    if npartitions == 1:
+        # FIXME: distributed#7816
+        with raises_with_cause(
+            RuntimeError, "shuffle_transfer failed", RuntimeError, "Barrier task"
+        ):
+            await c.compute(out)
+    else:
+        await c.compute(out)
 
     await clean_worker(a)
     await clean_worker(b)
@@ -176,7 +177,8 @@ def test_shuffle_before_categorize(loop_in_thread):
 
 
 @gen_cluster(client=True)
-async def test_concurrent(c, s, a, b):
+async def test_concurrent(c, s, a, b, lose_annotations):
+    await invoke_annotation_chaos(lose_annotations, c)
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -231,7 +233,7 @@ async def wait_until_worker_has_tasks(
             [
                 key
                 for key, ts in scheduler.tasks.items()
-                if prefix in key and ts.state == "memory" and ws in ts.who_has
+                if prefix in key and ts.state == "memory" and {ws} == ts.who_has
             ]
         )
         < count
@@ -948,13 +950,17 @@ async def test_crashed_worker_after_shuffle(c, s, a):
         block_event = Event()
         with dask.annotate(workers=[n.worker_address], allow_other_workers=True):
             out = block(out, in_event, block_event)
-        fut = c.compute(out)
+        out = c.compute(out)
 
+        await wait_until_worker_has_tasks("shuffle-p2p", n.worker_address, 1, s)
         await in_event.wait()
         await n.process.process.kill()
-        block_event.set()
-        with pytest.raises(RuntimeError):
-            await fut
+        await block_event.set()
+
+        out = await out
+        result = out.x.size
+        expected = await c.compute(df.x.size)
+        assert result == expected
 
         await c.close()
         await clean_worker(a)
@@ -973,12 +979,16 @@ async def test_crashed_worker_after_shuffle_persisted(c, s, a):
         )
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
         out = out.persist()
+
+        await wait_until_worker_has_tasks("shuffle-p2p", n.worker_address, 1, s)
         await out
 
         await n.process.process.kill()
 
-        with pytest.raises(RuntimeError):
-            await c.compute(out.sum())
+        result, expected = c.compute([out.x.size, df.x.size])
+        result = await result
+        expected = await expected
+        assert result == expected
 
         await c.close()
         await clean_worker(a)
@@ -1233,7 +1243,7 @@ async def test_basic_lowlevel_shuffle(
 
     for part in range(npartitions):
         worker_for_mapping[part] = get_worker_for_range_sharding(
-            part, workers, npartitions
+            npartitions, part, workers
         )
     assert len(set(worker_for_mapping.values())) == min(n_workers, npartitions)
     schema = pa.Schema.from_pandas(dfs[0])
@@ -1278,7 +1288,7 @@ async def test_basic_lowlevel_shuffle(
             all_parts = []
             for part, worker in worker_for_mapping.items():
                 s = local_shuffle_pool.shuffles[worker]
-                all_parts.append(s.get_output_partition(part))
+                all_parts.append(s.get_output_partition(part, f"key-{part}"))
 
             all_parts = await asyncio.gather(*all_parts)
 
@@ -1308,7 +1318,7 @@ async def test_error_offload(tmp_path, loop_in_thread):
 
     for part in range(npartitions):
         worker_for_mapping[part] = w = get_worker_for_range_sharding(
-            part, workers, npartitions
+            npartitions, part, workers
         )
         partitions_for_worker[w].append(part)
     schema = pa.Schema.from_pandas(dfs[0])
@@ -1362,7 +1372,7 @@ async def test_error_send(tmp_path, loop_in_thread):
 
     for part in range(npartitions):
         worker_for_mapping[part] = w = get_worker_for_range_sharding(
-            part, workers, npartitions
+            npartitions, part, workers
         )
         partitions_for_worker[w].append(part)
     schema = pa.Schema.from_pandas(dfs[0])
@@ -1415,7 +1425,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
 
     for part in range(npartitions):
         worker_for_mapping[part] = w = get_worker_for_range_sharding(
-            part, workers, npartitions
+            npartitions, part, workers
         )
         partitions_for_worker[w].append(part)
     schema = pa.Schema.from_pandas(dfs[0])
