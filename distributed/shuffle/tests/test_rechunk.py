@@ -83,7 +83,9 @@ async def test_lowlevel_rechunk(
 
     ind_chunks = [[(i, x) for i, x in enumerate(dim)] for dim in old]
     ind_chunks = [list(zip(x, y)) for x, y in product(*ind_chunks)]
-    old_chunks = {idx: np.random.random(chunk) for idx, chunk in ind_chunks}
+    old_chunks = {
+        idx: np.random.default_rng().random(chunk) for idx, chunk in ind_chunks
+    }
 
     workers = list("abcdefghijklmn")[:n_workers]
 
@@ -161,7 +163,7 @@ async def test_rechunk_configuration(c, s, *ws, config_value, keyword):
     --------
     dask.array.tests.test_rechunk.test_rechunk_1d
     """
-    a = np.random.uniform(0, 1, 30)
+    a = np.random.default_rng().uniform(0, 1, 30)
     x = da.from_array(a, chunks=((10,) * 3,))
     new = ((6,) * 5,)
     config = {"array.rechunk.method": config_value} if config_value is not None else {}
@@ -185,7 +187,7 @@ async def test_rechunk_2d(c, s, *ws):
     --------
     dask.array.tests.test_rechunk.test_rechunk_2d
     """
-    a = np.random.uniform(0, 1, 300).reshape((10, 30))
+    a = np.random.default_rng().uniform(0, 1, 300).reshape((10, 30))
     x = da.from_array(a, chunks=((1, 2, 3, 4), (5,) * 6))
     new = ((5, 5), (15,) * 2)
     x2 = rechunk(x, chunks=new, method="p2p")
@@ -202,7 +204,7 @@ async def test_rechunk_4d(c, s, *ws):
     dask.array.tests.test_rechunk.test_rechunk_4d
     """
     old = ((5, 5),) * 4
-    a = np.random.uniform(0, 1, 10000).reshape((10,) * 4)
+    a = np.random.default_rng().uniform(0, 1, 10000).reshape((10,) * 4)
     x = da.from_array(a, chunks=old)
     new = (
         (10,),
@@ -225,7 +227,7 @@ async def test_rechunk_with_single_output_chunk_raises(c, s, *ws):
     dask.array.tests.test_rechunk.test_rechunk_4d
     """
     old = ((5, 5),) * 4
-    a = np.random.uniform(0, 1, 10000).reshape((10,) * 4)
+    a = np.default_rng().uniform(0, 1, 10000).reshape((10,) * 4)
     x = da.from_array(a, chunks=old)
     new = ((10,),) * 4
     x2 = rechunk(x, chunks=new, method="p2p")
@@ -244,7 +246,7 @@ async def test_rechunk_expand(c, s, *ws):
     --------
     dask.array.tests.test_rechunk.test_rechunk_expand
     """
-    a = np.random.uniform(0, 1, 100).reshape((10, 10))
+    a = np.random.default_rng().uniform(0, 1, 100).reshape((10, 10))
     x = da.from_array(a, chunks=(5, 5))
     y = x.rechunk(chunks=((3, 3, 3, 1), (3, 3, 3, 1)), method="p2p")
     assert np.all(await c.compute(y) == a)
@@ -258,7 +260,7 @@ async def test_rechunk_expand2(c, s, *ws):
     dask.array.tests.test_rechunk.test_rechunk_expand2
     """
     (a, b) = (3, 2)
-    orig = np.random.uniform(0, 1, a**b).reshape((a,) * b)
+    orig = np.random.default_rng().uniform(0, 1, a**b).reshape((a,) * b)
     for off, off2 in product(range(1, a - 1), range(1, a - 1)):
         old = ((a - off, off),) * b
         x = da.from_array(orig, chunks=old)
@@ -280,7 +282,7 @@ async def test_rechunk_method(c, s, *ws):
     """
     old = ((5, 2, 3),) * 4
     new = ((3, 3, 3, 1),) * 4
-    a = np.random.uniform(0, 1, 10000).reshape((10,) * 4)
+    a = np.random.default_rng().uniform(0, 1, 10000).reshape((10,) * 4)
     x = da.from_array(a, chunks=old)
     x2 = x.rechunk(chunks=new, method="p2p")
     assert x2.chunks == new
@@ -298,7 +300,7 @@ async def test_rechunk_blockshape(c, s, *ws):
     new_shape, new_chunks = (10, 10), (4, 3)
     new_blockdims = normalize_chunks(new_chunks, new_shape)
     old_chunks = ((4, 4, 2), (3, 3, 3, 1))
-    a = np.random.uniform(0, 1, 100).reshape((10, 10))
+    a = np.random.default_rng().uniform(0, 1, 100).reshape((10, 10))
     x = da.from_array(a, chunks=old_chunks)
     check1 = rechunk(x, chunks=new_chunks, method="p2p")
     assert check1.chunks == new_blockdims
@@ -535,7 +537,7 @@ async def test_rechunk_unknown_from_pandas(c, s, *ws):
     dd = pytest.importorskip("dask.dataframe")
     pd = pytest.importorskip("pandas")
 
-    arr = np.random.randn(50, 10)
+    arr = np.default_rng().standard_normal((50, 10))
     x = dd.from_pandas(pd.DataFrame(arr), 2).values
     result = x.rechunk((None, (5, 5)), method="p2p")
     assert np.isnan(x.chunks[0]).all()
