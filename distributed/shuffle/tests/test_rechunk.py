@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import random
 import warnings
 
@@ -227,7 +228,7 @@ async def test_rechunk_with_single_output_chunk_raises(c, s, *ws):
     dask.array.tests.test_rechunk.test_rechunk_4d
     """
     old = ((5, 5),) * 4
-    a = np.default_rng().uniform(0, 1, 10000).reshape((10,) * 4)
+    a = np.random.default_rng().uniform(0, 1, 10000).reshape((10,) * 4)
     x = da.from_array(a, chunks=old)
     new = ((10,),) * 4
     x2 = rechunk(x, chunks=new, method="p2p")
@@ -465,26 +466,54 @@ async def test_rechunk_same(c, s, *ws):
     assert x is y
 
 
-def test_rechunk_same_fully_unknown():
+@gen_cluster(client=True)
+async def test_rechunk_same_fully_unknown(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_same_fully_unknown
+    """
     dd = pytest.importorskip("dask.dataframe")
     x = da.ones(shape=(10, 10), chunks=(5, 10))
     y = dd.from_array(x).values
     new_chunks = ((np.nan, np.nan), (10,))
     assert y.chunks == new_chunks
-    result = y.rechunk(new_chunks)
+    result = y.rechunk(new_chunks, method="p2p")
     assert y is result
 
 
-def test_rechunk_same_fully_unknown_floats():
+@gen_cluster(client=True)
+async def test_rechunk_same_fully_unknown_floats(c, s, *ws):
     """Similar to test_rechunk_same_fully_unknown but testing the behavior if
     ``float("nan")`` is used instead of the recommended ``np.nan``
+
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_same_fully_unknown_floats
     """
     dd = pytest.importorskip("dask.dataframe")
     x = da.ones(shape=(10, 10), chunks=(5, 10))
     y = dd.from_array(x).values
     new_chunks = ((float("nan"), float("nan")), (10,))
-    result = y.rechunk(new_chunks)
+    result = y.rechunk(new_chunks, method="p2p")
     assert y is result
+
+
+@gen_cluster(client=True)
+async def test_rechunk_same_partially_unknown(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_same_partially_unknown
+    """
+    dd = pytest.importorskip("dask.dataframe")
+    x = da.ones(shape=(10, 10), chunks=(5, 10))
+    y = dd.from_array(x).values
+    z = da.concatenate([x, y])
+    new_chunks = ((5, 5, np.nan, np.nan), (10,))
+    assert z.chunks == new_chunks
+    result = z.rechunk(new_chunks, method="p2p")
+    assert z is result
 
 
 @gen_cluster(client=True)
@@ -537,7 +566,7 @@ async def test_rechunk_unknown_from_pandas(c, s, *ws):
     dd = pytest.importorskip("dask.dataframe")
     pd = pytest.importorskip("pandas")
 
-    arr = np.default_rng().standard_normal((50, 10))
+    arr = np.random.default_rng().standard_normal((50, 10))
     x = dd.from_pandas(pd.DataFrame(arr), 2).values
     result = x.rechunk((None, (5, 5)), method="p2p")
     assert np.isnan(x.chunks[0]).all()
@@ -583,11 +612,11 @@ async def test_rechunk_unknown_from_array(c, s, *ws):
     ],
 )
 @gen_cluster(client=True)
-async def test_rechunk_unknown(c, s, *ws, x, chunks):
+async def test_rechunk_with_fully_unknown_dimension(c, s, *ws, x, chunks):
     """
     See Also
     --------
-    dask.array.tests.test_rechunk.test_rechunk_unknown
+    dask.array.tests.test_rechunk.test_rechunk_with_fully_unknown_dimension
     """
     dd = pytest.importorskip("dask.dataframe")
     y = dd.from_array(x).values
@@ -598,28 +627,67 @@ async def test_rechunk_unknown(c, s, *ws, x, chunks):
     assert_eq(await c.compute(result), await c.compute(expected))
 
 
+@pytest.mark.parametrize(
+    "x, chunks",
+    [
+        (da.ones(shape=(50, 10), chunks=(25, 10)), (None, 5)),
+        (da.ones(shape=(50, 10), chunks=(25, 10)), {1: 5}),
+        (da.ones(shape=(50, 10), chunks=(25, 10)), (None, (5, 5))),
+        (da.ones(shape=(1000, 10), chunks=(5, 10)), (None, 5)),
+        (da.ones(shape=(1000, 10), chunks=(5, 10)), {1: 5}),
+        (da.ones(shape=(1000, 10), chunks=(5, 10)), (None, (5, 5))),
+        (da.ones(shape=(10, 10), chunks=(10, 10)), (None, 5)),
+        (da.ones(shape=(10, 10), chunks=(10, 10)), {1: 5}),
+        (da.ones(shape=(10, 10), chunks=(10, 10)), (None, (5, 5))),
+        (da.ones(shape=(10, 10), chunks=(10, 2)), (None, 5)),
+        (da.ones(shape=(10, 10), chunks=(10, 2)), {1: 5}),
+        (da.ones(shape=(10, 10), chunks=(10, 2)), (None, (5, 5))),
+    ],
+)
 @gen_cluster(client=True)
-async def test_rechunk_unknown_explicit(c, s, *ws):
+async def test_rechunk_with_partially_unknown_dimension(c, s, *ws, x, chunks):
     """
     See Also
     --------
-    dask.array.tests.test_rechunk.test_rechunk_unknown_explicit
+    dask.array.tests.test_rechunk.test_rechunk_with_partially_unknown_dimension
+    """
+    dd = pytest.importorskip("dask.dataframe")
+    y = dd.from_array(x).values
+    z = da.concatenate([x, y])
+    xx = da.concatenate([x, x])
+    result = z.rechunk(chunks, method="p2p")
+    expected = xx.rechunk(chunks, method="p2p")
+    assert_chunks_match(result.chunks, expected.chunks)
+    assert_eq(await c.compute(result), await c.compute(expected))
+
+
+@pytest.mark.parametrize(
+    "new_chunks",
+    [
+        ((np.nan, np.nan), (5, 5)),
+        ((math.nan, math.nan), (5, 5)),
+        ((float("nan"), float("nan")), (5, 5)),
+    ],
+)
+@gen_cluster(client=True)
+async def test_rechunk_with_fully_unknown_dimension_explicit(c, s, *ws, new_chunks):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_with_fully_unknown_dimension_explicit
     """
     dd = pytest.importorskip("dask.dataframe")
     x = da.ones(shape=(10, 10), chunks=(5, 2))
     y = dd.from_array(x).values
-    result = y.rechunk(((np.nan, np.nan), (5, 5)), method="p2p")
+    result = y.rechunk(new_chunks, method="p2p")
     expected = x.rechunk((None, (5, 5)), method="p2p")
     assert_chunks_match(result.chunks, expected.chunks)
     assert_eq(await c.compute(result), await c.compute(expected))
 
 
 def assert_chunks_match(left, right):
-    for x, y in zip(left, right):
-        if np.isnan(x).any():
-            assert np.isnan(x).all()
-        else:
-            assert x == y
+    for ldim, rdim in zip(left, right):
+        assert all(np.isnan(l) or l == r for l, r in zip(ldim, rdim))
 
 
 @gen_cluster(client=True)
@@ -631,9 +699,17 @@ async def test_rechunk_unknown_raises(c, s, *ws):
     """
     dd = pytest.importorskip("dask.dataframe")
 
-    x = dd.from_array(da.ones(shape=(10, 10), chunks=(5, 5))).values
-    with pytest.raises(ValueError):
-        x.rechunk((None, (5, 5, 5)), method="p2p")
+    x = da.ones(shape=(10, 10), chunks=(5, 5))
+    y = dd.from_array(x).values
+    with pytest.raises(ValueError, match="Chunks do not add"):
+        y.rechunk((None, (5, 5, 5)), method="p2p")
+
+    with pytest.raises(ValueError, match="Chunks must be unchanging"):
+        y.rechunk(((5, 5), (5, 5)), method="p2p")
+
+    with pytest.raises(ValueError, match="Chunks must be unchanging"):
+        z = da.concatenate([x, y])
+        z.rechunk(((5, 3, 2, np.nan, np.nan), (5, 5)), method="p2p")
 
 
 @gen_cluster(client=True)
