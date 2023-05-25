@@ -3011,12 +3011,10 @@ class Client(SyncMethodMixin):
                 "Ignored modules must be a list. Instead got "
                 f"({type(ignore_modules)}, {ignore_modules})"
             )
+        pattern: re.Pattern | None = None
         if stacklevel is None:
-            pattern: re.Pattern | None
             if ignore_modules:
                 pattern = re.compile("|".join([f"(?:{mod})" for mod in ignore_modules]))
-            else:
-                pattern = None
         else:
             # stacklevel 0 or less - shows dask internals which likely isn't helpful
             stacklevel = stacklevel if stacklevel > 0 else 1
