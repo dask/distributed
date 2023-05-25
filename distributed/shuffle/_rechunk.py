@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import math
 from collections import defaultdict
-from itertools import product
+from itertools import compress, product
 from typing import TYPE_CHECKING, NamedTuple
 
 import dask
@@ -71,9 +72,6 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
     if x.size == 0:
         # Special case for empty array, as the algorithm below does not behave correctly
         return da.empty(x.shape, chunks=chunks, dtype=x.dtype)
-
-    import math
-    from itertools import compress
 
     old_chunks = x.chunks
     new_chunks = chunks
