@@ -315,6 +315,10 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
             memory_limiter_comms=memory_limiter_comms,
             memory_limiter_disk=memory_limiter_disk,
         )
+        from dask.array.core import normalize_chunks
+
+        old = normalize_chunks(old)
+        new = normalize_chunks(new)
         self.old = old
         self.new = new
         partitions_of = defaultdict(list)
