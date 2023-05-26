@@ -108,7 +108,6 @@ class ActiveMemoryManagerExtension:
         self.measure = measure
 
         if register:
-            scheduler.extensions["amm"] = self
             scheduler.handlers["amm_handler"] = self.amm_handler
 
         if interval is None:

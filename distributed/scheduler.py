@@ -6875,8 +6875,8 @@ class Scheduler(SchedulerState, ServerNode):
                 return {}
 
             stop_amm = False
-            amm: ActiveMemoryManagerExtension = self.extensions["amm"]
-            if not amm.running:
+            amm: ActiveMemoryManagerExtension | None = self.extensions.get("amm")
+            if not amm or not amm.running:
                 amm = ActiveMemoryManagerExtension(
                     self, policies=set(), register=False, start=True, interval=2.0
                 )

@@ -185,7 +185,6 @@ class MemorySamplerExtension:
 
     def __init__(self, scheduler: Scheduler):
         self.scheduler = scheduler
-        self.scheduler.extensions["memory_sampler"] = self
         self.scheduler.handlers["memory_sampler_start"] = self.start
         self.scheduler.handlers["memory_sampler_stop"] = self.stop
         self.samples = {}
