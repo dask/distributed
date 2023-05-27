@@ -7236,8 +7236,8 @@ async def test_computation_ignore_ipython_frames(s, a, b, nframes):
     def normalize(s):
         return re.sub(r"\s+", " ", s).strip()
 
-    assert normalize(code[0]) == normalize(source_code)
-    assert normalize(code[1]) == "def bar(x): return client.map(foo, range(x))"
+    assert normalize(code[0].code) == normalize(source_code)
+    assert normalize(code[1].code) == "def bar(x): return client.map(foo, range(x))"
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
