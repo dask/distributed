@@ -1640,7 +1640,7 @@ class Worker(BaseWorker, ServerNode):
 
         This first informs the scheduler that we're shutting down, and asks it
         to move our data elsewhere. Afterwards, we close as normal
-        """
+        """         
         if self.status in (Status.closing, Status.closing_gracefully):
             await self.finished()
 
@@ -1648,6 +1648,7 @@ class Worker(BaseWorker, ServerNode):
             return
 
         logger.info("Closing worker gracefully: %s. Reason: %s", self.address, reason)
+            
         # Wait for all tasks to leave the worker and don't accept any new ones.
         # Scheduler.retire_workers will set the status to closing_gracefully and push it
         # back to this worker.
@@ -1659,12 +1660,13 @@ class Worker(BaseWorker, ServerNode):
         )
         if restart is None:
             restart = self.lifetime_restart
-        
-        if self.drain:
-            logger.info(f"Draining worker")
-            while self.state.executed_count:
-                await asyncio.sleep(0.1)
                 
+        if self.drain:
+            logger.info(f"Draining worker, waiting on {len(self.state.all_running_tasks)=} threads. ")
+            while len(self.state.all_running_tasks):
+                await asyncio.sleep(0.1)
+            logger.info(f"Draining has finished. ")
+            
         await self.close(nanny=not restart, reason=reason)
 
     async def wait_until_closed(self):
