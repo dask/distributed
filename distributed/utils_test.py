@@ -2577,3 +2577,8 @@ class SizeOf:
 def gen_nbytes(nbytes: int) -> SizeOf:
     """A function that emulates exactly nbytes on the worker data structure."""
     return SizeOf(nbytes)
+
+
+def relative_frame_linenumber(frame):
+    """Line number of call relative to the frame"""
+    return inspect.getframeinfo(frame).lineno - frame.f_code.co_firstlineno

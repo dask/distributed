@@ -68,6 +68,7 @@ from distributed import versions as version_module
 from distributed._stories import scheduler_story
 from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
 from distributed.batched import BatchedSend
+from distributed.client import SourceCode
 from distributed.collections import HeapSet
 from distributed.comm import (
     Comm,
@@ -848,7 +849,7 @@ class Computation:
 
     start: float
     groups: set[TaskGroup]
-    code: SortedSet
+    code: SortedSet[SourceCode]
     id: uuid.UUID
     annotations: dict
 
@@ -6877,8 +6878,8 @@ class Scheduler(SchedulerState, ServerNode):
                 return {}
 
             stop_amm = False
-            amm: ActiveMemoryManagerExtension = self.extensions["amm"]
-            if not amm.running:
+            amm: ActiveMemoryManagerExtension | None = self.extensions.get("amm")
+            if not amm or not amm.running:
                 amm = ActiveMemoryManagerExtension(
                     self, policies=set(), register=False, start=True, interval=2.0
                 )

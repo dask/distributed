@@ -1,6 +1,43 @@
 Changelog
 =========
 
+.. _v2023.5.1:
+
+2023.5.1
+--------
+
+Released on May 26, 2023
+
+.. note::
+
+  This release drops support for Python 3.8. As of this release
+  Dask supports Python 3.9, 3.10, and 3.11.
+  See `this community issue <https://github.com/dask/community/issues/315>`_
+  for more details.
+
+Enhancements
+^^^^^^^^^^^^
+- Exclude IPython code from computations (:pr:`7788`) `Miles`_
+- Drop Python 3.8 support (:pr:`7840`) `Thomas Grainger`_
+- Add ``storage_options`` to ``performance_report`` (:pr:`7636`) `ypogorelova`_
+- Don't warn about mismatched ``msgpack`` (:pr:`7839`) `Irina Truong`_
+- Clean up ``sys.path`` on ``Server`` shutdown (:pr:`7838`) `James Bourbeau`_
+- Dashboard: Fine Performance Metrics (:pr:`7725`) `Miles`_
+
+Bug Fixes
+^^^^^^^^^
+- Properly handle unknown chunk sizes in P2P rechunking (:pr:`7856`) `Hendrik Makait`_
+- Minimal change to work around (:issue:`7726`) / support for UCX (:pr:`7851`) `Benjamin Zaitlen`_
+- Don't end computations until cluster is truly idle (:pr:`7790`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Explicitly install ``anaconda-client`` from conda-forge when uploading conda nightlies (:pr:`7861`) `Charles Blackmon-Luca`_
+- Fix ``is_idle`` docs build (:pr:`7854`) `James Bourbeau`_
+- Add tests for P2P barrier fusion (:pr:`7845`) `Hendrik Makait`_
+- Avoid ``DeprecationWarning`` in ``cupy`` dispatch registration (:pr:`7836`) `Lawrence Mitchell`_
+
+
 .. _v2023.5.0:
 
 2023.5.0
@@ -4950,3 +4987,4 @@ significantly without many new features.
 .. _`Eugene Druzhynin`: https://github.com/eugene-graft
 .. _`ypogorelova`: https://github.com/ypogorelova
 .. _`Patrick Hoefler`: https://github.com/phofl
+.. _`Irina Truong`: https://github.com/j-bennet

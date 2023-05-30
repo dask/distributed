@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import math
 from collections import defaultdict
-from itertools import product
+from itertools import compress, product
 from typing import TYPE_CHECKING, NamedTuple
 
 import dask
@@ -71,6 +72,34 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
     if x.size == 0:
         # Special case for empty array, as the algorithm below does not behave correctly
         return da.empty(x.shape, chunks=chunks, dtype=x.dtype)
+
+    old_chunks = x.chunks
+    new_chunks = chunks
+
+    def is_unknown(dim: ChunkedAxis) -> bool:
+        return any(math.isnan(chunk) for chunk in dim)
+
+    old_is_unknown = [is_unknown(dim) for dim in old_chunks]
+    new_is_unknown = [is_unknown(dim) for dim in new_chunks]
+
+    if old_is_unknown != new_is_unknown or any(
+        new != old for new, old in compress(zip(old_chunks, new_chunks), old_is_unknown)
+    ):
+        raise ValueError(
+            "Chunks must be unchanging along dimensions with missing values.\n\n"
+            "A possible solution:\n  x.compute_chunk_sizes()"
+        )
+
+    old_known = [dim for dim, unknown in zip(old_chunks, old_is_unknown) if not unknown]
+    new_known = [dim for dim, unknown in zip(new_chunks, new_is_unknown) if not unknown]
+
+    old_sizes = [sum(o) for o in old_known]
+    new_sizes = [sum(n) for n in new_known]
+
+    if old_sizes != new_sizes:
+        raise ValueError(
+            f"Cannot change dimensions from {old_sizes!r} to {new_sizes!r}"
+        )
 
     dsk: dict = {}
     token = tokenize(x, chunks)
