@@ -1044,8 +1044,21 @@ class TaskGroup:
     last_worker_tasks_left: int
 
     prefix: TaskPrefix | None
+
+    #: Earliest time when a task belonging to this group started computing;
+    #: 0 if no task has *finished* computing yet
+    #:
+    #: Notes
+    #: -----
+    #: This is not updated until at least one task has *finished* computing.
+    #: It could move backwards as tasks complete.
     start: float
+
+    #: Latest time when a task belonging to this group finished computing,
+    #: 0 if no task has finished computing yet
     stop: float
+
+    #: Cumulative duration of all completed actions, by action
     all_durations: defaultdict[str, float]
 
     __slots__ = tuple(__annotations__)
@@ -1066,12 +1079,13 @@ class TaskGroup:
 
     def add_duration(self, action: str, start: float, stop: float) -> None:
         duration = stop - start
+        self.duration += duration
         self.all_durations[action] += duration
         if action == "compute":
             if self.stop < stop:
                 self.stop = stop
-            self.start = self.start or start
-        self.duration += duration
+            if self.start == 0.0 or self.start > start:
+                self.start = start
         assert self.prefix is not None
         self.prefix.add_duration(action, start, stop)
 
