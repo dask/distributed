@@ -68,6 +68,7 @@ from distributed import versions as version_module
 from distributed._stories import scheduler_story
 from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
 from distributed.batched import BatchedSend
+from distributed.client import SourceCode
 from distributed.collections import HeapSet
 from distributed.comm import (
     Comm,
@@ -848,7 +849,7 @@ class Computation:
 
     start: float
     groups: set[TaskGroup]
-    code: SortedSet
+    code: SortedSet[SourceCode]
     id: uuid.UUID
     annotations: dict
 
