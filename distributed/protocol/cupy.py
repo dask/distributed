@@ -85,7 +85,7 @@ if MatDescriptor is not None:
     def reduce_matdescriptor(other):
         # Pickling MatDescriptor errors
         # xref: https://github.com/cupy/cupy/issues/3061
-        return cupy.cusparse.MatDescriptor.create, ()
+        return MatDescriptor.create, ()
 
     copyreg.pickle(MatDescriptor, reduce_matdescriptor)
 
