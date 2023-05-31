@@ -42,6 +42,24 @@ async def test_submit_from_worker(c, s, a, b):
     assert len([id for id in s.clients if id.lower().startswith("client")]) == 1
 
 
+@gen_cluster(client=True)
+async def test_submit_from_worker_async(c, s, a, b):
+    async def func(x):
+        with worker_client() as c:
+            x = c.submit(inc, x)
+            y = c.submit(double, x)
+            return await x + await y
+
+    x, y = c.map(func, [10, 20])
+    xx, yy = await c.gather([x, y])
+
+    assert xx == 10 + 1 + (10 + 1) * 2
+    assert yy == 20 + 1 + (20 + 1) * 2
+
+    assert len(s.transition_log) > 10
+    assert len([id for id in s.clients if id.lower().startswith("client")]) == 1
+
+
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
 async def test_scatter_from_worker(c, s, a, b):
     def func():
