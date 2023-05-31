@@ -86,7 +86,7 @@ class Span:
     groups: set[TaskGroup]
 
     #: Time when the span first appeared on the scheduler.
-    #: The same property on parent spans is always lesser or equal than this.
+    #: The same property on parent spans is always less than or equal to this.
     #:
     #: See also
     #: --------
