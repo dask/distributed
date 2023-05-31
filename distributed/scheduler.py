@@ -99,6 +99,7 @@ from distributed.recreate_tasks import ReplayTaskScheduler
 from distributed.security import Security
 from distributed.semaphore import SemaphoreExtension
 from distributed.shuffle import ShuffleSchedulerExtension
+from distributed.spans import SpansExtension
 from distributed.stealing import WorkStealing
 from distributed.utils import (
     All,
@@ -170,6 +171,7 @@ DEFAULT_EXTENSIONS = {
     "amm": ActiveMemoryManagerExtension,
     "memory_sampler": MemorySamplerExtension,
     "shuffle": ShuffleSchedulerExtension,
+    "spans": SpansExtension,
     "stealing": WorkStealing,
 }
 
@@ -4424,6 +4426,12 @@ class Scheduler(SchedulerState, ServerNode):
                     recommendations[ts.key] = "erred"
                     break
 
+        spans_ext: SpansExtension | None = self.extensions.get("spans")
+        if spans_ext:
+            span_annotations = spans_ext.new_tasks(new_tasks)
+            if span_annotations:
+                resolved_annotations["span"] = span_annotations
+
         for plugin in list(self.plugins.values()):
             try:
                 plugin.update_graph(
@@ -4528,7 +4536,7 @@ class Scheduler(SchedulerState, ServerNode):
                     ...
                 }
         """
-        resolved_annotations: dict[str, dict[str, Any]] = defaultdict(dict)
+        resolved_annotations: defaultdict[str, dict[str, Any]] = defaultdict(dict)
         for ts in tasks:
             key = ts.key
             # This could be a typed dict

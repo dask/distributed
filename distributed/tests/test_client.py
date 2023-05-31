@@ -6886,9 +6886,9 @@ async def test_annotations_task_state(c, s, a, b):
     with dask.config.set(optimization__fuse__active=False):
         x = await x.persist()
 
-    assert all(
-        {"qux": "bar", "priority": 100} == ts.annotations for ts in s.tasks.values()
-    )
+    for ts in s.tasks.values():
+        assert ts.annotations["qux"] == "bar"
+        assert ts.annotations["priority"] == 100
 
 
 @pytest.mark.parametrize("fn", ["compute", "persist"])
@@ -6904,7 +6904,8 @@ async def test_annotations_compute_time(c, s, a, b, fn):
 
     await wait(fut)
     assert s.tasks
-    assert all(ts.annotations == {"foo": "bar"} for ts in s.tasks.values())
+    for ts in s.tasks.values():
+        assert ts.annotations["foo"] == "bar"
 
 
 @pytest.mark.xfail(reason="https://github.com/dask/dask/issues/7036")
@@ -6936,9 +6937,9 @@ async def test_annotations_priorities(c, s, a, b):
     with dask.config.set(optimization__fuse__active=False):
         x = await x.persist()
 
-    assert all("15" in str(ts.priority) for ts in s.tasks.values())
-    assert all(ts.priority[0] == -15 for ts in s.tasks.values())
-    assert all({"priority": 15} == ts.annotations for ts in s.tasks.values())
+    for ts in s.tasks.values():
+        assert ts.priority[0] == -15
+        assert ts.annotations["priority"] == 15
 
 
 @gen_cluster(client=True)
@@ -6951,8 +6952,10 @@ async def test_annotations_workers(c, s, a, b):
     with dask.config.set(optimization__fuse__active=False):
         x = await x.persist()
 
-    assert all({"workers": [a.address]} == ts.annotations for ts in s.tasks.values())
-    assert all({a.address} == ts.worker_restrictions for ts in s.tasks.values())
+    for ts in s.tasks.values():
+        assert ts.annotations["workers"] == [a.address]
+        assert ts.worker_restrictions == {a.address}
+
     assert a.data
     assert not b.data
 
@@ -6967,8 +6970,9 @@ async def test_annotations_retries(c, s, a, b):
     with dask.config.set(optimization__fuse__active=False):
         x = await x.persist()
 
-    assert all(ts.retries == 2 for ts in s.tasks.values())
-    assert all(ts.annotations == {"retries": 2} for ts in s.tasks.values())
+    for ts in s.tasks.values():
+        assert ts.retries == 2
+        assert ts.annotations["retries"] == 2
 
 
 @gen_cluster(client=True)
@@ -7018,8 +7022,9 @@ async def test_annotations_resources(c, s, a, b):
     with dask.config.set(optimization__fuse__active=False):
         x = await x.persist()
 
-    assert all([{"GPU": 1} == ts.resource_restrictions for ts in s.tasks.values()])
-    assert all([{"resources": {"GPU": 1}} == ts.annotations for ts in s.tasks.values()])
+    for ts in s.tasks.values():
+        assert ts.resource_restrictions == {"GPU": 1}
+        assert ts.annotations["resources"] == {"GPU": 1}
 
 
 @gen_cluster(
@@ -7054,14 +7059,11 @@ async def test_annotations_loose_restrictions(c, s, a, b):
     with dask.config.set(optimization__fuse__active=False):
         x = await x.persist()
 
-    assert all(not ts.worker_restrictions for ts in s.tasks.values())
-    assert all({"fake"} == ts.host_restrictions for ts in s.tasks.values())
-    assert all(
-        [
-            {"workers": ["fake"], "allow_other_workers": True} == ts.annotations
-            for ts in s.tasks.values()
-        ]
-    )
+    for ts in s.tasks.values():
+        assert not ts.worker_restrictions
+        assert ts.host_restrictions == {"fake"}
+        assert ts.annotations["workers"] == ["fake"]
+        assert ts.annotations["allow_other_workers"] is True
 
 
 @gen_cluster(
@@ -7079,8 +7081,9 @@ async def test_annotations_submit_map(c, s, a, b):
 
     await wait([f, *fs])
 
-    assert all([{"foo": 1} == ts.resource_restrictions for ts in s.tasks.values()])
-    assert all([{"resources": {"foo": 1}} == ts.annotations for ts in s.tasks.values()])
+    for ts in s.tasks.values():
+        assert ts.resource_restrictions == {"foo": 1}
+        assert ts.annotations["resources"] == {"foo": 1}
     assert not b.state.tasks
 
 
