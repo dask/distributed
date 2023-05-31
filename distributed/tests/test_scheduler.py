@@ -50,6 +50,7 @@ from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
     BrokenComm,
+    NoSchedulerDelayWorker,
     assert_story,
     async_poll_for,
     captured_handler,
@@ -2576,22 +2577,6 @@ async def test_no_dangling_asyncio_tasks():
 
     tasks = asyncio.all_tasks()
     assert tasks == start
-
-
-class NoSchedulerDelayWorker(Worker):
-    """Custom worker class which does not update `scheduler_delay`.
-
-    This worker class is useful for some tests which make time
-    comparisons using times reported from workers.
-    """
-
-    @property
-    def scheduler_delay(self):
-        return 0
-
-    @scheduler_delay.setter
-    def scheduler_delay(self, value):
-        pass
 
 
 @gen_cluster(client=True, Worker=NoSchedulerDelayWorker, config=NO_AMM)

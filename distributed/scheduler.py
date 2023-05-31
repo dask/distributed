@@ -1063,6 +1063,12 @@ class TaskGroup:
     #: Cumulative duration of all completed actions, by action
     all_durations: defaultdict[str, float]
 
+    #: Span ID (see distributed.spans).
+    #: It is possible to end up in situation where different tasks of the same TaskGroup
+    #: belong to different spans; the purpose of this attribute is to arbitrarily force
+    #: everything onto the earliest encountered one.
+    span: tuple[str, ...]
+
     __slots__ = tuple(__annotations__)
 
     def __init__(self, name: str):
@@ -1078,6 +1084,7 @@ class TaskGroup:
         self.all_durations = defaultdict(float)
         self.last_worker = None
         self.last_worker_tasks_left = 0
+        self.span = ()
 
     def add_duration(self, action: str, start: float, stop: float) -> None:
         duration = stop - start
@@ -4431,6 +4438,10 @@ class Scheduler(SchedulerState, ServerNode):
             span_annotations = spans_ext.new_tasks(new_tasks)
             if span_annotations:
                 resolved_annotations["span"] = span_annotations
+            else:
+                # Edge case where some tasks define a span, while earlier tasks in the
+                # same TaskGroup don't define any
+                resolved_annotations.pop("span", None)
 
         for plugin in list(self.plugins.values()):
             try:
