@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 import toolz
 
 from dask.context import thread_state
-from dask.utils import get_meta_library, parse_bytes
+from dask.utils import funcname, get_meta_library, parse_bytes
 
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
@@ -945,11 +945,9 @@ def split_by_worker(
     import numpy as np
     import pyarrow as pa
 
+    # (cudf support) Align dataframe backends
     lib = get_meta_library(df)
-    if hasattr(lib, "from_pandas"):
-        # Allow cudf-based data
-        worker_for = lib.from_pandas(worker_for)
-
+    worker_for = lib.Series(worker_for)
     df = df.merge(
         right=worker_for.cat.codes.rename("_worker"),
         left_on=column,
@@ -964,7 +962,7 @@ def split_by_worker(
     # bytestream such that it cannot be deserialized anymore
     if hasattr(df, "to_arrow") and callable(df.to_arrow):
         t = df.to_arrow(preserve_index=True)
-        t = t.replace_schema_metadata(t.schema.metadata | {"dataframe": lib})
+        t = t.replace_schema_metadata(t.schema.metadata | {"dataframe": funcname(lib)})
     else:
         t = pa.Table.from_pandas(df, preserve_index=True)
     t = t.sort_by("_worker")
