@@ -80,7 +80,7 @@ class Span:
     #: -----
     #: TaskGroups are forgotten when the last task is forgotten. If a user calls
     #: compute() twice on the same collection, you'll have more than one group with the
-    #: same tg.key in this set! For the same reason, while the same TaskGroup object is
+    #: same tg.name in this set! For the same reason, while the same TaskGroup object is
     #: guaranteed to be attached to exactly one Span, you may have different TaskGroups
     #: with the same key attached to different Spans.
     groups: set[TaskGroup]
