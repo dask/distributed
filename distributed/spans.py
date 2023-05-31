@@ -17,7 +17,7 @@ def span(*tags: str) -> Iterator[None]:
     """Tag group of tasks to be part of a certain group, called a span.
 
     This context manager can be nested, thus creating sub-spans.
-    Every cluster defines a "default" span when no span has been defined by the client.
+    Every cluster defines a global "default" span when no span has been defined by the client.
 
     Examples
     --------
