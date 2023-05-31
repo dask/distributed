@@ -160,8 +160,9 @@ sys.excepthook = _clean_excepthook(sys.excepthook)
 try:
     from IPython.core.interactiveshell import InteractiveShell
 except ImportError:
-    pass
+    original_showtraceback = None
 else:
+    original_showtraceback = InteractiveShell.showtraceback
     InteractiveShell.showtraceback = _clean_ipython_traceback(
         InteractiveShell.showtraceback
     )
@@ -169,6 +170,8 @@ else:
 
 def _restore_exception_hook():
     sys.excepthook = original_excepthook
+    if original_showtraceback is not None:
+        InteractiveShell.showtraceback = original_showtraceback
 
 
 class SourceCode(NamedTuple):
