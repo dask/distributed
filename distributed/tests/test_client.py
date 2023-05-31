@@ -1656,6 +1656,20 @@ def test_upload_file_exception_sync(c):
             c.upload_file(fn)
 
 
+@gen_cluster(client=True)
+async def test_upload_file_load(c, s, a, b):
+    code = "syntax-error!"
+    with tmp_text("myfile.py", code) as fn:
+        # Without `load=False` this file would be imported and raise a `SyntaxError`
+        await c.upload_file(fn, load=False)
+
+        # Confirm workers and scheduler got the file
+        for server in [s, a, b]:
+            file = pathlib.Path(server.local_directory).joinpath("myfile.py")
+            assert file.is_file()
+            assert file.read_text() == code
+
+
 @gen_cluster(client=True, nthreads=[])
 async def test_upload_file_new_worker(c, s):
     def g():

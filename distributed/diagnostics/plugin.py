@@ -314,16 +314,17 @@ def _get_plugin_name(plugin: SchedulerPlugin | WorkerPlugin | NannyPlugin) -> st
 class SchedulerUploadFile(SchedulerPlugin):
     name = "upload_file"
 
-    def __init__(self, filepath):
+    def __init__(self, filepath: str, load: bool = True):
         """
         Initialize the plugin by reading in the data from the given file.
         """
         self.filename = os.path.basename(filepath)
+        self.load = load
         with open(filepath, "rb") as f:
             self.data = f.read()
 
     async def start(self, scheduler: Scheduler) -> None:
-        await scheduler.upload_file(self.filename, self.data)
+        await scheduler.upload_file(self.filename, self.data, load=self.load)
 
 
 class PackageInstall(WorkerPlugin, abc.ABC):
@@ -599,17 +600,18 @@ class UploadFile(WorkerPlugin):
 
     name = "upload_file"
 
-    def __init__(self, filepath):
+    def __init__(self, filepath: str, load: bool = True):
         """
         Initialize the plugin by reading in the data from the given file.
         """
         self.filename = os.path.basename(filepath)
+        self.load = load
         with open(filepath, "rb") as f:
             self.data = f.read()
 
     async def setup(self, worker):
         response = await worker.upload_file(
-            filename=self.filename, data=self.data, load=True
+            filename=self.filename, data=self.data, load=self.load
         )
         assert len(self.data) == response["nbytes"]
 

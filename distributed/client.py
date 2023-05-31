@@ -3730,22 +3730,23 @@ class Client(SyncMethodMixin):
 
         assert all(len(data) == v for v in response.values())
 
-    def upload_file(self, filename, **kwargs):
-        """Upload local package to workers
+    def upload_file(self, filename, load: bool = True):
+        """Upload local package to scheduler and workers
 
-        This sends a local file up to all worker nodes.  This file is placed
-        into the working directory of the running worker, see config option
+        This sends a local file up to the scheduler and all worker nodes.
+        This file is placed into the working directory of each node, see config option
         ``temporary-directory`` (defaults to :py:func:`tempfile.gettempdir`).
 
-        This directory will be added to the Python's system path so any .py,
-        .egg or .zip  files will be importable.
+        This directory will be added to the Python's system path so any ``.py``,
+        ``.egg`` or ``.zip``  files will be importable.
 
         Parameters
         ----------
         filename : string
-            Filename of .py, .egg or .zip file to send to workers
-        **kwargs : dict
-            Optional keyword arguments for the function
+            Filename of ``.py``, ``.egg``, or ``.zip`` file to send to workers
+        load : bool, optional
+            Whether or not to import the module as part of the upload process.
+            Defaults to ``True``.
 
         Examples
         --------
@@ -3758,9 +3759,9 @@ class Client(SyncMethodMixin):
         async def _():
             results = await asyncio.gather(
                 self.register_scheduler_plugin(
-                    SchedulerUploadFile(filename), name=name
+                    SchedulerUploadFile(filename, load=load), name=name
                 ),
-                self.register_worker_plugin(UploadFile(filename), name=name),
+                self.register_worker_plugin(UploadFile(filename, load=load), name=name),
             )
             return results[1]  # Results from workers upload
 
