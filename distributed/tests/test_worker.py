@@ -1044,11 +1044,22 @@ async def test_pid(s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_get_client(c, s, a, b):
+@pytest.mark.parametrize("asynchronous", (True, False))
+async def test_get_client(c, s, a, b, asynchronous):
     def f(x):
-        cc = get_client()
-        future = cc.submit(inc, x)
-        return future.result()
+        cc = get_client(asynchronous=asynchronous)
+        assert cc.asynchronous == asynchronous
+
+        if asynchronous:
+
+            async def _():
+                future = cc.submit(inc, x)
+                return await future.result()
+
+            return cc.sync(_, asynchronous=False)
+        else:
+            future = cc.submit(inc, x)
+            return future.result()
 
     assert default_client() is c
 

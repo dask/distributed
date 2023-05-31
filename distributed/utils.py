@@ -334,7 +334,16 @@ class SyncMethodMixin:
     @property
     def asynchronous(self):
         """Are we running in the event loop?"""
-        return in_async_call(self.loop, default=getattr(self, "_asynchronous", False))
+        return getattr(self, "_asynchronous", False) or in_async_call(self.loop)
+
+    @asynchronous.setter
+    def asynchronous(self, asynchronous: bool) -> None:
+        self._asynchronous = asynchronous
+        if getattr(self, "_loop_runner", None) is None:
+            self._loop_runner = LoopRunner(
+                loop=getattr(self, "_loop", getattr(self, "loop", None)),
+                asynchronous=asynchronous,
+            )
 
     def sync(self, func, *args, asynchronous=None, callback_timeout=None, **kwargs):
         """Call `func` with `args` synchronously or asynchronously depending on

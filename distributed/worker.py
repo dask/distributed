@@ -2689,7 +2689,9 @@ def get_worker() -> Worker:
         raise ValueError("No worker found") from None
 
 
-def get_client(address=None, timeout=None, resolve_address=True) -> Client:
+def get_client(
+    address=None, timeout=None, resolve_address=True, asynchronous=False
+) -> Client:
     """Get a client while within a task.
 
     This client connects to the same scheduler to which the worker is connected
@@ -2727,6 +2729,9 @@ def get_client(address=None, timeout=None, resolve_address=True) -> Client:
     worker_client
     secede
     """
+    from distributed.client import Client
+
+    client: None | Client
 
     if timeout is None:
         timeout = dask.config.get("distributed.comm.timeouts.connect")
@@ -2741,18 +2746,20 @@ def get_client(address=None, timeout=None, resolve_address=True) -> Client:
         pass
     else:
         if not address or worker.scheduler.address == address:
-            return worker._get_client(timeout=timeout)
-
-    from distributed.client import Client
+            client = worker._get_client(timeout=timeout)
+            client.asynchronous = asynchronous
+            return client
 
     try:
         client = Client.current()  # TODO: assumes the same scheduler
     except ValueError:
         client = None
+
     if client and (not address or client.scheduler.address == address):
+        client.asynchronous = asynchronous
         return client
     elif address:
-        return Client(address, timeout=timeout)
+        return Client(address, timeout=timeout, asynchronous=asynchronous)
     else:
         raise ValueError("No global client found and no address provided")
 
