@@ -3405,20 +3405,13 @@ class FinePerformanceMetrics(DashboardComponent):
         self.unit_selector = Select(title="Unit selection", options=[])
         self.unit_selector.on_change("value", handle_selector_chng)
         self.unit_selected = "seconds"
-        self.task_exec_by_activity_chart = figure()
-        self.task_exec_by_prefix_chart = figure()
-        self.senddata_by_activity_chart = figure()
+        self.task_exec_by_activity_chart = None
+        self.task_exec_by_prefix_chart = None
+        self.senddata_by_activity_chart = None
         self.root = column(
             self.function_selector,
             self.unit_selector,
-            row(
-                [
-                    self.task_exec_by_prefix_chart,
-                    self.task_exec_by_activity_chart,
-                    self.senddata_by_activity_chart,
-                ],
-                sizing_mode="stretch_width",
-            ),
+            row([figure(), figure(), figure()], sizing_mode="stretch_width"),
             sizing_mode="scale_width",
         )
 
@@ -3504,26 +3497,23 @@ class FinePerformanceMetrics(DashboardComponent):
             f"Filter by function ({len(self.function_selector.options)}):"
         )
 
-        task_exec_piechart = self._build_task_execution_by_activity_chart(
-            self.task_exec_data_limited.copy()
-        )
-        task_exec_barchart = self._build_task_execution_by_prefix_chart(
-            self.task_exec_data_limited.copy()
-        )
-        senddata_piechart = self._build_senddata_chart(self.senddata.copy())
+        self._build_task_execution_by_activity_chart(self.task_exec_data_limited.copy())
+        self._build_task_execution_by_prefix_chart(self.task_exec_data_limited.copy())
+        self._build_senddata_chart(self.senddata.copy())
 
         # Replacing the child causes small blips if done every iteration vs updating
         # renderers, but it's needed when new functions and/or activities show up to
         # rerender plot
-        if self.substantial_change:
-            self.root.children[-1].children[0] = task_exec_barchart
-            self.root.children[-1].children[1] = task_exec_piechart
-            self.root.children[-1].children[2] = senddata_piechart
+        if not getattr(self, "__set", False):
+            self.root.children[-1].children[0] = self.task_exec_by_prefix_chart
+            self.root.children[-1].children[1] = self.task_exec_by_activity_chart
+            self.root.children[-1].children[2] = self.senddata_by_activity_chart
             self.substantial_change = False
-        else:
-            self.task_exec_by_prefix_chart.renderers = task_exec_piechart.renderers
-            self.task_exec_by_activity_chart.renderers = task_exec_barchart.renderers
-            self.senddata_by_activity_chart.renderers = senddata_piechart.renderers
+            self.__set = True
+        # else:
+        #     self.task_exec_by_prefix_chart.renderers = task_exec_piechart.renderers
+        #     self.task_exec_by_activity_chart.renderers = task_exec_barchart.renderers
+        #     self.senddata_by_activity_chart.renderers = senddata_piechart.renderers
 
     def _build_task_execution_by_activity_chart(
         self, task_exec_data: defaultdict[str, list]
@@ -3553,30 +3543,31 @@ class FinePerformanceMetrics(DashboardComponent):
         piechart_data["activity"] = self.task_activities
         self.task_exec_by_activity_src.data = piechart_data
 
-        piechart = figure(
-            height=500,
-            sizing_mode="scale_both",
-            title="Task execution, by activity",
-            tools="hover",
-            tooltips="@{activity}: @text",
-            x_range=(-0.5, 1.0),
-        )
-        piechart.axis.axis_label = None
-        piechart.axis.visible = False
-        piechart.grid.grid_line_color = None
+        if self.task_exec_by_activity_chart is None:
+            piechart = figure(
+                height=500,
+                sizing_mode="scale_both",
+                title="Task execution, by activity",
+                tools="hover",
+                tooltips="@{activity}: @text",
+                x_range=(-0.5, 1.0),
+            )
+            piechart.axis.axis_label = None
+            piechart.axis.visible = False
+            piechart.grid.grid_line_color = None
 
-        piechart.wedge(
-            x=0,
-            y=1,
-            radius=0.4,
-            start_angle=cumsum("angle", include_zero=True),
-            end_angle=cumsum("angle"),
-            line_color="white",
-            fill_color="color",
-            legend_field="activity",
-            source=self.task_exec_by_activity_src,
-        )
-        return piechart
+            piechart.wedge(
+                x=0,
+                y=1,
+                radius=0.4,
+                start_angle=cumsum("angle", include_zero=True),
+                end_angle=cumsum("angle"),
+                line_color="white",
+                fill_color="color",
+                legend_field="activity",
+                source=self.task_exec_by_activity_src,
+            )
+            self.task_exec_by_activity_chart = piechart
 
     def _build_task_execution_by_prefix_chart(
         self, task_exec_data: defaultdict[str, list]
@@ -3621,7 +3612,7 @@ class FinePerformanceMetrics(DashboardComponent):
 
             self.task_exec_by_prefix_src.data = dict(task_exec_data)
             barchart.renderers = renderers
-        return barchart
+        self.task_exec_by_prefix_chart = barchart
 
     def _build_senddata_chart(self, senddata: defaultdict[str, list]) -> figure:
         piedata = {}
@@ -3643,29 +3634,31 @@ class FinePerformanceMetrics(DashboardComponent):
         piedata["color"] = small_palettes["YlGnBu"].get(len(piedata["activity"]), [])
 
         self.sendsrc.data = piedata
-        senddata_piechart = figure(
-            height=500,
-            sizing_mode="scale_both",
-            title="Send data, by activity",
-            tools="hover",
-            tooltips="@{activity}: @text",
-            x_range=(-0.5, 1.0),
-        )
-        senddata_piechart.wedge(
-            x=0,
-            y=1,
-            radius=0.4,
-            start_angle=cumsum("angle", include_zero=True),
-            end_angle=cumsum("angle"),
-            line_color="white",
-            fill_color="color",
-            legend_field="activity",
-            source=self.sendsrc,
-        )
-        senddata_piechart.axis.axis_label = None
-        senddata_piechart.axis.visible = False
-        senddata_piechart.grid.grid_line_color = None
-        return senddata_piechart
+
+        if self.senddata_by_activity_chart is None:
+            senddata_piechart = figure(
+                height=500,
+                sizing_mode="scale_both",
+                title="Send data, by activity",
+                tools="hover",
+                tooltips="@{activity}: @text",
+                x_range=(-0.5, 1.0),
+            )
+            senddata_piechart.wedge(
+                x=0,
+                y=1,
+                radius=0.4,
+                start_angle=cumsum("angle", include_zero=True),
+                end_angle=cumsum("angle"),
+                line_color="white",
+                fill_color="color",
+                legend_field="activity",
+                source=self.sendsrc,
+            )
+            senddata_piechart.axis.axis_label = None
+            senddata_piechart.axis.visible = False
+            senddata_piechart.grid.grid_line_color = None
+            self.senddata_by_activity_chart = senddata_piechart
 
 
 class Contention(DashboardComponent):
