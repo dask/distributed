@@ -1145,7 +1145,7 @@ properties:
 
           shorten-traceback:
             type: boolean
-            description: Shorten traceback to only relevant frames, for better readability. It will keep the first frame, the last frame, and one frame from client
+            description: Shorten traceback from unhandled exceptions. It will keep the first frame, the last frame, and one frame from client
 
           system-monitor:
             type: object
