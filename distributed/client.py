@@ -5254,15 +5254,15 @@ class as_completed:
         complete
     with_results: bool (False)
         Whether to wait and include results of futures as well;
-        in this case `as_completed` yields a tuple of (future, result)
+        in this case ``as_completed`` yields a tuple of (future, result)
     raise_errors: bool (True)
         Whether we should raise when the result of a future raises an
-        exception; only affects behavior when `with_results=True`.
+        exception; only affects behavior when ``with_results=True``.
     timeout: int (optional)
         The returned iterator raises a ``dask.distributed.TimeoutError``
-        if `__next__()` or `__anext__()` is called and the result
+        if ``__next__()`` or ``__anext__()`` is called and the result
         isn't available after timeout seconds from the original call to
-        `as_completed()`. If timeout is not specified or None, there is no limit
+        ``as_completed()``. If timeout is not specified or ``None``, there is no limit
         to the wait time.
 
     Examples
