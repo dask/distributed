@@ -91,7 +91,6 @@ from distributed.utils import (
     open_port,
     sync,
     tmp_text,
-    truncate_traceback,
 )
 from distributed.utils_test import (
     NO_AMM,
@@ -8334,26 +8333,3 @@ async def test_resolves_future_in_dict(c, s, a, b):
     outer_future = c.submit(identity, {"x": inner_future, "y": 2})
     result = await outer_future
     assert result == {"x": 1, "y": 2}
-
-
-def throws_map_blocks(x, block_id=None):
-    if block_id is not None and block_id[0] % 2 == 0:
-        raise ValueError(f"Bad block id {block_id}")
-    return x / 2
-
-
-def test_truncate_traceback(client):
-    with dask.config.set({"distributed.admin.truncate-traceback": True}):
-        # with array
-        try:
-            da = pytest.importorskip("dask.array")
-            arr = da.arange(30, chunks=3)
-            op = arr.map_blocks(throws_map_blocks)
-            op.compute()
-        except Exception:
-            _, _, tb = sys.exc_info()
-            before = len(list(traceback.walk_tb(tb)))
-            tb = truncate_traceback(tb)
-            after = len(list(traceback.walk_tb(tb)))
-            assert before > after
-            assert after <= 3

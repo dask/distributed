@@ -1143,9 +1143,9 @@ properties:
             type: boolean
             description: Enter Python Debugger on scheduling error
 
-          truncate-traceback:
+          shorten-traceback:
             type: boolean
-            description: Truncate traceback to only relevant frames, for better readability
+            description: Shorten traceback to only relevant frames, for better readability. It will keep the first frame, the last frame, and one frame from client
 
           system-monitor:
             type: object

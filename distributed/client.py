@@ -101,9 +101,9 @@ from distributed.utils import (
     is_python_shutting_down,
     log_errors,
     no_default,
+    shorten_traceback,
     sync,
     thread_state,
-    truncate_traceback,
 )
 from distributed.utils_comm import (
     WrappedKey,
@@ -134,7 +134,7 @@ TOPIC_PREFIX_FORWARDED_LOG_RECORD = "forwarded-log-record"
 def _clean_excepthook(func):
     @wraps(func)
     def wrapper(exc_type, exc, tb):
-        tb = truncate_traceback(tb)
+        tb = shorten_traceback(tb)
         return func(exc_type, exc.with_traceback(tb), tb)
 
     return wrapper
@@ -144,7 +144,7 @@ def _clean_ipython_traceback(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
         exc_type, exc, tb = sys.exc_info()
-        tb = truncate_traceback(tb)
+        tb = shorten_traceback(tb)
         kwargs["exc_tuple"] = exc_type, exc.with_traceback(tb), tb
         value = func(*args, **kwargs)
         return value
@@ -654,7 +654,7 @@ class FutureState:
         _, exception, traceback = clean_exception(exception, traceback)
 
         if (
-            dask.config.get("distributed.admin.truncate-traceback", False) is True
+            dask.config.get("distributed.admin.shorten-traceback", False) is True
             and key
             and erred_on
         ):

@@ -53,10 +53,10 @@ from distributed.utils import (
     run_in_executor_with_context,
     seek_delimiter,
     set_thread_state,
+    shorten_traceback,
     sync,
     thread_state,
     truncate_exception,
-    truncate_traceback,
     warn_on_duration,
 )
 from distributed.utils_test import (
@@ -66,6 +66,7 @@ from distributed.utils_test import (
     gen_test,
     has_ipv6,
     inc,
+    popen,
     throws,
 )
 
@@ -1061,7 +1062,7 @@ def test_rate_limiter_filter(caplog):
     ]
 
 
-def test_truncate_traceback():
+def test_shorten_traceback():
     def f1():
         return 2 / 0
 
@@ -1077,14 +1078,48 @@ def test_truncate_traceback():
     def f5():
         return f4() - 1
 
-    for func in (f1, f2, f3, f4, f5):
-        try:
-            func()
-        except Exception:  # noqa
-            _, _, tb = sys.exc_info()
-            before = len(list(traceback.walk_tb(tb)))
-            with dask.config.set({"distributed.admin.truncate-traceback": True}):
-                tb = truncate_traceback(tb)
-            after = len(list(traceback.walk_tb(tb)))
-            assert after <= before
-            assert after == 2
+    try:
+        f5()
+    except ZeroDivisionError:
+        _, _, tb = sys.exc_info()
+        before = len(list(traceback.walk_tb(tb)))
+        with dask.config.set({"distributed.admin.shorten-traceback": True}):
+            tb = shorten_traceback(tb)
+        after = len(list(traceback.walk_tb(tb)))
+        assert after <= before
+        assert after == 2
+
+
+client_script = """
+import dask
+from dask.distributed import Client
+if __name__ == "__main__":
+    try:
+        f1 = lambda: 2 / 0
+        f2 = lambda: f1() + 5
+        f3 = lambda: f2() + 1
+        dask.config.set({'distributed.admin.shorten-traceback': %s})
+        client = Client()
+        client.submit(f3).result()
+    finally:
+        client.close()
+"""
+
+
+@pytest.mark.slow
+@pytest.mark.flaky(reruns=5, reruns_delay=5)
+@pytest.mark.parametrize("shorten,expected", [(True, 3), (False, 5)])
+def test_shorten_traceback_excepthook(shorten, tmp_path, expected):
+    with open(tmp_path / "script.py", mode="w") as f:
+        f.write(client_script % shorten)
+
+    with popen([sys.executable, tmp_path / "script.py"], capture_output=True) as proc:
+        out, _ = proc.communicate(timeout=60)
+
+    lines = out.decode("utf-8").split("\n")
+    lines = [
+        stripped
+        for line in lines
+        if (stripped := line.strip()) and (stripped.startswith("File "))
+    ]
+    assert len(lines) == expected
