@@ -68,6 +68,7 @@ from distributed import versions as version_module
 from distributed._stories import scheduler_story
 from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
 from distributed.batched import BatchedSend
+from distributed.client import SourceCode
 from distributed.collections import HeapSet
 from distributed.comm import (
     Comm,
@@ -98,6 +99,7 @@ from distributed.recreate_tasks import ReplayTaskScheduler
 from distributed.security import Security
 from distributed.semaphore import SemaphoreExtension
 from distributed.shuffle import ShuffleSchedulerExtension
+from distributed.spans import SpansExtension
 from distributed.stealing import WorkStealing
 from distributed.utils import (
     All,
@@ -141,14 +143,13 @@ TaskStateState: TypeAlias = Literal[
 
 ALL_TASK_STATES: Set[TaskStateState] = set(TaskStateState.__args__)  # type: ignore
 
-# TODO remove quotes (requires Python >=3.9)
 # {task key -> finish state}
 # Not to be confused with distributed.worker_state_machine.Recs
-Recs: TypeAlias = "dict[str, TaskStateState]"
+Recs: TypeAlias = dict[str, TaskStateState]
 # {client or worker address: [{op: <key>, ...}, ...]}
-Msgs: TypeAlias = "dict[str, list[dict[str, Any]]]"
+Msgs: TypeAlias = dict[str, list[dict[str, Any]]]
 # (recommendations, client messages, worker messages)
-RecsMsgs: TypeAlias = "tuple[Recs, Msgs, Msgs]"
+RecsMsgs: TypeAlias = tuple[Recs, Msgs, Msgs]
 
 logger = logging.getLogger(__name__)
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
@@ -170,6 +171,7 @@ DEFAULT_EXTENSIONS = {
     "amm": ActiveMemoryManagerExtension,
     "memory_sampler": MemorySamplerExtension,
     "shuffle": ShuffleSchedulerExtension,
+    "spans": SpansExtension,
     "stealing": WorkStealing,
 }
 
@@ -849,7 +851,7 @@ class Computation:
 
     start: float
     groups: set[TaskGroup]
-    code: SortedSet
+    code: SortedSet[SourceCode]
     id: uuid.UUID
     annotations: dict
 
@@ -1044,9 +1046,28 @@ class TaskGroup:
     last_worker_tasks_left: int
 
     prefix: TaskPrefix | None
+
+    #: Earliest time when a task belonging to this group started computing;
+    #: 0 if no task has *finished* computing yet
+    #:
+    #: Notes
+    #: -----
+    #: This is not updated until at least one task has *finished* computing.
+    #: It could move backwards as tasks complete.
     start: float
+
+    #: Latest time when a task belonging to this group finished computing,
+    #: 0 if no task has finished computing yet
     stop: float
+
+    #: Cumulative duration of all completed actions, by action
     all_durations: defaultdict[str, float]
+
+    #: Span ID (see distributed.spans).
+    #: It is possible to end up in situation where different tasks of the same TaskGroup
+    #: belong to different spans; the purpose of this attribute is to arbitrarily force
+    #: everything onto the earliest encountered one.
+    span: tuple[str, ...]
 
     __slots__ = tuple(__annotations__)
 
@@ -1063,15 +1084,17 @@ class TaskGroup:
         self.all_durations = defaultdict(float)
         self.last_worker = None
         self.last_worker_tasks_left = 0
+        self.span = ()
 
     def add_duration(self, action: str, start: float, stop: float) -> None:
         duration = stop - start
+        self.duration += duration
         self.all_durations[action] += duration
         if action == "compute":
             if self.stop < stop:
                 self.stop = stop
-            self.start = self.start or start
-        self.duration += duration
+            if self.start == 0.0 or self.start > start:
+                self.start = start
         assert self.prefix is not None
         self.prefix.add_duration(action, start, stop)
 
@@ -1518,7 +1541,8 @@ class SchedulerState:
     running: set[WorkerState]
     #: Workers that are currently in running state and not fully utilized
     #: Definition based on occupancy
-    #: (actually a SortedDict, but the sortedcontainers package isn't annotated)
+    #: (actually a SortedDict, but the sortedcontainers package isn't annotated).
+    #: Not to be confused with :meth:`is_idle`.
     idle: dict[str, WorkerState]
     #: Similar to `idle`
     #: Definition based on assigned tasks
@@ -1774,6 +1798,21 @@ class SchedulerState:
             self.replicated_tasks,
         ):
             collection.clear()  # type: ignore
+
+    @property
+    def is_idle(self) -> bool:
+        """Return True iff there are no tasks that haven't finished computing.
+
+        Unlike testing ``self.total_occupancy``, this property returns False if there are
+        long-running tasks, no-worker, or queued tasks (due to not having any workers).
+
+        Not to be confused with ``idle``.
+        """
+        return all(
+            count == 0 or state in {"memory", "error", "released", "forgotten"}
+            for tg in self.task_groups.values()
+            for state, count in tg.states.items()
+        )
 
     @property
     def total_occupancy(self) -> float:
@@ -4325,7 +4364,7 @@ class Scheduler(SchedulerState, ServerNode):
                 keys=lost_keys, client=client, stimulus_id=stimulus_id
             )
 
-        if self.total_occupancy > 1e-9 and self.computations:
+        if not self.is_idle and self.computations:
             # Still working on something. Assign new tasks to same computation
             computation = self.computations[-1]
         else:
@@ -4393,6 +4432,16 @@ class Scheduler(SchedulerState, ServerNode):
                     ts.exception_blame = dts.exception_blame
                     recommendations[ts.key] = "erred"
                     break
+
+        spans_ext: SpansExtension | None = self.extensions.get("spans")
+        if spans_ext:
+            span_annotations = spans_ext.new_tasks(new_tasks)
+            if span_annotations:
+                resolved_annotations["span"] = span_annotations
+            else:
+                # Edge case where some tasks define a span, while earlier tasks in the
+                # same TaskGroup don't define any
+                resolved_annotations.pop("span", None)
 
         for plugin in list(self.plugins.values()):
             try:
@@ -4498,7 +4547,7 @@ class Scheduler(SchedulerState, ServerNode):
                     ...
                 }
         """
-        resolved_annotations: dict[str, dict[str, Any]] = defaultdict(dict)
+        resolved_annotations: defaultdict[str, dict[str, Any]] = defaultdict(dict)
         for ts in tasks:
             key = ts.key
             # This could be a typed dict
@@ -6860,8 +6909,8 @@ class Scheduler(SchedulerState, ServerNode):
                 return {}
 
             stop_amm = False
-            amm: ActiveMemoryManagerExtension = self.extensions["amm"]
-            if not amm.running:
+            amm: ActiveMemoryManagerExtension | None = self.extensions.get("amm")
+            if not amm or not amm.running:
                 amm = ActiveMemoryManagerExtension(
                     self, policies=set(), register=False, start=True, interval=2.0
                 )
@@ -7818,6 +7867,20 @@ class Scheduler(SchedulerState, ServerNode):
         return results
 
     def log_event(self, topic: str | Collection[str], msg: Any) -> None:
+        """Log an event under a given topic
+
+        Parameters
+        ----------
+        topic : str, list[str]
+            Name of the topic under which to log an event. To log the same
+            event under multiple topics, pass a list of topic names.
+        msg
+            Event message to log. Note this must be msgpack serializable.
+
+        See also
+        --------
+        Client.log_event
+        """
         event = (time(), msg)
         if not isinstance(topic, str):
             for t in topic:

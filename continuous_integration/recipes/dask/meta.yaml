@@ -18,11 +18,11 @@ build:
 
 requirements:
   host:
-    - python >=3.8
+    - python >=3.9
     - dask-core {{ dask_version }}
     - distributed {{ version }}
   run:
-    - python >=3.8
+    - python >=3.9
     - {{ pin_compatible('dask-core', max_pin='x.x.x.x') }}
     - {{ pin_compatible('distributed', exact=True) }}
     - cytoolz >=0.8.2

@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Iterable, Sequence
+from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING, Any
 
 from dask.base import is_dask_collection, tokenize
 from dask.highlevelgraph import HighLevelGraph
@@ -136,6 +137,7 @@ def merge_transfer(
     id: ShuffleId,
     input_partition: int,
     npartitions: int,
+    parts_out: set[int],
 ):
     return shuffle_transfer(
         input=input,
@@ -143,6 +145,7 @@ def merge_transfer(
         input_partition=input_partition,
         npartitions=npartitions,
         column=_HASH_COLUMN_NAME,
+        parts_out=parts_out,
     )
 
 
@@ -340,6 +343,7 @@ class HashJoinP2PLayer(Layer):
                 token_left,
                 i,
                 self.npartitions,
+                self.parts_out,
             )
         for i in range(self.n_partitions_right):
             transfer_keys_right.append((name_right, i))
@@ -349,6 +353,7 @@ class HashJoinP2PLayer(Layer):
                 token_right,
                 i,
                 self.npartitions,
+                self.parts_out,
             )
 
         _barrier_key_left = barrier_key(ShuffleId(token_left))

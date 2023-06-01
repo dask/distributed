@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import os
 import sys
+import tempfile
 import threading
 import traceback
 import types
@@ -24,6 +26,7 @@ import dask
 from dask.utils import parse_timedelta
 
 from distributed import profile, protocol
+from distributed.collections import LRU
 from distributed.comm import (
     Comm,
     CommClosedError,
@@ -35,16 +38,21 @@ from distributed.comm import (
 )
 from distributed.compatibility import PeriodicCallback
 from distributed.counter import Counter
+from distributed.diskutils import WorkDir, WorkSpace
 from distributed.metrics import context_meter, time
+from distributed.protocol import pickle
 from distributed.system_monitor import SystemMonitor
 from distributed.utils import (
     NoOpAwaitable,
     get_traceback,
     has_keyword,
+    import_file,
     iscoroutinefunction,
+    offload,
     recursive_to_dict,
     truncate_exception,
     wait_for,
+    warn_on_duration,
 )
 
 if TYPE_CHECKING:
@@ -54,6 +62,21 @@ if TYPE_CHECKING:
     R = TypeVar("R")
     T = TypeVar("T")
     Coro = Coroutine[Any, Any, T]
+
+
+cache_loads: LRU[bytes, Callable[..., Any]] = LRU(maxsize=100)
+
+
+def loads_function(bytes_object):
+    """Load a function from bytes, cache bytes"""
+    if len(bytes_object) < 100000:
+        try:
+            result = cache_loads[bytes_object]
+        except KeyError:
+            result = pickle.loads(bytes_object)
+            cache_loads[bytes_object] = result
+        return result
+    return pickle.loads(bytes_object)
 
 
 class Status(Enum):
@@ -303,6 +326,9 @@ class Server:
 
     default_ip = ""
     default_port = 0
+    local_directory: str
+    _workspace: WorkSpace
+    _workdir: None | WorkDir
 
     def __init__(
         self,
@@ -316,7 +342,41 @@ class Server:
         connection_args=None,
         timeout=None,
         io_loop=None,
+        local_directory=None,
+        needs_workdir=True,
     ):
+        if local_directory is None:
+            local_directory = (
+                dask.config.get("temporary-directory") or tempfile.gettempdir()
+            )
+
+        if "dask-scratch-space" not in str(local_directory):
+            local_directory = os.path.join(local_directory, "dask-scratch-space")
+
+        self._original_local_dir = local_directory
+
+        with warn_on_duration(
+            "1s",
+            "Creating scratch directories is taking a surprisingly long time. ({duration:.2f}s) "
+            "This is often due to running workers on a network file system. "
+            "Consider specifying a local-directory to point workers to write "
+            "scratch data to a local disk.",
+        ):
+            self._workspace = WorkSpace(local_directory)
+
+            if not needs_workdir:  # eg. Nanny will not need a WorkDir
+                self._workdir = None
+                self.local_directory = self._workspace.base_dir
+            else:
+                name = type(self).__name__.lower()
+                self._workdir = self._workspace.new_work_dir(prefix=f"{name}-")
+                self.local_directory = self._workdir.dir_path
+
+        self._updated_sys_path = False
+        if self.local_directory not in sys.path:
+            sys.path.insert(0, self.local_directory)
+            self._updated_sys_path = True
+
         if io_loop is not None:
             warnings.warn(
                 "The io_loop kwarg to Server is ignored and will be deprecated",
@@ -436,6 +496,35 @@ class Server:
         )
 
         self.__stopped = False
+
+    async def upload_file(
+        self, filename: str, data: str | bytes, load: bool = True
+    ) -> dict[str, Any]:
+        out_filename = os.path.join(self.local_directory, filename)
+
+        def func(data):
+            if isinstance(data, str):
+                data = data.encode()
+            with open(out_filename, "wb") as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+            return data
+
+        if len(data) < 10000:
+            data = func(data)
+        else:
+            data = await offload(func, data)
+
+        if load:
+            try:
+                import_file(out_filename)
+                cache_loads.data.clear()
+            except Exception as e:
+                logger.exception(e)
+                raise e
+
+        return {"status": "OK", "nbytes": len(data)}
 
     def _shift_counters(self):
         for counter in self.counters.values():
@@ -572,6 +661,9 @@ class Server:
     def stop(self):
         if self.__stopped:
             return
+
+        if self._workdir is not None:
+            self._workdir.release()
 
         self.monitor.close()
 
@@ -953,6 +1045,10 @@ class Server:
 
             await self.rpc.close()
             await asyncio.gather(*[comm.close() for comm in list(self._comms)])
+
+            # Remove scratch directory from global sys.path
+            if self._updated_sys_path and sys.path[0] == self.local_directory:
+                sys.path.remove(self.local_directory)
         finally:
             self._event_finished.set()
 

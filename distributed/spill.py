@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from collections.abc import Hashable, Iterator, Mapping, Sized
+from collections.abc import Callable, Hashable, Iterator, Mapping, Sized
 from contextlib import contextmanager
 from functools import partial
-from typing import Callable  # TODO import from collections.abc (requires Python >=3.9)
 from typing import Literal, NamedTuple, Protocol, cast
 
 import zict

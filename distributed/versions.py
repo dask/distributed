@@ -33,13 +33,14 @@ optional_packages = [
 
 
 # only these scheduler packages will be checked for version mismatch
-scheduler_relevant_packages = {pkg for pkg, _ in required_packages} | {"lz4", "python"}
+scheduler_relevant_packages = {pkg for pkg, _ in required_packages} | {
+    "lz4",
+    "python",
+} - {"msgpack"}
 
 
 # notes to be displayed for mismatch packages
-notes_mismatch_package = {
-    "msgpack": "Variation is ok, as long as everything is above 0.6"
-}
+notes_mismatch_package: dict[str, str] = {}
 
 
 def get_versions(

@@ -1,6 +1,74 @@
 Changelog
 =========
 
+.. _v2023.5.1:
+
+2023.5.1
+--------
+
+Released on May 26, 2023
+
+.. note::
+
+  This release drops support for Python 3.8. As of this release
+  Dask supports Python 3.9, 3.10, and 3.11.
+  See `this community issue <https://github.com/dask/community/issues/315>`_
+  for more details.
+
+Enhancements
+^^^^^^^^^^^^
+- Exclude IPython code from computations (:pr:`7788`) `Miles`_
+- Drop Python 3.8 support (:pr:`7840`) `Thomas Grainger`_
+- Add ``storage_options`` to ``performance_report`` (:pr:`7636`) `ypogorelova`_
+- Don't warn about mismatched ``msgpack`` (:pr:`7839`) `Irina Truong`_
+- Clean up ``sys.path`` on ``Server`` shutdown (:pr:`7838`) `James Bourbeau`_
+- Dashboard: Fine Performance Metrics (:pr:`7725`) `Miles`_
+
+Bug Fixes
+^^^^^^^^^
+- Properly handle unknown chunk sizes in P2P rechunking (:pr:`7856`) `Hendrik Makait`_
+- Minimal change to work around (:issue:`7726`) / support for UCX (:pr:`7851`) `Benjamin Zaitlen`_
+- Don't end computations until cluster is truly idle (:pr:`7790`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Explicitly install ``anaconda-client`` from conda-forge when uploading conda nightlies (:pr:`7861`) `Charles Blackmon-Luca`_
+- Fix ``is_idle`` docs build (:pr:`7854`) `James Bourbeau`_
+- Add tests for P2P barrier fusion (:pr:`7845`) `Hendrik Makait`_
+- Avoid ``DeprecationWarning`` in ``cupy`` dispatch registration (:pr:`7836`) `Lawrence Mitchell`_
+
+
+.. _v2023.5.0:
+
+2023.5.0
+--------
+
+Released on May 12, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- ``Client.upload_file`` send to both Workers and Scheduler and rename scratch directory (:pr:`7802`) `Miles`_
+- Allow dashboard to be used with bokeh prereleases (:pr:`7814`) `James Bourbeau`_
+
+Bug Fixes
+^^^^^^^^^
+- Ensure log_event of non-msgpack serializable object do not kill servers (:pr:`7472`) `Florian Jetter`_
+- Fix ``test_nanny.py`` duplicated ``pytestmark`` definitions (:pr:`7819`) `Thomas Grainger`_
+- Fix flaky ``test_dask_worker.py::test_single_executable_deprecated`` (:pr:`7817`) `Thomas Grainger`_
+
+Maintenance
+^^^^^^^^^^^
+- Annotation-less P2P shuffling (:pr:`7801`) `Hendrik Makait`_
+- Fix docstring for ``batch_size`` in ``client.map`` (:pr:`7833`) `David Chudzicki`_
+- Refactor ``test_protocol.py`` (:pr:`7829`) `crusaderky`_
+- Lint #6496 (:pr:`7828`) `crusaderky`_
+- Remove hardcoded 60s timeout (:pr:`6496`) `Florian Jetter`_
+- Add ``__init__.py`` files to template and static directories (:pr:`7809`) `Thomas Grainger`_
+- Disable compression for fast comms (:pr:`7768`) `crusaderky`_
+- Avoid deprecated ``pd.api.types.is_sparse`` (:pr:`7813`) `James Bourbeau`_
+- Bump gpuCI ``PYTHON_VER`` from 3.8 to 3.9 (:pr:`7812`) `Charles Blackmon-Luca`_
+
+
 .. _v2023.4.1:
 
 2023.4.1
@@ -4919,3 +4987,4 @@ significantly without many new features.
 .. _`Eugene Druzhynin`: https://github.com/eugene-graft
 .. _`ypogorelova`: https://github.com/ypogorelova
 .. _`Patrick Hoefler`: https://github.com/phofl
+.. _`Irina Truong`: https://github.com/j-bennet
