@@ -1090,7 +1090,11 @@ def test_shorten_traceback():
         assert after == 2
 
 
-client_script = """
+@pytest.mark.slow
+@pytest.mark.flaky(reruns=5, reruns_delay=5)
+@pytest.mark.parametrize("shorten,expected", [(True, 3), (False, 5)])
+def test_shorten_traceback_excepthook(shorten, tmp_path, expected):
+    client_script = """
 import dask
 from dask.distributed import Client
 if __name__ == "__main__":
@@ -1103,13 +1107,7 @@ if __name__ == "__main__":
         client.submit(f3).result()
     finally:
         client.close()
-"""
-
-
-@pytest.mark.slow
-@pytest.mark.flaky(reruns=5, reruns_delay=5)
-@pytest.mark.parametrize("shorten,expected", [(True, 3), (False, 5)])
-def test_shorten_traceback_excepthook(shorten, tmp_path, expected):
+    """
     with open(tmp_path / "script.py", mode="w") as f:
         f.write(client_script % shorten)
 
@@ -1121,5 +1119,31 @@ def test_shorten_traceback_excepthook(shorten, tmp_path, expected):
         stripped
         for line in lines
         if (stripped := line.strip()) and (stripped.startswith("File "))
+    ]
+    assert len(lines) == expected
+
+
+@pytest.mark.parametrize("shorten,expected", [(True, 2), (False, 5)])
+def test_shorten_traceback_showtraceback(capsys, shorten, expected):
+    ipython_testing_app = pytest.importorskip("IPython.testing.globalipapp")
+
+    cell_code = """
+import dask
+from dask.distributed import Client
+f1 = lambda: 2 / 0
+f2 = lambda: f1() + 5
+f3 = lambda: f2() + 1
+dask.config.set({'distributed.admin.shorten-traceback': %s})
+client = Client()"""
+    ip = ipython_testing_app.get_ipython()
+    ip.run_cell(cell_code % shorten)
+    ip.run_cell("client.submit(f3).result()")
+    ip.run_cell("client.close()")
+    lines = capsys.readouterr().out.strip().split("\n")
+    lines = [
+        stripped
+        for line in lines
+        if (stripped := line.strip())
+        and (stripped.startswith("File ") or stripped.startswith("Cell "))
     ]
     assert len(lines) == expected
