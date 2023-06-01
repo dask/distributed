@@ -3411,7 +3411,6 @@ class FinePerformanceMetrics(DashboardComponent):
         self.root = column(
             self.function_selector,
             self.unit_selector,
-            row([figure(), figure(), figure()], sizing_mode="stretch_width"),
             sizing_mode="scale_width",
         )
 
@@ -3497,23 +3496,29 @@ class FinePerformanceMetrics(DashboardComponent):
             f"Filter by function ({len(self.function_selector.options)}):"
         )
 
+        needs_figures_row = self.task_exec_by_activity_chart is None
         self._build_task_execution_by_activity_chart(self.task_exec_data_limited.copy())
         self._build_task_execution_by_prefix_chart(self.task_exec_data_limited.copy())
         self._build_senddata_chart(self.senddata.copy())
 
-        # Replacing the child causes small blips if done every iteration vs updating
-        # renderers, but it's needed when new functions and/or activities show up to
-        # rerender plot
-        if not getattr(self, "__set", False):
-            self.root.children[-1].children[0] = self.task_exec_by_prefix_chart
-            self.root.children[-1].children[1] = self.task_exec_by_activity_chart
-            self.root.children[-1].children[2] = self.senddata_by_activity_chart
+        if self.substantial_change or needs_figures_row:
             self.substantial_change = False
-            self.__set = True
-        # else:
-        #     self.task_exec_by_prefix_chart.renderers = task_exec_piechart.renderers
-        #     self.task_exec_by_activity_chart.renderers = task_exec_barchart.renderers
-        #     self.senddata_by_activity_chart.renderers = senddata_piechart.renderers
+
+            figures_row = row(
+                children=[
+                    self.task_exec_by_prefix_chart,
+                    self.task_exec_by_activity_chart,
+                    self.senddata_by_activity_chart,
+                ],
+                sizing_mode="stretch_width",
+            )
+
+            if needs_figures_row:
+                # First iteration, initial assignment of figures row
+                self.root.children.append(figures_row)
+            else:
+                # Otherwise needs forced refresh by replacing the figures row
+                self.root.children[-1] = figures_row
 
     def _build_task_execution_by_activity_chart(
         self, task_exec_data: defaultdict[str, list]
