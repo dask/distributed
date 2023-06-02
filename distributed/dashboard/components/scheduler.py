@@ -46,7 +46,7 @@ from bokeh.models import (
 )
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.models.widgets.markups import Div
-from bokeh.palettes import Viridis11, small_palettes
+from bokeh.palettes import Viridis11, YlGnBu9, interp_palette
 from bokeh.plotting import figure
 from bokeh.themes import Theme
 from bokeh.transform import cumsum, factor_cmap, linear_cmap, stack
@@ -3542,9 +3542,7 @@ class FinePerformanceMetrics(DashboardComponent):
             * math.pi
             for activity in self.task_activities
         ]
-        piechart_data["color"] = small_palettes["YlGnBu"].get(
-            len(self.task_activities), []
-        )
+        piechart_data["color"] = self._get_palette(len(self.task_activities))
         piechart_data["activity"] = self.task_activities
         self.task_exec_by_activity_src.data = piechart_data
 
@@ -3596,7 +3594,7 @@ class FinePerformanceMetrics(DashboardComponent):
                 x="functions",
                 width=0.9,
                 source=self.task_exec_by_prefix_src,
-                color=small_palettes["YlGnBu"].get(len(self.task_activities), []),
+                color=self._get_palette(len(self.task_activities)),
                 legend_label=self.task_activities,
             )
             for vbar in renderers:
@@ -3615,8 +3613,9 @@ class FinePerformanceMetrics(DashboardComponent):
             ):
                 self.substantial_change = True
 
-            self.task_exec_by_prefix_src.data = dict(task_exec_data)
             barchart.renderers = renderers
+
+        self.task_exec_by_prefix_src.data = dict(task_exec_data)
         self.task_exec_by_prefix_chart = barchart
 
     def _build_senddata_chart(self, senddata: defaultdict[str, list]) -> figure:
@@ -3636,7 +3635,7 @@ class FinePerformanceMetrics(DashboardComponent):
             * math.pi
             for op in piedata["activity"]
         ]
-        piedata["color"] = small_palettes["YlGnBu"].get(len(piedata["activity"]), [])
+        piedata["color"] = self._get_palette(len(piedata["activity"]))
 
         self.sendsrc.data = piedata
 
@@ -3664,6 +3663,9 @@ class FinePerformanceMetrics(DashboardComponent):
             senddata_piechart.axis.visible = False
             senddata_piechart.grid.grid_line_color = None
             self.senddata_by_activity_chart = senddata_piechart
+
+    def _get_palette(self, n: int) -> list[str]:
+        return interp_palette(YlGnBu9, n)
 
 
 class Contention(DashboardComponent):
