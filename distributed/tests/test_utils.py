@@ -1139,7 +1139,10 @@ client = Client()"""
     ip.run_cell(cell_code % shorten)
     ip.run_cell("client.submit(f3).result()")
     ip.run_cell("client.close()")
-    lines = capsys.readouterr().out.strip().split("\n")
+    captured = capsys.readouterr()
+    lines = captured.out.strip().split("\n")
+    print(f"\n{captured.out}")
+    print(f"\n{captured.err}")
     lines = [
         stripped
         for line in lines
