@@ -23,7 +23,6 @@ from distributed.exceptions import Reschedule
 from distributed.protocol import to_serialize
 from distributed.shuffle._arrow import (
     convert_partition,
-    deserialize_schema,
     list_of_buffers_to_table,
     serialize_table,
 )
@@ -421,8 +420,8 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         A set of all participating worker (addresses).
     column:
         The data column we split the input partition by.
-    schema:
-        The schema of the payload data.
+    meta:
+        Empty metadata of the input.
     id:
         A unique `ShuffleID` this belongs to.
     run_id:
@@ -451,7 +450,7 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         worker_for: dict[int, str],
         output_workers: set,
         column: str,
-        schema: pa.Schema,
+        meta: pd.DataFrame,
         id: ShuffleId,
         run_id: int,
         local_address: str,
@@ -477,7 +476,7 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
             memory_limiter_disk=memory_limiter_disk,
         )
         self.column = column
-        self.schema = schema
+        self.meta = meta
         partitions_of = defaultdict(list)
         for part, addr in worker_for.items():
             partitions_of[addr].append(part)
@@ -532,13 +531,6 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         await self._write_to_comm(out)
         return self.run_id
 
-    def _arrow_to_df(self, table: pa.Table) -> pd.DataFrame:
-        if table.schema.metadata.get(b"dataframe", None) == b"cudf":
-            import cudf
-
-            return cudf.DataFrame.from_arrow(table)
-        return table.to_pandas()
-
     async def get_output_partition(self, i: int, key: str) -> pd.DataFrame:
         self.raise_if_closed()
         assert self.transferred, "`get_output_partition` called before barrier task"
@@ -550,12 +542,11 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
             data = self._read_from_disk((i,))
 
             def _() -> pd.DataFrame:
-                df = convert_partition(data)
-                return self._arrow_to_df(df)
+                return convert_partition(data, self.meta)
 
             out = await self.offload(_)
         except KeyError:
-            out = self._arrow_to_df(self.schema.empty_table())
+            out = self.meta.copy()
         return out
 
     def _get_assigned_worker(self, i: int) -> str:
@@ -656,8 +647,6 @@ class ShuffleWorkerExtension:
         type: ShuffleType,
         **kwargs: Any,
     ) -> int:
-        if type == ShuffleType.DATAFRAME:
-            kwargs["empty"] = data
         shuffle = self.get_or_create_shuffle(shuffle_id, type=type, **kwargs)
         return sync(
             self.worker.loop,
@@ -730,12 +719,8 @@ class ShuffleWorkerExtension:
         ----------
         shuffle_id
             Unique identifier of the shuffle
-        empty
-            Empty metadata of input collection
-        column
-            Column to be used to map rows to output partitions (by hashing)
-        npartitions
-            Number of output partitions
+        type:
+            Type of the shuffle operation
         """
         shuffle = self.shuffles.get(shuffle_id, None)
         if shuffle is None:
@@ -781,20 +766,12 @@ class ShuffleWorkerExtension:
                 worker=self.worker.address,
             )
         elif type == ShuffleType.DATAFRAME:
-            import pyarrow as pa
-
             assert kwargs is not None
             result = await self.worker.scheduler.shuffle_get_or_create(
                 id=shuffle_id,
                 type=type,
                 spec={
-                    "schema": pa.Schema.from_pandas(
-                        kwargs["empty"].to_pandas()
-                        if hasattr(kwargs["empty"], "to_pandas")
-                        else kwargs["empty"]
-                    )
-                    .serialize()
-                    .to_pybytes(),
+                    "meta": to_serialize(kwargs["meta"]),
                     "npartitions": kwargs["npartitions"],
                     "column": kwargs["column"],
                     "parts_out": kwargs["parts_out"],
@@ -840,7 +817,7 @@ class ShuffleWorkerExtension:
                 column=result["column"],
                 worker_for=result["worker_for"],
                 output_workers=result["output_workers"],
-                schema=deserialize_schema(result["schema"]),
+                meta=result["meta"],
                 id=shuffle_id,
                 run_id=result["run_id"],
                 directory=os.path.join(

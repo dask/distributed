@@ -12,6 +12,7 @@ from itertools import product
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from distributed.diagnostics.plugin import SchedulerPlugin
+from distributed.protocol import to_serialize
 from distributed.shuffle._rechunk import ChunkedAxes, NIndex
 from distributed.shuffle._shuffle import (
     ShuffleId,
@@ -21,6 +22,8 @@ from distributed.shuffle._shuffle import (
 )
 
 if TYPE_CHECKING:
+    import pandas as pd
+
     from distributed.scheduler import (
         Recs,
         Scheduler,
@@ -50,7 +53,7 @@ class ShuffleState(abc.ABC):
 class DataFrameShuffleState(ShuffleState):
     type: ClassVar[ShuffleType] = ShuffleType.DATAFRAME
     worker_for: dict[int, str]
-    schema: bytes
+    meta: pd.DataFrame
     column: str
 
     def to_msg(self) -> dict[str, Any]:
@@ -60,7 +63,7 @@ class DataFrameShuffleState(ShuffleState):
             "run_id": self.run_id,
             "worker_for": self.worker_for,
             "column": self.column,
-            "schema": self.schema,
+            "meta": to_serialize(self.meta),
             "output_workers": self.output_workers,
         }
 
@@ -186,11 +189,11 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     def _create_dataframe_shuffle_state(
         self, id: ShuffleId, spec: dict[str, Any]
     ) -> DataFrameShuffleState:
-        schema = spec["schema"]
+        meta = spec["meta"]
         column = spec["column"]
         npartitions = spec["npartitions"]
         parts_out = spec["parts_out"]
-        assert schema is not None
+        assert meta is not None
         assert column is not None
         assert npartitions is not None
         assert parts_out is not None
@@ -204,7 +207,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             id=id,
             run_id=next(ShuffleState._run_id_iterator),
             worker_for=mapping,
-            schema=schema,
+            meta=meta,
             column=column,
             output_workers=output_workers,
             participating_workers=output_workers.copy(),
