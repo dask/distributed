@@ -717,15 +717,18 @@ def test_processing_chain():
                 [pd.Timestamp.fromtimestamp(1641034800 + i) for i in range(100)],
                 dtype=pd.ArrowDtype(pa.timestamp("ms")),
             ),
-            # FIXME: distributed#7420
-            # f"col{next(counter)}": pd.array(
-            #     ["lorem ipsum"] * 100,
-            #     dtype="string[pyarrow]",
-            # ),
-            # f"col{next(counter)}": pd.array(
-            #     ["lorem ipsum"] * 100,
-            #     dtype=pd.StringDtype("pyarrow"),
-            # ),
+            f"col{next(counter)}": pd.array(
+                ["lorem ipsum"] * 100,
+                dtype="string[pyarrow]",
+            ),
+            f"col{next(counter)}": pd.array(
+                ["lorem ipsum"] * 100,
+                dtype=pd.StringDtype("pyarrow"),
+            ),
+            f"col{next(counter)}": pd.array(
+                ["lorem ipsum"] * 100,
+                dtype="string[python]",
+            ),
             # custom objects
             # FIXME: Serializing custom objects is not supported in P2P shuffling
             # f"col{next(counter)}": pd.array(
@@ -783,9 +786,9 @@ def test_processing_chain():
     out = {}
     for k, bio in filesystem.items():
         bio.seek(0)
-        out[k] = convert_partition(bio.read())
+        out[k] = convert_partition(bio.read(), df)
 
-    shuffled_df = pd.concat(table.to_pandas() for table in out.values())
+    shuffled_df = pd.concat(df for df in out.values())
     pd.testing.assert_frame_equal(
         df,
         shuffled_df,

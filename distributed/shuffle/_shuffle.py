@@ -58,6 +58,7 @@ def shuffle_transfer(
     npartitions: int,
     column: str,
     parts_out: set[int],
+    meta: pd.DataFrame,
 ) -> int:
     try:
         return _get_worker_extension().add_partition(
@@ -68,6 +69,7 @@ def shuffle_transfer(
             npartitions=npartitions,
             column=column,
             parts_out=parts_out,
+            meta=meta,
         )
     except Exception as e:
         raise RuntimeError(f"shuffle_transfer failed during shuffle {id}") from e
@@ -100,13 +102,13 @@ def rearrange_by_column_p2p(
 ) -> DataFrame:
     from dask.dataframe import DataFrame
 
-    check_dtype_support(df._meta)
+    meta = df._meta.copy()
+    check_dtype_support(meta)
     npartitions = npartitions or df.npartitions
     token = tokenize(df, column, npartitions)
 
-    empty = df._meta.copy()
-    if any(not isinstance(c, str) for c in empty.columns):
-        unsupported = {c: type(c) for c in empty.columns if not isinstance(c, str)}
+    if any(not isinstance(c, str) for c in meta.columns):
+        unsupported = {c: type(c) for c in meta.columns if not isinstance(c, str)}
         raise TypeError(
             f"p2p requires all column names to be str, found: {unsupported}",
         )
@@ -118,11 +120,12 @@ def rearrange_by_column_p2p(
         npartitions,
         npartitions_input=df.npartitions,
         name_input=df._name,
+        meta_input=meta,
     )
     return DataFrame(
         HighLevelGraph.from_collections(name, layer, [df]),
         name,
-        empty,
+        meta,
         [None] * (npartitions + 1),
     )
 
@@ -139,6 +142,7 @@ class P2PShuffleLayer(Layer):
         npartitions: int,
         npartitions_input: int,
         name_input: str,
+        meta_input: pd.DataFrame,
         parts_out: Iterable | None = None,
         annotations: dict | None = None,
     ):
@@ -147,6 +151,7 @@ class P2PShuffleLayer(Layer):
         self.column = column
         self.npartitions = npartitions
         self.name_input = name_input
+        self.meta_input = meta_input
         if parts_out:
             self.parts_out = set(parts_out)
         else:
@@ -195,6 +200,7 @@ class P2PShuffleLayer(Layer):
             self.npartitions,
             self.npartitions_input,
             self.name_input,
+            self.meta_input,
             parts_out=parts_out,
         )
 
@@ -245,6 +251,7 @@ class P2PShuffleLayer(Layer):
                 self.npartitions,
                 self.column,
                 self.parts_out,
+                self.meta_input,
             )
 
         dsk[_barrier_key] = (shuffle_barrier, token, transfer_keys)
