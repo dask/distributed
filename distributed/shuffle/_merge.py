@@ -99,20 +99,20 @@ def hash_join_p2p(
     )
     # dummy result
     # Avoid using dummy data for a collection it is empty
-    lhs_meta = lhs._meta_nonempty if len(lhs.columns) else lhs._meta
-    rhs_meta = rhs._meta_nonempty if len(rhs.columns) else rhs._meta
-    meta = lhs_meta.merge(rhs_meta, **merge_kwargs)
+    _lhs_meta = lhs._meta_nonempty if len(lhs.columns) else lhs._meta
+    _rhs_meta = rhs._meta_nonempty if len(rhs.columns) else rhs._meta
+    meta = _lhs_meta.merge(_rhs_meta, **merge_kwargs)
     lhs = _calculate_partitions(lhs, left_on, npartitions)
     rhs = _calculate_partitions(rhs, right_on, npartitions)
     merge_name = "hash-join-" + tokenize(lhs, rhs, **merge_kwargs)
     join_layer = HashJoinP2PLayer(
         name=merge_name,
         name_input_left=lhs._name,
-        meta_input_left=lhs_meta,
+        meta_input_left=lhs._meta,
         left_on=left_on,
         n_partitions_left=lhs.npartitions,
         name_input_right=rhs._name,
-        meta_input_right=rhs_meta,
+        meta_input_right=rhs._meta,
         right_on=right_on,
         n_partitions_right=rhs.npartitions,
         meta_output=meta,
