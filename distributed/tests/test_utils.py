@@ -16,6 +16,7 @@ from array import array
 from collections import deque
 from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from time import sleep
+from unittest import mock
 
 import pytest
 from tornado.ioloop import IOLoop
@@ -523,6 +524,17 @@ async def test_loop_runner_gen():
     runner.stop()
     assert not runner.is_started()
     await asyncio.sleep(0.01)
+
+
+def test_loop_runner_exception_in_start(cleanup):
+    class MyException(Exception):
+        pass
+
+    with (
+        mock.patch("tornado.ioloop.IOLoop.current", side_effect=MyException),
+        pytest.raises(MyException),
+    ):
+        LoopRunner().start()
 
 
 @gen_test()
