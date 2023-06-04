@@ -608,12 +608,11 @@ class LoopRunner:
 
     def _real_stop(self, timeout):
         assert self._loop_thread is not None
-        if self._loop_thread is not None:
-            try:
-                self._loop.add_callback(self._stop_event.set)
-                self._loop_thread.join(timeout=timeout)
-            finally:
-                self._loop_thread = None
+        try:
+            self._loop.add_callback(self._stop_event.set)
+            self._loop_thread.join(timeout=timeout)
+        finally:
+            self._loop_thread = None
 
     def is_started(self):
         """
