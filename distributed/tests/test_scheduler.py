@@ -50,6 +50,7 @@ from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
     BrokenComm,
+    NoSchedulerDelayWorker,
     assert_story,
     async_poll_for,
     captured_handler,
@@ -2578,22 +2579,6 @@ async def test_no_dangling_asyncio_tasks():
     assert tasks == start
 
 
-class NoSchedulerDelayWorker(Worker):
-    """Custom worker class which does not update `scheduler_delay`.
-
-    This worker class is useful for some tests which make time
-    comparisons using times reported from workers.
-    """
-
-    @property
-    def scheduler_delay(self):
-        return 0
-
-    @scheduler_delay.setter
-    def scheduler_delay(self, value):
-        pass
-
-
 @gen_cluster(client=True, Worker=NoSchedulerDelayWorker, config=NO_AMM)
 async def test_task_groups(c, s, a, b):
     start = time()
@@ -2641,6 +2626,39 @@ async def test_task_groups(c, s, a, b):
     assert tg.start > start
     assert tg.stop < stop
     assert "compute" in tg.all_durations
+
+
+@gen_cluster(client=True, nthreads=[("", 2)], Worker=NoSchedulerDelayWorker)
+async def test_task_groups_update_start_stop(c, s, a):
+    """TaskGroup.stop increases as the tasks in the group finish.
+    TaskGroup.start can move backwards in the following use case:
+
+    - task (x, 0) starts
+    - task (x, 1) starts
+    - task (x, 1) finishes
+    - task (x, 0) finishes
+    """
+    ev = Event()
+    t0 = time()
+    x0 = c.submit(ev.wait, key=("x", 0))
+    await wait_for_state(str(x0.key), "executing", a)
+    tg = s.task_groups["x"]
+    assert tg.start == tg.stop == 0
+    t1 = time()
+    x1 = c.submit(inc, 1, key=("x", 1))
+    await x1
+    t2 = time()
+    assert t0 < t1 < tg.start < tg.stop < t2
+
+    await ev.set()
+    await x0
+    t3 = time()
+    assert t0 < tg.start < t1 < t2 < tg.stop < t3
+
+    x2 = c.submit(inc, 1, key=("x", 2))
+    await x2
+    t4 = time()
+    assert t0 < tg.start < t1 < t2 < t3 < tg.stop < t4
 
 
 @gen_cluster(client=True)

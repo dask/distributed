@@ -4,6 +4,7 @@ import asyncio
 import bisect
 import builtins
 import contextlib
+import contextvars
 import errno
 import logging
 import math
@@ -2144,7 +2145,11 @@ class Worker(BaseWorker, ServerNode):
 
         try:
             if iscoroutinefunction(func):
-                result = await func(*args, **kwargs)
+                token = _worker_cvar.set(self)
+                try:
+                    result = await func(*args, **kwargs)
+                finally:
+                    _worker_cvar.reset(token)
             elif separate_thread:
                 result = await self.loop.run_in_executor(
                     self.executors["actor"],
@@ -2158,7 +2163,11 @@ class Worker(BaseWorker, ServerNode):
                     self.active_threads_lock,
                 )
             else:
-                result = func(*args, **kwargs)
+                token = _worker_cvar.set(self)
+                try:
+                    result = func(*args, **kwargs)
+                finally:
+                    _worker_cvar.reset(token)
             return {"status": "OK", "result": to_serialize(result)}
         except Exception as ex:
             return {"status": "error", "exception": to_serialize(ex)}
@@ -2238,12 +2247,16 @@ class Worker(BaseWorker, ServerNode):
             try:
                 ts.start_time = time()
                 if iscoroutinefunction(function):
-                    result = await apply_function_async(
-                        function,
-                        args2,
-                        kwargs2,
-                        self.scheduler_delay,
-                    )
+                    token = _worker_cvar.set(self)
+                    try:
+                        result = await apply_function_async(
+                            function,
+                            args2,
+                            kwargs2,
+                            self.scheduler_delay,
+                        )
+                    finally:
+                        _worker_cvar.reset(token)
                 elif "ThreadPoolExecutor" in str(type(e)):
                     # The 'executor' time metric should be almost zero most of the time,
                     # e.g. thread synchronization overhead only, since thread-noncpu and
@@ -2665,6 +2678,9 @@ class Worker(BaseWorker, ServerNode):
         return self.transfer_outgoing_count_limit
 
 
+_worker_cvar: contextvars.ContextVar[Worker] = contextvars.ContextVar("_worker_cvar")
+
+
 def get_worker() -> Worker:
     """Get the worker currently running this task
 
@@ -2684,8 +2700,8 @@ def get_worker() -> Worker:
     worker_client
     """
     try:
-        return thread_state.execution_state["worker"]
-    except AttributeError:
+        return _worker_cvar.get()
+    except LookupError:
         raise ValueError("No worker found") from None
 
 
@@ -3012,7 +3028,11 @@ def apply_function(
         execution_state=execution_state,
         key=key,
     ):
-        msg = apply_function_simple(function, args, kwargs, time_delay)
+        token = _worker_cvar.set(execution_state["worker"])
+        try:
+            msg = apply_function_simple(function, args, kwargs, time_delay)
+        finally:
+            _worker_cvar.reset(token)
 
     with active_threads_lock:
         del active_threads[ident]
@@ -3145,7 +3165,11 @@ def apply_function_actor(
         key=key,
         actor=True,
     ):
-        result = function(*args, **kwargs)
+        token = _worker_cvar.set(execution_state["worker"])
+        try:
+            result = function(*args, **kwargs)
+        finally:
+            _worker_cvar.reset(token)
 
         with active_threads_lock:
             del active_threads[ident]

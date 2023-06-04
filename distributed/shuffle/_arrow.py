@@ -45,7 +45,7 @@ def check_minimal_arrow_version() -> None:
         )
 
 
-def convert_partition(data: bytes) -> pa.Table:
+def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
     import pyarrow as pa
 
     file = BytesIO(data)
@@ -54,7 +54,9 @@ def convert_partition(data: bytes) -> pa.Table:
     while file.tell() < end:
         sr = pa.RecordBatchStreamReader(file)
         shards.append(sr.read_all())
-    return pa.concat_tables(shards)
+    table = pa.concat_tables(shards)
+    df = table.to_pandas(self_destruct=True)
+    return df.astype(meta.dtypes)
 
 
 def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
@@ -62,31 +64,6 @@ def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
     import pyarrow as pa
 
     return pa.concat_tables(deserialize_table(buffer) for buffer in data)
-
-
-def deserialize_schema(data: bytes) -> pa.Schema:
-    """Deserialize an arrow schema
-
-    Examples
-    --------
-    >>> b = schema.serialize()  # doctest: +SKIP
-    >>> deserialize_schema(b)  # doctest: +SKIP
-
-    See also
-    --------
-    pa.Schema.serialize
-    """
-    import io
-
-    import pyarrow as pa
-
-    bio = io.BytesIO()
-    bio.write(data)
-    bio.seek(0)
-    sr = pa.RecordBatchStreamReader(bio)
-    table = sr.read_all()
-    bio.close()
-    return table.schema
 
 
 def serialize_table(table: pa.Table) -> bytes:

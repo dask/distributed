@@ -99,6 +99,7 @@ from distributed.recreate_tasks import ReplayTaskScheduler
 from distributed.security import Security
 from distributed.semaphore import SemaphoreExtension
 from distributed.shuffle import ShuffleSchedulerExtension
+from distributed.spans import SpansExtension
 from distributed.stealing import WorkStealing
 from distributed.utils import (
     All,
@@ -170,6 +171,7 @@ DEFAULT_EXTENSIONS = {
     "amm": ActiveMemoryManagerExtension,
     "memory_sampler": MemorySamplerExtension,
     "shuffle": ShuffleSchedulerExtension,
+    "spans": SpansExtension,
     "stealing": WorkStealing,
 }
 
@@ -1044,9 +1046,28 @@ class TaskGroup:
     last_worker_tasks_left: int
 
     prefix: TaskPrefix | None
+
+    #: Earliest time when a task belonging to this group started computing;
+    #: 0 if no task has *finished* computing yet
+    #:
+    #: Notes
+    #: -----
+    #: This is not updated until at least one task has *finished* computing.
+    #: It could move backwards as tasks complete.
     start: float
+
+    #: Latest time when a task belonging to this group finished computing,
+    #: 0 if no task has finished computing yet
     stop: float
+
+    #: Cumulative duration of all completed actions, by action
     all_durations: defaultdict[str, float]
+
+    #: Span ID (see distributed.spans).
+    #: It is possible to end up in situation where different tasks of the same TaskGroup
+    #: belong to different spans; the purpose of this attribute is to arbitrarily force
+    #: everything onto the earliest encountered one.
+    span: tuple[str, ...]
 
     __slots__ = tuple(__annotations__)
 
@@ -1063,15 +1084,17 @@ class TaskGroup:
         self.all_durations = defaultdict(float)
         self.last_worker = None
         self.last_worker_tasks_left = 0
+        self.span = ()
 
     def add_duration(self, action: str, start: float, stop: float) -> None:
         duration = stop - start
+        self.duration += duration
         self.all_durations[action] += duration
         if action == "compute":
             if self.stop < stop:
                 self.stop = stop
-            self.start = self.start or start
-        self.duration += duration
+            if self.start == 0.0 or self.start > start:
+                self.start = start
         assert self.prefix is not None
         self.prefix.add_duration(action, start, stop)
 
@@ -4412,6 +4435,16 @@ class Scheduler(SchedulerState, ServerNode):
                     recommendations[ts.key] = "erred"
                     break
 
+        spans_ext: SpansExtension | None = self.extensions.get("spans")
+        if spans_ext:
+            span_annotations = spans_ext.new_tasks(new_tasks)
+            if span_annotations:
+                resolved_annotations["span"] = span_annotations
+            else:
+                # Edge case where some tasks define a span, while earlier tasks in the
+                # same TaskGroup don't define any
+                resolved_annotations.pop("span", None)
+
         for plugin in list(self.plugins.values()):
             try:
                 plugin.update_graph(
@@ -4516,7 +4549,7 @@ class Scheduler(SchedulerState, ServerNode):
                     ...
                 }
         """
-        resolved_annotations: dict[str, dict[str, Any]] = defaultdict(dict)
+        resolved_annotations: defaultdict[str, dict[str, Any]] = defaultdict(dict)
         for ts in tasks:
             key = ts.key
             # This could be a typed dict

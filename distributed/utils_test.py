@@ -2582,3 +2582,19 @@ def gen_nbytes(nbytes: int) -> SizeOf:
 def relative_frame_linenumber(frame):
     """Line number of call relative to the frame"""
     return inspect.getframeinfo(frame).lineno - frame.f_code.co_firstlineno
+
+
+class NoSchedulerDelayWorker(Worker):
+    """Custom worker class which does not update `scheduler_delay`.
+
+    This worker class is useful for some tests which make time
+    comparisons using times reported from workers.
+    """
+
+    @property
+    def scheduler_delay(self):
+        return 0
+
+    @scheduler_delay.setter
+    def scheduler_delay(self, value):
+        pass
