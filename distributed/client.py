@@ -142,11 +142,15 @@ def _clean_excepthook(func):
 
 def _clean_ipython_traceback(func):
     @wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(self, *args, **kwargs):
         exc_type, exc, tb = sys.exc_info()
         tb = shorten_traceback(tb)
-        kwargs["exc_tuple"] = exc_type, exc.with_traceback(tb), tb
-        value = func(*args, **kwargs)
+        exc_info = exc_type, exc.with_traceback(tb), tb
+        if "exc_tuple" in kwargs:
+            kwargs["exc_tuple"] = exc_info
+        else:
+            args = [exc_info] + list(args)[1:]
+        value = func(self, *args, **kwargs)
         return value
 
     return wrapper
