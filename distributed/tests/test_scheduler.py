@@ -2662,6 +2662,92 @@ async def test_task_groups_update_start_stop(c, s, a):
 
 
 @gen_cluster(client=True)
+async def test_task_group_done(c, s, a, b):
+    """TaskGroup.done is True iff all of its tasks are in memory, erred, released, or
+    forgotten state
+    """
+    x0 = c.submit(inc, 1, key=("x", 0))  # memory
+    x1 = c.submit(lambda: 1 / 0, key=("x", 1))  # erred
+    x2 = c.submit(inc, 3, key=("x", 2))
+
+    x3 = c.submit(inc, 3, key=("x", 3))  # released
+    y = c.submit(inc, x3, key="y")
+    del x3
+
+    await wait([x0, x1, x2, y])
+    del x2  # forgotten
+    await async_poll_for(lambda: str(("x", 2)) not in s.tasks, timeout=5)
+
+    tg = s.task_groups["x"]
+    assert tg.states == {
+        "erred": 1,
+        "forgotten": 1,
+        "memory": 1,
+        "no-worker": 0,
+        "processing": 0,
+        "queued": 0,
+        "released": 1,
+        "waiting": 0,
+    }
+    assert tg.done
+
+
+@gen_cluster(client=True)
+async def test_task_group_not_done_waiting(c, s, a, b):
+    """TaskGroup.done is False if any of its tasks are in waiting state"""
+    ev = Event()
+    x = c.submit(ev.wait, key="x")
+    y0 = c.submit(lambda x: x, x, key=("y", 0))
+    y1 = c.submit(inc, 1, key=("y", 1))
+    await wait_for_state(y0.key, "waiting", s)
+    await y1
+
+    tg = s.task_groups["y"]
+    assert not tg.done
+    await ev.set()
+
+
+@gen_cluster(client=True)
+async def test_task_group_not_done_noworker(c, s, a, b):
+    """TaskGroup.done is False if any of its tasks are in no-worker state"""
+    x0 = c.submit(inc, 1, key=("x", 0), resources={"X": 1})
+    x1 = c.submit(inc, 1, key=("x", 1))
+    await wait_for_state(x0.key, "no-worker", s)
+    await x1
+
+    tg = s.task_groups["x"]
+    assert not tg.done
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[],
+    config={"distributed.scheduler.worker-saturation": 1.0},
+    timeout=3,
+)
+async def test_task_group_not_done_queued(c, s):
+    """TaskGroup.done is False if any of its tasks are in queued state"""
+    futs = c.map(inc, range(4))
+    await wait_for_state(futs[0].key, "queued", s)
+    tg = s.task_groups["inc"]
+    assert not tg.done
+
+
+@gen_cluster(client=True)
+async def test_task_group_not_done_processing(c, s, a, b):
+    """TaskGroup.done is False if any of its tasks are in processing state"""
+    ev = Event()
+    x0 = c.submit(ev.wait, key=("x", 0))
+    x1 = c.submit(inc, 1, key=("x", 1))
+    await wait_for_state(x0.key, "processing", s)
+    await x1
+
+    tg = s.task_groups["x"]
+    assert not tg.done
+    await ev.set()
+
+
+@gen_cluster(client=True)
 async def test_task_prefix(c, s, a, b):
     da = pytest.importorskip("dask.array")
     x = da.arange(100, chunks=(20,))

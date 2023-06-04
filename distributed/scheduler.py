@@ -1128,6 +1128,22 @@ class TaskGroup:
         """
         return recursive_to_dict(self, exclude=exclude, members=True)
 
+    @property
+    def done(self) -> bool:
+        """Return True if all computations for this group have completed; False
+        otherwise.
+
+        Notes
+        -----
+        This property may transition from True to False, e.g. when a worker that
+        contained the only replica of a task in memory crashes and the task need to be
+        recomputed.
+        """
+        return all(
+            count == 0 or state in {"memory", "erred", "released", "forgotten"}
+            for state, count in self.states.items()
+        )
+
 
 class TaskState:
     """A simple object holding information about a task.
@@ -1803,16 +1819,13 @@ class SchedulerState:
     def is_idle(self) -> bool:
         """Return True iff there are no tasks that haven't finished computing.
 
-        Unlike testing ``self.total_occupancy``, this property returns False if there are
-        long-running tasks, no-worker, or queued tasks (due to not having any workers).
+        Unlike testing ``self.total_occupancy``, this property returns False if there
+        are long-running tasks, no-worker, or queued tasks (due to not having any
+        workers).
 
         Not to be confused with ``idle``.
         """
-        return all(
-            count == 0 or state in {"memory", "error", "released", "forgotten"}
-            for tg in self.task_groups.values()
-            for state, count in tg.states.items()
-        )
+        return all(tg.done for tg in self.task_groups.values())
 
     @property
     def total_occupancy(self) -> float:
