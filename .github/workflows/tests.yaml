@@ -29,7 +29,8 @@ jobs:
         queuing: [queue]
         extra_packages: [null]
         # Cherry-pick test modules to split the overall runtime roughly in half
-        partition: [ci1, not ci1]
+        # partition: [ci1, not ci1]
+        partition: [ci1]
         exclude:
           - os: macos-latest
             environment: "3.9"
