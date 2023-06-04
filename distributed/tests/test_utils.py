@@ -537,6 +537,21 @@ def test_loop_runner_exception_in_start(cleanup):
         LoopRunner().start()
 
 
+def test_loop_runner_exception_in_teardown(cleanup):
+    runner = LoopRunner()
+    runner.start()
+
+    async def cancel_all_tasks():
+        current_task = asyncio.current_task()
+        for task in asyncio.all_tasks():
+            if task is not current_task:
+                task.cancel()
+
+    runner.run_sync(cancel_all_tasks)
+    with pytest.raises(asyncio.CancelledError):
+        runner.stop()
+
+
 @gen_test()
 async def test_all_quiet_exceptions():
     class CustomError(Exception):
