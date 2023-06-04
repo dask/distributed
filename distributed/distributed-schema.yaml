@@ -596,6 +596,15 @@ properties:
                 description: >-
                   Interval between checks for the spill, pause, and terminate thresholds
 
+              spill-compression:
+                enum: [null, false, auto, zlib, lz4, snappy, zstd]
+                description:
+                  The compression algorithm to use. 'auto' defaults to lz4 if installed,
+                  otherwise to snappy if installed, otherwise to false. zlib and zstd
+                  are only used if explicitly requested here. Uncompressible data is
+                  always uncompressed, regardless of this setting.
+                  See also distributed.comm.compression.
+
           http:
             type: object
             description: Settings for Dask's embedded HTTP Server
@@ -772,11 +781,13 @@ properties:
                     description: The maximum delay between retries
 
           compression:
-            type: string
-            description: |
-              The compression algorithm to use
-
-              This could be one of lz4, snappy, zstd
+            enum: [null, false, auto, zlib, lz4, snappy, zstd]
+            description:
+              The compression algorithm to use. 'auto' defaults to lz4 if installed,
+              otherwise to snappy if installed, otherwise to false. zlib and zstd are
+              only used if explicitly requested here. Uncompressible data and transfers
+              on localhost are always uncompressed, regardless of this setting.
+              See also distributed.worker.memory.spill-compression.
 
           offload:
             type:
@@ -1021,6 +1032,11 @@ properties:
                 minimum: 0
                 description: |
                   The maximum number of Computations to remember.
+              nframes:
+                type: integer
+                minimum: 0
+                description: |
+                  The number of frames of code to capture, starting from the innermost frame.
               ignore-modules:
                 type: array
                 description: |
@@ -1141,6 +1157,19 @@ properties:
               host-cpu:
                 type: boolean
                 description: Should we include host-wide CPU usage, with very granular breakdown?
+              gil:
+                type: object
+                description: |
+                  Should we include GIL contention metrics, requires `gilknocker` to be installed.
+                properties:
+                  enabled:
+                    type: boolean
+                    description: Enable monitoring of GIL contention
+                  interval:
+                    type: string
+                    description: |
+                      GIL polling interval. More frequent polling will reflect a more accurate GIL
+                      contention metric but will be more likely to impact runtime performance.
 
       rmm:
         type: object

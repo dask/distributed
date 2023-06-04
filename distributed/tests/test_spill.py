@@ -8,24 +8,25 @@ from pathlib import Path
 
 import pytest
 
+import dask.config
 from dask.sizeof import sizeof
 
 from distributed import profile
 from distributed.compatibility import WINDOWS
-from distributed.spill import SpillBuffer, has_zict_220
+from distributed.metrics import meter
+from distributed.spill import SpillBuffer
 from distributed.utils import RateLimiterFilter
 from distributed.utils_test import captured_logger
 
-requires_zict_220 = pytest.mark.skipif(
-    not has_zict_220,
-    reason="requires zict version >= 2.2.0",
-)
-
 
 def psize(tmp_path: Path, **objs: object) -> tuple[int, int]:
+    # zict 2.2: tmp_path/key
+    # zict >=3.0: tmp_path/key#0
+    fnames = tmp_path.glob("*")
+    key_to_fname = {fname.name.split("#")[0]: fname for fname in fnames}
     return (
         sum(sizeof(o) for o in objs.values()),
-        sum(os.stat(tmp_path / k).st_size for k in objs),
+        sum(os.stat(key_to_fname[k]).st_size for k in objs),
     )
 
 
@@ -40,8 +41,8 @@ def assert_buf(
         assert buf[k] is v
 
     # assertions on slow
-    assert set(buf.slow) == expect_slow.keys()
-    slow = buf.slow.data if has_zict_220 else buf.slow  # type: ignore
+    assert set(buf.slow) == set(expect_slow)
+    slow = buf._slow_uncached
     assert slow.weight_by_key == {
         k: psize(tmp_path, **{k: v}) for k, v in expect_slow.items()
     }
@@ -311,6 +312,12 @@ def test_spillbuffer_evict(tmp_path):
     assert_buf(buf, tmp_path, {"bad": bad}, {"a": a})
 
 
+def test_no_pop(tmp_path):
+    buf = SpillBuffer(str(tmp_path), target=100)
+    with pytest.raises(NotImplementedError):
+        buf.pop("x", None)
+
+
 class NoWeakRef:
     """A class which
     1. reports an arbitrary managed memory usage
@@ -337,10 +344,7 @@ class SupportsWeakRef(NoWeakRef):
 
 @pytest.mark.parametrize(
     "cls,expect_cached",
-    [
-        (SupportsWeakRef, has_zict_220),
-        (NoWeakRef, False),
-    ],
+    [(SupportsWeakRef, True), (NoWeakRef, False)],
 )
 @pytest.mark.parametrize("size", [60, 110])
 def test_weakref_cache(tmp_path, cls, expect_cached, size):
@@ -383,49 +387,70 @@ def test_weakref_cache(tmp_path, cls, expect_cached, size):
 
 
 def test_metrics(tmp_path):
-    buf = SpillBuffer(str(tmp_path), target=1000)
-    assert buf.get_metrics() == {
-        "disk_bytes": 0,
-        "disk_count": 0,
-        "disk_read_bytes_total": 0,
-        "disk_read_count_total": 0,
-        "disk_read_time_total": 0,
-        "disk_write_bytes_total": 0,
-        "disk_write_count_total": 0,
-        "disk_write_time_total": 0,
-        "memory_bytes": 0,
-        "memory_count": 0,
-        "memory_read_bytes_total": 0,
-        "memory_read_count_total": 0,
-        "pickle_time_total": 0,
-        "unpickle_time_total": 0,
+    buf = SpillBuffer(str(tmp_path), target=35_000)
+    assert buf.cumulative_metrics == {}
+
+    a = "a" * 20_000  # <target, highly compressible
+    b = "b"
+    c = random.randbytes(30_000)  # <target, uncompressible
+    d = "d" * 40_000  # >target, highly compressible
+
+    with meter() as m:
+        buf["a"] = a
+        buf["b"] = b
+        del buf["b"]  # No effect
+        _ = buf["a"]  # Cache hit
+        buf["c"] = c  # Auto evict a (c < target; pushes older keys to slow)
+        buf.evict()  # Manual evict c
+        buf["d"] = d  # Auto evict d (d > target; goes to slow)
+
+        a_size = psize(tmp_path, a=a)
+        c_size = psize(tmp_path, c=c)
+        d_size = psize(tmp_path, d=d)
+
+        _ = buf["c"]  # Unspill / cache miss (c < target, goes back to fast)
+        _ = buf["d"]  # Unspill / cache miss (d > target, stays in slow)
+
+    assert (set(buf.fast), set(buf.slow)) == ({"c"}, {"a", "d"})
+
+    assert {
+        (label, unit): v
+        for (label, unit), v in buf.cumulative_metrics.items()
+        if unit != "seconds"
+    } == {
+        ("disk-read", "bytes"): c_size[1] + d_size[1],
+        ("disk-read", "count"): 2,
+        ("disk-write", "bytes"): a_size[1] + c_size[1] + d_size[1],
+        ("disk-write", "count"): 3,
+        ("memory-read", "bytes"): a_size[0],
+        ("memory-read", "count"): 1,
     }
 
-    a, b, c = "a" * 200, "b" * 150, "c" * 100
+    time_metrics = {
+        (label, unit): v
+        for (label, unit), v in buf.cumulative_metrics.items()
+        if unit == "seconds"
+    }
+    assert all(v > 0 for v in time_metrics.values())
+    assert list(time_metrics) == [
+        ("serialize", "seconds"),
+        ("compress", "seconds"),
+        ("disk-write", "seconds"),
+        ("disk-read", "seconds"),
+        ("decompress", "seconds"),
+        ("deserialize", "seconds"),
+    ]
+    if not WINDOWS:  # Fiddly rounding; see distributed.metrics._WindowsTime
+        assert sum(time_metrics.values()) <= m.delta
 
-    buf["a"] = a
-    buf["b"] = b
-    del buf["b"]
 
-    metrics = buf.get_metrics()
-    assert 200 < metrics["memory_bytes"] < 350
-    assert metrics["memory_count"] == 1
-    for k, v in metrics.items():
-        if "disk" in k or "pickle" in k:
-            assert v == 0, f"{k}={v}"
-
-    assert metrics["memory_read_bytes_total"] == 0
-    assert metrics["memory_read_count_total"] == 0
-    _ = buf["a"]  # Cache hit
-    metrics = buf.get_metrics()
-    assert metrics["memory_read_bytes_total"] > 0
-    assert metrics["memory_read_count_total"] == 1
-
-    buf.evict()
-    buf["c"] = c
-    buf.evict()
-    _ = buf["c"]  # Unspill / cache miss
-
-    metrics = buf.get_metrics()
-    for k, v in metrics.items():
-        assert v > 0, f"{k}={v}"
+@pytest.mark.parametrize(
+    "compression,minsize,maxsize",
+    [("zlib", 100, 500), (None, 20_000, 20_500)],
+)
+def test_compression_settings(tmp_path, compression, minsize, maxsize):
+    with dask.config.set({"distributed.worker.memory.spill-compression": compression}):
+        buf = SpillBuffer(str(tmp_path), target=1)
+        x = "x" * 20_000
+        buf["x"] = x
+        assert minsize <= psize(tmp_path, x=x)[1] <= maxsize

@@ -4,8 +4,8 @@ import asyncio
 import contextlib
 import logging
 from collections import defaultdict
-from collections.abc import Iterator
-from typing import Any, Generic, Sized, TypeVar
+from collections.abc import Iterator, Sized
+from typing import Any, Generic, TypeVar
 
 from distributed.metrics import time
 from distributed.shuffle._limiter import ResourceLimiter
@@ -14,6 +14,12 @@ from distributed.sizeof import sizeof
 logger = logging.getLogger("distributed.shuffle")
 
 ShardType = TypeVar("ShardType", bound=Sized)
+T = TypeVar("T")
+
+
+class _List(list[T]):
+    # This ensures that the distributed.protocol will not iterate over this collection
+    pass
 
 
 class ShardsBuffer(Generic[ShardType]):
@@ -37,7 +43,7 @@ class ShardsBuffer(Generic[ShardType]):
     Flushing will not raise an exception. To ensure that the buffer finished successfully, please call `ShardsBuffer.raise_on_exception`
     """
 
-    shards: defaultdict[str, list[ShardType]]
+    shards: defaultdict[str, _List[ShardType]]
     sizes: defaultdict[str, int]
     concurrency_limit: int
     memory_limiter: ResourceLimiter | None
@@ -63,7 +69,7 @@ class ShardsBuffer(Generic[ShardType]):
         max_message_size: int = -1,
     ) -> None:
         self._accepts_input = True
-        self.shards = defaultdict(list)
+        self.shards = defaultdict(_List)
         self.sizes = defaultdict(int)
         self._exception = None
         self.concurrency_limit = concurrency_limit
@@ -139,7 +145,7 @@ class ShardsBuffer(Generic[ShardType]):
                 part_id = max(self.sizes, key=self.sizes.__getitem__)
                 if self.max_message_size > 0:
                     size = 0
-                    shards = []
+                    shards: _List[ShardType] = _List()
                     while size < self.max_message_size:
                         try:
                             shard = self.shards[part_id].pop()
@@ -169,6 +175,14 @@ class ShardsBuffer(Generic[ShardType]):
         data: dict
             A dictionary mapping destinations to lists of objects that should
             be written to that destination
+
+        Notes
+        -----
+        If this buffer has a memory limiter configured, then it will
+        apply back-pressure to the sender (blocking further receives)
+        if local resource usage hits the limit, until such time as the
+        resource usage drops.
+
         """
 
         if self._exception:

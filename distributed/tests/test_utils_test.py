@@ -28,7 +28,7 @@ from distributed.compatibility import WINDOWS
 from distributed.core import Server, Status, rpc
 from distributed.metrics import time
 from distributed.tests.test_batched import EchoServer
-from distributed.utils import get_mp_context
+from distributed.utils import get_mp_context, wait_for
 from distributed.utils_test import (
     SizeOf,
     _LockedCommPool,
@@ -39,6 +39,7 @@ from distributed.utils_test import (
     check_thread_leak,
     cluster,
     dump_cluster_state,
+    ensure_no_new_clients,
     freeze_batched_send,
     gen_cluster,
     gen_nbytes,
@@ -187,6 +188,23 @@ async def test_gen_cluster_tls(e, s, a, b):
     assert set(s.workers) == {w.address for w in [a, b]}
 
 
+@gen_cluster(nthreads=[("", 1)])
+async def test_gen_cluster_validate(s, a):
+    """gen_cluster() flips the default for the validate flag from False to True"""
+    assert s.validate
+    assert a.state.validate
+    async with Worker(s.address) as b:
+        assert b.state.validate
+
+
+@gen_cluster(nthreads=[("", 1)], config={"distributed.worker.validate": False})
+async def test_gen_cluster_validate_override(s, a):
+    assert s.validate
+    assert not a.state.validate
+    async with Worker(s.address) as b:
+        assert not b.state.validate
+
+
 @pytest.mark.xfail(
     reason="Test should always fail to ensure the body of the test function was run",
     strict=True,
@@ -235,6 +253,21 @@ async def test_gen_test_double_parametrized(foo, bar):
 @gen_test()
 async def test_gen_test_pytest_fixture(tmp_path):
     assert isinstance(tmp_path, pathlib.Path)
+
+
+@gen_test(config={"foo": 123, "distributed.worker.validate": False})
+async def test_gen_test_config():
+    assert dask.config.get("foo") == 123
+    # Some config defaults are different in gen_test() and gen_cluster()
+    assert dask.config.get("distributed.scheduler.validate") is True
+    assert dask.config.get("distributed.worker.validate") is False
+
+
+@gen_test()
+async def test_gen_test_config_default():
+    # Some config defaults are different in gen_test() and gen_cluster()
+    assert dask.config.get("distributed.scheduler.validate") is True
+    assert dask.config.get("distributed.worker.validate") is True
 
 
 @contextmanager
@@ -372,7 +405,7 @@ async def test_locked_comm_intercept_read(loop):
             await asyncio.sleep(0.001)
 
         with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(asyncio.shield(fut), 0.01)
+            await wait_for(asyncio.shield(fut), 0.01)
 
         assert await read_queue.get() == (b.address, "pong")
         read_event.set()
@@ -395,7 +428,7 @@ async def test_locked_comm_intercept_write(loop):
         fut = asyncio.create_task(ping_pong())
 
         with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(asyncio.shield(fut), 0.01)
+            await wait_for(asyncio.shield(fut), 0.01)
         # Write was blocked. The remote hasn't received the message, yet
         assert b.counter == 0
         assert await write_queue.get() == (b.address, {"op": "ping", "reply": True})
@@ -523,9 +556,9 @@ async def test_assert_story_identity(c, s, a, strict):
 
 
 @gen_cluster()
-async def test_dump_cluster_state(s, a, b, tmpdir):
-    await dump_cluster_state(s, [a, b], str(tmpdir), "dump")
-    with open(f"{tmpdir}/dump.yaml") as fh:
+async def test_dump_cluster_state(s, a, b, tmp_path):
+    await dump_cluster_state(s, [a, b], str(tmp_path), "dump")
+    with open(f"{tmp_path}/dump.yaml") as fh:
         out = yaml.safe_load(fh)
 
     assert out.keys() == {"scheduler", "workers", "versions"}
@@ -533,9 +566,9 @@ async def test_dump_cluster_state(s, a, b, tmpdir):
 
 
 @gen_cluster(nthreads=[])
-async def test_dump_cluster_state_no_workers(s, tmpdir):
-    await dump_cluster_state(s, [], str(tmpdir), "dump")
-    with open(f"{tmpdir}/dump.yaml") as fh:
+async def test_dump_cluster_state_no_workers(s, tmp_path):
+    await dump_cluster_state(s, [], str(tmp_path), "dump")
+    with open(f"{tmp_path}/dump.yaml") as fh:
         out = yaml.safe_load(fh)
 
     assert out.keys() == {"scheduler", "workers", "versions"}
@@ -543,9 +576,9 @@ async def test_dump_cluster_state_no_workers(s, tmpdir):
 
 
 @gen_cluster(Worker=Nanny)
-async def test_dump_cluster_state_nannies(s, a, b, tmpdir):
-    await dump_cluster_state(s, [a, b], str(tmpdir), "dump")
-    with open(f"{tmpdir}/dump.yaml") as fh:
+async def test_dump_cluster_state_nannies(s, a, b, tmp_path):
+    await dump_cluster_state(s, [a, b], str(tmp_path), "dump")
+    with open(f"{tmp_path}/dump.yaml") as fh:
         out = yaml.safe_load(fh)
 
     assert out.keys() == {"scheduler", "workers", "versions"}
@@ -553,10 +586,10 @@ async def test_dump_cluster_state_nannies(s, a, b, tmpdir):
 
 
 @gen_cluster()
-async def test_dump_cluster_state_unresponsive_local_worker(s, a, b, tmpdir):
+async def test_dump_cluster_state_unresponsive_local_worker(s, a, b, tmp_path):
     a.stop()
-    await dump_cluster_state(s, [a, b], str(tmpdir), "dump")
-    with open(f"{tmpdir}/dump.yaml") as fh:
+    await dump_cluster_state(s, [a, b], str(tmp_path), "dump")
+    with open(f"{tmp_path}/dump.yaml") as fh:
         out = yaml.safe_load(fh)
 
     assert out.keys() == {"scheduler", "workers", "versions"}
@@ -570,14 +603,14 @@ async def test_dump_cluster_state_unresponsive_local_worker(s, a, b, tmpdir):
     Worker=Nanny,
     config={"distributed.comm.timeouts.connect": "600ms"},
 )
-async def test_dump_cluster_unresponsive_remote_worker(c, s, a, b, tmpdir):
+async def test_dump_cluster_unresponsive_remote_worker(c, s, a, b, tmp_path):
     clog_fut = asyncio.create_task(
         c.run(lambda dask_scheduler: dask_scheduler.stop(), workers=[a.worker_address])
     )
     await asyncio.sleep(0.2)
 
-    await dump_cluster_state(s, [a, b], str(tmpdir), "dump")
-    with open(f"{tmpdir}/dump.yaml") as fh:
+    await dump_cluster_state(s, [a, b], str(tmp_path), "dump")
+    with open(f"{tmp_path}/dump.yaml") as fh:
         out = yaml.safe_load(fh)
 
     assert out.keys() == {"scheduler", "workers", "versions"}
@@ -991,11 +1024,11 @@ async def test_wait_for_state(c, s, a, capsys):
     )
 
     with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(wait_for_state("x", "bad_state", s), timeout=0.1)
+        await wait_for(wait_for_state("x", "bad_state", s), timeout=0.1)
     with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(wait_for_state("x", ("this", "that"), s), timeout=0.1)
+        await wait_for(wait_for_state("x", ("this", "that"), s), timeout=0.1)
     with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(wait_for_state("y", "memory", s), timeout=0.1)
+        await wait_for(wait_for_state("y", "memory", s), timeout=0.1)
     assert capsys.readouterr().out == (
         f"tasks[x].state='memory' on {s.address}; expected state='bad_state'\n"
         f"tasks[x].state='memory' on {s.address}; expected state=('this', 'that')\n"
@@ -1049,3 +1082,20 @@ def test_sizeof():
 def test_sizeof_error(input, exc, msg):
     with pytest.raises(exc, match=msg):
         SizeOf(input)
+
+
+@gen_test()
+async def test_ensure_no_new_clients():
+    with ensure_no_new_clients():
+        async with Scheduler() as s:
+            pass
+    async with Scheduler() as s:
+        with ensure_no_new_clients():
+            pass
+        with pytest.raises(AssertionError):
+            with ensure_no_new_clients():
+                async with Client(s.address, asynchronous=True):
+                    pass
+        async with Client(s.address, asynchronous=True):
+            with ensure_no_new_clients():
+                pass

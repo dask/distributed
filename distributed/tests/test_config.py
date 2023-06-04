@@ -3,15 +3,17 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
+import textwrap
 
 import pytest
 import yaml
 
 from distributed.config import initialize_logging
-from distributed.utils_test import new_config, new_config_file
+from distributed.utils_test import captured_handler, new_config, new_config_file
 
 
 @pytest.mark.parametrize(
@@ -38,26 +40,31 @@ def test_logging_default(caplog, config):
         f = logging.getLogger("foo")
         fb = logging.getLogger("foo.bar")
 
-        d.debug("1: debug")
-        d.info("2: info")
-        dfb.info("3: info")
-        fb.info("4: info")
-        fb.error("5: error")
-        f.info("6: info")
-        f.error("7: error")
-        dfc.info("8: ignore me")
-        dfc.warning("9: important")
+        with captured_handler(d.handlers[0]) as distributed_log:
+            d.debug("1: debug")
+            d.info("2: info")
+            dfb.info("3: info")
+            fb.info("4: info")
+            fb.error("5: error")
+            f.info("6: info")
+            f.error("7: error")
+            dfc.info("8: ignore me")
+            dfc.warning("9: important")
 
-        expected_logs = [
-            ("distributed", logging.INFO, "2: info"),
-            ("distributed.foo.bar", logging.INFO, "3: info"),
+        # default logging sets propagate=False so caplog does not capture
+        # distributed log records
+        assert caplog.record_tuples == [
             # Info logs of foreign libraries are not logged because default is
             # WARNING
             ("foo.bar", logging.ERROR, "5: error"),
             ("foo", logging.ERROR, "7: error"),
-            ("distributed.client", logging.WARN, "9: important"),
         ]
-        assert expected_logs == caplog.record_tuples
+        assert re.match(
+            r"\A\d+-\d+-\d+ \d+:\d+:\d+,\d+ - distributed - INFO - 2: info\n"
+            r"\d+-\d+-\d+ \d+:\d+:\d+,\d+ - distributed.foo.bar - INFO - 3: info\n"
+            r"\d+-\d+-\d+ \d+:\d+:\d+,\d+ - distributed.client - WARNING - 9: important\n\Z",
+            distributed_log.getvalue(),
+        )
 
 
 def test_logging_simple_under_distributed():
@@ -188,6 +195,42 @@ def test_logging_extended():
             """
 
         subprocess.check_call([sys.executable, "-c", code])
+
+
+def test_default_logging_does_not_override_basic_config():
+    code = textwrap.dedent(
+        """\
+        import logging
+        logging.basicConfig()
+        import distributed
+        logging.getLogger("distributed").warning("hello")
+        """
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code], check=True, capture_output=True, encoding="utf8"
+    )
+    assert proc.stdout == ""
+    assert proc.stderr == "WARNING:distributed:hello\n"
+
+
+def test_basic_config_does_not_override_default_logging():
+    code = textwrap.dedent(
+        """\
+        import logging
+        import distributed
+
+        logging.basicConfig()
+        logging.getLogger("distributed").warning("hello")
+        """
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code], check=True, capture_output=True, encoding="utf8"
+    )
+    assert proc.stdout == ""
+    assert re.match(
+        r"\A\d+-\d+-\d+ \d+:\d+:\d+,\d+ - distributed - WARNING - hello\n\Z",
+        proc.stderr,
+    )
 
 
 def test_logging_mutual_exclusive():

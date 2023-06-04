@@ -39,13 +39,15 @@ class WorkerMetricCollector(PrometheusCollector):
             "Number of tasks at worker.",
             labels=["state"],
         )
-        for k, n in ws.task_counts.items():
-            if k == "memory" and hasattr(self.server.data, "slow"):
+        for state, n in ws.task_counter.current_count(by_prefix=False).items():
+            if state == "memory" and hasattr(self.server.data, "slow"):
                 n_spilled = len(self.server.data.slow)
-                tasks.add_metric(["memory"], n - n_spilled)
-                tasks.add_metric(["disk"], n_spilled)
+                if n - n_spilled > 0:
+                    tasks.add_metric(["memory"], n - n_spilled)
+                if n_spilled > 0:
+                    tasks.add_metric(["disk"], n_spilled)
             else:
-                tasks.add_metric([k], n)
+                tasks.add_metric([state], n)
         yield tasks
 
         yield GaugeMetricFamily(
@@ -56,6 +58,13 @@ class WorkerMetricCollector(PrometheusCollector):
             ),
             value=ws.transfer_incoming_count,
         )
+
+        if self.server.monitor.monitor_gil_contention:
+            yield CounterMetricFamily(
+                self.build_name("gil_contention"),
+                "GIL contention metric",
+                value=self.server.monitor._cumulative_gil_contention,
+            )
 
         yield GaugeMetricFamily(
             self.build_name("threads"),
@@ -141,7 +150,7 @@ class WorkerMetricCollector(PrometheusCollector):
 
         now = time()
         max_tick_duration = max(
-            self.server.digests_max["tick_duration"],
+            self.server.digests_max.pop("tick_duration", 0),
             now - self.server._last_tick,
         )
         yield GaugeMetricFamily(
@@ -150,45 +159,11 @@ class WorkerMetricCollector(PrometheusCollector):
             unit="seconds",
             value=max_tick_duration,
         )
-
         yield CounterMetricFamily(
             self.build_name("tick_count"),
             "Total number of ticks observed since the server started",
             value=self.server._tick_counter,
         )
-
-        # This duplicates spill_time_total; however the breakdown is different
-        evloop_blocked_total = CounterMetricFamily(
-            self.build_name("event_loop_blocked_time"),
-            "Total time during which the worker's event loop was blocked "
-            "by spill/unspill activity since the latest worker reset",
-            unit="seconds",
-            labels=["cause"],
-        )
-        # This is typically higher than spill_time_per_key_max, as multiple keys can be
-        # spilled/unspilled without yielding the event loop
-        evloop_blocked_max = GaugeMetricFamily(
-            self.build_name("event_loop_blocked_time_max"),
-            "Maximum contiguous time during which the worker's event loop was blocked "
-            "by spill/unspill activity since the previous Prometheus poll",
-            unit="seconds",
-            labels=["cause"],
-        )
-        for family, digest in (
-            (evloop_blocked_total, self.server.digests_total),
-            (evloop_blocked_max, self.server.digests_max),
-        ):
-            for family_label, digest_label in (
-                ("disk-write-target", "disk-write-target-duration"),
-                ("disk-write-spill", "disk-write-spill-duration"),
-                ("disk-read-execute", "disk-load-duration"),
-                ("disk-read-get-data", "get-data-load-duration"),
-            ):
-                family.add_metric([family_label], digest[digest_label])
-
-        yield evloop_blocked_total
-        yield evloop_blocked_max
-        self.server.digests_max.clear()
 
     def collect_crick(self) -> Iterator[Metric]:
         # All metrics using digests require crick to be installed.
@@ -241,42 +216,36 @@ class WorkerMetricCollector(PrometheusCollector):
           read     = spill_bytes.disk_read  / spill_time.disk_read
         """
         try:
-            get_metrics = self.server.data.get_metrics  # type: ignore
+            metrics = self.server.data.cumulative_metrics  # type: ignore
         except AttributeError:
             return  # spilling is disabled
-        metrics = get_metrics()
 
-        total_bytes = CounterMetricFamily(
-            self.build_name("spill_bytes"),
-            "Total size of memory and disk accesses caused by managed data "
-            "since the latest worker restart",
-            labels=["activity"],
-        )
+        counters = {
+            "bytes": CounterMetricFamily(
+                self.build_name("spill_bytes"),
+                "Total size of memory and disk accesses caused by managed data "
+                "since the latest worker restart",
+                labels=["activity"],
+            ),
+            "count": CounterMetricFamily(
+                self.build_name("spill_count"),
+                "Total number of memory and disk accesses caused by managed data "
+                "since the latest worker restart",
+                labels=["activity"],
+            ),
+            "seconds": CounterMetricFamily(
+                self.build_name("spill_time"),
+                "Total time spent spilling/unspilling since the latest worker restart",
+                unit="seconds",
+                labels=["activity"],
+            ),
+        }
+
         # Note: memory_read is used to calculate cache hit ratios (see docstring)
-        for k in ("memory_read", "disk_read", "disk_write"):
-            total_bytes.add_metric([k], metrics[f"{k}_bytes_total"])
-        yield total_bytes
+        for (label, unit), value in metrics.items():
+            counters[unit].add_metric([label], value)
 
-        total_counts = CounterMetricFamily(
-            self.build_name("spill_count"),
-            "Total number of memory and disk accesses caused by managed data "
-            "since the latest worker restart",
-            labels=["activity"],
-        )
-        # Note: memory_read is used to calculate cache hit ratios (see docstring)
-        for k in ("memory_read", "disk_read", "disk_write"):
-            total_counts.add_metric([k], metrics[f"{k}_count_total"])
-        yield total_counts
-
-        total_times = CounterMetricFamily(
-            self.build_name("spill_time"),
-            "Total time spent spilling/unspilling since the latest worker restart",
-            unit="seconds",
-            labels=["activity"],
-        )
-        for k in ("pickle", "disk_write", "disk_read", "unpickle"):
-            total_times.add_metric([k], metrics[f"{k}_time_total"])
-        yield total_times
+        yield from counters.values()
 
 
 class PrometheusHandler(RequestHandler):

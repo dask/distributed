@@ -19,7 +19,7 @@ from distributed import (
 )
 from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.metrics import time
-from distributed.utils_test import async_wait_for, gen_test, slowinc
+from distributed.utils_test import async_poll_for, gen_test, slowinc
 
 
 def test_adaptive_local_cluster(loop):
@@ -464,7 +464,7 @@ async def test_scale_needs_to_be_awaited():
             await client.gather(futures)
 
             del futures
-            await async_wait_for(lambda: not cluster.workers, 10)
+            await async_poll_for(lambda: not cluster.workers, 10)
 
 
 @gen_test()
@@ -479,8 +479,8 @@ async def test_adaptive_stopped():
         instance = cluster.adapt(interval="10ms")
         assert instance.periodic_callback is not None
 
-        await async_wait_for(lambda: instance.periodic_callback.is_running(), timeout=5)
+        await async_poll_for(lambda: instance.periodic_callback.is_running(), timeout=5)
 
         pc = instance.periodic_callback
 
-    await async_wait_for(lambda: not pc.is_running(), timeout=5)
+    await async_poll_for(lambda: not pc.is_running(), timeout=5)

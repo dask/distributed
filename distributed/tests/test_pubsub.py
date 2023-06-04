@@ -54,7 +54,7 @@ async def test_speed(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[])
 async def test_client(c, s):
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError, match="No worker found"):
         get_worker()
     sub = Sub("a")
     pub = Pub("a")

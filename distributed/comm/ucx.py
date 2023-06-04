@@ -278,6 +278,11 @@ class UCX(Comm):
     def peer_address(self) -> str:
         return self._peer_addr
 
+    @property
+    def same_host(self) -> bool:
+        """Unlike in TCP, local_address can be blank"""
+        return super().same_host if self._local_addr else False
+
     @log_errors
     async def write(
         self,
@@ -416,7 +421,7 @@ class UCX(Comm):
         if self._ep is not None:
             try:
                 await self.ep.send(struct.pack("?Q", True, 0))
-            except (
+            except (  # noqa: B030
                 ucp.exceptions.UCXError,
                 ucp.exceptions.UCXCloseError,
                 ucp.exceptions.UCXCanceled,

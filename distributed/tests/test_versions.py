@@ -141,10 +141,10 @@ async def test_version_warning_in_cluster(s, a, b):
     assert any("0.0.0" in str(r.message) for r in record)
 
     async with Worker(s.address) as w:
-        assert any(w.id in line.message for line in w.logs)
-        assert any("Workers" in line.message for line in w.logs)
-        assert any("dask" in line.message for line in w.logs)
-        assert any("0.0.0" in line.message in line.message for line in w.logs)
+        assert any(w.id in line.getMessage() for line in w.logs)
+        assert any("Workers" in line.getMessage() for line in w.logs)
+        assert any("dask" in line.getMessage() for line in w.logs)
+        assert any("0.0.0" in line.getMessage() for line in w.logs)
 
 
 def test_python_version():

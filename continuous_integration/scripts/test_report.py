@@ -9,8 +9,8 @@ import re
 import shelve
 import sys
 import zipfile
-from collections.abc import Iterator
-from typing import Any, Iterable, cast
+from collections.abc import Iterable, Iterator
+from typing import Any, cast
 
 import altair
 import altair_saver
@@ -215,10 +215,6 @@ def suite_from_name(name: str) -> str:
     just lop off the front of the name to get the suite.
     """
     parts = name.split("-")
-    if len(parts) == 4:  # [OS, 'latest', py_version, $PARTITION_LABEL]
-        # Migration: handle older jobs without the `queuing` configuration.
-        # This branch can be removed after 2022-12-07.
-        parts.insert(3, "no_queue")
     return "-".join(parts[:4])
 
 
@@ -359,6 +355,10 @@ def download_and_parse_artifacts(
                 if xml is None:
                     continue
                 df = dataframe_from_jxml(cast(Iterable, xml))
+
+                # Needed until *-*-mindeps-numpy shows up in TEST_ID
+                a["name"] = a["name"].replace("--", "-numpy-")
+
                 # Note: we assign a column with the workflow run timestamp rather
                 # than the artifact timestamp so that artifacts triggered under
                 # the same workflow run can be aligned according to the same trigger

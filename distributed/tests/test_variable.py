@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import pickle
 import random
 from datetime import timedelta
 from time import sleep
@@ -236,7 +237,7 @@ async def test_Future_knows_status_immediately(c, s, a, b):
 
         future2 = await v2.get()
         assert future2.status == "error"
-        with pytest.raises(Exception):
+        with pytest.raises(ZeroDivisionError):
             await future2
 
         start = time()
@@ -294,3 +295,33 @@ async def test_variables_do_not_leak_client(c, s, a, b):
     while set(s.clients) != clients_pre:
         await asyncio.sleep(0.01)
         assert time() < start + 5
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_unpickle_without_client(c, s):
+    """Ensure that the object properly pickle roundtrips even if no client, worker, etc. is active in the given context.
+
+    This typically happens if the object is being deserialized on the scheduler.
+    """
+    obj = Variable("foo")
+    pickled = pickle.dumps(obj)
+    await c.close()
+
+    # We do not want to initialize a client during unpickling
+    with pytest.raises(ValueError):
+        Client.current()
+
+    obj2 = pickle.loads(pickled)
+
+    with pytest.raises(ValueError):
+        Client.current()
+
+    assert obj2.client is None
+
+    with pytest.raises(RuntimeError, match="not properly initialized"):
+        await obj2.set(42)
+
+    async with Client(s.address, asynchronous=True):
+        obj3 = pickle.loads(pickled)
+        await obj3.set(42)
+        assert await obj3.get() == 42

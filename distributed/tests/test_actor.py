@@ -17,10 +17,12 @@ from distributed import (
     as_completed,
     get_client,
     wait,
+    worker_client,
 )
 from distributed.metrics import time
 from distributed.utils import LateLoopEvent
-from distributed.utils_test import cluster, gen_cluster
+from distributed.utils_test import cluster, double, gen_cluster, inc
+from distributed.worker import get_worker
 
 
 class Counter:
@@ -782,3 +784,41 @@ async def test_serialize_with_pickle(c, s, a, b):
     future = c.submit(Foo, workers=a.address)
     foo = await future
     assert isinstance(foo.actor, Actor)
+
+
+@gen_cluster(client=True)
+async def test_worker_client_async(c, s, a, b):
+    class Actor:
+        async def demo(self, x):
+            with worker_client() as c:
+                x = c.submit(inc, x)
+                y = c.submit(double, x)
+                return await x + await y
+
+    actor = await c.submit(Actor, actor=True)
+    assert await actor.demo(10) == 10 + 1 + (10 + 1) * 2
+
+
+@gen_cluster(client=True)
+async def test_worker_client_separate_thread(c, s, a, b):
+    class Actor:
+        def demo(self, x):
+            with worker_client() as c:
+                x = c.submit(inc, x)
+                y = c.submit(double, x)
+                return x.result() + y.result()
+
+    actor = await c.submit(Actor, actor=True)
+    assert await actor.demo(10, separate_thread=True) == 10 + 1 + (10 + 1) * 2
+
+
+@gen_cluster(client=True)
+async def test_get_worker(c, s, a, b):
+    class Actor:
+        # There's not much you can do with a worker in a synchronous function
+        # running on the worker event loop.
+        def demo(self):
+            return get_worker().address
+
+    actor = await c.submit(Actor, actor=True, workers=[a.address])
+    assert await actor.demo() == a.address

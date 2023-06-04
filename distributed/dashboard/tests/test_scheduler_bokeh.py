@@ -25,9 +25,10 @@ from distributed.dashboard.components.scheduler import (
     AggregateAction,
     ClusterMemory,
     ComputePerKey,
+    Contention,
     CurrentLoad,
-    EventLoop,
     Events,
+    FinePerformanceMetrics,
     Hardware,
     MemoryByKey,
     MemoryColor,
@@ -108,7 +109,7 @@ async def test_basic(c, s, a, b):
         SystemMonitor,
         Occupancy,
         StealingTimeSeries,
-        EventLoop,
+        Contention,
     ]:
         ss = component(s)
 
@@ -326,6 +327,21 @@ async def test_WorkersMemory(c, s, a, b):
     # Empty rects are removed.
     assert llens in ({4}, {5}, {6})
     assert all(d["width"])
+
+
+@gen_cluster(client=True)
+async def test_FinePerformanceMetrics(c, s, a, b):
+    cl = FinePerformanceMetrics(s)
+
+    futures = c.map(slowinc, range(10), delay=0.001)
+    await wait(futures)
+    await asyncio.sleep(1)  # wait for metrics to arrive
+
+    assert not cl.task_exec_data
+
+    cl.update()
+    assert cl.task_exec_data
+    assert cl.task_exec_data["functions"] == ["slowinc"]
 
 
 @gen_cluster(client=True)
@@ -1117,12 +1133,17 @@ async def test_shuffling(c, s, a, b):
     dd = pytest.importorskip("dask.dataframe")
     ss = Shuffling(s)
 
-    df = dask.datasets.timeseries()
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-02-01",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
     df2 = dd.shuffle.shuffle(df, "x", shuffle="p2p").persist()
     start = time()
-    while not ss.source.data["disk_read"]:
+    while not ss.source.data["comm_written"]:
         ss.update()
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0)
         assert time() < start + 5
     await df2
 

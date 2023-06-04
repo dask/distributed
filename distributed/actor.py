@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import abc
 import functools
-import sys
 import threading
-from collections.abc import Generator
+from collections.abc import Awaitable, Generator
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Generic, Literal, NoReturn, TypeVar
@@ -16,11 +15,6 @@ from distributed.protocol import to_serialize
 from distributed.utils import LateLoopEvent, iscoroutinefunction, sync, thread_state
 from distributed.utils_comm import WrappedKey
 from distributed.worker import get_client, get_worker
-
-if sys.version_info >= (3, 9):
-    from collections.abc import Awaitable
-else:
-    from typing import Awaitable
 
 _T = TypeVar("_T")
 
@@ -68,20 +62,22 @@ class Actor(WrappedKey):
         super().__init__(key)
         self._cls = cls
         self._address = address
+        self._key = key
         self._future = None
-        if worker:
-            self._worker = worker
-            self._client = None
-        else:
+        self._worker = worker
+        self._client = None
+        self._try_bind_worker_client()
+
+    def _try_bind_worker_client(self):
+        if not self._worker:
             try:
-                # TODO: `get_worker` may return the wrong worker instance for async local clusters (most tests)
-                # when run outside of a task (when deserializing a key pointing to an Actor, etc.)
                 self._worker = get_worker()
             except ValueError:
                 self._worker = None
+        if not self._client:
             try:
                 self._client = get_client()
-                self._future = Future(key, inform=self._worker is None)
+                self._future = Future(self._key, inform=False)
                 # ^ When running on a worker, only hold a weak reference to the key, otherwise the key could become unreleasable.
             except ValueError:
                 self._client = None
@@ -94,6 +90,8 @@ class Actor(WrappedKey):
 
     @property
     def _io_loop(self):
+        if self._worker is None and self._client is None:
+            self._try_bind_worker_client()
         if self._worker:
             return self._worker.loop
         else:
@@ -101,6 +99,8 @@ class Actor(WrappedKey):
 
     @property
     def _scheduler_rpc(self):
+        if self._worker is None and self._client is None:
+            self._try_bind_worker_client()
         if self._worker:
             return self._worker.scheduler
         else:
@@ -108,6 +108,8 @@ class Actor(WrappedKey):
 
     @property
     def _worker_rpc(self):
+        if self._worker is None and self._client is None:
+            self._try_bind_worker_client()
         if self._worker:
             return self._worker.rpc(self._address)
         else:
@@ -141,7 +143,7 @@ class Actor(WrappedKey):
             raise ValueError(
                 "Worker holding Actor was lost.  Status: " + self._future.status
             )
-
+        self._try_bind_worker_client()
         if (
             self._worker
             and self._worker.address == self._address

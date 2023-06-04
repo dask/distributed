@@ -8,9 +8,9 @@ import math
 import random
 import weakref
 from collections import defaultdict
+from collections.abc import Callable, Coroutine, Iterable, Mapping, Sequence
 from operator import mul
 from time import sleep
-from typing import Callable, Coroutine, Iterable, Mapping, Sequence
 
 import pytest
 from tlz import merge, sliding_window
@@ -34,6 +34,7 @@ from distributed.compatibility import LINUX
 from distributed.core import Status
 from distributed.metrics import time
 from distributed.system import MEMORY_LIMIT
+from distributed.utils import wait_for
 from distributed.utils_test import (
     NO_AMM,
     BlockedGetData,
@@ -50,7 +51,6 @@ from distributed.utils_test import (
     wait_for_state,
 )
 from distributed.worker_state_machine import (
-    DigestMetric,
     ExecuteSuccessEvent,
     FreeKeysEvent,
     StealRequestEvent,
@@ -240,7 +240,7 @@ async def test_allow_tasks_stolen_before_first_completes(c, s, a, b):
             await asyncio.sleep(0.001)
         # Ensure the task is indeed blocked
         with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(first, 0.01)
+            await wait_for(first, 0.01)
 
         more_tasks = c.map(
             blocked_task,
@@ -262,7 +262,6 @@ async def test_allow_tasks_stolen_before_first_completes(c, s, a, b):
         await steal.start()
         # A is still blocked by executing task f-1 so this can only pass if
         # workstealing moves the tasks to B
-        await asyncio.sleep(5)
         await c.gather(more_tasks)
         assert len(b.data) == 10
     await first
@@ -1350,9 +1349,7 @@ def test_steal_worker_state(ws_with_running_task):
     assert ws.tasks["x"].state == "cancelled"
 
     instructions = ws.handle_stimulus(ExecuteSuccessEvent.dummy("x", stimulus_id="s2"))
-    assert instructions == [
-        DigestMetric(stimulus_id="s2", name="compute-duration", value=1.0)
-    ]
+    assert not instructions
     assert "x" not in ws.tasks
     assert "x" not in ws.data
     assert ws.available_resources == {"R": 1}
@@ -1861,7 +1858,7 @@ def _get_task_placement(
         actual.append(
             [
                 list(key_split(key[5:]))  # Remove "task-" prefix
-                for key in w.data.keys()
+                for key in w.data
                 if key.startswith("task-")
             ]
         )

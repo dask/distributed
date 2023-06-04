@@ -1,48 +1,51 @@
 from __future__ import annotations
 
 from io import BytesIO
-from typing import TYPE_CHECKING, BinaryIO
+from typing import TYPE_CHECKING
+
+from packaging.version import parse
 
 if TYPE_CHECKING:
+    import pandas as pd
     import pyarrow as pa
 
 
-def dump_shards(shards: list[bytes], file: BinaryIO) -> None:
+def check_dtype_support(meta_input: pd.DataFrame) -> None:
+    import pandas as pd
+
+    for name in meta_input:
+        column = meta_input[name]
+        # FIXME: PyArrow does not support complex numbers: https://issues.apache.org/jira/browse/ARROW-638
+        if pd.api.types.is_complex_dtype(column):
+            raise TypeError(
+                f"p2p does not support data of type '{column.dtype}' found in column '{name}'."
+            )
+        # FIXME: PyArrow does not support sparse data: https://issues.apache.org/jira/browse/ARROW-8679
+        if isinstance(column.dtype, pd.SparseDtype):
+            raise TypeError("p2p does not support sparse data found in column '{name}'")
+
+
+def check_minimal_arrow_version() -> None:
+    """Verify that the the correct version of pyarrow is installed to support
+    the P2P extension.
+
+    Raises a RuntimeError in case pyarrow is not installed or installed version
+    is not recent enough.
     """
-    Write multiple shard tables to the file
+    # First version to introduce Table.sort_by
+    minversion = "7.0.0"
+    try:
+        import pyarrow as pa
+    except ImportError:
+        raise RuntimeError(f"P2P shuffling requires pyarrow>={minversion}")
 
-    Note: This function appends to the file and dumps each table as an individual stream.
-    This results in multiple end-of-stream signals in the file.
-
-    See Also
-    --------
-    load_partition
-    """
-    for shard in shards:
-        file.write(shard)
-
-
-def load_partition(file: BinaryIO) -> list[bytes]:
-    """Load partition data written to file back out into a single table
-
-    Example
-    -------
-    >>> tables = [pa.Table.from_pandas(df), pa.Table.from_pandas(df2)]  # doctest: +SKIP
-    >>> with open("myfile", mode="wb") as f:  # doctest: +SKIP
-    ...     for table in tables:  # doctest: +SKIP
-    ...         dump_shards(tables, f)  # doctest: +SKIP
-
-    >>> with open("myfile", mode="rb") as f:  # doctest: +SKIP
-    ...     t = load_partition(f)  # doctest: +SKIP
-
-    See Also
-    --------
-    dump_shards
-    """
-    return [file.read()]
+    if parse(pa.__version__) < parse(minversion):
+        raise RuntimeError(
+            f"P2P shuffling requires pyarrow>={minversion} but only found {pa.__version__}"
+        )
 
 
-def convert_partition(data: bytes) -> pa.Table:
+def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
     import pyarrow as pa
 
     file = BytesIO(data)
@@ -51,7 +54,9 @@ def convert_partition(data: bytes) -> pa.Table:
     while file.tell() < end:
         sr = pa.RecordBatchStreamReader(file)
         shards.append(sr.read_all())
-    return pa.concat_tables(shards)
+    table = pa.concat_tables(shards)
+    df = table.to_pandas(self_destruct=True)
+    return df.astype(meta.dtypes)
 
 
 def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
@@ -59,31 +64,6 @@ def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
     import pyarrow as pa
 
     return pa.concat_tables(deserialize_table(buffer) for buffer in data)
-
-
-def deserialize_schema(data: bytes) -> pa.Schema:
-    """Deserialize an arrow schema
-
-    Examples
-    --------
-    >>> b = schema.serialize()  # doctest: +SKIP
-    >>> deserialize_schema(b)  # doctest: +SKIP
-
-    See also
-    --------
-    pa.Schema.serialize
-    """
-    import io
-
-    import pyarrow as pa
-
-    bio = io.BytesIO()
-    bio.write(data)
-    bio.seek(0)
-    sr = pa.RecordBatchStreamReader(bio)
-    table = sr.read_all()
-    bio.close()
-    return table.schema
 
 
 def serialize_table(table: pa.Table) -> bytes:

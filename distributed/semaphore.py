@@ -12,7 +12,7 @@ from dask.utils import parse_timedelta
 
 from distributed.compatibility import PeriodicCallback
 from distributed.metrics import time
-from distributed.utils import Deadline, SyncMethodMixin, log_errors
+from distributed.utils import Deadline, SyncMethodMixin, log_errors, wait_for
 from distributed.utils_comm import retry_operation
 from distributed.worker import get_client, get_worker
 
@@ -151,9 +151,7 @@ class SemaphoreExtension:
             # If acquiring fails, we wait for the event to be set, i.e. something has
             # been released and we can try to acquire again (continue loop)
             if not result:
-                future = asyncio.wait_for(
-                    self.events[name].wait(), timeout=deadline.remaining
-                )
+                future = wait_for(self.events[name].wait(), timeout=deadline.remaining)
                 try:
                     await future
                     continue
@@ -344,15 +342,8 @@ class Semaphore(SyncMethodMixin):
         scheduler_rpc=None,
         loop=None,
     ):
-        try:
-            worker = get_worker()
-            self.scheduler = scheduler_rpc or worker.scheduler
-            self.loop = loop or worker.loop
-
-        except ValueError:
-            client = get_client()
-            self.scheduler = scheduler_rpc or client.scheduler
-            self.loop = loop or client.loop
+        self._scheduler = scheduler_rpc
+        self._loop = loop
 
         self.name = name or "semaphore-" + uuid.uuid4().hex
         self.max_leases = max_leases
@@ -381,7 +372,39 @@ class Semaphore(SyncMethodMixin):
 
         # Need to start the callback using IOLoop.add_callback to ensure that the
         # PC uses the correct event loop.
-        self.loop.add_callback(pc.start)
+        if self.loop is not None:
+            self.loop.add_callback(pc.start)
+
+    @property
+    def scheduler(self):
+        self._bind_late()
+        return self._scheduler
+
+    @property
+    def loop(self):
+        self._bind_late()
+        return self._loop
+
+    def _bind_late(self):
+        if self._scheduler is None or self._loop is None:
+            try:
+                try:
+                    worker = get_worker()
+                    self._scheduler = self._scheduler or worker.scheduler
+                    self._loop = self._loop or worker.loop
+
+                except ValueError:
+                    client = get_client()
+                    self._scheduler = self._scheduler or client.scheduler
+                    self._loop = self._loop or client.loop
+            except ValueError:
+                pass
+
+    def _verify_running(self):
+        if not self.scheduler or not self.loop:
+            raise RuntimeError(
+                f"{type(self)} object not properly initialized. This can happen if the object is being deserialized outside of the context of a Client or Worker."
+            )
 
     async def _register(self):
         await retry_operation(
@@ -453,6 +476,7 @@ class Semaphore(SyncMethodMixin):
             Instead of number of seconds, it is also possible to specify
             a timedelta in string format, e.g. "200ms".
         """
+        self._verify_running()
         timeout = parse_timedelta(timeout)
         return self.sync(self._acquire, timeout=timeout)
 
@@ -486,6 +510,7 @@ class Semaphore(SyncMethodMixin):
             immediately, but it will always be automatically released after a specific interval configured using
             "distributed.scheduler.locks.lease-validation-interval" and "distributed.scheduler.locks.lease-timeout".
         """
+        self._verify_running()
         if not self._leases:
             raise RuntimeError("Released too often")
 
@@ -498,9 +523,11 @@ class Semaphore(SyncMethodMixin):
         """
         Return the number of currently registered leases.
         """
+        self._verify_running()
         return self.sync(self.scheduler.semaphore_value, name=self.name)
 
     def __enter__(self):
+        self._verify_running()
         self.acquire()
         return self
 
@@ -508,6 +535,7 @@ class Semaphore(SyncMethodMixin):
         self.release()
 
     async def __aenter__(self):
+        self._verify_running()
         await self.acquire()
         return self
 
@@ -528,8 +556,10 @@ class Semaphore(SyncMethodMixin):
         )
 
     def close(self):
+        self._verify_running()
         self.refresh_callback.stop()
         return self.sync(self.scheduler.semaphore_close, name=self.name)
 
     def __del__(self):
-        self.refresh_callback.stop()
+        if hasattr(self, "refresh_callback"):
+            self.refresh_callback.stop()

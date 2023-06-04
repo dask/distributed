@@ -7,7 +7,6 @@ from contextlib import suppress
 from time import sleep
 from unittest import mock
 
-import psutil
 import pytest
 from tlz import first, merge, partition_all
 
@@ -24,7 +23,7 @@ from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
     BlockedGetData,
-    async_wait_for,
+    async_poll_for,
     captured_logger,
     cluster,
     div,
@@ -212,7 +211,7 @@ async def test_multiple_clients_restart(s, a, b):
         assert await y2 == 3
 
         del x2, y2
-        await async_wait_for(lambda: not s.tasks, timeout=5)
+        await async_poll_for(lambda: not s.tasks, timeout=5)
 
 
 @gen_cluster(Worker=Nanny, timeout=60)
@@ -460,11 +459,10 @@ async def test_forget_data_not_supposed_to_have(c, s, a):
 
 @gen_cluster(
     client=True,
-    nthreads=[("", 1)] * 3,
+    nthreads=[("", 1)] * 2,
     config=merge(NO_AMM, {"distributed.comm.timeouts.connect": "1s"}),
-    Worker=Nanny,
 )
-async def test_failing_worker_with_additional_replicas_on_cluster(c, s, n0, n1, n2):
+async def test_failing_worker_with_additional_replicas_on_cluster(c, s, w0, w2):
     """
     If a worker detects a missing dependency, the scheduler is notified. If no
     other replica is available, the dependency is rescheduled. A reschedule
@@ -476,30 +474,28 @@ async def test_failing_worker_with_additional_replicas_on_cluster(c, s, n0, n1, 
     def dummy(*args, **kwargs):
         return
 
-    proc1 = psutil.Process(n1.pid)
-    f1 = c.submit(
-        SlowTransmitData,
-        1,
-        delay=0.1,
-        key="f1",
-        workers=[n0.worker_address],
-    )
-    await wait(f1)
+    async with BlockedGatherDep(s.address) as w1:
+        f1 = c.submit(
+            inc,
+            1,
+            key="f1",
+            workers=[w0.worker_address],
+        )
 
-    # We'll schedule tasks on two workers, s.t. f1 is replicated. We will
-    # suspend one of the workers and kill the origin worker of f1 such that a
-    # comm failure causes the worker to handle a missing dependency. It will ask
-    # the schedule such that it knows that a replica is available on f2 and
-    # reschedules the fetch
-    f2 = c.submit(dummy, f1, key="f2", workers=[n1.worker_address])
-    f3 = c.submit(dummy, f1, key="f3", workers=[n2.worker_address])
+        # We'll schedule tasks on two workers, s.t. f1 is replicated. We will
+        # suspend one of the workers and kill the origin worker of f1 such that a
+        # comm failure causes the worker to handle a missing dependency. It will ask
+        # the schedule such that it knows that a replica is available on f2 and
+        # reschedules the fetch
+        f2 = c.submit(dummy, f1, key="f2", workers=[w1.worker_address])
+        f3 = c.submit(dummy, f1, key="f3", workers=[w2.worker_address])
 
-    proc1.suspend()
+        await w1.in_gather_dep.wait()
 
-    await wait(f3)
-    # Because of this line we need to disable AMM; otherwise it could choose to delete
-    # the replicas of f1 on n1 and n2 and keep the one on n0.
-    await n0.close()
+        await wait(f3)
+        # Because of this line we need to disable AMM; otherwise it could choose to delete
+        # the replicas of f1 on w1 and w2 and keep the one on w0.
+        await w0.close()
 
-    proc1.resume()
-    await c.gather([f1, f2, f3])
+        w1.block_gather_dep.set()
+        await c.gather([f1, f2, f3])

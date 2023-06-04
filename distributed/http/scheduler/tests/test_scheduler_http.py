@@ -17,7 +17,7 @@ from distributed.client import wait
 from distributed.core import Status
 from distributed.utils import is_valid_xml
 from distributed.utils_test import (
-    async_wait_for,
+    async_poll_for,
     div,
     fetch_metrics,
     fetch_metrics_body,
@@ -107,7 +107,9 @@ async def test_prometheus(c, s, a, b):
     expected_metrics = {
         "dask_scheduler_clients",
         "dask_scheduler_desired_workers",
+        "dask_scheduler_gil_contention",
         "dask_scheduler_workers",
+        "dask_scheduler_last_time",
         "dask_scheduler_tasks",
         "dask_scheduler_tasks_suspicious",
         "dask_scheduler_tasks_forgotten",
@@ -293,7 +295,7 @@ async def test_prometheus_collect_worker_states(c, s, a, b):
 
     a.monitor.get_process_memory = lambda: 2**40
     sa = s.workers[a.address]
-    await async_wait_for(lambda: sa.status == Status.paused, timeout=2)
+    await async_poll_for(lambda: sa.status == Status.paused, timeout=2)
     assert await fetch_metrics() == {
         "idle": 1,
         "partially_saturated": 0,
@@ -481,3 +483,27 @@ async def test_adaptive_target(c, s, a, b):
             assert resp.headers["Content-Type"] == "application/json"
             num_workers = json.loads(await resp.text())["workers"]
             assert num_workers == 0
+
+
+@gen_cluster(
+    client=True,
+    clean_kwargs={"threads": False},
+    config={
+        "distributed.scheduler.http.routes": DEFAULT_ROUTES
+        + ["distributed.http.scheduler.api"]
+    },
+)
+async def test_check_idle(c, s, a, b):
+    aiohttp = pytest.importorskip("aiohttp")
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            "http://localhost:%d/api/v1/check_idle" % s.http_server.port
+        ) as resp:
+            assert resp.status == 200
+            assert resp.headers["Content-Type"] == "application/json"
+            response = json.loads(await resp.text())
+            assert (
+                isinstance(response["idle_since"], float)
+                or response["idle_since"] is None
+            )

@@ -309,7 +309,7 @@ async def test_resources(c, s):
 @pytest.mark.slow
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 @gen_cluster(client=True, nthreads=[])
-async def test_local_directory(c, s, nanny, tmpdir):
+async def test_local_directory(c, s, nanny, tmp_path):
     with popen(
         [
             "dask",
@@ -318,13 +318,13 @@ async def test_local_directory(c, s, nanny, tmpdir):
             nanny,
             "--no-dashboard",
             "--local-directory",
-            str(tmpdir),
+            str(tmp_path),
         ]
     ):
         await c.wait_for_workers(1)
         info = c.scheduler_info()
         (d,) = info["workers"].values()
-        assert d["local_directory"].startswith(str(tmpdir))
+        assert d["local_directory"].startswith(str(tmp_path))
 
 
 @pytest.mark.slow
@@ -723,11 +723,11 @@ def test_error_during_startup(monkeypatch, nanny, loop):
                 assert worker.wait(10) == 1
 
 
-@gen_cluster(nthreads=[], client=True)
-async def test_single_executable_deprecated(c, s):
-    with popen(["dask-worker", s.address], capture_output=True) as worker:
-        # ensure deprecation warning is emitted
-        wait_for_log_line(b"FutureWarning: dask-worker is deprecated", worker.stdout)
+def test_single_executable_deprecated():
+    assert (
+        b"FutureWarning: dask-worker is deprecated"
+        in subprocess.run(["dask-worker"], capture_output=True).stderr
+    )
 
 
 @pytest.mark.slow

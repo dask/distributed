@@ -12,8 +12,9 @@ from itertools import chain
 from types import ModuleType
 from typing import Any
 
-MIN_BOKEH_VERSION = "2.4.2"
-MAX_BOKEH_VERSION = "2.4.3"
+from packaging.requirements import Requirement
+
+BOKEH_REQUIREMENT = Requirement("bokeh>=2.4.2,!=3.0.*")
 
 required_packages = [
     ("dask", lambda p: p.__version__),
@@ -32,13 +33,14 @@ optional_packages = [
 
 
 # only these scheduler packages will be checked for version mismatch
-scheduler_relevant_packages = {pkg for pkg, _ in required_packages} | {"lz4", "python"}
+scheduler_relevant_packages = {pkg for pkg, _ in required_packages} | {
+    "lz4",
+    "python",
+} - {"msgpack"}
 
 
 # notes to be displayed for mismatch packages
-notes_mismatch_package = {
-    "msgpack": "Variation is ok, as long as everything is above 0.6"
-}
+notes_mismatch_package: dict[str, str] = {}
 
 
 def get_versions(

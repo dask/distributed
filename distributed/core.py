@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import os
 import sys
+import tempfile
 import threading
 import traceback
 import types
@@ -11,10 +13,10 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict, deque
-from collections.abc import Container, Coroutine
+from collections.abc import Callable, Container, Coroutine, Generator, Hashable
 from enum import Enum
-from functools import partial
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, TypedDict, TypeVar, final
+from functools import wraps
+from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, TypeVar, final
 
 import tblib
 from tlz import merge
@@ -24,6 +26,7 @@ import dask
 from dask.utils import parse_timedelta
 
 from distributed import profile, protocol
+from distributed.collections import LRU
 from distributed.comm import (
     Comm,
     CommClosedError,
@@ -34,24 +37,46 @@ from distributed.comm import (
     unparse_host_port,
 )
 from distributed.compatibility import PeriodicCallback
-from distributed.metrics import time
+from distributed.counter import Counter
+from distributed.diskutils import WorkDir, WorkSpace
+from distributed.metrics import context_meter, time
+from distributed.protocol import pickle
 from distributed.system_monitor import SystemMonitor
 from distributed.utils import (
     NoOpAwaitable,
     get_traceback,
     has_keyword,
+    import_file,
     iscoroutinefunction,
+    offload,
     recursive_to_dict,
     truncate_exception,
+    wait_for,
+    warn_on_duration,
 )
 
 if TYPE_CHECKING:
-    from typing_extensions import ParamSpec
+    from typing_extensions import ParamSpec, Self
 
     P = ParamSpec("P")
     R = TypeVar("R")
     T = TypeVar("T")
     Coro = Coroutine[Any, Any, T]
+
+
+cache_loads: LRU[bytes, Callable[..., Any]] = LRU(maxsize=100)
+
+
+def loads_function(bytes_object):
+    """Load a function from bytes, cache bytes"""
+    if len(bytes_object) < 100000:
+        try:
+            result = cache_loads[bytes_object]
+        except KeyError:
+            result = pickle.loads(bytes_object)
+            cache_loads[bytes_object] = result
+        return result
+    return pickle.loads(bytes_object)
 
 
 class Status(Enum):
@@ -301,6 +326,9 @@ class Server:
 
     default_ip = ""
     default_port = 0
+    local_directory: str
+    _workspace: WorkSpace
+    _workdir: None | WorkDir
 
     def __init__(
         self,
@@ -314,7 +342,41 @@ class Server:
         connection_args=None,
         timeout=None,
         io_loop=None,
+        local_directory=None,
+        needs_workdir=True,
     ):
+        if local_directory is None:
+            local_directory = (
+                dask.config.get("temporary-directory") or tempfile.gettempdir()
+            )
+
+        if "dask-scratch-space" not in str(local_directory):
+            local_directory = os.path.join(local_directory, "dask-scratch-space")
+
+        self._original_local_dir = local_directory
+
+        with warn_on_duration(
+            "1s",
+            "Creating scratch directories is taking a surprisingly long time. ({duration:.2f}s) "
+            "This is often due to running workers on a network file system. "
+            "Consider specifying a local-directory to point workers to write "
+            "scratch data to a local disk.",
+        ):
+            self._workspace = WorkSpace(local_directory)
+
+            if not needs_workdir:  # eg. Nanny will not need a WorkDir
+                self._workdir = None
+                self.local_directory = self._workspace.base_dir
+            else:
+                name = type(self).__name__.lower()
+                self._workdir = self._workspace.new_work_dir(prefix=f"{name}-")
+                self.local_directory = self._workdir.dir_path
+
+        self._updated_sys_path = False
+        if self.local_directory not in sys.path:
+            sys.path.insert(0, self.local_directory)
+            self._updated_sys_path = True
+
         if io_loop is not None:
             warnings.warn(
                 "The io_loop kwarg to Server is ignored and will be deprecated",
@@ -346,7 +408,6 @@ class Server:
         self._comms = {}
         self.deserialize = deserialize
         self.monitor = SystemMonitor()
-        self.counters = None
         self._ongoing_background_tasks = AsyncTaskGroup()
         self._event_finished = asyncio.Event()
 
@@ -370,24 +431,25 @@ class Server:
             else:
                 self.io_loop.profile = deque()
 
+        self.periodic_callbacks = {}
+
         # Statistics counters for various events
         try:
             from distributed.counter import Digest
 
-            self.digests = defaultdict(partial(Digest, loop=self.io_loop))
+            self.digests = defaultdict(Digest)
         except ImportError:
             self.digests = None
 
         # In case crick is not installed, also log cumulative totals (reset at server
         # restart) and local maximums (reset by prometheus poll)
         self.digests_total = defaultdict(float)
+        self.digests_total_since_heartbeat = defaultdict(float)
         self.digests_max = defaultdict(float)
 
-        from distributed.counter import Counter
-
-        self.counters = defaultdict(partial(Counter, loop=self.io_loop))
-
-        self.periodic_callbacks = {}
+        self.counters = defaultdict(Counter)
+        pc = PeriodicCallback(self._shift_counters, 5000)
+        self.periodic_callbacks["shift_counters"] = pc
 
         pc = PeriodicCallback(
             self.monitor.update,
@@ -434,6 +496,42 @@ class Server:
         )
 
         self.__stopped = False
+
+    async def upload_file(
+        self, filename: str, data: str | bytes, load: bool = True
+    ) -> dict[str, Any]:
+        out_filename = os.path.join(self.local_directory, filename)
+
+        def func(data):
+            if isinstance(data, str):
+                data = data.encode()
+            with open(out_filename, "wb") as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+            return data
+
+        if len(data) < 10000:
+            data = func(data)
+        else:
+            data = await offload(func, data)
+
+        if load:
+            try:
+                import_file(out_filename)
+                cache_loads.data.clear()
+            except Exception as e:
+                logger.exception(e)
+                raise e
+
+        return {"status": "OK", "nbytes": len(data)}
+
+    def _shift_counters(self):
+        for counter in self.counters.values():
+            counter.shift()
+        if self.digests is not None:
+            for digest in self.digests.values():
+                digest.shift()
 
     @property
     def status(self) -> Status:
@@ -525,7 +623,7 @@ class Server:
                 self.__startup_exc = exc
 
             try:
-                await asyncio.wait_for(self.start_unsafe(), timeout=timeout)
+                await wait_for(self.start_unsafe(), timeout=timeout)
             except asyncio.TimeoutError as exc:
                 await _close_on_failure(exc)
                 raise asyncio.TimeoutError(
@@ -534,7 +632,8 @@ class Server:
             except Exception as exc:
                 await _close_on_failure(exc)
                 raise RuntimeError(f"{type(self).__name__} failed to start.") from exc
-            self.status = Status.running
+            if self.status == Status.init:
+                self.status = Status.running
         return self
 
     async def __aenter__(self):
@@ -562,6 +661,11 @@ class Server:
     def stop(self):
         if self.__stopped:
             return
+
+        if self._workdir is not None:
+            self._workdir.release()
+
+        self.monitor.close()
 
         self.__stopped = True
         _stops = set()
@@ -921,6 +1025,7 @@ class Server:
                 pc.stop()
 
             if not self.__stopped:
+                self.monitor.close()
                 self.__stopped = True
                 _stops = set()
                 for listener in self.listeners:
@@ -940,17 +1045,50 @@ class Server:
 
             await self.rpc.close()
             await asyncio.gather(*[comm.close() for comm in list(self._comms)])
+
+            # Remove scratch directory from global sys.path
+            if self._updated_sys_path and sys.path[0] == self.local_directory:
+                sys.path.remove(self.local_directory)
         finally:
             self._event_finished.set()
 
-    def digest_metric(self, name: str, value: float) -> None:
+    def digest_metric(self, name: Hashable, value: float) -> None:
         # Granular data (requires crick)
         if self.digests is not None:
             self.digests[name].add(value)
         # Cumulative data (reset by server restart)
         self.digests_total[name] += value
+        # Cumulative data sent to scheduler and reset on heartbeat
+        self.digests_total_since_heartbeat[name] += value
         # Local maximums (reset by Prometheus poll)
         self.digests_max[name] = max(self.digests_max[name], value)
+
+
+def context_meter_to_server_digest(digest_tag: str) -> Callable:
+    """Decorator for an async method of a Server subclass that calls
+    ``distributed.metrics.context_meter.meter`` and/or ``digest_metric``.
+    It routes the calls from ``context_meter.digest_metric(label, value, unit)`` to
+    ``Server.digest_metric((digest_tag, label, unit), value)``.
+    """
+
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        async def wrapper(self: Server, *args: Any, **kwargs: Any) -> Any:
+            loop = asyncio.get_running_loop()
+
+            def metrics_callback(label: Hashable, value: float, unit: str) -> None:
+                if not isinstance(label, tuple):
+                    label = (label,)
+                name = (digest_tag, *label, unit)
+                # This callback could be called from another thread through offload()
+                loop.call_soon_threadsafe(self.digest_metric, name, value)
+
+            with context_meter.add_callback(metrics_callback):
+                return await func(self, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 def pingpong(comm):
@@ -1014,13 +1152,19 @@ async def send_recv(  # type: ignore[no-untyped-def]
     return response
 
 
-def addr_from_args(addr=None, ip=None, port=None):
+def addr_from_args(
+    addr: str | tuple[str, int | None] | None = None,
+    ip: str | None = None,
+    port: int | None = None,
+) -> str:
     if addr is None:
-        addr = (ip, port)
-    else:
-        assert ip is None and port is None
+        assert ip is not None
+        return normalize_address(unparse_host_port(ip, port))
+
+    assert ip is None and port is None
     if isinstance(addr, tuple):
-        addr = unparse_host_port(*addr)
+        return normalize_address(unparse_host_port(*addr))
+
     return normalize_address(addr)
 
 
@@ -1288,20 +1432,20 @@ class ConnectionPool:
 
     def __init__(
         self,
-        limit=512,
-        deserialize=True,
-        serializers=None,
-        allow_offload=True,
-        deserializers=None,
-        connection_args=None,
-        timeout=None,
-        server=None,
-    ):
+        limit: int = 512,
+        deserialize: bool = True,
+        serializers: list[str] | None = None,
+        allow_offload: bool = True,
+        deserializers: list[str] | None = None,
+        connection_args: dict[str, object] | None = None,
+        timeout: float | None = None,
+        server: object = None,
+    ) -> None:
         self.limit = limit  # Max number of open comms
         # Invariant: len(available) == open - active
-        self.available = defaultdict(set)
+        self.available: defaultdict[str, set[Comm]] = defaultdict(set)
         # Invariant: len(occupied) == active
-        self.occupied = defaultdict(set)
+        self.occupied: defaultdict[str, set[Comm]] = defaultdict(set)
         self.allow_offload = allow_offload
         self.deserialize = deserialize
         self.serializers = serializers
@@ -1309,18 +1453,21 @@ class ConnectionPool:
         self.connection_args = connection_args or {}
         self.timeout = timeout
         self.server = weakref.ref(server) if server else None
-        self._created = weakref.WeakSet()
+        self._created: weakref.WeakSet[Comm] = weakref.WeakSet()
         self._instances.add(self)
         # _n_connecting and _connecting have subtle different semantics. The set
         # _connecting contains futures actively trying to establish a connection
         # while the _n_connecting also accounts for connection attempts which
         # are waiting due to the connection limit
-        self._connecting = set()
+        self._connecting: defaultdict[str, set[asyncio.Task[Comm]]] = defaultdict(set)
         self._pending_count = 0
         self._connecting_count = 0
         self.status = Status.init
+        self._reasons: weakref.WeakKeyDictionary[
+            asyncio.Task[Any], str
+        ] = weakref.WeakKeyDictionary()
 
-    def _validate(self):
+    def _validate(self) -> None:
         """
         Validate important invariants of this class
 
@@ -1329,35 +1476,40 @@ class ConnectionPool:
         assert self.semaphore._value == self.limit - self.open - self._n_connecting
 
     @property
-    def active(self):
+    def active(self) -> int:
         return sum(map(len, self.occupied.values()))
 
     @property
-    def open(self):
+    def open(self) -> int:
         return self.active + sum(map(len, self.available.values()))
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "<ConnectionPool: open=%d, active=%d, connecting=%d>" % (
             self.open,
             self.active,
             len(self._connecting),
         )
 
-    def __call__(self, addr=None, ip=None, port=None):
+    def __call__(
+        self,
+        addr: str | tuple[str, int | None] | None = None,
+        ip: str | None = None,
+        port: int | None = None,
+    ) -> PooledRPCCall:
         """Cached rpc objects"""
         addr = addr_from_args(addr=addr, ip=ip, port=port)
         return PooledRPCCall(
             addr, self, serializers=self.serializers, deserializers=self.deserializers
         )
 
-    def __await__(self):
-        async def _():
+    def __await__(self) -> Generator[Any, Any, Self]:
+        async def _() -> Self:
             await self.start()
             return self
 
         return _().__await__()
 
-    async def start(self):
+    async def start(self) -> None:
         # Invariant: semaphore._value == limit - open - _n_connecting
         self.semaphore = asyncio.Semaphore(self.limit)
         self.status = Status.running
@@ -1366,7 +1518,7 @@ class ConnectionPool:
     def _n_connecting(self) -> int:
         return self._connecting_count
 
-    async def _connect(self, addr, timeout=None):
+    async def _connect(self, addr: str, timeout: float | None = None) -> Comm:
         self._pending_count += 1
         try:
             await self.semaphore.acquire()
@@ -1392,11 +1544,14 @@ class ConnectionPool:
             finally:
                 self._connecting_count -= 1
         except asyncio.CancelledError:
-            raise CommClosedError("ConnectionPool closing.")
+            current_task = asyncio.current_task()
+            assert current_task
+            reason = self._reasons.pop(current_task, "ConnectionPool closing.")
+            raise CommClosedError(reason)
         finally:
             self._pending_count -= 1
 
-    async def connect(self, addr, timeout=None):
+    async def connect(self, addr: str, timeout: float | None = None) -> Comm:
         """
         Get a Comm to the given address.  For internal use.
         """
@@ -1422,9 +1577,21 @@ class ConnectionPool:
         # it to propagate
         connect_attempt = asyncio.create_task(self._connect(addr, timeout))
         done = asyncio.Event()
-        self._connecting.add(connect_attempt)
-        connect_attempt.add_done_callback(lambda _: done.set())
-        connect_attempt.add_done_callback(self._connecting.discard)
+        connecting = self._connecting[addr]
+        connecting.add(connect_attempt)
+
+        def callback(task: asyncio.Task[Comm]) -> None:
+            done.set()
+            connecting = self._connecting[addr]
+            connecting.discard(task)
+
+            if not connecting:
+                try:
+                    del self._connecting[addr]
+                except KeyError:  # pragma: no cover
+                    pass
+
+        connect_attempt.add_done_callback(callback)
 
         try:
             await done.wait()
@@ -1438,7 +1605,7 @@ class ConnectionPool:
             raise
         return await connect_attempt
 
-    def reuse(self, addr, comm):
+    def reuse(self, addr: str, comm: Comm) -> None:
         """
         Reuse an open communication to the given address.  For internal use.
         """
@@ -1457,7 +1624,7 @@ class ConnectionPool:
                 if self.semaphore.locked() and self._pending_count:
                     self.collect()
 
-    def collect(self):
+    def collect(self) -> None:
         """
         Collect open but unused communications, to allow opening other ones.
         """
@@ -1473,7 +1640,7 @@ class ConnectionPool:
                 self.semaphore.release()
             comms.clear()
 
-    def remove(self, addr):
+    def remove(self, addr: str, *, reason: str = "Address removed.") -> None:
         """
         Remove all Comms to a given address.
         """
@@ -1489,13 +1656,20 @@ class ConnectionPool:
                 IOLoop.current().add_callback(comm.close)
                 self.semaphore.release()
 
-    async def close(self):
+        if addr in self._connecting:
+            tasks = self._connecting[addr]
+            for task in tasks:
+                self._reasons[task] = reason
+                task.cancel()
+
+    async def close(self) -> None:
         """
         Close all communications
         """
         self.status = Status.closed
-        for conn_fut in self._connecting:
-            conn_fut.cancel()
+        for tasks in self._connecting.values():
+            for task in tasks:
+                task.cancel()
         for d in [self.available, self.occupied]:
             comms = set()
             while d:

@@ -4,9 +4,11 @@ import asyncio
 import contextlib
 import os
 import socket
+import sys
 import threading
 import time as timemod
 import weakref
+from unittest import mock
 
 import pytest
 from tornado.ioloop import IOLoop
@@ -33,7 +35,7 @@ from distributed.core import (
 from distributed.metrics import time
 from distributed.protocol import to_serialize
 from distributed.protocol.compression import compressions
-from distributed.utils import get_ip, get_ipv6
+from distributed.utils import get_ip, get_ipv6, wait_for
 from distributed.utils_test import (
     assert_can_connect,
     assert_can_connect_from_everywhere_4,
@@ -255,6 +257,16 @@ async def test_server_status_compare_enum_is_quiet():
     # Note: We only want to assert that this comparison does not
     # raise an error/warning. We do not want to assert its result.
     server.status == Status.running  # noqa: B015
+
+
+@gen_test(config={"distributed.admin.system-monitor.gil.enabled": True})
+async def test_server_close_stops_gil_monitoring():
+    pytest.importorskip("gilknocker")
+
+    server = Server({})
+    assert server.monitor._gilknocker.is_running
+    await server.close()
+    assert not server.monitor._gilknocker.is_running
 
 
 @gen_test()
@@ -695,7 +707,7 @@ async def test_send_recv_cancelled():
         server_comm = next(iter(server._comms))
 
         with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(send_recv(client_comm, op="get_stuck"), timeout=0.1)
+            await wait_for(send_recv(client_comm, op="get_stuck"), timeout=0.1)
         assert client_comm.closed()
         while not server_comm.closed():
             await asyncio.sleep(0.01)
@@ -724,10 +736,12 @@ async def test_connection_pool():
         *(rpc(ip="127.0.0.1", port=s.port).ping() for s in servers[:5])
     )
     await asyncio.gather(*(rpc(s.address).ping() for s in servers[:5]))
-    await asyncio.gather(*(rpc("127.0.0.1:%d" % s.port).ping() for s in servers[:5]))
+    await asyncio.gather(*(rpc(f"127.0.0.1:{s.port}").ping() for s in servers[:5]))
     await asyncio.gather(
         *(rpc(ip="127.0.0.1", port=s.port).ping() for s in servers[:5])
     )
+    await asyncio.gather(*(rpc(("127.0.0.1", s.port)).ping() for s in servers[:5]))
+
     assert sum(map(len, rpc.available.values())) == 5
     assert sum(map(len, rpc.occupied.values())) == 0
     assert rpc.active == 0
@@ -837,6 +851,34 @@ async def test_connection_pool_outside_cancellation(monkeypatch):
 
         done, _ = await asyncio.wait(tasks)
         assert all(t.cancelled() for t in tasks)
+
+
+@gen_test()
+async def test_remove_cancels_connect_attempts():
+    loop = asyncio.get_running_loop()
+    connect_started = asyncio.Event()
+    connect_finished = loop.create_future()
+
+    async def connect(*args, **kwargs):
+        connect_started.set()
+        await connect_finished
+
+    async def connect_to_server():
+        with pytest.raises(CommClosedError, match="Address removed."):
+            await rpc.connect("tcp://0.0.0.0")
+
+    async def remove_address():
+        await connect_started.wait()
+        rpc.remove("tcp://0.0.0.0")
+
+    rpc = await ConnectionPool(limit=1)
+
+    with mock.patch("distributed.core.connect", connect):
+        await asyncio.gather(
+            connect_to_server(),
+            remove_address(),
+        )
+    assert connect_finished.cancelled()
 
 
 @gen_test()
@@ -1199,6 +1241,29 @@ async def test_server_comms_mark_active_handlers():
             validate_dict(server)
 
 
+@gen_test()
+async def test_server_sys_path_local_directory_cleanup(tmp_path, monkeypatch):
+    local_directory = str(tmp_path / "dask-scratch-space")
+
+    # Ensure `local_directory` is removed from `sys.path` as part of the
+    # `Server` shutdown process
+    assert not any(i.startswith(local_directory) for i in sys.path)
+    async with Server({}, local_directory=local_directory):
+        assert sys.path[0].startswith(local_directory)
+    assert not any(i.startswith(local_directory) for i in sys.path)
+
+    # Ensure `local_directory` isn't removed from `sys.path` if it
+    # was already there before the `Server` started
+    monkeypatch.setattr("sys.path", [local_directory] + sys.path)
+    assert sys.path[0].startswith(local_directory)
+    # NOTE: `needs_workdir=False` is needed to make sure the same path added
+    # to `sys.path` above is used by the `Server` (a subdirectory is created
+    # by default).
+    async with Server({}, local_directory=local_directory, needs_workdir=False):
+        assert sys.path[0].startswith(local_directory)
+    assert sys.path[0].startswith(local_directory)
+
+
 @pytest.mark.parametrize("close_via_rpc", [True, False])
 @gen_test()
 async def test_close_fast_without_active_handlers(close_via_rpc):
@@ -1209,11 +1274,11 @@ async def test_close_fast_without_active_handlers(close_via_rpc):
 
     if not close_via_rpc:
         fut = server.close()
-        await asyncio.wait_for(fut, 0.5)
+        await wait_for(fut, 0.5)
     else:
         async with rpc(server.address) as _rpc:
             fut = _rpc.terminate(reply=False)
-            await asyncio.wait_for(fut, 0.5)
+            await wait_for(fut, 0.5)
 
 
 @gen_test()
@@ -1236,7 +1301,7 @@ async def test_close_grace_period_for_handlers():
     # since the handler is running for a while, the close will not immediately
     # go through. We'll give the comm about a second to close itself
     with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(wait_for_close.wait(), 0.5)
+        await wait_for(wait_for_close.wait(), 0.5)
     await task
 
 

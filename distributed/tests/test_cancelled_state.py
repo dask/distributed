@@ -13,6 +13,7 @@ from distributed.utils_test import (
     BlockedGetData,
     _LockedCommPool,
     assert_story,
+    async_poll_for,
     gen_cluster,
     inc,
     lock_inc,
@@ -22,7 +23,6 @@ from distributed.utils_test import (
 from distributed.worker_state_machine import (
     AddKeysMsg,
     ComputeTaskEvent,
-    DigestMetric,
     Execute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
@@ -148,7 +148,7 @@ async def test_worker_stream_died_during_comm(c, s, a, b):
     write_event.set()
 
     await res
-    assert any("receive-dep-failed" in msg for msg in b.state.log)
+    assert any("gather-dep-failed" in msg for msg in b.state.log)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -193,7 +193,7 @@ async def test_flight_to_executing_via_cancelled_resumed(c, s, b):
         assert await fut2 == 3
 
         b_story = b.state.story(fut1.key)
-        assert any("receive-dep-failed" in msg for msg in b_story)
+        assert any("gather-dep-failed" in msg for msg in b_story)
         assert any("cancelled" in msg for msg in b_story)
         assert any("resumed" in msg for msg in b_story)
 
@@ -266,19 +266,8 @@ def test_flight_cancelled_error(ws):
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_in_flight_lost_after_resumed(c, s, b):
-    lock_executing = Lock()
-
-    def block_execution(lock):
-        lock.acquire()
-        return 1
-
     async with BlockedGetData(s.address) as a:
-        fut1 = c.submit(
-            block_execution,
-            lock_executing,
-            workers=[a.address],
-            key="fut1",
-        )
+        fut1 = c.submit(inc, 1, workers=[a.address], key="fut1")
         # Ensure fut1 is in memory but block any further execution afterwards to
         # ensure we control when the recomputation happens
         await wait(fut1)
@@ -287,7 +276,6 @@ async def test_in_flight_lost_after_resumed(c, s, b):
         # This ensures that B already fetches the task, i.e. after this the task
         # is guaranteed to be in flight
         await a.in_get_data.wait()
-        assert fut1.key in b.state.tasks
         assert b.state.tasks[fut1.key].state == "flight"
 
         s.set_restrictions({fut1.key: [a.address, b.address]})
@@ -295,30 +283,12 @@ async def test_in_flight_lost_after_resumed(c, s, b):
         # to be recomputed on B
         await s.remove_worker(a.address, stimulus_id="foo", close=False, safe=True)
 
-        while not b.state.tasks[fut1.key].state == "resumed":
-            await asyncio.sleep(0.01)
+        await wait_for_state(fut1.key, "resumed", b, interval=0)
 
         fut1.release()
         fut2.release()
 
-        while not b.state.tasks[fut1.key].state == "cancelled":
-            await asyncio.sleep(0.01)
-
-        a.block_get_data.set()
-        while b.state.tasks:
-            await asyncio.sleep(0.01)
-
-    assert_story(
-        b.state.story(fut1.key),
-        expect=[
-            # The initial free-keys is rejected
-            ("free-keys", (fut1.key,)),
-            (fut1.key, "resumed", "released", "cancelled", {}),
-            # After gather_dep receives the data, the task is forgotten
-            (fut1.key, "cancelled", "memory", "released", {fut1.key: "forgotten"}),
-            (fut1.key, "released", "forgotten", "forgotten", {}),
-        ],
-    )
+        await async_poll_for(lambda: not b.state.tasks, timeout=5)
 
 
 @gen_cluster(client=True)
@@ -803,7 +773,6 @@ def test_workerstate_executing_skips_fetch_on_success(ws_with_running_task):
         ExecuteSuccessEvent.dummy("x", 123, stimulus_id="s3"),
     )
     assert instructions == [
-        DigestMetric(name="compute-duration", value=1.0, stimulus_id="s3"),
         AddKeysMsg(keys=["x"], stimulus_id="s3"),
         Execute(key="y", stimulus_id="s3"),
     ]
@@ -893,7 +862,6 @@ def test_workerstate_flight_failure_to_executing(ws, block_queue):
         )
         assert instructions == [
             Execute(key="z", stimulus_id="s4"),
-            DigestMetric(name="compute-duration", value=1.0, stimulus_id="s6"),
             TaskFinishedMsg.match(key="z", stimulus_id="s6"),
             Execute(key="x", stimulus_id="s6"),
         ]
@@ -1016,7 +984,7 @@ async def test_execute_preamble_early_cancel(
     https://github.com/dask/dask/issues/9330
     test_worker.py::test_execute_preamble_abort_retirement
     """
-    async with BlockedExecute(s.address, validate=True) as a:
+    async with BlockedExecute(s.address) as a:
         if critical_section == "execute":
             in_ev = a.in_execute
             block_ev = a.block_execute
@@ -1076,7 +1044,7 @@ def test_cancel_with_dependencies_in_memory(ws, release_dep, done_ev_cls):
 
     Read: https://github.com/dask/distributed/issues/6893"""
     ws.handle_stimulus(
-        UpdateDataEvent(data={"x": 1}, report=False, stimulus_id="s1"),
+        UpdateDataEvent(data={"x": 1}, stimulus_id="s1"),
         ComputeTaskEvent.dummy("y", who_has={"x": [ws.address]}, stimulus_id="s2"),
     )
     assert ws.tasks["x"].state == "memory"
