@@ -22,15 +22,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # os: [ubuntu-latest, windows-latest, macos-latest]
-        os: [ubuntu-latest]
-        # environment: [mindeps, "3.9", "3.10", "3.11"]
-        environment: ["3.11"]
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        environment: [mindeps, "3.9", "3.10", "3.11"]
         queuing: [queue]
         extra_packages: [null]
         # Cherry-pick test modules to split the overall runtime roughly in half
-        # partition: [ci1, not ci1]
-        partition: [not ci1]
+        partition: [ci1, not ci1]
         exclude:
           - os: macos-latest
             environment: "3.9"
@@ -40,24 +37,24 @@ jobs:
             environment: mindeps
           - os: windows-latest
             environment: mindeps
-#        include:
-#          - os: ubuntu-latest
-#            environment: "3.9"
-#            queuing: no_queue
-#            partition: "ci1"
-#          - os: ubuntu-latest
-#            environment: "3.9"
-#            queuing: no_queue
-#            partition: "not ci1"
-#          # P2P rechunking - requires numpy and nothing else beyond mindeps (no pyarrow)
-#          - os: ubuntu-latest
-#            environment: mindeps
-#            extra_packages: [numpy]
-#            partition: "ci1"
-#          - os: ubuntu-latest
-#            environment: mindeps
-#            extra_packages: [numpy]
-#            partition: "not ci1"
+        include:
+          - os: ubuntu-latest
+            environment: "3.9"
+            queuing: no_queue
+            partition: "ci1"
+          - os: ubuntu-latest
+            environment: "3.9"
+            queuing: no_queue
+            partition: "not ci1"
+          # P2P rechunking - requires numpy and nothing else beyond mindeps (no pyarrow)
+          - os: ubuntu-latest
+            environment: mindeps
+            extra_packages: [numpy]
+            partition: "ci1"
+          - os: ubuntu-latest
+            environment: mindeps
+            extra_packages: [numpy]
+            partition: "not ci1"
 
         # Uncomment to stress-test the test suite for random failures.
         # Must also change `export TEST_ID` in first step below.
@@ -189,7 +186,7 @@ jobs:
           set -o pipefail
           mkdir reports
 
-          pytest distributed/tests/test_utils.py \
+          pytest distributed \
             -m "not avoid_ci and ${{ matrix.partition }}" --runslow \
             --leaks=fds,processes,threads \
             --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID \
@@ -208,9 +205,9 @@ jobs:
             python continuous_integration/scripts/parse_stdout.py < reports/stdout > reports/pytest.xml
           fi
 
-#      - name: Debug with tmate on failure
-#        if: ${{ failure() }}
-#        uses: mxschmitt/action-tmate@v3
+      # - name: Debug with tmate on failure
+      #   if: ${{ failure() }}
+      #   uses: mxschmitt/action-tmate@v3
 
       # https://community.codecov.com/t/files-missing-from-report/3902/7
       # The coverage file being created records filenames at the distributed/ directory
