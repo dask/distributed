@@ -5417,7 +5417,7 @@ class as_completed:
 
     def __next__(self):
         while self.queue.empty():
-            if self._deadline.expires and not self._deadline.remaining:
+            if self._deadline.expired:
                 raise TimeoutError()
             if self.is_empty():
                 raise StopIteration()
