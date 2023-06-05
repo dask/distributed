@@ -3585,11 +3585,18 @@ class FinePerformanceMetrics(DashboardComponent):
         barchart.yaxis.visible = False
         barchart.xaxis.major_label_orientation = 0.2
         barchart.grid.grid_line_color = None
+
+        if self.task_exec_by_prefix_chart is None:
+            self.task_exec_by_prefix_chart = barchart
+        else:
+            self.task_exec_by_prefix_chart.x_range = barchart.x_range
+
         stackers = [
             name for name in task_exec_data if name.endswith(self.unit_selected)
         ]
+
         if stackers:
-            renderers = barchart.vbar_stack(
+            renderers = self.task_exec_by_prefix_chart.vbar_stack(
                 stackers,
                 x="functions",
                 width=0.9,
@@ -3597,6 +3604,7 @@ class FinePerformanceMetrics(DashboardComponent):
                 color=self._get_palette(len(self.task_activities)),
                 legend_label=self.task_activities,
             )
+            self.task_exec_by_prefix_chart.tools = barchart.tools
             for vbar in renderers:
                 tooltips = [
                     (
@@ -3605,7 +3613,9 @@ class FinePerformanceMetrics(DashboardComponent):
                     ),
                     ("function", "@functions"),
                 ]
-                barchart.add_tools(HoverTool(tooltips=tooltips, renderers=[vbar]))
+                self.task_exec_by_prefix_chart.add_tools(
+                    HoverTool(tooltips=tooltips, renderers=[vbar])
+                )
 
             if any(
                 len(self.task_exec_by_prefix_src.data[k]) != len(task_exec_data[k])
@@ -3613,10 +3623,8 @@ class FinePerformanceMetrics(DashboardComponent):
             ):
                 self.substantial_change = True
 
-            barchart.renderers = renderers
-
+            self.task_exec_by_prefix_chart.renderers = renderers
         self.task_exec_by_prefix_src.data = dict(task_exec_data)
-        self.task_exec_by_prefix_chart = barchart
 
     def _build_senddata_chart(self, senddata: defaultdict[str, list]) -> figure:
         piedata = {}
