@@ -3522,7 +3522,7 @@ class FinePerformanceMetrics(DashboardComponent):
 
     def _build_task_execution_by_activity_chart(
         self, task_exec_data: defaultdict[str, list]
-    ) -> figure:
+    ) -> None:
         piechart_data = {}
         piechart_data["value"] = [
             sum(task_exec_data[f"{op}_{self.unit_selected}"])
@@ -3574,7 +3574,7 @@ class FinePerformanceMetrics(DashboardComponent):
 
     def _build_task_execution_by_prefix_chart(
         self, task_exec_data: defaultdict[str, list]
-    ) -> figure:
+    ) -> None:
         barchart = figure(
             x_range=task_exec_data["functions"],
             height=500,
@@ -3626,7 +3626,7 @@ class FinePerformanceMetrics(DashboardComponent):
             self.task_exec_by_prefix_chart.renderers = renderers
         self.task_exec_by_prefix_src.data = dict(task_exec_data)
 
-    def _build_senddata_chart(self, senddata: defaultdict[str, list]) -> figure:
+    def _build_senddata_chart(self, senddata: defaultdict[str, list]) -> None:
         piedata = {}
         piedata["activity"] = senddata["activity"]
         piedata["value"] = [
