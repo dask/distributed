@@ -1125,8 +1125,14 @@ if __name__ == "__main__":
 
 @pytest.mark.parametrize("shorten,expected", [(True, 2), (False, 5)])
 def test_shorten_traceback_showtraceback(capsys, shorten, expected):
-    ipython_testing_app = pytest.importorskip("IPython.testing.globalipapp")
+    pytest.importorskip("IPython")
 
+    from IPython.testing.globalipapp import get_ipython
+
+    from distributed.client import _clean_ipython_traceback
+
+    ip = get_ipython()
+    ip.set_custom_exc((Exception,), _clean_ipython_traceback)
     cell_code = """
 import dask
 from dask.distributed import Client
@@ -1135,14 +1141,11 @@ f2 = lambda: f1() + 5
 f3 = lambda: f2() + 1
 dask.config.set({'distributed.admin.shorten-traceback': %s})
 client = Client()"""
-    ip = ipython_testing_app.get_ipython()
     ip.run_cell(cell_code % shorten)
     ip.run_cell("client.submit(f3).result()")
     ip.run_cell("client.close()")
     captured = capsys.readouterr()
     lines = captured.out.strip().split("\n")
-    print(f"\n{captured.out = }")
-    print(f"\n{captured.err = }")
     lines = [
         stripped
         for line in lines

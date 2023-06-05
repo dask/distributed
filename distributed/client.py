@@ -140,60 +140,32 @@ def _clean_excepthook(func):
     return wrapper
 
 
-# def _clean_ipython_traceback(func):
-#     @wraps(func)
-#     def wrapper(self, *args, **kwargs):
-#         exc_type, value, exc_tb = sys.exc_info()
-#         tb = shorten_traceback(exc_tb)
-#         exc_info = exc_type, value.with_traceback(tb), tb
-#         if "exc_tuple" in kwargs:
-#             kwargs["exc_tuple"] = exc_info
-#         else:
-#             args = [exc_info] + list(args)[1:]
-#         value = func(self, *args, **kwargs)
-#         return value
-#
-#     return wrapper
-
-
-def _clean_ipython_showtraceback(self, etype, value, tb, tb_offset=None):
+def _clean_ipython_traceback(self, etype, value, tb, tb_offset=None):
     short_tb = shorten_traceback(tb)
     short_exc = value.with_traceback(short_tb)
     stb = self.InteractiveTB.structured_traceback(
         etype, short_exc, short_tb, tb_offset=tb_offset
     )
-    print(f"{tb_offset = }")
-    self._showtraceback(type, short_exc, stb, tb_offset=tb_offset)
+    self._showtraceback(type, short_exc, stb)
 
 
 original_excepthook = sys.excepthook
 sys.excepthook = _clean_excepthook(sys.excepthook)
 
 
-# if we're running in ipython, customize exception handling
+# if we're running in ipython, also customize exception handling
 try:
     from IPython import get_ipython
 except ImportError:
-    print("from IPython import get_ipython: ImportError")
     pass
 else:
     ip = get_ipython()
     if ip is not None:
-        print("ip.set_custom_exc")
-        ip.set_custom_exc((Exception,), _clean_ipython_showtraceback)
-# except ImportError:
-#     original_showtraceback = None
-# else:
-#     original_showtraceback = InteractiveShell.showtraceback
-#     InteractiveShell.showtraceback = _clean_ipython_traceback(
-#         InteractiveShell.showtraceback
-#     )
+        ip.set_custom_exc((Exception,), _clean_ipython_traceback)
 
 
 def _restore_exception_hook():
     sys.excepthook = original_excepthook
-    # if original_showtraceback is not None:
-    #     InteractiveShell.showtraceback = original_showtraceback
 
 
 class SourceCode(NamedTuple):

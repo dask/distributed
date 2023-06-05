@@ -208,9 +208,9 @@ jobs:
             python continuous_integration/scripts/parse_stdout.py < reports/stdout > reports/pytest.xml
           fi
 
-      - name: Debug with tmate on failure
-        if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+#      - name: Debug with tmate on failure
+#        if: ${{ failure() }}
+#        uses: mxschmitt/action-tmate@v3
 
       # https://community.codecov.com/t/files-missing-from-report/3902/7
       # The coverage file being created records filenames at the distributed/ directory
