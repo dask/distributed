@@ -3575,27 +3575,32 @@ class FinePerformanceMetrics(DashboardComponent):
     def _build_task_execution_by_prefix_chart(
         self, task_exec_data: defaultdict[str, list]
     ) -> None:
-        barchart = figure(
-            x_range=task_exec_data["functions"],
-            height=500,
-            sizing_mode="scale_both",
-            title="Task execution, by function",
-            tools="pan,wheel_zoom,box_zoom,reset",
-        )
-        barchart.yaxis.visible = False
-        barchart.xaxis.major_label_orientation = 0.2
-        barchart.grid.grid_line_color = None
+        functions = task_exec_data["functions"]
+        base_tools = "pan,wheel_zoom,box_zoom,reset"
 
         if self.task_exec_by_prefix_chart is None:
+            barchart = figure(
+                x_range=functions,
+                height=500,
+                sizing_mode="scale_both",
+                title="Task execution, by function",
+                tools=base_tools,
+            )
+            barchart.yaxis.visible = False
+            barchart.xaxis.major_label_orientation = 0.2
+            barchart.grid.grid_line_color = None
             self.task_exec_by_prefix_chart = barchart
-        else:
-            self.task_exec_by_prefix_chart.x_range = barchart.x_range
+
+        if self.task_exec_by_prefix_chart.x_range.factors != functions:
+            self.substantial_change = True
+            self.task_exec_by_prefix_chart.x_range = FactorRange(*functions)
 
         stackers = [
             name for name in task_exec_data if name.endswith(self.unit_selected)
         ]
 
-        if stackers:
+        if stackers and stackers != getattr(self, "_prev_stackers", []):
+            self._prev_stackers = stackers
             renderers = self.task_exec_by_prefix_chart.vbar_stack(
                 stackers,
                 x="functions",
@@ -3604,7 +3609,11 @@ class FinePerformanceMetrics(DashboardComponent):
                 color=self._get_palette(len(self.task_activities)),
                 legend_label=self.task_activities,
             )
-            self.task_exec_by_prefix_chart.tools = barchart.tools
+
+            # Create hovertools ontop of base tools
+            tools = self.task_exec_by_prefix_chart.tools
+            self.task_exec_by_prefix_chart.tools = tools[: len(base_tools.split(","))]
+
             for vbar in renderers:
                 tooltips = [
                     (
@@ -3617,12 +3626,7 @@ class FinePerformanceMetrics(DashboardComponent):
                     HoverTool(tooltips=tooltips, renderers=[vbar])
                 )
 
-            if any(
-                len(self.task_exec_by_prefix_src.data[k]) != len(task_exec_data[k])
-                for k in self.task_exec_by_prefix_src.data
-            ):
-                self.substantial_change = True
-
+            self.substantial_change = True
             self.task_exec_by_prefix_chart.renderers = renderers
         self.task_exec_by_prefix_src.data = dict(task_exec_data)
 
