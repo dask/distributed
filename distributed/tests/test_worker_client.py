@@ -277,7 +277,11 @@ def test_secede_without_stealing_issue_1262():
 
     # run the loop as an inner function so all workers are closed
     # and exceptions can be examined
-    @gen_cluster(client=True, scheduler_kwargs={"extensions": {}})
+    @gen_cluster(
+        client=True,
+        scheduler_kwargs={"extensions": {}},
+        worker_kwargs={"extensions": {}},
+    )
     async def secede_test(c, s, a, b):
         def func(x):
             with worker_client() as wc:

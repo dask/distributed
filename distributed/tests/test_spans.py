@@ -103,7 +103,12 @@ async def test_multiple_tags(c, s, a, b):
     assert s.extensions["spans"].spans_search_by_tag.keys() == {"foo", "bar"}
 
 
-@gen_cluster(client=True, scheduler_kwargs={"extensions": {}})
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    scheduler_kwargs={"extensions": {}},
+    worker_kwargs={"extensions": {}},
+)
 async def test_no_extension(c, s, a, b):
     x = c.submit(inc, 1, key="x")
     assert await x == 2
