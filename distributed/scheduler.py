@@ -1063,11 +1063,12 @@ class TaskGroup:
     #: Cumulative duration of all completed actions, by action
     all_durations: defaultdict[str, float]
 
-    #: Span ID (see distributed.spans).
+    #: Span ID (see ``distributed.spans``).
+    #: Matches ``distributed.worker_state_machine.TaskState.span_id``.
     #: It is possible to end up in situation where different tasks of the same TaskGroup
     #: belong to different spans; the purpose of this attribute is to arbitrarily force
     #: everything onto the earliest encountered one.
-    span: tuple[str, ...]
+    span_id: str | None
 
     __slots__ = tuple(__annotations__)
 
@@ -1084,7 +1085,7 @@ class TaskGroup:
         self.all_durations = defaultdict(float)
         self.last_worker = None
         self.last_worker_tasks_left = 0
-        self.span = ()
+        self.span_id = None
 
     def add_duration(self, action: str, start: float, stop: float) -> None:
         duration = stop - start
@@ -3338,6 +3339,7 @@ class SchedulerState:
             "resource_restrictions": ts.resource_restrictions,
             "actor": ts.actor,
             "annotations": ts.annotations,
+            "span_id": ts.group.span_id,
         }
         if self.validate:
             assert all(msg["who_has"].values())
@@ -4448,13 +4450,11 @@ class Scheduler(SchedulerState, ServerNode):
 
         spans_ext: SpansExtension | None = self.extensions.get("spans")
         if spans_ext:
-            span_annotations = spans_ext.new_tasks(new_tasks)
-            if span_annotations:
-                resolved_annotations["span"] = span_annotations
-            else:
-                # Edge case where some tasks define a span, while earlier tasks in the
-                # same TaskGroup don't define any
-                resolved_annotations.pop("span", None)
+            spans_ext.new_tasks(new_tasks)
+            # TaskGroup.span_id could be completely different from the one in the
+            # original annotations, so it has been dropped. Drop it here as well in
+            # order not to confuse SchedulerPlugin authors.
+            resolved_annotations.pop("span", None)
 
         for plugin in list(self.plugins.values()):
             try:
