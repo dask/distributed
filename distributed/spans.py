@@ -288,9 +288,12 @@ class SpansExtension:
         self.spans_search_by_name = defaultdict(list)
         self.spans_search_by_tag = defaultdict(list)
 
-    def new_tasks(self, tss: Iterable[TaskState]) -> None:
-        """Acknowledge the creation of new tasks on the scheduler.
-        Attach tasks to either the desired span or to ("default", ).
+    def observe_tasks(self, tss: Iterable[TaskState]) -> None:
+        """Acknowledge the existence of runnable tasks on the scheduler. These may
+        either be new tasks, tasks that were previously unrunnable, or tasks that were
+        already fed into this method already.
+
+        Attach newly observed tasks to either the desired span or to ("default", ).
         Update TaskGroup.span_id and wipe TaskState.annotations["span"].
         """
         default_span = None
