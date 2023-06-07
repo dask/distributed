@@ -4450,7 +4450,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         spans_ext: SpansExtension | None = self.extensions.get("spans")
         if spans_ext:
-            # observe_tasks does not necessarily contain all runnable tasks;
+            # new_tasks does not necessarily contain all runnable tasks;
             # _generate_taskstates is not the only thing that calls new_task(). A
             # TaskState may have also been created by client_desires_keys or scatter,
             # and only later gained a run_spec.
