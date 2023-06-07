@@ -346,46 +346,50 @@ class SpecCluster(Cluster):
     async def _correct_state_internal(self) -> None:
         async with self._lock:
             self._correct_state_waiting = None
+            await self._close_workers()
+            await self._open_workers()
 
-            to_close = set(self.workers) - set(self.worker_spec)
-            if to_close:
-                if self.scheduler.status == Status.running:
-                    await self.scheduler_comm.retire_workers(workers=list(to_close))
-                tasks = [
-                    asyncio.create_task(self.workers[w].close())
-                    for w in to_close
-                    if w in self.workers
-                ]
-                await asyncio.gather(*tasks)
-            for name in to_close:
-                if name in self.workers:
-                    del self.workers[name]
+    async def _close_workers(self) -> None:
+        to_close = set(self.workers) - set(self.worker_spec)
+        if to_close:
+            if self.scheduler.status == Status.running:
+                await self.scheduler_comm.retire_workers(workers=list(to_close))
+            tasks = [
+                asyncio.create_task(self.workers[w].close())
+                for w in to_close
+                if w in self.workers
+            ]
+            await asyncio.gather(*tasks)
+        for name in to_close:
+            if name in self.workers:
+                del self.workers[name]
 
-            to_open = set(self.worker_spec) - set(self.workers)
-            workers = []
-            for name in to_open:
-                d = self.worker_spec[name]
-                cls, opts = d["cls"], d.get("options", {})
-                if "name" not in opts:
-                    opts = opts.copy()
-                    opts["name"] = name
-                if isinstance(cls, str):
-                    cls = import_term(cls)
-                worker = cls(
-                    getattr(self.scheduler, "contact_address", None)
-                    or self.scheduler.address,
-                    **opts,
-                )
-                self._created.add(worker)
-                workers.append(worker)
-            if workers:
-                await asyncio.wait(
-                    [asyncio.create_task(_wrap_awaitable(w)) for w in workers]
-                )
-                for w in workers:
-                    w._cluster = weakref.ref(self)
-                    await w  # for tornado gen.coroutine support
-            self.workers.update(dict(zip(to_open, workers)))
+    async def _open_workers(self) -> None:
+        to_open = set(self.worker_spec) - set(self.workers)
+        workers = []
+        for name in to_open:
+            d = self.worker_spec[name]
+            cls, opts = d["cls"], d.get("options", {})
+            if "name" not in opts:
+                opts = opts.copy()
+                opts["name"] = name
+            if isinstance(cls, str):
+                cls = import_term(cls)
+            worker = cls(
+                getattr(self.scheduler, "contact_address", None)
+                or self.scheduler.address,
+                **opts,
+            )
+            self._created.add(worker)
+            workers.append(worker)
+        if workers:
+            await asyncio.wait(
+                [asyncio.create_task(_wrap_awaitable(w)) for w in workers]
+            )
+            for w in workers:
+                w._cluster = weakref.ref(self)
+                await w  # for tornado gen.coroutine support
+        self.workers.update(dict(zip(to_open, workers)))
 
     def _update_worker_status(self, op, msg):
         if op == "remove":
@@ -440,9 +444,7 @@ class SpecCluster(Cluster):
             with suppress(AttributeError):
                 self._adaptive.stop()
 
-            f = self.scale(0)
-            if isawaitable(f):
-                await f
+            self.worker_spec.clear()
             await self._correct_state()
             await asyncio.gather(*self._futures)
 

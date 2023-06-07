@@ -37,6 +37,7 @@ from distributed.client import (
 from distributed.core import Status, connect, rpc
 from distributed.deploy import (
     Adaptive,
+    HeterogeneousCluster,
     LocalCluster,
     SpecCluster,
     SSHCluster,
@@ -129,6 +130,7 @@ __all__ = [
     "Environ",
     "Event",
     "Future",
+    "HeterogeneousCluster",
     "KilledWorker",
     "LocalCluster",
     "Lock",
