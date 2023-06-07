@@ -4,7 +4,7 @@ import pytest
 
 from dask import delayed
 
-from distributed import Event
+from distributed import Client, Event, Future
 from distributed.metrics import time
 from distributed.spans import span
 from distributed.utils_test import (
@@ -347,3 +347,83 @@ def test_no_tags():
     with pytest.raises(ValueError, match="at least one"):
         with span():
             pass
+
+
+@gen_cluster(client=True)
+async def test_client_desires_keys_creates_ts(c, s, a, b):
+    """A TaskState object is created by client_desires_keys, and
+    is only later submitted with submit/compute by a different client
+
+    See also
+    --------
+    test_scheduler.py::test_client_desires_keys_creates_ts
+    test_spans.py::test_client_desires_keys_creates_tg
+    test_spans.py::test_scatter_creates_ts
+    test_spans.py::test_scatter_creates_tg
+    """
+    x = Future(key="x")
+    await wait_for_state("x", "released", s)
+    assert s.tasks["x"].group.span_id is None
+    async with Client(s.address, asynchronous=True) as c2:
+        c2.submit(inc, 1, key="x")
+        assert await x == 2
+    assert s.tasks["x"].group.span_id is not None
+
+
+@gen_cluster(client=True)
+async def test_client_desires_keys_creates_tg(c, s, a, b):
+    """A TaskGroup object is created by client_desires_keys, and
+    only later gains runnable tasks
+
+    See also
+    --------
+    test_spans.py::test_client_desires_keys_creates_ts
+    test_spans.py::test_scatter_creates_ts
+    test_spans.py::test_scatter_creates_tg
+    """
+    x0 = Future(key="x-0")
+    await wait_for_state("x-0", "released", s)
+    assert s.tasks["x-0"].group.span_id is None
+    x1 = c.submit(inc, 1, key="x-1")
+    assert await x1 == 2
+    assert s.tasks["x-0"].group.span_id is not None
+
+
+@gen_cluster(client=True)
+async def test_scatter_creates_ts(c, s, a, b):
+    """A TaskState object is created by scatter, and only later becomes runnable
+
+    See also
+    --------
+    test_scheduler.py::test_scatter_creates_ts
+    test_spans.py::test_client_desires_keys_creates_ts
+    test_spans.py::test_client_desires_keys_creates_tg
+    test_spans.py::test_scatter_creates_tg
+    """
+    x1 = (await c.scatter({"x": 1}, workers=[a.address]))["x"]
+    await wait_for_state("x", "memory", s)
+    assert s.tasks["x"].group.span_id is None
+    async with Client(s.address, asynchronous=True) as c2:
+        x2 = c2.submit(inc, 1, key="x")
+        assert await x2 == 1
+        await a.close()
+        assert await x2 == 2
+    assert s.tasks["x"].group.span_id is not None
+
+
+@gen_cluster(client=True)
+async def test_scatter_creates_tg(c, s, a, b):
+    """A TaskGroup object is created by scatter, and only later gains runnable tasks
+
+    See also
+    --------
+    test_spans.py::test_client_desires_keys_creates_ts
+    test_spans.py::test_client_desires_keys_creates_tg
+    test_spans.py::test_scatter_creates_ts
+    """
+    x0 = (await c.scatter({"x-0": 1}))["x-0"]
+    await wait_for_state("x-0", "memory", s)
+    assert s.tasks["x-0"].group.span_id is None
+    x1 = c.submit(inc, 1, key="x-1")
+    assert await x1 == 2
+    assert s.tasks["x-0"].group.span_id is not None

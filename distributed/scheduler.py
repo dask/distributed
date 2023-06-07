@@ -4450,7 +4450,11 @@ class Scheduler(SchedulerState, ServerNode):
 
         spans_ext: SpansExtension | None = self.extensions.get("spans")
         if spans_ext:
-            spans_ext.new_tasks(new_tasks)
+            # new_tasks does not necessarily contain all runnable tasks;
+            # _generate_taskstates is not the only thing that calls new_task(). A
+            # TaskState may have also been created by client_desires_keys or scatter,
+            # and only later gained a run_spec.
+            spans_ext.observe_tasks(runnable)
             # TaskGroup.span_id could be completely different from the one in the
             # original annotations, so it has been dropped. Drop it here as well in
             # order not to confuse SchedulerPlugin authors.
@@ -4486,16 +4490,13 @@ class Scheduler(SchedulerState, ServerNode):
         runnable = []
         new_tasks = []
         stack = list(keys)
-        tasks = []
         touched_keys = set()
         touched_tasks = []
         while stack:
             k = stack.pop()
             if k in touched_keys:
                 continue
-            # XXX Have a method get_task_state(self, k) ?
             ts = self.tasks.get(k)
-            tasks.append(ts)
             if ts is None:
                 ts = self.new_task(k, dsk.get(k), "released", computation=computation)
                 new_tasks.append(ts)
