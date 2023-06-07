@@ -46,7 +46,7 @@ from bokeh.models import (
 )
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.models.widgets.markups import Div
-from bokeh.palettes import Viridis11, small_palettes
+from bokeh.palettes import Viridis11, YlGnBu9, interp_palette
 from bokeh.plotting import figure
 from bokeh.themes import Theme
 from bokeh.transform import cumsum, factor_cmap, linear_cmap, stack
@@ -3522,7 +3522,7 @@ class FinePerformanceMetrics(DashboardComponent):
 
     def _build_task_execution_by_activity_chart(
         self, task_exec_data: defaultdict[str, list]
-    ) -> figure:
+    ) -> None:
         piechart_data = {}
         piechart_data["value"] = [
             sum(task_exec_data[f"{op}_{self.unit_selected}"])
@@ -3542,9 +3542,7 @@ class FinePerformanceMetrics(DashboardComponent):
             * math.pi
             for activity in self.task_activities
         ]
-        piechart_data["color"] = small_palettes["YlGnBu"].get(
-            len(self.task_activities), []
-        )
+        piechart_data["color"] = self._get_palette(len(self.task_activities))
         piechart_data["activity"] = self.task_activities
         self.task_exec_by_activity_src.data = piechart_data
 
@@ -3576,29 +3574,46 @@ class FinePerformanceMetrics(DashboardComponent):
 
     def _build_task_execution_by_prefix_chart(
         self, task_exec_data: defaultdict[str, list]
-    ) -> figure:
-        barchart = figure(
-            x_range=task_exec_data["functions"],
-            height=500,
-            sizing_mode="scale_both",
-            title="Task execution, by function",
-            tools="pan,wheel_zoom,box_zoom,reset",
-        )
-        barchart.yaxis.visible = False
-        barchart.xaxis.major_label_orientation = 0.2
-        barchart.grid.grid_line_color = None
+    ) -> None:
+        functions = task_exec_data["functions"]
+        base_tools = "pan,wheel_zoom,box_zoom,reset"
+
+        if self.task_exec_by_prefix_chart is None:
+            barchart = figure(
+                x_range=functions,
+                height=500,
+                sizing_mode="scale_both",
+                title="Task execution, by function",
+                tools=base_tools,
+            )
+            barchart.yaxis.visible = False
+            barchart.xaxis.major_label_orientation = 0.2
+            barchart.grid.grid_line_color = None
+            self.task_exec_by_prefix_chart = barchart
+
+        if self.task_exec_by_prefix_chart.x_range.factors != functions:
+            self.substantial_change = True
+            self.task_exec_by_prefix_chart.x_range = FactorRange(*functions)
+
         stackers = [
             name for name in task_exec_data if name.endswith(self.unit_selected)
         ]
-        if stackers:
-            renderers = barchart.vbar_stack(
+
+        if stackers and stackers != getattr(self, "_prev_stackers", []):
+            self._prev_stackers = stackers
+            renderers = self.task_exec_by_prefix_chart.vbar_stack(
                 stackers,
                 x="functions",
                 width=0.9,
                 source=self.task_exec_by_prefix_src,
-                color=small_palettes["YlGnBu"].get(len(self.task_activities), []),
+                color=self._get_palette(len(self.task_activities)),
                 legend_label=self.task_activities,
             )
+
+            # Create hovertools ontop of base tools
+            tools = self.task_exec_by_prefix_chart.tools
+            self.task_exec_by_prefix_chart.tools = tools[: len(base_tools.split(","))]
+
             for vbar in renderers:
                 tooltips = [
                     (
@@ -3607,19 +3622,15 @@ class FinePerformanceMetrics(DashboardComponent):
                     ),
                     ("function", "@functions"),
                 ]
-                barchart.add_tools(HoverTool(tooltips=tooltips, renderers=[vbar]))
+                self.task_exec_by_prefix_chart.add_tools(
+                    HoverTool(tooltips=tooltips, renderers=[vbar])
+                )
 
-            if any(
-                len(self.task_exec_by_prefix_src.data[k]) != len(task_exec_data[k])
-                for k in self.task_exec_by_prefix_src.data
-            ):
-                self.substantial_change = True
+            self.substantial_change = True
+            self.task_exec_by_prefix_chart.renderers = renderers
+        self.task_exec_by_prefix_src.data = dict(task_exec_data)
 
-            self.task_exec_by_prefix_src.data = dict(task_exec_data)
-            barchart.renderers = renderers
-        self.task_exec_by_prefix_chart = barchart
-
-    def _build_senddata_chart(self, senddata: defaultdict[str, list]) -> figure:
+    def _build_senddata_chart(self, senddata: defaultdict[str, list]) -> None:
         piedata = {}
         piedata["activity"] = senddata["activity"]
         piedata["value"] = [
@@ -3636,7 +3647,7 @@ class FinePerformanceMetrics(DashboardComponent):
             * math.pi
             for op in piedata["activity"]
         ]
-        piedata["color"] = small_palettes["YlGnBu"].get(len(piedata["activity"]), [])
+        piedata["color"] = self._get_palette(len(piedata["activity"]))
 
         self.sendsrc.data = piedata
 
@@ -3664,6 +3675,9 @@ class FinePerformanceMetrics(DashboardComponent):
             senddata_piechart.axis.visible = False
             senddata_piechart.grid.grid_line_color = None
             self.senddata_by_activity_chart = senddata_piechart
+
+    def _get_palette(self, n: int) -> list[str]:
+        return interp_palette(YlGnBu9, n)
 
 
 class Contention(DashboardComponent):

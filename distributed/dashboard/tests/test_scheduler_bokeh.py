@@ -344,6 +344,25 @@ async def test_FinePerformanceMetrics(c, s, a, b):
     assert cl.task_exec_data["functions"] == ["slowinc"]
 
 
+@gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
+async def test_FinePerformanceMetrics_simulated_spill_no_crash(c, s, a, b):
+    metrics = {
+        ("execute", "inc", "disk-read", "seconds"): 1.0,
+        ("execute", "inc", "disk-read", "count"): 16.0,
+        ("execute", "inc", "disk-read", "bytes"): 2059931767.0,
+        ("execute", "inc", "disk-write", "seconds"): 0.12,
+        ("execute", "inc", "disk-write", "count"): 2.0,
+        ("execute", "inc", "disk-write", "bytes"): 268435938.0,
+    }
+    s.cumulative_worker_metrics.clear()
+    s.cumulative_worker_metrics.update(metrics)
+    http_client = AsyncHTTPClient()
+    response = await http_client.fetch(
+        f"http://localhost:{s.http_server.port}/individual-fine-performance-metrics"
+    )
+    assert response.code == 200
+
+
 @gen_cluster(client=True)
 async def test_ClusterMemory(c, s, a, b):
     cl = ClusterMemory(s)
