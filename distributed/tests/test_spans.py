@@ -350,14 +350,14 @@ def test_no_tags():
 
 
 @gen_cluster(client=True)
-async def test_client_desires_new_key_creates_ts(c, s, a, b):
+async def test_client_desires_keys_creates_ts(c, s, a, b):
     """A TaskState object is created by client_desires_keys, and
     is only later submitted with submit/compute by a different client
 
     See also
     --------
-    test_scheduler.py::test_client_desires_new_key_creates_ts
-    test_spans.py::test_client_desires_new_key_creates_tg
+    test_scheduler.py::test_client_desires_keys_creates_ts
+    test_spans.py::test_client_desires_keys_creates_tg
     test_spans.py::test_scatter_creates_ts
     test_spans.py::test_scatter_creates_tg
     """
@@ -371,13 +371,13 @@ async def test_client_desires_new_key_creates_ts(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_client_desires_new_key_creates_tg(c, s, a, b):
+async def test_client_desires_keys_creates_tg(c, s, a, b):
     """A TaskGroup object is created by client_desires_keys, and
     only later gains runnable tasks
 
     See also
     --------
-    test_spans.py::test_client_desires_new_key_creates_ts
+    test_spans.py::test_client_desires_keys_creates_ts
     test_spans.py::test_scatter_creates_ts
     test_spans.py::test_scatter_creates_tg
     """
@@ -396,8 +396,8 @@ async def test_scatter_creates_ts(c, s, a, b):
     See also
     --------
     test_scheduler.py::test_scatter_creates_ts
-    test_spans.py::test_client_desires_new_key_creates_ts
-    test_spans.py::test_client_desires_new_key_creates_tg
+    test_spans.py::test_client_desires_keys_creates_ts
+    test_spans.py::test_client_desires_keys_creates_tg
     test_spans.py::test_scatter_creates_tg
     """
     x1 = (await c.scatter({"x": 1}, workers=[a.address]))["x"]
@@ -417,8 +417,8 @@ async def test_scatter_creates_tg(c, s, a, b):
 
     See also
     --------
-    test_spans.py::test_client_desires_new_key_creates_ts
-    test_spans.py::test_client_desires_new_key_creates_tg
+    test_spans.py::test_client_desires_keys_creates_ts
+    test_spans.py::test_client_desires_keys_creates_tg
     test_spans.py::test_scatter_creates_ts
     """
     x0 = (await c.scatter({"x-0": 1}))["x-0"]

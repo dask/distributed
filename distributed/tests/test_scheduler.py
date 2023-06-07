@@ -4457,14 +4457,14 @@ async def test_tell_workers_when_peers_have_left(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_client_desires_new_key_creates_ts(c, s, a, b):
+async def test_client_desires_keys_creates_ts(c, s, a, b):
     """A TaskState object is created by client_desires_keys, and
     is only later submitted with submit/compute by a different client
 
     See also
     --------
     test_scheduler.py::test_scatter_creates_ts
-    test_spans.py::test_client_desires_new_key_creates_ts
+    test_spans.py::test_client_desires_keys_creates_ts
     """
     x = Future(key="x")
     await wait_for_state("x", "released", s)
@@ -4481,7 +4481,7 @@ async def test_scatter_creates_ts(c, s, a, b):
 
     See also
     --------
-    test_scheduler.py::test_client_desires_new_key_creates_ts
+    test_scheduler.py::test_client_desires_keys_creates_ts
     test_spans.py::test_scatter_creates_ts
     """
     x1 = (await c.scatter({"x": 1}, workers=[a.address]))["x"]
