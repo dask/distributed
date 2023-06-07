@@ -297,6 +297,9 @@ class TaskState:
     nbytes: int | None = None
     #: Arbitrary task annotations
     annotations: dict | None = None
+    #: unique span id (see ``distributed.spans``).
+    #: Matches ``distributed.scheduler.TaskState.group.span_id``.
+    span_id: str | None = None
     #: True if the :meth:`~WorkerBase.execute` or :meth:`~WorkerBase.gather_dep`
     #: coroutine servicing this task completed; False otherwise. This flag changes
     #: the behaviour of transitions out of the ``executing``, ``flight`` etc. states.
@@ -765,6 +768,7 @@ class ComputeTaskEvent(StateMachineEvent):
     resource_restrictions: dict[str, float]
     actor: bool
     annotations: dict
+    span_id: str | None
 
     __slots__ = tuple(__annotations__)
 
@@ -831,6 +835,7 @@ class ComputeTaskEvent(StateMachineEvent):
             resource_restrictions=resource_restrictions or {},
             actor=actor,
             annotations=annotations or {},
+            span_id=None,
             stimulus_id=stimulus_id,
         )
 
@@ -2877,6 +2882,7 @@ class WorkerState:
             ts.priority = priority
             ts.duration = ev.duration
             ts.annotations = ev.annotations
+            ts.span_id = ev.span_id
 
             # If we receive ComputeTaskEvent twice for the same task, resources may have
             # changed, but the task is still running. Preserve the previous resource
