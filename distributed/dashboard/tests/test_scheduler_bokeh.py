@@ -373,7 +373,7 @@ async def test_FinePerformanceMetrics(c, s, a, b):
     assert not cl.task_exec_data
     cl.update()
     assert cl.task_exec_data
-    assert cl.task_exec_data["functions"] == ["w", "x", "y", "z"]
+    assert set(cl.task_exec_data["functions"]) == {"w", "x", "y", "z"}
 
 
 @gen_cluster(client=True)

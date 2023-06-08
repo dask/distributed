@@ -3426,6 +3426,27 @@ class FinePerformanceMetrics(DashboardComponent):
             for k, v in self.scheduler.cumulative_worker_metrics.items()
             if isinstance(k, tuple)
         )
+
+        activities = {
+            activity
+            for (_, *_, activity, _), _ in items
+            if activity not in self.task_activities
+        }
+        if activities:
+            self.substantial_change = True
+            self.task_activities.extend(activities)
+
+        functions = {
+            func
+            for (ctx, func, *_), _ in items
+            if ctx == "execute" and func not in self.task_exec_data["functions"]
+        }
+        if functions:
+            self.substantial_change = True
+            self.task_exec_data["timestamp"].extend(datetime.now() for _ in functions)
+            self.function_selector.options.extend(functions)
+            self.task_exec_data["functions"].extend(functions)
+
         for (context, *parts), val in items:
             if context == "get-data":
                 activity, unit = parts
@@ -3452,15 +3473,6 @@ class FinePerformanceMetrics(DashboardComponent):
                     # note append doesn't work here
                     self.unit_selector.options += [unit]
 
-                if activity not in self.task_activities:
-                    self.substantial_change = True
-                    self.task_activities.append(activity)
-
-                if prefix not in self.task_exec_data["functions"]:
-                    self.substantial_change = True
-                    self.function_selector.options.append(prefix)
-                    self.task_exec_data["functions"].append(prefix)
-                    self.task_exec_data["timestamp"].append(datetime.utcnow())
                 idx = self.task_exec_data["functions"].index(prefix)
 
                 # Some function/activity combos missing, so need to keep columns aligned
