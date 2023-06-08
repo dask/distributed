@@ -53,6 +53,7 @@ from distributed.dashboard.components.worker import Counters
 from distributed.dashboard.scheduler import applications
 from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.metrics import time
+from distributed.spans import span
 from distributed.utils import format_dashboard_link
 from distributed.utils_test import (
     block_on_event,
@@ -329,38 +330,50 @@ async def test_WorkersMemory(c, s, a, b):
     assert all(d["width"])
 
 
-@gen_cluster(client=True)
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.memory.target": 0.7,
+        "distributed.worker.memory.spill": False,
+        "distributed.worker.memory.pause": False,
+    },
+    worker_kwargs={"memory_limit": 100},
+)
 async def test_FinePerformanceMetrics(c, s, a, b):
     cl = FinePerformanceMetrics(s)
 
-    futures = c.map(slowinc, range(10), delay=0.001)
-    await wait(futures)
-    await asyncio.sleep(1)  # wait for metrics to arrive
+    # execute on default span; multiple tasks in same TaskGroup
+    x0 = c.submit(inc, 0, key="x-0", workers=[a.address])
+    x1 = c.submit(inc, 1, key="x-1", workers=[a.address])
+
+    # execute with spill (output size is individually larger than target)
+    w = c.submit(lambda: "x" * 75, key="w", workers=[a.address])
+
+    await wait([x0, x1, w])
+
+    a.data.evict()
+    a.data.evict()
+    assert not a.data.fast
+    assert set(a.data.slow) == {"x-0", "x-1", "w"}
+
+    with span("foo"):
+        # execute on named span, with unspill
+        y0 = c.submit(inc, x0, key="y-0", workers=[a.address])
+        # get_data with unspill + gather_dep + execute on named span
+        y1 = c.submit(inc, x1, key="y-1", workers=[b.address])
+
+    # execute on named span (duplicate name, different id)
+    with span("foo"):
+        z = c.submit(inc, 3, key="z")
+    await wait([y0, y1, z])
+
+    await a.heartbeat()
+    await b.heartbeat()
 
     assert not cl.task_exec_data
-
     cl.update()
     assert cl.task_exec_data
-    assert cl.task_exec_data["functions"] == ["slowinc"]
-
-
-@gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
-async def test_FinePerformanceMetrics_simulated_spill_no_crash(c, s, a, b):
-    metrics = {
-        ("execute", "inc", "disk-read", "seconds"): 1.0,
-        ("execute", "inc", "disk-read", "count"): 16.0,
-        ("execute", "inc", "disk-read", "bytes"): 2059931767.0,
-        ("execute", "inc", "disk-write", "seconds"): 0.12,
-        ("execute", "inc", "disk-write", "count"): 2.0,
-        ("execute", "inc", "disk-write", "bytes"): 268435938.0,
-    }
-    s.cumulative_worker_metrics.clear()
-    s.cumulative_worker_metrics.update(metrics)
-    http_client = AsyncHTTPClient()
-    response = await http_client.fetch(
-        f"http://localhost:{s.http_server.port}/individual-fine-performance-metrics"
-    )
-    assert response.code == 200
+    assert set(cl.task_exec_data["functions"]) == {"w", "x", "y", "z"}
 
 
 @gen_cluster(client=True)
