@@ -3694,9 +3694,7 @@ class BaseWorker(abc.ABC):
             return
 
         for label, value, unit in ledger.finalize(coarse_time=coarse_time):
-            if not isinstance(label, tuple):
-                label = (label,)
-            self.digest_metric((*activity, *label, unit), value)
+            self.digest_metric((*activity, label, unit), value)
 
     def handle_stimulus(self, *stims: StateMachineEvent) -> None:
         """Forward one or more external stimuli to :meth:`WorkerState.handle_stimulus`
