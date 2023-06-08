@@ -111,6 +111,28 @@ async def test_minimal_version(c, s, a, b):
         await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
 
 
+@pytest.mark.gpu
+@gen_cluster(client=True)
+async def test_basic_cudf_support(c, s, a, b):
+    pytest.importorskip("dask_cudf")
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    ).to_backend("cudf")
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    assert out.npartitions == df.npartitions
+    x, y = c.compute([df.x.size, out.x.size])
+    x = await x
+    y = await y
+    assert x == y
+
+    await clean_worker(a)
+    await clean_worker(b)
+    await clean_scheduler(s)
+
+
 @pytest.mark.parametrize("npartitions", [None, 1, 20])
 @gen_cluster(client=True)
 async def test_basic_integration(c, s, a, b, lose_annotations, npartitions):
