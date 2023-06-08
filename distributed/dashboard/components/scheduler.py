@@ -3429,7 +3429,7 @@ class FinePerformanceMetrics(DashboardComponent):
 
         activities = {
             activity
-            for (_, *_, activity, _), _ in items
+            for (*_, activity, _), _ in items
             if activity not in self.task_activities
         }
         if activities:
