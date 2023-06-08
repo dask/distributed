@@ -234,7 +234,7 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
 
     @abc.abstractmethod
     async def get_output_partition(
-        self, i: T_partition_id, key: str
+        self, i: T_partition_id, key: str, **kwargs: Any
     ) -> T_partition_type:
         """Get an output partition to the shuffle run"""
 
@@ -380,8 +380,11 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
         await self._write_to_comm(out)
         return self.run_id
 
-    async def get_output_partition(self, i: NIndex, key: str) -> np.ndarray:
+    async def get_output_partition(
+        self, i: NIndex, key: str, **kwargs: Any
+    ) -> np.ndarray:
         self.raise_if_closed()
+        assert not kwargs
         assert self.transferred, "`get_output_partition` called before barrier task"
 
         await self._ensure_output_worker(i, key)
@@ -420,8 +423,6 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         A set of all participating worker (addresses).
     column:
         The data column we split the input partition by.
-    meta:
-        Empty metadata of the input.
     id:
         A unique `ShuffleID` this belongs to.
     run_id:
@@ -450,7 +451,6 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         worker_for: dict[int, str],
         output_workers: set,
         column: str,
-        meta: pd.DataFrame,
         id: ShuffleId,
         run_id: int,
         local_address: str,
@@ -476,7 +476,6 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
             memory_limiter_disk=memory_limiter_disk,
         )
         self.column = column
-        self.meta = meta
         partitions_of = defaultdict(list)
         for part, addr in worker_for.items():
             partitions_of[addr].append(part)
@@ -531,8 +530,12 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         await self._write_to_comm(out)
         return self.run_id
 
-    async def get_output_partition(self, i: int, key: str) -> pd.DataFrame:
+    async def get_output_partition(
+        self, i: int, key: str, **kwargs: Any
+    ) -> pd.DataFrame:
         self.raise_if_closed()
+        meta = kwargs.pop("meta")
+        assert not kwargs
         assert self.transferred, "`get_output_partition` called before barrier task"
 
         await self._ensure_output_worker(i, key)
@@ -542,11 +545,11 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
             data = self._read_from_disk((i,))
 
             def _() -> pd.DataFrame:
-                return convert_partition(data, self.meta)
+                return convert_partition(data, meta)
 
             out = await self.offload(_)
         except KeyError:
-            out = self.meta.copy()
+            out = meta.copy()
         return out
 
     def _get_assigned_worker(self, i: int) -> str:
@@ -771,7 +774,6 @@ class ShuffleWorkerExtension:
                 id=shuffle_id,
                 type=type,
                 spec={
-                    "meta": to_serialize(kwargs["meta"]),
                     "npartitions": kwargs["npartitions"],
                     "column": kwargs["column"],
                     "parts_out": kwargs["parts_out"],
@@ -817,7 +819,6 @@ class ShuffleWorkerExtension:
                 column=result["column"],
                 worker_for=result["worker_for"],
                 output_workers=result["output_workers"],
-                meta=result["meta"],
                 id=shuffle_id,
                 run_id=result["run_id"],
                 directory=os.path.join(
@@ -904,7 +905,11 @@ class ShuffleWorkerExtension:
         )
 
     def get_output_partition(
-        self, shuffle_id: ShuffleId, run_id: int, output_partition: int | NIndex
+        self,
+        shuffle_id: ShuffleId,
+        run_id: int,
+        output_partition: int | NIndex,
+        **kwargs: Any,
     ) -> Any:
         """
         Task: Retrieve a shuffled output partition from the ShuffleExtension.
@@ -914,7 +919,11 @@ class ShuffleWorkerExtension:
         shuffle = self.get_shuffle_run(shuffle_id, run_id)
         key = thread_state.key
         return sync(
-            self.worker.loop, shuffle.get_output_partition, output_partition, key
+            self.worker.loop,
+            shuffle.get_output_partition,
+            output_partition,
+            key,
+            **kwargs,
         )
 
 
