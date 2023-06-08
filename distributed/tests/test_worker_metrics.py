@@ -31,7 +31,6 @@ def get_digests(
     if isinstance(allow, str):
         allow = (allow,)
     d = w.digests_total if isinstance(w, Worker) else w.cumulative_worker_metrics
-    # import pprint; pprint.pprint(dict(d))
     digests = {
         k: v
         for k, v in d.items()
