@@ -140,7 +140,6 @@ def merge_transfer(
     input_partition: int,
     npartitions: int,
     parts_out: set[int],
-    meta: pd.DataFrame,
 ):
     return shuffle_transfer(
         input=input,
@@ -149,7 +148,6 @@ def merge_transfer(
         npartitions=npartitions,
         column=_HASH_COLUMN_NAME,
         parts_out=parts_out,
-        meta=meta,
     )
 
 
@@ -162,6 +160,8 @@ def merge_unpack(
     how: MergeHow,
     left_on: IndexLabel,
     right_on: IndexLabel,
+    meta_left: pd.DataFrame,
+    meta_right: pd.DataFrame,
     result_meta: pd.DataFrame,
     suffixes: Suffixes,
 ):
@@ -170,10 +170,10 @@ def merge_unpack(
     ext = _get_worker_extension()
     # If the partition is empty, it doesn't contain the hash column name
     left = ext.get_output_partition(
-        shuffle_id_left, barrier_left, output_partition
+        shuffle_id_left, barrier_left, output_partition, meta=meta_left
     ).drop(columns=_HASH_COLUMN_NAME, errors="ignore")
     right = ext.get_output_partition(
-        shuffle_id_right, barrier_right, output_partition
+        shuffle_id_right, barrier_right, output_partition, meta=meta_right
     ).drop(columns=_HASH_COLUMN_NAME, errors="ignore")
     return merge_chunk(
         left,
@@ -355,7 +355,6 @@ class HashJoinP2PLayer(Layer):
                 i,
                 self.npartitions,
                 self.parts_out,
-                self.meta_input_left,
             )
         for i in range(self.n_partitions_right):
             transfer_keys_right.append((name_right, i))
@@ -366,7 +365,6 @@ class HashJoinP2PLayer(Layer):
                 i,
                 self.npartitions,
                 self.parts_out,
-                self.meta_input_right,
             )
 
         _barrier_key_left = barrier_key(ShuffleId(token_left))
@@ -386,6 +384,8 @@ class HashJoinP2PLayer(Layer):
                 self.how,
                 self.left_on,
                 self.right_on,
+                self.meta_input_left,
+                self.meta_input_right,
                 self.meta_output,
                 self.suffixes,
             )
