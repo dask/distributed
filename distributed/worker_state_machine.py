@@ -3604,12 +3604,13 @@ class BaseWorker(abc.ABC):
         self.state = state
         self._async_instructions = set()
 
-    def _start_async_instruction(
+    def _start_async_instruction(  # type: ignore[valid-type]
         self,
         task_name: str,
         func: Callable[P, Awaitable[StateMachineEvent]],
         /,
         *args: P.args,
+        span_id: str | None = None,
         **kwargs: P.kwargs,
     ) -> None:
         """Execute an asynchronous instruction inside an asyncio task"""
@@ -3622,12 +3623,15 @@ class BaseWorker(abc.ABC):
 
         task = asyncio.create_task(wrapper(), name=task_name)
         self._async_instructions.add(task)
-        task.add_done_callback(partial(self._finish_async_instruction, ledger=ledger))
+        task.add_done_callback(
+            partial(self._finish_async_instruction, ledger=ledger, span_id=span_id)
+        )
 
     def _finish_async_instruction(
         self,
         task: asyncio.Task[StateMachineEvent],
         ledger: DelayedMetricsLedger,
+        span_id: str | None,
     ) -> None:
         """The asynchronous instruction just completed; process the returned
         stimulus.
@@ -3647,15 +3651,19 @@ class BaseWorker(abc.ABC):
             # Capture metric events in _transition_to_memory()
             self.handle_stimulus(stim)
 
-        self._finalize_metrics(stim, ledger)
+        self._finalize_metrics(stim, ledger, span_id)
 
     def _finalize_metrics(
         self,
         stim: StateMachineEvent,
         ledger: DelayedMetricsLedger,
+        span_id: str | None = None,
     ) -> None:
-        activity: tuple[str, ...]
+        activity: tuple[str | None, ...]
         coarse_time: str | Literal[False]
+
+        if not isinstance(stim, ExecuteDoneEvent):
+            assert span_id is None
 
         if isinstance(stim, GatherDepSuccessEvent):
             activity = ("gather-dep",)
@@ -3677,16 +3685,16 @@ class BaseWorker(abc.ABC):
             coarse_time = "busy"
 
         elif isinstance(stim, ExecuteSuccessEvent):
-            activity = ("execute", key_split(stim.key))
+            activity = ("execute", span_id, key_split(stim.key))
             ts = self.state.tasks.get(stim.key)
             coarse_time = False if ts and ts.state == "memory" else "cancelled"
 
         elif isinstance(stim, ExecuteFailureEvent):
-            activity = ("execute", key_split(stim.key))
+            activity = ("execute", span_id, key_split(stim.key))
             coarse_time = "failed"
 
         elif isinstance(stim, RescheduleEvent):
-            activity = ("execute", key_split(stim.key))
+            activity = ("execute", span_id, key_split(stim.key))
             coarse_time = "cancelled"
 
         else:
@@ -3729,10 +3737,12 @@ class BaseWorker(abc.ABC):
                 )
 
             elif isinstance(inst, Execute):
+                ts = self.state.tasks[inst.key]
                 self._start_async_instruction(
                     f"execute({inst.key})",
                     self.execute,
                     inst.key,
+                    span_id=ts.span_id,
                     stimulus_id=inst.stimulus_id,
                 )
 

@@ -12,8 +12,8 @@ import dask.config
 from distributed.metrics import time
 
 if TYPE_CHECKING:
-    from distributed import Scheduler
-    from distributed.scheduler import TaskGroup, TaskState, TaskStateState
+    from distributed import Scheduler, Worker
+    from distributed.scheduler import TaskGroup, TaskState, TaskStateState, WorkerState
 
 
 @contextmanager
@@ -124,6 +124,8 @@ class Span:
     #: stop
     enqueued: float
 
+    _cumulative_worker_metrics: defaultdict[tuple[str, ...], float]
+
     # Support for weakrefs to a class with __slots__
     __weakref__: Any
 
@@ -136,6 +138,7 @@ class Span:
         self.enqueued = time()
         self.children = []
         self.groups = set()
+        self._cumulative_worker_metrics = defaultdict(float)
 
     def __repr__(self) -> str:
         return f"Span<name={self.name}, id={self.id}>"
@@ -262,8 +265,25 @@ class Span:
         """
         return sum(tg.nbytes_total for tg in self.traverse_groups())
 
+    @property
+    def cumulative_worker_metrics(self) -> defaultdict[tuple[str, ...], float]:
+        """Replica of Worker.digests_total and Scheduler.cumulative_worker_metrics, but
+        only for the metrics that can be attributed to the current span tree.
+        The span_id has been removed from the key.
 
-class SpansExtension:
+        At the moment of writing, all keys are
+        ``("execute", <task prefix>, <activity>, <unit>)``
+        but more may be added in the future with a different format; please test for
+        ``k[0] == "execute"``.
+        """
+        out: defaultdict[tuple[str, ...], float] = defaultdict(float)
+        for child in self.traverse_spans():
+            for k, v in child._cumulative_worker_metrics.items():
+                out[k] += v
+        return out
+
+
+class SpansSchedulerExtension:
     """Scheduler extension for spans support"""
 
     #: All Span objects by id
@@ -358,3 +378,49 @@ class SpansExtension:
             self.root_spans.append(span)
 
         return span
+
+    def heartbeat(
+        self, ws: WorkerState, data: dict[str, dict[tuple[str, ...], float]]
+    ) -> None:
+        """Triggered by SpansWorkerExtension.heartbeat().
+
+        Populate :meth:`Span.cumulative_worker_metrics` with data from the worker.
+
+        See also
+        --------
+        SpansWorkerExtension.heartbeat
+        Span.cumulative_worker_metrics
+        """
+        for span_id, metrics in data.items():
+            span = self.spans[span_id]
+            for k, v in metrics.items():
+                span._cumulative_worker_metrics[k] += v
+
+
+class SpansWorkerExtension:
+    """Worker extension for spans support"""
+
+    worker: Worker
+
+    def __init__(self, worker: Worker):
+        self.worker = worker
+
+    def heartbeat(self) -> dict[str, dict[tuple[str, ...], float]]:
+        """Apportion the metrics that do have a span to the Spans on the scheduler
+
+        Returns
+        -------
+        ``{span_id: {("execute", prefix, activity, unit): value}}``
+
+        See also
+        --------
+        SpansSchedulerExtension.heartbeat
+        Span.cumulative_worker_metrics
+        """
+        out: defaultdict[str, dict[tuple[str, ...], float]] = defaultdict(dict)
+        for k, v in self.worker.digests_total_since_heartbeat.items():
+            if isinstance(k, tuple) and k[0] == "execute":
+                _, span_id, prefix, activity, unit = k
+                assert span_id is not None
+                out[span_id]["execute", prefix, activity, unit] = v
+        return dict(out)
