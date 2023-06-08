@@ -2312,24 +2312,6 @@ async def test_idle_timeout_no_workers(c, s):
     assert s.check_idle()
 
 
-@gen_cluster(client=True)
-async def test_cumulative_worker_metrics(c, s, a, b):
-    # Race condition: metrics that are updated while idle may or may not be there already
-    assert s.cumulative_worker_metrics.keys() in (set(), {"latency"})
-    await c.submit(inc, 1, key="do_work")
-
-    await a.heartbeat()
-    await b.heartbeat()
-
-    metrics = s.cumulative_worker_metrics
-
-    # Subset of expected keys
-    assert "latency" in metrics
-    assert ("execute", "do_work", "deserialize", "seconds") in metrics
-
-    assert all(isinstance(value, float) for value in metrics.values())
-
-
 @gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})
 async def test_bandwidth(c, s, a, b):
     start = s.bandwidth

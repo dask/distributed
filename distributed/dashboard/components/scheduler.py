@@ -3422,7 +3422,8 @@ class FinePerformanceMetrics(DashboardComponent):
     @log_errors
     def update(self):
         items = sorted(
-            (k, v)
+            # Custom metrics can be any hashable
+            (tuple(map(str, k)), v)
             for k, v in self.scheduler.cumulative_worker_metrics.items()
             if isinstance(k, tuple)
         )

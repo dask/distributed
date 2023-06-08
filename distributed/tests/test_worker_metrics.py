@@ -11,7 +11,7 @@ import pytest
 import dask
 
 import distributed
-from distributed import Event, Worker, wait
+from distributed import Event, Reschedule, Scheduler, Worker, get_worker, wait
 from distributed.compatibility import WINDOWS
 from distributed.metrics import context_meter, meter
 from distributed.utils_test import (
@@ -20,17 +20,20 @@ from distributed.utils_test import (
     async_poll_for,
     gen_cluster,
     inc,
+    slowinc,
     wait_for_state,
 )
 
 
-def get_digests(w: Worker, allow: str | Collection[str] = ()) -> dict[Hashable, float]:
-    # import pprint; pprint.pprint(dict(w.digests_total))
+def get_digests(
+    w: Worker | Scheduler, allow: str | Collection[str] = ()
+) -> dict[Hashable, float]:
     if isinstance(allow, str):
         allow = (allow,)
+    d = w.digests_total if isinstance(w, Worker) else w.cumulative_worker_metrics
     digests = {
         k: v
-        for k, v in w.digests_total.items()
+        for k, v in d.items()
         if k
         not in {"latency", "tick-duration", "transfer-bandwidth", "transfer-duration"}
         and (any(a in k for a in allow) or not allow)
@@ -396,26 +399,142 @@ async def test_user_metrics_fail(c, s, a):
     assert get_digests(a)["execute", "x", "failed", "seconds"] < 1
 
 
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_user_metrics_weird(c, s, a):
+    """label can be any msgpack-serializable Hashable
+    unit can be any string
+    """
+
+    def f():
+        context_meter.digest_metric(("foo", 1), 1, "seconds")
+        context_meter.digest_metric(None, 2, "custom")
+
+    await wait(c.submit(f, key="x"))
+    await a.heartbeat()
+
+    assert (
+        list(get_digests(a))
+        == list(get_digests(s))
+        == [
+            ("execute", "x", "deserialize", "seconds"),
+            ("execute", "x", ("foo", 1), "seconds"),
+            ("execute", "x", None, "custom"),
+            ("execute", "x", "thread-cpu", "seconds"),
+            ("execute", "x", "thread-noncpu", "seconds"),
+            ("execute", "x", "executor", "seconds"),
+            ("execute", "x", "other", "seconds"),
+        ]
+    )
+
+
 @gen_cluster(client=True, nthreads=[("", 3)])
 async def test_do_not_leak_metrics(c, s, a, b):
     def f(k):
         for _ in range(10):
             sleep(0.05)
-            context_meter.digest_metric(("ping", k), 1, "count")
+            context_meter.digest_metric(f"ping-{k}", 1, "count")
 
     async def g(k):
         for _ in range(10):
             await asyncio.sleep(0.05)
-            context_meter.digest_metric(("ping", k), 1, "count")
+            context_meter.digest_metric(f"ping-{k}", 1, "count")
 
     x = c.submit(f, "x", key="x")
     y = c.submit(f, "y", key="y")
     z = c.submit(g, "z", key="z")
-    await c.run(g, "w")
+    await c.run(g, "w")  # Metrics are discarded
     await wait([x, y, z])
 
-    assert get_digests(a, "ping") == {
-        ("execute", "x", "ping", "x", "count"): 10,
-        ("execute", "y", "ping", "y", "count"): 10,
-        ("execute", "z", "ping", "z", "count"): 10,
+    assert get_digests(a, "count") == {
+        ("execute", "x", "ping-x", "count"): 10,
+        ("execute", "y", "ping-y", "count"): 10,
+        ("execute", "z", "ping-z", "count"): 10,
     }
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 2,
+    config={"distributed.scheduler.work-stealing": False},
+)
+async def test_reschedule(c, s, a, b):
+    """A task raises Reschedule()
+
+    See also
+    --------
+    test_reschedule.py
+    """
+    a_address = a.address
+
+    def f(x):
+        sleep(0.1)
+        if get_worker().address == a_address:
+            raise Reschedule()
+
+    futures = c.map(f, range(4), key=["x-1", "x-2", "x-3", "x-4"])
+    futures2 = c.map(slowinc, range(10), delay=0.1, key="clog", workers=[a.address])
+    await wait(futures)
+    assert all(f.key in b.data for f in futures)
+
+    evs = get_digests(a, "x")
+    k = ("execute", "x", "cancelled", "seconds")
+    assert list(evs) == [k]
+    assert evs[k] > 0
+
+
+@gen_cluster(client=True)
+async def test_send_metrics_to_scheduler(c, s, a, b):
+    """Test that Worker.digests_total are sync'ed by the heartbeat to
+    Scheduler.cumulative_worker_metrics
+    """
+    # Race condition: metrics that are updated while idle may or may not be there already
+    assert s.cumulative_worker_metrics.keys() in (set(), {"latency"})
+
+    x0 = c.submit(inc, 1, key=("x", 0), workers=[a.address])
+    x1 = c.submit(inc, 1, key=("x", 1), workers=[b.address])
+    # Trigger gather_dep and get_data
+    x2 = c.submit(inc, x0, key=("x", 2), workers=[b.address])
+    x3 = c.submit(inc, x1, key=("x", 3), workers=[a.address])
+    await wait([x2, x3])
+    # Flush metrics from workers to scheduler
+    await a.heartbeat()
+    await b.heartbeat()
+
+    # Make sure that cumulative sync over multiple heartbeats works as expected
+    x4 = c.submit(inc, 1, key=("x", 4))
+    await wait(x4)
+    await a.heartbeat()
+    await b.heartbeat()
+
+    # Metrics from workers have been summed up on scheduler
+    a_metrics = get_digests(a)
+    b_metrics = get_digests(b)
+    s_metrics = get_digests(s)
+    assert (
+        list(a_metrics)
+        == list(b_metrics)
+        == list(s_metrics)
+        == [
+            ("execute", "x", "deserialize", "seconds"),
+            ("execute", "x", "thread-cpu", "seconds"),
+            ("execute", "x", "thread-noncpu", "seconds"),
+            ("execute", "x", "executor", "seconds"),
+            ("execute", "x", "other", "seconds"),
+            ("get-data", "memory-read", "count"),
+            ("get-data", "memory-read", "bytes"),
+            ("get-data", "serialize", "seconds"),
+            ("get-data", "compress", "seconds"),
+            ("gather-dep", "decompress", "seconds"),
+            ("gather-dep", "deserialize", "seconds"),
+            ("gather-dep", "network", "seconds"),
+            ("gather-dep", "other", "seconds"),
+            ("get-data", "network", "seconds"),
+            ("execute", "x", "memory-read", "count"),
+            ("execute", "x", "memory-read", "bytes"),
+        ]
+    )
+    for k in s_metrics:
+        if not WINDOWS:
+            assert a_metrics[k] > 0
+            assert b_metrics[k] > 0
+        assert s_metrics[k] == a_metrics[k] + b_metrics[k]
