@@ -234,7 +234,7 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
 
     @abc.abstractmethod
     async def get_output_partition(
-        self, i: T_partition_id, key: str, **kwargs: Any
+        self, i: T_partition_id, key: str, meta: pd.DataFrame | None = None
     ) -> T_partition_type:
         """Get an output partition to the shuffle run"""
 
@@ -381,10 +381,10 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
         return self.run_id
 
     async def get_output_partition(
-        self, i: NIndex, key: str, **kwargs: Any
+        self, i: NIndex, key: str, meta: pd.DataFrame | None = None
     ) -> np.ndarray:
         self.raise_if_closed()
-        assert not kwargs
+        assert meta is None
         assert self.transferred, "`get_output_partition` called before barrier task"
 
         await self._ensure_output_worker(i, key)
@@ -531,11 +531,10 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         return self.run_id
 
     async def get_output_partition(
-        self, i: int, key: str, **kwargs: Any
+        self, i: int, key: str, meta: pd.DataFrame | None = None
     ) -> pd.DataFrame:
         self.raise_if_closed()
-        meta = kwargs.pop("meta")
-        assert not kwargs
+        assert meta is not None
         assert self.transferred, "`get_output_partition` called before barrier task"
 
         await self._ensure_output_worker(i, key)
@@ -545,7 +544,7 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
             data = self._read_from_disk((i,))
 
             def _() -> pd.DataFrame:
-                return convert_partition(data, meta)
+                return convert_partition(data, meta)  # type: ignore
 
             out = await self.offload(_)
         except KeyError:
@@ -909,7 +908,7 @@ class ShuffleWorkerExtension:
         shuffle_id: ShuffleId,
         run_id: int,
         output_partition: int | NIndex,
-        **kwargs: Any,
+        meta: pd.DataFrame | None = None,
     ) -> Any:
         """
         Task: Retrieve a shuffled output partition from the ShuffleExtension.
@@ -923,7 +922,7 @@ class ShuffleWorkerExtension:
             shuffle.get_output_partition,
             output_partition,
             key,
-            **kwargs,
+            meta=meta,
         )
 
 
