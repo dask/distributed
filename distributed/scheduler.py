@@ -99,7 +99,7 @@ from distributed.recreate_tasks import ReplayTaskScheduler
 from distributed.security import Security
 from distributed.semaphore import SemaphoreExtension
 from distributed.shuffle import ShuffleSchedulerExtension
-from distributed.spans import SpansExtension
+from distributed.spans import SpansSchedulerExtension
 from distributed.stealing import WorkStealing
 from distributed.utils import (
     All,
@@ -171,7 +171,7 @@ DEFAULT_EXTENSIONS = {
     "amm": ActiveMemoryManagerExtension,
     "memory_sampler": MemorySamplerExtension,
     "shuffle": ShuffleSchedulerExtension,
-    "spans": SpansExtension,
+    "spans": SpansSchedulerExtension,
     "stealing": WorkStealing,
 }
 
@@ -4448,7 +4448,7 @@ class Scheduler(SchedulerState, ServerNode):
                     recommendations[ts.key] = "erred"
                     break
 
-        spans_ext: SpansExtension | None = self.extensions.get("spans")
+        spans_ext: SpansSchedulerExtension | None = self.extensions.get("spans")
         if spans_ext:
             # new_tasks does not necessarily contain all runnable tasks;
             # _generate_taskstates is not the only thing that calls new_task(). A

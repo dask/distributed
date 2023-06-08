@@ -4,7 +4,8 @@ import pytest
 
 from dask import delayed
 
-from distributed import Client, Event, Future
+from distributed import Client, Event, Future, wait
+from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 from distributed.spans import span
 from distributed.utils_test import (
@@ -427,3 +428,105 @@ async def test_scatter_creates_tg(c, s, a, b):
     x1 = c.submit(inc, 1, key="x-1")
     assert await x1 == 2
     assert s.tasks["x-0"].group.span_id is not None
+
+
+@gen_cluster(client=True)
+async def test_worker_metrics(c, s, a, b):
+    """Test that Scheduler.cumulative_worker_metrics and Span.cumulative_worker_metrics
+    are sync'ed for all 'execute' activities
+
+    See also
+    --------
+    test_worker_metrics.py::test_send_metrics_to_scheduler
+    """
+    sid_y = []
+    with span("foo") as sid_x:
+        # Make sure that cumulative sync over multiple heartbeats works as expected
+        for _ in range(2):
+            # Span 'foo' remains the same across for iterations
+            x0 = c.submit(inc, 1, key=("x", 0), workers=[a.address])
+            x1 = c.submit(inc, 1, key=("x", 1), workers=[b.address])
+            await wait([x0, x1])
+
+            # Span 'bar' is opened and closed between for iterations
+            with span("bar") as sid_yi:
+                sid_y.append(sid_yi)
+                y0 = c.submit(inc, 1, key=("y", 0), workers=[a.address])
+                y1 = c.submit(inc, 1, key=("y", 1), workers=[b.address])
+            await wait([y0, y1])
+
+            # Populate gather_dep and get_data metrics.
+            # They will be ignored by the spans extension because they have no span_id.
+            x2 = c.submit(inc, x0, key=("x", 2), workers=[b.address])
+            x3 = c.submit(inc, x1, key=("x", 3), workers=[a.address])
+            await wait([x2, x3])
+
+            # Flush metrics from workers to scheduler
+            await a.heartbeat()
+            await b.heartbeat()
+
+            # Cleanup
+            del x0, x1, x2, x3, y0, y1
+            await async_poll_for(
+                lambda: not s.tasks and not a.state.tasks and not b.state.tasks,
+                timeout=5,
+            )
+
+    metrics = {
+        k: v
+        for k, v in s.cumulative_worker_metrics.items()
+        if isinstance(k, tuple) and k[0] == "execute"
+    }
+
+    assert list(metrics) == [
+        ("execute", sid_x, "x", "deserialize", "seconds"),
+        ("execute", sid_x, "x", "thread-cpu", "seconds"),
+        ("execute", sid_x, "x", "thread-noncpu", "seconds"),
+        ("execute", sid_x, "x", "executor", "seconds"),
+        ("execute", sid_x, "x", "other", "seconds"),
+        ("execute", sid_y[0], "y", "deserialize", "seconds"),
+        ("execute", sid_y[0], "y", "thread-cpu", "seconds"),
+        ("execute", sid_y[0], "y", "thread-noncpu", "seconds"),
+        ("execute", sid_y[0], "y", "executor", "seconds"),
+        ("execute", sid_y[0], "y", "other", "seconds"),
+        ("execute", sid_x, "x", "memory-read", "count"),
+        ("execute", sid_x, "x", "memory-read", "bytes"),
+        ("execute", sid_y[1], "y", "deserialize", "seconds"),
+        ("execute", sid_y[1], "y", "thread-cpu", "seconds"),
+        ("execute", sid_y[1], "y", "thread-noncpu", "seconds"),
+        ("execute", sid_y[1], "y", "executor", "seconds"),
+        ("execute", sid_y[1], "y", "other", "seconds"),
+    ]
+
+    if not WINDOWS:
+        assert all(v > 0 for v in metrics.values())
+
+    ext = s.extensions["spans"]
+
+    # Metrics have been synchronized from scheduler to spans
+    for (context, span_id, prefix, activity, unit), v in metrics.items():
+        assert (
+            ext.spans[span_id]._cumulative_worker_metrics[
+                context, prefix, activity, unit
+            ]
+            == v
+        )
+
+    # foo metrics include self and its child bar
+    cum_metrics = ext.spans_search_by_name["foo",][0].cumulative_worker_metrics
+    assert list(cum_metrics) == [
+        ("execute", "x", "deserialize", "seconds"),
+        ("execute", "x", "thread-cpu", "seconds"),
+        ("execute", "x", "thread-noncpu", "seconds"),
+        ("execute", "x", "executor", "seconds"),
+        ("execute", "x", "other", "seconds"),
+        ("execute", "x", "memory-read", "count"),
+        ("execute", "x", "memory-read", "bytes"),
+        ("execute", "y", "deserialize", "seconds"),
+        ("execute", "y", "thread-cpu", "seconds"),
+        ("execute", "y", "thread-noncpu", "seconds"),
+        ("execute", "y", "executor", "seconds"),
+        ("execute", "y", "other", "seconds"),
+    ]
+    for k, v in cum_metrics.items():
+        assert v == sum(sp._cumulative_worker_metrics[k] for sp in ext.spans.values())
