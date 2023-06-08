@@ -93,6 +93,7 @@ from distributed.pubsub import PubSubWorkerExtension
 from distributed.security import Security
 from distributed.shuffle import ShuffleWorkerExtension
 from distributed.sizeof import safe_sizeof as sizeof
+from distributed.spans import SpansWorkerExtension
 from distributed.threadpoolexecutor import ThreadPoolExecutor
 from distributed.threadpoolexecutor import secede as tpe_secede
 from distributed.utils import (
@@ -172,6 +173,7 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 DEFAULT_EXTENSIONS: dict[str, type] = {
     "pubsub": PubSubWorkerExtension,
     "shuffle": ShuffleWorkerExtension,
+    "spans": SpansWorkerExtension,
 }
 
 DEFAULT_METRICS: dict[str, Callable[[Worker], Any]] = {}
@@ -1056,8 +1058,6 @@ class Worker(BaseWorker, ServerNode):
             event_loop_interval=self._tick_interval_observed,
         )
 
-        self.digests_total_since_heartbeat.clear()
-
         monitor_recent = self.monitor.recent()
         # Convert {foo.bar: 123} to {foo: {bar: 123}}
         for k, v in monitor_recent.items():
@@ -1251,6 +1251,8 @@ class Worker(BaseWorker, ServerNode):
                     if hasattr(extension, "heartbeat")
                 },
             )
+            self.digests_total_since_heartbeat.clear()
+
             end = time()
             middle = (start + end) / 2
 

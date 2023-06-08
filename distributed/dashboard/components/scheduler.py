@@ -7,6 +7,7 @@ import os
 from collections import OrderedDict, defaultdict
 from collections.abc import Iterable
 from datetime import datetime, timedelta
+from itertools import chain
 from numbers import Number
 from typing import Any, TypeVar
 
@@ -46,7 +47,7 @@ from bokeh.models import (
 )
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.models.widgets.markups import Div
-from bokeh.palettes import Viridis11, small_palettes
+from bokeh.palettes import Viridis11, YlGnBu9, interp_palette
 from bokeh.plotting import figure
 from bokeh.themes import Theme
 from bokeh.transform import cumsum, factor_cmap, linear_cmap, stack
@@ -3402,7 +3403,7 @@ class FinePerformanceMetrics(DashboardComponent):
 
         self.function_selector = MultiChoice(value=[], options=[])
         self.function_selector.placeholder = "Select specific functions"
-        self.unit_selector = Select(title="Unit selection", options=[])
+        self.unit_selector = Select(title="Unit selection", options=["seconds"])
         self.unit_selector.on_change("value", handle_selector_chng)
         self.unit_selected = "seconds"
         self.task_exec_by_activity_chart = None
@@ -3418,63 +3419,97 @@ class FinePerformanceMetrics(DashboardComponent):
         formatters = {"bytes": format_bytes, "seconds": format_time}
         return formatters.get(unit, str)(val)
 
+    def get_metrics(
+        self,
+    ) -> tuple[list[tuple[str, str, str, float]], list[tuple[str, str, float]]]:
+        """Pre-process fine performance metrics
+
+        Returns
+        -------
+        - 'execute' metrics: [(function, activity, unit, value), ...]
+        - 'get_data' metrics: [(activity, unit, value), ...]
+        """
+        execute: defaultdict[tuple[str, str, str], float] = defaultdict(float)
+        get_data = []
+
+        for k, v in self.scheduler.cumulative_worker_metrics.items():
+            if not isinstance(k, tuple):
+                continue
+            context, *other, activity, unit = k
+            assert isinstance(unit, str)
+
+            if context == "execute":
+                span_id, function = other
+                assert isinstance(function, str)
+                # Custom metrics can provide any hashable as the label
+                # Squash all span_ids together
+                # TODO offer a filter by span_id, like we already do by function
+                execute[function, str(activity), unit] += v
+            elif context == "get-data":
+                assert not other
+                assert isinstance(activity, str)
+                get_data.append((activity, unit, v))
+
+            # Ignore memory-monitor and gather-dep metrics
+
+        return (
+            [
+                (function, activity, unit, v)
+                for (function, activity, unit), v in sorted(execute.items())
+            ],
+            sorted(get_data),
+        )
+
     @without_property_validation
     @log_errors
     def update(self):
-        items = sorted(
-            (k, v)
-            for k, v in self.scheduler.cumulative_worker_metrics.items()
-            if isinstance(k, tuple)
-        )
-        for (context, *parts), val in items:
-            if context == "get-data":
-                activity, unit = parts
+        execute_metrics, get_data_metrics = self.get_metrics()
 
-                if unit not in self.unit_selector.options:
-                    # note append doesn't work here
-                    self.unit_selector.options += [unit]
+        activities = {
+            activity for *_, activity, _, _ in chain(execute_metrics, get_data_metrics)
+        }
+        activities.difference_update(self.task_activities)
+        if activities:
+            self.substantial_change = True
+            self.task_activities.extend(activities)
 
-                if activity not in self.senddata["activity"]:
-                    self.substantial_change = True
-                    self.senddata["activity"].append(activity)
+        units = {unit for *_, unit, _ in chain(execute_metrics, get_data_metrics)}
+        units.difference_update(self.unit_selector.options)
+        self.unit_selector.options.extend(units)
 
-                idx = self.senddata["activity"].index(activity)
-                while idx >= len(self.senddata[f"{activity}_{unit}"]):
-                    self.senddata[f"{activity}_{unit}"].append(0)
-                    self.senddata[f"{activity}_{unit}_text"].append("")
-                self.senddata[f"{activity}_{unit}_text"][idx] = self.format(unit, val)
-                self.senddata[f"{activity}_{unit}"][idx] = val
+        functions = {function for function, *_ in execute_metrics}
+        functions.difference_update(self.task_exec_data["functions"])
+        if functions:
+            self.substantial_change = True
+            self.task_exec_data["timestamp"].extend(datetime.now() for _ in functions)
+            self.function_selector.options.extend(functions)
+            self.task_exec_data["functions"].extend(functions)
 
-            elif context == "execute":
-                prefix, activity, unit = parts
+        for activity, unit, val in get_data_metrics:
+            if activity not in self.senddata["activity"]:
+                self.substantial_change = True
+                self.senddata["activity"].append(activity)
 
-                if unit not in self.unit_selector.options:
-                    # note append doesn't work here
-                    self.unit_selector.options += [unit]
+            idx = self.senddata["activity"].index(activity)
+            while idx >= len(self.senddata[f"{activity}_{unit}"]):
+                self.senddata[f"{activity}_{unit}"].append(0)
+                self.senddata[f"{activity}_{unit}_text"].append("")
+            self.senddata[f"{activity}_{unit}_text"][idx] = self.format(unit, val)
+            self.senddata[f"{activity}_{unit}"][idx] = val
 
-                if activity not in self.task_activities:
-                    self.substantial_change = True
-                    self.task_activities.append(activity)
+        for prefix, activity, unit, val in execute_metrics:
+            idx = self.task_exec_data["functions"].index(prefix)
 
-                if prefix not in self.task_exec_data["functions"]:
-                    self.substantial_change = True
-                    self.function_selector.options.append(prefix)
-                    self.task_exec_data["functions"].append(prefix)
-                    self.task_exec_data["timestamp"].append(datetime.utcnow())
-                idx = self.task_exec_data["functions"].index(prefix)
+            # Some function/activity combos missing, so need to keep columns aligned
+            for op in self.task_activities:
+                while len(self.task_exec_data[f"{op}_{unit}"]) != len(
+                    self.task_exec_data["functions"]
+                ):
+                    self.task_exec_data[f"{op}_{unit}"].append(0)
+                    self.task_exec_data[f"{op}_{unit}_text"].append("")
 
-                # Some function/activity combos missing, so need to keep columns aligned
-                for op in self.task_activities:
-                    while len(self.task_exec_data[f"{op}_{unit}"]) != len(
-                        self.task_exec_data["functions"]
-                    ):
-                        self.task_exec_data[f"{op}_{unit}"].append(0)
-                        self.task_exec_data[f"{op}_{unit}_text"].append("")
-
-                self.task_exec_data[f"{activity}_{unit}"][idx] = val
-                self.task_exec_data[f"{activity}_{unit}_text"][idx] = self.format(
-                    unit, val
-                )
+            self.task_exec_data[f"{activity}_{unit}"][idx] = val
+            self.task_exec_data[f"{activity}_{unit}_text"][idx] = self.format(unit, val)
 
         data = self.task_exec_data.copy()
         # If user has manually selected function(s) then we are only showing them.
@@ -3522,7 +3557,7 @@ class FinePerformanceMetrics(DashboardComponent):
 
     def _build_task_execution_by_activity_chart(
         self, task_exec_data: defaultdict[str, list]
-    ) -> figure:
+    ) -> None:
         piechart_data = {}
         piechart_data["value"] = [
             sum(task_exec_data[f"{op}_{self.unit_selected}"])
@@ -3542,9 +3577,7 @@ class FinePerformanceMetrics(DashboardComponent):
             * math.pi
             for activity in self.task_activities
         ]
-        piechart_data["color"] = small_palettes["YlGnBu"].get(
-            len(self.task_activities), []
-        )
+        piechart_data["color"] = self._get_palette(len(self.task_activities))
         piechart_data["activity"] = self.task_activities
         self.task_exec_by_activity_src.data = piechart_data
 
@@ -3576,29 +3609,46 @@ class FinePerformanceMetrics(DashboardComponent):
 
     def _build_task_execution_by_prefix_chart(
         self, task_exec_data: defaultdict[str, list]
-    ) -> figure:
-        barchart = figure(
-            x_range=task_exec_data["functions"],
-            height=500,
-            sizing_mode="scale_both",
-            title="Task execution, by function",
-            tools="pan,wheel_zoom,box_zoom,reset",
-        )
-        barchart.yaxis.visible = False
-        barchart.xaxis.major_label_orientation = 0.2
-        barchart.grid.grid_line_color = None
+    ) -> None:
+        functions = task_exec_data["functions"]
+        base_tools = "pan,wheel_zoom,box_zoom,reset"
+
+        if self.task_exec_by_prefix_chart is None:
+            barchart = figure(
+                x_range=functions,
+                height=500,
+                sizing_mode="scale_both",
+                title="Task execution, by function",
+                tools=base_tools,
+            )
+            barchart.yaxis.visible = False
+            barchart.xaxis.major_label_orientation = 0.2
+            barchart.grid.grid_line_color = None
+            self.task_exec_by_prefix_chart = barchart
+
+        if self.task_exec_by_prefix_chart.x_range.factors != functions:
+            self.substantial_change = True
+            self.task_exec_by_prefix_chart.x_range = FactorRange(*functions)
+
         stackers = [
             name for name in task_exec_data if name.endswith(self.unit_selected)
         ]
-        if stackers:
-            renderers = barchart.vbar_stack(
+
+        if stackers and stackers != getattr(self, "_prev_stackers", []):
+            self._prev_stackers = stackers
+            renderers = self.task_exec_by_prefix_chart.vbar_stack(
                 stackers,
                 x="functions",
                 width=0.9,
                 source=self.task_exec_by_prefix_src,
-                color=small_palettes["YlGnBu"].get(len(self.task_activities), []),
+                color=self._get_palette(len(self.task_activities)),
                 legend_label=self.task_activities,
             )
+
+            # Create hovertools ontop of base tools
+            tools = self.task_exec_by_prefix_chart.tools
+            self.task_exec_by_prefix_chart.tools = tools[: len(base_tools.split(","))]
+
             for vbar in renderers:
                 tooltips = [
                     (
@@ -3607,19 +3657,15 @@ class FinePerformanceMetrics(DashboardComponent):
                     ),
                     ("function", "@functions"),
                 ]
-                barchart.add_tools(HoverTool(tooltips=tooltips, renderers=[vbar]))
+                self.task_exec_by_prefix_chart.add_tools(
+                    HoverTool(tooltips=tooltips, renderers=[vbar])
+                )
 
-            if any(
-                len(self.task_exec_by_prefix_src.data[k]) != len(task_exec_data[k])
-                for k in self.task_exec_by_prefix_src.data
-            ):
-                self.substantial_change = True
+            self.substantial_change = True
+            self.task_exec_by_prefix_chart.renderers = renderers
+        self.task_exec_by_prefix_src.data = dict(task_exec_data)
 
-            self.task_exec_by_prefix_src.data = dict(task_exec_data)
-            barchart.renderers = renderers
-        self.task_exec_by_prefix_chart = barchart
-
-    def _build_senddata_chart(self, senddata: defaultdict[str, list]) -> figure:
+    def _build_senddata_chart(self, senddata: defaultdict[str, list]) -> None:
         piedata = {}
         piedata["activity"] = senddata["activity"]
         piedata["value"] = [
@@ -3636,7 +3682,7 @@ class FinePerformanceMetrics(DashboardComponent):
             * math.pi
             for op in piedata["activity"]
         ]
-        piedata["color"] = small_palettes["YlGnBu"].get(len(piedata["activity"]), [])
+        piedata["color"] = self._get_palette(len(piedata["activity"]))
 
         self.sendsrc.data = piedata
 
@@ -3664,6 +3710,9 @@ class FinePerformanceMetrics(DashboardComponent):
             senddata_piechart.axis.visible = False
             senddata_piechart.grid.grid_line_color = None
             self.senddata_by_activity_chart = senddata_piechart
+
+    def _get_palette(self, n: int) -> list[str]:
+        return interp_palette(YlGnBu9, n)
 
 
 class Contention(DashboardComponent):

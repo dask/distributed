@@ -759,7 +759,11 @@ async def test_RetireWorker_amm_on_off(c, s, a, b, start_amm):
     assert "x" in b.data
 
 
-@gen_cluster(client=True, scheduler_kwargs={"extensions": {}})
+@gen_cluster(
+    client=True,
+    scheduler_kwargs={"extensions": {}},
+    worker_kwargs={"extensions": {}},
+)
 async def test_RetireWorker_no_extension(c, s, a, b):
     """retire_workers must work when the AMM extension is not loaded"""
     futures = await c.scatter({"x": 1}, workers=[a.address])
