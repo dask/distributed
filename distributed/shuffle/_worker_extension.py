@@ -31,7 +31,7 @@ from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._rechunk import ChunkedAxes, NIndex
 from distributed.shuffle._rechunk import ShardID as ArrayRechunkShardID
-from distributed.shuffle._rechunk import disassemble_chunks
+from distributed.shuffle._rechunk import split_axes
 from distributed.shuffle._shuffle import ShuffleId, ShuffleType
 from distributed.sizeof import sizeof
 from distributed.utils import log_errors, sync
@@ -327,7 +327,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
             partitions_of[addr].append(part)
         self.partitions_of = dict(partitions_of)
         self.worker_for = worker_for
-        self._disassembled_chunks = disassemble_chunks(old, new)
+        self.split_axes = split_axes(old, new)
 
     async def _receive(self, data: list[tuple[ArrayRechunkShardID, bytes]]) -> None:
         self.raise_if_closed()
@@ -370,10 +370,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
             from itertools import product
 
             shards = product(
-                *(
-                    axis[i]
-                    for axis, i in zip(self._disassembled_chunks, input_partition)
-                )
+                *(axis[i] for axis, i in zip(self.split_axes, input_partition))
             )
 
             for shard in shards:

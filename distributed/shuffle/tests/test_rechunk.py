@@ -18,7 +18,7 @@ from dask.array.rechunk import normalize_chunks, rechunk
 from dask.array.utils import assert_eq
 
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._rechunk import disassemble_chunks
+from distributed.shuffle._rechunk import split_axes
 from distributed.shuffle._scheduler_extension import get_worker_for_hash_sharding
 from distributed.shuffle._shuffle import ShuffleId
 from distributed.shuffle._worker_extension import ArrayRechunkRun
@@ -936,7 +936,7 @@ async def test_rechunk_with_zero(c, s, *ws):
     assert_eq(await c.compute(result), await c.compute(expected))
 
 
-def test_disassemble_chunks_1():
+def test_split_axes_1():
     """
     See Also
     --------
@@ -944,7 +944,7 @@ def test_disassemble_chunks_1():
     """
     old = ((10, 10, 10, 10, 10),)
     new = ((25, 5, 20),)
-    result = disassemble_chunks(old, new)
+    result = split_axes(old, new)
     expected = [
         [
             [(0, 0, slice(0, 10, None))],
@@ -957,7 +957,7 @@ def test_disassemble_chunks_1():
     assert result == expected
 
 
-def test_disassemble_chunks_2():
+def test_split_axes_2():
     """
     See Also
     --------
@@ -965,7 +965,7 @@ def test_disassemble_chunks_2():
     """
     old = ((20, 20, 20, 20, 20),)
     new = ((58, 4, 20, 18),)
-    result = disassemble_chunks(old, new)
+    result = split_axes(old, new)
     expected = [
         [
             [(0, 0, slice(0, 20, None))],
@@ -978,7 +978,7 @@ def test_disassemble_chunks_2():
     assert result == expected
 
 
-def test_disassemble_chunks_nan():
+def test_split_axes_nan():
     """
     See Also
     --------
@@ -986,7 +986,7 @@ def test_disassemble_chunks_nan():
     """
     old_chunks = ((np.nan, np.nan), (8,))
     new_chunks = ((np.nan, np.nan), (4, 4))
-    result = disassemble_chunks(old_chunks, new_chunks)
+    result = split_axes(old_chunks, new_chunks)
 
     expected = [
         [
@@ -998,7 +998,7 @@ def test_disassemble_chunks_nan():
     assert result == expected
 
 
-def test_disassemble_chunks_nan_single():
+def test_split_axes_nan_single():
     """
     See Also
     --------
@@ -1007,7 +1007,7 @@ def test_disassemble_chunks_nan_single():
     old_chunks = ((np.nan,), (10,))
     new_chunks = ((np.nan,), (5, 5))
 
-    result = disassemble_chunks(old_chunks, new_chunks)
+    result = split_axes(old_chunks, new_chunks)
     expected = [
         [[(0, 0, slice(0, None, None))]],
         [[(0, 0, slice(0, 5, None)), (1, 0, slice(5, 10, None))]],
@@ -1015,7 +1015,7 @@ def test_disassemble_chunks_nan_single():
     assert result == expected
 
 
-def test_disassemble_chunks_nan_long():
+def test_split_axes_nan_long():
     """
     See Also
     --------
@@ -1023,7 +1023,7 @@ def test_disassemble_chunks_nan_long():
     """
     old_chunks = (tuple([np.nan] * 4), (10,))
     new_chunks = (tuple([np.nan] * 4), (5, 5))
-    result = disassemble_chunks(old_chunks, new_chunks)
+    result = split_axes(old_chunks, new_chunks)
     expected = [
         [
             [(0, 0, slice(0, None, None))],
@@ -1038,7 +1038,7 @@ def test_disassemble_chunks_nan_long():
     assert result == expected
 
 
-def test_disassemble_chunks_with_nonzero():
+def test_split_axes_with_nonzero():
     """
     See Also
     --------
@@ -1046,7 +1046,7 @@ def test_disassemble_chunks_with_nonzero():
     """
     old = ((4, 4), (2,))
     new = ((8,), (1, 1))
-    result = disassemble_chunks(old, new)
+    result = split_axes(old, new)
     expected = [
         [
             [(0, 0, slice(0, 4, None))],
@@ -1057,7 +1057,7 @@ def test_disassemble_chunks_with_nonzero():
     assert result == expected
 
 
-def test_disassemble_chunks_with_zero():
+def test_split_axes_with_zero():
     """
     See Also
     --------
@@ -1065,7 +1065,7 @@ def test_disassemble_chunks_with_zero():
     """
     old = ((4, 4), (2,))
     new = ((4, 0, 0, 4), (1, 1))
-    result = disassemble_chunks(old, new)
+    result = split_axes(old, new)
 
     expected = [
         [
@@ -1082,7 +1082,7 @@ def test_disassemble_chunks_with_zero():
 
     old = ((4, 0, 0, 4), (1, 1))
     new = ((4, 4), (2,))
-    result = disassemble_chunks(old, new)
+    result = split_axes(old, new)
 
     expected = [
         [
@@ -1100,7 +1100,7 @@ def test_disassemble_chunks_with_zero():
 
     old = ((4, 4), (2,))
     new = ((2, 0, 0, 2, 4), (1, 1))
-    result = disassemble_chunks(old, new)
+    result = split_axes(old, new)
     expected = [
         [
             [
@@ -1117,7 +1117,7 @@ def test_disassemble_chunks_with_zero():
 
     old = ((4, 4), (2,))
     new = ((0, 0, 4, 4), (1, 1))
-    result = disassemble_chunks(old, new)
+    result = split_axes(old, new)
     expected = [
         [
             [

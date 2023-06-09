@@ -155,19 +155,19 @@ class ShardID(NamedTuple):
     shard_index: NIndex
 
 
-DisassembledChunk: TypeAlias = list[tuple[int, int, slice]]
-DisassembledAxis: TypeAlias = list[DisassembledChunk]
-DisassembledAxes: TypeAlias = list[DisassembledAxis]
+SplitChunk: TypeAlias = list[tuple[int, int, slice]]
+SplitAxis: TypeAlias = list[SplitChunk]
+SplitAxes: TypeAlias = list[SplitAxis]
 
 
-def disassemble_chunks(old: ChunkedAxes, new: ChunkedAxes) -> DisassembledAxes:
+def split_axes(old: ChunkedAxes, new: ChunkedAxes) -> SplitAxes:
     from dask.array.rechunk import old_to_new
 
     _old_to_new = old_to_new(old, new)
 
     axes = []
     for axis_id, new_axis in enumerate(_old_to_new):
-        old_axis: DisassembledAxis = [[] for _ in old[axis_id]]
+        old_axis: SplitAxis = [[] for _ in old[axis_id]]
         for new_chunk_id, new_chunk in enumerate(new_axis):
             for new_subchunk_id, (old_chunk_id, slice) in enumerate(new_chunk):
                 old_axis[old_chunk_id].append((new_chunk_id, new_subchunk_id, slice))
