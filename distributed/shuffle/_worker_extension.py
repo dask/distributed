@@ -31,7 +31,7 @@ from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._rechunk import ChunkedAxes, NIndex
 from distributed.shuffle._rechunk import ShardID as ArrayRechunkShardID
-from distributed.shuffle._rechunk import rechunk_slicing
+from distributed.shuffle._rechunk import disassemble_chunks
 from distributed.shuffle._shuffle import ShuffleId, ShuffleType
 from distributed.sizeof import sizeof
 from distributed.utils import log_errors, sync
@@ -300,8 +300,6 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
     ):
-        from dask.array.rechunk import old_to_new
-
         super().__init__(
             id=id,
             run_id=run_id,
@@ -329,8 +327,8 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
             partitions_of[addr].append(part)
         self.partitions_of = dict(partitions_of)
         self.worker_for = worker_for
-        self._slicing = rechunk_slicing(old, new)
-        self._old_to_new = old_to_new(old, new)
+        self._disassembled_chunks = disassemble_chunks(old, new)
+        pass
 
     async def _receive(self, data: list[tuple[ArrayRechunkShardID, bytes]]) -> None:
         self.raise_if_closed()

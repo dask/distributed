@@ -156,32 +156,24 @@ class ShardID(NamedTuple):
     shard_index: NIndex
 
 
-def rechunk_slicing(
-    old: ChunkedAxes, new: ChunkedAxes
-) -> dict[NIndex, list[tuple[ShardID, NSlice]]]:
-    """Calculate how to slice the old chunks to create the new chunks
+DisassembledAxis: TypeAlias = list[tuple[int, int, slice]]
+DisassembledAxes: TypeAlias = list[DisassembledAxis]
 
-    Returns
-    -------
-        Mapping of each old chunk to a list of tuples defining where each slice
-        of the old chunk belongs. Each tuple consists of the index
-        of the new chunk, the index of the slice within the composition of slices
-        creating the new chunk, and the slice to be applied to the old chunk.
-    """
-    from dask.array.rechunk import intersect_chunks
 
-    ndim = len(old)
-    intersections = intersect_chunks(old, new)
-    new_indices = product(*(range(len(c)) for c in new))
+def disassemble_chunks(old: ChunkedAxes, new: ChunkedAxes) -> DisassembledAxes:
+    from dask.array.rechunk import old_to_new
 
-    slicing = defaultdict(list)
+    _old_to_new = old_to_new(old, new)
 
-    for new_index, new_chunk in zip(new_indices, intersections):
-        sub_shape = [len({slice[dim][0] for slice in new_chunk}) for dim in range(ndim)]
-
-        shard_indices = product(*(range(dim) for dim in sub_shape))
-
-        for shard_index, sliced_chunk in zip(shard_indices, new_chunk):
-            old_index, nslice = zip(*sliced_chunk)
-            slicing[old_index].append((ShardID(new_index, shard_index), nslice))
-    return slicing
+    axes = []
+    for axis_id, new_axis in enumerate(_old_to_new):
+        old_axis = [[] for _ in old[axis_id]]
+        for new_chunk_id, new_chunk in enumerate(new_axis):
+            for new_subchunk_id, (old_chunk_id, slice) in enumerate(new_chunk):
+                old_axis[old_chunk_id].append((new_chunk_id, new_subchunk_id, slice))
+        for old_chunk in old_axis:
+            if len(old_chunk) == 1:
+                continue
+            old_chunk.sort(key=lambda subchunk: subchunk[2].start)
+        axes.append(old_axis)
+    return axes
