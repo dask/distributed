@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 import toolz
 
 from dask.context import thread_state
-from dask.utils import funcname, get_meta_library, parse_bytes
+from dask.utils import get_meta_library, parse_bytes
 
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
@@ -953,8 +953,9 @@ def split_by_worker(
     # FIXME: If we do not preserve the index something is corrupting the
     # bytestream such that it cannot be deserialized anymore
     if hasattr(df, "to_arrow") and callable(df.to_arrow):
+        # TODO: Dispatch on `df`
+        # (see: https://github.com/dask/dask/pull/10312)
         t = df.to_arrow(preserve_index=True)
-        t = t.replace_schema_metadata(t.schema.metadata | {"dataframe": funcname(lib)})
     else:
         t = pa.Table.from_pandas(df, preserve_index=True)
     t = t.sort_by("_worker")
