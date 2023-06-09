@@ -328,7 +328,6 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
         self.partitions_of = dict(partitions_of)
         self.worker_for = worker_for
         self._disassembled_chunks = disassemble_chunks(old, new)
-        pass
 
     async def _receive(self, data: list[tuple[ArrayRechunkShardID, bytes]]) -> None:
         self.raise_if_closed()
@@ -368,9 +367,20 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
             write the serialized payload directly to disk on the receiver.
             """
             out: dict[str, list[tuple[ArrayRechunkShardID, bytes]]] = defaultdict(list)
-            for id, nslice in self._slicing[input_partition]:
-                out[self.worker_for[id.chunk_index]].append(
-                    (id, pickle.dumps((id.shard_index, data[nslice])))
+            from itertools import product
+
+            shards = product(
+                *(
+                    axis[i]
+                    for axis, i in zip(self._disassembled_chunks, input_partition)
+                )
+            )
+
+            for shard in shards:
+                chunk_index, shard_index, nslice = zip(*shard)
+                id = ArrayRechunkShardID(chunk_index, shard_index)
+                out[self.worker_for[chunk_index]].append(
+                    (id, pickle.dumps((shard_index, data[nslice])))
                 )
             return out
 
@@ -392,8 +402,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
         data = self._read_from_disk(i)
 
         def _() -> np.ndarray:
-            subdims = tuple(len(self._old_to_new[dim][ix]) for dim, ix in enumerate(i))
-            return convert_chunk(data, subdims)
+            return convert_chunk(data)
 
         return await self.offload(_)
 
@@ -994,16 +1003,24 @@ def split_by_partition(t: pa.Table, column: str) -> dict[Any, pa.Table]:
     return dict(zip(partitions, shards))
 
 
-def convert_chunk(data: bytes, subdims: tuple[int, ...]) -> np.ndarray:
+def convert_chunk(data: bytes) -> np.ndarray:
     import numpy as np
 
     from dask.array.core import concatenate3
 
     file = BytesIO(data)
-    rec_cat_arg = np.empty(subdims, dtype="O")
+    shards: dict[NIndex, np.ndarray] = {}
+
     while file.tell() < len(data):
-        subindex, subarray = pickle.load(file)
-        rec_cat_arg[tuple(subindex)] = subarray
+        index, shard = pickle.load(file)
+        shards[index] = shard
+
+    subshape = [max(dim) + 1 for dim in zip(*shards.keys())]
+    assert len(shards) == np.prod(subshape)
+
+    rec_cat_arg = np.empty(subshape, dtype="O")
+    for index, shard in shards.items():
+        rec_cat_arg[tuple(index)] = shard
     del data
     del file
     arrs = rec_cat_arg.tolist()

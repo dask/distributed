@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import math
-from collections import defaultdict
-from itertools import compress, product
+from itertools import compress
 from typing import TYPE_CHECKING, NamedTuple
 
 import dask
@@ -156,7 +155,8 @@ class ShardID(NamedTuple):
     shard_index: NIndex
 
 
-DisassembledAxis: TypeAlias = list[tuple[int, int, slice]]
+DisassembledChunk: TypeAlias = list[tuple[int, int, slice]]
+DisassembledAxis: TypeAlias = list[DisassembledChunk]
 DisassembledAxes: TypeAlias = list[DisassembledAxis]
 
 
@@ -167,7 +167,7 @@ def disassemble_chunks(old: ChunkedAxes, new: ChunkedAxes) -> DisassembledAxes:
 
     axes = []
     for axis_id, new_axis in enumerate(_old_to_new):
-        old_axis = [[] for _ in old[axis_id]]
+        old_axis: DisassembledAxis = [[] for _ in old[axis_id]]
         for new_chunk_id, new_chunk in enumerate(new_axis):
             for new_subchunk_id, (old_chunk_id, slice) in enumerate(new_chunk):
                 old_axis[old_chunk_id].append((new_chunk_id, new_subchunk_id, slice))

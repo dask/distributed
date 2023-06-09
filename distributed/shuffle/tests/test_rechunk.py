@@ -18,7 +18,7 @@ from dask.array.rechunk import normalize_chunks, rechunk
 from dask.array.utils import assert_eq
 
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._rechunk import ShardID, disassemble_chunks
+from distributed.shuffle._rechunk import disassemble_chunks
 from distributed.shuffle._scheduler_extension import get_worker_for_hash_sharding
 from distributed.shuffle._shuffle import ShuffleId
 from distributed.shuffle._worker_extension import ArrayRechunkRun
@@ -636,17 +636,17 @@ async def test_rechunk_with_fully_unknown_dimension(c, s, *ws, x, chunks):
         pytest.param(
             da.ones(shape=(1000, 10), chunks=(5, 10)),
             (None, 5),
-            marks=pytest.mark.skip(reason="distributed#7757"),
+            # marks=pytest.mark.skip(reason="distributed#7757"),
         ),
         pytest.param(
             da.ones(shape=(1000, 10), chunks=(5, 10)),
             {1: 5},
-            marks=pytest.mark.skip(reason="distributed#7757"),
+            # marks=pytest.mark.skip(reason="distributed#7757"),
         ),
         pytest.param(
             da.ones(shape=(1000, 10), chunks=(5, 10)),
             (None, (5, 5)),
-            marks=pytest.mark.skip(reason="distributed#7757"),
+            # marks=pytest.mark.skip(reason="distributed#7757"),
         ),
         (da.ones(shape=(10, 10), chunks=(10, 10)), (None, 5)),
         (da.ones(shape=(10, 10), chunks=(10, 10)), {1: 5}),
