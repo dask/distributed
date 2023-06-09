@@ -1,6 +1,45 @@
 Changelog
 =========
 
+.. _v2023.6.0:
+
+2023.6.0
+--------
+
+Released on June 9, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Post fine performance metrics to spans (:pr:`7885`) `crusaderky`_
+- Unique Spans (:pr:`7882`) `crusaderky`_
+- Add a ``timeout`` to ``client.as_completed`` that mirrors ``concurrent.futures.as_completed`` ``timeout`` (:pr:`7811`) `Thomas Grainger`_
+- Enforce dtypes in P2P shuffle (:pr:`7879`) `Hendrik Makait`_
+- Support ``load=`` keyword for ``Client.upload_file`` (:pr:`7873`) `James Bourbeau`_
+- Support ``get_worker()`` and ``worker_client()`` in async tasks (:pr:`7844`) `Thomas Grainger`_
+- Capture line number for code frames (:pr:`7786`) `Miles`_
+
+Bug Fixes
+^^^^^^^^^
+- Avoid meta roundtrip in P2P shuffle (:pr:`7895`) `Hendrik Makait`_
+- Fix Fine Performance Metrics mis-aligned ``ColumnData`` lengths (:pr:`7893`) `Miles`_
+- Fix Fine Performance Metrics spilling crash (:pr:`7878`) `Miles`_
+- Fix spans bug when ``scatter`` or ``client_desires_new_key`` creates a task (:pr:`7886`) `crusaderky`_
+- Fix Fine Performance Metrics w/ Bokeh 3 (:pr:`7874`) `Miles`_
+- ``TaskGroup.start`` can move backwards (:pr:`7867`) `crusaderky`_
+- Use properly imported ``MatDescriptor`` for ``cupy`` dispatch registration (:pr:`7868`) `Charles Blackmon-Luca`_
+- Ensure ``retire_workers`` works if AMM extension hasn't been loaded (:pr:`7863`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Review user-defined fine performance metrics (:pr:`7894`) `crusaderky`_
+- Fix tests that disable the shuffle extension (:pr:`7883`) `crusaderky`_
+- Refactor ``Scheduler.is_idle`` (:pr:`7881`) `crusaderky`_
+- Link TaskGroups to Spans (:pr:`7869`) `crusaderky`_
+- Spans skeleton (:pr:`7862`) `crusaderky`_
+- Update gpuCI ``RAPIDS_VER`` to ``23.08`` (:pr:`7855`)
+- Bump ``JamesIves/github-pages-deploy-action`` from 4.4.1 to 4.4.2 (:pr:`7865`)
+
+
 .. _v2023.5.1:
 
 2023.5.1
