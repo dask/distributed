@@ -46,6 +46,7 @@ def check_minimal_arrow_version() -> None:
 
 
 def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
+    import pandas as pd
     import pyarrow as pa
 
     file = BytesIO(data)
@@ -56,6 +57,15 @@ def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
         shards.append(sr.read_all())
     table = pa.concat_tables(shards)
     df = table.to_pandas(self_destruct=True)
+
+    def default_types_mapper(pyarrow_dtype: pa.DataType) -> object:
+        # Avoid converting strings from `string[pyarrow]` to `string[python]`
+        # if we have *some* `string[pyarrow]`
+        if pyarrow_dtype == pa.string() and pd.StringDtype("pyarrow") in meta.values:
+            return pd.StringDtype("pyarrow")
+        return None
+
+    df = table.to_pandas(self_destruct=True, types_mapper=default_types_mapper)
     return df.astype(meta.dtypes)
 
 
