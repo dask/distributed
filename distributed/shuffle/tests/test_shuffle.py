@@ -1212,7 +1212,6 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
         self,
         name,
         worker_for_mapping,
-        meta,
         directory,
         loop,
         Shuffle=DataFrameShuffleRun,
@@ -1222,7 +1221,6 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
             worker_for=worker_for_mapping,
             # FIXME: Is output_workers redundant with worker_for?
             output_workers=set(worker_for_mapping.values()),
-            meta=meta,
             directory=directory / name,
             id=ShuffleId(name),
             run_id=next(AbstractShuffleTestPool._shuffle_run_id_iterator),
@@ -1279,7 +1277,6 @@ async def test_basic_lowlevel_shuffle(
                 local_shuffle_pool.new_shuffle(
                     name=workers[ix],
                     worker_for_mapping=worker_for_mapping,
-                    meta=meta,
                     directory=tmp_path,
                     loop=loop_in_thread,
                 )
@@ -1312,7 +1309,7 @@ async def test_basic_lowlevel_shuffle(
             all_parts = []
             for part, worker in worker_for_mapping.items():
                 s = local_shuffle_pool.shuffles[worker]
-                all_parts.append(s.get_output_partition(part, f"key-{part}"))
+                all_parts.append(s.get_output_partition(part, f"key-{part}", meta=meta))
 
             all_parts = await asyncio.gather(*all_parts)
 
@@ -1345,7 +1342,6 @@ async def test_error_offload(tmp_path, loop_in_thread):
             npartitions, part, workers
         )
         partitions_for_worker[w].append(part)
-    meta = dfs[0].head(0)
 
     class ErrorOffload(DataFrameShuffleRun):
         async def offload(self, func, *args):
@@ -1355,7 +1351,6 @@ async def test_error_offload(tmp_path, loop_in_thread):
         sA = local_shuffle_pool.new_shuffle(
             name="A",
             worker_for_mapping=worker_for_mapping,
-            meta=meta,
             directory=tmp_path,
             loop=loop_in_thread,
             Shuffle=ErrorOffload,
@@ -1363,7 +1358,6 @@ async def test_error_offload(tmp_path, loop_in_thread):
         sB = local_shuffle_pool.new_shuffle(
             name="B",
             worker_for_mapping=worker_for_mapping,
-            meta=meta,
             directory=tmp_path,
             loop=loop_in_thread,
         )
@@ -1399,7 +1393,6 @@ async def test_error_send(tmp_path, loop_in_thread):
             npartitions, part, workers
         )
         partitions_for_worker[w].append(part)
-    meta = dfs[0].head(0)
 
     class ErrorSend(DataFrameShuffleRun):
         async def send(self, *args: Any, **kwargs: Any) -> None:
@@ -1409,7 +1402,6 @@ async def test_error_send(tmp_path, loop_in_thread):
         sA = local_shuffle_pool.new_shuffle(
             name="A",
             worker_for_mapping=worker_for_mapping,
-            meta=meta,
             directory=tmp_path,
             loop=loop_in_thread,
             Shuffle=ErrorSend,
@@ -1417,7 +1409,6 @@ async def test_error_send(tmp_path, loop_in_thread):
         sB = local_shuffle_pool.new_shuffle(
             name="B",
             worker_for_mapping=worker_for_mapping,
-            meta=meta,
             directory=tmp_path,
             loop=loop_in_thread,
         )
@@ -1452,7 +1443,6 @@ async def test_error_receive(tmp_path, loop_in_thread):
             npartitions, part, workers
         )
         partitions_for_worker[w].append(part)
-    meta = dfs[0].head(0)
 
     class ErrorReceive(DataFrameShuffleRun):
         async def receive(self, data: list[tuple[int, bytes]]) -> None:
@@ -1462,7 +1452,6 @@ async def test_error_receive(tmp_path, loop_in_thread):
         sA = local_shuffle_pool.new_shuffle(
             name="A",
             worker_for_mapping=worker_for_mapping,
-            meta=meta,
             directory=tmp_path,
             loop=loop_in_thread,
             Shuffle=ErrorReceive,
@@ -1470,7 +1459,6 @@ async def test_error_receive(tmp_path, loop_in_thread):
         sB = local_shuffle_pool.new_shuffle(
             name="B",
             worker_for_mapping=worker_for_mapping,
-            meta=meta,
             directory=tmp_path,
             loop=loop_in_thread,
         )
