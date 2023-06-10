@@ -176,6 +176,7 @@ def _get_ip(host, port, family):
         ip = sock.getsockname()[0]
         return ip
     except OSError as e:
+        print("s", host, port)
         warnings.warn(
             "Couldn't detect a suitable IP address for "
             "reaching %r, defaulting to hostname: %s" % (host, e),
