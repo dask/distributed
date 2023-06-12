@@ -58,7 +58,6 @@ def shuffle_transfer(
     npartitions: int,
     column: str,
     parts_out: set[int],
-    meta: pd.DataFrame,
 ) -> int:
     try:
         return _get_worker_extension().add_partition(
@@ -69,18 +68,17 @@ def shuffle_transfer(
             npartitions=npartitions,
             column=column,
             parts_out=parts_out,
-            meta=meta,
         )
     except Exception as e:
         raise RuntimeError(f"shuffle_transfer failed during shuffle {id}") from e
 
 
 def shuffle_unpack(
-    id: ShuffleId, output_partition: int, barrier_run_id: int
+    id: ShuffleId, output_partition: int, barrier_run_id: int, meta: pd.DataFrame
 ) -> pd.DataFrame:
     try:
         return _get_worker_extension().get_output_partition(
-            id, barrier_run_id, output_partition
+            id, barrier_run_id, output_partition, meta=meta
         )
     except Reschedule as e:
         raise e
@@ -251,14 +249,19 @@ class P2PShuffleLayer(Layer):
                 self.npartitions,
                 self.column,
                 self.parts_out,
-                self.meta_input,
             )
 
         dsk[_barrier_key] = (shuffle_barrier, token, transfer_keys)
 
         name = self.name
         for part_out in self.parts_out:
-            dsk[(name, part_out)] = (shuffle_unpack, token, part_out, _barrier_key)
+            dsk[(name, part_out)] = (
+                shuffle_unpack,
+                token,
+                part_out,
+                _barrier_key,
+                self.meta_input,
+            )
         return dsk
 
 

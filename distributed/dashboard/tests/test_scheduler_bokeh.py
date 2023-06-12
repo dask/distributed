@@ -52,7 +52,8 @@ from distributed.dashboard.components.scheduler import (
 from distributed.dashboard.components.worker import Counters
 from distributed.dashboard.scheduler import applications
 from distributed.diagnostics.task_stream import TaskStreamPlugin
-from distributed.metrics import time
+from distributed.metrics import context_meter, time
+from distributed.spans import span
 from distributed.utils import format_dashboard_link
 from distributed.utils_test import (
     block_on_event,
@@ -329,19 +330,61 @@ async def test_WorkersMemory(c, s, a, b):
     assert all(d["width"])
 
 
-@gen_cluster(client=True)
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.memory.target": 0.7,
+        "distributed.worker.memory.spill": False,
+        "distributed.worker.memory.pause": False,
+    },
+    worker_kwargs={"memory_limit": 100},
+)
 async def test_FinePerformanceMetrics(c, s, a, b):
     cl = FinePerformanceMetrics(s)
 
-    futures = c.map(slowinc, range(10), delay=0.001)
-    await wait(futures)
-    await asyncio.sleep(1)  # wait for metrics to arrive
+    # execute on default span; multiple tasks in same TaskGroup
+    x0 = c.submit(inc, 0, key="x-0", workers=[a.address])
+    x1 = c.submit(inc, 1, key="x-1", workers=[a.address])
+
+    # execute with spill (output size is individually larger than target)
+    w = c.submit(lambda: "x" * 75, key="w", workers=[a.address])
+
+    await wait([x0, x1, w])
+
+    a.data.evict()
+    a.data.evict()
+    assert not a.data.fast
+    assert set(a.data.slow) == {"x-0", "x-1", "w"}
+
+    with span("foo"):
+        # execute on named span, with unspill
+        y0 = c.submit(inc, x0, key="y-0", workers=[a.address])
+        # get_data with unspill + gather_dep + execute on named span
+        y1 = c.submit(inc, x1, key="y-1", workers=[b.address])
+
+    # execute on named span (duplicate name, different id)
+    with span("foo"):
+        z = c.submit(inc, 3, key="z")
+
+    # Custom metric with non-string label and custom unit
+    def f():
+        context_meter.digest_metric(None, 1, "custom")
+        context_meter.digest_metric(("foo", 1), 2, "custom")
+
+    v = c.submit(f, key="v")
+    await wait([y0, y1, z, v])
+
+    await a.heartbeat()
+    await b.heartbeat()
 
     assert not cl.task_exec_data
-
     cl.update()
     assert cl.task_exec_data
-    assert cl.task_exec_data["functions"] == ["slowinc"]
+    assert set(cl.task_exec_data["functions"]) == {"v", "w", "x", "y", "z"}
+    assert set(cl.unit_selector.options) == {"seconds", "count", "bytes", "custom"}
+    assert "thread-cpu" in cl.task_activities
+    assert "('foo', 1)" in cl.task_activities
+    assert "None" in cl.task_activities
 
 
 @gen_cluster(client=True)

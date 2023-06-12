@@ -99,7 +99,7 @@ from distributed.recreate_tasks import ReplayTaskScheduler
 from distributed.security import Security
 from distributed.semaphore import SemaphoreExtension
 from distributed.shuffle import ShuffleSchedulerExtension
-from distributed.spans import SpansExtension
+from distributed.spans import SpansSchedulerExtension
 from distributed.stealing import WorkStealing
 from distributed.utils import (
     All,
@@ -171,7 +171,7 @@ DEFAULT_EXTENSIONS = {
     "amm": ActiveMemoryManagerExtension,
     "memory_sampler": MemorySamplerExtension,
     "shuffle": ShuffleSchedulerExtension,
-    "spans": SpansExtension,
+    "spans": SpansSchedulerExtension,
     "stealing": WorkStealing,
 }
 
@@ -1063,11 +1063,12 @@ class TaskGroup:
     #: Cumulative duration of all completed actions, by action
     all_durations: defaultdict[str, float]
 
-    #: Span ID (see distributed.spans).
+    #: Span ID (see ``distributed.spans``).
+    #: Matches ``distributed.worker_state_machine.TaskState.span_id``.
     #: It is possible to end up in situation where different tasks of the same TaskGroup
     #: belong to different spans; the purpose of this attribute is to arbitrarily force
     #: everything onto the earliest encountered one.
-    span: tuple[str, ...]
+    span_id: str | None
 
     __slots__ = tuple(__annotations__)
 
@@ -1084,7 +1085,7 @@ class TaskGroup:
         self.all_durations = defaultdict(float)
         self.last_worker = None
         self.last_worker_tasks_left = 0
-        self.span = ()
+        self.span_id = None
 
     def add_duration(self, action: str, start: float, stop: float) -> None:
         duration = stop - start
@@ -1127,6 +1128,22 @@ class TaskGroup:
         TaskState._to_dict
         """
         return recursive_to_dict(self, exclude=exclude, members=True)
+
+    @property
+    def done(self) -> bool:
+        """Return True if all computations for this group have completed; False
+        otherwise.
+
+        Notes
+        -----
+        This property may transition from True to False, e.g. when a worker that
+        contained the only replica of a task in memory crashes and the task need to be
+        recomputed.
+        """
+        return all(
+            count == 0 or state in {"memory", "erred", "released", "forgotten"}
+            for state, count in self.states.items()
+        )
 
 
 class TaskState:
@@ -1803,16 +1820,13 @@ class SchedulerState:
     def is_idle(self) -> bool:
         """Return True iff there are no tasks that haven't finished computing.
 
-        Unlike testing ``self.total_occupancy``, this property returns False if there are
-        long-running tasks, no-worker, or queued tasks (due to not having any workers).
+        Unlike testing ``self.total_occupancy``, this property returns False if there
+        are long-running tasks, no-worker, or queued tasks (due to not having any
+        workers).
 
         Not to be confused with ``idle``.
         """
-        return all(
-            count == 0 or state in {"memory", "error", "released", "forgotten"}
-            for tg in self.task_groups.values()
-            for state, count in tg.states.items()
-        )
+        return all(tg.done for tg in self.task_groups.values())
 
     @property
     def total_occupancy(self) -> float:
@@ -3327,6 +3341,7 @@ class SchedulerState:
             "resource_restrictions": ts.resource_restrictions,
             "actor": ts.actor,
             "annotations": ts.annotations,
+            "span_id": ts.group.span_id,
         }
         if self.validate:
             assert all(msg["who_has"].values())
@@ -4435,15 +4450,17 @@ class Scheduler(SchedulerState, ServerNode):
                     recommendations[ts.key] = "erred"
                     break
 
-        spans_ext: SpansExtension | None = self.extensions.get("spans")
+        spans_ext: SpansSchedulerExtension | None = self.extensions.get("spans")
         if spans_ext:
-            span_annotations = spans_ext.new_tasks(new_tasks)
-            if span_annotations:
-                resolved_annotations["span"] = span_annotations
-            else:
-                # Edge case where some tasks define a span, while earlier tasks in the
-                # same TaskGroup don't define any
-                resolved_annotations.pop("span", None)
+            # new_tasks does not necessarily contain all runnable tasks;
+            # _generate_taskstates is not the only thing that calls new_task(). A
+            # TaskState may have also been created by client_desires_keys or scatter,
+            # and only later gained a run_spec.
+            spans_ext.observe_tasks(runnable)
+            # TaskGroup.span_id could be completely different from the one in the
+            # original annotations, so it has been dropped. Drop it here as well in
+            # order not to confuse SchedulerPlugin authors.
+            resolved_annotations.pop("span", None)
 
         for plugin in list(self.plugins.values()):
             try:
@@ -4475,16 +4492,13 @@ class Scheduler(SchedulerState, ServerNode):
         runnable = []
         new_tasks = []
         stack = list(keys)
-        tasks = []
         touched_keys = set()
         touched_tasks = []
         while stack:
             k = stack.pop()
             if k in touched_keys:
                 continue
-            # XXX Have a method get_task_state(self, k) ?
             ts = self.tasks.get(k)
-            tasks.append(ts)
             if ts is None:
                 ts = self.new_task(k, dsk.get(k), "released", computation=computation)
                 new_tasks.append(ts)
