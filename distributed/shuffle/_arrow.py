@@ -61,7 +61,10 @@ def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
     def default_types_mapper(pyarrow_dtype: pa.DataType) -> object:
         # Avoid converting strings from `string[pyarrow]` to `string[python]`
         # if we have *some* `string[pyarrow]`
-        if pyarrow_dtype == pa.string() and pd.StringDtype("pyarrow") in meta.values:
+        if (
+            pyarrow_dtype in {pa.large_string(), pa.string()}
+            and pd.StringDtype("pyarrow") in meta.values
+        ):
             return pd.StringDtype("pyarrow")
         return None
 
