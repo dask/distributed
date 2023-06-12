@@ -63,7 +63,7 @@ def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
         # if we have *some* `string[pyarrow]`
         if (
             pyarrow_dtype in {pa.large_string(), pa.string()}
-            and pd.StringDtype("pyarrow") in meta.values
+            and pd.StringDtype("pyarrow") in meta.dtypes.values
         ):
             return pd.StringDtype("pyarrow")
         return None
