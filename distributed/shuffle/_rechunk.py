@@ -172,8 +172,6 @@ def split_axes(old: ChunkedAxes, new: ChunkedAxes) -> SplitAxes:
             for new_subchunk_id, (old_chunk_id, slice) in enumerate(new_chunk):
                 old_axis[old_chunk_id].append((new_chunk_id, new_subchunk_id, slice))
         for old_chunk in old_axis:
-            if len(old_chunk) == 1:
-                continue
             old_chunk.sort(key=lambda subchunk: subchunk[2].start)
         axes.append(old_axis)
     return axes
