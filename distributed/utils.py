@@ -429,8 +429,10 @@ else:
     # as late as possible: when calling any methods that wait on or wake
     # Future instances. See: https://bugs.python.org/issue42392
     class LateLoopEvent:
+        _event: asyncio.Event | None
+
         def __init__(self) -> None:
-            self._event: asyncio.Event | None = None
+            self._event = None
 
         def set(self) -> None:
             if self._event is None:
@@ -497,6 +499,7 @@ class LoopRunner:
         weakref.WeakKeyDictionary[IOLoop, tuple[int, LoopRunner | None]]
     ] = weakref.WeakKeyDictionary()
     _lock = threading.Lock()
+    _loop_thread: _CollectErrorThread | None
 
     def __init__(self, loop: IOLoop | None = None, asynchronous: bool = False):
         if loop is None:
@@ -517,7 +520,7 @@ class LoopRunner:
 
         self._loop = loop
         self._asynchronous = asynchronous
-        self._loop_thread: _CollectErrorThread | None = None
+        self._loop_thread = None
         self._started = False
         self._stop_event = LateLoopEvent()
 
