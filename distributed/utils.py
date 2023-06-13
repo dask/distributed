@@ -510,7 +510,7 @@ class LoopRunner:
                     ) from e
                 loop = IOLoop.current()
         elif not loop.asyncio_loop.is_running():  # type: ignore[attr-defined]
-            # LoopRunner is not responsible for starting a foriegn IOLoop
+            # LoopRunner is not responsible for starting a foreign IOLoop
             raise RuntimeError(
                 "Constructing LoopRunner(loop=loop) without a running loop is not supported"
             )
