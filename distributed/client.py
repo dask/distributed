@@ -91,6 +91,7 @@ from distributed.sizeof import sizeof
 from distributed.threadpoolexecutor import rejoin
 from distributed.utils import (
     CancelledError,
+    LoopRunner,
     NoOpAwaitable,
     SyncMethodMixin,
     TimeoutError,
@@ -954,7 +955,8 @@ class Client(SyncMethodMixin):
             self.connection_args = self.security.get_connection_args("client")
 
         self._loop = loop
-        self.asynchronous = asynchronous
+        self._asynchronous = asynchronous
+        self._loop_runner = LoopRunner(loop=self._loop, asynchronous=asynchronous)
         self._connecting_to_scheduler = False
 
         self._gather_keys = None

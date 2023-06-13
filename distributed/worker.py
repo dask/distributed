@@ -2747,8 +2747,15 @@ def get_client(
     else:
         if not address or worker.scheduler.address == address:
             client = worker._get_client(timeout=timeout)
-            client.asynchronous = asynchronous
-            return client
+            if client.asynchronous == asynchronous:
+                return client
+            return Client(
+                worker.scheduler.address,
+                loop=client.loop,
+                timeout=timeout,
+                asynchronous=asynchronous,
+                set_as_default=False,
+            )
 
     try:
         client = Client.current()  # TODO: assumes the same scheduler
@@ -2756,8 +2763,15 @@ def get_client(
         client = None
 
     if client and (not address or client.scheduler.address == address):
-        client.asynchronous = asynchronous
-        return client
+        if client.asynchronous == asynchronous:
+            return client
+        return Client(
+            client.scheduler.address,
+            timeout=timeout,
+            asynchronous=asynchronous,
+            loop=client.loop,
+            set_as_default=False,
+        )
     elif address:
         return Client(address, timeout=timeout, asynchronous=asynchronous)
     else:
