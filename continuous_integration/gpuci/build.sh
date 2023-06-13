@@ -44,8 +44,7 @@ gpuci_logger "Install distributed"
 python -m pip install -e .
 
 gpuci_logger "Install dask"
-# python -m pip install git+https://github.com/dask/dask
-python -m pip install git+https://github.com/hendrikmakait/dask.git@default-shuffle-ignores-fuse
+python -m pip install git+https://github.com/dask/dask
 
 gpuci_logger "Check Python versions"
 python --version
