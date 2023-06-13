@@ -152,8 +152,6 @@ SplitAxes: TypeAlias = list[SplitAxis]
 def split_axes(old: ChunkedAxes, new: ChunkedAxes) -> SplitAxes:
     """Calculate how to split the old chunks on each axis to create the new chunks
 
-    _extended_summary_
-
     Parameters
     ----------
     old : ChunkedAxes
@@ -164,8 +162,8 @@ def split_axes(old: ChunkedAxes, new: ChunkedAxes) -> SplitAxes:
     Returns
     -------
     SplitAxes
-        Each axis contains a list of splits of the old chunks. Each split is a list of
-        of
+        Splits along each axis that determine how to slice the input chunks to create
+        the new chunks by concatenating the resulting shards.
     """
     from dask.array.rechunk import old_to_new
 
