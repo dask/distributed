@@ -63,5 +63,6 @@ repos:
           - pytest
           - tornado
           - pyarrow
-          - git+https://github.com/dask/dask
+          # - git+https://github.com/dask/dask
+          - git+https://github.com/hendrikmakait/dask.git@default-shuffle-ignores-fuse
           - git+https://github.com/dask/zict
