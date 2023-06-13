@@ -5,7 +5,6 @@ import datetime
 import logging
 import uuid
 import warnings
-from collections.abc import Awaitable
 from contextlib import suppress
 from inspect import isawaitable
 from typing import Any
@@ -207,7 +206,7 @@ class Cluster(SyncMethodMixin):
 
         self.status = Status.closed
 
-    def close(self, timeout: float | None = None) -> Awaitable[None] | None:
+    def close(self, timeout: float | None = None) -> Any:
         # If the cluster is already closed, we're already done
         if self.status == Status.closed:
             if self.asynchronous:
