@@ -48,7 +48,7 @@ from dask.widgets import get_template
 
 from distributed.core import ErrorMessage
 from distributed.protocol.serialize import _is_dumpable
-from distributed.utils import wait_for
+from distributed.utils import Deadline, wait_for
 
 try:
     from dask.delayed import single_key
@@ -5254,10 +5254,16 @@ class as_completed:
         complete
     with_results: bool (False)
         Whether to wait and include results of futures as well;
-        in this case `as_completed` yields a tuple of (future, result)
+        in this case ``as_completed`` yields a tuple of (future, result)
     raise_errors: bool (True)
         Whether we should raise when the result of a future raises an
-        exception; only affects behavior when `with_results=True`.
+        exception; only affects behavior when ``with_results=True``.
+    timeout: int (optional)
+        The returned iterator raises a ``dask.distributed.TimeoutError``
+        if ``__next__()`` or ``__anext__()`` is called and the result
+        isn't available after timeout seconds from the original call to
+        ``as_completed()``. If timeout is not specified or ``None``, there is no limit
+        to the wait time.
 
     Examples
     --------
@@ -5294,7 +5300,15 @@ class as_completed:
     3
     """
 
-    def __init__(self, futures=None, loop=None, with_results=False, raise_errors=True):
+    def __init__(
+        self,
+        futures=None,
+        loop=None,
+        with_results=False,
+        raise_errors=True,
+        *,
+        timeout=None,
+    ):
         if futures is None:
             futures = []
         self.futures = defaultdict(lambda: 0)
@@ -5304,6 +5318,7 @@ class as_completed:
         self.thread_condition = threading.Condition()
         self.with_results = with_results
         self.raise_errors = raise_errors
+        self._deadline = Deadline.after(parse_timedelta(timeout))
 
         if futures:
             self.update(futures)
@@ -5402,6 +5417,8 @@ class as_completed:
 
     def __next__(self):
         while self.queue.empty():
+            if self._deadline.expired:
+                raise TimeoutError()
             if self.is_empty():
                 raise StopIteration()
             with self.thread_condition:
@@ -5409,6 +5426,11 @@ class as_completed:
         return self._get_and_raise()
 
     async def __anext__(self):
+        if not self._deadline.expires:
+            return await self._anext()
+        return await wait_for(self._anext(), self._deadline.remaining)
+
+    async def _anext(self):
         if not self.futures and self.queue.empty():
             raise StopAsyncIteration
         while self.queue.empty():
