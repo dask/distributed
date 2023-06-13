@@ -38,7 +38,7 @@ def rechunk_transfer(
     try:
         return _get_worker_extension().add_partition(
             input,
-            input_partition=input_chunk,
+            partition_id=input_chunk,
             shuffle_id=id,
             type=ShuffleType.ARRAY_RECHUNK,
             new=new,
