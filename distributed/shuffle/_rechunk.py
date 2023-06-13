@@ -155,9 +155,9 @@ def split_axes(old: ChunkedAxes, new: ChunkedAxes) -> SplitAxes:
     Parameters
     ----------
     old : ChunkedAxes
-        Chunking along each axis of the old array
+        Chunks along each axis of the old array
     new : ChunkedAxes
-        Chunking along each axis of the new array
+        Chunks along each axis of the new array
 
     Returns
     -------
