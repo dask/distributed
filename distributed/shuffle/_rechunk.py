@@ -125,23 +125,61 @@ class ShardID(NamedTuple):
     shard_index: NIndex
 
 
-SplitChunk: TypeAlias = list[tuple[int, int, slice]]
+class Split(NamedTuple):
+    """Slice of a chunk that is concatenated with other splits to create a new chunk
+
+    Splits define how to slice an input chunk on a single axis into small pieces
+    that can be concatenated together with splits from other input chunks to create
+    output chunks of a rechunk operation.
+    """
+
+    #: Index of the new output chunk to which this split belongs.
+    chunk_index: int
+
+    #: Index of the split within the list of splits that are concatenated
+    #: to create the new chunk.
+    split_index: int
+
+    #: Slice of the input chunk.
+    slice: slice
+
+
+SplitChunk: TypeAlias = list[Split]
 SplitAxis: TypeAlias = list[SplitChunk]
 SplitAxes: TypeAlias = list[SplitAxis]
 
 
 def split_axes(old: ChunkedAxes, new: ChunkedAxes) -> SplitAxes:
+    """Calculate how to split the old chunks on each axis to create the new chunks
+
+    _extended_summary_
+
+    Parameters
+    ----------
+    old : ChunkedAxes
+        Chunking along each axis of the old array
+    new : ChunkedAxes
+        Chunking along each axis of the new array
+
+    Returns
+    -------
+    SplitAxes
+        Each axis contains a list of splits of the old chunks. Each split is a list of
+        of
+    """
     from dask.array.rechunk import old_to_new
 
     _old_to_new = old_to_new(old, new)
 
     axes = []
-    for axis_id, new_axis in enumerate(_old_to_new):
-        old_axis: SplitAxis = [[] for _ in old[axis_id]]
-        for new_chunk_id, new_chunk in enumerate(new_axis):
-            for new_subchunk_id, (old_chunk_id, slice) in enumerate(new_chunk):
-                old_axis[old_chunk_id].append((new_chunk_id, new_subchunk_id, slice))
+    for axis_index, new_axis in enumerate(_old_to_new):
+        old_axis: SplitAxis = [[] for _ in old[axis_index]]
+        for new_chunk_index, new_chunk in enumerate(new_axis):
+            for split_index, (old_chunk_index, slice) in enumerate(new_chunk):
+                old_axis[old_chunk_index].append(
+                    Split(new_chunk_index, split_index, slice)
+                )
         for old_chunk in old_axis:
-            old_chunk.sort(key=lambda subchunk: subchunk[2].start)
+            old_chunk.sort(key=lambda split: split.slice.start)
         axes.append(old_axis)
     return axes
