@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import asynccontextmanager, contextmanager, suppress
 from contextvars import ContextVar
-from functools import partial, wraps
+from functools import partial
 from importlib.metadata import PackageNotFoundError, version
 from numbers import Number
 from queue import Queue as pyQueue
@@ -101,7 +101,6 @@ from distributed.utils import (
     is_python_shutting_down,
     log_errors,
     no_default,
-    shorten_traceback,
     sync,
     thread_state,
 )
@@ -129,43 +128,6 @@ DEFAULT_EXTENSIONS = {
 }
 
 TOPIC_PREFIX_FORWARDED_LOG_RECORD = "forwarded-log-record"
-
-
-def _clean_excepthook(func):
-    @wraps(func)
-    def wrapper(exc_type, exc, tb):
-        tb = shorten_traceback(tb)
-        return func(exc_type, exc.with_traceback(tb), tb)
-
-    return wrapper
-
-
-def _clean_ipython_traceback(self, etype, value, tb, tb_offset=None):
-    short_tb = shorten_traceback(tb)
-    short_exc = value.with_traceback(short_tb)
-    stb = self.InteractiveTB.structured_traceback(
-        etype, short_exc, short_tb, tb_offset=tb_offset
-    )
-    self._showtraceback(type, short_exc, stb)
-
-
-original_excepthook = sys.excepthook
-sys.excepthook = _clean_excepthook(sys.excepthook)
-
-
-# if we're running in ipython, also customize exception handling
-try:
-    from IPython import get_ipython
-except ImportError:
-    pass
-else:
-    ip = get_ipython()
-    if ip is not None:
-        ip.set_custom_exc((Exception,), _clean_ipython_traceback)
-
-
-def _restore_exception_hook():
-    sys.excepthook = original_excepthook
 
 
 class SourceCode(NamedTuple):
@@ -648,7 +610,7 @@ class FutureState:
         _, exception, traceback = clean_exception(exception, traceback)
 
         if (
-            dask.config.get("distributed.admin.shorten-traceback", False) is True
+            dask.config.get("admin.traceback.shorten", False) is True
             and key
             and erred_on
         ):
@@ -5957,4 +5919,3 @@ def _close_global_client():
 
 
 atexit.register(_close_global_client)
-atexit.register(_restore_exception_hook)

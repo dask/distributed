@@ -864,44 +864,6 @@ def ensure_ip(hostname):
 tblib.pickling_support.install()
 
 
-def is_client_code(filename):
-    return os.path.join("distributed", "client.py") in filename
-
-
-def shorten_traceback(exc_traceback):
-    """Remove irrelevant stack elements from traceback. Will keep the first and last frame,
-    plus one frame from distributed/client.py."""
-
-    # if config flag is not set, do nothing
-    if dask.config.get("distributed.admin.shorten-traceback", False) is False:
-        return exc_traceback
-
-    curr = exc_traceback
-    has_client_frame = False
-    frames = []
-    while curr:
-        if len(frames) == 0:
-            # always keep first frame
-            frames.append(curr)
-        elif not curr.tb_next:
-            # always keep last frame
-            frames.append(curr)
-        elif is_client_code(curr.tb_frame.f_code.co_filename) and (
-            has_client_frame is False
-        ):
-            # keep one client frame
-            frames.append(curr)
-            has_client_frame = True
-        curr = curr.tb_next
-
-    curr = None
-    for tb in reversed(frames):
-        tb.tb_next = curr
-        curr = tb
-
-    return curr
-
-
 def get_traceback():
     exc_type, exc_value, exc_traceback = sys.exc_info()
     bad = [

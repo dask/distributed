@@ -1143,10 +1143,6 @@ properties:
             type: boolean
             description: Enter Python Debugger on scheduling error
 
-          shorten-traceback:
-            type: boolean
-            description: Shorten traceback from unhandled exceptions. It will keep the first frame, the last frame, and one frame from client
-
           system-monitor:
             type: object
             description: |

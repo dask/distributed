@@ -9,7 +9,6 @@ import multiprocessing
 import os
 import queue
 import socket
-import sys
 import traceback
 import warnings
 import xml
@@ -53,7 +52,6 @@ from distributed.utils import (
     run_in_executor_with_context,
     seek_delimiter,
     set_thread_state,
-    shorten_traceback,
     sync,
     thread_state,
     truncate_exception,
@@ -66,7 +64,6 @@ from distributed.utils_test import (
     gen_test,
     has_ipv6,
     inc,
-    popen,
     throws,
 )
 
@@ -1060,96 +1057,3 @@ def test_rate_limiter_filter(caplog):
         "Hello again!",
         "Hello once more!",
     ]
-
-
-def test_shorten_traceback():
-    def f1():
-        return 2 / 0
-
-    def f2():
-        return f1() + 5
-
-    def f3():
-        return f2() + 1
-
-    def f4():
-        return f3() - 2
-
-    def f5():
-        return f4() - 1
-
-    try:
-        f5()
-    except ZeroDivisionError:
-        _, _, tb = sys.exc_info()
-        before = len(list(traceback.walk_tb(tb)))
-        with dask.config.set({"distributed.admin.shorten-traceback": True}):
-            tb = shorten_traceback(tb)
-        after = len(list(traceback.walk_tb(tb)))
-        assert after <= before
-        assert after == 2
-
-
-@pytest.mark.slow
-@pytest.mark.flaky(reruns=5, reruns_delay=5)
-@pytest.mark.parametrize("shorten,expected", [(True, 3), (False, 5)])
-def test_shorten_traceback_excepthook(shorten, tmp_path, expected):
-    client_script = """
-import dask
-from dask.distributed import Client
-if __name__ == "__main__":
-    try:
-        f1 = lambda: 2 / 0
-        f2 = lambda: f1() + 5
-        f3 = lambda: f2() + 1
-        dask.config.set({'distributed.admin.shorten-traceback': %s})
-        client = Client()
-        client.submit(f3).result()
-    finally:
-        client.close()
-    """
-    with open(tmp_path / "script.py", mode="w") as f:
-        f.write(client_script % shorten)
-
-    with popen([sys.executable, tmp_path / "script.py"], capture_output=True) as proc:
-        out, _ = proc.communicate(timeout=60)
-
-    lines = out.decode("utf-8").split("\n")
-    lines = [
-        stripped
-        for line in lines
-        if (stripped := line.strip()) and (stripped.startswith("File "))
-    ]
-    assert len(lines) == expected
-
-
-@pytest.mark.parametrize("shorten,expected", [(True, 2), (False, 5)])
-def test_shorten_traceback_showtraceback(capsys, shorten, expected):
-    pytest.importorskip("IPython")
-
-    from IPython.testing.globalipapp import get_ipython
-
-    from distributed.client import _clean_ipython_traceback
-
-    ip = get_ipython()
-    ip.set_custom_exc((Exception,), _clean_ipython_traceback)
-    cell_code = """
-import dask
-from dask.distributed import Client
-f1 = lambda: 2 / 0
-f2 = lambda: f1() + 5
-f3 = lambda: f2() + 1
-dask.config.set({'distributed.admin.shorten-traceback': %s})
-client = Client()"""
-    ip.run_cell(cell_code % shorten)
-    ip.run_cell("client.submit(f3).result()")
-    ip.run_cell("client.close()")
-    captured = capsys.readouterr()
-    lines = captured.out.strip().split("\n")
-    lines = [
-        stripped
-        for line in lines
-        if (stripped := line.strip())
-        and (stripped.startswith("File ") or stripped.startswith("Cell "))
-    ]
-    assert len(lines) == expected
