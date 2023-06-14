@@ -59,3 +59,4 @@ dependencies:
   - pytest-repeat
   - pytest-rerunfailures
   - pytest-timeout
+  - pytest-tornasync  # is this getting picked up transtively in other environments?
