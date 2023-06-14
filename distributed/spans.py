@@ -282,6 +282,16 @@ class Span:
                 out[k] += v
         return out
 
+    @staticmethod
+    def merge(*items: Span) -> Span:
+        """Merge multiple spans into a synthetic one.
+        The input spans must not be related with each other.
+        """
+        out = Span(name=("(merged)",), id_="(merged)", parent=None)
+        out.children.extend(items)
+        out.enqueued = min(child.enqueued for child in items)
+        return out
+
 
 class SpansSchedulerExtension:
     """Scheduler extension for spans support"""
@@ -300,6 +310,11 @@ class SpansSchedulerExtension:
     #: All spans, keyed by the individual tags that make up their name and sorted by
     #: creation time.
     #: This is a convenience helper structure to speed up searches.
+    #:
+    #: See Also
+    #: --------
+    #: find_by_tags
+    #: merge_by_tags
     spans_search_by_tag: defaultdict[str, list[Span]]
 
     def __init__(self, scheduler: Scheduler):
@@ -378,6 +393,29 @@ class SpansSchedulerExtension:
             self.root_spans.append(span)
 
         return span
+
+    def find_by_tags(self, *tags: str) -> Iterator[Span]:
+        """Yield all spans that contain any of the given tags.
+        When a tag is shared both by a span and its (grand)children, only return the
+        parent.
+        """
+        by_level = defaultdict(list)
+        for tag in tags:
+            for sp in self.spans_search_by_tag[tag]:
+                by_level[len(sp.name)].append(sp)
+
+        seen = set()
+        for _, level in sorted(by_level.items()):
+            seen.update(level)
+            for sp in level:
+                if sp.parent not in seen:
+                    yield sp
+
+    def merge_by_tags(self, *tags: str) -> Span:
+        """Return a synthetic Span which is the sum of all spans containing the given
+        tags
+        """
+        return Span.merge(*self.find_by_tags(*tags))
 
     def heartbeat(
         self, ws: WorkerState, data: dict[str, dict[tuple[str, ...], float]]

@@ -90,6 +90,7 @@ from distributed.diagnostics.task_stream import color_of as ts_color_of
 from distributed.diagnostics.task_stream import colors as ts_color_lookup
 from distributed.metrics import time
 from distributed.scheduler import Scheduler
+from distributed.spans import SpansSchedulerExtension
 from distributed.utils import Log, log_errors
 
 if dask.config.get("distributed.dashboard.export-tool"):
@@ -3392,6 +3393,7 @@ class FinePerformanceMetrics(DashboardComponent):
     visible_functions: list[str]
     visible_activities: list[str]
     function_selector: MultiChoice
+    span_tag_selector: MultiChoice
     unit_selector: Select
     task_exec_by_activity_chart: figure | None
     task_exec_by_prefix_chart: figure | None
@@ -3418,12 +3420,19 @@ class FinePerformanceMetrics(DashboardComponent):
             value=[],
             options=[],
         )
+        self.span_tag_selector = MultiChoice(
+            title="Filter by span tag",
+            placeholder="Select specific span tags",
+            value=[],
+            options=[],
+        )
         self.unit_selector = Select(title="Unit selection", options=["seconds"])
         self.unit_selector.value = "seconds"
         self.unit_selector.on_change("value", self._handle_change_unit)
 
         selectors_row = row(
             children=[
+                self.span_tag_selector,
                 self.function_selector,
                 self.unit_selector,
             ],
@@ -3501,6 +3510,7 @@ class FinePerformanceMetrics(DashboardComponent):
 
         - self.unit_selector
         - self.function_selector
+        - self.span_tag_selector
         """
         units = set()
         functions = set()
@@ -3528,6 +3538,18 @@ class FinePerformanceMetrics(DashboardComponent):
             self.function_selector.title = (
                 f"Filter by function ({len(self.function_selector.options)}):"
             )
+
+        spans_ext: SpansSchedulerExtension | None = self.scheduler.extensions.get(
+            "spans"
+        )
+        if spans_ext:
+            tags = set(spans_ext.spans_search_by_tag)
+            tags.difference_update(self.span_tag_selector.options)
+            if tags:
+                self.span_tag_selector.options.extend(tags)
+                self.span_tag_selector.title = (
+                    f"Filter by span tag ({len(self.span_tag_selector.options)}):"
+                )
 
     def _format(self, val: float) -> str:
         unit = self.unit_selector.value
@@ -3573,9 +3595,20 @@ class FinePerformanceMetrics(DashboardComponent):
 
         function_sel = set(self.function_selector.value)
 
-        for k, v in self.scheduler.cumulative_worker_metrics.items():
+        if self.span_tag_selector.value:
+            spans_ext: SpansSchedulerExtension = self.scheduler.extensions["spans"]
+            metrics = spans_ext.merge_by_tags(
+                *self.span_tag_selector.value
+            ).cumulative_worker_metrics
+            has_span_id = False
+        else:
+            metrics = self.scheduler.cumulative_worker_metrics
+            has_span_id = True
+
+        for k, v in metrics.items():
             if not isinstance(k, tuple):
-                continue
+                # Only happens in global metrics
+                continue  # type: ignore[unreachable]
             context, *other, activity, unit = k
             assert isinstance(unit, str)
             assert self.unit_selector.value
@@ -3583,7 +3616,7 @@ class FinePerformanceMetrics(DashboardComponent):
                 continue
 
             if context == "execute":
-                _, function = other
+                function = other[1 if has_span_id else 0]
                 assert isinstance(function, str)
                 if not function_sel or function in function_sel:
                     # Custom metrics can provide any hashable as the label
@@ -3595,6 +3628,7 @@ class FinePerformanceMetrics(DashboardComponent):
                     execute[activity] += v
 
             elif context == "get-data" and not function_sel:
+                # Note: this will always be empty when a span is selected
                 assert isinstance(activity, str)
                 visible_activities.add(activity)
                 get_data[activity] += v
