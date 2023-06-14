@@ -29,7 +29,7 @@ from distributed.shuffle._arrow import (
 from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._rechunk import ChunkedAxes, NIndex
+from distributed.shuffle._rechunk import ChunkedAxes, NDIndex
 from distributed.shuffle._rechunk import ShardID as ArrayRechunkShardID
 from distributed.shuffle._rechunk import split_axes
 from distributed.shuffle._shuffle import ShuffleId, ShuffleType
@@ -152,7 +152,7 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         self.raise_if_closed()
         await self._comm_buffer.write(data)
 
-    async def _write_to_disk(self, data: dict[NIndex, list[bytes]]) -> None:
+    async def _write_to_disk(self, data: dict[NDIndex, list[bytes]]) -> None:
         self.raise_if_closed()
         await self._disk_buffer.write(
             {"_".join(str(i) for i in k): v for k, v in data.items()}
@@ -198,7 +198,7 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         if not self.closed:
             self._exception = exception
 
-    def _read_from_disk(self, id: NIndex) -> bytes:
+    def _read_from_disk(self, id: NDIndex) -> bytes:
         self.raise_if_closed()
         data: bytes = self._disk_buffer.read("_".join(str(i) for i in id))
         return data
@@ -239,7 +239,7 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         """Get an output partition to the shuffle run"""
 
 
-class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
+class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NDIndex, "np.ndarray"]):
     """State for a single active rechunk execution
 
     This object is responsible for splitting, sending, receiving and combining
@@ -286,7 +286,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
 
     def __init__(
         self,
-        worker_for: dict[NIndex, str],
+        worker_for: dict[NDIndex, str],
         output_workers: set,
         old: ChunkedAxes,
         new: ChunkedAxes,
@@ -343,7 +343,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
             self._exception = e
             raise
 
-    async def add_partition(self, data: np.ndarray, partition_id: NIndex) -> int:
+    async def add_partition(self, data: np.ndarray, partition_id: NDIndex) -> int:
         self.raise_if_closed()
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to shuffle {self}")
@@ -361,15 +361,15 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
             out: dict[str, list[tuple[ArrayRechunkShardID, bytes]]] = defaultdict(list)
             from itertools import product
 
-            shards = product(
+            ndsplits = product(
                 *(axis[i] for axis, i in zip(self.split_axes, partition_id))
             )
 
-            for shard in shards:
-                chunk_index, shard_index, nslice = zip(*shard)
+            for ndsplit in ndsplits:
+                chunk_index, shard_index, ndslice = zip(*ndsplit)
                 id = ArrayRechunkShardID(chunk_index, shard_index)
                 out[self.worker_for[chunk_index]].append(
-                    (id, pickle.dumps((shard_index, data[nslice])))
+                    (id, pickle.dumps((shard_index, data[ndslice])))
                 )
             return out
 
@@ -378,7 +378,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
         return self.run_id
 
     async def get_output_partition(
-        self, partition_id: NIndex, key: str, meta: pd.DataFrame | None = None
+        self, partition_id: NDIndex, key: str, meta: pd.DataFrame | None = None
     ) -> np.ndarray:
         self.raise_if_closed()
         assert meta is None
@@ -395,7 +395,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NIndex, "np.ndarray"]):
 
         return await self.offload(_)
 
-    def _get_assigned_worker(self, id: NIndex) -> str:
+    def _get_assigned_worker(self, id: NDIndex) -> str:
         return self.worker_for[id]
 
 
@@ -501,7 +501,7 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
             self._exception = e
             raise
 
-    def _repartition_buffers(self, data: list[bytes]) -> dict[NIndex, list[bytes]]:
+    def _repartition_buffers(self, data: list[bytes]) -> dict[NDIndex, list[bytes]]:
         table = list_of_buffers_to_table(data)
         groups = split_by_partition(table, self.column)
         assert len(table) == sum(map(len, groups.values()))
@@ -903,7 +903,7 @@ class ShuffleWorkerExtension:
         self,
         shuffle_id: ShuffleId,
         run_id: int,
-        partition_id: int | NIndex,
+        partition_id: int | NDIndex,
         meta: pd.DataFrame | None = None,
     ) -> Any:
         """
@@ -998,7 +998,7 @@ def convert_chunk(data: bytes) -> np.ndarray:
     from dask.array.core import concatenate3
 
     file = BytesIO(data)
-    shards: dict[NIndex, np.ndarray] = {}
+    shards: dict[NDIndex, np.ndarray] = {}
 
     while file.tell() < len(data):
         index, shard = pickle.load(file)

@@ -24,14 +24,14 @@ if TYPE_CHECKING:
 
 ChunkedAxis: TypeAlias = tuple[float, ...]  # chunks must either be an int or NaN
 ChunkedAxes: TypeAlias = tuple[ChunkedAxis, ...]
-NIndex: TypeAlias = tuple[int, ...]
-NSlice: TypeAlias = tuple[slice, ...]
+NDIndex: TypeAlias = tuple[int, ...]
+NDSlice: TypeAlias = tuple[slice, ...]
 
 
 def rechunk_transfer(
     input: np.ndarray,
     id: ShuffleId,
-    input_chunk: NIndex,
+    input_chunk: NDIndex,
     new: ChunkedAxes,
     old: ChunkedAxes,
 ) -> int:
@@ -49,7 +49,7 @@ def rechunk_transfer(
 
 
 def rechunk_unpack(
-    id: ShuffleId, output_chunk: NIndex, barrier_run_id: int
+    id: ShuffleId, output_chunk: NDIndex, barrier_run_id: int
 ) -> np.ndarray:
     try:
         return _get_worker_extension().get_output_partition(
@@ -119,10 +119,10 @@ class ShardID(NamedTuple):
     """
 
     #: Index of the new output chunk to which the shard belongs
-    chunk_index: NIndex
+    chunk_index: NDIndex
     #: Index of the shard within the multi-dimensional array of shards that will be
     # concatenated into the new chunk
-    shard_index: NIndex
+    shard_index: NDIndex
 
 
 class Split(NamedTuple):
