@@ -20,6 +20,7 @@ from collections.abc import (
     Callable,
     Collection,
     Container,
+    Coroutine,
     Hashable,
     Iterable,
     Mapping,
@@ -99,6 +100,8 @@ from distributed.threadpoolexecutor import secede as tpe_secede
 from distributed.utils import (
     TimeoutError,
     _maybe_complex,
+    convert_args_to_str,
+    convert_kwargs_to_str,
     get_ip,
     has_arg,
     in_async_call,
@@ -2143,11 +2146,59 @@ class Worker(BaseWorker, ServerNode):
     # Execute Task #
     ################
 
-    def run(self, comm, function, args=(), wait=True, kwargs=None):
-        return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
+    async def run(
+        self, *, function: bytes, args: bytes, kwargs: bytes, wait: bool = True
+    ) -> object:
+        function_loaded = pickle.loads(function)
+        is_coro = iscoroutinefunction(function_loaded)
+        assert wait or is_coro, "Combination not supported"
+        args_loaded = pickle.loads(args)
+        kwargs_loaded = pickle.loads(kwargs)
+        if has_arg(function_loaded, "dask_worker"):
+            kwargs_loaded["dask_worker"] = self
 
-    def run_coroutine(self, comm, function, args=(), kwargs=None, wait=True):
-        return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
+        logger.info("Run out-of-band function %r", funcname(function_loaded))
+
+        try:
+            if not is_coro:
+                token = _worker_cvar.set(self)
+                try:
+                    result = function_loaded(*args_loaded, **kwargs_loaded)
+                finally:
+                    _worker_cvar.reset(token)
+            else:
+                if wait:
+                    token = _worker_cvar.set(self)
+                    try:
+                        result = await function_loaded(*args_loaded, **kwargs_loaded)
+                    finally:
+                        _worker_cvar.reset(token)
+                else:
+                    self._ongoing_background_tasks.call_soon(
+                        _set_cvar_and_run,
+                        self,
+                        function_loaded,
+                        *args_loaded,
+                        **kwargs_loaded,
+                    )
+                    result = None
+
+        except Exception as e:
+            logger.warning(
+                "Run Failed\nFunction: %s\nargs:     %s\nkwargs:   %s\n",
+                str(funcname(function))[:1000],
+                convert_args_to_str(args_loaded, max_len=1000),
+                convert_kwargs_to_str(kwargs_loaded, max_len=1000),
+                exc_info=True,
+            )
+
+            return error_message(e)
+        return {"status": "OK", "result": to_serialize(result)}
+
+    async def run_coroutine(self, comm, *, function, args, kwargs, wait):
+        return await self.run(
+            worker=self, function=function, args=args, kwargs=kwargs, wait=wait
+        )
 
     async def actor_execute(
         self,
@@ -2701,6 +2752,20 @@ class Worker(BaseWorker, ServerNode):
 _worker_cvar: contextvars.ContextVar[Worker] = contextvars.ContextVar("_worker_cvar")
 
 
+async def _set_cvar_and_run(
+    worker,
+    function: Callable[P, Coroutine[Any, Any, T]],
+    /,
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> T:
+    token = _worker_cvar.set(worker)
+    try:
+        return await function(*args, **kwargs)
+    finally:
+        _worker_cvar.reset(token)
+
+
 def get_worker() -> Worker:
     """Get the worker currently running this task
 
@@ -3217,85 +3282,6 @@ def get_msg_safe_str(msg):
     if "kwargs" in msg:
         msg["kwargs"] = Repr(convert_kwargs_to_str, msg["kwargs"])
     return msg
-
-
-def convert_args_to_str(args, max_len: int | None = None) -> str:
-    """Convert args to a string, allowing for some arguments to raise
-    exceptions during conversion and ignoring them.
-    """
-    length = 0
-    strs = ["" for i in range(len(args))]
-    for i, arg in enumerate(args):
-        try:
-            sarg = repr(arg)
-        except Exception:
-            sarg = "< could not convert arg to str >"
-        strs[i] = sarg
-        length += len(sarg) + 2
-        if max_len is not None and length > max_len:
-            return "({}".format(", ".join(strs[: i + 1]))[:max_len]
-    else:
-        return "({})".format(", ".join(strs))
-
-
-def convert_kwargs_to_str(kwargs: dict, max_len: int | None = None) -> str:
-    """Convert kwargs to a string, allowing for some arguments to raise
-    exceptions during conversion and ignoring them.
-    """
-    length = 0
-    strs = ["" for i in range(len(kwargs))]
-    for i, (argname, arg) in enumerate(kwargs.items()):
-        try:
-            sarg = repr(arg)
-        except Exception:
-            sarg = "< could not convert arg to str >"
-        skwarg = repr(argname) + ": " + sarg
-        strs[i] = skwarg
-        length += len(skwarg) + 2
-        if max_len is not None and length > max_len:
-            return "{{{}".format(", ".join(strs[: i + 1]))[:max_len]
-    else:
-        return "{{{}}}".format(", ".join(strs))
-
-
-async def run(server, comm, function, args=(), kwargs=None, wait=True):
-    kwargs = kwargs or {}
-    function = pickle.loads(function)
-    is_coro = iscoroutinefunction(function)
-    assert wait or is_coro, "Combination not supported"
-    if args:
-        args = pickle.loads(args)
-    if kwargs:
-        kwargs = pickle.loads(kwargs)
-    if has_arg(function, "dask_worker"):
-        kwargs["dask_worker"] = server
-    if has_arg(function, "dask_scheduler"):
-        kwargs["dask_scheduler"] = server
-    logger.info("Run out-of-band function %r", funcname(function))
-
-    try:
-        if not is_coro:
-            result = function(*args, **kwargs)
-        else:
-            if wait:
-                result = await function(*args, **kwargs)
-            else:
-                server._ongoing_background_tasks.call_soon(function, *args, **kwargs)
-                result = None
-
-    except Exception as e:
-        logger.warning(
-            "Run Failed\nFunction: %s\nargs:     %s\nkwargs:   %s\n",
-            str(funcname(function))[:1000],
-            convert_args_to_str(args, max_len=1000),
-            convert_kwargs_to_str(kwargs, max_len=1000),
-            exc_info=True,
-        )
-
-        response = error_message(e)
-    else:
-        response = {"status": "OK", "result": to_serialize(result)}
-    return response
 
 
 _global_workers = Worker._instances

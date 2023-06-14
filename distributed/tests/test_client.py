@@ -6588,6 +6588,44 @@ async def test_run_on_scheduler_async_def_wait(c, s, a, b):
     assert b.foo == "bar"
 
 
+@gen_cluster(client=True)
+async def test_run_get_worker(c, s, a, b):
+    def f():
+        get_worker().foo = "bar"
+
+    await c.run(f)
+
+    assert a.foo == "bar"
+    assert b.foo == "bar"
+
+
+@gen_cluster(client=True)
+async def test_run_get_worker_async_def(c, s, a, b):
+    async def f():
+        await asyncio.sleep(0.01)
+        get_worker().foo = "bar"
+
+    await c.run(f)
+
+    assert a.foo == "bar"
+    assert b.foo == "bar"
+
+
+@gen_cluster(client=True)
+async def test_run_get_worker_async_def_wait(c, s, a, b):
+    async def f():
+        await asyncio.sleep(0.01)
+        get_worker().foo = "bar"
+
+    await c.run(f, wait=False)
+
+    while not hasattr(a, "foo") or not hasattr(b, "foo"):
+        await asyncio.sleep(0.01)
+
+    assert a.foo == "bar"
+    assert b.foo == "bar"
+
+
 @pytest.mark.slow
 @pytest.mark.skipif(WINDOWS, reason="frequently kills off the whole test suite")
 @pytest.mark.parametrize("local", [True, False])

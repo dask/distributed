@@ -135,7 +135,7 @@ def get_mp_context():
     return ctx
 
 
-def has_arg(func, argname):
+def has_arg(func: Callable[..., AnyType], argname: str) -> bool:
     """
     Whether the function takes an argument with the given name.
     """
@@ -148,7 +148,7 @@ def has_arg(func, argname):
             break
         try:
             # For Tornado coroutines and other decorated functions
-            func = func.__wrapped__
+            func = func.__wrapped__  # type: ignore[attr-defined]
         except AttributeError:
             break
     return False
@@ -1922,3 +1922,42 @@ else:
 
     async def wait_for(fut: Awaitable[T], timeout: float) -> T:
         return await asyncio.wait_for(fut, timeout)
+
+
+def convert_args_to_str(args: tuple[object, ...], max_len: int | None = None) -> str:
+    """Convert args to a string, allowing for some arguments to raise
+    exceptions during conversion and ignoring them.
+    """
+    length = 0
+    strs = ["" for i in range(len(args))]
+    for i, arg in enumerate(args):
+        try:
+            sarg = repr(arg)
+        except Exception:
+            sarg = "< could not convert arg to str >"
+        strs[i] = sarg
+        length += len(sarg) + 2
+        if max_len is not None and length > max_len:
+            return "({}".format(", ".join(strs[: i + 1]))[:max_len]
+    else:
+        return "({})".format(", ".join(strs))
+
+
+def convert_kwargs_to_str(kwargs: dict, max_len: int | None = None) -> str:
+    """Convert kwargs to a string, allowing for some arguments to raise
+    exceptions during conversion and ignoring them.
+    """
+    length = 0
+    strs = ["" for i in range(len(kwargs))]
+    for i, (argname, arg) in enumerate(kwargs.items()):
+        try:
+            sarg = repr(arg)
+        except Exception:
+            sarg = "< could not convert arg to str >"
+        skwarg = repr(argname) + ": " + sarg
+        strs[i] = skwarg
+        length += len(skwarg) + 2
+        if max_len is not None and length > max_len:
+            return "{{{}".format(", ".join(strs[: i + 1]))[:max_len]
+    else:
+        return "{{{}}}".format(", ".join(strs))

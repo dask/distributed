@@ -55,6 +55,7 @@ from dask.core import get_deps
 from dask.utils import (
     format_bytes,
     format_time,
+    funcname,
     key_split,
     parse_bytes,
     parse_timedelta,
@@ -90,6 +91,7 @@ from distributed.metrics import monotonic, time
 from distributed.multi_lock import MultiLockExtension
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
+from distributed.protocol import to_serialize
 from distributed.protocol.pickle import dumps, loads
 from distributed.protocol.serialize import Serialized, ToPickle, serialize
 from distributed.publish import PublishExtension
@@ -104,9 +106,13 @@ from distributed.stealing import WorkStealing
 from distributed.utils import (
     All,
     TimeoutError,
+    convert_args_to_str,
+    convert_kwargs_to_str,
     empty_context,
     format_dashboard_link,
     get_fileno_limit,
+    has_arg,
+    iscoroutinefunction,
     key_split_group,
     log_errors,
     no_default,
@@ -7344,12 +7350,11 @@ class Scheduler(SchedulerState, ServerNode):
 
         return result
 
-    def run_function(
+    async def run_function(
         self,
-        comm: Comm,
-        function: Callable,
-        args: tuple = (),
-        kwargs: dict | None = None,
+        function: bytes,
+        args: bytes,
+        kwargs: bytes,
         wait: bool = True,
     ) -> Any:
         """Run a function within this process
@@ -7358,17 +7363,47 @@ class Scheduler(SchedulerState, ServerNode):
         --------
         Client.run_on_scheduler
         """
-        from distributed.worker import run
-
         if not dask.config.get("distributed.scheduler.pickle"):
             raise ValueError(
                 "Cannot run function as the scheduler has been explicitly disallowed from "
                 "deserializing arbitrary bytestrings using pickle via the "
                 "'distributed.scheduler.pickle' configuration setting."
             )
-        kwargs = kwargs or {}
         self.log_event("all", {"action": "run-function", "function": function})
-        return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
+
+        function_loaded = pickle.loads(function)
+        is_coro = iscoroutinefunction(function_loaded)
+        assert wait or is_coro, "Combination not supported"
+        args_loaded = pickle.loads(args)
+        kwargs_loaded = pickle.loads(kwargs)
+        if has_arg(function_loaded, "dask_scheduler"):
+            kwargs_loaded["dask_scheduler"] = self
+
+        logger.info("Run out-of-band function %r", funcname(function_loaded))
+
+        try:
+            if not is_coro:
+                result = function_loaded(*args_loaded, **kwargs_loaded)
+            else:
+                if wait:
+                    result = await function_loaded(*args_loaded, **kwargs_loaded)
+                else:
+                    self._ongoing_background_tasks.call_soon(
+                        function_loaded, *args_loaded, **kwargs_loaded
+                    )
+                    result = None
+
+        except Exception as e:
+            logger.warning(
+                "Run Failed\nFunction: %s\nargs:     %s\nkwargs:   %s\n",
+                str(funcname(function))[:1000],
+                convert_args_to_str(args_loaded, max_len=1000),
+                convert_kwargs_to_str(kwargs_loaded, max_len=1000),
+                exc_info=True,
+            )
+
+            return error_message(e)
+        return {"status": "OK", "result": to_serialize(result)}
 
     def set_metadata(self, keys: list[str], value: object = None) -> None:
         metadata = self.task_metadata
