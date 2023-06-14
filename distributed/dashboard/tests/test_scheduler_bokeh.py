@@ -368,8 +368,9 @@ async def test_FinePerformanceMetrics(c, s, a, b):
 
     # Custom metric with non-string label and custom unit
     def f():
-        context_meter.digest_metric(None, 1, "custom")
-        context_meter.digest_metric(("foo", 1), 2, "custom")
+        context_meter.digest_metric(None, 1, "seconds")
+        context_meter.digest_metric(("foo", 1), 2, "seconds")
+        context_meter.digest_metric("hideme", 1.1, "custom")
 
     v = c.submit(f, key="v")
     await wait([y0, y1, z, v])
@@ -377,14 +378,32 @@ async def test_FinePerformanceMetrics(c, s, a, b):
     await a.heartbeat()
     await b.heartbeat()
 
-    assert not cl.task_exec_data
+    assert not cl.visible_functions
     cl.update()
-    assert cl.task_exec_data
-    assert set(cl.task_exec_data["functions"]) == {"v", "w", "x", "y", "z"}
-    assert set(cl.unit_selector.options) == {"seconds", "count", "bytes", "custom"}
-    assert "thread-cpu" in cl.task_activities
-    assert "('foo', 1)" in cl.task_activities
-    assert "None" in cl.task_activities
+    assert sorted(cl.visible_functions) == ["v", "w", "x", "y", "z"]
+    assert sorted(cl.unit_selector.options) == ["bytes", "count", "custom", "seconds"]
+    assert "thread-cpu" in cl.visible_activities
+    assert "('foo', 1)" in cl.visible_activities
+    assert "None" in cl.visible_activities
+    assert "hideme" not in cl.visible_activities
+
+    orig_activities = cl.visible_activities[:]
+
+    cl.unit_selector.value = "bytes"
+    cl.update()
+    assert sorted(cl.visible_activities) == ["disk-read", "disk-write", "memory-read"]
+
+    cl.unit_selector.value = "count"
+    cl.update()
+    assert sorted(cl.visible_activities) == ["disk-read", "disk-write", "memory-read"]
+
+    cl.unit_selector.value = "custom"
+    cl.update()
+    assert sorted(cl.visible_activities) == ["hideme"]
+
+    cl.unit_selector.value = "seconds"
+    cl.update()
+    assert cl.visible_activities == orig_activities
 
 
 @gen_cluster(client=True)
