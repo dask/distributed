@@ -1,6 +1,82 @@
 Changelog
 =========
 
+.. _v2023.6.0:
+
+2023.6.0
+--------
+
+Released on June 9, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Post fine performance metrics to spans (:pr:`7885`) `crusaderky`_
+- Unique Spans (:pr:`7882`) `crusaderky`_
+- Add a ``timeout`` to ``client.as_completed`` that mirrors ``concurrent.futures.as_completed`` ``timeout`` (:pr:`7811`) `Thomas Grainger`_
+- Enforce dtypes in P2P shuffle (:pr:`7879`) `Hendrik Makait`_
+- Support ``load=`` keyword for ``Client.upload_file`` (:pr:`7873`) `James Bourbeau`_
+- Support ``get_worker()`` and ``worker_client()`` in async tasks (:pr:`7844`) `Thomas Grainger`_
+- Capture line number for code frames (:pr:`7786`) `Miles`_
+
+Bug Fixes
+^^^^^^^^^
+- Avoid meta roundtrip in P2P shuffle (:pr:`7895`) `Hendrik Makait`_
+- Fix Fine Performance Metrics mis-aligned ``ColumnData`` lengths (:pr:`7893`) `Miles`_
+- Fix Fine Performance Metrics spilling crash (:pr:`7878`) `Miles`_
+- Fix spans bug when ``scatter`` or ``client_desires_new_key`` creates a task (:pr:`7886`) `crusaderky`_
+- Fix Fine Performance Metrics w/ Bokeh 3 (:pr:`7874`) `Miles`_
+- ``TaskGroup.start`` can move backwards (:pr:`7867`) `crusaderky`_
+- Use properly imported ``MatDescriptor`` for ``cupy`` dispatch registration (:pr:`7868`) `Charles Blackmon-Luca`_
+- Ensure ``retire_workers`` works if AMM extension hasn't been loaded (:pr:`7863`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Review user-defined fine performance metrics (:pr:`7894`) `crusaderky`_
+- Fix tests that disable the shuffle extension (:pr:`7883`) `crusaderky`_
+- Refactor ``Scheduler.is_idle`` (:pr:`7881`) `crusaderky`_
+- Link TaskGroups to Spans (:pr:`7869`) `crusaderky`_
+- Spans skeleton (:pr:`7862`) `crusaderky`_
+- Update gpuCI ``RAPIDS_VER`` to ``23.08`` (:pr:`7855`)
+- Bump ``JamesIves/github-pages-deploy-action`` from 4.4.1 to 4.4.2 (:pr:`7865`)
+
+
+.. _v2023.5.1:
+
+2023.5.1
+--------
+
+Released on May 26, 2023
+
+.. note::
+
+  This release drops support for Python 3.8. As of this release
+  Dask supports Python 3.9, 3.10, and 3.11.
+  See `this community issue <https://github.com/dask/community/issues/315>`_
+  for more details.
+
+Enhancements
+^^^^^^^^^^^^
+- Exclude IPython code from computations (:pr:`7788`) `Miles`_
+- Drop Python 3.8 support (:pr:`7840`) `Thomas Grainger`_
+- Add ``storage_options`` to ``performance_report`` (:pr:`7636`) `ypogorelova`_
+- Don't warn about mismatched ``msgpack`` (:pr:`7839`) `Irina Truong`_
+- Clean up ``sys.path`` on ``Server`` shutdown (:pr:`7838`) `James Bourbeau`_
+- Dashboard: Fine Performance Metrics (:pr:`7725`) `Miles`_
+
+Bug Fixes
+^^^^^^^^^
+- Properly handle unknown chunk sizes in P2P rechunking (:pr:`7856`) `Hendrik Makait`_
+- Minimal change to work around (:issue:`7726`) / support for UCX (:pr:`7851`) `Benjamin Zaitlen`_
+- Don't end computations until cluster is truly idle (:pr:`7790`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Explicitly install ``anaconda-client`` from conda-forge when uploading conda nightlies (:pr:`7861`) `Charles Blackmon-Luca`_
+- Fix ``is_idle`` docs build (:pr:`7854`) `James Bourbeau`_
+- Add tests for P2P barrier fusion (:pr:`7845`) `Hendrik Makait`_
+- Avoid ``DeprecationWarning`` in ``cupy`` dispatch registration (:pr:`7836`) `Lawrence Mitchell`_
+
+
 .. _v2023.5.0:
 
 2023.5.0
@@ -4950,3 +5026,4 @@ significantly without many new features.
 .. _`Eugene Druzhynin`: https://github.com/eugene-graft
 .. _`ypogorelova`: https://github.com/ypogorelova
 .. _`Patrick Hoefler`: https://github.com/phofl
+.. _`Irina Truong`: https://github.com/j-bennet

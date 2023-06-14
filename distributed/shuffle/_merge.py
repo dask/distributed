@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Iterable, Sequence
+from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING, Any
 
 from dask.base import is_dask_collection, tokenize
 from dask.highlevelgraph import HighLevelGraph
@@ -107,9 +108,11 @@ def hash_join_p2p(
     join_layer = HashJoinP2PLayer(
         name=merge_name,
         name_input_left=lhs._name,
+        meta_input_left=lhs._meta,
         left_on=left_on,
         n_partitions_left=lhs.npartitions,
         name_input_right=rhs._name,
+        meta_input_right=rhs._meta,
         right_on=right_on,
         n_partitions_right=rhs.npartitions,
         meta_output=meta,
@@ -157,18 +160,21 @@ def merge_unpack(
     how: MergeHow,
     left_on: IndexLabel,
     right_on: IndexLabel,
+    meta_left: pd.DataFrame,
+    meta_right: pd.DataFrame,
     result_meta: pd.DataFrame,
     suffixes: Suffixes,
 ):
     from dask.dataframe.multi import merge_chunk
 
     ext = _get_worker_extension()
+    # If the partition is empty, it doesn't contain the hash column name
     left = ext.get_output_partition(
-        shuffle_id_left, barrier_left, output_partition
-    ).drop(columns=_HASH_COLUMN_NAME)
+        shuffle_id_left, barrier_left, output_partition, meta=meta_left
+    ).drop(columns=_HASH_COLUMN_NAME, errors="ignore")
     right = ext.get_output_partition(
-        shuffle_id_right, barrier_right, output_partition
-    ).drop(columns=_HASH_COLUMN_NAME)
+        shuffle_id_right, barrier_right, output_partition, meta=meta_right
+    ).drop(columns=_HASH_COLUMN_NAME, errors="ignore")
     return merge_chunk(
         left,
         right,
@@ -185,10 +191,12 @@ class HashJoinP2PLayer(Layer):
         self,
         name: str,
         name_input_left: str,
+        meta_input_left: pd.DataFrame,
         left_on,
         n_partitions_left: int,
         n_partitions_right: int,
         name_input_right: str,
+        meta_input_right: pd.DataFrame,
         right_on,
         meta_output: pd.DataFrame,
         left_index: bool,
@@ -202,8 +210,10 @@ class HashJoinP2PLayer(Layer):
     ) -> None:
         self.name = name
         self.name_input_left = name_input_left
+        self.meta_input_left = meta_input_left
         self.left_on = left_on
         self.name_input_right = name_input_right
+        self.meta_input_right = meta_input_right
         self.right_on = right_on
         self.how = how
         self.npartitions = npartitions
@@ -284,8 +294,10 @@ class HashJoinP2PLayer(Layer):
         return HashJoinP2PLayer(
             name=self.name,
             name_input_left=self.name_input_left,
+            meta_input_left=self.meta_input_left,
             left_on=self.left_on,
             name_input_right=self.name_input_right,
+            meta_input_right=self.meta_input_right,
             right_on=self.right_on,
             how=self.how,
             npartitions=self.npartitions,
@@ -372,6 +384,8 @@ class HashJoinP2PLayer(Layer):
                 self.how,
                 self.left_on,
                 self.right_on,
+                self.meta_input_left,
+                self.meta_input_right,
                 self.meta_output,
                 self.suffixes,
             )

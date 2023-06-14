@@ -64,7 +64,7 @@ if TYPE_CHECKING:
     Coro = Coroutine[Any, Any, T]
 
 
-cache_loads = LRU(maxsize=100)
+cache_loads: LRU[bytes, Callable[..., Any]] = LRU(maxsize=100)
 
 
 def loads_function(bytes_object):

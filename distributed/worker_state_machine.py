@@ -20,6 +20,7 @@ from collections.abc import (
     Iterator,
     Mapping,
     MutableMapping,
+    Sequence,
     Set,
 )
 from copy import copy
@@ -32,8 +33,8 @@ from typing import (
     ClassVar,
     Literal,
     NamedTuple,
-    Sequence,
     TypedDict,
+    Union,
     cast,
 )
 
@@ -296,6 +297,9 @@ class TaskState:
     nbytes: int | None = None
     #: Arbitrary task annotations
     annotations: dict | None = None
+    #: unique span id (see ``distributed.spans``).
+    #: Matches ``distributed.scheduler.TaskState.group.span_id``.
+    span_id: str | None = None
     #: True if the :meth:`~WorkerBase.execute` or :meth:`~WorkerBase.gather_dep`
     #: coroutine servicing this task completed; False otherwise. This flag changes
     #: the behaviour of transitions out of the ``executing``, ``flight`` etc. states.
@@ -764,6 +768,7 @@ class ComputeTaskEvent(StateMachineEvent):
     resource_restrictions: dict[str, float]
     actor: bool
     annotations: dict
+    span_id: str | None
 
     __slots__ = tuple(__annotations__)
 
@@ -830,6 +835,7 @@ class ComputeTaskEvent(StateMachineEvent):
             resource_restrictions=resource_restrictions or {},
             actor=actor,
             annotations=annotations or {},
+            span_id=None,
             stimulus_id=stimulus_id,
         )
 
@@ -1046,12 +1052,11 @@ class SecedeEvent(StateMachineEvent):
     compute_duration: float
 
 
-# TODO remove quotes (requires Python >=3.9)
 # {TaskState -> finish: TaskStateState | (finish: TaskStateState, transition *args)}
 # Not to be confused with distributed.scheduler.Recs
-Recs: TypeAlias = "dict[TaskState, TaskStateState | tuple]"
-Instructions: TypeAlias = "list[Instruction]"
-RecsInstrs: TypeAlias = "tuple[Recs, Instructions]"
+Recs: TypeAlias = dict[TaskState, Union[TaskStateState, tuple]]
+Instructions: TypeAlias = list[Instruction]
+RecsInstrs: TypeAlias = tuple[Recs, Instructions]
 
 
 def merge_recs_instructions(*args: RecsInstrs) -> RecsInstrs:
@@ -2877,6 +2882,7 @@ class WorkerState:
             ts.priority = priority
             ts.duration = ev.duration
             ts.annotations = ev.annotations
+            ts.span_id = ev.span_id
 
             # If we receive ComputeTaskEvent twice for the same task, resources may have
             # changed, but the task is still running. Preserve the previous resource
@@ -3598,12 +3604,13 @@ class BaseWorker(abc.ABC):
         self.state = state
         self._async_instructions = set()
 
-    def _start_async_instruction(
+    def _start_async_instruction(  # type: ignore[valid-type]
         self,
         task_name: str,
         func: Callable[P, Awaitable[StateMachineEvent]],
         /,
         *args: P.args,
+        span_id: str | None = None,
         **kwargs: P.kwargs,
     ) -> None:
         """Execute an asynchronous instruction inside an asyncio task"""
@@ -3616,12 +3623,15 @@ class BaseWorker(abc.ABC):
 
         task = asyncio.create_task(wrapper(), name=task_name)
         self._async_instructions.add(task)
-        task.add_done_callback(partial(self._finish_async_instruction, ledger=ledger))
+        task.add_done_callback(
+            partial(self._finish_async_instruction, ledger=ledger, span_id=span_id)
+        )
 
     def _finish_async_instruction(
         self,
         task: asyncio.Task[StateMachineEvent],
         ledger: DelayedMetricsLedger,
+        span_id: str | None,
     ) -> None:
         """The asynchronous instruction just completed; process the returned
         stimulus.
@@ -3641,15 +3651,19 @@ class BaseWorker(abc.ABC):
             # Capture metric events in _transition_to_memory()
             self.handle_stimulus(stim)
 
-        self._finalize_metrics(stim, ledger)
+        self._finalize_metrics(stim, ledger, span_id)
 
     def _finalize_metrics(
         self,
         stim: StateMachineEvent,
         ledger: DelayedMetricsLedger,
+        span_id: str | None = None,
     ) -> None:
-        activity: tuple[str, ...]
+        activity: tuple[str | None, ...]
         coarse_time: str | Literal[False]
+
+        if not isinstance(stim, ExecuteDoneEvent):
+            assert span_id is None
 
         if isinstance(stim, GatherDepSuccessEvent):
             activity = ("gather-dep",)
@@ -3671,16 +3685,16 @@ class BaseWorker(abc.ABC):
             coarse_time = "busy"
 
         elif isinstance(stim, ExecuteSuccessEvent):
-            activity = ("execute", key_split(stim.key))
+            activity = ("execute", span_id, key_split(stim.key))
             ts = self.state.tasks.get(stim.key)
             coarse_time = False if ts and ts.state == "memory" else "cancelled"
 
         elif isinstance(stim, ExecuteFailureEvent):
-            activity = ("execute", key_split(stim.key))
+            activity = ("execute", span_id, key_split(stim.key))
             coarse_time = "failed"
 
         elif isinstance(stim, RescheduleEvent):
-            activity = ("execute", key_split(stim.key))
+            activity = ("execute", span_id, key_split(stim.key))
             coarse_time = "cancelled"
 
         else:
@@ -3688,9 +3702,7 @@ class BaseWorker(abc.ABC):
             return
 
         for label, value, unit in ledger.finalize(coarse_time=coarse_time):
-            if not isinstance(label, tuple):
-                label = (label,)
-            self.digest_metric((*activity, *label, unit), value)
+            self.digest_metric((*activity, label, unit), value)
 
     def handle_stimulus(self, *stims: StateMachineEvent) -> None:
         """Forward one or more external stimuli to :meth:`WorkerState.handle_stimulus`
@@ -3725,10 +3737,12 @@ class BaseWorker(abc.ABC):
                 )
 
             elif isinstance(inst, Execute):
+                ts = self.state.tasks[inst.key]
                 self._start_async_instruction(
                     f"execute({inst.key})",
                     self.execute,
                     inst.key,
+                    span_id=ts.span_id,
                     stimulus_id=inst.stimulus_id,
                 )
 

@@ -16,7 +16,7 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Collection, Iterator
+from collections.abc import Collection, Coroutine, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import asynccontextmanager, contextmanager, suppress
@@ -25,7 +25,7 @@ from functools import partial
 from importlib.metadata import PackageNotFoundError, version
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import Any, ClassVar, Coroutine, Literal, Sequence, TypedDict
+from typing import Any, ClassVar, Literal, NamedTuple, TypedDict
 
 from packaging.version import parse as parse_version
 from tlz import first, groupby, keymap, merge, partition_all, valmap
@@ -48,7 +48,7 @@ from dask.widgets import get_template
 
 from distributed.core import ErrorMessage
 from distributed.protocol.serialize import _is_dumpable
-from distributed.utils import wait_for
+from distributed.utils import Deadline, wait_for
 
 try:
     from dask.delayed import single_key
@@ -128,6 +128,13 @@ DEFAULT_EXTENSIONS = {
 }
 
 TOPIC_PREFIX_FORWARDED_LOG_RECORD = "forwarded-log-record"
+
+
+class SourceCode(NamedTuple):
+    code: str
+    lineno_frame: int
+    lineno_relative: int
+    filename: str
 
 
 def _get_global_client() -> Client | None:
@@ -2354,9 +2361,9 @@ class Client(SyncMethodMixin):
         elif isinstance(futures, Iterator):
             return (self.gather(f, errors=errors, direct=direct) for f in futures)
         else:
-            if hasattr(thread_state, "execution_state"):  # within worker task
-                local_worker = thread_state.execution_state["worker"]
-            else:
+            try:
+                local_worker = get_worker()
+            except ValueError:
                 local_worker = None
             return self.sync(
                 self._gather,
@@ -2579,9 +2586,9 @@ class Client(SyncMethodMixin):
                 "Consider using a normal for loop and Client.submit"
             )
 
-        if hasattr(thread_state, "execution_state"):  # within worker task
-            local_worker = thread_state.execution_state["worker"]
-        else:
+        try:
+            local_worker = get_worker()
+        except ValueError:
             local_worker = None
         return self.sync(
             self._scatter,
@@ -2992,7 +2999,7 @@ class Client(SyncMethodMixin):
     @staticmethod
     def _get_computation_code(
         stacklevel: int | None = None, nframes: int = 1
-    ) -> tuple[str, ...]:
+    ) -> tuple[SourceCode, ...]:
         """Walk up the stack to the user code and extract the code surrounding
         the compute/submit/persist call. All modules encountered which are
         ignored through the option
@@ -3013,44 +3020,54 @@ class Client(SyncMethodMixin):
                 "Ignored modules must be a list. Instead got "
                 f"({type(ignore_modules)}, {ignore_modules})"
             )
+        pattern: re.Pattern | None = None
         if stacklevel is None:
-            pattern: re.Pattern | None
             if ignore_modules:
                 pattern = re.compile("|".join([f"(?:{mod})" for mod in ignore_modules]))
-            else:
-                pattern = None
         else:
             # stacklevel 0 or less - shows dask internals which likely isn't helpful
             stacklevel = stacklevel if stacklevel > 0 else 1
 
-        code: list[str] = []
-        for i, (fr, _) in enumerate(traceback.walk_stack(sys._getframe().f_back), 1):
+        code: list[SourceCode] = []
+        for i, (fr, lineno_frame) in enumerate(
+            traceback.walk_stack(sys._getframe().f_back), 1
+        ):
             if len(code) >= nframes:
                 break
-            if stacklevel is not None:
-                if i != stacklevel:
-                    continue
+            elif stacklevel is not None and i != stacklevel:
+                continue
             elif pattern is not None and (
                 pattern.match(fr.f_globals.get("__name__", ""))
                 or fr.f_code.co_name in ("<listcomp>", "<dictcomp>")
             ):
                 continue
+
+            kwargs = dict(
+                lineno_frame=lineno_frame,
+                lineno_relative=lineno_frame - fr.f_code.co_firstlineno,
+                filename=fr.f_code.co_filename,
+            )
+
             try:
-                code.append(inspect.getsource(fr))
+                code.append(SourceCode(code=inspect.getsource(fr), **kwargs))  # type: ignore
             except OSError:
-                # Try to fine the source if we are in %%time or %%timeit magic.
-                if (
-                    fr.f_code.co_filename in {"<timed exec>", "<magic-timeit>"}
-                    and "IPython" in sys.modules
-                ):
+                try:
                     from IPython import get_ipython
 
                     ip = get_ipython()
                     if ip is not None:
                         # The current cell
-                        code.append(ip.history_manager._i00)
+                        code.append(SourceCode(code=ip.history_manager._i00, **kwargs))  # type: ignore
+                except ImportError:
+                    pass  # No IPython
+
                 break
 
+            # Ignore IPython related wrapping functions to user code
+            if hasattr(fr.f_back, "f_globals"):
+                module_name = sys.modules[fr.f_back.f_globals["__name__"]].__name__  # type: ignore
+                if module_name.endswith("interactiveshell"):
+                    break
         return tuple(reversed(code))
 
     def _graph_to_futures(
@@ -3110,6 +3127,10 @@ class Client(SyncMethodMixin):
                     "This may cause some slowdown.\n"
                     "Consider scattering data ahead of time and using futures."
                 )
+
+            computations = self._get_computation_code(
+                nframes=dask.config.get("distributed.diagnostics.computations.nframes")
+            )
             self._send_to_scheduler(
                 {
                     "op": "update-graph",
@@ -3120,11 +3141,7 @@ class Client(SyncMethodMixin):
                     "submitting_task": getattr(thread_state, "key", None),
                     "fifo_timeout": fifo_timeout,
                     "actors": actors,
-                    "code": self._get_computation_code(
-                        nframes=dask.config.get(
-                            "distributed.diagnostics.computations.nframes"
-                        )
-                    ),
+                    "code": ToPickle(computations),
                     "annotations": ToPickle(annotations),
                 }
             )
@@ -3713,22 +3730,23 @@ class Client(SyncMethodMixin):
 
         assert all(len(data) == v for v in response.values())
 
-    def upload_file(self, filename, **kwargs):
-        """Upload local package to workers
+    def upload_file(self, filename, load: bool = True):
+        """Upload local package to scheduler and workers
 
-        This sends a local file up to all worker nodes.  This file is placed
-        into the working directory of the running worker, see config option
+        This sends a local file up to the scheduler and all worker nodes.
+        This file is placed into the working directory of each node, see config option
         ``temporary-directory`` (defaults to :py:func:`tempfile.gettempdir`).
 
-        This directory will be added to the Python's system path so any .py,
-        .egg or .zip  files will be importable.
+        This directory will be added to the Python's system path so any ``.py``,
+        ``.egg`` or ``.zip``  files will be importable.
 
         Parameters
         ----------
         filename : string
-            Filename of .py, .egg or .zip file to send to workers
-        **kwargs : dict
-            Optional keyword arguments for the function
+            Filename of ``.py``, ``.egg``, or ``.zip`` file to send to workers
+        load : bool, optional
+            Whether or not to import the module as part of the upload process.
+            Defaults to ``True``.
 
         Examples
         --------
@@ -3741,9 +3759,9 @@ class Client(SyncMethodMixin):
         async def _():
             results = await asyncio.gather(
                 self.register_scheduler_plugin(
-                    SchedulerUploadFile(filename), name=name
+                    SchedulerUploadFile(filename, load=load), name=name
                 ),
-                self.register_worker_plugin(UploadFile(filename), name=name),
+                self.register_worker_plugin(UploadFile(filename, load=load), name=name),
             )
             return results[1]  # Results from workers upload
 
@@ -5236,10 +5254,16 @@ class as_completed:
         complete
     with_results: bool (False)
         Whether to wait and include results of futures as well;
-        in this case `as_completed` yields a tuple of (future, result)
+        in this case ``as_completed`` yields a tuple of (future, result)
     raise_errors: bool (True)
         Whether we should raise when the result of a future raises an
-        exception; only affects behavior when `with_results=True`.
+        exception; only affects behavior when ``with_results=True``.
+    timeout: int (optional)
+        The returned iterator raises a ``dask.distributed.TimeoutError``
+        if ``__next__()`` or ``__anext__()`` is called and the result
+        isn't available after timeout seconds from the original call to
+        ``as_completed()``. If timeout is not specified or ``None``, there is no limit
+        to the wait time.
 
     Examples
     --------
@@ -5276,7 +5300,15 @@ class as_completed:
     3
     """
 
-    def __init__(self, futures=None, loop=None, with_results=False, raise_errors=True):
+    def __init__(
+        self,
+        futures=None,
+        loop=None,
+        with_results=False,
+        raise_errors=True,
+        *,
+        timeout=None,
+    ):
         if futures is None:
             futures = []
         self.futures = defaultdict(lambda: 0)
@@ -5286,6 +5318,7 @@ class as_completed:
         self.thread_condition = threading.Condition()
         self.with_results = with_results
         self.raise_errors = raise_errors
+        self._deadline = Deadline.after(parse_timedelta(timeout))
 
         if futures:
             self.update(futures)
@@ -5384,6 +5417,8 @@ class as_completed:
 
     def __next__(self):
         while self.queue.empty():
+            if self._deadline.expired:
+                raise TimeoutError()
             if self.is_empty():
                 raise StopIteration()
             with self.thread_condition:
@@ -5391,6 +5426,11 @@ class as_completed:
         return self._get_and_raise()
 
     async def __anext__(self):
+        if not self._deadline.expires:
+            return await self._anext()
+        return await wait_for(self._anext(), self._deadline.remaining)
+
+    async def _anext(self):
         if not self.futures and self.queue.empty():
             raise StopAsyncIteration
         while self.queue.empty():
@@ -5755,7 +5795,7 @@ class performance_report:
         client = get_client()
         if code is None:
             frames = client._get_computation_code(self._stacklevel + 1, nframes=1)
-            code = frames[0] if frames else "<Code not available>"
+            code = frames[0].code if frames else "<Code not available>"
         data = await client.scheduler.performance_report(
             start=self.start, last_count=self.last_count, code=code, mode=self.mode
         )
@@ -5770,7 +5810,7 @@ class performance_report:
     def __exit__(self, exc_type, exc_value, traceback):
         client = get_client()
         frames = client._get_computation_code(self._stacklevel + 1, nframes=1)
-        code = frames[0] if frames else "<Code not available>"
+        code = frames[0].code if frames else "<Code not available>"
         client.sync(self.__aexit__, exc_type, exc_value, traceback, code=code)
 
 

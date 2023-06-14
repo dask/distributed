@@ -9,8 +9,8 @@ import re
 import shelve
 import sys
 import zipfile
-from collections.abc import Iterator
-from typing import Any, Iterable, cast
+from collections.abc import Iterable, Iterator
+from typing import Any, cast
 
 import altair
 import altair_saver

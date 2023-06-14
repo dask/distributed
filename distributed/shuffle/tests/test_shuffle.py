@@ -7,10 +7,11 @@ import os
 import random
 import shutil
 from collections import defaultdict
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack
 from itertools import count
-from typing import Any, Mapping
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -47,7 +48,13 @@ from distributed.shuffle.tests.utils import (
     invoke_annotation_chaos,
 )
 from distributed.utils import Deadline
-from distributed.utils_test import cluster, gen_cluster, gen_test, wait_for_state
+from distributed.utils_test import (
+    cluster,
+    gen_cluster,
+    gen_test,
+    raises_with_cause,
+    wait_for_state,
+)
 from distributed.worker_state_machine import TaskState as WorkerTaskState
 
 try:
@@ -104,8 +111,9 @@ async def test_minimal_version(c, s, a, b):
         await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
 
 
+@pytest.mark.parametrize("npartitions", [None, 1, 20])
 @gen_cluster(client=True)
-async def test_basic_integration(c, s, a, b, lose_annotations):
+async def test_basic_integration(c, s, a, b, lose_annotations, npartitions):
     await invoke_annotation_chaos(lose_annotations, c)
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -113,11 +121,41 @@ async def test_basic_integration(c, s, a, b, lose_annotations):
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
-    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p", npartitions=npartitions)
+    if npartitions is None:
+        assert out.npartitions == df.npartitions
+    else:
+        assert out.npartitions == npartitions
     x, y = c.compute([df.x.size, out.x.size])
     x = await x
     y = await y
     assert x == y
+
+    await clean_worker(a)
+    await clean_worker(b)
+    await clean_scheduler(s)
+
+
+@pytest.mark.parametrize("npartitions", [None, 1, 20])
+@gen_cluster(client=True)
+async def test_shuffle_with_array_conversion(c, s, a, b, lose_annotations, npartitions):
+    await invoke_annotation_chaos(lose_annotations, c)
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p", npartitions=npartitions).values
+
+    if npartitions == 1:
+        # FIXME: distributed#7816
+        with raises_with_cause(
+            RuntimeError, "shuffle_transfer failed", RuntimeError, "Barrier task"
+        ):
+            await c.compute(out)
+    else:
+        await c.compute(out)
 
     await clean_worker(a)
     await clean_worker(b)
@@ -679,15 +717,18 @@ def test_processing_chain():
                 [pd.Timestamp.fromtimestamp(1641034800 + i) for i in range(100)],
                 dtype=pd.ArrowDtype(pa.timestamp("ms")),
             ),
-            # FIXME: distributed#7420
-            # f"col{next(counter)}": pd.array(
-            #     ["lorem ipsum"] * 100,
-            #     dtype="string[pyarrow]",
-            # ),
-            # f"col{next(counter)}": pd.array(
-            #     ["lorem ipsum"] * 100,
-            #     dtype=pd.StringDtype("pyarrow"),
-            # ),
+            f"col{next(counter)}": pd.array(
+                ["lorem ipsum"] * 100,
+                dtype="string[pyarrow]",
+            ),
+            f"col{next(counter)}": pd.array(
+                ["lorem ipsum"] * 100,
+                dtype=pd.StringDtype("pyarrow"),
+            ),
+            f"col{next(counter)}": pd.array(
+                ["lorem ipsum"] * 100,
+                dtype="string[python]",
+            ),
             # custom objects
             # FIXME: Serializing custom objects is not supported in P2P shuffling
             # f"col{next(counter)}": pd.array(
@@ -696,7 +737,6 @@ def test_processing_chain():
         }
     )
     df["_partitions"] = df.col4 % npartitions
-    schema = pa.Schema.from_pandas(df)
     worker_for = {i: random.choice(workers) for i in list(range(npartitions))}
     worker_for = pd.Series(worker_for, name="_worker").astype("category")
 
@@ -745,9 +785,9 @@ def test_processing_chain():
     out = {}
     for k, bio in filesystem.items():
         bio.seek(0)
-        out[k] = convert_partition(bio.read())
+        out[k] = convert_partition(bio.read(), df.head(0))
 
-    shuffled_df = pd.concat(table.to_pandas() for table in out.values())
+    shuffled_df = pd.concat(df for df in out.values())
     pd.testing.assert_frame_equal(
         df,
         shuffled_df,
@@ -1150,7 +1190,6 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
         self,
         name,
         worker_for_mapping,
-        schema,
         directory,
         loop,
         Shuffle=DataFrameShuffleRun,
@@ -1160,7 +1199,6 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
             worker_for=worker_for_mapping,
             # FIXME: Is output_workers redundant with worker_for?
             output_workers=set(worker_for_mapping.values()),
-            schema=schema,
             directory=directory / name,
             id=ShuffleId(name),
             run_id=next(AbstractShuffleTestPool._shuffle_run_id_iterator),
@@ -1208,7 +1246,7 @@ async def test_basic_lowlevel_shuffle(
             npartitions, part, workers
         )
     assert len(set(worker_for_mapping.values())) == min(n_workers, npartitions)
-    schema = pa.Schema.from_pandas(dfs[0])
+    meta = dfs[0].head(0)
 
     with DataFrameShuffleTestPool() as local_shuffle_pool:
         shuffles = []
@@ -1217,7 +1255,6 @@ async def test_basic_lowlevel_shuffle(
                 local_shuffle_pool.new_shuffle(
                     name=workers[ix],
                     worker_for_mapping=worker_for_mapping,
-                    schema=schema,
                     directory=tmp_path,
                     loop=loop_in_thread,
                 )
@@ -1250,7 +1287,7 @@ async def test_basic_lowlevel_shuffle(
             all_parts = []
             for part, worker in worker_for_mapping.items():
                 s = local_shuffle_pool.shuffles[worker]
-                all_parts.append(s.get_output_partition(part, f"key-{part}"))
+                all_parts.append(s.get_output_partition(part, f"key-{part}", meta=meta))
 
             all_parts = await asyncio.gather(*all_parts)
 
@@ -1283,7 +1320,6 @@ async def test_error_offload(tmp_path, loop_in_thread):
             npartitions, part, workers
         )
         partitions_for_worker[w].append(part)
-    schema = pa.Schema.from_pandas(dfs[0])
 
     class ErrorOffload(DataFrameShuffleRun):
         async def offload(self, func, *args):
@@ -1293,7 +1329,6 @@ async def test_error_offload(tmp_path, loop_in_thread):
         sA = local_shuffle_pool.new_shuffle(
             name="A",
             worker_for_mapping=worker_for_mapping,
-            schema=schema,
             directory=tmp_path,
             loop=loop_in_thread,
             Shuffle=ErrorOffload,
@@ -1301,7 +1336,6 @@ async def test_error_offload(tmp_path, loop_in_thread):
         sB = local_shuffle_pool.new_shuffle(
             name="B",
             worker_for_mapping=worker_for_mapping,
-            schema=schema,
             directory=tmp_path,
             loop=loop_in_thread,
         )
@@ -1337,7 +1371,6 @@ async def test_error_send(tmp_path, loop_in_thread):
             npartitions, part, workers
         )
         partitions_for_worker[w].append(part)
-    schema = pa.Schema.from_pandas(dfs[0])
 
     class ErrorSend(DataFrameShuffleRun):
         async def send(self, *args: Any, **kwargs: Any) -> None:
@@ -1347,7 +1380,6 @@ async def test_error_send(tmp_path, loop_in_thread):
         sA = local_shuffle_pool.new_shuffle(
             name="A",
             worker_for_mapping=worker_for_mapping,
-            schema=schema,
             directory=tmp_path,
             loop=loop_in_thread,
             Shuffle=ErrorSend,
@@ -1355,7 +1387,6 @@ async def test_error_send(tmp_path, loop_in_thread):
         sB = local_shuffle_pool.new_shuffle(
             name="B",
             worker_for_mapping=worker_for_mapping,
-            schema=schema,
             directory=tmp_path,
             loop=loop_in_thread,
         )
@@ -1390,7 +1421,6 @@ async def test_error_receive(tmp_path, loop_in_thread):
             npartitions, part, workers
         )
         partitions_for_worker[w].append(part)
-    schema = pa.Schema.from_pandas(dfs[0])
 
     class ErrorReceive(DataFrameShuffleRun):
         async def receive(self, data: list[tuple[int, bytes]]) -> None:
@@ -1400,7 +1430,6 @@ async def test_error_receive(tmp_path, loop_in_thread):
         sA = local_shuffle_pool.new_shuffle(
             name="A",
             worker_for_mapping=worker_for_mapping,
-            schema=schema,
             directory=tmp_path,
             loop=loop_in_thread,
             Shuffle=ErrorReceive,
@@ -1408,7 +1437,6 @@ async def test_error_receive(tmp_path, loop_in_thread):
         sB = local_shuffle_pool.new_shuffle(
             name="B",
             worker_for_mapping=worker_for_mapping,
-            schema=schema,
             directory=tmp_path,
             loop=loop_in_thread,
         )
