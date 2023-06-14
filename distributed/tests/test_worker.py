@@ -56,6 +56,7 @@ from distributed.diagnostics.plugin import (
 from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.scheduler import KilledWorker, Scheduler
+from distributed.utils import sync
 from distributed.utils_test import (
     NO_AMM,
     BlockedExecute,
@@ -1056,7 +1057,7 @@ async def test_get_client(c, s, a, b, asynchronous):
                 future = cc.submit(inc, x)
                 return await future.result()
 
-            return cc.sync(_, asynchronous=False)
+            return sync(cc.loop, _)
         else:
             future = cc.submit(inc, x)
             return future.result()
