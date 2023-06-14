@@ -2768,7 +2768,7 @@ def get_client(
     else:
         if not address or worker.scheduler.address == address:
             client = worker._get_client(timeout=timeout)
-            if asynchronous is None:
+            if asynchronous is None or client._asynchronous == asynchronous:
                 return client
             return Client(
                 worker.scheduler.address,
@@ -2784,7 +2784,7 @@ def get_client(
         client = None
 
     if client and (not address or client.scheduler.address == address):
-        if asynchronous is None:
+        if asynchronous is None or client._asynchronous == asynchronous:
             return client
         return Client(
             client.scheduler.address,
