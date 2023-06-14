@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from packaging.version import parse
 
-from dask.dataframe.dispatch import from_pyarrow_table_dispatch
+import dask.dataframe.dispatch as dataframe_dispatch
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -57,7 +57,13 @@ def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
         sr = pa.RecordBatchStreamReader(file)
         shards.append(sr.read_all())
     table = pa.concat_tables(shards)
-    df = from_pyarrow_table_dispatch(meta, table)
+    if hasattr(dataframe_dispatch, "from_pyarrow_table_dispatch"):
+        df = dataframe_dispatch.from_pyarrow_table_dispatch(
+            meta, table, self_destruct=True
+        )
+    else:
+        # Backward compat
+        df = table.to_pandas(self_destruct=True)
     return df.astype(meta.dtypes)
 
 

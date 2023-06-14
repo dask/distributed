@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 
 import toolz
 
+import dask.dataframe.dispatch as dataframe_dispatch
 from dask.context import thread_state
-from dask.dataframe.dispatch import to_pyarrow_table_dispatch
 from dask.utils import get_meta_library, parse_bytes
 
 from distributed.core import PooledRPCCall
@@ -944,7 +944,13 @@ def split_by_worker(
     # assert len(df) == nrows  # Not true if some outputs aren't wanted
     # FIXME: If we do not preserve the index something is corrupting the
     # bytestream such that it cannot be deserialized anymore
-    t = to_pyarrow_table_dispatch(df, preserve_index=True)
+    if hasattr(dataframe_dispatch, "to_pyarrow_table_dispatch"):
+        t = dataframe_dispatch.to_pyarrow_table_dispatch(df, preserve_index=True)
+    else:
+        import pyarrow as pa
+
+        # Backward compat
+        t = pa.Table.from_pandas(df, preserve_index=True)
     t = t.sort_by("_worker")
     codes = np.asarray(t.select(["_worker"]))[0]
     t = t.drop(["_worker"])
