@@ -120,7 +120,7 @@ class ShardID(NamedTuple):
 
     #: Index of the new output chunk to which the shard belongs
     chunk_index: NDIndex
-    #: Index of the shard within the multi-dimensional array of shards that will be
+    #: Index of the shard within the n-dimensional array of shards that will be
     # concatenated into the new chunk
     shard_index: NDIndex
 
