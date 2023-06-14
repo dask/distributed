@@ -30,6 +30,7 @@ from distributed import (
     CancelledError,
     Client,
     Event,
+    Future,
     Lock,
     Nanny,
     SchedulerPlugin,
@@ -50,6 +51,7 @@ from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
     BrokenComm,
+    NoSchedulerDelayWorker,
     assert_story,
     async_poll_for,
     captured_handler,
@@ -2310,24 +2312,6 @@ async def test_idle_timeout_no_workers(c, s):
     assert s.check_idle()
 
 
-@gen_cluster(client=True)
-async def test_cumulative_worker_metrics(c, s, a, b):
-    # Race condition: metrics that are updated while idle may or may not be there already
-    assert s.cumulative_worker_metrics.keys() in (set(), {"latency"})
-    await c.submit(inc, 1, key="do_work")
-
-    await a.heartbeat()
-    await b.heartbeat()
-
-    metrics = s.cumulative_worker_metrics
-
-    # Subset of expected keys
-    assert "latency" in metrics
-    assert ("execute", "do_work", "deserialize", "seconds") in metrics
-
-    assert all(isinstance(value, float) for value in metrics.values())
-
-
 @gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})
 async def test_bandwidth(c, s, a, b):
     start = s.bandwidth
@@ -2578,22 +2562,6 @@ async def test_no_dangling_asyncio_tasks():
     assert tasks == start
 
 
-class NoSchedulerDelayWorker(Worker):
-    """Custom worker class which does not update `scheduler_delay`.
-
-    This worker class is useful for some tests which make time
-    comparisons using times reported from workers.
-    """
-
-    @property
-    def scheduler_delay(self):
-        return 0
-
-    @scheduler_delay.setter
-    def scheduler_delay(self, value):
-        pass
-
-
 @gen_cluster(client=True, Worker=NoSchedulerDelayWorker, config=NO_AMM)
 async def test_task_groups(c, s, a, b):
     start = time()
@@ -2674,6 +2642,92 @@ async def test_task_groups_update_start_stop(c, s, a):
     await x2
     t4 = time()
     assert t0 < tg.start < t1 < t2 < t3 < tg.stop < t4
+
+
+@gen_cluster(client=True)
+async def test_task_group_done(c, s, a, b):
+    """TaskGroup.done is True iff all of its tasks are in memory, erred, released, or
+    forgotten state
+    """
+    x0 = c.submit(inc, 1, key=("x", 0))  # memory
+    x1 = c.submit(lambda: 1 / 0, key=("x", 1))  # erred
+    x2 = c.submit(inc, 3, key=("x", 2))
+
+    x3 = c.submit(inc, 3, key=("x", 3))  # released
+    y = c.submit(inc, x3, key="y")
+    del x3
+
+    await wait([x0, x1, x2, y])
+    del x2  # forgotten
+    await async_poll_for(lambda: str(("x", 2)) not in s.tasks, timeout=5)
+
+    tg = s.task_groups["x"]
+    assert tg.states == {
+        "erred": 1,
+        "forgotten": 1,
+        "memory": 1,
+        "no-worker": 0,
+        "processing": 0,
+        "queued": 0,
+        "released": 1,
+        "waiting": 0,
+    }
+    assert tg.done
+
+
+@gen_cluster(client=True)
+async def test_task_group_not_done_waiting(c, s, a, b):
+    """TaskGroup.done is False if any of its tasks are in waiting state"""
+    ev = Event()
+    x = c.submit(ev.wait, key="x")
+    y0 = c.submit(lambda x: x, x, key=("y", 0))
+    y1 = c.submit(inc, 1, key=("y", 1))
+    await wait_for_state(y0.key, "waiting", s)
+    await y1
+
+    tg = s.task_groups["y"]
+    assert not tg.done
+    await ev.set()
+
+
+@gen_cluster(client=True)
+async def test_task_group_not_done_noworker(c, s, a, b):
+    """TaskGroup.done is False if any of its tasks are in no-worker state"""
+    x0 = c.submit(inc, 1, key=("x", 0), resources={"X": 1})
+    x1 = c.submit(inc, 1, key=("x", 1))
+    await wait_for_state(x0.key, "no-worker", s)
+    await x1
+
+    tg = s.task_groups["x"]
+    assert not tg.done
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[],
+    config={"distributed.scheduler.worker-saturation": 1.0},
+    timeout=3,
+)
+async def test_task_group_not_done_queued(c, s):
+    """TaskGroup.done is False if any of its tasks are in queued state"""
+    futs = c.map(inc, range(4))
+    await wait_for_state(futs[0].key, "queued", s)
+    tg = s.task_groups["inc"]
+    assert not tg.done
+
+
+@gen_cluster(client=True)
+async def test_task_group_not_done_processing(c, s, a, b):
+    """TaskGroup.done is False if any of its tasks are in processing state"""
+    ev = Event()
+    x0 = c.submit(ev.wait, key=("x", 0))
+    x1 = c.submit(inc, 1, key=("x", 1))
+    await wait_for_state(x0.key, "processing", s)
+    await x1
+
+    tg = s.task_groups["x"]
+    assert not tg.done
+    await ev.set()
 
 
 @gen_cluster(client=True)
@@ -4382,3 +4436,42 @@ async def test_tell_workers_when_peers_have_left(c, s, a, b):
         g = await c.submit(inc, f, key="g", workers=[w3.address])
         # fails over to the second worker in less than the connect timeout
         assert time() < start + connect_timeout
+
+
+@gen_cluster(client=True)
+async def test_client_desires_keys_creates_ts(c, s, a, b):
+    """A TaskState object is created by client_desires_keys, and
+    is only later submitted with submit/compute by a different client
+
+    See also
+    --------
+    test_scheduler.py::test_scatter_creates_ts
+    test_spans.py::test_client_desires_keys_creates_ts
+    """
+    x = Future(key="x")
+    await wait_for_state("x", "released", s)
+    assert s.tasks["x"].run_spec is None
+    async with Client(s.address, asynchronous=True) as c2:
+        c2.submit(inc, 1, key="x")
+        assert await x == 2
+    assert s.tasks["x"].run_spec is not None
+
+
+@gen_cluster(client=True)
+async def test_scatter_creates_ts(c, s, a, b):
+    """A TaskState object is created by scatter, and only later becomes runnable
+
+    See also
+    --------
+    test_scheduler.py::test_client_desires_keys_creates_ts
+    test_spans.py::test_scatter_creates_ts
+    """
+    x1 = (await c.scatter({"x": 1}, workers=[a.address]))["x"]
+    await wait_for_state("x", "memory", s)
+    assert s.tasks["x"].run_spec is None
+    async with Client(s.address, asynchronous=True) as c2:
+        x2 = c2.submit(inc, 1, key="x")
+        assert await x2 == 1
+        await a.close()
+        assert await x2 == 2
+    assert s.tasks["x"].run_spec is not None

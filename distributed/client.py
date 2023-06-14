@@ -48,7 +48,7 @@ from dask.widgets import get_template
 
 from distributed.core import ErrorMessage
 from distributed.protocol.serialize import _is_dumpable
-from distributed.utils import wait_for
+from distributed.utils import Deadline, wait_for
 
 try:
     from dask.delayed import single_key
@@ -2362,9 +2362,9 @@ class Client(SyncMethodMixin):
         elif isinstance(futures, Iterator):
             return (self.gather(f, errors=errors, direct=direct) for f in futures)
         else:
-            if hasattr(thread_state, "execution_state"):  # within worker task
-                local_worker = thread_state.execution_state["worker"]
-            else:
+            try:
+                local_worker = get_worker()
+            except ValueError:
                 local_worker = None
             return self.sync(
                 self._gather,
@@ -2587,9 +2587,9 @@ class Client(SyncMethodMixin):
                 "Consider using a normal for loop and Client.submit"
             )
 
-        if hasattr(thread_state, "execution_state"):  # within worker task
-            local_worker = thread_state.execution_state["worker"]
-        else:
+        try:
+            local_worker = get_worker()
+        except ValueError:
             local_worker = None
         return self.sync(
             self._scatter,
@@ -3731,22 +3731,23 @@ class Client(SyncMethodMixin):
 
         assert all(len(data) == v for v in response.values())
 
-    def upload_file(self, filename, **kwargs):
-        """Upload local package to workers
+    def upload_file(self, filename, load: bool = True):
+        """Upload local package to scheduler and workers
 
-        This sends a local file up to all worker nodes.  This file is placed
-        into the working directory of the running worker, see config option
+        This sends a local file up to the scheduler and all worker nodes.
+        This file is placed into the working directory of each node, see config option
         ``temporary-directory`` (defaults to :py:func:`tempfile.gettempdir`).
 
-        This directory will be added to the Python's system path so any .py,
-        .egg or .zip  files will be importable.
+        This directory will be added to the Python's system path so any ``.py``,
+        ``.egg`` or ``.zip``  files will be importable.
 
         Parameters
         ----------
         filename : string
-            Filename of .py, .egg or .zip file to send to workers
-        **kwargs : dict
-            Optional keyword arguments for the function
+            Filename of ``.py``, ``.egg``, or ``.zip`` file to send to workers
+        load : bool, optional
+            Whether or not to import the module as part of the upload process.
+            Defaults to ``True``.
 
         Examples
         --------
@@ -3759,9 +3760,9 @@ class Client(SyncMethodMixin):
         async def _():
             results = await asyncio.gather(
                 self.register_scheduler_plugin(
-                    SchedulerUploadFile(filename), name=name
+                    SchedulerUploadFile(filename, load=load), name=name
                 ),
-                self.register_worker_plugin(UploadFile(filename), name=name),
+                self.register_worker_plugin(UploadFile(filename, load=load), name=name),
             )
             return results[1]  # Results from workers upload
 
@@ -5254,10 +5255,16 @@ class as_completed:
         complete
     with_results: bool (False)
         Whether to wait and include results of futures as well;
-        in this case `as_completed` yields a tuple of (future, result)
+        in this case ``as_completed`` yields a tuple of (future, result)
     raise_errors: bool (True)
         Whether we should raise when the result of a future raises an
-        exception; only affects behavior when `with_results=True`.
+        exception; only affects behavior when ``with_results=True``.
+    timeout: int (optional)
+        The returned iterator raises a ``dask.distributed.TimeoutError``
+        if ``__next__()`` or ``__anext__()`` is called and the result
+        isn't available after timeout seconds from the original call to
+        ``as_completed()``. If timeout is not specified or ``None``, there is no limit
+        to the wait time.
 
     Examples
     --------
@@ -5294,7 +5301,15 @@ class as_completed:
     3
     """
 
-    def __init__(self, futures=None, loop=None, with_results=False, raise_errors=True):
+    def __init__(
+        self,
+        futures=None,
+        loop=None,
+        with_results=False,
+        raise_errors=True,
+        *,
+        timeout=None,
+    ):
         if futures is None:
             futures = []
         self.futures = defaultdict(lambda: 0)
@@ -5304,6 +5319,7 @@ class as_completed:
         self.thread_condition = threading.Condition()
         self.with_results = with_results
         self.raise_errors = raise_errors
+        self._deadline = Deadline.after(parse_timedelta(timeout))
 
         if futures:
             self.update(futures)
@@ -5402,6 +5418,8 @@ class as_completed:
 
     def __next__(self):
         while self.queue.empty():
+            if self._deadline.expired:
+                raise TimeoutError()
             if self.is_empty():
                 raise StopIteration()
             with self.thread_condition:
@@ -5409,6 +5427,11 @@ class as_completed:
         return self._get_and_raise()
 
     async def __anext__(self):
+        if not self._deadline.expires:
+            return await self._anext()
+        return await wait_for(self._anext(), self._deadline.remaining)
+
+    async def _anext(self):
         if not self.futures and self.queue.empty():
             raise StopAsyncIteration
         while self.queue.empty():

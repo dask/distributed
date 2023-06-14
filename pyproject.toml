@@ -27,7 +27,7 @@ requires-python = ">=3.9"
 dependencies = [
     "click >= 8.0",
     "cloudpickle >= 1.5.0",
-    "dask == 2023.5.1",
+    "dask == 2023.6.0",
     "jinja2 >= 2.10.3",
     "locket >= 1.0.0",
     "msgpack >= 1.0.0",
@@ -186,6 +186,7 @@ allow_incomplete_defs = true
 # Recent or recently overhauled modules featuring stricter validation
 module = [
     "distributed.active_memory_manager",
+    "distributed.spans",
     "distributed.system_monitor",
     "distributed.worker_memory",
     "distributed.worker_state_machine",
