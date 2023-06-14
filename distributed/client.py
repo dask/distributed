@@ -1507,7 +1507,7 @@ class Client(SyncMethodMixin):
     def __del__(self):
         # If the loop never got assigned, we failed early in the constructor,
         # nothing to do
-        if self.__loop is not None and self.__loop.asyncio_loop.is_running():
+        if self.__loop is not None:
             self.close()
 
     def _inc_ref(self, key):

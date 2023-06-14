@@ -2708,7 +2708,7 @@ def get_worker() -> Worker:
 
 
 def get_client(
-    address=None, timeout=None, resolve_address=True, asynchronous=False
+    address=None, timeout=None, resolve_address=True, asynchronous=None
 ) -> Client:
     """Get a client while within a task.
 
@@ -2724,6 +2724,9 @@ def get_client(
         ``distributed.comm.timeouts.connect`` configuration value.
     resolve_address : bool, default True
         Whether to resolve `address` to its canonical form.
+    asynchronous : bool or None, optional
+        Explicitly set the Client(..., asynchronous=...) flag, otherwise ``None``
+        will use the default in ``Client``.
 
     Returns
     -------
@@ -2765,13 +2768,13 @@ def get_client(
     else:
         if not address or worker.scheduler.address == address:
             client = worker._get_client(timeout=timeout)
-            if client.asynchronous == asynchronous:
+            if asynchronous is None:
                 return client
             return Client(
                 worker.scheduler.address,
-                loop=client.loop,
                 timeout=timeout,
                 asynchronous=asynchronous,
+                loop=client.loop,
                 set_as_default=False,
             )
 
@@ -2781,7 +2784,7 @@ def get_client(
         client = None
 
     if client and (not address or client.scheduler.address == address):
-        if client.asynchronous == asynchronous:
+        if asynchronous is None:
             return client
         return Client(
             client.scheduler.address,
@@ -2791,7 +2794,10 @@ def get_client(
             set_as_default=False,
         )
     elif address:
-        return Client(address, timeout=timeout, asynchronous=asynchronous)
+        kwargs = dict(address=address, timeout=timeout)
+        if asynchronous is not None:
+            kwargs["asynchronous"] = asynchronous
+        return Client(**kwargs)
     else:
         raise ValueError("No global client found and no address provided")
 

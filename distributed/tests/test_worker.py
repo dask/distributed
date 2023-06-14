@@ -1048,7 +1048,7 @@ async def test_pid(s, a, b):
 async def test_get_client(c, s, a, b, asynchronous):
     def f(x):
         cc = get_client(asynchronous=asynchronous)
-        assert cc.asynchronous == asynchronous
+        assert cc._asynchronous == asynchronous
 
         if asynchronous:
 
