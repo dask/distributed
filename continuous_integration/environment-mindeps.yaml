@@ -20,6 +20,7 @@ dependencies:
   - urllib3=1.24.3
   - zict=2.2.0
   # Distributed depends on the latest version of Dask
+  - partd=1.2.0
   - pip
   - pip:
     - git+https://github.com/dask/dask

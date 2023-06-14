@@ -23,7 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        environment: [mindeps, "3.9", "3.10", "3.11"]
+        environment: [mindeps, mindeps-optional, "3.9", "3.10", "3.11"]
         queuing: [queue]
         extra_packages: [null]
         # Cherry-pick test modules to split the overall runtime roughly in half
@@ -37,6 +37,10 @@ jobs:
             environment: mindeps
           - os: windows-latest
             environment: mindeps
+          - os: macos-latest
+            environment: mindeps-optional
+          - os: windows-latest
+            environment: mindeps-optional
         include:
           - os: ubuntu-latest
             environment: "3.9"
