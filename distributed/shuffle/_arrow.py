@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from io import BytesIO
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from packaging.version import parse
+
+from dask.dataframe.dispatch import from_pyarrow_table_dispatch
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -45,14 +47,6 @@ def check_minimal_arrow_version() -> None:
         )
 
 
-def _arrow_to_df(table: pa.Table, like: Any) -> pd.DataFrame:
-    if hasattr(like, "from_arrow"):
-        # TODO: Dispatch on `meta`
-        # (see: https://github.com/dask/dask/pull/10312)
-        return like.from_arrow(table)
-    return table.to_pandas(self_destruct=True)
-
-
 def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
     import pyarrow as pa
 
@@ -63,7 +57,7 @@ def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
         sr = pa.RecordBatchStreamReader(file)
         shards.append(sr.read_all())
     table = pa.concat_tables(shards)
-    df = _arrow_to_df(table, meta)
+    df = from_pyarrow_table_dispatch(meta, table)
     return df.astype(meta.dtypes)
 
 

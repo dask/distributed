@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 import toolz
 
 from dask.context import thread_state
+from dask.dataframe.dispatch import to_pyarrow_table_dispatch
 from dask.utils import get_meta_library, parse_bytes
 
 from distributed.core import PooledRPCCall
@@ -927,7 +928,6 @@ def split_by_worker(
     Split data into many arrow batches, partitioned by destination worker
     """
     import numpy as np
-    import pyarrow as pa
 
     # (cudf support) Align dataframe backends
     lib = get_meta_library(df)
@@ -944,12 +944,7 @@ def split_by_worker(
     # assert len(df) == nrows  # Not true if some outputs aren't wanted
     # FIXME: If we do not preserve the index something is corrupting the
     # bytestream such that it cannot be deserialized anymore
-    if hasattr(df, "to_arrow") and callable(df.to_arrow):
-        # TODO: Dispatch on `df`
-        # (see: https://github.com/dask/dask/pull/10312)
-        t = df.to_arrow(preserve_index=True)
-    else:
-        t = pa.Table.from_pandas(df, preserve_index=True)
+    t = to_pyarrow_table_dispatch(df, preserve_index=True)
     t = t.sort_by("_worker")
     codes = np.asarray(t.select(["_worker"]))[0]
     t = t.drop(["_worker"])

@@ -114,7 +114,16 @@ async def test_minimal_version(c, s, a, b):
 @pytest.mark.gpu
 @gen_cluster(client=True)
 async def test_basic_cudf_support(c, s, a, b):
+    cudf = pytest.importorskip("cudf")
     pytest.importorskip("dask_cudf")
+
+    try:
+        from dask.dataframe.dispatch import to_pyarrow_table_dispatch
+
+        to_pyarrow_table_dispatch(cudf.DataFrame())
+    except (ImportError, TypeError):
+        pytest.skip(reason="Newer version of cudf is required.")
+
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
