@@ -57,13 +57,7 @@ def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
         sr = pa.RecordBatchStreamReader(file)
         shards.append(sr.read_all())
     table = pa.concat_tables(shards)
-    if hasattr(dataframe_dispatch, "from_pyarrow_table_dispatch"):
-        df = dataframe_dispatch.from_pyarrow_table_dispatch(
-            meta, table, self_destruct=True
-        )
-    else:
-        # Backward compat
-        df = table.to_pandas(self_destruct=True)
+    df = dataframe_dispatch.from_pyarrow_table_dispatch(meta, table, self_destruct=True)
     return df.astype(meta.dtypes)
 
 

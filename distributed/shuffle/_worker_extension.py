@@ -944,13 +944,7 @@ def split_by_worker(
     # assert len(df) == nrows  # Not true if some outputs aren't wanted
     # FIXME: If we do not preserve the index something is corrupting the
     # bytestream such that it cannot be deserialized anymore
-    if hasattr(dataframe_dispatch, "to_pyarrow_table_dispatch"):
-        t = dataframe_dispatch.to_pyarrow_table_dispatch(df, preserve_index=True)
-    else:
-        import pyarrow as pa
-
-        # Backward compat
-        t = pa.Table.from_pandas(df, preserve_index=True)
+    t = dataframe_dispatch.to_pyarrow_table_dispatch(df, preserve_index=True)
     t = t.sort_by("_worker")
     codes = np.asarray(t.select(["_worker"]))[0]
     t = t.drop(["_worker"])

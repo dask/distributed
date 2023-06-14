@@ -121,8 +121,8 @@ async def test_basic_cudf_support(c, s, a, b):
         from dask.dataframe.dispatch import to_pyarrow_table_dispatch
 
         to_pyarrow_table_dispatch(cudf.DataFrame())
-    except (ImportError, TypeError):
-        pytest.skip(reason="Newer version of dask and/or dask_cudf is required.")
+    except TypeError:
+        pytest.skip(reason="Newer version of dask_cudf is required.")
 
     df = dask.datasets.timeseries(
         start="2000-01-01",
