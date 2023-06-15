@@ -1507,7 +1507,12 @@ class Client(SyncMethodMixin):
         # If the loop never got assigned, we failed early in the constructor,
         # nothing to do
         if self.__loop is not None:
-            self.close()
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+            else:
+                self.close()
 
     def _inc_ref(self, key):
         with self._refcount_lock:
