@@ -3524,7 +3524,7 @@ class FinePerformanceMetrics(DashboardComponent):
             units.add(unit)
 
             if context == "execute":
-                function, = other
+                (function,) = other
                 assert isinstance(function, str)
                 functions.add(function)
 
