@@ -342,6 +342,10 @@ async def test_WorkersMemory(c, s, a, b):
 async def test_FinePerformanceMetrics(c, s, a, b):
     cl = FinePerformanceMetrics(s)
 
+    # Test with no metrics
+    cl.update()
+    assert not cl.visible_functions
+
     # execute on default span; multiple tasks in same TaskGroup
     x0 = c.submit(inc, 0, key="x-0", workers=[a.address])
     x1 = c.submit(inc, 1, key="x-1", workers=[a.address])
@@ -378,7 +382,6 @@ async def test_FinePerformanceMetrics(c, s, a, b):
     await a.heartbeat()
     await b.heartbeat()
 
-    assert not cl.visible_functions
     cl.update()
     assert sorted(cl.visible_functions) == ["v", "w", "x", "y", "z"]
     assert sorted(cl.unit_selector.options) == ["bytes", "count", "custom", "seconds"]

@@ -3618,10 +3618,9 @@ class FinePerformanceMetrics(DashboardComponent):
                     # Custom metrics can provide any hashable as the label
                     activity = str(activity)
                     execute_by_func[function, activity] += v
+                    execute[activity] += v
                     visible_functions.add(function)
                     visible_activities.add(activity)
-                    execute_by_func[function, activity] += v
-                    execute[activity] += v
 
             elif context == "get-data" and not function_sel:
                 # Note: this will always be empty when a span is selected
@@ -3710,7 +3709,6 @@ class FinePerformanceMetrics(DashboardComponent):
         _build_task_execution_by_prefix_chart
         _update_task_execution_by_prefix_chart
         """
-        ymax = 0.0
         func_totals = [
             sum(data[function, activity] for activity in self.visible_activities)
             for function in self.visible_functions
@@ -3728,8 +3726,7 @@ class FinePerformanceMetrics(DashboardComponent):
                 self._format(v) + f" ({v * perc_ki:.0f}%)"
                 for v, perc_ki in zip(values, perc_k)
             ]
-            ymax = max(ymax, sum(values))
-        return out, ymax
+        return out, max(func_totals, default=0.0)
 
     def _build_task_execution_by_prefix_chart(self) -> figure:
         """Create empty stacked bar chart for execute by function
