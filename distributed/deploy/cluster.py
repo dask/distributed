@@ -520,6 +520,11 @@ class Cluster(SyncMethodMixin):
             display(mimebundle, raw=True)
 
     def __enter__(self):
+        if self.asynchronous:
+            raise TypeError(
+                "Used 'with' with asynchronous class; please use 'async with'"
+            )
+
         return self.sync(self.__aenter__)
 
     def __exit__(self, exc_type, exc_value, traceback):
