@@ -591,7 +591,6 @@ class BaseTCPListener(BaseListener, RequireEncryptionMixin):
         tcp_server, self.tcp_server = self.tcp_server, None
         if tcp_server is not None:
             tcp_server.stop()
-        super().stop()
 
     def _check_started(self):
         if self.tcp_server is None:

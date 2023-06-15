@@ -533,7 +533,6 @@ class UCXListener(BaseListener):
 
     def stop(self):
         self.ucp_server = None
-        super().stop()
 
     def get_host_port(self):
         # TODO: TCP raises if this hasn't started yet.

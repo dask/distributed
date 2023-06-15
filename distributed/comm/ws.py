@@ -403,7 +403,6 @@ class WSListener(BaseListener):
 
     def stop(self):
         self.server.stop()
-        super().stop()
 
     def get_host_port(self):
         """

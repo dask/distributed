@@ -304,7 +304,6 @@ class InProcListener(BaseListener):
     def stop(self):
         self.listen_q.put_nowait(None)
         self.manager.remove_listener(self.address)
-        super().stop()
 
     @property
     def listen_address(self):
