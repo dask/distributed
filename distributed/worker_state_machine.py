@@ -2798,7 +2798,7 @@ class WorkerState:
             for dep in ts.dependents:
                 if dep.state in ("executing", "long-running"):
                     raise RuntimeError(
-                        f"Cannot remove replica of {ts.key!r} while {dep.key!r} in state {ts.state!r}."
+                        f"Cannot remove replica of {ts.key!r} while {dep.key!r} in state {dep.state!r}."
                     )  # pragma: no cover
             self.log.append((ts.key, "remove-replica", ev.stimulus_id, time()))
             recommendations[ts] = "released"
