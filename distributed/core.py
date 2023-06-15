@@ -673,6 +673,12 @@ class Server:
             future = listener.stop()
             if inspect.isawaitable(future):
                 _stops.add(future)
+            try:
+                abort_handshaking_comms = listener.abort_handshaking_comms
+            except AttributeError:
+                pass
+            else:
+                abort_handshaking_comms()
 
         if _stops:
 
@@ -1037,6 +1043,12 @@ class Server:
                             PendingDeprecationWarning,
                         )
                         _stops.add(future)
+                    try:
+                        abort_handshaking_comms = listener.abort_handshaking_comms
+                    except AttributeError:
+                        pass
+                    else:
+                        abort_handshaking_comms()
                 if _stops:
                     await asyncio.gather(*_stops)
 

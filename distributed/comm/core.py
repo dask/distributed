@@ -220,7 +220,7 @@ class Listener(ABC):
         """
 
     @abstractmethod
-    def stop(self) -> None:
+    def stop(self):
         """
         Stop listening.  This does not shutdown already established
         communications, but prevents accepting new ones.
@@ -289,11 +289,10 @@ class BaseListener(Listener):
         finally:
             self.__comms.discard(comm)
 
-    def stop(self) -> None:
+    def abort_handshaking_comms(self) -> None:
         comms, self.__comms = self.__comms, set()
         for comm in comms:
             comm.abort()
-        super().stop()
 
 
 class Connector(ABC):

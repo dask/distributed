@@ -734,7 +734,6 @@ class TCPListener(BaseListener):
         # Stop listening
         for server in self._servers:
             server.close()
-        super().stop()
 
     def get_host_port(self):
         """
