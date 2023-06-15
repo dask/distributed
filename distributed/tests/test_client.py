@@ -6668,7 +6668,7 @@ async def test_performance_report(c, s, a, b, local):
     assert "Dask Performance Report" in data
     assert "x = da.random" in data
     assert "Threads: 4" in data
-    assert "No logs to report" in data
+    assert "INFO - Run out-of-band function" in data
     assert dask.__version__ in data
 
     # stacklevel=2 captures code two frames back -- which in this case
