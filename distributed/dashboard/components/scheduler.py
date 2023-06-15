@@ -90,7 +90,7 @@ from distributed.diagnostics.task_stream import color_of as ts_color_of
 from distributed.diagnostics.task_stream import colors as ts_color_lookup
 from distributed.metrics import time
 from distributed.scheduler import Scheduler
-from distributed.spans import SpansSchedulerExtension
+from distributed.spans import Span, SpansSchedulerExtension
 from distributed.utils import Log, log_errors
 
 if dask.config.get("distributed.dashboard.export-tool"):
@@ -3524,7 +3524,7 @@ class FinePerformanceMetrics(DashboardComponent):
             units.add(unit)
 
             if context == "execute":
-                _, function = other
+                (function,) = other
                 assert isinstance(function, str)
                 functions.add(function)
 
@@ -3595,20 +3595,16 @@ class FinePerformanceMetrics(DashboardComponent):
 
         function_sel = set(self.function_selector.value)
 
+        span: Span | Scheduler
         if self.span_tag_selector.value:
             spans_ext: SpansSchedulerExtension = self.scheduler.extensions["spans"]
-            metrics = spans_ext.merge_by_tags(
-                *self.span_tag_selector.value
-            ).cumulative_worker_metrics
-            has_span_id = False
+            span = spans_ext.merge_by_tags(*self.span_tag_selector.value)
         else:
-            metrics = self.scheduler.cumulative_worker_metrics
-            has_span_id = True
+            span = self.scheduler
 
-        for k, v in metrics.items():
+        for k, v in span.cumulative_worker_metrics.items():
             if not isinstance(k, tuple):
-                # Only happens in global metrics
-                continue  # type: ignore[unreachable]
+                continue  # Only happens in global metrics
             context, *other, activity, unit = k
             assert isinstance(unit, str)
             assert self.unit_selector.value
@@ -3616,7 +3612,7 @@ class FinePerformanceMetrics(DashboardComponent):
                 continue
 
             if context == "execute":
-                function = other[1 if has_span_id else 0]
+                (function,) = other
                 assert isinstance(function, str)
                 if not function_sel or function in function_sel:
                     # Custom metrics can provide any hashable as the label
