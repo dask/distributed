@@ -3211,6 +3211,31 @@ async def test_cancel_clears_processing(c, s, *workers):
     s.validate_state()
 
 
+@gen_cluster(client=True)
+async def test_handle_null_partitions_p2p_shuffling(c, s, *workers):
+    has_pyarrow = False
+    try:
+        check_minimal_arrow_version()
+        has_pyarrow = True
+    except RuntimeError:
+        pass
+
+    if has_pyarrow:
+        import pandas as pd
+
+        dd = pytest.importorskip("dask.dataframe")
+        data = [
+            {"companies": [], "id": "a", "x": None},
+            {"companies": [{"id": 3}, {"id": 5}], "id": "b", "x": None},
+            {"companies": [{"id": 3}, {"id": 4}, {"id": 5}], "id": "c", "x": "b"},
+            {"companies": [{"id": 9}], "id": "a", "x": "a"},
+        ]
+        df = pd.DataFrame(data)
+        ddf = dd.from_pandas(df, npartitions=2)
+        ddf = ddf.shuffle(on="id", shuffle="p2p", ignore_index=True)
+        await c.compute(ddf)
+
+
 def test_default_get(loop_in_thread):
     has_pyarrow = False
     try:
