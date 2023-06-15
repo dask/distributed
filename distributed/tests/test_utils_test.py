@@ -605,7 +605,7 @@ async def test_dump_cluster_state_unresponsive_local_worker(s, a, b, tmp_path):
 )
 async def test_dump_cluster_unresponsive_remote_worker(c, s, a, b, tmp_path):
     clog_fut = asyncio.create_task(
-        c.run(lambda dask_scheduler: dask_scheduler.stop(), workers=[a.worker_address])
+        c.run(lambda dask_worker: dask_worker.stop(), workers=[a.worker_address])
     )
     await asyncio.sleep(0.2)
 
