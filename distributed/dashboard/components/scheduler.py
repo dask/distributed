@@ -3622,10 +3622,9 @@ class FinePerformanceMetrics(DashboardComponent):
                     # Custom metrics can provide any hashable as the label
                     activity = str(activity)
                     execute_by_func[function, activity] += v
+                    execute[activity] += v
                     visible_functions.add(function)
                     visible_activities.add(activity)
-                    execute_by_func[function, activity] += v
-                    execute[activity] += v
 
             elif context == "get-data" and not function_sel:
                 # Note: this will always be empty when a span is selected
