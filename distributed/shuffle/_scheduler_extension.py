@@ -314,7 +314,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
                 # TODO: Do we need to handle other states?
 
         # If processing the transactions causes a task to get released, this
-        # remove the shuffle from self.states. Therefore, we must process them
+        # removes the shuffle from self.states. Therefore, we must process them
         # outside of the loop.
         self.scheduler.transitions(recs, stimulus_id=stimulus_id)
 
