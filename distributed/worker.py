@@ -1034,6 +1034,14 @@ class Worker(BaseWorker, ServerNode):
             # spilling is disabled
             spilled_memory, spilled_disk = 0, 0
 
+        # Squash span_id in metrics.
+        # SpansWorkerExtension, if loaded, will send them out disaggregated.
+        digests: defaultdict[Hashable, float] = defaultdict(float)
+        for k, v in self.digests_total_since_heartbeat.items():
+            if isinstance(k, tuple) and k[0] == "execute":
+                k = k[:1] + k[2:]
+            digests[k] += v
+
         out = dict(
             task_counts=self.state.task_counter.current_count(by_prefix=False),
             bandwidth={
@@ -1041,7 +1049,7 @@ class Worker(BaseWorker, ServerNode):
                 "workers": dict(self.bandwidth_workers),
                 "types": keymap(typename, self.bandwidth_types),
             },
-            digests_total_since_heartbeat=dict(self.digests_total_since_heartbeat),
+            digests_total_since_heartbeat=dict(digests),
             managed_bytes=self.state.nbytes,
             spilled_bytes={
                 "memory": spilled_memory,
