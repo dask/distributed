@@ -17,7 +17,7 @@ from typing import Any
 import dask
 
 from distributed.comm.addressing import parse_host_port, unparse_host_port
-from distributed.comm.core import Comm, CommClosedError, Connector, Listener
+from distributed.comm.core import BaseListener, Comm, CommClosedError, Connector
 from distributed.comm.registry import Backend
 from distributed.comm.utils import (
     ensure_concrete_host,
@@ -594,7 +594,7 @@ class TLSConnector(TCPConnector):
         return {"ssl": ctx}
 
 
-class TCPListener(Listener):
+class TCPListener(BaseListener):
     prefix = "tcp://"
     comm_class = TCP
 
@@ -608,6 +608,7 @@ class TCPListener(Listener):
         default_port=0,
         **kwargs,
     ):
+        super().__init__()
         self.ip, self.port = parse_host_port(address, default_port)
         self.default_host = default_host
         self.comm_handler = comm_handler
@@ -733,6 +734,7 @@ class TCPListener(Listener):
         # Stop listening
         for server in self._servers:
             server.close()
+        super().stop()
 
     def get_host_port(self):
         """

@@ -221,7 +221,7 @@ class Listener(ABC):
         """
 
     @abstractmethod
-    def stop(self):
+    def stop(self) -> None:
         """
         Stop listening.  This does not shutdown already established
         communications, but prevents accepting new ones.
@@ -287,6 +287,26 @@ class Listener(ABC):
         comm.handshake_options = comm.handshake_configuration(
             comm.local_info, comm.remote_info
         )
+
+
+class BaseListener(Listener):
+    def __init__(self) -> None:
+        self.__comms: set[Comm] = set()
+
+    async def on_connection(
+        self, comm: Comm, handshake_overrides: dict[str, Any] | None = None
+    ) -> None:
+        self.__comms.add(comm)
+        try:
+            return await super().on_connection(comm, handshake_overrides)
+        finally:
+            self.__comms.discard(comm)
+
+    def stop(self) -> None:
+        comms, self.__comms = self.__comms, set()
+        for comm in comms:
+            comm.abort()
+        super().stop()
 
 
 class Connector(ABC):
