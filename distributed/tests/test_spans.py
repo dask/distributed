@@ -13,6 +13,7 @@ from distributed.utils_test import (
     async_poll_for,
     gen_cluster,
     inc,
+    slowinc,
     wait_for_state,
 )
 
@@ -530,3 +531,66 @@ async def test_worker_metrics(c, s, a, b):
     ]
     for k, v in cum_metrics.items():
         assert v == sum(sp._cumulative_worker_metrics[k] for sp in ext.spans.values())
+
+
+@gen_cluster(client=True)
+async def test_merge_by_tags(c, s, a, b):
+    with span("foo") as foo1:
+        await c.submit(inc, 1, key="x1")
+        with span("bar") as bar1:  # foo, bar
+            await c.submit(inc, 2, key="x2")
+            with span("foo") as foo2:  # foo, bar, foo
+                await c.submit(inc, 3, key="x3")
+        with span("foo") as foo3:  # foo, foo
+            await c.submit(inc, 4, key="x4")
+    with span("bar") as bar2:  # bar
+        await c.submit(inc, 5, key="x5")
+
+    ext = s.extensions["spans"]
+    assert {s.id for s in ext.find_by_tags("foo")} == {foo1}
+    assert {s.id for s in ext.find_by_tags("foo", "bar")} == {foo1, bar2}
+    assert {s.id for s in ext.find_by_tags("bar", "foo")} == {foo1, bar2}
+    assert {s.id for s in ext.find_by_tags("bar")} == {bar1, bar2}
+
+    def tgnames(*tags):
+        return [tg.name for tg in ext.merge_by_tags(*tags).traverse_groups()]
+
+    assert tgnames("foo") == ["x1", "x2", "x3", "x4"]
+    assert tgnames("foo", "bar") == ["x1", "x2", "x3", "x4", "x5"]
+    assert tgnames("bar", "foo") == ["x5", "x1", "x2", "x3", "x4"]
+    assert tgnames("bar") == ["x5", "x2", "x3"]
+
+
+@gen_cluster(client=True)
+async def test_merge_by_tags_metrics(c, s, a, b):
+    with span("foo") as foo1:
+        await c.submit(slowinc, 1, delay=0.05, key="x-1")
+    await async_poll_for(lambda: not s.task_groups, timeout=5)
+
+    with span("foo") as foo2:
+        await c.submit(slowinc, 2, delay=0.06, key="x-2")
+    await async_poll_for(lambda: not s.task_groups, timeout=5)
+
+    with span("bar") as bar1:
+        await c.submit(slowinc, 3, delay=0.07, key="x-3")
+    await async_poll_for(lambda: not s.task_groups, timeout=5)
+
+    await a.heartbeat()
+    await b.heartbeat()
+
+    ext = s.extensions["spans"]
+    k = ("execute", "x", "thread-noncpu", "seconds")
+    t_foo = ext.merge_by_tags("foo").cumulative_worker_metrics[k]
+    t_bar = ext.merge_by_tags("bar").cumulative_worker_metrics[k]
+    t_foo1 = ext.spans[foo1]._cumulative_worker_metrics[k]
+    t_foo2 = ext.spans[foo2]._cumulative_worker_metrics[k]
+    t_bar1 = ext.spans[bar1]._cumulative_worker_metrics[k]
+    assert t_foo1 > 0
+    assert t_foo2 > 0
+    assert t_bar1 > 0
+    assert t_foo == t_foo1 + t_foo2
+    assert t_bar == t_bar1
+
+    assert ext.merge_by_tags("foo").enqueued == min(
+        ext.spans[foo1].enqueued, ext.spans[foo2].enqueued
+    )

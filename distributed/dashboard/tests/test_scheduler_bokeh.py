@@ -405,6 +405,10 @@ async def test_FinePerformanceMetrics(c, s, a, b):
     cl.update()
     assert cl.visible_activities == orig_activities
 
+    cl.span_tag_selector.value = ["foo"]
+    cl.update()
+    assert sorted(cl.visible_functions) == ["y", "z"]
+
 
 @gen_cluster(client=True)
 async def test_ClusterMemory(c, s, a, b):
