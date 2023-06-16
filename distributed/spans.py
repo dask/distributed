@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 import weakref
 from collections import defaultdict
-from collections.abc import Iterable, Iterator
+from collections.abc import Hashable, Iterable, Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -124,7 +124,7 @@ class Span:
     #: stop
     enqueued: float
 
-    _cumulative_worker_metrics: defaultdict[tuple[str, ...], float]
+    _cumulative_worker_metrics: defaultdict[tuple[Hashable, ...], float]
 
     # Support for weakrefs to a class with __slots__
     __weakref__: Any
@@ -266,7 +266,7 @@ class Span:
         return sum(tg.nbytes_total for tg in self.traverse_groups())
 
     @property
-    def cumulative_worker_metrics(self) -> defaultdict[tuple[str, ...], float]:
+    def cumulative_worker_metrics(self) -> defaultdict[tuple[Hashable, ...], float]:
         """Replica of Worker.digests_total and Scheduler.cumulative_worker_metrics, but
         only for the metrics that can be attributed to the current span tree.
         The span_id has been removed from the key.
@@ -276,7 +276,7 @@ class Span:
         but more may be added in the future with a different format; please test for
         ``k[0] == "execute"``.
         """
-        out: defaultdict[tuple[str, ...], float] = defaultdict(float)
+        out: defaultdict[tuple[Hashable, ...], float] = defaultdict(float)
         for child in self.traverse_spans():
             for k, v in child._cumulative_worker_metrics.items():
                 out[k] += v
@@ -418,7 +418,7 @@ class SpansSchedulerExtension:
         return Span.merge(*self.find_by_tags(*tags))
 
     def heartbeat(
-        self, ws: WorkerState, data: dict[str, dict[tuple[str, ...], float]]
+        self, ws: WorkerState, data: dict[tuple[Hashable, ...], float]
     ) -> None:
         """Triggered by SpansWorkerExtension.heartbeat().
 
@@ -429,36 +429,49 @@ class SpansSchedulerExtension:
         SpansWorkerExtension.heartbeat
         Span.cumulative_worker_metrics
         """
-        for span_id, metrics in data.items():
+        for (context, span_id, *other), v in data.items():
+            assert isinstance(span_id, str)
             span = self.spans[span_id]
-            for k, v in metrics.items():
-                span._cumulative_worker_metrics[k] += v
+            span._cumulative_worker_metrics[(context, *other)] += v
 
 
 class SpansWorkerExtension:
     """Worker extension for spans support"""
 
     worker: Worker
+    digests_total_since_heartbeat: dict[tuple[Hashable, ...], float]
 
     def __init__(self, worker: Worker):
         self.worker = worker
+        self.digests_total_since_heartbeat = {}
 
-    def heartbeat(self) -> dict[str, dict[tuple[str, ...], float]]:
+    def collect_digests(self) -> None:
+        """Make a local copy of Worker.digests_total_since_heartbeat. We can't just
+        parse it directly in heartbeat() as the event loop may be yielded between its
+        call and `self.worker.digests_total_since_heartbeat.clear()`, causing the
+        scheduler to become misaligned with the workers.
+        """
+        # Note: this method may be called spuriously by Worker._register_with_scheduler,
+        # but when it does it's guaranteed not to find any metrics
+        assert not self.digests_total_since_heartbeat
+        self.digests_total_since_heartbeat = {
+            k: v
+            for k, v in self.worker.digests_total_since_heartbeat.items()
+            if isinstance(k, tuple) and k[0] == "execute"
+        }
+
+    def heartbeat(self) -> dict[tuple[Hashable, ...], float]:
         """Apportion the metrics that do have a span to the Spans on the scheduler
 
         Returns
         -------
-        ``{span_id: {("execute", prefix, activity, unit): value}}``
+        ``{(context, span_id, prefix, activity, unit): value}}``
 
         See also
         --------
         SpansSchedulerExtension.heartbeat
         Span.cumulative_worker_metrics
         """
-        out: defaultdict[str, dict[tuple[str, ...], float]] = defaultdict(dict)
-        for k, v in self.worker.digests_total_since_heartbeat.items():
-            if isinstance(k, tuple) and k[0] == "execute":
-                _, span_id, prefix, activity, unit = k
-                assert span_id is not None
-                out[span_id]["execute", prefix, activity, unit] = v
-        return dict(out)
+        out = self.digests_total_since_heartbeat
+        self.digests_total_since_heartbeat = {}
+        return out
