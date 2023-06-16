@@ -6,7 +6,6 @@ import logging
 import uuid
 import warnings
 from contextlib import suppress
-from inspect import isawaitable
 from typing import Any
 
 from packaging.version import parse as parse_version
@@ -540,9 +539,7 @@ class Cluster(SyncMethodMixin):
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        f = self.close()
-        if isawaitable(f):
-            await f
+        await self.close()
 
     @property
     def scheduler_address(self) -> str:
