@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ShuffleState(abc.ABC):
-    _run_id_iterator: ClassVar[itertools.count] = itertools.count()
+    _run_id_iterator: ClassVar[itertools.count] = itertools.count(1)
 
     id: ShuffleId
     run_id: int
