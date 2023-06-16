@@ -279,8 +279,6 @@ async def test_no_more_workers_than_tasks():
                 assert len(cluster.scheduler.workers) <= 1
 
 
-@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
-@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
 def test_basic_no_loop(cleanup):
     loop = None
     try:
@@ -293,8 +291,7 @@ def test_basic_no_loop(cleanup):
                 assert future.result() == 2
             loop = cluster.loop
     finally:
-        if loop is not None:
-            loop.add_callback(loop.stop)
+        assert loop is None or not loop.asyncio_loop.is_running()
 
 
 @pytest.mark.flaky(condition=LINUX, reruns=10, reruns_delay=5)
