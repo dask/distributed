@@ -12,7 +12,6 @@ from itertools import product
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from distributed.diagnostics.plugin import SchedulerPlugin
-from distributed.protocol import to_serialize
 from distributed.shuffle._rechunk import ChunkedAxes, NIndex
 from distributed.shuffle._shuffle import (
     ShuffleId,
@@ -22,8 +21,6 @@ from distributed.shuffle._shuffle import (
 )
 
 if TYPE_CHECKING:
-    import pandas as pd
-
     from distributed.scheduler import (
         Recs,
         Scheduler,
@@ -53,7 +50,6 @@ class ShuffleState(abc.ABC):
 class DataFrameShuffleState(ShuffleState):
     type: ClassVar[ShuffleType] = ShuffleType.DATAFRAME
     worker_for: dict[int, str]
-    meta: pd.DataFrame
     column: str
 
     def to_msg(self) -> dict[str, Any]:
@@ -63,7 +59,6 @@ class DataFrameShuffleState(ShuffleState):
             "run_id": self.run_id,
             "worker_for": self.worker_for,
             "column": self.column,
-            "meta": to_serialize(self.meta),
             "output_workers": self.output_workers,
         }
 
@@ -189,11 +184,9 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     def _create_dataframe_shuffle_state(
         self, id: ShuffleId, spec: dict[str, Any]
     ) -> DataFrameShuffleState:
-        meta = spec["meta"]
         column = spec["column"]
         npartitions = spec["npartitions"]
         parts_out = spec["parts_out"]
-        assert meta is not None
         assert column is not None
         assert npartitions is not None
         assert parts_out is not None
@@ -207,7 +200,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             id=id,
             run_id=next(ShuffleState._run_id_iterator),
             worker_for=mapping,
-            meta=meta,
             column=column,
             output_workers=output_workers,
             participating_workers=output_workers.copy(),
@@ -302,6 +294,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
 
         stimulus_id = f"shuffle-failed-worker-left-{time()}"
 
+        recs: Recs = {}
         for shuffle_id, shuffle in self.states.items():
             if worker not in shuffle.participating_workers:
                 continue
@@ -312,7 +305,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             self._fail_on_workers(shuffle, str(exception))
 
             barrier_task = self.scheduler.tasks[barrier_key(shuffle_id)]
-            recs: Recs = {}
             if barrier_task.state == "memory":
                 for dt in barrier_task.dependents:
                     if worker not in dt.worker_restrictions:
@@ -321,7 +313,10 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
                     recs.update({dt.key: "waiting"})
                 # TODO: Do we need to handle other states?
 
-            self.scheduler.transitions(recs, stimulus_id=stimulus_id)
+        # If processing the transactions causes a task to get released, this
+        # removes the shuffle from self.states. Therefore, we must process them
+        # outside of the loop.
+        self.scheduler.transitions(recs, stimulus_id=stimulus_id)
 
     def transition(
         self,
