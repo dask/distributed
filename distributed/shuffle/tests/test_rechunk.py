@@ -180,6 +180,60 @@ async def test_rechunk_configuration(c, s, *ws, config_value, keyword):
     assert np.all(await c.compute(x2) == a)
 
 
+@pytest.mark.parametrize("config_value", ["tasks", "p2p", "auto", None])
+@gen_cluster(client=True)
+async def test_rechunk_auto_keyword(c, s, *ws, config_value):
+    with dask.config.set(
+        {"array.rechunk.method": config_value} if config_value else {}
+    ):
+        rng = da.random.default_rng()
+        x = rng.random((100, 100), chunks=(100, 1))
+        new = ((1,) * 100, (100,))
+        result = rechunk(x, chunks=new, method="auto")
+        assert all(
+            key[0][0].startswith("rechunk-p2p") for key in result.__dask_keys__()
+        )
+        assert result.chunks == new
+
+        new = ((50,) * 2, (2,) * 50)
+        result = rechunk(x, chunks=new, method="auto")
+        assert not any(
+            key[0][0].startswith("rechunk-p2p") for key in result.__dask_keys__()
+        )
+        assert result.chunks == new
+
+
+@pytest.mark.parametrize("keyword_value", ["tasks", "p2p", "auto", None])
+@gen_cluster(client=True)
+async def test_rechunk_auto_config(c, s, *ws, keyword_value):
+    with dask.config.set({"array.rechunk.method": "auto"}):
+        rng = da.random.default_rng()
+        x = rng.random((100, 100), chunks=(100, 1))
+        new = ((1,) * 100, (100,))
+        result = rechunk(x, chunks=new, method=keyword_value)
+        if keyword_value == "tasks":
+            assert not any(
+                key[0][0].startswith("rechunk-p2p") for key in result.__dask_keys__()
+            )
+        else:
+            assert all(
+                key[0][0].startswith("rechunk-p2p") for key in result.__dask_keys__()
+            )
+        assert result.chunks == new
+
+        new = ((50,) * 2, (2,) * 50)
+        result = rechunk(x, chunks=new, method=keyword_value)
+        if keyword_value == "p2p":
+            assert all(
+                key[0][0].startswith("rechunk-p2p") for key in result.__dask_keys__()
+            )
+        else:
+            assert not any(
+                key[0][0].startswith("rechunk-p2p") for key in result.__dask_keys__()
+            )
+        assert result.chunks == new
+
+
 @gen_cluster(client=True)
 async def test_rechunk_2d(c, s, *ws):
     """Try rechunking a random 2d matrix
