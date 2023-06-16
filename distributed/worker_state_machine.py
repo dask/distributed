@@ -482,6 +482,7 @@ class TaskErredMsg(SendMessageToScheduler):
     op = "task-erred"
 
     key: str
+    run_id: int
     exception: Serialize
     traceback: Serialize | None
     exception_text: str
@@ -502,6 +503,7 @@ class TaskErredMsg(SendMessageToScheduler):
         assert ts.exception
         return TaskErredMsg(
             key=ts.key,
+            run_id=ts.run_id,
             exception=ts.exception,
             traceback=ts.traceback,
             exception_text=ts.exception_text,
