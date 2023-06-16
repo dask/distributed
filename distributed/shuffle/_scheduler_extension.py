@@ -294,6 +294,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
 
         stimulus_id = f"shuffle-failed-worker-left-{time()}"
 
+        recs: Recs = {}
         for shuffle_id, shuffle in self.states.items():
             if worker not in shuffle.participating_workers:
                 continue
@@ -304,7 +305,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             self._fail_on_workers(shuffle, str(exception))
 
             barrier_task = self.scheduler.tasks[barrier_key(shuffle_id)]
-            recs: Recs = {}
             if barrier_task.state == "memory":
                 for dt in barrier_task.dependents:
                     if worker not in dt.worker_restrictions:
@@ -313,7 +313,10 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
                     recs.update({dt.key: "waiting"})
                 # TODO: Do we need to handle other states?
 
-            self.scheduler.transitions(recs, stimulus_id=stimulus_id)
+        # If processing the transactions causes a task to get released, this
+        # removes the shuffle from self.states. Therefore, we must process them
+        # outside of the loop.
+        self.scheduler.transitions(recs, stimulus_id=stimulus_id)
 
     def transition(
         self,
