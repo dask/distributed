@@ -1853,7 +1853,7 @@ class SchedulerState:
                     duration = self.UNKNOWN_TASK_DURATION
             res += duration * count
         occ = res + network_occ / self.bandwidth
-        assert occ >= 0, (res, network_occ, self.bandwidth)
+        assert occ >= 0, (occ, res, network_occ, self.bandwidth)
         return occ
 
     #####################
