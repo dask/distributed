@@ -51,6 +51,6 @@ dependencies:
   - zstandard >=0.9.0
   - pip:
       # - git+https://github.com/dask/dask
-      - git+https://github.com/hendrikmakait/dask@d4a288cf4a00b04b2333d973b37a0e270784b807
+      - git+https://github.com/hendrikmakait/dask@addf9afa6c284565e82f95fa750c9325710bdfce
       - git+https://github.com/dask/crick  # Only tested here
       - keras

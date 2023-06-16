@@ -17,6 +17,7 @@ from dask.array.core import concatenate3
 from dask.array.rechunk import normalize_chunks, rechunk
 from dask.array.utils import assert_eq
 
+from distributed import Client
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._rechunk import ShardID, rechunk_slicing
 from distributed.shuffle._scheduler_extension import get_worker_for_hash_sharding
@@ -181,26 +182,46 @@ async def test_rechunk_configuration(c, s, *ws, config_value, keyword):
 
 
 @pytest.mark.parametrize("config_value", ["tasks", "p2p", "auto", None])
-@gen_cluster(client=True)
-async def test_rechunk_auto_keyword(c, s, *ws, config_value):
+@gen_cluster(client=False)
+async def test_rechunk_auto_keyword(s, *ws, config_value):
     with dask.config.set(
         {"array.rechunk.method": config_value} if config_value else {}
     ):
         rng = da.random.default_rng()
         x = rng.random((100, 100), chunks=(100, 1))
+        # This is above the threshold
         new = ((1,) * 100, (100,))
         result = rechunk(x, chunks=new, method="auto")
-        assert all(
-            key[0][0].startswith("rechunk-p2p") for key in result.__dask_keys__()
-        )
-        assert result.chunks == new
 
-        new = ((50,) * 2, (2,) * 50)
-        result = rechunk(x, chunks=new, method="auto")
+        # We don't have a client to run things with, so don't choose P2P
         assert not any(
             key[0][0].startswith("rechunk-p2p") for key in result.__dask_keys__()
         )
-        assert result.chunks == new
+
+        async with Client(s.address, asynchronous=True, set_as_default=True):
+            # Now we have a client, choose P2P
+            result = rechunk(x, chunks=new, method="auto")
+            assert all(
+                key[0][0].startswith("rechunk-p2p") for key in result.__dask_keys__()
+            )
+            assert result.chunks == new
+
+            # This is below the threshold, so stick to tasks
+            new = ((50,) * 2, (2,) * 50)
+            result = rechunk(x, chunks=new, method="auto")
+            assert not any(
+                key[0][0].startswith("rechunk-p2p") for key in result.__dask_keys__()
+            )
+            assert result.chunks == new
+
+            with dask.config.set({"array.rechunk.threshold": 1}):
+                # We've decreased the threshold, so pick P2P now
+                result = rechunk(x, chunks=new, method="auto")
+                assert all(
+                    key[0][0].startswith("rechunk-p2p")
+                    for key in result.__dask_keys__()
+                )
+                assert result.chunks == new
 
 
 @pytest.mark.parametrize("keyword_value", ["tasks", "p2p", "auto", None])
