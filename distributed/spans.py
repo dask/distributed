@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import dask.config
 
+from distributed.collections import sum_mappings
 from distributed.metrics import time
 
 if TYPE_CHECKING:
@@ -199,7 +200,7 @@ class Span:
         return max(tg.stop for tg in self.traverse_groups())
 
     @property
-    def states(self) -> defaultdict[TaskStateState, int]:
+    def states(self) -> dict[TaskStateState, int]:
         """The number of tasks currently in each state in this span tree;
         e.g. ``{"memory": 10, "processing": 3, "released": 4, ...}``.
 
@@ -207,11 +208,7 @@ class Span:
         --------
         distributed.scheduler.TaskGroup.states
         """
-        out: defaultdict[TaskStateState, int] = defaultdict(int)
-        for tg in self.traverse_groups():
-            for state, count in tg.states.items():
-                out[state] += count
-        return out
+        return sum_mappings(tg.states for tg in self.traverse_groups())
 
     @property
     def done(self) -> bool:
@@ -230,7 +227,7 @@ class Span:
         return all(tg.done for tg in self.traverse_groups())
 
     @property
-    def all_durations(self) -> defaultdict[str, float]:
+    def all_durations(self) -> dict[str, float]:
         """Cumulative duration of all completed actions in this span tree, by action
 
         See also
@@ -238,11 +235,7 @@ class Span:
         duration
         distributed.scheduler.TaskGroup.all_durations
         """
-        out: defaultdict[str, float] = defaultdict(float)
-        for tg in self.traverse_groups():
-            for action, nsec in tg.all_durations.items():
-                out[action] += nsec
-        return out
+        return sum_mappings(tg.all_durations for tg in self.traverse_groups())
 
     @property
     def duration(self) -> float:
@@ -266,7 +259,7 @@ class Span:
         return sum(tg.nbytes_total for tg in self.traverse_groups())
 
     @property
-    def cumulative_worker_metrics(self) -> defaultdict[tuple[Hashable, ...], float]:
+    def cumulative_worker_metrics(self) -> dict[tuple[Hashable, ...], float]:
         """Replica of Worker.digests_total and Scheduler.cumulative_worker_metrics, but
         only for the metrics that can be attributed to the current span tree.
         The span_id has been removed from the key.
@@ -276,11 +269,9 @@ class Span:
         but more may be added in the future with a different format; please test for
         ``k[0] == "execute"``.
         """
-        out: defaultdict[tuple[Hashable, ...], float] = defaultdict(float)
-        for child in self.traverse_spans():
-            for k, v in child._cumulative_worker_metrics.items():
-                out[k] += v
-        return out
+        return sum_mappings(
+            child._cumulative_worker_metrics for child in self.traverse_spans()
+        )
 
     @staticmethod
     def merge(*items: Span) -> Span:
@@ -471,6 +462,7 @@ class SpansWorkerExtension:
         --------
         SpansSchedulerExtension.heartbeat
         Span.cumulative_worker_metrics
+        distributed.worker.Worker.get_metrics
         """
         out = self.digests_total_since_heartbeat
         self.digests_total_since_heartbeat = {}

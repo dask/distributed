@@ -4,10 +4,11 @@ import heapq
 import operator
 import pickle
 import random
+from collections.abc import Mapping
 
 import pytest
 
-from distributed.collections import LRU, HeapSet
+from distributed.collections import LRU, HeapSet, sum_mappings
 
 
 def test_lru():
@@ -345,3 +346,32 @@ def test_heapset_sort_duplicate():
     heap.add(c1)
 
     assert list(heap.sorted()) == [c1, c2]
+
+
+class ReadOnlyMapping(Mapping):
+    def __init__(self, d: Mapping):
+        self.d = d
+
+    def __getitem__(self, item):
+        return self.d[item]
+
+    def __iter__(self):
+        return iter(self.d)
+
+    def __len__(self):
+        return len(self.d)
+
+
+def test_sum_mappings():
+    a = {"x": 1, "y": 1.2, "z": [3, 4]}
+    b = ReadOnlyMapping({"w": 7, "y": 3.4, "z": [5, 6]})
+    c = iter([("y", 0.2), ("y", -0.5)])
+    actual = sum_mappings(iter([a, b, c]))
+    assert isinstance(actual, dict)
+    assert actual == {"x": 1, "y": 4.3, "z": [3, 4, 5, 6], "w": 7}
+    assert isinstance(actual["x"], int)  # Not 1.0
+    assert list(actual) == ["x", "y", "z", "w"]
+
+    d = {"x0": 1, "x1": 2, "y0": 4}
+    actual = sum_mappings([((k[0], v) for k, v in d.items())])
+    assert actual == {"x": 3, "y": 4}
