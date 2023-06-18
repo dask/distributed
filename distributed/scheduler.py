@@ -842,6 +842,8 @@ class ErredTask:
 class Computation:
     """Collection tracking a single compute or persist call
 
+    DEPRECATED: please use spans instead
+
     See also
     --------
     TaskPrefix
@@ -851,7 +853,7 @@ class Computation:
 
     start: float
     groups: set[TaskGroup]
-    code: SortedSet[SourceCode]
+    code: SortedSet[tuple[SourceCode, ...]]
     id: uuid.UUID
     annotations: dict
 
@@ -4320,7 +4322,7 @@ class Scheduler(SchedulerState, ServerNode):
         user_priority: int | dict[str, int] = 0,
         actors: bool | list[str] | None = None,
         fifo_timeout: float = 0.0,
-        code: tuple[str] | None = None,
+        code: tuple[SourceCode, ...] = (),
         annotations: dict | None = None,
         stimulus_id: str | None = None,
     ) -> None:
@@ -4454,7 +4456,7 @@ class Scheduler(SchedulerState, ServerNode):
             # _generate_taskstates is not the only thing that calls new_task(). A
             # TaskState may have also been created by client_desires_keys or scatter,
             # and only later gained a run_spec.
-            spans_ext.observe_tasks(runnable)
+            spans_ext.observe_tasks(runnable, code=code)
             # TaskGroup.span_id could be completely different from the one in the
             # original annotations, so it has been dropped. Drop it here as well in
             # order not to confuse SchedulerPlugin authors.

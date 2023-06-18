@@ -13,6 +13,7 @@ from distributed.metrics import time
 
 if TYPE_CHECKING:
     from distributed import Scheduler, Worker
+    from distributed.client import SourceCode
     from distributed.scheduler import TaskGroup, TaskState, TaskStateState, WorkerState
 
 
@@ -124,6 +125,10 @@ class Span:
     #: stop
     enqueued: float
 
+    #: Source code snippets, if it was sent by the client.
+    #: We're using a dict without values as an insertion-sorted set.
+    _code: dict[tuple[SourceCode, ...], None]
+
     _cumulative_worker_metrics: defaultdict[tuple[Hashable, ...], float]
 
     # Support for weakrefs to a class with __slots__
@@ -138,6 +143,7 @@ class Span:
         self.enqueued = time()
         self.children = []
         self.groups = set()
+        self._code = {}
         self._cumulative_worker_metrics = defaultdict(float)
 
     def __repr__(self) -> str:
@@ -266,6 +272,17 @@ class Span:
         return sum(tg.nbytes_total for tg in self.traverse_groups())
 
     @property
+    def code(self) -> list[tuple[SourceCode, ...]]:
+        """Code snippets, sent by the client on compute(), persist(), and submit().
+
+        Only populated if ``distributed.diagnostics.computations.nframes`` is non-zero.
+        """
+        # Deduplicate, but preserve order
+        return list(
+            dict.fromkeys(sc for child in self.traverse_spans() for sc in child._code)
+        )
+
+    @property
     def cumulative_worker_metrics(self) -> defaultdict[tuple[Hashable, ...], float]:
         """Replica of Worker.digests_total and Scheduler.cumulative_worker_metrics, but
         only for the metrics that can be attributed to the current span tree.
@@ -323,7 +340,9 @@ class SpansSchedulerExtension:
         self.spans_search_by_name = defaultdict(list)
         self.spans_search_by_tag = defaultdict(list)
 
-    def observe_tasks(self, tss: Iterable[TaskState]) -> None:
+    def observe_tasks(
+        self, tss: Iterable[TaskState], code: tuple[SourceCode, ...]
+    ) -> None:
         """Acknowledge the existence of runnable tasks on the scheduler. These may
         either be new tasks, tasks that were previously unrunnable, or tasks that were
         already fed into this method already.
@@ -338,7 +357,9 @@ class SpansSchedulerExtension:
             # different spans. If that happens, arbitrarily force everything onto the
             # span of the earliest encountered TaskGroup.
             tg = ts.group
-            if not tg.span_id:
+            if tg.span_id:
+                span = self.spans[tg.span_id]
+            else:
                 ann = ts.annotations.get("span")
                 if ann:
                     span = self._ensure_span(ann["name"], ann["ids"])
@@ -349,6 +370,9 @@ class SpansSchedulerExtension:
 
                 tg.span_id = span.id
                 span.groups.add(tg)
+
+            if code:
+                span._code[code] = None
 
             # The span may be completely different from the one referenced by the
             # annotation, due to the TaskGroup collision issue explained above.
