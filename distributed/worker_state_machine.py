@@ -2028,11 +2028,11 @@ class WorkerState:
     def _transition_generic_error(
         self,
         ts: TaskState,
-        run_id: int,
         exception: Serialize,
         traceback: Serialize | None,
         exception_text: str,
         traceback_text: str,
+        run_id: int,
         *,
         stimulus_id: str,
     ) -> RecsInstrs:
@@ -2448,7 +2448,7 @@ class WorkerState:
                 # Third-party MutableMappings (dask-cuda etc.) may have other use cases
                 # for this.
                 msg = error_message(e)
-                return {ts: tuple(msg.values())}, []
+                return {ts: tuple(msg.values()) + (run_id,)}, []
 
             stop = time()
             if stop - start > 0.005:
