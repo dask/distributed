@@ -596,8 +596,9 @@ async def test_resumed_cancelled_handle_compute(
         assert False, "unreachable"
 
 
+@pytest.mark.parametrize("raise_error", [True, False])
 @gen_cluster(client=True)
-async def test_cancelled_handle_compute(c, s, a, b):
+async def test_cancelled_handle_compute(c, s, a, b, raise_error):
     """
     Given the history of a task
     executing -> cancelled
@@ -619,6 +620,8 @@ async def test_cancelled_handle_compute(c, s, a, b):
     def block(x, lock, enter_event, exit_event):
         enter_event.set()
         with lock:
+            if raise_error:
+                raise RuntimeError("test error")
             return x + 1
 
     f1 = c.submit(inc, 1, key="f1", workers=[a.address])
@@ -658,26 +661,46 @@ async def test_cancelled_handle_compute(c, s, a, b):
 
     assert await f4 == 4 + 2
 
-    story = b.state.story(f3.key)
-    assert_story(
-        b.state.story(f3.key),
-        expect=[
-            (f3.key, "ready", "executing", "executing", {}),
-            (f3.key, "executing", "released", "cancelled", {}),
-            (f3.key, "cancelled", "waiting", "executing", {}),
-            (f3.key, "executing", "memory", "memory", {}),
-            (
-                f3.key,
-                "memory",
-                "released",
-                "released",
-                {f2.key: "released", f3.key: "forgotten"},
-            ),
-            (f3.key, "released", "forgotten", "forgotten", {f2.key: "forgotten"}),
-            (f3.key, "ready", "executing", "executing", {}),
-            (f3.key, "executing", "memory", "memory", {}),
-        ],
-    )
+    if raise_error:
+        assert_story(
+            b.state.story(f3.key),
+            expect=[
+                (f3.key, "ready", "executing", "executing", {}),
+                (f3.key, "executing", "released", "cancelled", {}),
+                (f3.key, "cancelled", "waiting", "executing", {}),
+                (f3.key, "executing", "error", "error", {}),
+                (
+                    f3.key,
+                    "error",
+                    "released",
+                    "released",
+                    {f2.key: "released", f3.key: "forgotten"},
+                ),
+                (f3.key, "released", "forgotten", "forgotten", {f2.key: "forgotten"}),
+                (f3.key, "ready", "executing", "executing", {}),
+                (f3.key, "executing", "memory", "memory", {}),
+            ],
+        )
+    else:
+        assert_story(
+            b.state.story(f3.key),
+            expect=[
+                (f3.key, "ready", "executing", "executing", {}),
+                (f3.key, "executing", "released", "cancelled", {}),
+                (f3.key, "cancelled", "waiting", "executing", {}),
+                (f3.key, "executing", "memory", "memory", {}),
+                (
+                    f3.key,
+                    "memory",
+                    "released",
+                    "released",
+                    {f2.key: "released", f3.key: "forgotten"},
+                ),
+                (f3.key, "released", "forgotten", "forgotten", {f2.key: "forgotten"}),
+                (f3.key, "ready", "executing", "executing", {}),
+                (f3.key, "executing", "memory", "memory", {}),
+            ],
+        )
 
 
 @pytest.mark.parametrize("intermediate_state", ["resumed", "cancelled"])
