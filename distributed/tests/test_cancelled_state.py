@@ -488,6 +488,9 @@ async def test_resumed_cancelled_handle_compute(
         await lock_compute.release()
         await exit_compute.wait()
 
+        while f3.key in b.state.tasks:
+            await asyncio.sleep(0.01)
+
     f1 = c.submit(inc, 1, key="f1", workers=[a.address])
     f2 = c.submit(inc, f1, key="f2", workers=[a.address])
     f3 = c.submit(inc, f2, key="f3", workers=[b.address])
@@ -530,6 +533,13 @@ async def test_resumed_cancelled_handle_compute(
                 (f3.key, "executing", "released", "cancelled", {}),
                 (f3.key, "cancelled", "fetch", "resumed", {}),
                 (f3.key, "resumed", "released", "cancelled", {}),
+                (
+                    f3.key,
+                    "cancelled",
+                    "error",
+                    "released",
+                    {f2.key: "released", f3.key: "forgotten"},
+                ),
                 (f3.key, "released", "forgotten", "forgotten", {f2.key: "forgotten"}),
                 (f3.key, "ready", "executing", "executing", {}),
                 (f3.key, "executing", "memory", "memory", {}),
