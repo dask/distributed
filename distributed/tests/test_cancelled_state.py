@@ -589,8 +589,7 @@ async def test_resumed_cancelled_handle_compute(
                 ),
                 (f3.key, "released", "forgotten", "forgotten", {f2.key: "forgotten"}),
                 (f3.key, "ready", "executing", "executing", {}),
-                (f3.key, "executing", "memory", "memory", {})
-                # FIXME: (distributed#7489)
+                (f3.key, "executing", "memory", "memory", {}),
             ],
         )
     else:
