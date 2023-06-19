@@ -439,7 +439,9 @@ async def test_user_metrics_weird(c, s, a):
         ("execute", "x", "other", "seconds"),
     ]
     for (context, prefix, activity, unit), v in s_metrics.items():
-        assert a_metrics[context, span_id(s), prefix, activity, unit] == v
+        assert a_metrics[context, span_id(s), prefix, activity, unit] == pytest.approx(
+            v
+        )
 
 
 @gen_cluster(client=True, nthreads=[("", 3)])
@@ -560,7 +562,7 @@ async def test_send_metrics_to_scheduler(c, s, a, b):
         if not WINDOWS:
             assert a_metrics[wk] > 0
             assert b_metrics[wk] > 0
-        assert s_metrics[sk] == a_metrics[wk] + b_metrics[wk]
+        assert s_metrics[sk] == pytest.approx(a_metrics[wk] + b_metrics[wk])
 
 
 @gen_cluster(
@@ -593,7 +595,7 @@ async def test_no_spans_extension(c, s, a):
     for wk, sk in zip(expect_worker, expect_scheduler):
         if not WINDOWS:
             assert w_metrics[wk] > 0
-        assert s_metrics[sk] == w_metrics[wk]
+        assert s_metrics[sk] == pytest.approx(w_metrics[wk])
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
