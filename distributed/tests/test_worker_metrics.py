@@ -439,7 +439,9 @@ async def test_user_metrics_weird(c, s, a):
         ("execute", "x", "other", "seconds"),
     ]
     for (context, prefix, activity, unit), v in s_metrics.items():
-        assert a_metrics[context, span_id(s), prefix, activity, unit] == v
+        assert a_metrics[context, span_id(s), prefix, activity, unit] == pytest.approx(
+            v
+        )
 
 
 @gen_cluster(client=True, nthreads=[("", 3)])
@@ -560,7 +562,7 @@ async def test_send_metrics_to_scheduler(c, s, a, b):
         if not WINDOWS:
             assert a_metrics[wk] > 0
             assert b_metrics[wk] > 0
-        assert s_metrics[sk] == a_metrics[wk] + b_metrics[wk]
+        assert s_metrics[sk] == pytest.approx(a_metrics[wk] + b_metrics[wk])
 
 
 @gen_cluster(
@@ -593,4 +595,26 @@ async def test_no_spans_extension(c, s, a):
     for wk, sk in zip(expect_worker, expect_scheduler):
         if not WINDOWS:
             assert w_metrics[wk] > 0
-        assert s_metrics[sk] == w_metrics[wk]
+        assert s_metrics[sk] == pytest.approx(w_metrics[wk])
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_new_metrics_during_heartbeat(c, s, a):
+    """Make sure that metrics generated during the heartbeat don't get lost"""
+    # Create default span
+    await c.submit(inc, 1)
+    span = s.extensions["spans"].spans_search_by_name["default",][0]
+
+    hb_task = asyncio.create_task(a.heartbeat())
+    n = 0
+    while not hb_task.done():
+        n += 1
+        a.digest_metric(("execute", span.id, "x", "test", "test"), 1)
+        await asyncio.sleep(0)
+    await hb_task
+    assert n > 10
+    await a.heartbeat()
+
+    assert a.digests_total["execute", span.id, "x", "test", "test"] == n
+    assert s.cumulative_worker_metrics["execute", "x", "test", "test"] == n
+    assert span.cumulative_worker_metrics["execute", "x", "test", "test"] == n
