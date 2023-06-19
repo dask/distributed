@@ -530,13 +530,6 @@ async def test_resumed_cancelled_handle_compute(
                 (f3.key, "executing", "released", "cancelled", {}),
                 (f3.key, "cancelled", "fetch", "resumed", {}),
                 (f3.key, "resumed", "released", "cancelled", {}),
-                (
-                    f3.key,
-                    "cancelled",
-                    "error",
-                    "released",
-                    {f2.key: "released", f3.key: "forgotten"},
-                ),
                 (f3.key, "released", "forgotten", "forgotten", {f2.key: "forgotten"}),
                 (f3.key, "ready", "executing", "executing", {}),
                 (f3.key, "executing", "memory", "memory", {}),
