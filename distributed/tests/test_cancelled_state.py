@@ -821,7 +821,7 @@ def test_workerstate_executing_failure_to_fetch(ws_with_running_task):
     - executing -> long-running -> cancelled -> resumed(fetch)
 
     The task execution later terminates with a failure.
-    This is an edge case interaction between work stealing and a task that does not
+    This is an edge case interaction involving task cancellation and a task that does not
     deterministically succeed or fail when run multiple times or on different workers.
 
     Test that the task is fetched from the other worker. This is to avoid having to deal
