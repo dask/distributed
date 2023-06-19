@@ -2232,6 +2232,7 @@ class Worker(BaseWorker, ServerNode):
             return ExecuteFailureEvent.from_exception(
                 exc,
                 key=key,
+                run_id=run_id,
                 stimulus_id=f"run-spec-deserialize-failed-{time()}",
             )
 
@@ -2356,6 +2357,7 @@ class Worker(BaseWorker, ServerNode):
             return ExecuteFailureEvent.from_exception(
                 result,
                 key=key,
+                run_id=run_id,
                 start=result["start"],
                 stop=result["stop"],
                 stimulus_id=f"task-erred-{time()}",
@@ -2366,6 +2368,7 @@ class Worker(BaseWorker, ServerNode):
             return ExecuteFailureEvent.from_exception(
                 exc,
                 key=key,
+                run_id=run_id,
                 stimulus_id=f"execute-unknown-error-{time()}",
             )
 

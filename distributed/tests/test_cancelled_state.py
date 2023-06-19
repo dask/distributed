@@ -569,8 +569,7 @@ async def test_resumed_cancelled_handle_compute(
         )
 
     elif wait_for_processing and raise_error:
-        with pytest.raises(RuntimeError, match="test error"):
-            await f3
+        assert await f4 == 4 + 2
 
         assert_story(
             b.state.story(f3.key),
@@ -581,6 +580,16 @@ async def test_resumed_cancelled_handle_compute(
                 (f3.key, "resumed", "released", "cancelled", {}),
                 (f3.key, "cancelled", "waiting", "executing", {}),
                 (f3.key, "executing", "error", "error", {}),
+                (
+                    f3.key,
+                    "error",
+                    "released",
+                    "released",
+                    {f2.key: "released", f3.key: "forgotten"},
+                ),
+                (f3.key, "released", "forgotten", "forgotten", {f2.key: "forgotten"}),
+                (f3.key, "ready", "executing", "executing", {}),
+                (f3.key, "executing", "memory", "memory", {})
                 # FIXME: (distributed#7489)
             ],
         )

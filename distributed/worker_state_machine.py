@@ -498,12 +498,12 @@ class TaskErredMsg(SendMessageToScheduler):
 
     @staticmethod
     def from_task(
-        ts: TaskState, stimulus_id: str, thread: int | None = None
+        ts: TaskState, run_id: int, stimulus_id: str, thread: int | None = None
     ) -> TaskErredMsg:
         assert ts.exception
         return TaskErredMsg(
             key=ts.key,
-            run_id=ts.run_id,
+            run_id=run_id,
             exception=ts.exception,
             traceback=ts.traceback,
             exception_text=ts.exception_text,
@@ -905,6 +905,7 @@ class ExecuteSuccessEvent(ExecuteDoneEvent):
 
 @dataclass
 class ExecuteFailureEvent(ExecuteDoneEvent):
+    run_id: int  # FIXME: Utilize the run ID in all ExecuteDoneEvents
     start: float | None
     stop: float | None
     exception: Serialize
@@ -923,6 +924,7 @@ class ExecuteFailureEvent(ExecuteDoneEvent):
         err_or_msg: BaseException | ErrorMessage,
         *,
         key: str,
+        run_id: int,
         start: float | None = None,
         stop: float | None = None,
         stimulus_id: str,
@@ -934,6 +936,7 @@ class ExecuteFailureEvent(ExecuteDoneEvent):
 
         return cls(
             key=key,
+            run_id=run_id,
             start=start,
             stop=stop,
             exception=msg["exception"],
@@ -947,6 +950,7 @@ class ExecuteFailureEvent(ExecuteDoneEvent):
     def dummy(
         key: str,
         *,
+        run_id: int = 1,
         stimulus_id: str,
     ) -> ExecuteFailureEvent:
         """Build a dummy event, with most attributes set to a reasonable default.
@@ -954,6 +958,7 @@ class ExecuteFailureEvent(ExecuteDoneEvent):
         """
         return ExecuteFailureEvent(
             key=key,
+            run_id=run_id,
             start=None,
             stop=None,
             exception=Serialize(None),
@@ -2023,6 +2028,7 @@ class WorkerState:
     def _transition_generic_error(
         self,
         ts: TaskState,
+        run_id: int,
         exception: Serialize,
         traceback: Serialize | None,
         exception_text: str,
@@ -2037,6 +2043,7 @@ class WorkerState:
         ts.state = "error"
         smsg = TaskErredMsg.from_task(
             ts,
+            run_id=run_id,
             stimulus_id=stimulus_id,
             thread=self.threads.get(ts.key),
         )
@@ -2046,6 +2053,7 @@ class WorkerState:
     def _transition_resumed_error(
         self,
         ts: TaskState,
+        run_id: int,
         exception: Serialize,
         traceback: Serialize | None,
         exception_text: str,
@@ -2861,7 +2869,9 @@ class WorkerState:
                 )
             )
         elif ts.state == "error":
-            instructions.append(TaskErredMsg.from_task(ts, stimulus_id=ev.stimulus_id))
+            instructions.append(
+                TaskErredMsg.from_task(ts, run_id=ev.run_id, stimulus_id=ev.stimulus_id)
+            )
         elif ts.state in {
             "released",
             "fetch",
@@ -3040,6 +3050,7 @@ class WorkerState:
         recommendations: Recs = {
             ts: (
                 "error",
+                ts.run_id,
                 ev.exception,
                 ev.traceback,
                 ev.exception_text,
@@ -3177,6 +3188,7 @@ class WorkerState:
             )
         recs[ts] = (
             "error",
+            ev.run_id,
             ev.exception,
             ev.traceback,
             ev.exception_text,

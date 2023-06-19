@@ -4886,12 +4886,10 @@ class Scheduler(SchedulerState, ServerNode):
         if ts is None or ts.state != "processing":
             return {}, {}, {}
 
-        if (
-            ts.run_id != run_id
-            and ts.processing_on
-            and ts.processing_on.address == worker
-        ):
-            return self._transition(key, "waiting", stimulus_id)
+        if ts.run_id != run_id:
+            if ts.processing_on and ts.processing_on.address == worker:
+                return self._transition(key, "released", stimulus_id)
+            return {}, {}, {}
 
         if ts.retries > 0:
             ts.retries -= 1
