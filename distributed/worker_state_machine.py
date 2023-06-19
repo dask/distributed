@@ -2053,11 +2053,11 @@ class WorkerState:
     def _transition_resumed_error(
         self,
         ts: TaskState,
-        run_id: int,
         exception: Serialize,
         traceback: Serialize | None,
         exception_text: str,
         traceback_text: str,
+        run_id: int,
         *,
         stimulus_id: str,
     ) -> RecsInstrs:
@@ -3050,11 +3050,11 @@ class WorkerState:
         recommendations: Recs = {
             ts: (
                 "error",
-                ts.run_id,
                 ev.exception,
                 ev.traceback,
                 ev.exception_text,
                 ev.traceback_text,
+                ts.run_id,
             )
             for ts in self._gather_dep_done_common(ev)
         }
@@ -3188,11 +3188,11 @@ class WorkerState:
             )
         recs[ts] = (
             "error",
-            ev.run_id,
             ev.exception,
             ev.traceback,
             ev.exception_text,
             ev.traceback_text,
+            ev.run_id,
         )
         return recs, instr
 
