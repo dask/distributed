@@ -23,7 +23,7 @@ dependencies:
   - pip
   - pip:
     # - git+https://github.com/dask/dask
-      - git+https://github.com/hendrikmakait/dask@addf9afa6c284565e82f95fa750c9325710bdfce
+      - git+https://github.com/hendrikmakait/dask@066e31b98cd43e4fd6fcb86d7fd1f849252037fd
   # test dependencies
   - pytest
   - pytest-cov
