@@ -224,6 +224,18 @@ async def test_rechunk_auto_keyword(s, *ws, config_value):
                 assert result.chunks == new
 
 
+@gen_cluster(client=True)
+async def test_rechunk_auto_keyword_with_unknown_dimension(c, s, *ws):
+    dd = pytest.importorskip("dask.dataframe")
+    x = dd.from_array(da.ones(shape=(10, 10), chunks=(1, 10))).values
+    new = ((np.nan,) * 10, (1,) * 10)
+    result = rechunk(x, chunks=new, method="auto")
+    assert not any(
+        key[0][0].startswith("rechunk-p2p") for key in result.__dask_keys__()
+    )
+    assert result.chunks == new
+
+
 @pytest.mark.parametrize("keyword_value", ["tasks", "p2p", "auto", None])
 @gen_cluster(client=True)
 async def test_rechunk_auto_config(c, s, *ws, keyword_value):
