@@ -112,6 +112,9 @@ async def test_minimal_version(c, s, a, b):
 
 
 @pytest.mark.gpu
+@pytest.mark.filterwarnings(
+    "ignore:Ignoring the following arguments to `from_pyarrow_table_dispatch`."
+)
 @gen_cluster(client=True)
 async def test_basic_cudf_support(c, s, a, b):
     cudf = pytest.importorskip("cudf")
