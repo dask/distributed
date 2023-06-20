@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from collections import defaultdict
-from itertools import product
 from typing import TYPE_CHECKING, NamedTuple
 
 import dask
@@ -26,21 +24,21 @@ if TYPE_CHECKING:
 
 ChunkedAxis: TypeAlias = tuple[float, ...]  # chunks must either be an int or NaN
 ChunkedAxes: TypeAlias = tuple[ChunkedAxis, ...]
-NIndex: TypeAlias = tuple[int, ...]
-NSlice: TypeAlias = tuple[slice, ...]
+NDIndex: TypeAlias = tuple[int, ...]
+NDSlice: TypeAlias = tuple[slice, ...]
 
 
 def rechunk_transfer(
     input: np.ndarray,
     id: ShuffleId,
-    input_chunk: NIndex,
+    input_chunk: NDIndex,
     new: ChunkedAxes,
     old: ChunkedAxes,
 ) -> int:
     try:
         return _get_worker_extension().add_partition(
             input,
-            input_partition=input_chunk,
+            partition_id=input_chunk,
             shuffle_id=id,
             type=ShuffleType.ARRAY_RECHUNK,
             new=new,
@@ -51,7 +49,7 @@ def rechunk_transfer(
 
 
 def rechunk_unpack(
-    id: ShuffleId, output_chunk: NIndex, barrier_run_id: int
+    id: ShuffleId, output_chunk: NDIndex, barrier_run_id: int
 ) -> np.ndarray:
     try:
         return _get_worker_extension().get_output_partition(
@@ -121,38 +119,65 @@ class ShardID(NamedTuple):
     """
 
     #: Index of the new output chunk to which the shard belongs
-    chunk_index: NIndex
-    #: Index of the shard within the multi-dimensional array of shards that will be
+    chunk_index: NDIndex
+    #: Index of the shard within the n-dimensional array of shards that will be
     # concatenated into the new chunk
-    shard_index: NIndex
+    shard_index: NDIndex
 
 
-def rechunk_slicing(
-    old: ChunkedAxes, new: ChunkedAxes
-) -> dict[NIndex, list[tuple[ShardID, NSlice]]]:
-    """Calculate how to slice the old chunks to create the new chunks
+class Split(NamedTuple):
+    """Slice of a chunk that is concatenated with other splits to create a new chunk
+
+    Splits define how to slice an input chunk on a single axis into small pieces
+    that can be concatenated together with splits from other input chunks to create
+    output chunks of a rechunk operation.
+    """
+
+    #: Index of the new output chunk to which this split belongs.
+    chunk_index: int
+
+    #: Index of the split within the list of splits that are concatenated
+    #: to create the new chunk.
+    split_index: int
+
+    #: Slice of the input chunk.
+    slice: slice
+
+
+SplitChunk: TypeAlias = list[Split]
+SplitAxis: TypeAlias = list[SplitChunk]
+SplitAxes: TypeAlias = list[SplitAxis]
+
+
+def split_axes(old: ChunkedAxes, new: ChunkedAxes) -> SplitAxes:
+    """Calculate how to split the old chunks on each axis to create the new chunks
+
+    Parameters
+    ----------
+    old : ChunkedAxes
+        Chunks along each axis of the old array
+    new : ChunkedAxes
+        Chunks along each axis of the new array
 
     Returns
     -------
-        Mapping of each old chunk to a list of tuples defining where each slice
-        of the old chunk belongs. Each tuple consists of the index
-        of the new chunk, the index of the slice within the composition of slices
-        creating the new chunk, and the slice to be applied to the old chunk.
+    SplitAxes
+        Splits along each axis that determine how to slice the input chunks to create
+        the new chunks by concatenating the resulting shards.
     """
-    from dask.array.rechunk import intersect_chunks
+    from dask.array.rechunk import old_to_new
 
-    ndim = len(old)
-    intersections = intersect_chunks(old, new)
-    new_indices = product(*(range(len(c)) for c in new))
+    _old_to_new = old_to_new(old, new)
 
-    slicing = defaultdict(list)
-
-    for new_index, new_chunk in zip(new_indices, intersections):
-        sub_shape = [len({slice[dim][0] for slice in new_chunk}) for dim in range(ndim)]
-
-        shard_indices = product(*(range(dim) for dim in sub_shape))
-
-        for shard_index, sliced_chunk in zip(shard_indices, new_chunk):
-            old_index, nslice = zip(*sliced_chunk)
-            slicing[old_index].append((ShardID(new_index, shard_index), nslice))
-    return slicing
+    axes = []
+    for axis_index, new_axis in enumerate(_old_to_new):
+        old_axis: SplitAxis = [[] for _ in old[axis_index]]
+        for new_chunk_index, new_chunk in enumerate(new_axis):
+            for split_index, (old_chunk_index, slice) in enumerate(new_chunk):
+                old_axis[old_chunk_index].append(
+                    Split(new_chunk_index, split_index, slice)
+                )
+        for old_chunk in old_axis:
+            old_chunk.sort(key=lambda split: split.slice.start)
+        axes.append(old_axis)
+    return axes

@@ -13,6 +13,7 @@ from distributed.utils_test import (
     async_poll_for,
     gen_cluster,
     inc,
+    slowinc,
     wait_for_state,
 )
 
@@ -439,8 +440,8 @@ async def test_worker_metrics(c, s, a, b):
     --------
     test_worker_metrics.py::test_send_metrics_to_scheduler
     """
-    sid_y = []
-    with span("foo") as sid_x:
+    bar_sid = []
+    with span("foo") as foo_sid:
         # Make sure that cumulative sync over multiple heartbeats works as expected
         for _ in range(2):
             # Span 'foo' remains the same across for iterations
@@ -449,11 +450,9 @@ async def test_worker_metrics(c, s, a, b):
             await wait([x0, x1])
 
             # Span 'bar' is opened and closed between for iterations
-            with span("bar") as sid_yi:
-                sid_y.append(sid_yi)
-                y0 = c.submit(inc, 1, key=("y", 0), workers=[a.address])
-                y1 = c.submit(inc, 1, key=("y", 1), workers=[b.address])
-            await wait([y0, y1])
+            with span("bar") as bar_sid_i:
+                bar_sid.append(bar_sid_i)
+                await c.submit(inc, 1, key=("y", 0))
 
             # Populate gather_dep and get_data metrics.
             # They will be ignored by the spans extension because they have no span_id.
@@ -466,55 +465,20 @@ async def test_worker_metrics(c, s, a, b):
             await b.heartbeat()
 
             # Cleanup
-            del x0, x1, x2, x3, y0, y1
-            await async_poll_for(
-                lambda: not s.tasks and not a.state.tasks and not b.state.tasks,
-                timeout=5,
-            )
+            del x0, x1, x2, x3
+            await async_poll_for(lambda: not s.tasks, timeout=5)
 
-    metrics = {
-        k: v
-        for k, v in s.cumulative_worker_metrics.items()
-        if isinstance(k, tuple) and k[0] == "execute"
-    }
-
-    assert list(metrics) == [
-        ("execute", sid_x, "x", "deserialize", "seconds"),
-        ("execute", sid_x, "x", "thread-cpu", "seconds"),
-        ("execute", sid_x, "x", "thread-noncpu", "seconds"),
-        ("execute", sid_x, "x", "executor", "seconds"),
-        ("execute", sid_x, "x", "other", "seconds"),
-        ("execute", sid_y[0], "y", "deserialize", "seconds"),
-        ("execute", sid_y[0], "y", "thread-cpu", "seconds"),
-        ("execute", sid_y[0], "y", "thread-noncpu", "seconds"),
-        ("execute", sid_y[0], "y", "executor", "seconds"),
-        ("execute", sid_y[0], "y", "other", "seconds"),
-        ("execute", sid_x, "x", "memory-read", "count"),
-        ("execute", sid_x, "x", "memory-read", "bytes"),
-        ("execute", sid_y[1], "y", "deserialize", "seconds"),
-        ("execute", sid_y[1], "y", "thread-cpu", "seconds"),
-        ("execute", sid_y[1], "y", "thread-noncpu", "seconds"),
-        ("execute", sid_y[1], "y", "executor", "seconds"),
-        ("execute", sid_y[1], "y", "other", "seconds"),
-    ]
-
-    if not WINDOWS:
-        assert all(v > 0 for v in metrics.values())
+            # Have metrics with 'y' task prefix in foo too
+            await c.submit(inc, 1, key=("y", 1))
 
     ext = s.extensions["spans"]
 
-    # Metrics have been synchronized from scheduler to spans
-    for (context, span_id, prefix, activity, unit), v in metrics.items():
-        assert (
-            ext.spans[span_id]._cumulative_worker_metrics[
-                context, prefix, activity, unit
-            ]
-            == v
-        )
+    foo_metrics = ext.spans[foo_sid].cumulative_worker_metrics
+    bar0_metrics = ext.spans[bar_sid[0]].cumulative_worker_metrics
+    bar1_metrics = ext.spans[bar_sid[1]].cumulative_worker_metrics
 
-    # foo metrics include self and its child bar
-    cum_metrics = ext.spans_search_by_name["foo",][0].cumulative_worker_metrics
-    assert list(cum_metrics) == [
+    # metrics for foo include self and its child bar
+    assert list(foo_metrics) == [
         ("execute", "x", "deserialize", "seconds"),
         ("execute", "x", "thread-cpu", "seconds"),
         ("execute", "x", "thread-noncpu", "seconds"),
@@ -528,5 +492,93 @@ async def test_worker_metrics(c, s, a, b):
         ("execute", "y", "executor", "seconds"),
         ("execute", "y", "other", "seconds"),
     ]
-    for k, v in cum_metrics.items():
-        assert v == sum(sp._cumulative_worker_metrics[k] for sp in ext.spans.values())
+    assert (
+        list(bar0_metrics)
+        == list(bar1_metrics)
+        == [
+            ("execute", "y", "deserialize", "seconds"),
+            ("execute", "y", "thread-cpu", "seconds"),
+            ("execute", "y", "thread-noncpu", "seconds"),
+            ("execute", "y", "executor", "seconds"),
+            ("execute", "y", "other", "seconds"),
+        ]
+    )
+
+    if not WINDOWS:
+        for metrics in (foo_metrics, bar0_metrics, bar1_metrics):
+            assert all(v > 0 for v in metrics.values()), metrics
+
+    # Metrics have been synchronized from scheduler to spans
+    for k, v in foo_metrics.items():
+        assert s.cumulative_worker_metrics[k] == pytest.approx(v)
+
+    # Metrics for foo contain the sum of metrics from itself and for bar
+    for k in bar0_metrics:
+        assert foo_metrics[k] == pytest.approx(
+            bar0_metrics[k]
+            + bar1_metrics[k]
+            + ext.spans[foo_sid]._cumulative_worker_metrics[k]
+        )
+
+
+@gen_cluster(client=True)
+async def test_merge_by_tags(c, s, a, b):
+    with span("foo") as foo1:
+        await c.submit(inc, 1, key="x1")
+        with span("bar") as bar1:  # foo, bar
+            await c.submit(inc, 2, key="x2")
+            with span("foo") as foo2:  # foo, bar, foo
+                await c.submit(inc, 3, key="x3")
+        with span("foo") as foo3:  # foo, foo
+            await c.submit(inc, 4, key="x4")
+    with span("bar") as bar2:  # bar
+        await c.submit(inc, 5, key="x5")
+
+    ext = s.extensions["spans"]
+    assert {s.id for s in ext.find_by_tags("foo")} == {foo1}
+    assert {s.id for s in ext.find_by_tags("foo", "bar")} == {foo1, bar2}
+    assert {s.id for s in ext.find_by_tags("bar", "foo")} == {foo1, bar2}
+    assert {s.id for s in ext.find_by_tags("bar")} == {bar1, bar2}
+
+    def tgnames(*tags):
+        return [tg.name for tg in ext.merge_by_tags(*tags).traverse_groups()]
+
+    assert tgnames("foo") == ["x1", "x2", "x3", "x4"]
+    assert tgnames("foo", "bar") == ["x1", "x2", "x3", "x4", "x5"]
+    assert tgnames("bar", "foo") == ["x5", "x1", "x2", "x3", "x4"]
+    assert tgnames("bar") == ["x5", "x2", "x3"]
+
+
+@gen_cluster(client=True)
+async def test_merge_by_tags_metrics(c, s, a, b):
+    with span("foo") as foo1:
+        await c.submit(slowinc, 1, delay=0.05, key="x-1")
+    await async_poll_for(lambda: not s.task_groups, timeout=5)
+
+    with span("foo") as foo2:
+        await c.submit(slowinc, 2, delay=0.06, key="x-2")
+    await async_poll_for(lambda: not s.task_groups, timeout=5)
+
+    with span("bar") as bar1:
+        await c.submit(slowinc, 3, delay=0.07, key="x-3")
+    await async_poll_for(lambda: not s.task_groups, timeout=5)
+
+    await a.heartbeat()
+    await b.heartbeat()
+
+    ext = s.extensions["spans"]
+    k = ("execute", "x", "thread-noncpu", "seconds")
+    t_foo = ext.merge_by_tags("foo").cumulative_worker_metrics[k]
+    t_bar = ext.merge_by_tags("bar").cumulative_worker_metrics[k]
+    t_foo1 = ext.spans[foo1]._cumulative_worker_metrics[k]
+    t_foo2 = ext.spans[foo2]._cumulative_worker_metrics[k]
+    t_bar1 = ext.spans[bar1]._cumulative_worker_metrics[k]
+    assert t_foo1 > 0
+    assert t_foo2 > 0
+    assert t_bar1 > 0
+    assert t_foo == t_foo1 + t_foo2
+    assert t_bar == t_bar1
+
+    assert ext.merge_by_tags("foo").enqueued == min(
+        ext.spans[foo1].enqueued, ext.spans[foo2].enqueued
+    )

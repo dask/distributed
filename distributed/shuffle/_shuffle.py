@@ -64,7 +64,7 @@ def shuffle_transfer(
             input,
             shuffle_id=id,
             type=ShuffleType.DATAFRAME,
-            input_partition=input_partition,
+            partition_id=input_partition,
             npartitions=npartitions,
             column=column,
             parts_out=parts_out,
