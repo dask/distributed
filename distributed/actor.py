@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import abc
-import asyncio
 import functools
-import sys
 import threading
 from collections.abc import Awaitable, Generator
 from dataclasses import dataclass
@@ -14,39 +12,11 @@ from tornado.ioloop import IOLoop
 
 from distributed.client import Future
 from distributed.protocol import to_serialize
-from distributed.utils import iscoroutinefunction, sync, thread_state
+from distributed.utils import LateLoopEvent, iscoroutinefunction, sync, thread_state
 from distributed.utils_comm import WrappedKey
 from distributed.worker import get_client, get_worker
 
 _T = TypeVar("_T")
-
-
-if sys.version_info >= (3, 10):
-    from asyncio import Event as _LateLoopEvent
-else:
-    # In python 3.10 asyncio.Lock and other primitives no longer support
-    # passing a loop kwarg to bind to a loop running in another thread
-    # e.g. calling from Client(asynchronous=False). Instead the loop is bound
-    # as late as possible: when calling any methods that wait on or wake
-    # Future instances. See: https://bugs.python.org/issue42392
-    class _LateLoopEvent:
-        def __init__(self) -> None:
-            self._event: asyncio.Event | None = None
-
-        def set(self) -> None:
-            if self._event is None:
-                self._event = asyncio.Event()
-
-            self._event.set()
-
-        def is_set(self) -> bool:
-            return self._event is not None and self._event.is_set()
-
-        async def wait(self) -> bool:
-            if self._event is None:
-                self._event = asyncio.Event()
-
-            return await self._event.wait()
 
 
 class Actor(WrappedKey):
@@ -322,7 +292,7 @@ class _Error:
 class ActorFuture(BaseActorFuture[_T]):
     def __init__(self, io_loop: IOLoop):
         self._io_loop = io_loop
-        self._event = _LateLoopEvent()
+        self._event = LateLoopEvent()
         self._out: _Error | _OK[_T] | None = None
 
     def __await__(self) -> Generator[object, None, _T]:

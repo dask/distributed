@@ -12,7 +12,7 @@ from itertools import product
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from distributed.diagnostics.plugin import SchedulerPlugin
-from distributed.shuffle._rechunk import ChunkedAxes, NIndex
+from distributed.shuffle._rechunk import ChunkedAxes, NDIndex
 from distributed.shuffle._shuffle import (
     ShuffleId,
     ShuffleType,
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ShuffleState(abc.ABC):
-    _run_id_iterator: ClassVar[itertools.count] = itertools.count()
+    _run_id_iterator: ClassVar[itertools.count] = itertools.count(1)
 
     id: ShuffleId
     run_id: int
@@ -66,7 +66,7 @@ class DataFrameShuffleState(ShuffleState):
 @dataclass
 class ArrayRechunkState(ShuffleState):
     type: ClassVar[ShuffleType] = ShuffleType.ARRAY_RECHUNK
-    worker_for: dict[NIndex, str]
+    worker_for: dict[NDIndex, str]
     old: ChunkedAxes
     new: ChunkedAxes
 
@@ -294,6 +294,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
 
         stimulus_id = f"shuffle-failed-worker-left-{time()}"
 
+        recs: Recs = {}
         for shuffle_id, shuffle in self.states.items():
             if worker not in shuffle.participating_workers:
                 continue
@@ -304,7 +305,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             self._fail_on_workers(shuffle, str(exception))
 
             barrier_task = self.scheduler.tasks[barrier_key(shuffle_id)]
-            recs: Recs = {}
             if barrier_task.state == "memory":
                 for dt in barrier_task.dependents:
                     if worker not in dt.worker_restrictions:
@@ -313,7 +313,10 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
                     recs.update({dt.key: "waiting"})
                 # TODO: Do we need to handle other states?
 
-            self.scheduler.transitions(recs, stimulus_id=stimulus_id)
+        # If processing the transactions causes a task to get released, this
+        # removes the shuffle from self.states. Therefore, we must process them
+        # outside of the loop.
+        self.scheduler.transitions(recs, stimulus_id=stimulus_id)
 
     def transition(
         self,
@@ -374,7 +377,7 @@ def get_worker_for_range_sharding(
 
 
 def get_worker_for_hash_sharding(
-    output_partition: NIndex, workers: Sequence[str]
+    output_partition: NDIndex, workers: Sequence[str]
 ) -> str:
     """Get address of target worker for this output partition using hash sharding"""
     i = hash(output_partition) % len(workers)

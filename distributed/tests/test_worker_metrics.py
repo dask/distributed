@@ -426,19 +426,22 @@ async def test_user_metrics_weird(c, s, a):
     await wait(c.submit(f, key="x"))
     await a.heartbeat()
 
-    assert (
-        list(get_digests(a))
-        == list(get_digests(s))
-        == [
-            ("execute", span_id(s), "x", "deserialize", "seconds"),
-            ("execute", span_id(s), "x", ("foo", 1), "seconds"),
-            ("execute", span_id(s), "x", None, "custom"),
-            ("execute", span_id(s), "x", "thread-cpu", "seconds"),
-            ("execute", span_id(s), "x", "thread-noncpu", "seconds"),
-            ("execute", span_id(s), "x", "executor", "seconds"),
-            ("execute", span_id(s), "x", "other", "seconds"),
-        ]
-    )
+    s_metrics = get_digests(s)
+    a_metrics = get_digests(a)
+
+    assert list(s_metrics) == [
+        ("execute", "x", "deserialize", "seconds"),
+        ("execute", "x", ("foo", 1), "seconds"),
+        ("execute", "x", None, "custom"),
+        ("execute", "x", "thread-cpu", "seconds"),
+        ("execute", "x", "thread-noncpu", "seconds"),
+        ("execute", "x", "executor", "seconds"),
+        ("execute", "x", "other", "seconds"),
+    ]
+    for (context, prefix, activity, unit), v in s_metrics.items():
+        assert a_metrics[context, span_id(s), prefix, activity, unit] == pytest.approx(
+            v
+        )
 
 
 @gen_cluster(client=True, nthreads=[("", 3)])
@@ -530,34 +533,36 @@ async def test_send_metrics_to_scheduler(c, s, a, b):
     a_metrics = get_digests(a)
     b_metrics = get_digests(b)
     s_metrics = get_digests(s)
-    assert (
-        list(a_metrics)
-        == list(b_metrics)
-        == list(s_metrics)
-        == [
-            ("execute", None, "x", "deserialize", "seconds"),
-            ("execute", None, "x", "thread-cpu", "seconds"),
-            ("execute", None, "x", "thread-noncpu", "seconds"),
-            ("execute", None, "x", "executor", "seconds"),
-            ("execute", None, "x", "other", "seconds"),
-            ("get-data", "memory-read", "count"),
-            ("get-data", "memory-read", "bytes"),
-            ("get-data", "serialize", "seconds"),
-            ("get-data", "compress", "seconds"),
-            ("gather-dep", "decompress", "seconds"),
-            ("gather-dep", "deserialize", "seconds"),
-            ("gather-dep", "network", "seconds"),
-            ("gather-dep", "other", "seconds"),
-            ("get-data", "network", "seconds"),
-            ("execute", None, "x", "memory-read", "count"),
-            ("execute", None, "x", "memory-read", "bytes"),
-        ]
-    )
-    for k in s_metrics:
+
+    expect_worker = [
+        ("execute", None, "x", "deserialize", "seconds"),
+        ("execute", None, "x", "thread-cpu", "seconds"),
+        ("execute", None, "x", "thread-noncpu", "seconds"),
+        ("execute", None, "x", "executor", "seconds"),
+        ("execute", None, "x", "other", "seconds"),
+        ("get-data", "memory-read", "count"),
+        ("get-data", "memory-read", "bytes"),
+        ("get-data", "serialize", "seconds"),
+        ("get-data", "compress", "seconds"),
+        ("gather-dep", "decompress", "seconds"),
+        ("gather-dep", "deserialize", "seconds"),
+        ("gather-dep", "network", "seconds"),
+        ("gather-dep", "other", "seconds"),
+        ("get-data", "network", "seconds"),
+        ("execute", None, "x", "memory-read", "count"),
+        ("execute", None, "x", "memory-read", "bytes"),
+    ]
+    assert list(a_metrics) == list(b_metrics) == expect_worker
+    expect_scheduler = [
+        k[:1] + k[2:] if k[0] == "execute" else k for k in expect_worker
+    ]
+    assert list(s_metrics) == expect_scheduler
+
+    for wk, sk in zip(expect_worker, expect_scheduler):
         if not WINDOWS:
-            assert a_metrics[k] > 0
-            assert b_metrics[k] > 0
-        assert s_metrics[k] == a_metrics[k] + b_metrics[k]
+            assert a_metrics[wk] > 0
+            assert b_metrics[wk] > 0
+        assert s_metrics[sk] == pytest.approx(a_metrics[wk] + b_metrics[wk])
 
 
 @gen_cluster(
@@ -571,8 +576,9 @@ async def test_no_spans_extension(c, s, a):
     await wait(c.submit(inc, 1, key="y"))
     await a.heartbeat()
 
-    digests = get_digests(a)
-    assert list(digests) == [
+    w_metrics = get_digests(a)
+    s_metrics = get_digests(s)
+    expect_worker = [
         ("execute", None, "x", "failed", "seconds"),
         ("execute", None, "y", "deserialize", "seconds"),
         ("execute", None, "y", "thread-cpu", "seconds"),
@@ -580,5 +586,35 @@ async def test_no_spans_extension(c, s, a):
         ("execute", None, "y", "executor", "seconds"),
         ("execute", None, "y", "other", "seconds"),
     ]
-    for k, v in digests.items():
-        assert s.cumulative_worker_metrics[k] == v
+    expect_scheduler = [
+        k[:1] + k[2:] if k[0] == "execute" else k for k in expect_worker
+    ]
+    assert list(w_metrics) == expect_worker
+    assert list(s_metrics) == expect_scheduler
+
+    for wk, sk in zip(expect_worker, expect_scheduler):
+        if not WINDOWS:
+            assert w_metrics[wk] > 0
+        assert s_metrics[sk] == pytest.approx(w_metrics[wk])
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_new_metrics_during_heartbeat(c, s, a):
+    """Make sure that metrics generated during the heartbeat don't get lost"""
+    # Create default span
+    await c.submit(inc, 1)
+    span = s.extensions["spans"].spans_search_by_name["default",][0]
+
+    hb_task = asyncio.create_task(a.heartbeat())
+    n = 0
+    while not hb_task.done():
+        n += 1
+        a.digest_metric(("execute", span.id, "x", "test", "test"), 1)
+        await asyncio.sleep(0)
+    await hb_task
+    assert n > 10
+    await a.heartbeat()
+
+    assert a.digests_total["execute", span.id, "x", "test", "test"] == n
+    assert s.cumulative_worker_metrics["execute", "x", "test", "test"] == n
+    assert span.cumulative_worker_metrics["execute", "x", "test", "test"] == n
