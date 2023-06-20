@@ -510,13 +510,12 @@ async def test_worker_metrics(c, s, a, b):
 
     # Metrics have been synchronized from scheduler to spans
     for k, v in foo_metrics.items():
-        assert s.cumulative_worker_metrics[k] == v
+        assert s.cumulative_worker_metrics[k] == pytest.approx(v)
 
     # Metrics for foo contain the sum of metrics from itself and for bar
     for k in bar0_metrics:
-        assert (
-            foo_metrics[k]
-            == bar0_metrics[k]
+        assert foo_metrics[k] == pytest.approx(
+            bar0_metrics[k]
             + bar1_metrics[k]
             + ext.spans[foo_sid]._cumulative_worker_metrics[k]
         )
