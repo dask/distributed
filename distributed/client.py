@@ -610,7 +610,8 @@ class FutureState:
         _, exception, traceback = clean_exception(exception, traceback)
 
         if (
-            dask.config.get("admin.traceback.shorten", False) is True
+            dask.config.get("admin.traceback.shorten.when", None)
+            and dask.config.get("admin.traceback.shorten.what", None)
             and key
             and erred_on
         ):
