@@ -1840,7 +1840,7 @@ async def test_handle_null_partitions_p2p_shuffling(c, s, *workers):
     ddf = dd.from_pandas(df, npartitions=2)
     ddf = ddf.shuffle(on="id", shuffle="p2p", ignore_index=True)
     result = await c.compute(ddf)
-    assert dask.dataframe.utils.assert_eq(result, df)
+    dd.assert_eq(result, df)
 
     await c.close()
     await asyncio.gather(*[clean_worker(w) for w in workers])
