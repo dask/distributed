@@ -55,7 +55,7 @@ def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
     while file.tell() < end:
         sr = pa.RecordBatchStreamReader(file)
         shards.append(sr.read_all())
-    table = pa.concat_tables(shards)
+    table = pa.concat_tables(shards, promote=True)
     df = table.to_pandas(self_destruct=True)
 
     def default_types_mapper(pyarrow_dtype: pa.DataType) -> object:
