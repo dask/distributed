@@ -3108,7 +3108,7 @@ class Client(SyncMethodMixin):
                 annotations["resources"] = resources
 
             # Merge global and local annotations
-            annotations = merge(dask.config.get("annotations", {}), annotations)
+            annotations = merge(dask.get_annotations({}), annotations)
 
             # Pack the high level graph before sending it to the scheduler
             keyset = set(keys)
