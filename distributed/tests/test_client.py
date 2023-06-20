@@ -33,6 +33,7 @@ from unittest import mock
 import psutil
 import pytest
 import yaml
+from packaging.version import parse as parse_version
 from tlz import concat, first, identity, isdistinct, merge, pluck, valmap
 from tornado.ioloop import IOLoop
 
@@ -7262,6 +7263,9 @@ def test_computation_object_code_dask_compute_no_frames_default(client):
 
 def test_computation_object_code_not_available(client):
     np = pytest.importorskip("numpy")
+    if parse_version(np.__version__) >= parse_version("1.25"):
+        raise pytest.skip("numpy >=1.25 can capture ufunc code")
+
     pd = pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
     with dask.config.set({"distributed.diagnostics.computations.nframes": 2}):

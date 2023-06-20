@@ -19,7 +19,7 @@ from dask.array.utils import assert_eq
 
 from distributed import Client
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._rechunk import ShardID, rechunk_slicing
+from distributed.shuffle._rechunk import Split, split_axes
 from distributed.shuffle._scheduler_extension import get_worker_for_hash_sharding
 from distributed.shuffle._shuffle import ShuffleId
 from distributed.shuffle._worker_extension import ArrayRechunkRun
@@ -723,17 +723,14 @@ async def test_rechunk_with_fully_unknown_dimension(c, s, *ws, x, chunks):
         pytest.param(
             da.ones(shape=(1000, 10), chunks=(5, 10)),
             (None, 5),
-            marks=pytest.mark.skip(reason="distributed#7757"),
         ),
         pytest.param(
             da.ones(shape=(1000, 10), chunks=(5, 10)),
             {1: 5},
-            marks=pytest.mark.skip(reason="distributed#7757"),
         ),
         pytest.param(
             da.ones(shape=(1000, 10), chunks=(5, 10)),
             (None, (5, 5)),
-            marks=pytest.mark.skip(reason="distributed#7757"),
         ),
         (da.ones(shape=(10, 10), chunks=(10, 10)), (None, 5)),
         (da.ones(shape=(10, 10), chunks=(10, 10)), {1: 5}),
@@ -1023,7 +1020,7 @@ async def test_rechunk_with_zero(c, s, *ws):
     assert_eq(await c.compute(result), await c.compute(expected))
 
 
-def test_rechunk_slicing_1():
+def test_split_axes_1():
     """
     See Also
     --------
@@ -1031,21 +1028,20 @@ def test_rechunk_slicing_1():
     """
     old = ((10, 10, 10, 10, 10),)
     new = ((25, 5, 20),)
-    result = rechunk_slicing(old, new)
-    expected = {
-        (0,): [(ShardID((0,), (0,)), (slice(0, 10, None),))],
-        (1,): [(ShardID((0,), (1,)), (slice(0, 10, None),))],
-        (2,): [
-            (ShardID((0,), (2,)), (slice(0, 5, None),)),
-            (ShardID((1,), (0,)), (slice(5, 10, None),)),
-        ],
-        (3,): [(ShardID((2,), (0,)), (slice(0, 10, None),))],
-        (4,): [(ShardID((2,), (1,)), (slice(0, 10, None),))],
-    }
+    result = split_axes(old, new)
+    expected = [
+        [
+            [Split(0, 0, slice(0, 10, None))],
+            [Split(0, 1, slice(0, 10, None))],
+            [Split(0, 2, slice(0, 5, None)), Split(1, 0, slice(5, 10, None))],
+            [Split(2, 0, slice(0, 10, None))],
+            [Split(2, 1, slice(0, 10, None))],
+        ]
+    ]
     assert result == expected
 
 
-def test_rechunk_slicing_2():
+def test_split_axes_2():
     """
     See Also
     --------
@@ -1053,27 +1049,20 @@ def test_rechunk_slicing_2():
     """
     old = ((20, 20, 20, 20, 20),)
     new = ((58, 4, 20, 18),)
-    result = rechunk_slicing(old, new)
-    expected = {
-        (0,): [(ShardID((0,), (0,)), (slice(0, 20, None),))],
-        (1,): [(ShardID((0,), (1,)), (slice(0, 20, None),))],
-        (2,): [
-            (ShardID((0,), (2,)), (slice(0, 18, None),)),
-            (ShardID((1,), (0,)), (slice(18, 20, None),)),
-        ],
-        (3,): [
-            (ShardID((1,), (1,)), (slice(0, 2, None),)),
-            (ShardID((2,), (0,)), (slice(2, 20, None),)),
-        ],
-        (4,): [
-            (ShardID((2,), (1,)), (slice(0, 2, None),)),
-            (ShardID((3,), (0,)), (slice(2, 20, None),)),
-        ],
-    }
+    result = split_axes(old, new)
+    expected = [
+        [
+            [Split(0, 0, slice(0, 20, None))],
+            [Split(0, 1, slice(0, 20, None))],
+            [Split(0, 2, slice(0, 18, None)), Split(1, 0, slice(18, 20, None))],
+            [Split(1, 1, slice(0, 2, None)), Split(2, 0, slice(2, 20, None))],
+            [Split(2, 1, slice(0, 2, None)), Split(3, 0, slice(2, 20, None))],
+        ]
+    ]
     assert result == expected
 
 
-def test_rechunk_slicing_nan():
+def test_split_axes_nan():
     """
     See Also
     --------
@@ -1081,27 +1070,19 @@ def test_rechunk_slicing_nan():
     """
     old_chunks = ((np.nan, np.nan), (8,))
     new_chunks = ((np.nan, np.nan), (4, 4))
-    result = rechunk_slicing(old_chunks, new_chunks)
-    expected = {
-        (0, 0): [
-            (
-                ShardID((0, 0), (0, 0)),
-                (slice(0, None, None), slice(0, 4, None)),
-            ),
-            (
-                ShardID((0, 1), (0, 0)),
-                (slice(0, None, None), slice(4, 8, None)),
-            ),
+    result = split_axes(old_chunks, new_chunks)
+
+    expected = [
+        [
+            [Split(0, 0, slice(0, None, None))],
+            [Split(1, 0, slice(0, None, None))],
         ],
-        (1, 0): [
-            (ShardID((1, 0), (0, 0)), (slice(0, None, None), slice(0, 4, None))),
-            (ShardID((1, 1), (0, 0)), (slice(0, None, None), slice(4, 8, None))),
-        ],
-    }
+        [[Split(0, 0, slice(0, 4, None)), Split(1, 0, slice(4, 8, None))]],
+    ]
     assert result == expected
 
 
-def test_rechunk_slicing_nan_single():
+def test_split_axes_nan_single():
     """
     See Also
     --------
@@ -1110,17 +1091,15 @@ def test_rechunk_slicing_nan_single():
     old_chunks = ((np.nan,), (10,))
     new_chunks = ((np.nan,), (5, 5))
 
-    result = rechunk_slicing(old_chunks, new_chunks)
-    expected = {
-        (0, 0): [
-            (ShardID((0, 0), (0, 0)), (slice(0, None, None), slice(0, 5, None))),
-            (ShardID((0, 1), (0, 0)), (slice(0, None, None), slice(5, 10, None))),
-        ],
-    }
+    result = split_axes(old_chunks, new_chunks)
+    expected = [
+        [[Split(0, 0, slice(0, None, None))]],
+        [[Split(0, 0, slice(0, 5, None)), Split(1, 0, slice(5, 10, None))]],
+    ]
     assert result == expected
 
 
-def test_rechunk_slicing_nan_long():
+def test_split_axes_nan_long():
     """
     See Also
     --------
@@ -1128,29 +1107,22 @@ def test_rechunk_slicing_nan_long():
     """
     old_chunks = (tuple([np.nan] * 4), (10,))
     new_chunks = (tuple([np.nan] * 4), (5, 5))
-    result = rechunk_slicing(old_chunks, new_chunks)
-    expected = {
-        (0, 0): [
-            (ShardID((0, 0), (0, 0)), (slice(0, None, None), slice(0, 5, None))),
-            (ShardID((0, 1), (0, 0)), (slice(0, None, None), slice(5, 10, None))),
+    result = split_axes(old_chunks, new_chunks)
+    expected = [
+        [
+            [Split(0, 0, slice(0, None, None))],
+            [Split(1, 0, slice(0, None, None))],
+            [Split(2, 0, slice(0, None, None))],
+            [Split(3, 0, slice(0, None, None))],
         ],
-        (1, 0): [
-            (ShardID((1, 0), (0, 0)), (slice(0, None, None), slice(0, 5, None))),
-            (ShardID((1, 1), (0, 0)), (slice(0, None, None), slice(5, 10, None))),
+        [
+            [Split(0, 0, slice(0, 5, None)), Split(1, 0, slice(5, 10, None))],
         ],
-        (2, 0): [
-            (ShardID((2, 0), (0, 0)), (slice(0, None, None), slice(0, 5, None))),
-            (ShardID((2, 1), (0, 0)), (slice(0, None, None), slice(5, 10, None))),
-        ],
-        (3, 0): [
-            (ShardID((3, 0), (0, 0)), (slice(0, None, None), slice(0, 5, None))),
-            (ShardID((3, 1), (0, 0)), (slice(0, None, None), slice(5, 10, None))),
-        ],
-    }
+    ]
     assert result == expected
 
 
-def test_rechunk_slicing_chunks_with_nonzero():
+def test_split_axes_with_nonzero():
     """
     See Also
     --------
@@ -1158,21 +1130,18 @@ def test_rechunk_slicing_chunks_with_nonzero():
     """
     old = ((4, 4), (2,))
     new = ((8,), (1, 1))
-    result = rechunk_slicing(old, new)
-    expected = {
-        (0, 0): [
-            (ShardID((0, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
-            (ShardID((0, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
+    result = split_axes(old, new)
+    expected = [
+        [
+            [Split(0, 0, slice(0, 4, None))],
+            [Split(0, 1, slice(0, 4, None))],
         ],
-        (1, 0): [
-            (ShardID((0, 0), (1, 0)), (slice(0, 4, None), slice(0, 1, None))),
-            (ShardID((0, 1), (1, 0)), (slice(0, 4, None), slice(1, 2, None))),
-        ],
-    }
+        [[Split(0, 0, slice(0, 1, None)), Split(1, 0, slice(1, 2, None))]],
+    ]
     assert result == expected
 
 
-def test_rechunk_slicing_chunks_with_zero():
+def test_split_axes_with_zero():
     """
     See Also
     --------
@@ -1180,87 +1149,68 @@ def test_rechunk_slicing_chunks_with_zero():
     """
     old = ((4, 4), (2,))
     new = ((4, 0, 0, 4), (1, 1))
-    result = rechunk_slicing(old, new)
+    result = split_axes(old, new)
 
-    expected = {
-        (0, 0): [
-            (ShardID((0, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
-            (ShardID((0, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
+    expected = [
+        [
+            [Split(0, 0, slice(0, 4, None))],
+            [
+                Split(1, 0, slice(0, 0, None)),
+                Split(2, 0, slice(0, 0, None)),
+                Split(3, 0, slice(0, 4, None)),
+            ],
         ],
-        (1, 0): [
-            # FIXME: We should probably filter these out to avoid sending empty shards
-            (ShardID((1, 0), (0, 0)), (slice(0, 0, None), slice(0, 1, None))),
-            (ShardID((1, 1), (0, 0)), (slice(0, 0, None), slice(1, 2, None))),
-            (ShardID((2, 0), (0, 0)), (slice(0, 0, None), slice(0, 1, None))),
-            (ShardID((2, 1), (0, 0)), (slice(0, 0, None), slice(1, 2, None))),
-            (ShardID((3, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
-            (ShardID((3, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
-        ],
-    }
-
+        [[Split(0, 0, slice(0, 1, None)), Split(1, 0, slice(1, 2, None))]],
+    ]
     assert result == expected
 
     old = ((4, 0, 0, 4), (1, 1))
     new = ((4, 4), (2,))
-    result = rechunk_slicing(old, new)
+    result = split_axes(old, new)
 
-    expected = {
-        (0, 0): [
-            (ShardID((0, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
+    expected = [
+        [
+            [Split(0, 0, slice(0, 4, None))],
+            [],
+            [],
+            [Split(1, 0, slice(0, 4, None))],
         ],
-        (0, 1): [
-            (ShardID((0, 0), (0, 1)), (slice(0, 4, None), slice(0, 1, None))),
+        [
+            [Split(0, 0, slice(0, 1, None))],
+            [Split(0, 1, slice(0, 1, None))],
         ],
-        (3, 0): [
-            (ShardID((1, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
-        ],
-        (3, 1): [
-            (ShardID((1, 0), (0, 1)), (slice(0, 4, None), slice(0, 1, None))),
-        ],
-    }
-
+    ]
     assert result == expected
 
     old = ((4, 4), (2,))
     new = ((2, 0, 0, 2, 4), (1, 1))
-    result = rechunk_slicing(old, new)
-    expected = {
-        (0, 0): [
-            (ShardID((0, 0), (0, 0)), (slice(0, 2, None), slice(0, 1, None))),
-            (ShardID((0, 1), (0, 0)), (slice(0, 2, None), slice(1, 2, None))),
-            # FIXME: We should probably filter these out to avoid sending empty shards
-            (ShardID((1, 0), (0, 0)), (slice(2, 2, None), slice(0, 1, None))),
-            (ShardID((1, 1), (0, 0)), (slice(2, 2, None), slice(1, 2, None))),
-            (ShardID((2, 0), (0, 0)), (slice(2, 2, None), slice(0, 1, None))),
-            (ShardID((2, 1), (0, 0)), (slice(2, 2, None), slice(1, 2, None))),
-            (ShardID((3, 0), (0, 0)), (slice(2, 4, None), slice(0, 1, None))),
-            (ShardID((3, 1), (0, 0)), (slice(2, 4, None), slice(1, 2, None))),
+    result = split_axes(old, new)
+    expected = [
+        [
+            [
+                Split(0, 0, slice(0, 2, None)),
+                Split(1, 0, slice(2, 2, None)),
+                Split(2, 0, slice(2, 2, None)),
+                Split(3, 0, slice(2, 4)),
+            ],
+            [Split(4, 0, slice(0, 4, None))],
         ],
-        (1, 0): [
-            (ShardID((4, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
-            (ShardID((4, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
-        ],
-    }
-
+        [[Split(0, 0, slice(0, 1, None)), Split(1, 0, slice(1, 2, None))]],
+    ]
     assert result == expected
 
     old = ((4, 4), (2,))
     new = ((0, 0, 4, 4), (1, 1))
-    result = rechunk_slicing(old, new)
-    expected = {
-        (0, 0): [
-            # FIXME: We should probably filter these out to avoid sending empty shards
-            (ShardID((0, 0), (0, 0)), (slice(0, 0, None), slice(0, 1, None))),
-            (ShardID((0, 1), (0, 0)), (slice(0, 0, None), slice(1, 2, None))),
-            (ShardID((1, 0), (0, 0)), (slice(0, 0, None), slice(0, 1, None))),
-            (ShardID((1, 1), (0, 0)), (slice(0, 0, None), slice(1, 2, None))),
-            (ShardID((2, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
-            (ShardID((2, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
+    result = split_axes(old, new)
+    expected = [
+        [
+            [
+                Split(0, 0, slice(0, 0, None)),
+                Split(1, 0, slice(0, 0, None)),
+                Split(2, 0, slice(0, 4, None)),
+            ],
+            [Split(3, 0, slice(0, 4, None))],
         ],
-        (1, 0): [
-            (ShardID((3, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
-            (ShardID((3, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
-        ],
-    }
-
+        [[Split(0, 0, slice(0, 1, None)), Split(1, 0, slice(1, 2, None))]],
+    ]
     assert result == expected
