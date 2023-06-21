@@ -582,3 +582,34 @@ async def test_merge_by_tags_metrics(c, s, a, b):
     assert ext.merge_by_tags("foo").enqueued == min(
         ext.spans[foo1].enqueued, ext.spans[foo2].enqueued
     )
+
+
+@gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 10})
+async def test_code(c, s, a, b):
+    with span("foo") as foo:
+        for subspan in ("bar", "baz"):
+            with span(subspan):
+                for key in ("x", "y"):
+                    # Call update-graph four times in two different subspans,
+                    # all with the same code stack
+                    await c.submit(inc, 1, key=key)
+
+        await c.submit(inc, 2, key="z")
+        await c.submit(inc, 3, key="w")
+
+    code = s.extensions["spans"].spans[foo].code
+
+    # Identical code stacks have been deduplicated
+    assert len(code) == 3
+    assert "def _run(self)" in code[0][-2].code
+    assert "inc, 1" in code[0][-1].code
+    assert code[0][-1].lineno_relative == 10
+    assert code[1][-1].lineno_relative == 11
+    assert code[2][-1].lineno_relative == 8
+
+
+@gen_cluster(client=True)
+async def test_no_code_by_default(c, s, a, b):
+    with span("foo") as foo:
+        await c.submit(inc, 1, key="x")
+    assert s.extensions["spans"].spans[foo].code == []
