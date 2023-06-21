@@ -1568,7 +1568,11 @@ class SchedulerState:
     idle_task_count: set[WorkerState]
     #: Workers that are fully utilized. May include non-running workers.
     saturated: set[WorkerState]
+    #: Current number of threads across all workers
     total_nthreads: int
+    #: History of number of threads
+    #: (timestamp, new number fo threads)
+    total_nthreads_history: list[tuple[float, int]]
     #: Cluster-wide resources. {resource name: {worker address: amount}}
     resources: dict[str, dict[str, float]]
 
@@ -1690,6 +1694,7 @@ class SchedulerState:
         self.task_prefixes = {}
         self.task_metadata = {}
         self.total_nthreads = 0
+        self.total_nthreads_history = [(time(), 0)]
         self.unknown_durations = {}
         self.queued = queued
         self.unrunnable = unrunnable
@@ -4246,6 +4251,7 @@ class Scheduler(SchedulerState, ServerNode):
         dh["nthreads"] += nthreads
 
         self.total_nthreads += nthreads
+        self.total_nthreads_history.append((time(), self.total_nthreads))
         self.aliases[name] = address
 
         self.heartbeat_worker(
@@ -4996,6 +5002,7 @@ class Scheduler(SchedulerState, ServerNode):
         dh_addresses.remove(address)
         dh["nthreads"] -= ws.nthreads
         self.total_nthreads -= ws.nthreads
+        self.total_nthreads_history.append((time(), self.total_nthreads))
         if not dh_addresses:
             del self.host_info[host]
 
