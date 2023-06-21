@@ -14,6 +14,7 @@ from distributed.utils_test import (
     _LockedCommPool,
     assert_story,
     async_poll_for,
+    freeze_batched_send,
     gen_cluster,
     inc,
     lock_inc,
@@ -765,29 +766,29 @@ async def test_cancelled_task_error_rejected(c, s, a, b):
         while any(fut.key in s.tasks for fut in futs):
             await asyncio.sleep(0.05)
 
-    await release_all_futures()
-    await wait_for_state(f3.key, "cancelled", b)
+    with freeze_batched_send(s.stream_comms[b.address]):
+        await release_all_futures()
 
-    f1 = c.submit(inc, 1, key="f1", workers=[a.address])
-    f2 = c.submit(inc, f1, key="f2", workers=[a.address])
-    f3 = c.submit(
-        block,
-        f2,
-        lock=lock_successful,
-        enter_event=enter_compute_successful,
-        exit_event=exit_compute_successful,
-        raise_error=False,
-        key="f3",
-        workers=[a.address],
-    )
-    f4 = c.submit(sum, [f1, f3], key="f4", workers=[b.address])
+        f1 = c.submit(inc, 1, key="f1", workers=[a.address])
+        f2 = c.submit(inc, f1, key="f2", workers=[a.address])
+        f3 = c.submit(
+            block,
+            f2,
+            lock=lock_successful,
+            enter_event=enter_compute_successful,
+            exit_event=exit_compute_successful,
+            raise_error=False,
+            key="f3",
+            workers=[a.address],
+        )
+        f4 = c.submit(sum, [f1, f3], key="f4", workers=[b.address])
 
-    await wait_for_state(f3.key, "processing", s)
-    await enter_compute_successful.wait()
+        await wait_for_state(f3.key, "processing", s)
+        await enter_compute_successful.wait()
 
-    await lock_erring.release()
-    while f3.key in b.state.tasks:
-        await asyncio.sleep(0.05)
+        await lock_erring.release()
+        await wait_for_state(f3.key, "error", b)
+
     await lock_successful.release()
     assert await f4 == 4 + 2
 
@@ -795,15 +796,15 @@ async def test_cancelled_task_error_rejected(c, s, a, b):
         b.state.story(f3.key),
         expect=[
             (f3.key, "ready", "executing", "executing", {}),
-            (f3.key, "executing", "released", "cancelled", {}),
+            (f3.key, "executing", "error", "error", {}),
             (
                 f3.key,
-                "cancelled",
                 "error",
                 "released",
-                {f2.key: "released", f3.key: "forgotten"},
+                "released",
+                {f3.key: "forgotten"},
             ),
-            (f3.key, "released", "forgotten", "forgotten", {f2.key: "forgotten"}),
+            (f3.key, "released", "forgotten", "forgotten", {}),
         ],
     )
 
