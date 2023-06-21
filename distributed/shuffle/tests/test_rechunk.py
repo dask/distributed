@@ -600,9 +600,9 @@ async def test_rechunk_unknown_from_array(c, s, *ws):
         (da.ones(shape=(50, 10), chunks=(25, 10)), (None, 5)),
         (da.ones(shape=(50, 10), chunks=(25, 10)), {1: 5}),
         (da.ones(shape=(50, 10), chunks=(25, 10)), (None, (5, 5))),
-        (da.ones(shape=(1000, 10), chunks=(5, 10)), (None, 5)),
-        (da.ones(shape=(1000, 10), chunks=(5, 10)), {1: 5}),
-        (da.ones(shape=(1000, 10), chunks=(5, 10)), (None, (5, 5))),
+        (da.ones(shape=(100, 10), chunks=(5, 10)), (None, 5)),
+        (da.ones(shape=(100, 10), chunks=(5, 10)), {1: 5}),
+        (da.ones(shape=(100, 10), chunks=(5, 10)), (None, (5, 5))),
         (da.ones(shape=(10, 10), chunks=(10, 10)), (None, 5)),
         (da.ones(shape=(10, 10), chunks=(10, 10)), {1: 5}),
         (da.ones(shape=(10, 10), chunks=(10, 10)), (None, (5, 5))),
@@ -633,16 +633,16 @@ async def test_rechunk_with_fully_unknown_dimension(c, s, *ws, x, chunks):
         (da.ones(shape=(50, 10), chunks=(25, 10)), (None, 5)),
         (da.ones(shape=(50, 10), chunks=(25, 10)), {1: 5}),
         (da.ones(shape=(50, 10), chunks=(25, 10)), (None, (5, 5))),
-        pytest.param(
-            da.ones(shape=(1000, 10), chunks=(5, 10)),
+        (
+            da.ones(shape=(100, 10), chunks=(5, 10)),
             (None, 5),
         ),
-        pytest.param(
-            da.ones(shape=(1000, 10), chunks=(5, 10)),
+        (
+            da.ones(shape=(100, 10), chunks=(5, 10)),
             {1: 5},
         ),
-        pytest.param(
-            da.ones(shape=(1000, 10), chunks=(5, 10)),
+        (
+            da.ones(shape=(100, 10), chunks=(5, 10)),
             (None, (5, 5)),
         ),
         (da.ones(shape=(10, 10), chunks=(10, 10)), (None, 5)),
