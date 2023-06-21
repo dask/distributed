@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 import toolz
 
 from dask.context import thread_state
-from dask.dataframe.dispatch import to_pyarrow_table_dispatch
 from dask.utils import get_meta_library, parse_bytes
 
 from distributed.core import PooledRPCCall
@@ -932,6 +931,8 @@ def split_by_worker(
     Split data into many arrow batches, partitioned by destination worker
     """
     import numpy as np
+
+    from dask.dataframe.dispatch import to_pyarrow_table_dispatch
 
     # (cudf support) Align dataframe backends
     lib = get_meta_library(df)

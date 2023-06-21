@@ -5,8 +5,6 @@ from typing import TYPE_CHECKING
 
 from packaging.version import parse
 
-from dask.dataframe.dispatch import from_pyarrow_table_dispatch
-
 if TYPE_CHECKING:
     import pandas as pd
     import pyarrow as pa
@@ -50,6 +48,8 @@ def check_minimal_arrow_version() -> None:
 def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
     import pandas as pd
     import pyarrow as pa
+
+    from dask.dataframe.dispatch import from_pyarrow_table_dispatch
 
     file = BytesIO(data)
     end = len(data)
