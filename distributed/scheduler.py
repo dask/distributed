@@ -1571,7 +1571,7 @@ class SchedulerState:
     #: Current number of threads across all workers
     total_nthreads: int
     #: History of number of threads
-    #: (timestamp, new number fo threads)
+    #: (timestamp, new number of threads)
     total_nthreads_history: list[tuple[float, int]]
     #: Cluster-wide resources. {resource name: {worker address: amount}}
     resources: dict[str, dict[str, float]]
