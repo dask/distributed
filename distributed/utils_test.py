@@ -6,7 +6,6 @@ import contextlib
 import copy
 import errno
 import functools
-import gc
 import inspect
 import io
 import logging
@@ -1065,22 +1064,18 @@ def gen_cluster(
                     else:
                         await c._close(fast=True)
 
-                    def get_unclosed():
-                        return [c for c in Comm._instances if not c.closed()] + [
+                    try:
+                        unclosed = [c for c in Comm._instances if not c.closed()] + [
                             c for c in _global_clients.values() if c.status != "closed"
                         ]
-
-                    try:
-                        while deadline.remaining:
-                            gc.collect()
-                            if not get_unclosed():
-                                break
-                            await asyncio.sleep(0.05)
-                        else:
-                            if allow_unclosed:
-                                print(f"Unclosed Comms: {get_unclosed()}")
-                            else:
-                                raise RuntimeError("Unclosed Comms", get_unclosed())
+                        try:
+                            if unclosed:
+                                if allow_unclosed:
+                                    print(f"Unclosed Comms: {unclosed}")
+                                else:
+                                    raise RuntimeError("Unclosed Comms", unclosed)
+                        finally:
+                            del unclosed
                     finally:
                         Comm._instances.clear()
                         _global_clients.clear()
