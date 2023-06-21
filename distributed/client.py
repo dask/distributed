@@ -604,7 +604,7 @@ class FutureState:
             The traceback
         erred_on: set
             Workers where it errored
-        key: tuple
+        key: Hashable
             Task key
         """
         _, exception, traceback = clean_exception(exception, traceback)
