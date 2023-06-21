@@ -74,7 +74,7 @@ def span(*tags: str) -> Iterator[str]:
     if not tags:
         raise ValueError("Must specify at least one span tag")
 
-    annotation = dask.get_annotations().get("span")  # type: ignore
+    annotation = dask.get_annotations().get("span")
     prev_tags = annotation["name"] if annotation else ()
     # You must specify the full history of IDs, not just the parent, because
     # otherwise you would not be able to uniquely identify grandparents when
