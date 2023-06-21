@@ -610,10 +610,10 @@ class FutureState:
         _, exception, traceback = clean_exception(exception, traceback)
 
         if (
-            dask.config.get("admin.traceback.shorten.when", None)
-            and dask.config.get("admin.traceback.shorten.what", None)
-            and key
+            key
             and erred_on
+            and dask.config.get("admin.traceback.shorten.when")
+            and dask.config.get("admin.traceback.shorten.what")
         ):
             # when Exception is logged or printed, its args are printed as well,
             # this makes it easier to communicate extra information without
