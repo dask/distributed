@@ -1860,3 +1860,22 @@ async def test_closed_worker_returns_before_barrier(c, s):
         await c.close()
         await asyncio.gather(*[clean_worker(w) for w in workers])
         await clean_scheduler(s)
+
+
+@gen_cluster(client=True)
+async def test_handle_null_partitions_p2p_shuffling(c, s, *workers):
+    data = [
+        {"companies": [], "id": "a", "x": None},
+        {"companies": [{"id": 3}, {"id": 5}], "id": "b", "x": None},
+        {"companies": [{"id": 3}, {"id": 4}, {"id": 5}], "id": "c", "x": "b"},
+        {"companies": [{"id": 9}], "id": "a", "x": "a"},
+    ]
+    df = pd.DataFrame(data)
+    ddf = dd.from_pandas(df, npartitions=2)
+    ddf = ddf.shuffle(on="id", shuffle="p2p", ignore_index=True)
+    result = await c.compute(ddf)
+    dd.assert_eq(result, df)
+
+    await c.close()
+    await asyncio.gather(*[clean_worker(w) for w in workers])
+    await clean_scheduler(s)

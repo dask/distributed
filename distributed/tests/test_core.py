@@ -333,7 +333,7 @@ async def test_server_listen():
         if has_ipv6():
             EXTERNAL_IP6 = get_ipv6()
     except socket.gaierror:
-        raise pytest.skip("no network access")
+        pytest.skip("no network access")
 
     from contextlib import asynccontextmanager
 

@@ -7264,7 +7264,7 @@ def test_computation_object_code_dask_compute_no_frames_default(client):
 def test_computation_object_code_not_available(client):
     np = pytest.importorskip("numpy")
     if parse_version(np.__version__) >= parse_version("1.25"):
-        raise pytest.skip("numpy >=1.25 can capture ufunc code")
+        pytest.skip("numpy >=1.25 can capture ufunc code")
 
     pd = pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
