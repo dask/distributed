@@ -2168,6 +2168,36 @@ class Client(SyncMethodMixin):
 
         return [futures[stringify(k)] for k in keys]
 
+    def decorate(self, **kwargs):
+        """
+        Decorate a function to submit tasks to Dask
+
+        This converts a normal function to instead return Dask Futures.  That
+        function can then be used in parallel.
+
+        This takes the same keywords as ``client.submit``
+
+        Example
+        -------
+
+        >>> @client.decorate()
+        ... def f(x):
+        ...     return x + 1
+
+        >>> futures = [f(x) for x in range(10)]
+        >>> results = [future.result() for future in futures]
+
+        See Also
+        --------
+        Client.submit
+        dask.delayed
+        """
+
+        def _(function):
+            return partial(self.submit, function, **kwargs)
+
+        return _
+
     async def _gather(self, futures, errors="raise", direct=None, local_worker=None):
         unpacked, future_set = unpack_remotedata(futures, byte_keys=True)
         mismatched_futures = [f for f in future_set if f.client is not self]
