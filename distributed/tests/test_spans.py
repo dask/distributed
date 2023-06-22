@@ -6,10 +6,9 @@ import pytest
 
 from dask import delayed
 
-from distributed import Client, Event, Future, Worker, wait
+from distributed import Client, Event, Future, Worker, span, wait
 from distributed.compatibility import WINDOWS
 from distributed.metrics import time
-from distributed.spans import span
 from distributed.utils_test import (
     NoSchedulerDelayWorker,
     async_poll_for,

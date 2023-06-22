@@ -3628,6 +3628,12 @@ class FinePerformanceMetrics(DashboardComponent):
 
             # Custom metrics won't necessarily contain a string as the label
             activity = str(activity)
+
+            # TODO We could implement some fancy logic in spans.py to change the label
+            #      if no other spans are running at the same time.
+            if not self.span_tag_selector.value and activity == "idle or other spans":
+                activity = "idle"
+
             execute_by_func[function, activity] += v
             execute[activity] += v
             visible_functions.add(function)
