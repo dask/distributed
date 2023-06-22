@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 import toolz
 
 from dask.context import thread_state
-from dask.utils import get_meta_library, parse_bytes
+from dask.utils import parse_bytes
 
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
@@ -934,9 +934,8 @@ def split_by_worker(
 
     from dask.dataframe.dispatch import to_pyarrow_table_dispatch
 
-    # (cudf support) Align dataframe backends
-    lib = get_meta_library(df)
-    worker_for = lib.Series(worker_for)
+    # (cudf support) Avoid pd.Series
+    worker_for = df._constructor_sliced(worker_for)
     df = df.merge(
         right=worker_for.cat.codes.rename("_worker"),
         left_on=column,
