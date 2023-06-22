@@ -115,6 +115,15 @@ class Cluster(SyncMethodMixin):
         self.__loop = value
 
     @property
+    def called_from_running_loop(self):
+        try:
+            return (
+                getattr(self.loop, "asyncio_loop", None) is asyncio.get_running_loop()
+            )
+        except RuntimeError:
+            return self.asynchronous
+
+    @property
     def name(self):
         return self._cluster_info["name"]
 

@@ -334,7 +334,10 @@ class SyncMethodMixin:
     @property
     def asynchronous(self):
         """Are we running in the event loop?"""
-        return in_async_call(self.loop, default=getattr(self, "_asynchronous", False))
+        try:
+            return in_async_call(self.loop, default=getattr(self, "_asynchronous", False))
+        except RuntimeError as e:
+            return False
 
     def sync(self, func, *args, asynchronous=None, callback_timeout=None, **kwargs):
         """Call `func` with `args` synchronously or asynchronously depending on
