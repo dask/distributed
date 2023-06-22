@@ -50,6 +50,6 @@ dependencies:
   - zict
   - zstandard >=0.9.0
   - pip:
-      - git+https://github.com/j-bennet/dask@j-bennet/10340-annotations-leak # TODO: revert
+      - git+https://github.com/dask/dask
       - git+https://github.com/dask/crick  # Only tested here
       - keras

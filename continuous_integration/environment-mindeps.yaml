@@ -22,7 +22,7 @@ dependencies:
   # Distributed depends on the latest version of Dask
   - pip
   - pip:
-    - git+https://github.com/j-bennet/dask@j-bennet/10340-annotations-leak # TODO: revert
+    - git+https://github.com/dask/dask
   # test dependencies
   - pytest
   - pytest-cov

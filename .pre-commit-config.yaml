@@ -63,5 +63,5 @@ repos:
           - pytest
           - tornado
           - pyarrow
-          - git+https://github.com/j-bennet/dask@j-bennet/10340-annotations-leak
+          - git+https://github.com/dask/dask
           - git+https://github.com/dask/zict
