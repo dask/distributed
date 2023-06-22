@@ -71,6 +71,7 @@ class Cluster(SyncMethodMixin):
         scheduler_sync_interval=1,
     ):
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
+        self.__asynchronous = asynchronous
 
         self.scheduler_info = {"workers": {}}
         self.periodic_callbacks = {}
@@ -121,7 +122,7 @@ class Cluster(SyncMethodMixin):
                 getattr(self.loop, "asyncio_loop", None) is asyncio.get_running_loop()
             )
         except RuntimeError:
-            return self.asynchronous
+            return self.__asynchronous
 
     @property
     def name(self):
