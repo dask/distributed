@@ -33,6 +33,7 @@ from unittest import mock
 import psutil
 import pytest
 import yaml
+from packaging.version import parse as parse_version
 from tlz import concat, first, identity, isdistinct, merge, pluck, valmap
 from tornado.ioloop import IOLoop
 
@@ -79,14 +80,7 @@ from distributed.metrics import time
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
 from distributed.shuffle import check_minimal_arrow_version
 from distributed.sizeof import sizeof
-from distributed.utils import (
-    NoOpAwaitable,
-    get_mp_context,
-    is_valid_xml,
-    open_port,
-    sync,
-    tmp_text,
-)
+from distributed.utils import get_mp_context, is_valid_xml, open_port, sync, tmp_text
 from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
@@ -2101,27 +2095,8 @@ async def test_multi_client(s, a, b):
         await asyncio.sleep(0.01)
 
 
-@contextmanager
-def _pristine_loop():
-    IOLoop.clear_instance()
-    IOLoop.clear_current()
-    loop = IOLoop()
-    loop.make_current()
-    assert IOLoop.current() is loop
-    try:
-        yield loop
-    finally:
-        try:
-            loop.close(all_fds=True)
-        except (KeyError, ValueError):
-            pass
-        IOLoop.clear_instance()
-        IOLoop.clear_current()
-
-
 def long_running_client_connection(address):
-    with _pristine_loop():
-        c = Client(address)
+    with Client(address, loop=None) as c:
         x = c.submit(lambda x: x + 1, 10)
         x.result()
         sleep(100)
@@ -2774,8 +2749,6 @@ async def test_startup_close_startup(s, a, b):
         pass
 
 
-@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
-@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
 def test_startup_close_startup_sync(loop):
     with cluster() as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
@@ -4008,22 +3981,24 @@ async def test_serialize_future(s, a, b):
 async def test_serialize_future_without_client(s, a, b):
     # Do not use a ctx manager to avoid having this being set as a current and/or default client
     c1 = await Client(s.address, asynchronous=True, set_as_default=False)
+    try:
+        with ensure_no_new_clients():
 
-    with ensure_no_new_clients():
+            def do_stuff():
+                return 1
 
-        def do_stuff():
-            return 1
+            future = c1.submit(do_stuff)
+            pickled = pickle.dumps(future)
+            unpickled_fut = pickle.loads(pickled)
 
-        future = c1.submit(do_stuff)
-        pickled = pickle.dumps(future)
-        unpickled_fut = pickle.loads(pickled)
+        with pytest.raises(RuntimeError):
+            await unpickled_fut
 
-    with pytest.raises(RuntimeError):
-        await unpickled_fut
-
-    with c1.as_current():
-        unpickled_fut_ctx = pickle.loads(pickled)
-        assert await unpickled_fut_ctx == 1
+        with c1.as_current():
+            unpickled_fut_ctx = pickle.loads(pickled)
+            assert await unpickled_fut_ctx == 1
+    finally:
+        await c1.close()
 
 
 @gen_cluster()
@@ -5647,23 +5622,12 @@ async def test_future_auto_inform(c, s, a, b):
             await asyncio.sleep(0.01)
 
 
-@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
-@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
-@pytest.mark.filterwarnings("ignore:clear_current is deprecated:DeprecationWarning")
 def test_client_async_before_loop_starts(cleanup):
-    async def close():
-        async with client:
-            pass
-
-    with _pristine_loop() as loop:
-        with pytest.warns(
-            DeprecationWarning,
-            match=r"Constructing LoopRunner\(loop=loop\) without a running loop is deprecated",
-        ):
-            client = Client(asynchronous=True, loop=loop)
-        assert client.asynchronous
-        assert isinstance(client.close(), NoOpAwaitable)
-        loop.run_sync(close)  # TODO: client.close() does not unset global client
+    with pytest.raises(
+        RuntimeError,
+        match=r"Constructing LoopRunner\(asynchronous=True\) without a running loop is not supported",
+    ):
+        client = Client(asynchronous=True, loop=None)
 
 
 @pytest.mark.slow
@@ -7089,8 +7053,6 @@ async def test_workers_collection_restriction(c, s, a, b):
     assert a.data and not b.data
 
 
-@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
-@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_get_client_functions_spawn_clusters(c, s, a):
     # see gh4565
@@ -7287,6 +7249,9 @@ def test_computation_object_code_dask_compute_no_frames_default(client):
 
 def test_computation_object_code_not_available(client):
     np = pytest.importorskip("numpy")
+    if parse_version(np.__version__) >= parse_version("1.25"):
+        pytest.skip("numpy >=1.25 can capture ufunc code")
+
     pd = pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
     with dask.config.set({"distributed.diagnostics.computations.nframes": 2}):

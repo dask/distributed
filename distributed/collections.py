@@ -4,7 +4,7 @@ import heapq
 import itertools
 import weakref
 from collections import OrderedDict, UserDict
-from collections.abc import Callable, Hashable, Iterator, MutableSet
+from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, MutableSet
 from typing import Any, TypeVar, cast
 
 T = TypeVar("T", bound=Hashable)
@@ -198,3 +198,17 @@ class HeapSet(MutableSet[T]):
         self._data.clear()
         self._heap.clear()
         self._sorted = True
+
+
+def sum_mappings(ds: Iterable[Mapping[K, V] | Iterable[tuple[K, V]]], /) -> dict[K, V]:
+    """Sum the values of the given mappings, key by key"""
+    out: dict[K, V] = {}
+    for d in ds:
+        if isinstance(d, Mapping):
+            d = d.items()
+        for k, v in d:
+            try:
+                out[k] += v  # type: ignore
+            except KeyError:
+                out[k] = v
+    return out

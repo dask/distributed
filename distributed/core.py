@@ -1567,6 +1567,8 @@ class ConnectionPool:
         """
         Get a Comm to the given address.  For internal use.
         """
+        if self.status != Status.running:
+            raise RuntimeError("ConnectionPool is closed")
         available = self.available[addr]
         occupied = self.occupied[addr]
         while available:

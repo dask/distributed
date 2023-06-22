@@ -3,16 +3,20 @@ from __future__ import annotations
 import uuid
 import weakref
 from collections import defaultdict
-from collections.abc import Iterable, Iterator
+from collections.abc import Hashable, Iterable, Iterator
 from contextlib import contextmanager
+from itertools import islice
 from typing import TYPE_CHECKING, Any
 
 import dask.config
 
+from distributed.collections import sum_mappings
+from distributed.itertools import ffill
 from distributed.metrics import time
 
 if TYPE_CHECKING:
     from distributed import Scheduler, Worker
+    from distributed.client import SourceCode
     from distributed.scheduler import TaskGroup, TaskState, TaskStateState, WorkerState
 
 
@@ -124,21 +128,40 @@ class Span:
     #: stop
     enqueued: float
 
-    _cumulative_worker_metrics: defaultdict[tuple[str, ...], float]
+    #: Source code snippets, if it was sent by the client.
+    #: We're using a dict without values as an insertion-sorted set.
+    _code: dict[tuple[SourceCode, ...], None]
+
+    _cumulative_worker_metrics: defaultdict[tuple[Hashable, ...], float]
+
+    #: reference to SchedulerState.total_nthreads_history
+    _total_nthreads_history: list[tuple[float, int]]
+    #: Length of total_nthreads_history when this span was enqueued
+    _total_nthreads_offset: int
 
     # Support for weakrefs to a class with __slots__
     __weakref__: Any
 
     __slots__ = tuple(__annotations__)
 
-    def __init__(self, name: tuple[str, ...], id_: str, parent: Span | None):
+    def __init__(
+        self,
+        name: tuple[str, ...],
+        id_: str,
+        parent: Span | None,
+        total_nthreads_history: list[tuple[float, int]],
+    ):
         self.name = name
         self.id = id_
         self._parent = weakref.ref(parent) if parent is not None else None
         self.enqueued = time()
         self.children = []
         self.groups = set()
+        self._code = {}
         self._cumulative_worker_metrics = defaultdict(float)
+        assert len(total_nthreads_history) > 0
+        self._total_nthreads_history = total_nthreads_history
+        self._total_nthreads_offset = len(total_nthreads_history) - 1
 
     def __repr__(self) -> str:
         return f"Span<name={self.name}, id={self.id}>"
@@ -180,26 +203,40 @@ class Span:
         stop
         distributed.scheduler.TaskGroup.start
         """
-        return min(
+        out = min(
             (tg.start for tg in self.traverse_groups() if tg.start != 0.0),
             default=0.0,
         )
+        if out:
+            # absorb small errors in worker delay calculation
+            out = max(out, self.enqueued)
+        return out
 
     @property
     def stop(self) -> float:
-        """Latest time when a task belonging to this span tree finished computing;
-        0 if no task has finished computing yet.
+        """When this span tree finished computing, or current timestamp if it didn't
+        finish yet.
+
+        Notes
+        -----
+        This differs from ``TaskGroup.stop`` when there aren't unfinished tasks; is also
+        will never be zero.
 
         See also
         --------
         enqueued
         start
+        done
         distributed.scheduler.TaskGroup.stop
         """
-        return max(tg.stop for tg in self.traverse_groups())
+        if not self.done:
+            return time()
+        out = max(tg.stop for tg in self.traverse_groups())
+        # absorb small errors in worker delay calculation
+        return max(self.enqueued, out)
 
     @property
-    def states(self) -> defaultdict[TaskStateState, int]:
+    def states(self) -> dict[TaskStateState, int]:
         """The number of tasks currently in each state in this span tree;
         e.g. ``{"memory": 10, "processing": 3, "released": 4, ...}``.
 
@@ -207,11 +244,7 @@ class Span:
         --------
         distributed.scheduler.TaskGroup.states
         """
-        out: defaultdict[TaskStateState, int] = defaultdict(int)
-        for tg in self.traverse_groups():
-            for state, count in tg.states.items():
-                out[state] += count
-        return out
+        return sum_mappings(tg.states for tg in self.traverse_groups())
 
     @property
     def done(self) -> bool:
@@ -230,7 +263,7 @@ class Span:
         return all(tg.done for tg in self.traverse_groups())
 
     @property
-    def all_durations(self) -> defaultdict[str, float]:
+    def all_durations(self) -> dict[str, float]:
         """Cumulative duration of all completed actions in this span tree, by action
 
         See also
@@ -238,11 +271,7 @@ class Span:
         duration
         distributed.scheduler.TaskGroup.all_durations
         """
-        out: defaultdict[str, float] = defaultdict(float)
-        for tg in self.traverse_groups():
-            for action, nsec in tg.all_durations.items():
-                out[action] += nsec
-        return out
+        return sum_mappings(tg.all_durations for tg in self.traverse_groups())
 
     @property
     def duration(self) -> float:
@@ -266,7 +295,18 @@ class Span:
         return sum(tg.nbytes_total for tg in self.traverse_groups())
 
     @property
-    def cumulative_worker_metrics(self) -> defaultdict[tuple[str, ...], float]:
+    def code(self) -> list[tuple[SourceCode, ...]]:
+        """Code snippets, sent by the client on compute(), persist(), and submit().
+
+        Only populated if ``distributed.diagnostics.computations.nframes`` is non-zero.
+        """
+        # Deduplicate, but preserve order
+        return list(
+            dict.fromkeys(sc for child in self.traverse_spans() for sc in child._code)
+        )
+
+    @property
+    def cumulative_worker_metrics(self) -> dict[tuple[Hashable, ...], float]:
         """Replica of Worker.digests_total and Scheduler.cumulative_worker_metrics, but
         only for the metrics that can be attributed to the current span tree.
         The span_id has been removed from the key.
@@ -276,15 +316,132 @@ class Span:
         but more may be added in the future with a different format; please test for
         ``k[0] == "execute"``.
         """
-        out: defaultdict[tuple[str, ...], float] = defaultdict(float)
-        for child in self.traverse_spans():
-            for k, v in child._cumulative_worker_metrics.items():
-                out[k] += v
+        out = sum_mappings(
+            child._cumulative_worker_metrics for child in self.traverse_spans()
+        )
+        known_seconds = sum(
+            v for k, v in out.items() if k[0] == "execute" and k[-1] == "seconds"
+        )
+        # Besides rounding errors, you may get negative unknown seconds if a user
+        # manually invokes `context_meter.digest_metric`.
+        unknown_seconds = max(0.0, self.active_cpu_seconds - known_seconds)
+
+        out["execute", "N/A", "idle or other spans", "seconds"] = unknown_seconds
         return out
+
+    @staticmethod
+    def merge(*items: Span) -> Span:
+        """Merge multiple spans into a synthetic one.
+        The input spans must not be related with each other.
+        """
+        if not items:
+            raise ValueError("Nothing to merge")
+        out = Span(
+            name=("(merged)",),
+            id_="(merged)",
+            parent=None,
+            total_nthreads_history=items[0]._total_nthreads_history,
+        )
+        out._total_nthreads_offset = min(
+            child._total_nthreads_offset for child in items
+        )
+        out.children.extend(items)
+        out.enqueued = min(child.enqueued for child in items)
+        return out
+
+    def _nthreads_timeseries(self) -> Iterator[tuple[float, int]]:
+        """Yield (timestamp, number of threads across the cluster), forward-fill"""
+        stop = self.stop if self.done else 0
+        for t, n in islice(
+            self._total_nthreads_history, self._total_nthreads_offset, None
+        ):
+            if stop and t >= stop:
+                break
+            yield max(self.enqueued, t), n
+
+    def _active_timeseries(self) -> Iterator[tuple[float, bool]]:
+        """If this span is the output of :meth:`merge`, yield
+        (timestamp, True if at least one input span is active), forward-fill.
+        """
+        now = time()
+        if self.id != "(merged)":
+            yield self.enqueued, True
+            yield self.stop if self.done else now, False
+            return
+
+        events = []
+        for child in self.children:
+            events.append((child.enqueued, 1))
+            events.append((child.stop if child.done else now, -1))
+        events.sort()
+
+        n_active = 0
+        for t, delta in events:
+            if not n_active:
+                assert delta > 0
+                yield t, True
+            n_active += delta
+            if n_active == 0:
+                yield t, False
+
+    @property
+    def nthreads_intervals(self) -> list[tuple[float, float, int]]:
+        """
+        Returns
+        ------
+        List of tuples:
+
+        - begin timestamp
+        - end timestamp
+        - Scheduler.total_nthreads during this interval
+
+        When the Span is the output of :meth:`merge`, the intervals may not be
+        contiguous.
+
+        See Also
+        --------
+        enqueued
+        stop
+        active_cpu_seconds
+        distributed.scheduler.SchedulerState.total_nthreads
+        """
+        nthreads_t, nthreads_count = zip(*self._nthreads_timeseries())
+        is_active_t, is_active_flag = zip(*self._active_timeseries())
+        t_interp = sorted({*nthreads_t, *is_active_t})
+        nthreads_count_interp = ffill(t_interp, nthreads_t, nthreads_count, left=0)
+        is_active_flag_interp = ffill(t_interp, is_active_t, is_active_flag, left=False)
+        return [
+            (t0, t1, n)
+            for t0, t1, n, active in zip(
+                t_interp, t_interp[1:], nthreads_count_interp, is_active_flag_interp
+            )
+            if active
+        ]
+
+    @property
+    def active_cpu_seconds(self) -> float:
+        """Return number of CPU seconds that were made available on the cluster while
+        this Span was running; in other words
+        ``(Span.stop - Span.enqueued) * Scheduler.total_nthreads``.
+
+        This accounts for workers joining and leaving the cluster while this Span was
+        active. If this Span is the output of :meth:`merge`, do not count gaps between
+        input spans.
+
+        See Also
+        --------
+        enqueued
+        stop
+        nthreads_intervals
+        distributed.scheduler.SchedulerState.total_nthreads
+        """
+        return sum((t1 - t0) * nthreads for t0, t1, nthreads in self.nthreads_intervals)
 
 
 class SpansSchedulerExtension:
     """Scheduler extension for spans support"""
+
+    scheduler: Scheduler
 
     #: All Span objects by id
     spans: dict[str, Span]
@@ -300,15 +457,23 @@ class SpansSchedulerExtension:
     #: All spans, keyed by the individual tags that make up their name and sorted by
     #: creation time.
     #: This is a convenience helper structure to speed up searches.
+    #:
+    #: See Also
+    #: --------
+    #: find_by_tags
+    #: merge_by_tags
     spans_search_by_tag: defaultdict[str, list[Span]]
 
     def __init__(self, scheduler: Scheduler):
+        self.scheduler = scheduler
         self.spans = {}
         self.root_spans = []
         self.spans_search_by_name = defaultdict(list)
         self.spans_search_by_tag = defaultdict(list)
 
-    def observe_tasks(self, tss: Iterable[TaskState]) -> None:
+    def observe_tasks(
+        self, tss: Iterable[TaskState], code: tuple[SourceCode, ...]
+    ) -> None:
         """Acknowledge the existence of runnable tasks on the scheduler. These may
         either be new tasks, tasks that were previously unrunnable, or tasks that were
         already fed into this method already.
@@ -323,7 +488,9 @@ class SpansSchedulerExtension:
             # different spans. If that happens, arbitrarily force everything onto the
             # span of the earliest encountered TaskGroup.
             tg = ts.group
-            if not tg.span_id:
+            if tg.span_id:
+                span = self.spans[tg.span_id]
+            else:
                 ann = ts.annotations.get("span")
                 if ann:
                     span = self._ensure_span(ann["name"], ann["ids"])
@@ -334,6 +501,9 @@ class SpansSchedulerExtension:
 
                 tg.span_id = span.id
                 span.groups.add(tg)
+
+            if code:
+                span._code[code] = None
 
             # The span may be completely different from the one referenced by the
             # annotation, due to the TaskGroup collision issue explained above.
@@ -367,7 +537,12 @@ class SpansSchedulerExtension:
         for i in range(1, len(name)):
             parent = self._ensure_span(name[:i], ids[:i])
 
-        span = Span(name=name, id_=ids[-1], parent=parent)
+        span = Span(
+            name=name,
+            id_=ids[-1],
+            parent=parent,
+            total_nthreads_history=self.scheduler.total_nthreads_history,
+        )
         self.spans[span.id] = span
         self.spans_search_by_name[name].append(span)
         for tag in name:
@@ -379,8 +554,35 @@ class SpansSchedulerExtension:
 
         return span
 
+    def find_by_tags(self, *tags: str) -> Iterator[Span]:
+        """Yield all spans that contain any of the given tags.
+        When a tag is shared both by a span and its (grand)children, only return the
+        parent.
+        """
+        by_level = defaultdict(list)
+        for tag in tags:
+            for sp in self.spans_search_by_tag[tag]:
+                by_level[len(sp.name)].append(sp)
+
+        seen = set()
+        for _, level in sorted(by_level.items()):
+            seen.update(level)
+            for sp in level:
+                if sp.parent not in seen:
+                    yield sp
+
+    def merge_all(self) -> Span:
+        """Return a synthetic Span which is the sum of all spans"""
+        return Span.merge(*self.root_spans)
+
+    def merge_by_tags(self, *tags: str) -> Span:
+        """Return a synthetic Span which is the sum of all spans containing the given
+        tags
+        """
+        return Span.merge(*self.find_by_tags(*tags))
+
     def heartbeat(
-        self, ws: WorkerState, data: dict[str, dict[tuple[str, ...], float]]
+        self, ws: WorkerState, data: dict[tuple[Hashable, ...], float]
     ) -> None:
         """Triggered by SpansWorkerExtension.heartbeat().
 
@@ -391,36 +593,50 @@ class SpansSchedulerExtension:
         SpansWorkerExtension.heartbeat
         Span.cumulative_worker_metrics
         """
-        for span_id, metrics in data.items():
+        for (context, span_id, *other), v in data.items():
+            assert isinstance(span_id, str)
             span = self.spans[span_id]
-            for k, v in metrics.items():
-                span._cumulative_worker_metrics[k] += v
+            span._cumulative_worker_metrics[(context, *other)] += v
 
 
 class SpansWorkerExtension:
     """Worker extension for spans support"""
 
     worker: Worker
+    digests_total_since_heartbeat: dict[tuple[Hashable, ...], float]
 
     def __init__(self, worker: Worker):
         self.worker = worker
+        self.digests_total_since_heartbeat = {}
 
-    def heartbeat(self) -> dict[str, dict[tuple[str, ...], float]]:
+    def collect_digests(self) -> None:
+        """Make a local copy of Worker.digests_total_since_heartbeat. We can't just
+        parse it directly in heartbeat() as the event loop may be yielded between its
+        call and `self.worker.digests_total_since_heartbeat.clear()`, causing the
+        scheduler to become misaligned with the workers.
+        """
+        # Note: this method may be called spuriously by Worker._register_with_scheduler,
+        # but when it does it's guaranteed not to find any metrics
+        assert not self.digests_total_since_heartbeat
+        self.digests_total_since_heartbeat = {
+            k: v
+            for k, v in self.worker.digests_total_since_heartbeat.items()
+            if isinstance(k, tuple) and k[0] == "execute"
+        }
+
+    def heartbeat(self) -> dict[tuple[Hashable, ...], float]:
         """Apportion the metrics that do have a span to the Spans on the scheduler
 
         Returns
         -------
-        ``{span_id: {("execute", prefix, activity, unit): value}}``
+        ``{(context, span_id, prefix, activity, unit): value}}``
 
         See also
         --------
         SpansSchedulerExtension.heartbeat
         Span.cumulative_worker_metrics
+        distributed.worker.Worker.get_metrics
         """
-        out: defaultdict[str, dict[tuple[str, ...], float]] = defaultdict(dict)
-        for k, v in self.worker.digests_total_since_heartbeat.items():
-            if isinstance(k, tuple) and k[0] == "execute":
-                _, span_id, prefix, activity, unit = k
-                assert span_id is not None
-                out[span_id]["execute", prefix, activity, unit] = v
-        return dict(out)
+        out = self.digests_total_since_heartbeat
+        self.digests_total_since_heartbeat = {}
+        return out

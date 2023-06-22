@@ -1034,6 +1034,24 @@ class Worker(BaseWorker, ServerNode):
             # spilling is disabled
             spilled_memory, spilled_disk = 0, 0
 
+        # Send Fine Performance Metrics
+        # Make sure we do not yield the event loop between the moment we parse
+        # self.digests_total_since_heartbeat to send it to the scheduler and the moment
+        # we clear it!
+        spans_ext: SpansWorkerExtension | None = self.extensions.get("spans")
+        if spans_ext:
+            # Send metrics with disaggregated span_id
+            spans_ext.collect_digests()
+
+        # Send metrics with squashed span_id
+        digests: defaultdict[Hashable, float] = defaultdict(float)
+        for k, v in self.digests_total_since_heartbeat.items():
+            if isinstance(k, tuple) and k[0] == "execute":
+                k = k[:1] + k[2:]
+            digests[k] += v
+
+        self.digests_total_since_heartbeat.clear()
+
         out = dict(
             task_counts=self.state.task_counter.current_count(by_prefix=False),
             bandwidth={
@@ -1041,7 +1059,7 @@ class Worker(BaseWorker, ServerNode):
                 "workers": dict(self.bandwidth_workers),
                 "types": keymap(typename, self.bandwidth_types),
             },
-            digests_total_since_heartbeat=dict(self.digests_total_since_heartbeat),
+            digests_total_since_heartbeat=dict(digests),
             managed_bytes=self.state.nbytes,
             spilled_bytes={
                 "memory": spilled_memory,
@@ -1206,6 +1224,7 @@ class Worker(BaseWorker, ServerNode):
             except TimeoutError:  # pragma: no cover
                 logger.info("Timed out when connecting to scheduler")
         if response["status"] != "OK":
+            await comm.close()
             msg = response["message"] if "message" in response else repr(response)
             logger.error(f"Unable to connect to scheduler: {msg}")
             raise ValueError(f"Unexpected response from register: {response!r}")
@@ -1251,7 +1270,6 @@ class Worker(BaseWorker, ServerNode):
                     if hasattr(extension, "heartbeat")
                 },
             )
-            self.digests_total_since_heartbeat.clear()
 
             end = time()
             middle = (start + end) / 2
