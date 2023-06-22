@@ -3626,7 +3626,7 @@ class FinePerformanceMetrics(DashboardComponent):
             if function_sel and function not in function_sel:
                 continue
 
-            # Custom metrics can provide any hashable as the label
+            # Custom metrics won't necessarily contain a string as the label
             activity = str(activity)
             execute_by_func[function, activity] += v
             execute[activity] += v
