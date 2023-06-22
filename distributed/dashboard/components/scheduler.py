@@ -90,7 +90,7 @@ from distributed.diagnostics.task_stream import color_of as ts_color_of
 from distributed.diagnostics.task_stream import colors as ts_color_lookup
 from distributed.metrics import time
 from distributed.scheduler import Scheduler
-from distributed.spans import Span, SpansSchedulerExtension
+from distributed.spans import SpansSchedulerExtension
 from distributed.utils import Log, log_errors
 
 if dask.config.get("distributed.dashboard.export-tool"):
@@ -3532,6 +3532,9 @@ class FinePerformanceMetrics(DashboardComponent):
         if units:
             self.unit_selector.options.extend(units)
 
+        if functions:
+            # Added on the fly by Span.cumulative_worker_metrics
+            functions.add("N/A")
         functions.difference_update(self.function_selector.options)
         if functions:
             self.function_selector.options.extend(functions)
@@ -3595,38 +3598,51 @@ class FinePerformanceMetrics(DashboardComponent):
 
         function_sel = set(self.function_selector.value)
 
-        span: Span | Scheduler
-        if self.span_tag_selector.value:
-            spans_ext: SpansSchedulerExtension = self.scheduler.extensions["spans"]
+        spans_ext: SpansSchedulerExtension | None = self.scheduler.extensions.get(
+            "spans"
+        )
+        if spans_ext and self.span_tag_selector.value:
             span = spans_ext.merge_by_tags(*self.span_tag_selector.value)
+            execute_metrics = span.cumulative_worker_metrics
+        elif spans_ext and spans_ext.spans:
+            # Calculate idle time
+            span = spans_ext.merge_all()
+            execute_metrics = span.cumulative_worker_metrics
         else:
-            span = self.scheduler
+            # Spans extension is not loaded
+            execute_metrics = {
+                k: v
+                for k, v in self.scheduler.cumulative_worker_metrics.items()
+                if isinstance(k, tuple) and k[0] == "execute"
+            }
 
-        for k, v in span.cumulative_worker_metrics.items():
-            if not isinstance(k, tuple):
-                continue  # Only happens in global metrics
-            context, *other, activity, unit = k
+        for (context, function, activity, unit), v in execute_metrics.items():
+            assert context == "execute"
+            assert isinstance(function, str)
             assert isinstance(unit, str)
             assert self.unit_selector.value
             if unit != self.unit_selector.value:
                 continue
+            if function_sel and function not in function_sel:
+                continue
 
-            if context == "execute":
-                (function,) = other
-                assert isinstance(function, str)
-                if not function_sel or function in function_sel:
-                    # Custom metrics can provide any hashable as the label
-                    activity = str(activity)
-                    execute_by_func[function, activity] += v
-                    execute[activity] += v
-                    visible_functions.add(function)
-                    visible_activities.add(activity)
+            # Custom metrics won't necessarily contain a string as the label
+            activity = str(activity)
+            execute_by_func[function, activity] += v
+            execute[activity] += v
+            visible_functions.add(function)
+            visible_activities.add(activity)
 
-            elif context == "get-data" and not function_sel:
-                # Note: this will always be empty when a span is selected
-                assert isinstance(activity, str)
-                visible_activities.add(activity)
-                get_data[activity] += v
+        if not self.function_selector.value and not self.span_tag_selector.value:
+            for k, v in self.scheduler.cumulative_worker_metrics.items():
+                if isinstance(k, tuple) and k[0] == "get-data":
+                    _, activity, unit = k
+                    assert isinstance(activity, str)
+                    assert isinstance(unit, str)
+                    assert self.unit_selector.value
+                    if unit == self.unit_selector.value:
+                        visible_activities.add(activity)
+                        get_data[activity] += v
 
             # Ignore memory-monitor and gather-dep metrics
 

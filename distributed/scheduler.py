@@ -842,6 +842,8 @@ class ErredTask:
 class Computation:
     """Collection tracking a single compute or persist call
 
+    DEPRECATED: please use spans instead
+
     See also
     --------
     TaskPrefix
@@ -851,7 +853,7 @@ class Computation:
 
     start: float
     groups: set[TaskGroup]
-    code: SortedSet[SourceCode]
+    code: SortedSet[tuple[SourceCode, ...]]
     id: uuid.UUID
     annotations: dict
 
@@ -1566,7 +1568,11 @@ class SchedulerState:
     idle_task_count: set[WorkerState]
     #: Workers that are fully utilized. May include non-running workers.
     saturated: set[WorkerState]
+    #: Current number of threads across all workers
     total_nthreads: int
+    #: History of number of threads
+    #: (timestamp, new number of threads)
+    total_nthreads_history: list[tuple[float, int]]
     #: Cluster-wide resources. {resource name: {worker address: amount}}
     resources: dict[str, dict[str, float]]
 
@@ -1688,6 +1694,7 @@ class SchedulerState:
         self.task_prefixes = {}
         self.task_metadata = {}
         self.total_nthreads = 0
+        self.total_nthreads_history = [(time(), 0)]
         self.unknown_durations = {}
         self.queued = queued
         self.unrunnable = unrunnable
@@ -4244,6 +4251,7 @@ class Scheduler(SchedulerState, ServerNode):
         dh["nthreads"] += nthreads
 
         self.total_nthreads += nthreads
+        self.total_nthreads_history.append((time(), self.total_nthreads))
         self.aliases[name] = address
 
         self.heartbeat_worker(
@@ -4320,7 +4328,7 @@ class Scheduler(SchedulerState, ServerNode):
         user_priority: int | dict[str, int] = 0,
         actors: bool | list[str] | None = None,
         fifo_timeout: float = 0.0,
-        code: tuple[str] | None = None,
+        code: tuple[SourceCode, ...] = (),
         annotations: dict | None = None,
         stimulus_id: str | None = None,
     ) -> None:
@@ -4454,7 +4462,7 @@ class Scheduler(SchedulerState, ServerNode):
             # _generate_taskstates is not the only thing that calls new_task(). A
             # TaskState may have also been created by client_desires_keys or scatter,
             # and only later gained a run_spec.
-            spans_ext.observe_tasks(runnable)
+            spans_ext.observe_tasks(runnable, code=code)
             # TaskGroup.span_id could be completely different from the one in the
             # original annotations, so it has been dropped. Drop it here as well in
             # order not to confuse SchedulerPlugin authors.
@@ -4994,6 +5002,7 @@ class Scheduler(SchedulerState, ServerNode):
         dh_addresses.remove(address)
         dh["nthreads"] -= ws.nthreads
         self.total_nthreads -= ws.nthreads
+        self.total_nthreads_history.append((time(), self.total_nthreads))
         if not dh_addresses:
             del self.host_info[host]
 
