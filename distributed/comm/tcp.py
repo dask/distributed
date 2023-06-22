@@ -24,11 +24,11 @@ from dask.utils import parse_timedelta
 
 from distributed.comm.addressing import parse_host_port, unparse_host_port
 from distributed.comm.core import (
+    BaseListener,
     Comm,
     CommClosedError,
     Connector,
     FatalCommClosedError,
-    Listener,
 )
 from distributed.comm.registry import Backend
 from distributed.comm.utils import (
@@ -539,7 +539,7 @@ class TLSConnector(BaseTCPConnector):
         return tls_args
 
 
-class BaseTCPListener(Listener, RequireEncryptionMixin):
+class BaseTCPListener(BaseListener, RequireEncryptionMixin):
     def __init__(
         self,
         address,
@@ -550,6 +550,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         default_port=0,
         **connection_args,
     ):
+        super().__init__()
         self._check_encryption(address, connection_args)
         self.ip, self.port = parse_host_port(address, default_port)
         self.default_host = default_host
