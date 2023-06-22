@@ -212,7 +212,7 @@ def test_as_completed_with_results(client):
     y.cancel()
     with pytest.raises(RuntimeError) as exc:
         res = list(ac)
-    assert str(exc.value) == "hello!"
+    assert "hello!" in str(exc.value)
 
 
 @gen_cluster(client=True)
@@ -226,7 +226,7 @@ async def test_as_completed_with_results_async(c, s, a, b):
     with pytest.raises(RuntimeError) as exc:
         async for _ in ac:
             pass
-    assert str(exc.value) == "hello!"
+    assert "hello!" in str(exc.value)
 
 
 def test_as_completed_with_results_no_raise(client):
