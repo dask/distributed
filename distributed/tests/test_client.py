@@ -3981,22 +3981,24 @@ async def test_serialize_future(s, a, b):
 async def test_serialize_future_without_client(s, a, b):
     # Do not use a ctx manager to avoid having this being set as a current and/or default client
     c1 = await Client(s.address, asynchronous=True, set_as_default=False)
+    try:
+        with ensure_no_new_clients():
 
-    with ensure_no_new_clients():
+            def do_stuff():
+                return 1
 
-        def do_stuff():
-            return 1
+            future = c1.submit(do_stuff)
+            pickled = pickle.dumps(future)
+            unpickled_fut = pickle.loads(pickled)
 
-        future = c1.submit(do_stuff)
-        pickled = pickle.dumps(future)
-        unpickled_fut = pickle.loads(pickled)
+        with pytest.raises(RuntimeError):
+            await unpickled_fut
 
-    with pytest.raises(RuntimeError):
-        await unpickled_fut
-
-    with c1.as_current():
-        unpickled_fut_ctx = pickle.loads(pickled)
-        assert await unpickled_fut_ctx == 1
+        with c1.as_current():
+            unpickled_fut_ctx = pickle.loads(pickled)
+            assert await unpickled_fut_ctx == 1
+    finally:
+        await c1.close()
 
 
 @gen_cluster()
