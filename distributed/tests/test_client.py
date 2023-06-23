@@ -403,7 +403,11 @@ async def test_Future_exception(c, s, a, b):
     x = c.submit(div, 1, 0)
     result = await x.exception()
     assert isinstance(result, ZeroDivisionError)
-    assert str(result).startswith("division by zero\nin task")
+    if hasattr(result, "__notes__"):
+        # python 3.11
+        assert any(x.startswith("in task") for x in result.__notes__)
+    else:
+        assert str(result).startswith("division by zero\nin task")
 
     x = c.submit(div, 1, 1)
     result = await x.exception()
@@ -412,8 +416,13 @@ async def test_Future_exception(c, s, a, b):
 
 def test_Future_exception_sync(c):
     x = c.submit(div, 1, 0)
-    assert isinstance(x.exception(), ZeroDivisionError)
-    assert str(x.exception()).startswith("division by zero\nin task")
+    result = x.exception()
+    assert isinstance(result, ZeroDivisionError)
+    if hasattr(result, "__notes__"):
+        # python 3.11
+        assert any(x.startswith("in task") for x in result.__notes__)
+    else:
+        assert str(result).startswith("division by zero\nin task")
 
     x = c.submit(div, 1, 1)
     assert x.exception() is None

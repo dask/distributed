@@ -25,12 +25,23 @@ def attach_worker_info(ex: BaseException, key: Any, erred_on: Any) -> BaseExcept
 
     extype = type(ex)
     try:
-        WorkerError = type(
-            extype.__name__,
-            (extype,),
-            dict(args=ex.args, __str__=worker_str, __module__=extype.__module__),
-        )
-        wrapped = WorkerError(*ex.args)
-        return wrapped
+        if hasattr(ex, "add_note"):
+            # python 3.11 allows adding a Note to an exception
+            ex.add_note(f"in task: {key}\non worker: {erred_on}")
+            return ex
+        else:
+            WorkerError = type(
+                extype.__name__,
+                (extype,),
+                dict(
+                    args=ex.args,
+                    __str__=worker_str,
+                    __module__=extype.__module__,
+                ),
+            )
+            wrapped = WorkerError(*ex.args)
+            wrapped.__cause__ = ex.__cause__
+            wrapped.__context__ = ex.__context__
+            return wrapped
     except:  # noqa
         return ex
