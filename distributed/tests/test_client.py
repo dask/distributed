@@ -403,7 +403,7 @@ async def test_Future_exception(c, s, a, b):
     x = c.submit(div, 1, 0)
     result = await x.exception()
     assert isinstance(result, ZeroDivisionError)
-    if hasattr(result, "__notes__"):
+    if sys.version_info >= (3, 11):
         # python 3.11
         assert any(x.startswith("in task") for x in result.__notes__)
     else:
@@ -418,7 +418,7 @@ def test_Future_exception_sync(c):
     x = c.submit(div, 1, 0)
     result = x.exception()
     assert isinstance(result, ZeroDivisionError)
-    if hasattr(result, "__notes__"):
+    if sys.version_info >= (3, 11):
         # python 3.11
         assert any(x.startswith("in task") for x in result.__notes__)
     else:

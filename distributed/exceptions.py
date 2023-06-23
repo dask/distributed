@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 
@@ -25,7 +26,7 @@ def attach_worker_info(ex: BaseException, key: Any, erred_on: Any) -> BaseExcept
 
     extype = type(ex)
     try:
-        if hasattr(ex, "add_note"):
+        if sys.version_info >= (3, 11):
             # python 3.11 allows adding a Note to an exception
             ex.add_note(f"in task: {key}\non worker: {erred_on}")
             return ex
