@@ -323,9 +323,6 @@ class Future(WrappedKey):
         result = self.client.sync(self._result, callback_timeout=timeout, raiseit=False)
         if self.status == "error":
             typ, exc, tb = result
-            logger.error(
-                f"in task: {self._state.key}\non worker:{self._state.erred_on}"
-            )
             raise exc.with_traceback(tb)
         elif self.status == "cancelled":
             raise result
@@ -336,6 +333,9 @@ class Future(WrappedKey):
         await self._state.wait()
         if self.status == "error":
             exc = clean_exception(self._state.exception, self._state.traceback)
+            logger.error(
+                f"in task: {self._state.key}\non worker:{self._state.erred_on}"
+            )
             if raiseit:
                 typ, exc, tb = exc
                 raise exc.with_traceback(tb)
@@ -354,6 +354,9 @@ class Future(WrappedKey):
     async def _exception(self):
         await self._state.wait()
         if self.status == "error":
+            logger.error(
+                f"in task: {self._state.key}\non worker:{self._state.erred_on}"
+            )
             return self._state.exception
         else:
             return None

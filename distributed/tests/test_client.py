@@ -400,9 +400,17 @@ async def test_future_tuple_repr(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_Future_exception(c, s, a, b):
-    x = c.submit(div, 1, 0)
-    result = await x.exception()
-    assert isinstance(result, ZeroDivisionError)
+    with captured_logger("distributed.client") as logger:
+        x = c.submit(div, 1, 0)
+        exc = await x.exception()
+        assert isinstance(exc, ZeroDivisionError)
+    assert logger.getvalue().startswith("in task: ")
+
+    with captured_logger("distributed.client") as logger:
+        x = c.submit(div, 1, 0)
+        with pytest.raises(ZeroDivisionError):
+            _ = await x.result()
+    assert logger.getvalue().startswith("in task: ")
 
     x = c.submit(div, 1, 1)
     result = await x.exception()
@@ -410,8 +418,16 @@ async def test_Future_exception(c, s, a, b):
 
 
 def test_Future_exception_sync(c):
-    x = c.submit(div, 1, 0)
-    assert isinstance(x.exception(), ZeroDivisionError)
+    with captured_logger("distributed.client") as logger:
+        x = c.submit(div, 1, 0)
+        assert isinstance(x.exception(), ZeroDivisionError)
+    assert logger.getvalue().startswith("in task: ")
+
+    with captured_logger("distributed.client") as logger:
+        x = c.submit(div, 1, 0)
+        with pytest.raises(ZeroDivisionError):
+            _ = x.result()
+    assert logger.getvalue().startswith("in task: ")
 
     x = c.submit(div, 1, 1)
     assert x.exception() is None
