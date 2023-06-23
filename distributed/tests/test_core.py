@@ -333,7 +333,7 @@ async def test_server_listen():
         if has_ipv6():
             EXTERNAL_IP6 = get_ipv6()
     except socket.gaierror:
-        raise pytest.skip("no network access")
+        pytest.skip("no network access")
 
     from contextlib import asynccontextmanager
 
@@ -768,6 +768,9 @@ async def test_connection_pool():
         assert time() < start + 2
 
     await rpc.close()
+    with pytest.raises(RuntimeError, match=r"ConnectionPool is closed"):
+        await rpc(ip="127.0.0.1", port=s.port).ping()
+
     await asyncio.gather(*[server.close() for server in servers])
 
 

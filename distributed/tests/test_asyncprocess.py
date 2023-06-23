@@ -171,7 +171,7 @@ def assert_exit_code(proc: AsyncProcess, expect: signal.Signals) -> None:
     elif MACOS:
         # FIXME this happens very frequently on GitHub MacOSX CI. Reason unknown.
         if expect != signal.SIGKILL and proc.exitcode == -signal.SIGKILL:
-            raise pytest.xfail(reason="https://github.com/dask/distributed/issues/6393")
+            pytest.xfail(reason="https://github.com/dask/distributed/issues/6393")
         assert proc.exitcode == -expect
     else:
         assert LINUX
