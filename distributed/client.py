@@ -323,6 +323,9 @@ class Future(WrappedKey):
         result = self.client.sync(self._result, callback_timeout=timeout, raiseit=False)
         if self.status == "error":
             typ, exc, tb = result
+            logger.error(
+                f"in task: {self._state.key}\non worker:{self._state.erred_on}"
+            )
             raise exc.with_traceback(tb)
         elif self.status == "cancelled":
             raise result
@@ -545,7 +548,15 @@ class FutureState:
     This is shared between all Futures with the same key and client.
     """
 
-    __slots__ = ("_event", "status", "type", "exception", "traceback")
+    __slots__ = (
+        "_event",
+        "status",
+        "type",
+        "exception",
+        "traceback",
+        "key",
+        "erred_on",
+    )
 
     def __init__(self):
         self._event = None
@@ -590,7 +601,7 @@ class FutureState:
         self.status = "pending"
         self._get_event().clear()
 
-    def set_error(self, exception, traceback):
+    def set_error(self, exception, traceback, erred_on, key):
         """Sets the error data
 
         Sets the status to 'error'. Sets the exception, the traceback,
@@ -602,9 +613,15 @@ class FutureState:
             The exception
         traceback: Exception
             The traceback
+        erred_on: set
+            Workers where it errored
+        key: Hashable
+            Task key
         """
         _, exception, traceback = clean_exception(exception, traceback)
 
+        self.key = key
+        self.erred_on = erred_on
         self.status = "error"
         self.exception = exception
         self.traceback = traceback
@@ -1618,10 +1635,12 @@ class Client(SyncMethodMixin):
         if state is not None:
             state.retry()
 
-    def _handle_task_erred(self, key=None, exception=None, traceback=None):
+    def _handle_task_erred(
+        self, key=None, exception=None, traceback=None, erred_on=None
+    ):
         state = self.futures.get(key)
         if state is not None:
-            state.set_error(exception, traceback)
+            state.set_error(exception, traceback, erred_on, key)
 
     def _handle_restart(self):
         logger.info("Receive restart signal from scheduler")
@@ -2228,6 +2247,7 @@ class Client(SyncMethodMixin):
                         except (KeyError, AttributeError):
                             exc = CancelledError(key)
                         else:
+                            logger.error(f"in task: {st.key}\non worker:{st.erred_on}")
                             raise exception.with_traceback(traceback)
                         raise exc
                     if errors == "skip":
@@ -3241,6 +3261,9 @@ class Client(SyncMethodMixin):
                     should_rejoin = False
             try:
                 results = self.gather(packed, asynchronous=asynchronous, direct=direct)
+            except Exception:
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                raise exc_value.with_traceback(exc_traceback)
             finally:
                 for f in futures.values():
                     f.release()

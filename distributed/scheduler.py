@@ -2483,6 +2483,7 @@ class SchedulerState:
             "key": key,
             "exception": failing_ts.exception,
             "traceback": failing_ts.traceback,
+            "erred_on": failing_ts.erred_on,
         }
         for cs in ts.who_wants:
             client_msgs[cs.client_key] = [report_msg]
@@ -2677,6 +2678,7 @@ class SchedulerState:
             "key": key,
             "exception": failing_ts.exception,
             "traceback": failing_ts.traceback,
+            "erred_on": failing_ts.erred_on,
         }
         for cs in ts.who_wants:
             client_msgs[cs.client_key] = [report_msg]

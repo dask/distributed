@@ -267,7 +267,7 @@ class Queue:
             if d["type"] == "Future":
                 value = Future(d["value"], self.client, inform=True, state=d["state"])
                 if d["state"] == "erred":
-                    value._state.set_error(d["exception"], d["traceback"])
+                    value._state.set_error(d["exception"], d["traceback"], None, None)
                 self.client._send_to_scheduler(
                     {"op": "queue-future-release", "name": self.name, "key": d["value"]}
                 )
