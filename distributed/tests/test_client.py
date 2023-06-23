@@ -399,37 +399,21 @@ async def test_future_tuple_repr(c, s, a, b):
 
 
 @gen_cluster(client=True)
-@pytest.mark.parametrize("shorten_traceback", [False, True])
-async def test_Future_exception(c, s, a, b, shorten_traceback):
-    config_value = ["tests"] if shorten_traceback else None
-    with dask.config.set(
-        {
-            "admin.traceback.shorten.when": config_value,
-            "admin.traceback.shorten.what": config_value,
-        }
-    ):
-        x = c.submit(div, 1, 0)
-        result = await x.exception()
-        assert isinstance(result, ZeroDivisionError)
-        assert ("in task:" in result.args[0]) == shorten_traceback
+async def test_Future_exception(c, s, a, b):
+    x = c.submit(div, 1, 0)
+    result = await x.exception()
+    assert isinstance(result, ZeroDivisionError)
+    assert str(result).startswith("division by zero\nin task")
 
     x = c.submit(div, 1, 1)
     result = await x.exception()
     assert result is None
 
 
-@pytest.mark.parametrize("shorten_traceback", [False, True])
-def test_Future_exception_sync(c, shorten_traceback):
-    config_value = ["tests"] if shorten_traceback else None
-    with dask.config.set(
-        {
-            "admin.traceback.shorten.when": config_value,
-            "admin.traceback.shorten.what": config_value,
-        }
-    ):
-        x = c.submit(div, 1, 0)
-        assert isinstance(x.exception(), ZeroDivisionError)
-        assert ("in task:" in x.exception().args[0]) == shorten_traceback
+def test_Future_exception_sync(c):
+    x = c.submit(div, 1, 0)
+    assert isinstance(x.exception(), ZeroDivisionError)
+    assert str(x.exception()).startswith("division by zero\nin task")
 
     x = c.submit(div, 1, 1)
     assert x.exception() is None

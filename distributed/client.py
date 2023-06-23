@@ -57,6 +57,7 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import IOLoop
 
+import distributed.exceptions
 import distributed.utils
 from distributed import cluster_dump, preloading
 from distributed import versions as version_module
@@ -609,21 +610,11 @@ class FutureState:
         """
         _, exception, traceback = clean_exception(exception, traceback)
 
-        if (
-            key
-            and erred_on
-            and dask.config.get("admin.traceback.shorten.when")
-            and dask.config.get("admin.traceback.shorten.what")
-        ):
-            # when Exception is logged or printed, its args are printed as well,
-            # this makes it easier to communicate extra information without
-            # wrapping it with a custom Exception
-            worker_message = f"in task: {key}\non worker: {erred_on}"
-            if not exception.args:
-                exception.args = (worker_message,)
-            else:
-                arg0 = f"{exception.args[0]}\n{worker_message}"
-                exception.args = (arg0,) + exception.args[1:]
+        if exception and key and erred_on:
+            # add worker message to the Exception
+            exception = distributed.exceptions.attach_worker_info(
+                exception, key, erred_on
+            )
 
         self.status = "error"
         self.exception = exception
