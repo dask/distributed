@@ -3,16 +3,19 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
+from collections.abc import Hashable
+from functools import partial
 from timeit import default_timer
 from typing import ClassVar
 
 from tlz import groupby, valmap
 
 from dask.base import tokenize
-from dask.utils import key_split, stringify
+from dask.utils import stringify
 
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.metrics import time
+from distributed.spans import Span
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +140,14 @@ class Progress(SchedulerPlugin):
         logger.debug("Remove Progress plugin")
 
 
+def key_get_span(
+    key: Hashable, *, span_ids: dict[Hashable, str], spans: dict[str, Span]
+) -> str:
+    """Get span name for grouping tasks in a less granular way."""
+    span_id = span_ids[key]
+    return ", ".join(spans[span_id].name)
+
+
 class MultiProgress(Progress):
     """Progress variant that keeps track of different groups of keys
 
@@ -161,7 +172,7 @@ class MultiProgress(Progress):
     """
 
     def __init__(
-        self, keys, scheduler=None, func=key_split, minimum=0, dt=0.1, complete=False
+        self, keys, scheduler=None, func=None, minimum=0, dt=0.1, complete=False
     ):
         self.func = func
         name = f"multi-progress-{tokenize(keys, func, minimum, dt, complete)}"
@@ -187,6 +198,12 @@ class MultiProgress(Progress):
             self.keys, _ = dependent_keys(tasks, complete=False)
         self.all_keys.update(keys)
         self.keys |= errors & self.all_keys
+
+        # TODO: this is super ugly, should have span name as part of key
+        if self.func is None:
+            span_ids = {k: self.scheduler.tasks[k].group.span_id for k in self.all_keys}
+            spans = self.scheduler.extensions["spans"].spans
+            self.func = partial(key_get_span, spans=spans, span_ids=span_ids)
 
         if not self.keys:
             self.stop(exception=None, key=None)

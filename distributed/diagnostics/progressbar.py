@@ -12,7 +12,6 @@ from tlz import valmap
 from tornado.ioloop import IOLoop
 
 import dask
-from dask.utils import key_split
 
 from distributed.client import default_client, futures_of
 from distributed.core import (
@@ -243,7 +242,7 @@ class MultiProgressBar:
         self,
         keys,
         scheduler=None,
-        func=key_split,
+        func=None,
         interval="100ms",
         complete=False,
         **kwargs,
@@ -340,7 +339,7 @@ class MultiProgressWidget(MultiProgressBar):
         scheduler=None,
         minimum=0,
         interval=0.1,
-        func=key_split,
+        func=None,
         complete=False,
         **kwargs,
     ):
