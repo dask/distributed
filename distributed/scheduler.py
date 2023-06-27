@@ -3109,7 +3109,9 @@ class SchedulerState:
             # Note: This coincides with DEFAULT_TASK_DURATION / nthreads==2
             # This means that a 2 Thread worker with one task is a tie on
             # start_time with a worker with zero tasks but a trivial transfer
-            start_time += 0.25
+            import dask
+
+            start_time += dask.config.get("distributed.scheduler.latency-penalty", 0.25)
 
         # Differences below 10ms are meaningless
         start_time = round(start_time, 2)
