@@ -56,6 +56,7 @@ from distributed import (
     performance_report,
     profile,
     secede,
+    submit,
 )
 from distributed.client import (
     Client,
@@ -8307,8 +8308,8 @@ async def test_resolves_future_in_dict(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_decorate(c, s, a, b):
-    @c.decorate(retries=123)
+async def test_submit_decorator(c, s, a, b):
+    @submit(retries=123)
     def f(x):
         return x + 1
 
