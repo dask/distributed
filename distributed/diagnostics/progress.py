@@ -181,7 +181,7 @@ class MultiProgress(Progress):
             raise ValueError("provide either `func` or `scheduler_func`")
         self.func = func
         self.scheduler_func = scheduler_func
-        name = f"multi-progress-{tokenize(keys, func, minimum, dt, complete)}"
+        name = f"multi-progress-{tokenize(keys, func, scheduler_func, minimum, dt, complete)}"
         super().__init__(
             keys, scheduler, minimum=minimum, dt=dt, complete=complete, name=name
         )

@@ -9,6 +9,7 @@ import pytest
 from packaging.version import parse as parse_version
 
 from distributed.client import wait
+from distributed.spans import span
 from distributed.utils_test import dec, gen_cluster, gen_tls_cluster, inc, throws
 
 ipywidgets = pytest.importorskip("ipywidgets")
@@ -225,6 +226,34 @@ def test_fast(client):
     p = progress(L3, multi=True, complete=True, notebook=True)
     client.sync(p.listen)
     assert set(p._last_response["all"]) == {"inc", "dec", "add"}
+
+
+@mock_widget()
+def test_multibar_use_spans(client):
+    """Test progress(use_spans=True)"""
+    with span("span 1"):
+        L = client.map(inc, range(100))
+    with span("span 2"):
+        L2 = client.map(dec, L)
+    with span("span 3"):
+        L3 = client.map(add, L, L2)
+
+    p = progress(L3, multi=True, complete=True, notebook=True, use_spans=True)
+    client.sync(p.listen)
+
+    # keys are tuples of (group_name, group_id), just get names
+    bar_items = {k[0]: v for k, v in p.bars.items()}
+    bar_texts = {k[0]: v for k, v in p.bar_texts.items()}
+    bar_labels = {k[0]: v for k, v in p.bar_labels.items()}
+
+    assert bar_items.keys() == {"span 1", "span 2", "span 3"}
+    assert all(v.value == 1 for v in bar_items.values())
+
+    assert bar_texts.keys() == {"span 1", "span 2", "span 3"}
+    assert all("100 / 100" in v.value for v in bar_texts.values())
+
+    assert bar_labels.keys() == {"span 1", "span 2", "span 3"}
+    assert all(">span " in v.value for v in bar_labels.values())
 
 
 @mock_widget()
