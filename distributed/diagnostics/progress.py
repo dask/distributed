@@ -142,7 +142,11 @@ class MultiProgress(Progress):
 
     See Progress for most details.  This only adds a function ``func=``
     that splits keys.  This defaults to ``key_split`` which aligns with naming
-    conventions chosen in the dask project (tuples, hyphens, etc..)
+    conventions chosen in the dask project (tuples, hyphens, etc..).
+
+    Alternatively, a ``scheduler_func`` can be provided. This should be the
+    name of a method on the scheduler that accepts task ``key`` as an argument,
+    and returns a string.
 
     State
     -----
@@ -161,13 +165,32 @@ class MultiProgress(Progress):
     """
 
     def __init__(
-        self, keys, scheduler=None, func=key_split, minimum=0, dt=0.1, complete=False
+        self,
+        keys,
+        scheduler=None,
+        *,
+        func=None,
+        scheduler_func=None,
+        minimum=0,
+        dt=0.1,
+        complete=False,
     ):
+        if func is None and scheduler_func is None:
+            func = key_split
+        if (func is None) == (scheduler_func is None):
+            raise ValueError("provide either `func` or `scheduler_func`")
         self.func = func
+        self.scheduler_func = scheduler_func
         name = f"multi-progress-{tokenize(keys, func, minimum, dt, complete)}"
         super().__init__(
             keys, scheduler, minimum=minimum, dt=dt, complete=complete, name=name
         )
+
+    def get_group(self, key: str) -> str:
+        """Get group name by task key."""
+        if self.scheduler_func:
+            return getattr(self.scheduler, self.scheduler_func)(key) or "unassigned"
+        return self.func(key)
 
     async def setup(self):
         keys = self.keys
@@ -192,8 +215,8 @@ class MultiProgress(Progress):
             self.stop(exception=None, key=None)
 
         # Group keys by func name
-        self.keys = valmap(set, groupby(self.func, self.keys))
-        self.all_keys = valmap(set, groupby(self.func, self.all_keys))
+        self.keys = valmap(set, groupby(self.get_group, self.keys))
+        self.all_keys = valmap(set, groupby(self.get_group, self.all_keys))
         for k in self.all_keys:
             if k not in self.keys:
                 self.keys[k] = set()
@@ -204,7 +227,7 @@ class MultiProgress(Progress):
 
     def transition(self, key, start, finish, *args, **kwargs):
         if start == "processing" and finish == "memory":
-            s = self.keys.get(self.func(key), None)
+            s = self.keys.get(self.get_group(key), None)
             if s and key in s:
                 s.remove(key)
 
@@ -213,12 +236,12 @@ class MultiProgress(Progress):
 
         if finish == "erred":
             logger.debug("Progress sees task erred")
-            k = self.func(key)
+            k = self.get_group(key)
             if k in self.all_keys and key in self.all_keys[k]:
                 self.stop(exception=kwargs.get("exception"), key=key)
 
         if finish == "forgotten":
-            k = self.func(key)
+            k = self.get_group(key)
             if k in self.all_keys and key in self.all_keys[k]:
                 logger.debug("A task was cancelled (%s), stopping progress", key)
                 self.stop(exception=True)

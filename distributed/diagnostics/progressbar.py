@@ -12,7 +12,6 @@ from tlz import valmap
 from tornado.ioloop import IOLoop
 
 import dask
-from dask.utils import key_split
 
 from distributed.client import default_client, futures_of
 from distributed.core import (
@@ -243,7 +242,9 @@ class MultiProgressBar:
         self,
         keys,
         scheduler=None,
-        func=key_split,
+        *,
+        func=None,
+        scheduler_func=None,
         interval="100ms",
         complete=False,
         **kwargs,
@@ -258,6 +259,7 @@ class MultiProgressBar:
 
         self.keys = {k.key if hasattr(k, "key") else k for k in keys}
         self.func = func
+        self.scheduler_func = scheduler_func
         self.interval = interval
         self.complete = complete
         self._start_time = default_timer()
@@ -270,9 +272,16 @@ class MultiProgressBar:
         complete = self.complete
         keys = self.keys
         func = self.func
+        scheduler_func = self.scheduler_func
 
         async def setup(scheduler):
-            p = MultiProgress(keys, scheduler, complete=complete, func=func)
+            p = MultiProgress(
+                keys,
+                scheduler,
+                complete=complete,
+                func=func,
+                scheduler_func=scheduler_func,
+            )
             await p.setup()
             return p
 
@@ -340,17 +349,32 @@ class MultiProgressWidget(MultiProgressBar):
         scheduler=None,
         minimum=0,
         interval=0.1,
-        func=key_split,
+        func=None,
+        scheduler_func=None,
         complete=False,
         **kwargs,
     ):
-        super().__init__(keys, scheduler, func, interval, complete)
+        super().__init__(
+            keys,
+            scheduler,
+            func=func,
+            scheduler_func=scheduler_func,
+            interval=interval,
+            complete=complete,
+        )
         from ipywidgets import VBox
 
         self.widget = VBox([])
 
     def make_widget(self, all):
         from ipywidgets import HTML, FloatProgress, HBox, VBox
+
+        def make_label(key):
+            if isinstance(key, tuple):
+                # tuple of (group_name, group_id)
+                key = key[0]
+            key = key.decode() if isinstance(key, bytes) else key
+            return html.escape(key)
 
         self.elapsed_time = HTML("")
         self.bars = {key: FloatProgress(min=0, max=1, description="") for key in all}
@@ -359,9 +383,7 @@ class MultiProgressWidget(MultiProgressBar):
             key: HTML(
                 '<div style="padding: 0px 10px 0px 10px;'
                 " text-align:left; word-wrap: "
-                'break-word;">'
-                + html.escape(key.decode() if isinstance(key, bytes) else key)
-                + "</div>"
+                'break-word;">' + make_label(key) + "</div>"
             )
             for key in all
         }
@@ -429,7 +451,9 @@ class MultiProgressWidget(MultiProgressBar):
             )
 
 
-def progress(*futures, notebook=None, multi=True, complete=True, **kwargs):
+def progress(
+    *futures, notebook=None, multi=True, complete=True, use_spans=False, **kwargs
+):
     """Track progress of futures
 
     This operates differently in the notebook and the console
@@ -448,6 +472,9 @@ def progress(*futures, notebook=None, multi=True, complete=True, **kwargs):
     complete : bool (optional)
         Track all keys (True) or only keys that have not yet run (False)
         (defaults to True)
+    use_spans : bool (optional)
+        Use spans instead of task key names for grouping tasks
+        (defaults to False)
 
     Notes
     -----
@@ -465,6 +492,8 @@ def progress(*futures, notebook=None, multi=True, complete=True, **kwargs):
         futures = [futures]
     if notebook is None:
         notebook = is_kernel()  # often but not always correct assumption
+    if use_spans:
+        kwargs["scheduler_func"] = "get_task_span_name"
     if notebook:
         if multi:
             bar = MultiProgressWidget(futures, complete=complete, **kwargs)

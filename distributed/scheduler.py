@@ -3698,6 +3698,7 @@ class Scheduler(SchedulerState, ServerNode):
             "heartbeat_worker": self.heartbeat_worker,
             "get_task_status": self.get_task_status,
             "get_task_stream": self.get_task_stream,
+            "get_task_span_name": self.get_task_span_name,
             "get_task_prefix_states": self.get_task_prefix_states,
             "register_scheduler_plugin": self.register_scheduler_plugin,
             "register_worker_plugin": self.register_worker_plugin,
@@ -7421,6 +7422,27 @@ class Scheduler(SchedulerState, ServerNode):
         return {
             key: (self.tasks[key].state if key in self.tasks else None) for key in keys
         }
+
+    def get_task_span_name(self, key: str) -> tuple[str, str] | None:
+        """Look up task span id and name.
+
+        Parameters
+        ----------
+        key : str
+            Task key
+
+        Returns
+        --------
+        result : tuple[str, str] | None
+        """
+        if key in self.tasks:
+            span_id = self.tasks[key].group.span_id or "default"
+            spans_ext: SpansSchedulerExtension | None = self.extensions.get("spans")
+            if spans_ext:
+                span_name = ", ".join(spans_ext.spans[span_id].name) or "default"
+                return span_name, span_id
+            return span_id, span_id
+        return None
 
     def get_task_stream(
         self,
