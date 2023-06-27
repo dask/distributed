@@ -12,6 +12,7 @@ from tlz import valmap
 from tornado.ioloop import IOLoop
 
 import dask
+from dask.utils import key_split
 
 from distributed.client import default_client, futures_of
 from distributed.core import (
@@ -257,6 +258,11 @@ class MultiProgressBar:
                 self.client = weakref.ref(key.client)
                 break
 
+        if func is None and scheduler_func is None:
+            func = key_split
+        if (func is None) == (scheduler_func is None):
+            raise ValueError("provide either `func` or `scheduler_func`")
+
         self.keys = {k.key if hasattr(k, "key") else k for k in keys}
         self.func = func
         self.scheduler_func = scheduler_func
@@ -313,6 +319,7 @@ class MultiProgressBar:
             response = await self.comm.read(
                 deserializers=self.client()._deserializers if self.client else None
             )
+            print(f"\n{response = }")
             self._last_response = response
             self.status = response["status"]
             self._draw_bar(**response)
@@ -482,6 +489,10 @@ def progress(
     if notebook is None:
         notebook = is_kernel()  # often but not always correct assumption
     if use_spans:
+        if kwargs.get("func", None) is not None:
+            raise ValueError("`func` can't be used with `use_spans=True`")
+        if kwargs.get("scheduler_func", None) is not None:
+            raise ValueError("`scheduler_func` can't be used with `use_spans=True`")
         kwargs["scheduler_func"] = "get_task_span_name"
     if notebook:
         if multi:

@@ -177,8 +177,6 @@ class MultiProgress(Progress):
     ):
         if func is None and scheduler_func is None:
             func = key_split
-        if (func is None) == (scheduler_func is None):
-            raise ValueError("provide either `func` or `scheduler_func`")
         self.func = func
         self.scheduler_func = scheduler_func
         name = f"multi-progress-{tokenize(keys, func, scheduler_func, minimum, dt, complete)}"

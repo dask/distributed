@@ -77,6 +77,14 @@ def test_progress_function_w_kwargs(client, capsys):
     check_bar_completed(capsys)
 
 
+def test_progress_function_raises():
+    """Raises early enough so it doesn't need a Client"""
+    with pytest.raises(ValueError, match="`func` can't be used"):
+        progress(None, func="foo", use_spans=True)
+    with pytest.raises(ValueError, match="`scheduler_func` can't be used"):
+        progress(None, scheduler_func="foo", use_spans=True)
+
+
 @gen_cluster(client=True, nthreads=[])
 async def test_deprecated_loop_properties(c, s):
     class ExampleTextProgressBar(TextProgressBar):

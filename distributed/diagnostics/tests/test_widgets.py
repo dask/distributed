@@ -8,6 +8,8 @@ from unittest import mock
 import pytest
 from packaging.version import parse as parse_version
 
+from dask.utils import key_split
+
 from distributed.client import wait
 from distributed.spans import span
 from distributed.utils_test import dec, gen_cluster, gen_tls_cluster, inc, throws
@@ -254,6 +256,21 @@ def test_multibar_use_spans(client):
 
     assert bar_labels.keys() == {"span 1", "span 2", "span 3"}
     assert all(">span " in v.value for v in bar_labels.values())
+
+
+@mock_widget()
+def test_multibar_func_raises(client):
+    """Should raise when `scheduler_func` and `func` are set"""
+    L = client.map(inc, range(100))
+    L2 = client.map(dec, L)
+    L3 = client.map(add, L, L2)
+
+    # ensure default value if nothing is set
+    p = MultiProgressWidget(L3)
+    assert p.func == key_split
+
+    with pytest.raises(ValueError, match="provide either `func`"):
+        MultiProgressWidget(L3, func="foo", scheduler_func="foo")
 
 
 @mock_widget()
