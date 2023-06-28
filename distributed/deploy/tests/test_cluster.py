@@ -77,3 +77,13 @@ def test_exponential_backoff():
     assert _exponential_backoff(5, 1.5, 3, 20) == 20
     # avoid overflow
     assert _exponential_backoff(1000, 1.5, 3, 20) == 20
+
+
+@gen_test()
+async def test_sync_context_manager_used_with_async_cluster():
+    async with Cluster(asynchronous=True, name="A") as cluster:
+        with pytest.raises(
+            TypeError,
+            match=r"Used 'with' with asynchronous class; please use 'async with'",
+        ), cluster:
+            pass

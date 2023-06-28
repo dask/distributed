@@ -25,11 +25,11 @@ import dask
 
 from distributed.comm.addressing import parse_host_port, unparse_host_port
 from distributed.comm.core import (
+    BaseListener,
     Comm,
     CommClosedError,
     Connector,
     FatalCommClosedError,
-    Listener,
 )
 from distributed.comm.registry import backends
 from distributed.comm.tcp import (
@@ -332,7 +332,7 @@ class WSS(WS):
             )
 
 
-class WSListener(Listener):
+class WSListener(BaseListener):
     prefix = "ws://"
 
     def __init__(
@@ -343,6 +343,7 @@ class WSListener(Listener):
         allow_offload: bool = False,
         **connection_args: Any,
     ):
+        super().__init__()
         if not address.startswith(self.prefix):
             address = f"{self.prefix}{address}"
 

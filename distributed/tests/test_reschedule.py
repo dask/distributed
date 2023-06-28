@@ -52,7 +52,6 @@ async def test_raise_reschedule(c, s, a, b, state):
     await wait(futures)
     assert any(isinstance(ev, RescheduleEvent) for ev in a.state.stimulus_log)
     assert all(f.key in b.data for f in futures)
-    assert "x" not in a.state.tasks
 
 
 @pytest.mark.parametrize("state", ["executing", "long-running"])

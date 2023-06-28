@@ -12,11 +12,11 @@ import threading
 import uuid
 import warnings
 import weakref
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from inspect import isawaitable
 from queue import Empty
 from time import sleep as sync_sleep
-from typing import TYPE_CHECKING, Callable, ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 from toolz import merge
 from tornado.ioloop import IOLoop
@@ -43,6 +43,7 @@ from distributed.node import ServerNode
 from distributed.process import AsyncProcess
 from distributed.proctitle import enable_proctitle_on_children
 from distributed.protocol import pickle
+from distributed.protocol.serialize import _is_dumpable
 from distributed.security import Security
 from distributed.utils import (
     get_ip,
@@ -610,6 +611,24 @@ class Nanny(ServerNode):
         )
 
     def log_event(self, topic, msg):
+        """Log an event under a given topic
+
+        Parameters
+        ----------
+        topic : str, list[str]
+            Name of the topic under which to log an event. To log the same
+            event under multiple topics, pass a list of topic names.
+        msg
+            Event message to log. Note this must be msgpack serializable.
+
+        See also
+        --------
+        Client.log_event
+        """
+        if not _is_dumpable(msg):
+            raise TypeError(
+                f"Message must be msgpack serializable. Got {type(msg)=} instead."
+            )
         self._ongoing_background_tasks.call_soon(self._log_event, topic, msg)
 
 

@@ -6,7 +6,6 @@ import contextlib
 import copy
 import errno
 import functools
-import gc
 import inspect
 import io
 import logging
@@ -24,11 +23,11 @@ import threading
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Generator, Iterator, Mapping
 from contextlib import contextmanager, nullcontext, suppress
 from itertools import count
 from time import sleep
-from typing import IO, Any, Generator, Iterator, Literal
+from typing import IO, Any, Literal
 
 import pytest
 import yaml
@@ -1067,22 +1066,18 @@ def gen_cluster(
                     else:
                         await c._close(fast=True)
 
-                    def get_unclosed():
-                        return [c for c in Comm._instances if not c.closed()] + [
+                    try:
+                        unclosed = [c for c in Comm._instances if not c.closed()] + [
                             c for c in _global_clients.values() if c.status != "closed"
                         ]
-
-                    try:
-                        while deadline.remaining:
-                            gc.collect()
-                            if not get_unclosed():
-                                break
-                            await asyncio.sleep(0.05)
-                        else:
-                            if allow_unclosed:
-                                print(f"Unclosed Comms: {get_unclosed()}")
-                            else:
-                                raise RuntimeError("Unclosed Comms", get_unclosed())
+                        try:
+                            if unclosed:
+                                if allow_unclosed:
+                                    print(f"Unclosed Comms: {unclosed}")
+                                else:
+                                    raise RuntimeError("Unclosed Comms", unclosed)
+                        finally:
+                            del unclosed
                     finally:
                         Comm._instances.clear()
                         _global_clients.clear()
@@ -2580,3 +2575,24 @@ class SizeOf:
 def gen_nbytes(nbytes: int) -> SizeOf:
     """A function that emulates exactly nbytes on the worker data structure."""
     return SizeOf(nbytes)
+
+
+def relative_frame_linenumber(frame):
+    """Line number of call relative to the frame"""
+    return inspect.getframeinfo(frame).lineno - frame.f_code.co_firstlineno
+
+
+class NoSchedulerDelayWorker(Worker):
+    """Custom worker class which does not update `scheduler_delay`.
+
+    This worker class is useful for some tests which make time
+    comparisons using times reported from workers.
+    """
+
+    @property
+    def scheduler_delay(self):
+        return 0
+
+    @scheduler_delay.setter
+    def scheduler_delay(self, value):
+        pass

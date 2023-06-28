@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import itertools
+import random
 from typing import Any
 
+from distributed.client import Client
 from distributed.core import PooledRPCCall
+from distributed.diagnostics.plugin import SchedulerPlugin
+from distributed.scheduler import Scheduler, TaskStateState
 from distributed.shuffle._shuffle import ShuffleId
 from distributed.shuffle._worker_extension import ShuffleRun
 
@@ -43,3 +47,54 @@ class AbstractShuffleTestPool:
         for addr, s in self.shuffles.items():
             out[addr] = await s.inputs_done()
         return out
+
+
+class ShuffleAnnotationChaosPlugin(SchedulerPlugin):
+    #: Rate at which the plugin randomly drops shuffle annotations
+    rate: float
+    scheduler: Scheduler | None
+    seen: set
+
+    def __init__(self, rate: float):
+        self.rate = rate
+        self.scheduler = None
+        self.seen = set()
+
+    async def start(self, scheduler: Scheduler) -> None:
+        self.scheduler = scheduler
+
+    def transition(
+        self,
+        key: str,
+        start: TaskStateState,
+        finish: TaskStateState,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        assert self.scheduler
+        if finish != "waiting":
+            return
+        if not key.startswith("shuffle-barrier-"):
+            return
+        if key in self.seen:
+            return
+
+        self.seen.add(key)
+
+        barrier = self.scheduler.tasks[key]
+
+        if self._flip():
+            barrier.annotations.pop("shuffle", None)
+        for dt in barrier.dependents:
+            if self._flip():
+                dt.annotations.pop("shuffle", None)
+
+    def _flip(self) -> bool:
+        return random.random() < self.rate
+
+
+async def invoke_annotation_chaos(rate: float, client: Client) -> None:
+    if not rate:
+        return
+    plugin = ShuffleAnnotationChaosPlugin(rate)
+    await client.register_scheduler_plugin(plugin)

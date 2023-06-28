@@ -68,7 +68,12 @@ def dask_deserialize_cupy_ndarray(header, frames):
 
 
 try:
-    from cupy.cusparse import MatDescriptor
+    from packaging.version import Version
+
+    if Version(cupy.__version__) >= Version("12"):
+        from cupyx.cusparse import MatDescriptor
+    else:
+        from cupy.cusparse import MatDescriptor
     from cupyx.scipy.sparse import spmatrix
 except ImportError:
     MatDescriptor = None
@@ -80,7 +85,7 @@ if MatDescriptor is not None:
     def reduce_matdescriptor(other):
         # Pickling MatDescriptor errors
         # xref: https://github.com/cupy/cupy/issues/3061
-        return cupy.cusparse.MatDescriptor.create, ()
+        return MatDescriptor.create, ()
 
     copyreg.pickle(MatDescriptor, reduce_matdescriptor)
 

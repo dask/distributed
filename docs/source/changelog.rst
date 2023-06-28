@@ -1,6 +1,160 @@
 Changelog
 =========
 
+.. _v2023.6.1:
+
+2023.6.1
+--------
+
+Released on June 26, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Add idle time to fine performance metrics (:pr:`7938`) `crusaderky`_
+- Spans: capture code snippets (:pr:`7930`) `crusaderky`_
+- Improve memory footprint of P2P rechunking (:pr:`7897`) `Hendrik Makait`_
+- Improve error message on invalid state in ``_handle_remove_replicas`` (:pr:`7920`) `Hendrik Makait`_
+- Make ``ShuffleSchedulerExtension.remove_worker`` more robust (:pr:`7921`) `Hendrik Makait`_
+- Provide more information if occupancy drops below zero (:pr:`7924`) `Hendrik Makait`_
+- Improved conversion between ``pyarrow`` and ``pandas`` in P2P shuffling (:pr:`7896`) `Hendrik Makait`_
+
+Bug Fixes
+^^^^^^^^^
+- Add ``Cluster.called_from_running_loop`` and fix ``Cluster.asynchronous`` (:pr:`7941`) `Jacob Tomlinson`_
+- Fix annotations and spans leaking between threads (:pr:`7935`) `Irina Truong`_
+- Handle null partitions in P2P shuffling (:pr:`7922`) `Jonathan De Troye`_
+- Fix race condition in Fine Performance Metrics sync (:pr:`7927`) `crusaderky`_
+- Avoid (:pr:`7923`) by starting ``run_id`` at 1 (:pr:`7925`) `Hendrik Makait`_
+- Fix glitches in Fine Performance Metrics stacked graph (:pr:`7919`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Wipe the cache after (:pr:`7935`) (:pr:`7946`) `crusaderky`_
+- Remove grace period for unclosed comms in ``gen_cluster`` (:pr:`7937`) `Thomas Grainger`_
+- ``raise pytest.skip`` is redundant (:pr:`7939`) `crusaderky`_
+- Fix ``test_rechunk_with_{fully|partially}_unknown_dimension`` on CI (:pr:`7934`) `Hendrik Makait`_
+- Fix compatibility with ``numpy`` 1.25 (:pr:`7932`) `crusaderky`_
+- Spans: refactor sums of mappings (:pr:`7918`) `crusaderky`_
+- Fix flaky ``test_send_metrics_to_scheduler`` (:pr:`7931`) `crusaderky`_
+- Avoid calls to ``make_current()`` and ``make_clear()`` by using ``asyncio.run`` in ``LoopRunner`` (:pr:`7467`) `Thomas Grainger`_
+- Add ``needs triage`` label to re/opened PRs and issues (:pr:`7916`) `Miles`_
+- Remove ``span_id`` from global metrics on scheduler (:pr:`7917`) `crusaderky`_
+- Add spans to Fine Performance Metrics bokeh dashboard (:pr:`7911`) `crusaderky`_
+- FinePerformanceMetrics dashboard overhaul (:pr:`7910`) `crusaderky`_
+- Check for ``skip-caching`` label (:pr:`7907`) `Miles`_
+- Fix CI changes from (:pr:`7902`) (:pr:`7905`) `Hendrik Makait`_
+- Rename ``get_default_shuffle_algorithm`` to ``get_default_shuffle_method`` (:pr:`7902`) `Hendrik Makait`_
+- Bump actions/checkout from 3.5.2 to 3.5.3 (:pr:`7904`)
+- Refactor P2P rechunk validation (:pr:`7890`) `Hendrik Makait`_
+
+
+.. _v2023.6.0:
+
+2023.6.0
+--------
+
+Released on June 9, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Post fine performance metrics to spans (:pr:`7885`) `crusaderky`_
+- Unique Spans (:pr:`7882`) `crusaderky`_
+- Add a ``timeout`` to ``client.as_completed`` that mirrors ``concurrent.futures.as_completed`` ``timeout`` (:pr:`7811`) `Thomas Grainger`_
+- Enforce dtypes in P2P shuffle (:pr:`7879`) `Hendrik Makait`_
+- Support ``load=`` keyword for ``Client.upload_file`` (:pr:`7873`) `James Bourbeau`_
+- Support ``get_worker()`` and ``worker_client()`` in async tasks (:pr:`7844`) `Thomas Grainger`_
+- Capture line number for code frames (:pr:`7786`) `Miles`_
+
+Bug Fixes
+^^^^^^^^^
+- Avoid meta roundtrip in P2P shuffle (:pr:`7895`) `Hendrik Makait`_
+- Fix Fine Performance Metrics mis-aligned ``ColumnData`` lengths (:pr:`7893`) `Miles`_
+- Fix Fine Performance Metrics spilling crash (:pr:`7878`) `Miles`_
+- Fix spans bug when ``scatter`` or ``client_desires_new_key`` creates a task (:pr:`7886`) `crusaderky`_
+- Fix Fine Performance Metrics w/ Bokeh 3 (:pr:`7874`) `Miles`_
+- ``TaskGroup.start`` can move backwards (:pr:`7867`) `crusaderky`_
+- Use properly imported ``MatDescriptor`` for ``cupy`` dispatch registration (:pr:`7868`) `Charles Blackmon-Luca`_
+- Ensure ``retire_workers`` works if AMM extension hasn't been loaded (:pr:`7863`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Review user-defined fine performance metrics (:pr:`7894`) `crusaderky`_
+- Fix tests that disable the shuffle extension (:pr:`7883`) `crusaderky`_
+- Refactor ``Scheduler.is_idle`` (:pr:`7881`) `crusaderky`_
+- Link TaskGroups to Spans (:pr:`7869`) `crusaderky`_
+- Spans skeleton (:pr:`7862`) `crusaderky`_
+- Update gpuCI ``RAPIDS_VER`` to ``23.08`` (:pr:`7855`)
+- Bump ``JamesIves/github-pages-deploy-action`` from 4.4.1 to 4.4.2 (:pr:`7865`)
+
+
+.. _v2023.5.1:
+
+2023.5.1
+--------
+
+Released on May 26, 2023
+
+.. note::
+
+  This release drops support for Python 3.8. As of this release
+  Dask supports Python 3.9, 3.10, and 3.11.
+  See `this community issue <https://github.com/dask/community/issues/315>`_
+  for more details.
+
+Enhancements
+^^^^^^^^^^^^
+- Exclude IPython code from computations (:pr:`7788`) `Miles`_
+- Drop Python 3.8 support (:pr:`7840`) `Thomas Grainger`_
+- Add ``storage_options`` to ``performance_report`` (:pr:`7636`) `ypogorelova`_
+- Don't warn about mismatched ``msgpack`` (:pr:`7839`) `Irina Truong`_
+- Clean up ``sys.path`` on ``Server`` shutdown (:pr:`7838`) `James Bourbeau`_
+- Dashboard: Fine Performance Metrics (:pr:`7725`) `Miles`_
+
+Bug Fixes
+^^^^^^^^^
+- Properly handle unknown chunk sizes in P2P rechunking (:pr:`7856`) `Hendrik Makait`_
+- Minimal change to work around (:issue:`7726`) / support for UCX (:pr:`7851`) `Benjamin Zaitlen`_
+- Don't end computations until cluster is truly idle (:pr:`7790`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Explicitly install ``anaconda-client`` from conda-forge when uploading conda nightlies (:pr:`7861`) `Charles Blackmon-Luca`_
+- Fix ``is_idle`` docs build (:pr:`7854`) `James Bourbeau`_
+- Add tests for P2P barrier fusion (:pr:`7845`) `Hendrik Makait`_
+- Avoid ``DeprecationWarning`` in ``cupy`` dispatch registration (:pr:`7836`) `Lawrence Mitchell`_
+
+
+.. _v2023.5.0:
+
+2023.5.0
+--------
+
+Released on May 12, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- ``Client.upload_file`` send to both Workers and Scheduler and rename scratch directory (:pr:`7802`) `Miles`_
+- Allow dashboard to be used with bokeh prereleases (:pr:`7814`) `James Bourbeau`_
+
+Bug Fixes
+^^^^^^^^^
+- Ensure log_event of non-msgpack serializable object do not kill servers (:pr:`7472`) `Florian Jetter`_
+- Fix ``test_nanny.py`` duplicated ``pytestmark`` definitions (:pr:`7819`) `Thomas Grainger`_
+- Fix flaky ``test_dask_worker.py::test_single_executable_deprecated`` (:pr:`7817`) `Thomas Grainger`_
+
+Maintenance
+^^^^^^^^^^^
+- Annotation-less P2P shuffling (:pr:`7801`) `Hendrik Makait`_
+- Fix docstring for ``batch_size`` in ``client.map`` (:pr:`7833`) `David Chudzicki`_
+- Refactor ``test_protocol.py`` (:pr:`7829`) `crusaderky`_
+- Lint #6496 (:pr:`7828`) `crusaderky`_
+- Remove hardcoded 60s timeout (:pr:`6496`) `Florian Jetter`_
+- Add ``__init__.py`` files to template and static directories (:pr:`7809`) `Thomas Grainger`_
+- Disable compression for fast comms (:pr:`7768`) `crusaderky`_
+- Avoid deprecated ``pd.api.types.is_sparse`` (:pr:`7813`) `James Bourbeau`_
+- Bump gpuCI ``PYTHON_VER`` from 3.8 to 3.9 (:pr:`7812`) `Charles Blackmon-Luca`_
+
+
 .. _v2023.4.1:
 
 2023.4.1
@@ -4919,3 +5073,4 @@ significantly without many new features.
 .. _`Eugene Druzhynin`: https://github.com/eugene-graft
 .. _`ypogorelova`: https://github.com/ypogorelova
 .. _`Patrick Hoefler`: https://github.com/phofl
+.. _`Irina Truong`: https://github.com/j-bennet

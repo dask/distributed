@@ -4,6 +4,7 @@ import asyncio
 import bisect
 import builtins
 import contextlib
+import contextvars
 import errno
 import logging
 import math
@@ -65,7 +66,7 @@ from distributed.comm import Comm, connect, get_address_host, parse_address
 from distributed.comm import resolve_address as comm_resolve_address
 from distributed.comm.addressing import address_from_user_args
 from distributed.comm.utils import OFFLOAD_THRESHOLD
-from distributed.compatibility import PeriodicCallback, randbytes, to_thread
+from distributed.compatibility import PeriodicCallback
 from distributed.core import (
     ConnectionPool,
     PooledRPCCall,
@@ -81,15 +82,18 @@ from distributed.core import send_recv
 from distributed.diagnostics import nvml, rmm
 from distributed.diagnostics.plugin import _get_plugin_name
 from distributed.diskutils import WorkSpace
+from distributed.exceptions import Reschedule
 from distributed.http import get_handlers
 from distributed.metrics import context_meter, thread_time, time
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
 from distributed.protocol import pickle, to_serialize
+from distributed.protocol.serialize import _is_dumpable
 from distributed.pubsub import PubSubWorkerExtension
 from distributed.security import Security
 from distributed.shuffle import ShuffleWorkerExtension
 from distributed.sizeof import safe_sizeof as sizeof
+from distributed.spans import SpansWorkerExtension
 from distributed.threadpoolexecutor import ThreadPoolExecutor
 from distributed.threadpoolexecutor import secede as tpe_secede
 from distributed.utils import (
@@ -169,6 +173,7 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 DEFAULT_EXTENSIONS: dict[str, type] = {
     "pubsub": PubSubWorkerExtension,
     "shuffle": ShuffleWorkerExtension,
+    "spans": SpansWorkerExtension,
 }
 
 DEFAULT_METRICS: dict[str, Callable[[Worker], Any]] = {}
@@ -957,6 +962,24 @@ class Worker(BaseWorker, ServerNode):
         return self._deque_handler.deque
 
     def log_event(self, topic: str | Collection[str], msg: Any) -> None:
+        """Log an event under a given topic
+
+        Parameters
+        ----------
+        topic : str, list[str]
+            Name of the topic under which to log an event. To log the same
+            event under multiple topics, pass a list of topic names.
+        msg
+            Event message to log. Note this must be msgpack serializable.
+
+        See also
+        --------
+        Client.log_event
+        """
+        if not _is_dumpable(msg):
+            raise TypeError(
+                f"Message must be msgpack serializable. Got {type(msg)=} instead."
+            )
         full_msg = {
             "op": "log-event",
             "topic": topic,
@@ -1011,6 +1034,24 @@ class Worker(BaseWorker, ServerNode):
             # spilling is disabled
             spilled_memory, spilled_disk = 0, 0
 
+        # Send Fine Performance Metrics
+        # Make sure we do not yield the event loop between the moment we parse
+        # self.digests_total_since_heartbeat to send it to the scheduler and the moment
+        # we clear it!
+        spans_ext: SpansWorkerExtension | None = self.extensions.get("spans")
+        if spans_ext:
+            # Send metrics with disaggregated span_id
+            spans_ext.collect_digests()
+
+        # Send metrics with squashed span_id
+        digests: defaultdict[Hashable, float] = defaultdict(float)
+        for k, v in self.digests_total_since_heartbeat.items():
+            if isinstance(k, tuple) and k[0] == "execute":
+                k = k[:1] + k[2:]
+            digests[k] += v
+
+        self.digests_total_since_heartbeat.clear()
+
         out = dict(
             task_counts=self.state.task_counter.current_count(by_prefix=False),
             bandwidth={
@@ -1018,7 +1059,7 @@ class Worker(BaseWorker, ServerNode):
                 "workers": dict(self.bandwidth_workers),
                 "types": keymap(typename, self.bandwidth_types),
             },
-            digests_total_since_heartbeat=dict(self.digests_total_since_heartbeat),
+            digests_total_since_heartbeat=dict(digests),
             managed_bytes=self.state.nbytes,
             spilled_bytes={
                 "memory": spilled_memory,
@@ -1034,8 +1075,6 @@ class Worker(BaseWorker, ServerNode):
             },
             event_loop_interval=self._tick_interval_observed,
         )
-
-        self.digests_total_since_heartbeat.clear()
 
         monitor_recent = self.monitor.recent()
         # Convert {foo.bar: 123} to {foo: {bar: 123}}
@@ -1185,6 +1224,7 @@ class Worker(BaseWorker, ServerNode):
             except TimeoutError:  # pragma: no cover
                 logger.info("Timed out when connecting to scheduler")
         if response["status"] != "OK":
+            await comm.close()
             msg = response["message"] if "message" in response else repr(response)
             logger.error(f"Unable to connect to scheduler: {msg}")
             raise ValueError(f"Unexpected response from register: {response!r}")
@@ -1230,6 +1270,7 @@ class Worker(BaseWorker, ServerNode):
                     if hasattr(extension, "heartbeat")
                 },
             )
+
             end = time()
             middle = (start + end) / 2
 
@@ -1586,7 +1627,9 @@ class Worker(BaseWorker, ServerNode):
                 _close(executor=executor, wait=False)
             else:
                 try:
-                    await to_thread(_close, executor=executor, wait=executor_wait)
+                    await asyncio.to_thread(
+                        _close, executor=executor, wait=executor_wait
+                    )
                 except RuntimeError:  # Are we shutting down the process?
                     logger.error(
                         "Could not close executor %r by dispatching to thread. Trying synchronously.",
@@ -2122,7 +2165,11 @@ class Worker(BaseWorker, ServerNode):
 
         try:
             if iscoroutinefunction(func):
-                result = await func(*args, **kwargs)
+                token = _worker_cvar.set(self)
+                try:
+                    result = await func(*args, **kwargs)
+                finally:
+                    _worker_cvar.reset(token)
             elif separate_thread:
                 result = await self.loop.run_in_executor(
                     self.executors["actor"],
@@ -2136,7 +2183,11 @@ class Worker(BaseWorker, ServerNode):
                     self.active_threads_lock,
                 )
             else:
-                result = func(*args, **kwargs)
+                token = _worker_cvar.set(self)
+                try:
+                    result = func(*args, **kwargs)
+                finally:
+                    _worker_cvar.reset(token)
             return {"status": "OK", "result": to_serialize(result)}
         except Exception as ex:
             return {"status": "error", "exception": to_serialize(ex)}
@@ -2216,12 +2267,16 @@ class Worker(BaseWorker, ServerNode):
             try:
                 ts.start_time = time()
                 if iscoroutinefunction(function):
-                    result = await apply_function_async(
-                        function,
-                        args2,
-                        kwargs2,
-                        self.scheduler_delay,
-                    )
+                    token = _worker_cvar.set(self)
+                    try:
+                        result = await apply_function_async(
+                            function,
+                            args2,
+                            kwargs2,
+                            self.scheduler_delay,
+                        )
+                    finally:
+                        _worker_cvar.reset(token)
                 elif "ThreadPoolExecutor" in str(type(e)):
                     # The 'executor' time metric should be almost zero most of the time,
                     # e.g. thread synchronization overhead only, since thread-noncpu and
@@ -2643,6 +2698,9 @@ class Worker(BaseWorker, ServerNode):
         return self.transfer_outgoing_count_limit
 
 
+_worker_cvar: contextvars.ContextVar[Worker] = contextvars.ContextVar("_worker_cvar")
+
+
 def get_worker() -> Worker:
     """Get the worker currently running this task
 
@@ -2662,8 +2720,8 @@ def get_worker() -> Worker:
     worker_client
     """
     try:
-        return thread_state.execution_state["worker"]
-    except AttributeError:
+        return _worker_cvar.get()
+    except LookupError:
         raise ValueError("No worker found") from None
 
 
@@ -2769,20 +2827,6 @@ def secede():
             stimulus_id=f"secede-{time()}",
         ),
     )
-
-
-class Reschedule(Exception):
-    """Reschedule this task
-
-    Raising this exception will stop the current execution of the task and ask
-    the scheduler to reschedule this task, possibly on a different machine.
-
-    This does not guarantee that the task will move onto a different machine.
-    The scheduler will proceed through its normal heuristics to determine the
-    optimal machine to accept this task.  The machine will likely change if the
-    load across the cluster has significantly changed since first scheduling
-    the task.
-    """
 
 
 @overload
@@ -2904,7 +2948,7 @@ def execute_task(task):
         return task
 
 
-cache_dumps = LRU(maxsize=100)
+cache_dumps: LRU[Callable[..., Any], bytes] = LRU(maxsize=100)
 
 _cache_lock = threading.Lock()
 
@@ -3004,7 +3048,11 @@ def apply_function(
         execution_state=execution_state,
         key=key,
     ):
-        msg = apply_function_simple(function, args, kwargs, time_delay)
+        token = _worker_cvar.set(execution_state["worker"])
+        try:
+            msg = apply_function_simple(function, args, kwargs, time_delay)
+        finally:
+            _worker_cvar.reset(token)
 
     with active_threads_lock:
         del active_threads[ident]
@@ -3137,7 +3185,11 @@ def apply_function_actor(
         key=key,
         actor=True,
     ):
-        result = function(*args, **kwargs)
+        token = _worker_cvar.set(execution_state["worker"])
+        try:
+            result = function(*args, **kwargs)
+        finally:
+            _worker_cvar.reset(token)
 
         with active_threads_lock:
             del active_threads[ident]
@@ -3437,7 +3489,7 @@ def benchmark_disk(
             names = list(map(str, range(100)))
             size = parse_bytes(size_str)
 
-            data = randbytes(size)
+            data = random.randbytes(size)
 
             start = time()
             total = 0
@@ -3468,7 +3520,7 @@ def benchmark_memory(
     out = {}
     for size_str in sizes:
         size = parse_bytes(size_str)
-        data = randbytes(size)
+        data = random.randbytes(size)
 
         start = time()
         total = 0
@@ -3501,7 +3553,7 @@ async def benchmark_network(
     async with rpc(address) as r:
         for size_str in sizes:
             size = parse_bytes(size_str)
-            data = to_serialize(randbytes(size))
+            data = to_serialize(random.randbytes(size))
 
             start = time()
             total = 0

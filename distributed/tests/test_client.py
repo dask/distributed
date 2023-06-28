@@ -6,11 +6,13 @@ import functools
 import gc
 import inspect
 import logging
+import multiprocessing
 import operator
 import os
 import pathlib
 import pickle
 import random
+import re
 import subprocess
 import sys
 import threading
@@ -31,6 +33,7 @@ from unittest import mock
 import psutil
 import pytest
 import yaml
+from packaging.version import parse as parse_version
 from tlz import concat, first, identity, isdistinct, merge, pluck, valmap
 from tornado.ioloop import IOLoop
 
@@ -38,12 +41,7 @@ import dask
 import dask.bag as db
 from dask import delayed
 from dask.optimization import SubgraphCallable
-from dask.utils import (
-    get_default_shuffle_algorithm,
-    parse_timedelta,
-    stringify,
-    tmpfile,
-)
+from dask.utils import get_default_shuffle_method, parse_timedelta, stringify, tmpfile
 
 from distributed import (
     CancelledError,
@@ -76,20 +74,13 @@ from distributed.client import (
 from distributed.cluster_dump import load_cluster_dump
 from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, WINDOWS
-from distributed.core import Status
+from distributed.core import Status, error_message
 from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.metrics import time
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
 from distributed.shuffle import check_minimal_arrow_version
 from distributed.sizeof import sizeof
-from distributed.utils import (
-    NoOpAwaitable,
-    get_mp_context,
-    is_valid_xml,
-    open_port,
-    sync,
-    tmp_text,
-)
+from distributed.utils import get_mp_context, is_valid_xml, open_port, sync, tmp_text
 from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
@@ -114,6 +105,7 @@ from distributed.utils_test import (
     popen,
     raises_with_cause,
     randominc,
+    relative_frame_linenumber,
     save_sys_modules,
     slowadd,
     slowdec,
@@ -1653,6 +1645,20 @@ def test_upload_file_exception_sync(c):
             c.upload_file(fn)
 
 
+@gen_cluster(client=True)
+async def test_upload_file_load(c, s, a, b):
+    code = "syntax-error!"
+    with tmp_text("myfile.py", code) as fn:
+        # Without `load=False` this file would be imported and raise a `SyntaxError`
+        await c.upload_file(fn, load=False)
+
+        # Confirm workers and scheduler got the file
+        for server in [s, a, b]:
+            file = pathlib.Path(server.local_directory).joinpath("myfile.py")
+            assert file.is_file()
+            assert file.read_text() == code
+
+
 @gen_cluster(client=True, nthreads=[])
 async def test_upload_file_new_worker(c, s):
     def g():
@@ -2089,27 +2095,8 @@ async def test_multi_client(s, a, b):
         await asyncio.sleep(0.01)
 
 
-@contextmanager
-def _pristine_loop():
-    IOLoop.clear_instance()
-    IOLoop.clear_current()
-    loop = IOLoop()
-    loop.make_current()
-    assert IOLoop.current() is loop
-    try:
-        yield loop
-    finally:
-        try:
-            loop.close(all_fds=True)
-        except (KeyError, ValueError):
-            pass
-        IOLoop.clear_instance()
-        IOLoop.clear_current()
-
-
 def long_running_client_connection(address):
-    with _pristine_loop():
-        c = Client(address)
+    with Client(address, loop=None) as c:
         x = c.submit(lambda x: x + 1, 10)
         x.result()
         sleep(100)
@@ -2762,8 +2749,6 @@ async def test_startup_close_startup(s, a, b):
         pass
 
 
-@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
-@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
 def test_startup_close_startup_sync(loop):
     with cluster() as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
@@ -3212,25 +3197,25 @@ def test_default_get(loop_in_thread):
         # These may change in the future but the selection below should not
         distributed_default = "p2p" if has_pyarrow else "tasks"
         local_default = "disk"
-        assert get_default_shuffle_algorithm() == local_default
+        assert get_default_shuffle_method() == local_default
         with Client(s["address"], set_as_default=True, loop=loop) as c:
             assert dask.base.get_scheduler() == c.get
-            assert get_default_shuffle_algorithm() == distributed_default
+            assert get_default_shuffle_method() == distributed_default
 
         assert dask.base.get_scheduler() == pre_get
-        assert get_default_shuffle_algorithm() == local_default
+        assert get_default_shuffle_method() == local_default
 
         c = Client(s["address"], set_as_default=False, loop=loop)
         assert dask.base.get_scheduler() == pre_get
-        assert get_default_shuffle_algorithm() == local_default
+        assert get_default_shuffle_method() == local_default
         c.close()
 
         c = Client(s["address"], set_as_default=True, loop=loop)
-        assert get_default_shuffle_algorithm() == distributed_default
+        assert get_default_shuffle_method() == distributed_default
         assert dask.base.get_scheduler() == c.get
         c.close()
         assert dask.base.get_scheduler() == pre_get
-        assert get_default_shuffle_algorithm() == local_default
+        assert get_default_shuffle_method() == local_default
 
         with Client(s["address"], loop=loop) as c:
             assert dask.base.get_scheduler() == c.get
@@ -3996,22 +3981,24 @@ async def test_serialize_future(s, a, b):
 async def test_serialize_future_without_client(s, a, b):
     # Do not use a ctx manager to avoid having this being set as a current and/or default client
     c1 = await Client(s.address, asynchronous=True, set_as_default=False)
+    try:
+        with ensure_no_new_clients():
 
-    with ensure_no_new_clients():
+            def do_stuff():
+                return 1
 
-        def do_stuff():
-            return 1
+            future = c1.submit(do_stuff)
+            pickled = pickle.dumps(future)
+            unpickled_fut = pickle.loads(pickled)
 
-        future = c1.submit(do_stuff)
-        pickled = pickle.dumps(future)
-        unpickled_fut = pickle.loads(pickled)
+        with pytest.raises(RuntimeError):
+            await unpickled_fut
 
-    with pytest.raises(RuntimeError):
-        await unpickled_fut
-
-    with c1.as_current():
-        unpickled_fut_ctx = pickle.loads(pickled)
-        assert await unpickled_fut_ctx == 1
+        with c1.as_current():
+            unpickled_fut_ctx = pickle.loads(pickled)
+            assert await unpickled_fut_ctx == 1
+    finally:
+        await c1.close()
 
 
 @gen_cluster()
@@ -5635,23 +5622,12 @@ async def test_future_auto_inform(c, s, a, b):
             await asyncio.sleep(0.01)
 
 
-@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
-@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
-@pytest.mark.filterwarnings("ignore:clear_current is deprecated:DeprecationWarning")
 def test_client_async_before_loop_starts(cleanup):
-    async def close():
-        async with client:
-            pass
-
-    with _pristine_loop() as loop:
-        with pytest.warns(
-            DeprecationWarning,
-            match=r"Constructing LoopRunner\(loop=loop\) without a running loop is deprecated",
-        ):
-            client = Client(asynchronous=True, loop=loop)
-        assert client.asynchronous
-        assert isinstance(client.close(), NoOpAwaitable)
-        loop.run_sync(close)  # TODO: client.close() does not unset global client
+    with pytest.raises(
+        RuntimeError,
+        match=r"Constructing LoopRunner\(asynchronous=True\) without a running loop is not supported",
+    ):
+        client = Client(asynchronous=True, loop=None)
 
 
 @pytest.mark.slow
@@ -6614,8 +6590,9 @@ async def test_run_on_scheduler_async_def_wait(c, s, a, b):
 
 @pytest.mark.slow
 @pytest.mark.skipif(WINDOWS, reason="frequently kills off the whole test suite")
+@pytest.mark.parametrize("local", [True, False])
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 2)
-async def test_performance_report(c, s, a, b):
+async def test_performance_report(c, s, a, b, local):
     pytest.importorskip("bokeh")
     da = pytest.importorskip("dask.array")
 
@@ -6628,8 +6605,15 @@ async def test_performance_report(c, s, a, b):
         """
         x = da.random.random((1000, 1000), chunks=(100, 100))
         with tmpfile(extension="html") as fn:
+            urlpath = fn
+            if not local:
+                pytest.importorskip("fsspec")
+                # Make it look like an fsspec path
+                urlpath = f"file://{fn}"
             async with performance_report(
-                filename=fn, stacklevel=stacklevel, mode=mode
+                filename=urlpath,
+                stacklevel=stacklevel,
+                mode=mode,
             ):
                 await c.compute((x + x.T).sum())
 
@@ -6875,9 +6859,9 @@ async def test_annotations_task_state(c, s, a, b):
     with dask.config.set(optimization__fuse__active=False):
         x = await x.persist()
 
-    assert all(
-        {"qux": "bar", "priority": 100} == ts.annotations for ts in s.tasks.values()
-    )
+    for ts in s.tasks.values():
+        assert ts.annotations["qux"] == "bar"
+        assert ts.annotations["priority"] == 100
 
 
 @pytest.mark.parametrize("fn", ["compute", "persist"])
@@ -6893,7 +6877,8 @@ async def test_annotations_compute_time(c, s, a, b, fn):
 
     await wait(fut)
     assert s.tasks
-    assert all(ts.annotations == {"foo": "bar"} for ts in s.tasks.values())
+    for ts in s.tasks.values():
+        assert ts.annotations["foo"] == "bar"
 
 
 @pytest.mark.xfail(reason="https://github.com/dask/dask/issues/7036")
@@ -6925,9 +6910,9 @@ async def test_annotations_priorities(c, s, a, b):
     with dask.config.set(optimization__fuse__active=False):
         x = await x.persist()
 
-    assert all("15" in str(ts.priority) for ts in s.tasks.values())
-    assert all(ts.priority[0] == -15 for ts in s.tasks.values())
-    assert all({"priority": 15} == ts.annotations for ts in s.tasks.values())
+    for ts in s.tasks.values():
+        assert ts.priority[0] == -15
+        assert ts.annotations["priority"] == 15
 
 
 @gen_cluster(client=True)
@@ -6940,8 +6925,10 @@ async def test_annotations_workers(c, s, a, b):
     with dask.config.set(optimization__fuse__active=False):
         x = await x.persist()
 
-    assert all({"workers": [a.address]} == ts.annotations for ts in s.tasks.values())
-    assert all({a.address} == ts.worker_restrictions for ts in s.tasks.values())
+    for ts in s.tasks.values():
+        assert ts.annotations["workers"] == [a.address]
+        assert ts.worker_restrictions == {a.address}
+
     assert a.data
     assert not b.data
 
@@ -6956,8 +6943,9 @@ async def test_annotations_retries(c, s, a, b):
     with dask.config.set(optimization__fuse__active=False):
         x = await x.persist()
 
-    assert all(ts.retries == 2 for ts in s.tasks.values())
-    assert all(ts.annotations == {"retries": 2} for ts in s.tasks.values())
+    for ts in s.tasks.values():
+        assert ts.retries == 2
+        assert ts.annotations["retries"] == 2
 
 
 @gen_cluster(client=True)
@@ -7007,8 +6995,9 @@ async def test_annotations_resources(c, s, a, b):
     with dask.config.set(optimization__fuse__active=False):
         x = await x.persist()
 
-    assert all([{"GPU": 1} == ts.resource_restrictions for ts in s.tasks.values()])
-    assert all([{"resources": {"GPU": 1}} == ts.annotations for ts in s.tasks.values()])
+    for ts in s.tasks.values():
+        assert ts.resource_restrictions == {"GPU": 1}
+        assert ts.annotations["resources"] == {"GPU": 1}
 
 
 @gen_cluster(
@@ -7043,14 +7032,11 @@ async def test_annotations_loose_restrictions(c, s, a, b):
     with dask.config.set(optimization__fuse__active=False):
         x = await x.persist()
 
-    assert all(not ts.worker_restrictions for ts in s.tasks.values())
-    assert all({"fake"} == ts.host_restrictions for ts in s.tasks.values())
-    assert all(
-        [
-            {"workers": ["fake"], "allow_other_workers": True} == ts.annotations
-            for ts in s.tasks.values()
-        ]
-    )
+    for ts in s.tasks.values():
+        assert not ts.worker_restrictions
+        assert ts.host_restrictions == {"fake"}
+        assert ts.annotations["workers"] == ["fake"]
+        assert ts.annotations["allow_other_workers"] is True
 
 
 @gen_cluster(
@@ -7068,8 +7054,9 @@ async def test_annotations_submit_map(c, s, a, b):
 
     await wait([f, *fs])
 
-    assert all([{"foo": 1} == ts.resource_restrictions for ts in s.tasks.values()])
-    assert all([{"resources": {"foo": 1}} == ts.annotations for ts in s.tasks.values()])
+    for ts in s.tasks.values():
+        assert ts.resource_restrictions == {"foo": 1}
+        assert ts.annotations["resources"] == {"foo": 1}
     assert not b.state.tasks
 
 
@@ -7082,8 +7069,6 @@ async def test_workers_collection_restriction(c, s, a, b):
     assert a.data and not b.data
 
 
-@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
-@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_get_client_functions_spawn_clusters(c, s, a):
     # see gh4565
@@ -7116,16 +7101,41 @@ async def test_get_client_functions_spawn_clusters(c, s, a):
 def test_computation_code_walk_frames():
     test_function_code = inspect.getsource(test_computation_code_walk_frames)
     code = Client._get_computation_code()
+    lineno_relative = relative_frame_linenumber(inspect.currentframe()) - 1
+    lineno_frame = inspect.getframeinfo(inspect.currentframe()).lineno - 2
 
-    assert code == (test_function_code,)
+    # Sanity check helper function works, called 7 lines down in this function
+    assert relative_frame_linenumber(inspect.currentframe()) == 7
+
+    assert len(code) == 1
+    code = code[0]
+
+    assert code.code == test_function_code
+    assert code.lineno_frame == lineno_frame
+    assert code.lineno_relative == lineno_relative
+    assert code.filename == __file__
 
     def nested_call():
-        return Client._get_computation_code(nframes=2)
+        code = Client._get_computation_code(nframes=2)
+        nonlocal lineno_relative, lineno_frame
+        lineno_relative = 1  # called on first line in this function
+        lineno_frame = inspect.getframeinfo(inspect.currentframe()).lineno - 3
+        return code
 
     nested = nested_call()
+    nested_call_lineno_relative = relative_frame_linenumber(inspect.currentframe()) - 1
+    nested_call_lineno_frame = inspect.getframeinfo(inspect.currentframe()).lineno - 2
+
     assert len(nested) == 2
-    assert nested[-1] == inspect.getsource(nested_call)
-    assert nested[-2] == test_function_code
+    assert nested[-1].code == inspect.getsource(nested_call)
+    assert nested[-1].lineno_frame == lineno_frame
+    assert nested[-1].lineno_relative == lineno_relative
+    assert nested[-1].filename == __file__
+
+    assert nested[-2].code == test_function_code
+    assert nested[-2].lineno_frame == nested_call_lineno_frame
+    assert nested[-2].lineno_relative == nested_call_lineno_relative
+    assert nested[-2].filename == __file__
 
     with pytest.raises(TypeError, match="Ignored modules must be a list"):
         with dask.config.set(
@@ -7139,9 +7149,69 @@ def test_computation_code_walk_frames():
         import sys
 
         upper_frame_code = inspect.getsource(sys._getframe(1))
+        lineno_relative = relative_frame_linenumber(sys._getframe(1))
+        lineno_frame = inspect.getframeinfo(sys._getframe(1)).lineno
         code = Client._get_computation_code()
-        assert code == (upper_frame_code,)
-        assert nested_call()[-1] == upper_frame_code
+
+        assert len(code) == 1
+        code = code[0]
+
+        assert code.code == upper_frame_code
+        assert code.lineno_relative == lineno_relative
+        assert code.lineno_frame == lineno_frame
+        assert nested_call()[-1].code == upper_frame_code
+
+
+def run_in_ipython(code):
+    from IPython.testing.globalipapp import start_ipython
+
+    shell = start_ipython()
+    return shell.run_cell(code)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("nframes", (2, 3))
+@gen_cluster()
+async def test_computation_ignore_ipython_frames(s, a, b, nframes):
+    pytest.importorskip("IPython")
+
+    source_code = f"""
+        import time
+        import dask
+        from distributed import Client
+
+        dask.config.set({{"distributed.diagnostics.computations.nframes": {nframes}}})
+        with Client("{s.address}") as client:
+            def foo(x): print(x); return x;
+            def bar(x): return client.map(foo, range(x))
+
+            N = client.gather(bar(3))
+    """
+    # When not running IPython in a new process, it does not shutdown
+    # properly and leaks a thread. There should be a way to fix this.
+    # Seems to be another (deeper) issue that this shouldn't need
+    # a subprocess/thread/@gen_cluster/test at all, and ought to be able to run
+    # directly in InteractiveShell (and does) but requires `--reruns=1`
+    # due to some underlying lag in the asyncio if ran by itself, but will
+    # otherwise run fine in the suite of tests.
+    ctx = multiprocessing.get_context("spawn")
+    with concurrent.futures.ProcessPoolExecutor(1, mp_context=ctx) as executor:
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(executor, run_in_ipython, source_code)
+
+    result.raise_error()
+    computations = s.computations
+
+    assert len(computations) == 1
+    assert len(computations[0].code) == 1
+    code = computations[0].code[0]
+    assert len(code) == 2  # 2 frames when ignoring IPython frames
+
+    def normalize(s):
+        return re.sub(r"\s+", " ", s).strip()
+
+    assert normalize(code[0].code) == normalize(source_code)
+    assert normalize(code[1].code) == "def bar(x): return client.map(foo, range(x))"
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -7175,8 +7245,8 @@ def test_computation_object_code_dask_compute(client):
     code = client.run_on_scheduler(fetch_comp_code)
 
     assert len(code) == 2
-    assert code[-1] == test_function_code
-    assert code[-2] == inspect.getsource(sys._getframe(1))
+    assert code[-1].code == test_function_code
+    assert code[-2].code == inspect.getsource(sys._getframe(1))
 
 
 def test_computation_object_code_dask_compute_no_frames_default(client):
@@ -7195,6 +7265,9 @@ def test_computation_object_code_dask_compute_no_frames_default(client):
 
 def test_computation_object_code_not_available(client):
     np = pytest.importorskip("numpy")
+    if parse_version(np.__version__) >= parse_version("1.25"):
+        pytest.skip("numpy >=1.25 can capture ufunc code")
+
     pd = pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
     with dask.config.set({"distributed.diagnostics.computations.nframes": 2}):
@@ -7227,8 +7300,8 @@ async def test_computation_object_code_dask_persist(c, s, a, b):
     assert len(comp.code) == 1
 
     assert len(comp.code[0]) == 2
-    assert comp.code[0][-1] == test_function_code
-    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
+    assert comp.code[0][-1].code == test_function_code
+    assert comp.code[0][-2].code == inspect.getsource(sys._getframe(1))
 
 
 @gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
@@ -7250,8 +7323,8 @@ async def test_computation_object_code_client_submit_simple(c, s, a, b):
     assert len(comp.code) == 1
 
     assert len(comp.code[0]) == 2
-    assert comp.code[0][-1] == test_function_code
-    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
+    assert comp.code[0][-1].code == test_function_code
+    assert comp.code[0][-2].code == inspect.getsource(sys._getframe(1))
 
 
 @gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
@@ -7274,8 +7347,8 @@ async def test_computation_object_code_client_submit_list_comp(c, s, a, b):
     assert len(comp.code) == 1
 
     assert len(comp.code[0]) == 2
-    assert comp.code[0][-1] == test_function_code
-    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
+    assert comp.code[0][-1].code == test_function_code
+    assert comp.code[0][-2].code == inspect.getsource(sys._getframe(1))
 
 
 @gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
@@ -7298,8 +7371,8 @@ async def test_computation_object_code_client_submit_dict_comp(c, s, a, b):
     assert len(comp.code) == 1
 
     assert len(comp.code[0]) == 2
-    assert comp.code[0][-1] == test_function_code
-    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
+    assert comp.code[0][-1].code == test_function_code
+    assert comp.code[0][-2].code == inspect.getsource(sys._getframe(1))
 
 
 @gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
@@ -7319,8 +7392,8 @@ async def test_computation_object_code_client_map(c, s, a, b):
     assert len(comp.code) == 1
 
     assert len(comp.code[0]) == 2
-    assert comp.code[0][-1] == test_function_code
-    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
+    assert comp.code[0][-1].code == test_function_code
+    assert comp.code[0][-2].code == inspect.getsource(sys._getframe(1))
 
 
 @gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
@@ -7339,8 +7412,8 @@ async def test_computation_object_code_client_compute(c, s, a, b):
     assert len(comp.code) == 1
 
     assert len(comp.code[0]) == 2
-    assert comp.code[0][-1] == test_function_code
-    assert comp.code[0][-2] == inspect.getsource(sys._getframe(1))
+    assert comp.code[0][-1].code == test_function_code
+    assert comp.code[0][-2].code == inspect.getsource(sys._getframe(1))
 
 
 @pytest.mark.slow
@@ -7548,6 +7621,32 @@ async def test_log_event_warn(c, s, a, b):
 
     with pytest.warns(UserWarning, match="asdf"):
         await c.submit(no_category)
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_log_event_msgpack(c, s, a, b):
+    await c.log_event("test-topic", "foo")
+    with pytest.raises(TypeError, match="msgpack"):
+
+        class C:
+            pass
+
+        await c.log_event("test-topic", C())
+    await c.log_event("test-topic", "bar")
+    await c.log_event("test-topic", error_message(Exception()))
+
+    # assertion reversed for mock.ANY.__eq__(Serialized())
+    assert [
+        "foo",
+        "bar",
+        {
+            "status": "error",
+            "exception": mock.ANY,
+            "traceback": mock.ANY,
+            "exception_text": "Exception()",
+            "traceback_text": "",
+        },
+    ] == [msg[1] for msg in s.get_events("test-topic")]
 
 
 @gen_cluster(client=True)

@@ -289,6 +289,25 @@ class Listener(ABC):
         )
 
 
+class BaseListener(Listener):
+    def __init__(self) -> None:
+        self.__comms: set[Comm] = set()
+
+    async def on_connection(
+        self, comm: Comm, handshake_overrides: dict[str, Any] | None = None
+    ) -> None:
+        self.__comms.add(comm)
+        try:
+            return await super().on_connection(comm, handshake_overrides)
+        finally:
+            self.__comms.discard(comm)
+
+    def abort_handshaking_comms(self) -> None:
+        comms, self.__comms = self.__comms, set()
+        for comm in comms:
+            comm.abort()
+
+
 class Connector(ABC):
     @abstractmethod
     async def connect(self, address, deserialize=True):
