@@ -2567,8 +2567,15 @@ def test_run_coroutine_sync(c, s, a, b):
     assert t2 - t1 <= 1.0
 
 
-@gen_cluster(client=True)
-async def test_run_exception(c, s, a, b):
+@pytest.mark.parametrize(
+    "Worker,nanny,get_address",
+    [
+        (Worker, False, operator.attrgetter("address")),
+        (Nanny, True, operator.attrgetter("worker_address")),
+    ],
+)
+@gen_cluster(client=True, nthreads=[])
+async def test_run_exception(c, s, Worker, nanny, get_address):
     class MyError(Exception):
         pass
 
@@ -2577,19 +2584,38 @@ async def test_run_exception(c, s, a, b):
             raise MyError("informative message")
         return 123
 
-    with pytest.raises(MyError, match="informative message"):
-        await c.run(raise_exception, addr=a.address)
-    with pytest.raises(MyError, match="informative message"):
-        await c.run(raise_exception, addr=a.address, on_error="raise")
-    with pytest.raises(ValueError, match="on_error must be"):
-        await c.run(raise_exception, addr=a.address, on_error="invalid")
+    async with Worker(s.address) as a, Worker(s.address) as b:
+        with pytest.raises(MyError, match="informative message"):
+            await c.run(raise_exception, addr=a.address, nanny=nanny)
+        with pytest.raises(MyError, match="informative message"):
+            await c.run(raise_exception, addr=a.address, on_error="raise", nanny=nanny)
+        with pytest.raises(ValueError, match="on_error must be"):
+            await c.run(
+                raise_exception, addr=a.address, on_error="invalid", nanny=nanny
+            )
 
-    out = await c.run(raise_exception, addr=a.address, on_error="return")
-    assert isinstance(out[a.address], MyError)
-    assert out[b.address] == 123
+        out = await c.run(
+            raise_exception, addr=a.address, on_error="return", nanny=nanny
+        )
+        assert isinstance(out[get_address(a)], MyError)
+        assert out[get_address(b)] == 123
 
-    out = await c.run(raise_exception, addr=a.address, on_error="ignore")
-    assert out == {b.address: 123}
+        out = await c.run(
+            raise_exception, addr=a.address, on_error="ignore", nanny=nanny
+        )
+        assert out == {get_address(b): 123}
+
+
+@gen_cluster(client=True)
+async def test_run_on_scheduler_exception(c, s, a, b):
+    class MyError(Exception):
+        pass
+
+    def raise_exception():
+        raise MyError
+
+    with pytest.raises(MyError):
+        await c.run_on_scheduler(raise_exception)
 
 
 @gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "200ms"})
@@ -6554,17 +6580,23 @@ async def test_run_on_scheduler_async_def(c, s, a, b):
 
     assert s.foo == "bar"
 
-    async def f(dask_worker):
-        await asyncio.sleep(0.01)
-        dask_worker.foo = "bar"
 
-    await c.run(f)
-    assert a.foo == "bar"
-    assert b.foo == "bar"
+@pytest.mark.parametrize("Worker,nanny", [(Worker, False), (Nanny, True)])
+@gen_cluster(client=True, nthreads=[])
+async def test_run_async_def(c, s, Worker, nanny):
+    async with Worker(s.address) as a, Worker(s.address) as b:
+
+        async def f(dask_worker):
+            await asyncio.sleep(0.01)
+            dask_worker.foo = "bar"
+
+        await c.run(f, nanny=nanny)
+        assert a.foo == "bar"
+        assert b.foo == "bar"
 
 
 @gen_cluster(client=True)
-async def test_run_on_scheduler_async_def_wait(c, s, a, b):
+async def test_run_on_scheduler_async_def_no_wait(c, s, a, b):
     async def f(dask_scheduler):
         await asyncio.sleep(0.01)
         dask_scheduler.foo = "bar"
@@ -6575,17 +6607,23 @@ async def test_run_on_scheduler_async_def_wait(c, s, a, b):
         await asyncio.sleep(0.01)
     assert s.foo == "bar"
 
-    async def f(dask_worker):
-        await asyncio.sleep(0.01)
-        dask_worker.foo = "bar"
 
-    await c.run(f, wait=False)
+@pytest.mark.parametrize("Worker,nanny", [(Worker, False), (Nanny, True)])
+@gen_cluster(client=True, nthreads=[])
+async def test_run_async_def_no_wait(c, s, Worker, nanny):
+    async with Worker(s.address) as a, Worker(s.address) as b:
 
-    while not hasattr(a, "foo") or not hasattr(b, "foo"):
-        await asyncio.sleep(0.01)
+        async def f(dask_worker):
+            await asyncio.sleep(0.01)
+            dask_worker.foo = "bar"
 
-    assert a.foo == "bar"
-    assert b.foo == "bar"
+        await c.run(f, wait=False, nanny=nanny)
+
+        while not hasattr(a, "foo") or not hasattr(b, "foo"):
+            await asyncio.sleep(0.01)
+
+        assert a.foo == "bar"
+        assert b.foo == "bar"
 
 
 @gen_cluster(client=True)
