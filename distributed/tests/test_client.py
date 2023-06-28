@@ -2568,21 +2568,28 @@ def test_run_coroutine_sync(c, s, a, b):
 
 
 @pytest.mark.parametrize(
-    "Worker,nanny,get_address",
+    "Worker,nanny,address_attr,log_name",
     [
-        (Worker, False, operator.attrgetter("address")),
-        (Nanny, True, operator.attrgetter("worker_address")),
+        (Worker, False, "address", "worker"),
+        (Nanny, True, "worker_address", "nanny"),
     ],
 )
 @gen_cluster(client=True, nthreads=[])
-async def test_run_exception(c, s, Worker, nanny, get_address):
+async def test_run_exception(c, s, Worker, nanny, address_attr, log_name):
     class MyError(Exception):
         pass
 
-    def raise_exception(dask_worker, addr):
+    def raise_exception(*, addr, dask_worker):
         if addr == dask_worker.address:
             raise MyError("informative message")
         return 123
+
+    # for testing log truncation of args and kwargs
+    def raise_exception_padding(padding_arg, *, padding_kwarg):
+        raise MyError("informative message")
+
+    def get_address(worker):
+        return getattr(worker, address_attr)
 
     async with Worker(s.address) as a, Worker(s.address) as b:
         with pytest.raises(MyError, match="informative message"):
@@ -2604,6 +2611,22 @@ async def test_run_exception(c, s, Worker, nanny, get_address):
             raise_exception, addr=a.address, on_error="ignore", nanny=nanny
         )
         assert out == {get_address(b): 123}
+
+        with (
+            captured_logger(f"distributed.{log_name}") as caplog,
+            pytest.raises(MyError, match="informative message"),
+        ):
+            await c.run(
+                raise_exception_padding,
+                "x" * 1000,
+                padding_kwarg="y" * 1000,
+                nanny=nanny,
+                workers=[get_address(a)],
+            )
+
+        assert (
+            f"args:     ('{'x' * 998}\nkwargs:   {{'padding_kwarg': '{'y' * 981}\n"
+        ) in caplog.getvalue()
 
 
 @gen_cluster(client=True)
