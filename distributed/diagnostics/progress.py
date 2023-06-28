@@ -224,7 +224,6 @@ class MultiProgress(Progress):
         logger.debug("Set up Progress keys")
 
     def transition(self, key, start, finish, *args, **kwargs):
-        print(f"\ntransition: {key, start, finish}")
         if start == "processing" and finish == "memory":
             s = self.keys.get(self.get_group(key), None)
             if s and key in s:
