@@ -634,13 +634,30 @@ async def test_run_dask_worker_kwonlyarg(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_run_coroutine_dask_worker(c, s, a, b):
+async def test_run_async_await_dask_worker(c, s, a, b):
     async def f(dask_worker=None):
         await asyncio.sleep(0.001)
         return dask_worker.id
 
     response = await c.run(f)
     assert response == {a.address: a.id, b.address: b.id}
+
+
+@gen_cluster(client=True)
+async def test_run_coroutine_dask_worker(c, s, a, b):
+    async def f(dask_worker=None):
+        await asyncio.sleep(0.001)
+        return dask_worker.id
+
+    with pytest.warns(
+        DeprecationWarning, match=r"run_coroutine is a deprecated alias of run"
+    ):
+        assert await c.rpc(a.address).run_coroutine(
+            function=pickle.dumps(f),
+            args=pickle.dumps(()),
+            kwargs=pickle.dumps({}),
+            wait=True,
+        ) == {"result": a.id, "status": "OK"}
 
 
 @gen_cluster(client=True, nthreads=[])

@@ -2196,9 +2196,12 @@ class Worker(BaseWorker, ServerNode):
         return {"status": "OK", "result": to_serialize(result)}
 
     async def run_coroutine(self, comm, *, function, args, kwargs, wait):
-        return await self.run(
-            worker=self, function=function, args=args, kwargs=kwargs, wait=wait
+        warnings.warn(
+            "run_coroutine is a deprecated alias of run",
+            DeprecationWarning,
+            stacklevel=2,
         )
+        return await self.run(function=function, args=args, kwargs=kwargs, wait=wait)
 
     async def actor_execute(
         self,
