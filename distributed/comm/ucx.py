@@ -20,7 +20,7 @@ import dask
 from dask.utils import parse_bytes
 
 from distributed.comm.addressing import parse_host_port, unparse_host_port
-from distributed.comm.core import Comm, CommClosedError, Connector, Listener
+from distributed.comm.core import BaseListener, Comm, CommClosedError, Connector
 from distributed.comm.registry import Backend, backends
 from distributed.comm.utils import (
     ensure_concrete_host,
@@ -278,6 +278,11 @@ class UCX(Comm):
     def peer_address(self) -> str:
         return self._peer_addr
 
+    @property
+    def same_host(self) -> bool:
+        """Unlike in TCP, local_address can be blank"""
+        return super().same_host if self._local_addr else False
+
     @log_errors
     async def write(
         self,
@@ -474,7 +479,7 @@ class UCXConnector(Connector):
         )
 
 
-class UCXListener(Listener):
+class UCXListener(BaseListener):
     prefix = UCXConnector.prefix
     comm_class = UCXConnector.comm_class
     encrypted = UCXConnector.encrypted
@@ -487,6 +492,7 @@ class UCXListener(Listener):
         allow_offload: bool = True,
         **connection_args: Any,
     ):
+        super().__init__()
         if not address.startswith("ucx"):
             address = "ucx://" + address
         self.ip, self._input_port = parse_host_port(address, default_port=0)

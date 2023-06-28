@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import random
 import warnings
 
@@ -17,8 +18,8 @@ from dask.array.rechunk import normalize_chunks, rechunk
 from dask.array.utils import assert_eq
 
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._rechunk import ShardID, rechunk_slicing
-from distributed.shuffle._scheduler_extension import get_worker_for_range_sharding
+from distributed.shuffle._rechunk import Split, split_axes
+from distributed.shuffle._scheduler_extension import get_worker_for_hash_sharding
 from distributed.shuffle._shuffle import ShuffleId
 from distributed.shuffle._worker_extension import ArrayRechunkRun
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
@@ -83,7 +84,9 @@ async def test_lowlevel_rechunk(
 
     ind_chunks = [[(i, x) for i, x in enumerate(dim)] for dim in old]
     ind_chunks = [list(zip(x, y)) for x, y in product(*ind_chunks)]
-    old_chunks = {idx: np.random.random(chunk) for idx, chunk in ind_chunks}
+    old_chunks = {
+        idx: np.random.default_rng().random(chunk) for idx, chunk in ind_chunks
+    }
 
     workers = list("abcdefghijklmn")[:n_workers]
 
@@ -91,9 +94,7 @@ async def test_lowlevel_rechunk(
 
     new_indices = list(product(*(range(len(dim)) for dim in new)))
     for i, idx in enumerate(new_indices):
-        worker_for_mapping[idx] = get_worker_for_range_sharding(
-            i, workers, len(new_indices)
-        )
+        worker_for_mapping[idx] = get_worker_for_hash_sharding(i, workers)
 
     assert len(set(worker_for_mapping.values())) == min(n_workers, len(new_indices))
 
@@ -138,7 +139,7 @@ async def test_lowlevel_rechunk(
             all_chunks = np.empty(tuple(len(dim) for dim in new), dtype="O")
             for ix, worker in worker_for_mapping.items():
                 s = local_shuffle_pool.shuffles[worker]
-                all_chunks[ix] = await s.get_output_partition(ix)
+                all_chunks[ix] = await s.get_output_partition(ix, f"key-{ix}")
 
         finally:
             await asyncio.gather(*[s.close() for s in shuffles])
@@ -153,38 +154,9 @@ async def test_lowlevel_rechunk(
         )
 
 
-def test_raise_on_fuse_optimization():
-    a = np.random.uniform(0, 1, 30)
-    x = da.from_array(a, chunks=((10,) * 3,))
-    new = ((6,) * 5,)
-    with pytest.raises(RuntimeError, match="fuse optimization"):
-        rechunk(x, chunks=new, method="p2p")
-
-
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
-async def test_raise_on_lost_annotation(c, s, a, b):
-    a = np.random.uniform(0, 1, 30)
-    x = da.from_array(a, chunks=((10,) * 3,))
-    new = ((6,) * 5,)
-    x2 = rechunk(x, chunks=new, method="p2p")
-
-    # Manually drop "shuffle" annotation
-    for name, layer in x2.dask.layers.items():
-        if name.startswith("rechunk-p2p"):
-            del layer.annotations["shuffle"]
-
-    with raises_with_cause(
-        RuntimeError,
-        "rechunk_transfer failed",
-        RuntimeError,
-        "lost its ``shuffle`` annotation",
-    ):
-        await c.compute(x2)
-
-
 @pytest.mark.parametrize("config_value", ["tasks", "p2p", None])
 @pytest.mark.parametrize("keyword", ["tasks", "p2p", None])
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_configuration(c, s, *ws, config_value, keyword):
     """Try rechunking a random 1d matrix
 
@@ -192,7 +164,7 @@ async def test_rechunk_configuration(c, s, *ws, config_value, keyword):
     --------
     dask.array.tests.test_rechunk.test_rechunk_1d
     """
-    a = np.random.uniform(0, 1, 30)
+    a = np.random.default_rng().uniform(0, 1, 30)
     x = da.from_array(a, chunks=((10,) * 3,))
     new = ((6,) * 5,)
     config = {"array.rechunk.method": config_value} if config_value is not None else {}
@@ -208,7 +180,7 @@ async def test_rechunk_configuration(c, s, *ws, config_value, keyword):
     assert np.all(await c.compute(x2) == a)
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_2d(c, s, *ws):
     """Try rechunking a random 2d matrix
 
@@ -216,7 +188,7 @@ async def test_rechunk_2d(c, s, *ws):
     --------
     dask.array.tests.test_rechunk.test_rechunk_2d
     """
-    a = np.random.uniform(0, 1, 300).reshape((10, 30))
+    a = np.random.default_rng().uniform(0, 1, 300).reshape((10, 30))
     x = da.from_array(a, chunks=((1, 2, 3, 4), (5,) * 6))
     new = ((5, 5), (15,) * 2)
     x2 = rechunk(x, chunks=new, method="p2p")
@@ -224,7 +196,7 @@ async def test_rechunk_2d(c, s, *ws):
     assert np.all(await c.compute(x2) == a)
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_4d(c, s, *ws):
     """Try rechunking a random 4d matrix
 
@@ -233,28 +205,55 @@ async def test_rechunk_4d(c, s, *ws):
     dask.array.tests.test_rechunk.test_rechunk_4d
     """
     old = ((5, 5),) * 4
-    a = np.random.uniform(0, 1, 10000).reshape((10,) * 4)
+    a = np.random.default_rng().uniform(0, 1, 10000).reshape((10,) * 4)
+    x = da.from_array(a, chunks=old)
+    new = (
+        (10,),
+        (10,),
+        (10,),
+        (8, 2),
+    )  # This has been altered to return >1 output partition
+    x2 = rechunk(x, chunks=new, method="p2p")
+    assert x2.chunks == new
+    await c.compute(x2)
+    assert np.all(await c.compute(x2) == a)
+
+
+@gen_cluster(client=True)
+async def test_rechunk_with_single_output_chunk_raises(c, s, *ws):
+    """See distributed#7816
+
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_4d
+    """
+    old = ((5, 5),) * 4
+    a = np.random.default_rng().uniform(0, 1, 10000).reshape((10,) * 4)
     x = da.from_array(a, chunks=old)
     new = ((10,),) * 4
     x2 = rechunk(x, chunks=new, method="p2p")
     assert x2.chunks == new
-    assert np.all(await c.compute(x2) == a)
+    # FIXME: distributed#7816
+    with raises_with_cause(
+        RuntimeError, "rechunk_transfer failed", RuntimeError, "Barrier task"
+    ):
+        await c.compute(x2)
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_expand(c, s, *ws):
     """
     See Also
     --------
     dask.array.tests.test_rechunk.test_rechunk_expand
     """
-    a = np.random.uniform(0, 1, 100).reshape((10, 10))
+    a = np.random.default_rng().uniform(0, 1, 100).reshape((10, 10))
     x = da.from_array(a, chunks=(5, 5))
     y = x.rechunk(chunks=((3, 3, 3, 1), (3, 3, 3, 1)), method="p2p")
     assert np.all(await c.compute(y) == a)
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_expand2(c, s, *ws):
     """
     See Also
@@ -262,7 +261,7 @@ async def test_rechunk_expand2(c, s, *ws):
     dask.array.tests.test_rechunk.test_rechunk_expand2
     """
     (a, b) = (3, 2)
-    orig = np.random.uniform(0, 1, a**b).reshape((a,) * b)
+    orig = np.random.default_rng().uniform(0, 1, a**b).reshape((a,) * b)
     for off, off2 in product(range(1, a - 1), range(1, a - 1)):
         old = ((a - off, off),) * b
         x = da.from_array(orig, chunks=old)
@@ -274,7 +273,7 @@ async def test_rechunk_expand2(c, s, *ws):
             assert np.all(y == orig)
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_method(c, s, *ws):
     """Test rechunking can be done as a method of dask array.
 
@@ -284,14 +283,14 @@ async def test_rechunk_method(c, s, *ws):
     """
     old = ((5, 2, 3),) * 4
     new = ((3, 3, 3, 1),) * 4
-    a = np.random.uniform(0, 1, 10000).reshape((10,) * 4)
+    a = np.random.default_rng().uniform(0, 1, 10000).reshape((10,) * 4)
     x = da.from_array(a, chunks=old)
     x2 = x.rechunk(chunks=new, method="p2p")
     assert x2.chunks == new
     assert np.all(await c.compute(x2) == a)
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_blockshape(c, s, *ws):
     """Test that blockshape can be used.
 
@@ -302,14 +301,14 @@ async def test_rechunk_blockshape(c, s, *ws):
     new_shape, new_chunks = (10, 10), (4, 3)
     new_blockdims = normalize_chunks(new_chunks, new_shape)
     old_chunks = ((4, 4, 2), (3, 3, 3, 1))
-    a = np.random.uniform(0, 1, 100).reshape((10, 10))
+    a = np.random.default_rng().uniform(0, 1, 100).reshape((10, 10))
     x = da.from_array(a, chunks=old_chunks)
     check1 = rechunk(x, chunks=new_chunks, method="p2p")
     assert check1.chunks == new_blockdims
     assert np.all(await c.compute(check1) == a)
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_dtype(c, s, *ws):
     """
     See Also
@@ -320,7 +319,7 @@ async def test_dtype(c, s, *ws):
     assert x.rechunk(chunks=(1,), method="p2p").dtype == x.dtype
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_with_dict(c, s, *ws):
     """
     See Also
@@ -344,7 +343,7 @@ async def test_rechunk_with_dict(c, s, *ws):
     assert y.chunks == ((4, 4, 4, 4, 4, 4), (24,))
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_with_empty_input(c, s, *ws):
     """
     See Also
@@ -357,7 +356,7 @@ async def test_rechunk_with_empty_input(c, s, *ws):
         x.rechunk(chunks=(), method="p2p")
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_with_null_dimensions(c, s, *ws):
     """
     See Also
@@ -375,7 +374,7 @@ async def test_rechunk_with_null_dimensions(c, s, *ws):
     )
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_with_integer(c, s, *ws):
     """
     See Also
@@ -388,7 +387,7 @@ async def test_rechunk_with_integer(c, s, *ws):
     assert (await c.compute(x) == await c.compute(y)).all()
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_0d(c, s, *ws):
     """
     See Also
@@ -405,7 +404,7 @@ async def test_rechunk_0d(c, s, *ws):
 @pytest.mark.parametrize(
     "arr", [da.array([]), da.array([[], []]), da.array([[[]], [[]]])]
 )
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_empty_array(c, s, *ws, arr):
     """
     See Also
@@ -416,7 +415,7 @@ async def test_rechunk_empty_array(c, s, *ws, arr):
     assert arr.size == 0
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_empty(c, s, *ws):
     """
     See Also
@@ -429,7 +428,7 @@ async def test_rechunk_empty(c, s, *ws):
     assert_eq(await c.compute(x), await c.compute(y))
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_zero_dim_array(c, s, *ws):
     """
     See Also
@@ -442,7 +441,7 @@ async def test_rechunk_zero_dim_array(c, s, *ws):
     assert_eq(await c.compute(x), await c.compute(y))
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_zero_dim_array_II(c, s, *ws):
     """
     See Also
@@ -455,7 +454,7 @@ async def test_rechunk_zero_dim_array_II(c, s, *ws):
     assert_eq(await c.compute(x), await c.compute(y))
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_same(c, s, *ws):
     """
     See Also
@@ -467,7 +466,57 @@ async def test_rechunk_same(c, s, *ws):
     assert x is y
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
+async def test_rechunk_same_fully_unknown(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_same_fully_unknown
+    """
+    dd = pytest.importorskip("dask.dataframe")
+    x = da.ones(shape=(10, 10), chunks=(5, 10))
+    y = dd.from_array(x).values
+    new_chunks = ((np.nan, np.nan), (10,))
+    assert y.chunks == new_chunks
+    result = y.rechunk(new_chunks, method="p2p")
+    assert y is result
+
+
+@gen_cluster(client=True)
+async def test_rechunk_same_fully_unknown_floats(c, s, *ws):
+    """Similar to test_rechunk_same_fully_unknown but testing the behavior if
+    ``float("nan")`` is used instead of the recommended ``np.nan``
+
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_same_fully_unknown_floats
+    """
+    dd = pytest.importorskip("dask.dataframe")
+    x = da.ones(shape=(10, 10), chunks=(5, 10))
+    y = dd.from_array(x).values
+    new_chunks = ((float("nan"), float("nan")), (10,))
+    result = y.rechunk(new_chunks, method="p2p")
+    assert y is result
+
+
+@gen_cluster(client=True)
+async def test_rechunk_same_partially_unknown(c, s, *ws):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_same_partially_unknown
+    """
+    dd = pytest.importorskip("dask.dataframe")
+    x = da.ones(shape=(10, 10), chunks=(5, 10))
+    y = dd.from_array(x).values
+    z = da.concatenate([x, y])
+    new_chunks = ((5, 5, np.nan, np.nan), (10,))
+    assert z.chunks == new_chunks
+    result = z.rechunk(new_chunks, method="p2p")
+    assert z is result
+
+
+@gen_cluster(client=True)
 async def test_rechunk_with_zero_placeholders(c, s, *ws):
     """
     See Also
@@ -480,7 +529,7 @@ async def test_rechunk_with_zero_placeholders(c, s, *ws):
     assert x.chunks == y.chunks
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_minus_one(c, s, *ws):
     """
     See Also
@@ -493,7 +542,7 @@ async def test_rechunk_minus_one(c, s, *ws):
     assert_eq(await c.compute(x), await c.compute(y))
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_warning(c, s, *ws):
     """
     See Also
@@ -507,7 +556,7 @@ async def test_rechunk_warning(c, s, *ws):
     assert not w
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_unknown_from_pandas(c, s, *ws):
     """
     See Also
@@ -517,7 +566,7 @@ async def test_rechunk_unknown_from_pandas(c, s, *ws):
     dd = pytest.importorskip("dask.dataframe")
     pd = pytest.importorskip("pandas")
 
-    arr = np.random.randn(50, 10)
+    arr = np.random.default_rng().standard_normal((50, 10))
     x = dd.from_pandas(pd.DataFrame(arr), 2).values
     result = x.rechunk((None, (5, 5)), method="p2p")
     assert np.isnan(x.chunks[0]).all()
@@ -529,7 +578,7 @@ async def test_rechunk_unknown_from_pandas(c, s, *ws):
     assert_eq(await c.compute(result), await c.compute(expected))
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_unknown_from_array(c, s, *ws):
     """
     See Also
@@ -551,9 +600,9 @@ async def test_rechunk_unknown_from_array(c, s, *ws):
         (da.ones(shape=(50, 10), chunks=(25, 10)), (None, 5)),
         (da.ones(shape=(50, 10), chunks=(25, 10)), {1: 5}),
         (da.ones(shape=(50, 10), chunks=(25, 10)), (None, (5, 5))),
-        (da.ones(shape=(1000, 10), chunks=(5, 10)), (None, 5)),
-        (da.ones(shape=(1000, 10), chunks=(5, 10)), {1: 5}),
-        (da.ones(shape=(1000, 10), chunks=(5, 10)), (None, (5, 5))),
+        (da.ones(shape=(100, 10), chunks=(5, 10)), (None, 5)),
+        (da.ones(shape=(100, 10), chunks=(5, 10)), {1: 5}),
+        (da.ones(shape=(100, 10), chunks=(5, 10)), (None, (5, 5))),
         (da.ones(shape=(10, 10), chunks=(10, 10)), (None, 5)),
         (da.ones(shape=(10, 10), chunks=(10, 10)), {1: 5}),
         (da.ones(shape=(10, 10), chunks=(10, 10)), (None, (5, 5))),
@@ -562,12 +611,12 @@ async def test_rechunk_unknown_from_array(c, s, *ws):
         (da.ones(shape=(10, 10), chunks=(10, 2)), (None, (5, 5))),
     ],
 )
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
-async def test_rechunk_unknown(c, s, *ws, x, chunks):
+@gen_cluster(client=True)
+async def test_rechunk_with_fully_unknown_dimension(c, s, *ws, x, chunks):
     """
     See Also
     --------
-    dask.array.tests.test_rechunk.test_rechunk_unknown
+    dask.array.tests.test_rechunk.test_rechunk_with_fully_unknown_dimension
     """
     dd = pytest.importorskip("dask.dataframe")
     y = dd.from_array(x).values
@@ -578,31 +627,79 @@ async def test_rechunk_unknown(c, s, *ws, x, chunks):
     assert_eq(await c.compute(result), await c.compute(expected))
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
-async def test_rechunk_unknown_explicit(c, s, *ws):
+@pytest.mark.parametrize(
+    "x, chunks",
+    [
+        (da.ones(shape=(50, 10), chunks=(25, 10)), (None, 5)),
+        (da.ones(shape=(50, 10), chunks=(25, 10)), {1: 5}),
+        (da.ones(shape=(50, 10), chunks=(25, 10)), (None, (5, 5))),
+        (
+            da.ones(shape=(100, 10), chunks=(5, 10)),
+            (None, 5),
+        ),
+        (
+            da.ones(shape=(100, 10), chunks=(5, 10)),
+            {1: 5},
+        ),
+        (
+            da.ones(shape=(100, 10), chunks=(5, 10)),
+            (None, (5, 5)),
+        ),
+        (da.ones(shape=(10, 10), chunks=(10, 10)), (None, 5)),
+        (da.ones(shape=(10, 10), chunks=(10, 10)), {1: 5}),
+        (da.ones(shape=(10, 10), chunks=(10, 10)), (None, (5, 5))),
+        (da.ones(shape=(10, 10), chunks=(10, 2)), (None, 5)),
+        (da.ones(shape=(10, 10), chunks=(10, 2)), {1: 5}),
+        (da.ones(shape=(10, 10), chunks=(10, 2)), (None, (5, 5))),
+    ],
+)
+@gen_cluster(client=True)
+async def test_rechunk_with_partially_unknown_dimension(c, s, *ws, x, chunks):
     """
     See Also
     --------
-    dask.array.tests.test_rechunk.test_rechunk_unknown_explicit
+    dask.array.tests.test_rechunk.test_rechunk_with_partially_unknown_dimension
+    """
+    dd = pytest.importorskip("dask.dataframe")
+    y = dd.from_array(x).values
+    z = da.concatenate([x, y])
+    xx = da.concatenate([x, x])
+    result = z.rechunk(chunks, method="p2p")
+    expected = xx.rechunk(chunks, method="p2p")
+    assert_chunks_match(result.chunks, expected.chunks)
+    assert_eq(await c.compute(result), await c.compute(expected))
+
+
+@pytest.mark.parametrize(
+    "new_chunks",
+    [
+        ((np.nan, np.nan), (5, 5)),
+        ((math.nan, math.nan), (5, 5)),
+        ((float("nan"), float("nan")), (5, 5)),
+    ],
+)
+@gen_cluster(client=True)
+async def test_rechunk_with_fully_unknown_dimension_explicit(c, s, *ws, new_chunks):
+    """
+    See Also
+    --------
+    dask.array.tests.test_rechunk.test_rechunk_with_fully_unknown_dimension_explicit
     """
     dd = pytest.importorskip("dask.dataframe")
     x = da.ones(shape=(10, 10), chunks=(5, 2))
     y = dd.from_array(x).values
-    result = y.rechunk(((float("nan"), float("nan")), (5, 5)), method="p2p")
+    result = y.rechunk(new_chunks, method="p2p")
     expected = x.rechunk((None, (5, 5)), method="p2p")
     assert_chunks_match(result.chunks, expected.chunks)
     assert_eq(await c.compute(result), await c.compute(expected))
 
 
 def assert_chunks_match(left, right):
-    for x, y in zip(left, right):
-        if np.isnan(x).any():
-            assert np.isnan(x).all()
-        else:
-            assert x == y
+    for ldim, rdim in zip(left, right):
+        assert all(np.isnan(l) or l == r for l, r in zip(ldim, rdim))
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_unknown_raises(c, s, *ws):
     """
     See Also
@@ -611,12 +708,20 @@ async def test_rechunk_unknown_raises(c, s, *ws):
     """
     dd = pytest.importorskip("dask.dataframe")
 
-    x = dd.from_array(da.ones(shape=(10, 10), chunks=(5, 5))).values
-    with pytest.raises(ValueError):
-        x.rechunk((None, (5, 5, 5)), method="p2p")
+    x = da.ones(shape=(10, 10), chunks=(5, 5))
+    y = dd.from_array(x).values
+    with pytest.raises(ValueError, match="Chunks do not add"):
+        y.rechunk((None, (5, 5, 5)), method="p2p")
+
+    with pytest.raises(ValueError, match="Chunks must be unchanging"):
+        y.rechunk(((5, 5), (5, 5)), method="p2p")
+
+    with pytest.raises(ValueError, match="Chunks must be unchanging"):
+        z = da.concatenate([x, y])
+        z.rechunk(((5, 3, 2, np.nan, np.nan), (5, 5)), method="p2p")
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_zero_dim(c, s, *ws):
     """
     See Also
@@ -629,7 +734,7 @@ async def test_rechunk_zero_dim(c, s, *ws):
     assert len(await c.compute(x)) == 0
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_empty_chunks(c, s, *ws):
     """
     See Also
@@ -642,7 +747,7 @@ async def test_rechunk_empty_chunks(c, s, *ws):
 
 
 @pytest.mark.skip(reason="FIXME: We should avoid P2P in this case")
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_avoid_needless_chunking(c, s, *ws):
     x = da.ones(16, chunks=2)
     y = x.rechunk(8, method="p2p")
@@ -660,7 +765,7 @@ async def test_rechunk_avoid_needless_chunking(c, s, *ws):
         (20, (1, 1, 1, 1, 6, 2, 1, 7), 5, (5, 5, 5, 5)),
     ],
 )
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_auto_1d(c, s, *ws, shape, chunks, bs, expected):
     """
     See Also
@@ -672,7 +777,7 @@ async def test_rechunk_auto_1d(c, s, *ws, shape, chunks, bs, expected):
     assert y.chunks == (expected,)
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_auto_2d(c, s, *ws):
     """
     See Also
@@ -700,7 +805,7 @@ async def test_rechunk_auto_2d(c, s, *ws):
     assert y.chunks[0] == (4, 4, 4, 4, 4)  # limited by largest
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_auto_3d(c, s, *ws):
     """
     See Also
@@ -717,7 +822,7 @@ async def test_rechunk_auto_3d(c, s, *ws):
 
 
 @pytest.mark.parametrize("n", [100, 1000])
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_auto_image_stack(c, s, *ws, n):
     """
     See Also
@@ -743,7 +848,7 @@ async def test_rechunk_auto_image_stack(c, s, *ws, n):
         assert z.chunks == ((1,) * n, (362, 362, 276), (362, 362, 276))
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_down(c, s, *ws):
     """
     See Also
@@ -767,7 +872,7 @@ async def test_rechunk_down(c, s, *ws):
         assert z.chunks == ((10,) * 10, (104,) * 9 + (64,), (1000,))
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_zero(c, s, *ws):
     """
     See Also
@@ -780,7 +885,7 @@ async def test_rechunk_zero(c, s, *ws):
         assert y.chunks == ((1,) * 10,)
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_bad_keys(c, s, *ws):
     """
     See Also
@@ -811,7 +916,7 @@ async def test_rechunk_bad_keys(c, s, *ws):
     assert "-100" in str(info.value)
 
 
-@gen_cluster(client=True, config={"optimization.fuse.active": False})
+@gen_cluster(client=True)
 async def test_rechunk_with_zero(c, s, *ws):
     """
     See Also
@@ -828,7 +933,7 @@ async def test_rechunk_with_zero(c, s, *ws):
     assert_eq(await c.compute(result), await c.compute(expected))
 
 
-def test_rechunk_slicing_1():
+def test_split_axes_1():
     """
     See Also
     --------
@@ -836,21 +941,20 @@ def test_rechunk_slicing_1():
     """
     old = ((10, 10, 10, 10, 10),)
     new = ((25, 5, 20),)
-    result = rechunk_slicing(old, new)
-    expected = {
-        (0,): [(ShardID((0,), (0,)), (slice(0, 10, None),))],
-        (1,): [(ShardID((0,), (1,)), (slice(0, 10, None),))],
-        (2,): [
-            (ShardID((0,), (2,)), (slice(0, 5, None),)),
-            (ShardID((1,), (0,)), (slice(5, 10, None),)),
-        ],
-        (3,): [(ShardID((2,), (0,)), (slice(0, 10, None),))],
-        (4,): [(ShardID((2,), (1,)), (slice(0, 10, None),))],
-    }
+    result = split_axes(old, new)
+    expected = [
+        [
+            [Split(0, 0, slice(0, 10, None))],
+            [Split(0, 1, slice(0, 10, None))],
+            [Split(0, 2, slice(0, 5, None)), Split(1, 0, slice(5, 10, None))],
+            [Split(2, 0, slice(0, 10, None))],
+            [Split(2, 1, slice(0, 10, None))],
+        ]
+    ]
     assert result == expected
 
 
-def test_rechunk_slicing_2():
+def test_split_axes_2():
     """
     See Also
     --------
@@ -858,104 +962,80 @@ def test_rechunk_slicing_2():
     """
     old = ((20, 20, 20, 20, 20),)
     new = ((58, 4, 20, 18),)
-    result = rechunk_slicing(old, new)
-    expected = {
-        (0,): [(ShardID((0,), (0,)), (slice(0, 20, None),))],
-        (1,): [(ShardID((0,), (1,)), (slice(0, 20, None),))],
-        (2,): [
-            (ShardID((0,), (2,)), (slice(0, 18, None),)),
-            (ShardID((1,), (0,)), (slice(18, 20, None),)),
-        ],
-        (3,): [
-            (ShardID((1,), (1,)), (slice(0, 2, None),)),
-            (ShardID((2,), (0,)), (slice(2, 20, None),)),
-        ],
-        (4,): [
-            (ShardID((2,), (1,)), (slice(0, 2, None),)),
-            (ShardID((3,), (0,)), (slice(2, 20, None),)),
-        ],
-    }
+    result = split_axes(old, new)
+    expected = [
+        [
+            [Split(0, 0, slice(0, 20, None))],
+            [Split(0, 1, slice(0, 20, None))],
+            [Split(0, 2, slice(0, 18, None)), Split(1, 0, slice(18, 20, None))],
+            [Split(1, 1, slice(0, 2, None)), Split(2, 0, slice(2, 20, None))],
+            [Split(2, 1, slice(0, 2, None)), Split(3, 0, slice(2, 20, None))],
+        ]
+    ]
     assert result == expected
 
 
-def test_rechunk_slicing_nan():
+def test_split_axes_nan():
     """
     See Also
     --------
     dask.array.tests.test_rechunk.test_intersect_nan
     """
-    old_chunks = ((float("nan"), float("nan")), (8,))
-    new_chunks = ((float("nan"), float("nan")), (4, 4))
-    result = rechunk_slicing(old_chunks, new_chunks)
-    expected = {
-        (0, 0): [
-            (
-                ShardID((0, 0), (0, 0)),
-                (slice(0, None, None), slice(0, 4, None)),
-            ),
-            (
-                ShardID((0, 1), (0, 0)),
-                (slice(0, None, None), slice(4, 8, None)),
-            ),
+    old_chunks = ((np.nan, np.nan), (8,))
+    new_chunks = ((np.nan, np.nan), (4, 4))
+    result = split_axes(old_chunks, new_chunks)
+
+    expected = [
+        [
+            [Split(0, 0, slice(0, None, None))],
+            [Split(1, 0, slice(0, None, None))],
         ],
-        (1, 0): [
-            (ShardID((1, 0), (0, 0)), (slice(0, None, None), slice(0, 4, None))),
-            (ShardID((1, 1), (0, 0)), (slice(0, None, None), slice(4, 8, None))),
-        ],
-    }
+        [[Split(0, 0, slice(0, 4, None)), Split(1, 0, slice(4, 8, None))]],
+    ]
     assert result == expected
 
 
-def test_rechunk_slicing_nan_single():
+def test_split_axes_nan_single():
     """
     See Also
     --------
     dask.array.tests.test_rechunk.test_intersect_nan_single
     """
-    old_chunks = ((float("nan"),), (10,))
-    new_chunks = ((float("nan"),), (5, 5))
+    old_chunks = ((np.nan,), (10,))
+    new_chunks = ((np.nan,), (5, 5))
 
-    result = rechunk_slicing(old_chunks, new_chunks)
-    expected = {
-        (0, 0): [
-            (ShardID((0, 0), (0, 0)), (slice(0, None, None), slice(0, 5, None))),
-            (ShardID((0, 1), (0, 0)), (slice(0, None, None), slice(5, 10, None))),
-        ],
-    }
+    result = split_axes(old_chunks, new_chunks)
+    expected = [
+        [[Split(0, 0, slice(0, None, None))]],
+        [[Split(0, 0, slice(0, 5, None)), Split(1, 0, slice(5, 10, None))]],
+    ]
     assert result == expected
 
 
-def test_rechunk_slicing_nan_long():
+def test_split_axes_nan_long():
     """
     See Also
     --------
     dask.array.tests.test_rechunk.test_intersect_nan_long
     """
-    old_chunks = (tuple([float("nan")] * 4), (10,))
-    new_chunks = (tuple([float("nan")] * 4), (5, 5))
-    result = rechunk_slicing(old_chunks, new_chunks)
-    expected = {
-        (0, 0): [
-            (ShardID((0, 0), (0, 0)), (slice(0, None, None), slice(0, 5, None))),
-            (ShardID((0, 1), (0, 0)), (slice(0, None, None), slice(5, 10, None))),
+    old_chunks = (tuple([np.nan] * 4), (10,))
+    new_chunks = (tuple([np.nan] * 4), (5, 5))
+    result = split_axes(old_chunks, new_chunks)
+    expected = [
+        [
+            [Split(0, 0, slice(0, None, None))],
+            [Split(1, 0, slice(0, None, None))],
+            [Split(2, 0, slice(0, None, None))],
+            [Split(3, 0, slice(0, None, None))],
         ],
-        (1, 0): [
-            (ShardID((1, 0), (0, 0)), (slice(0, None, None), slice(0, 5, None))),
-            (ShardID((1, 1), (0, 0)), (slice(0, None, None), slice(5, 10, None))),
+        [
+            [Split(0, 0, slice(0, 5, None)), Split(1, 0, slice(5, 10, None))],
         ],
-        (2, 0): [
-            (ShardID((2, 0), (0, 0)), (slice(0, None, None), slice(0, 5, None))),
-            (ShardID((2, 1), (0, 0)), (slice(0, None, None), slice(5, 10, None))),
-        ],
-        (3, 0): [
-            (ShardID((3, 0), (0, 0)), (slice(0, None, None), slice(0, 5, None))),
-            (ShardID((3, 1), (0, 0)), (slice(0, None, None), slice(5, 10, None))),
-        ],
-    }
+    ]
     assert result == expected
 
 
-def test_rechunk_slicing_chunks_with_nonzero():
+def test_split_axes_with_nonzero():
     """
     See Also
     --------
@@ -963,21 +1043,18 @@ def test_rechunk_slicing_chunks_with_nonzero():
     """
     old = ((4, 4), (2,))
     new = ((8,), (1, 1))
-    result = rechunk_slicing(old, new)
-    expected = {
-        (0, 0): [
-            (ShardID((0, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
-            (ShardID((0, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
+    result = split_axes(old, new)
+    expected = [
+        [
+            [Split(0, 0, slice(0, 4, None))],
+            [Split(0, 1, slice(0, 4, None))],
         ],
-        (1, 0): [
-            (ShardID((0, 0), (1, 0)), (slice(0, 4, None), slice(0, 1, None))),
-            (ShardID((0, 1), (1, 0)), (slice(0, 4, None), slice(1, 2, None))),
-        ],
-    }
+        [[Split(0, 0, slice(0, 1, None)), Split(1, 0, slice(1, 2, None))]],
+    ]
     assert result == expected
 
 
-def test_rechunk_slicing_chunks_with_zero():
+def test_split_axes_with_zero():
     """
     See Also
     --------
@@ -985,87 +1062,68 @@ def test_rechunk_slicing_chunks_with_zero():
     """
     old = ((4, 4), (2,))
     new = ((4, 0, 0, 4), (1, 1))
-    result = rechunk_slicing(old, new)
+    result = split_axes(old, new)
 
-    expected = {
-        (0, 0): [
-            (ShardID((0, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
-            (ShardID((0, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
+    expected = [
+        [
+            [Split(0, 0, slice(0, 4, None))],
+            [
+                Split(1, 0, slice(0, 0, None)),
+                Split(2, 0, slice(0, 0, None)),
+                Split(3, 0, slice(0, 4, None)),
+            ],
         ],
-        (1, 0): [
-            # FIXME: We should probably filter these out to avoid sending empty shards
-            (ShardID((1, 0), (0, 0)), (slice(0, 0, None), slice(0, 1, None))),
-            (ShardID((1, 1), (0, 0)), (slice(0, 0, None), slice(1, 2, None))),
-            (ShardID((2, 0), (0, 0)), (slice(0, 0, None), slice(0, 1, None))),
-            (ShardID((2, 1), (0, 0)), (slice(0, 0, None), slice(1, 2, None))),
-            (ShardID((3, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
-            (ShardID((3, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
-        ],
-    }
-
+        [[Split(0, 0, slice(0, 1, None)), Split(1, 0, slice(1, 2, None))]],
+    ]
     assert result == expected
 
     old = ((4, 0, 0, 4), (1, 1))
     new = ((4, 4), (2,))
-    result = rechunk_slicing(old, new)
+    result = split_axes(old, new)
 
-    expected = {
-        (0, 0): [
-            (ShardID((0, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
+    expected = [
+        [
+            [Split(0, 0, slice(0, 4, None))],
+            [],
+            [],
+            [Split(1, 0, slice(0, 4, None))],
         ],
-        (0, 1): [
-            (ShardID((0, 0), (0, 1)), (slice(0, 4, None), slice(0, 1, None))),
+        [
+            [Split(0, 0, slice(0, 1, None))],
+            [Split(0, 1, slice(0, 1, None))],
         ],
-        (3, 0): [
-            (ShardID((1, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
-        ],
-        (3, 1): [
-            (ShardID((1, 0), (0, 1)), (slice(0, 4, None), slice(0, 1, None))),
-        ],
-    }
-
+    ]
     assert result == expected
 
     old = ((4, 4), (2,))
     new = ((2, 0, 0, 2, 4), (1, 1))
-    result = rechunk_slicing(old, new)
-    expected = {
-        (0, 0): [
-            (ShardID((0, 0), (0, 0)), (slice(0, 2, None), slice(0, 1, None))),
-            (ShardID((0, 1), (0, 0)), (slice(0, 2, None), slice(1, 2, None))),
-            # FIXME: We should probably filter these out to avoid sending empty shards
-            (ShardID((1, 0), (0, 0)), (slice(2, 2, None), slice(0, 1, None))),
-            (ShardID((1, 1), (0, 0)), (slice(2, 2, None), slice(1, 2, None))),
-            (ShardID((2, 0), (0, 0)), (slice(2, 2, None), slice(0, 1, None))),
-            (ShardID((2, 1), (0, 0)), (slice(2, 2, None), slice(1, 2, None))),
-            (ShardID((3, 0), (0, 0)), (slice(2, 4, None), slice(0, 1, None))),
-            (ShardID((3, 1), (0, 0)), (slice(2, 4, None), slice(1, 2, None))),
+    result = split_axes(old, new)
+    expected = [
+        [
+            [
+                Split(0, 0, slice(0, 2, None)),
+                Split(1, 0, slice(2, 2, None)),
+                Split(2, 0, slice(2, 2, None)),
+                Split(3, 0, slice(2, 4)),
+            ],
+            [Split(4, 0, slice(0, 4, None))],
         ],
-        (1, 0): [
-            (ShardID((4, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
-            (ShardID((4, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
-        ],
-    }
-
+        [[Split(0, 0, slice(0, 1, None)), Split(1, 0, slice(1, 2, None))]],
+    ]
     assert result == expected
 
     old = ((4, 4), (2,))
     new = ((0, 0, 4, 4), (1, 1))
-    result = rechunk_slicing(old, new)
-    expected = {
-        (0, 0): [
-            # FIXME: We should probably filter these out to avoid sending empty shards
-            (ShardID((0, 0), (0, 0)), (slice(0, 0, None), slice(0, 1, None))),
-            (ShardID((0, 1), (0, 0)), (slice(0, 0, None), slice(1, 2, None))),
-            (ShardID((1, 0), (0, 0)), (slice(0, 0, None), slice(0, 1, None))),
-            (ShardID((1, 1), (0, 0)), (slice(0, 0, None), slice(1, 2, None))),
-            (ShardID((2, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
-            (ShardID((2, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
+    result = split_axes(old, new)
+    expected = [
+        [
+            [
+                Split(0, 0, slice(0, 0, None)),
+                Split(1, 0, slice(0, 0, None)),
+                Split(2, 0, slice(0, 4, None)),
+            ],
+            [Split(3, 0, slice(0, 4, None))],
         ],
-        (1, 0): [
-            (ShardID((3, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
-            (ShardID((3, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
-        ],
-    }
-
+        [[Split(0, 0, slice(0, 1, None)), Split(1, 0, slice(1, 2, None))]],
+    ]
     assert result == expected

@@ -6,6 +6,7 @@ import importlib
 import itertools
 import logging
 import os
+import random
 import sys
 import tempfile
 import threading
@@ -43,7 +44,7 @@ from distributed import (
 )
 from distributed.comm.registry import backends
 from distributed.comm.utils import OFFLOAD_THRESHOLD
-from distributed.compatibility import LINUX, WINDOWS, randbytes, to_thread
+from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import (
@@ -55,6 +56,7 @@ from distributed.diagnostics.plugin import (
 from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.scheduler import KilledWorker, Scheduler
+from distributed.utils import wait_for
 from distributed.utils_test import (
     NO_AMM,
     BlockedExecute,
@@ -217,8 +219,9 @@ async def test_upload_file(c, s, a, b):
     result = await future
     assert result == 123
 
-    await c.close()
     await s.close()
+    await c.close()
+
     assert not os.path.exists(os.path.join(a.local_directory, "foobar.py"))
 
 
@@ -598,7 +601,7 @@ async def test_io_loop_alternate_loop(s, loop):
             async with Worker(s.address, loop=loop) as w:
                 assert w.io_loop is w.loop is IOLoop.current()
 
-    await to_thread(asyncio.run, main())
+    await asyncio.to_thread(asyncio.run, main())
 
 
 @gen_cluster(client=True)
@@ -866,6 +869,39 @@ async def test_dont_overlap_communications_to_same_worker(c, s, a, b):
     assert l1["stop"] < l2["start"]
 
 
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_log_event(c, s, a):
+    def log_event(msg):
+        w = get_worker()
+        w.log_event("test-topic", msg)
+
+    await c.submit(log_event, "foo")
+
+    class C:
+        pass
+
+    with pytest.raises(TypeError, match="msgpack"):
+        await c.submit(log_event, C())
+
+    # Worker still works
+    await c.submit(log_event, "bar")
+    await c.submit(log_event, error_message(Exception()))
+
+    # assertion reversed for mock.ANY.__eq__(Serialized())
+    assert [
+        "foo",
+        "bar",
+        {
+            "status": "error",
+            "exception": mock.ANY,
+            "traceback": mock.ANY,
+            "exception_text": "Exception()",
+            "traceback_text": "",
+            "worker": a.address,
+        },
+    ] == [msg[1] for msg in s.get_events("test-topic")]
+
+
 @gen_cluster(client=True)
 async def test_log_exception_on_failed_task(c, s, a, b):
     with captured_logger("distributed.worker") as logger:
@@ -978,7 +1014,7 @@ def test_worker_dir(worker, tmp_path):
 
 @gen_cluster(client=True, nthreads=[], config={"temporary-directory": None})
 async def test_default_worker_dir(c, s):
-    expect = os.path.join(tempfile.gettempdir(), "dask-worker-space")
+    expect = os.path.join(tempfile.gettempdir(), "dask-scratch-space")
 
     async with Worker(s.address) as w:
         assert os.path.dirname(w.local_directory) == expect
@@ -1385,7 +1421,7 @@ async def test_local_directory(s, tmp_path):
     with dask.config.set(temporary_directory=str(tmp_path)):
         async with Worker(s.address) as w:
             assert w.local_directory.startswith(str(tmp_path))
-            assert "dask-worker-space" in w.local_directory
+            assert "dask-scratch-space" in w.local_directory
 
 
 @gen_cluster(nthreads=[])
@@ -1393,7 +1429,7 @@ async def test_local_directory_make_new_directory(s, tmp_path):
     async with Worker(s.address, local_directory=str(tmp_path / "foo" / "bar")) as w:
         assert w.local_directory.startswith(str(tmp_path))
         assert "foo" in w.local_directory
-        assert "dask-worker-space" in w.local_directory
+        assert "dask-scratch-space" in w.local_directory
 
 
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
@@ -1582,7 +1618,7 @@ async def test_close_async_task_handles_cancellation(c, s, a):
     with captured_logger(
         "distributed.worker.state_machine", level=logging.ERROR
     ) as logger:
-        await asyncio.wait_for(a.close(timeout=1), timeout=5)
+        await wait_for(a.close(timeout=1), timeout=5)
     assert "Failed to cancel asyncio task" in logger.getvalue()
     assert not task.cancelled()
     assert s.tasks["f1"].state in ("queued", "no-worker")
@@ -2774,7 +2810,7 @@ async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
         return res
 
     monkeypatch.setattr("distributed.worker.offload", custom_worker_offload)
-    obj = randbytes(OFFLOAD_THRESHOLD + 1)
+    obj = random.randbytes(OFFLOAD_THRESHOLD + 1)
     fut = c.submit(lambda _: 41, obj, workers=[a.address], allow_other_workers=True)
 
     await in_deserialize.wait()
@@ -3704,7 +3740,7 @@ async def test_forward_output(c, s, a, b, capsys):
 class EnsureOffloaded:
     def __init__(self, main_thread_id):
         self.main_thread_id = main_thread_id
-        self.data = randbytes(OFFLOAD_THRESHOLD + 1)
+        self.data = random.randbytes(OFFLOAD_THRESHOLD + 1)
 
     def __sizeof__(self):
         return len(self.data)

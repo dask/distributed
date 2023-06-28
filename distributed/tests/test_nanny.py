@@ -13,11 +13,6 @@ from unittest import mock
 
 import psutil
 import pytest
-
-from distributed.diagnostics.plugin import WorkerPlugin
-
-pytestmark = pytest.mark.gpu
-
 from tlz import first
 from tornado.ioloop import IOLoop
 
@@ -26,8 +21,9 @@ from dask.utils import tmpfile
 
 from distributed import Nanny, Scheduler, Worker, profile, rpc, wait, worker
 from distributed.compatibility import LINUX, WINDOWS
-from distributed.core import CommClosedError, Status
+from distributed.core import CommClosedError, Status, error_message
 from distributed.diagnostics import SchedulerPlugin
+from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.utils import TimeoutError, get_mp_context, parse_ports
@@ -39,7 +35,7 @@ from distributed.utils_test import (
     raises_with_cause,
 )
 
-pytestmark = pytest.mark.ci1
+pytestmark = [pytest.mark.ci1, pytest.mark.gpu]
 
 
 @gen_cluster(Worker=Nanny)
@@ -367,23 +363,23 @@ async def test_local_directory(s):
         with dask.config.set(temporary_directory=fn):
             async with Nanny(s.address) as n:
                 assert n.local_directory.startswith(fn)
-                assert "dask-worker-space" in n.local_directory
-                assert n.process.worker_dir.count("dask-worker-space") == 1
+                assert "dask-scratch-space" in n.local_directory
+                assert n.process.worker_dir.count("dask-scratch-space") == 1
 
 
 @pytest.mark.skipif(WINDOWS, reason="Need POSIX filesystem permissions and UIDs")
 @gen_cluster(nthreads=[])
 async def test_unwriteable_dask_worker_space(s, tmp_path):
-    os.mkdir(f"{tmp_path}/dask-worker-space", mode=0o500)
+    os.mkdir(f"{tmp_path}/dask-scratch-space", mode=0o500)
     with pytest.raises(PermissionError):
-        open(f"{tmp_path}/dask-worker-space/tryme", "w")
+        open(f"{tmp_path}/dask-scratch-space/tryme", "w")
 
     with dask.config.set(temporary_directory=tmp_path):
         async with Nanny(s.address) as n:
             assert n.local_directory == os.path.join(
-                tmp_path, f"dask-worker-space-{os.getuid()}"
+                tmp_path, f"dask-scratch-space-{os.getuid()}"
             )
-            assert n.process.worker_dir.count(f"dask-worker-space-{os.getuid()}") == 1
+            assert n.process.worker_dir.count(f"dask-scratch-space-{os.getuid()}") == 1
 
 
 def _noop(x):
@@ -706,28 +702,24 @@ async def test_malloc_trim_threshold(c, s, a):
     using mimalloc by default. If it does, a thorough benchmarking exercise is needed.
     """
     da = pytest.importorskip("dask.array")
-
-    a = da.random.random(
-        2**29 // 8,  # 0.5 GiB,
-        chunks=160 * 2**10 // 8,  # 160 kiB
-    ).persist()
-    await wait(a)
+    arr = da.random.random(2**29 // 8, chunks="512 kiB")  # 0.5 GiB
+    arr = arr.persist()
+    await wait(arr)
     # Wait for heartbeat
-    while s.memory.process < 2**29:
-        await asyncio.sleep(0.01)
-    del a
+    await async_poll_for(lambda: s.memory.process > 2**29, timeout=5)
+    del arr
 
     # This is the delicate bit, as it relies on
     # 1. PyMem_Free() to be quick to invoke glibc free() when memory becomes available
     # 2. glibc free() to be quick to invoke the kernel's sbrk() when the same happens
     #
     # At the moment of writing, the readings are:
-    # - 122 MiB after starting a new worker
-    # - 139 MiB after computing a trivial dask.array collection
-    # - 185 MiB at the end of this test, with MALLOC_TRIM_THRESHOLD_=65536
-    # - 698 MiB at the end of this test, without MALLOC_TRIM_THRESHOLD_
-    while s.memory.process > 250 * 2**20:
-        await asyncio.sleep(0.01)
+    # - 132        MiB after starting a new worker
+    # - 670~725[1] MiB after arr has been fully computed
+    # - 156~210[1] MiB at the end of this test, with MALLOC_TRIM_THRESHOLD_=65536
+    # - 620~670[1] MiB at the end of this test, without MALLOC_TRIM_THRESHOLD_
+    # [1] depends on distributed.scheduler.worker-saturation
+    await async_poll_for(lambda: s.memory.process < 300 * 2**20, timeout=5)
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -759,3 +751,33 @@ async def test_worker_inherits_temp_config(c, s):
         async with Nanny(s.address):
             out = await c.submit(lambda: dask.config.get("test123"))
             assert out == 123
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_log_event(c, s):
+    async with Nanny(s.address) as n:
+        n.log_event("test-topic1", "foo")
+
+        class C:
+            pass
+
+        with pytest.raises(TypeError, match="msgpack"):
+            n.log_event("test-topic2", C())
+        n.log_event("test-topic3", "bar")
+        n.log_event("test-topic4", error_message(Exception()))
+
+        # Worker unaffected
+        assert await c.submit(lambda x: x + 1, 1) == 2
+
+    assert [msg[1] for msg in s.get_events("test-topic1")] == ["foo"]
+    assert [msg[1] for msg in s.get_events("test-topic3")] == ["bar"]
+    # assertion reversed for mock.ANY.__eq__(Serialized())
+    assert [
+        {
+            "status": "error",
+            "exception": mock.ANY,
+            "traceback": mock.ANY,
+            "exception_text": "Exception()",
+            "traceback_text": "",
+        },
+    ] == [msg[1] for msg in s.get_events("test-topic4")]

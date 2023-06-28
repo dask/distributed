@@ -3,12 +3,12 @@ from __future__ import annotations
 import array
 import os
 import random
-import secrets
 import uuid
 from pathlib import Path
 
 import pytest
 
+import dask.config
 from dask.sizeof import sizeof
 
 from distributed import profile
@@ -20,8 +20,8 @@ from distributed.utils_test import captured_logger
 
 
 def psize(tmp_path: Path, **objs: object) -> tuple[int, int]:
-    # zict <= 2.2.0: tmp_path/key
-    # zict >= 2.3.0: tmp_path/key#0
+    # zict 2.2: tmp_path/key
+    # zict >=3.0: tmp_path/key#0
     fnames = tmp_path.glob("*")
     key_to_fname = {fname.name.split("#")[0]: fname for fname in fnames}
     return (
@@ -392,7 +392,7 @@ def test_metrics(tmp_path):
 
     a = "a" * 20_000  # <target, highly compressible
     b = "b"
-    c = secrets.token_bytes(30_000)  # <target, uncompressible
+    c = random.randbytes(30_000)  # <target, uncompressible
     d = "d" * 40_000  # >target, highly compressible
 
     with meter() as m:
@@ -442,3 +442,15 @@ def test_metrics(tmp_path):
     ]
     if not WINDOWS:  # Fiddly rounding; see distributed.metrics._WindowsTime
         assert sum(time_metrics.values()) <= m.delta
+
+
+@pytest.mark.parametrize(
+    "compression,minsize,maxsize",
+    [("zlib", 100, 500), (None, 20_000, 20_500)],
+)
+def test_compression_settings(tmp_path, compression, minsize, maxsize):
+    with dask.config.set({"distributed.worker.memory.spill-compression": compression}):
+        buf = SpillBuffer(str(tmp_path), target=1)
+        x = "x" * 20_000
+        buf["x"] = x
+        assert minsize <= psize(tmp_path, x=x)[1] <= maxsize

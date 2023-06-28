@@ -23,6 +23,9 @@ cd "$WORKSPACE"
 # Determine CUDA release version
 export CUDA_REL=${CUDA_VERSION%.*}
 
+# FIXME - monitoring GIL contention causes UCX teardown issues
+export DASK_DISTRIBUTED__ADMIN__SYSTEM_MONITOR__GIL__ENABLED=False
+
 ################################################################################
 # SETUP - Check environment
 ################################################################################
@@ -37,11 +40,11 @@ gpuci_logger "Activate conda env"
 . /opt/conda/etc/profile.d/conda.sh
 conda activate dask
 
-gpuci_logger "Install dask"
-python -m pip install git+https://github.com/dask/dask
-
 gpuci_logger "Install distributed"
 python -m pip install -e .
+
+gpuci_logger "Install dask"
+python -m pip install git+https://github.com/dask/dask
 
 gpuci_logger "Check Python versions"
 python --version

@@ -149,12 +149,36 @@ class SchedulerPlugin:
         """
 
     def add_worker(self, scheduler: Scheduler, worker: str) -> None | Awaitable[None]:
-        """Run when a new worker enters the cluster"""
+        """Run when a new worker enters the cluster
+
+        If this method is synchronous, it is immediately and synchronously executed
+        without ``Scheduler.add_worker`` ever yielding to the event loop.
+        If it is asynchronous, it will be awaited after all synchronous
+        ``SchedulerPlugin.add_worker`` hooks have executed.
+
+        .. warning::
+
+            There are no guarantees about the execution order between individual
+            ``SchedulerPlugin.add_worker`` hooks and the ordering may be subject
+            to change without deprecation cycle.
+        """
 
     def remove_worker(
         self, scheduler: Scheduler, worker: str
     ) -> None | Awaitable[None]:
-        """Run when a worker leaves the cluster"""
+        """Run when a worker leaves the cluster
+
+        If this method is synchronous, it is immediately and synchronously executed
+        without ``Scheduler.remove_worker`` ever yielding to the event loop.
+        If it is asynchronous, it will be awaited after all synchronous
+        ``SchedulerPlugin.remove_worker`` hooks have executed.
+
+        .. warning::
+
+            There are no guarantees about the execution order between individual
+            ``SchedulerPlugin.remove_worker`` hooks and the ordering may be subject
+            to change without deprecation cycle.
+        """
 
     def add_client(self, scheduler: Scheduler, client: str) -> None:
         """Run when a new client connects"""
@@ -285,6 +309,22 @@ def _get_plugin_name(plugin: SchedulerPlugin | WorkerPlugin | NannyPlugin) -> st
         return plugin.name
     else:
         return funcname(type(plugin)) + "-" + str(uuid.uuid4())
+
+
+class SchedulerUploadFile(SchedulerPlugin):
+    name = "upload_file"
+
+    def __init__(self, filepath: str, load: bool = True):
+        """
+        Initialize the plugin by reading in the data from the given file.
+        """
+        self.filename = os.path.basename(filepath)
+        self.load = load
+        with open(filepath, "rb") as f:
+            self.data = f.read()
+
+    async def start(self, scheduler: Scheduler) -> None:
+        await scheduler.upload_file(self.filename, self.data, load=self.load)
 
 
 class PackageInstall(WorkerPlugin, abc.ABC):
@@ -560,17 +600,18 @@ class UploadFile(WorkerPlugin):
 
     name = "upload_file"
 
-    def __init__(self, filepath):
+    def __init__(self, filepath: str, load: bool = True):
         """
         Initialize the plugin by reading in the data from the given file.
         """
         self.filename = os.path.basename(filepath)
+        self.load = load
         with open(filepath, "rb") as f:
             self.data = f.read()
 
     async def setup(self, worker):
         response = await worker.upload_file(
-            filename=self.filename, data=self.data, load=True
+            filename=self.filename, data=self.data, load=self.load
         )
         assert len(self.data) == response["nbytes"]
 

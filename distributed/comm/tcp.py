@@ -24,11 +24,11 @@ from dask.utils import parse_timedelta
 
 from distributed.comm.addressing import parse_host_port, unparse_host_port
 from distributed.comm.core import (
+    BaseListener,
     Comm,
     CommClosedError,
     Connector,
     FatalCommClosedError,
-    Listener,
 )
 from distributed.comm.registry import Backend
 from distributed.comm.utils import (
@@ -420,29 +420,22 @@ _NUMERIC_ONLY = socket.AI_NUMERICHOST | socket.AI_NUMERICSERV
 
 
 async def _getaddrinfo(host, port, *, family, type=socket.SOCK_STREAM):
-    # On Python3.8 we are observing problems, particularly on slow systems
-    # For additional info, see
-    # https://github.com/dask/distributed/pull/6847#issuecomment-1208179864
-    # https://github.com/dask/distributed/pull/6847
-    # https://github.com/dask/distributed/issues/6896
-    # https://github.com/dask/distributed/issues/6846
-    if sys.version_info >= (3, 9):
-        # If host and port are numeric, then getaddrinfo doesn't block and we
-        # can skip get_running_loop().getaddrinfo which is implemented by
-        # running in a ThreadPoolExecutor. So we try first with the
-        # _NUMERIC_ONLY flags set, and then only use the threadpool if that
-        # fails with EAI_NONAME:
-        try:
-            return socket.getaddrinfo(
-                host,
-                port,
-                family=family,
-                type=type,
-                flags=_NUMERIC_ONLY,
-            )
-        except socket.gaierror as e:
-            if e.errno != socket.EAI_NONAME:
-                raise
+    # If host and port are numeric, then getaddrinfo doesn't block and we
+    # can skip get_running_loop().getaddrinfo which is implemented by
+    # running in a ThreadPoolExecutor. So we try first with the
+    # _NUMERIC_ONLY flags set, and then only use the threadpool if that
+    # fails with EAI_NONAME:
+    try:
+        return socket.getaddrinfo(
+            host,
+            port,
+            family=family,
+            type=type,
+            flags=_NUMERIC_ONLY,
+        )
+    except socket.gaierror as e:
+        if e.errno != socket.EAI_NONAME:
+            raise
 
     # That failed; it's a real hostname. We better use a thread.
     return await asyncio.get_running_loop().getaddrinfo(
@@ -546,7 +539,7 @@ class TLSConnector(BaseTCPConnector):
         return tls_args
 
 
-class BaseTCPListener(Listener, RequireEncryptionMixin):
+class BaseTCPListener(BaseListener, RequireEncryptionMixin):
     def __init__(
         self,
         address,
@@ -557,6 +550,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         default_port=0,
         **connection_args,
     ):
+        super().__init__()
         self._check_encryption(address, connection_args)
         self.ip, self.port = parse_host_port(address, default_port)
         self.default_host = default_host

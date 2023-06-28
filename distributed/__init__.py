@@ -7,7 +7,15 @@ from distributed import widgets  # load distributed widgets second
 # isort: on
 
 import atexit
+import weakref
 
+# This finalizer registers an atexit handler that has to happen before
+# distributed registers its handlers, otherwise we observe hangs on
+# cluster shutdown when using the UCX comms backend. See
+# https://github.com/dask/distributed/issues/7726 for more discussion
+# of the problem and the search for long term solutions
+
+weakref.finalize(lambda: None, lambda: None)
 import dask
 from dask.config import config  # type: ignore
 

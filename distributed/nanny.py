@@ -8,16 +8,15 @@ import logging
 import multiprocessing
 import os
 import shutil
-import tempfile
 import threading
 import uuid
 import warnings
 import weakref
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from inspect import isawaitable
 from queue import Empty
 from time import sleep as sync_sleep
-from typing import TYPE_CHECKING, Callable, ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 from toolz import merge
 from tornado.ioloop import IOLoop
@@ -39,12 +38,12 @@ from distributed.core import (
     error_message,
 )
 from distributed.diagnostics.plugin import _get_plugin_name
-from distributed.diskutils import WorkSpace
 from distributed.metrics import time
 from distributed.node import ServerNode
 from distributed.process import AsyncProcess
 from distributed.proctitle import enable_proctitle_on_children
 from distributed.protocol import pickle
+from distributed.protocol.serialize import _is_dumpable
 from distributed.security import Security
 from distributed.utils import (
     get_ip,
@@ -52,7 +51,7 @@ from distributed.utils import (
     json_load_robust,
     log_errors,
     parse_ports,
-    silence_logging,
+    silence_logging_cmgr,
     wait_for,
 )
 from distributed.worker import Worker, run
@@ -164,6 +163,7 @@ class Nanny(ServerNode):
                 stacklevel=2,
             )
 
+        self.__exit_stack = stack = contextlib.ExitStack()
         self.process = None
         self._setup_logging(logger)
         self.loop = self.io_loop = IOLoop.current()
@@ -173,19 +173,6 @@ class Nanny(ServerNode):
         self.security = security or Security()
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("worker")
-
-        if local_directory is None:
-            local_directory = (
-                dask.config.get("temporary-directory") or tempfile.gettempdir()
-            )
-            self._original_local_dir = local_directory
-            local_directory = os.path.join(local_directory, "dask-worker-space")
-        else:
-            self._original_local_dir = local_directory
-
-        # Create directory if it doesn't exist and test for write access.
-        # In case of PermissionError, change the name.
-        self.local_directory = WorkSpace(local_directory).base_dir
 
         self.preload = preload
         if self.preload is None:
@@ -198,6 +185,25 @@ class Nanny(ServerNode):
             preload_nanny = dask.config.get("distributed.nanny.preload")
         if preload_nanny_argv is None:
             preload_nanny_argv = dask.config.get("distributed.nanny.preload-argv")
+
+        handlers = {
+            "instantiate": self.instantiate,
+            "kill": self.kill,
+            "restart": self.restart,
+            "get_logs": self.get_logs,
+            # cannot call it 'close' on the rpc side for naming conflict
+            "terminate": self.close,
+            "close_gracefully": self.close_gracefully,
+            "run": self.run,
+            "plugin_add": self.plugin_add,
+            "plugin_remove": self.plugin_remove,
+        }
+        super().__init__(
+            handlers=handlers,
+            connection_args=self.connection_args,
+            local_directory=local_directory,
+            needs_workdir=False,
+        )
 
         self.preloads = preloading.process_preloads(
             self, preload_nanny, preload_nanny_argv, file_dir=self.local_directory
@@ -220,7 +226,7 @@ class Nanny(ServerNode):
                 protocol = protocol_address[0]
 
         self._given_worker_port = worker_port
-        self.nthreads = nthreads or CPU_COUNT
+        self.nthreads: int = nthreads or CPU_COUNT
         self.reconnect = reconnect
         self.validate = validate
         self.resources = resources
@@ -252,26 +258,10 @@ class Nanny(ServerNode):
         self.quiet = quiet
 
         if silence_logs:
-            silence_logging(level=silence_logs)
+            stack.enter_context(silence_logging_cmgr(level=silence_logs))
         self.silence_logs = silence_logs
 
-        handlers = {
-            "instantiate": self.instantiate,
-            "kill": self.kill,
-            "restart": self.restart,
-            "get_logs": self.get_logs,
-            # cannot call it 'close' on the rpc side for naming conflict
-            "terminate": self.close,
-            "close_gracefully": self.close_gracefully,
-            "run": self.run,
-            "plugin_add": self.plugin_add,
-            "plugin_remove": self.plugin_remove,
-        }
-
         self.plugins: dict[str, NannyPlugin] = {}
-
-        super().__init__(handlers=handlers, connection_args=self.connection_args)
-
         self.scheduler = self.rpc(self.scheduler_addr)
         self.memory_manager = NannyMemoryManager(self, memory_limit=memory_limit)
 
@@ -611,6 +601,7 @@ class Nanny(ServerNode):
         await self.rpc.close()
         self.status = Status.closed
         await super().close()
+        self.__exit_stack.__exit__(None, None, None)
         return "OK"
 
     async def _log_event(self, topic, msg):
@@ -620,6 +611,24 @@ class Nanny(ServerNode):
         )
 
     def log_event(self, topic, msg):
+        """Log an event under a given topic
+
+        Parameters
+        ----------
+        topic : str, list[str]
+            Name of the topic under which to log an event. To log the same
+            event under multiple topics, pass a list of topic names.
+        msg
+            Event message to log. Note this must be msgpack serializable.
+
+        See also
+        --------
+        Client.log_event
+        """
+        if not _is_dumpable(msg):
+            raise TypeError(
+                f"Message must be msgpack serializable. Got {type(msg)=} instead."
+            )
         self._ongoing_background_tasks.call_soon(self._log_event, topic, msg)
 
 

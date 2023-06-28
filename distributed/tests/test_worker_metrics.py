@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import secrets
 import time
-from collections.abc import Hashable
+from collections.abc import Collection, Hashable
 from concurrent.futures import ProcessPoolExecutor
 from time import sleep
 
@@ -11,8 +10,8 @@ import pytest
 
 import dask
 
-from distributed import Event, Worker, wait
-from distributed.comm.utils import OFFLOAD_THRESHOLD
+import distributed
+from distributed import Event, Reschedule, Scheduler, Worker, get_worker, wait
 from distributed.compatibility import WINDOWS
 from distributed.metrics import context_meter, meter
 from distributed.utils_test import (
@@ -21,21 +20,34 @@ from distributed.utils_test import (
     async_poll_for,
     gen_cluster,
     inc,
+    slowinc,
     wait_for_state,
 )
 
 
-def get_digests(w: Worker, allow: str | None = None) -> dict[Hashable, float]:
-    # import pprint; pprint.pprint(dict(w.digests_total))
+def get_digests(
+    w: Worker | Scheduler, allow: str | Collection[str] = ()
+) -> dict[Hashable, float]:
+    if isinstance(allow, str):
+        allow = (allow,)
+    d = w.digests_total if isinstance(w, Worker) else w.cumulative_worker_metrics
     digests = {
         k: v
-        for k, v in w.digests_total.items()
+        for k, v in d.items()
         if k
         not in {"latency", "tick-duration", "transfer-bandwidth", "transfer-duration"}
-        and (allow is None or allow in k)
+        and (any(a in k for a in allow) or not allow)
     }
     assert all(v >= 0 for v in digests.values()), digests
     return digests
+
+
+def span_id(s: Scheduler) -> str | None:
+    ext = s.extensions["spans"]
+    defaults = ext.spans_search_by_name["default",]
+    # This is an arbitrary constraint enforced by the tests below
+    assert len(defaults) == 1
+    return defaults[0].id
 
 
 @gen_cluster(client=True, config={"distributed.worker.memory.target": 1e-9})
@@ -70,24 +82,25 @@ async def test_task_lifecycle(c, s, a, b):
         ("gather-dep", "other", "seconds"),
         # a.execute()
         # -> Deserialize run_spec
-        ("execute", "z", "deserialize", "seconds"),
+        ("execute", span_id(s), "z", "deserialize", "seconds"),
         # -> Unspill inputs
         # (There's also another execute-deserialize-seconds entry)
-        ("execute", "z", "disk-read", "seconds"),
-        ("execute", "z", "disk-read", "count"),
-        ("execute", "z", "disk-read", "bytes"),
-        ("execute", "z", "decompress", "seconds"),
+        ("execute", span_id(s), "z", "disk-read", "seconds"),
+        ("execute", span_id(s), "z", "disk-read", "count"),
+        ("execute", span_id(s), "z", "disk-read", "bytes"),
+        ("execute", span_id(s), "z", "decompress", "seconds"),
         # -> Run in thread
-        ("execute", "z", "thread-cpu", "seconds"),
-        ("execute", "z", "thread-noncpu", "seconds"),
+        ("execute", span_id(s), "z", "thread-cpu", "seconds"),
+        ("execute", span_id(s), "z", "thread-noncpu", "seconds"),
+        ("execute", span_id(s), "z", "executor", "seconds"),
         # Spill output; added by _transition_to_memory
-        ("execute", "z", "serialize", "seconds"),
-        ("execute", "z", "compress", "seconds"),
-        ("execute", "z", "disk-write", "seconds"),
-        ("execute", "z", "disk-write", "count"),
-        ("execute", "z", "disk-write", "bytes"),
+        ("execute", span_id(s), "z", "serialize", "seconds"),
+        ("execute", span_id(s), "z", "compress", "seconds"),
+        ("execute", span_id(s), "z", "disk-write", "seconds"),
+        ("execute", span_id(s), "z", "disk-write", "count"),
+        ("execute", span_id(s), "z", "disk-write", "bytes"),
         # Delta to end-to-end runtime as seen from the worker state machine
-        ("execute", "z", "other", "seconds"),
+        ("execute", span_id(s), "z", "other", "seconds"),
         # a.get_data() (triggered by the client retrieving the Future for z)
         # Unspill
         ("get-data", "disk-read", "seconds"),
@@ -103,8 +116,8 @@ async def test_task_lifecycle(c, s, a, b):
     assert list(get_digests(a)) == expect
 
     assert get_digests(a, allow="count") == {
-        ("execute", "z", "disk-read", "count"): 2,
-        ("execute", "z", "disk-write", "count"): 1,
+        ("execute", span_id(s), "z", "disk-read", "count"): 2,
+        ("execute", span_id(s), "z", "disk-write", "count"): 1,
         ("gather-dep", "disk-write", "count"): 1,
         ("get-data", "disk-read", "count"): 1,
     }
@@ -116,8 +129,10 @@ async def test_task_lifecycle(c, s, a, b):
 async def test_async_task(c, s, a):
     """Test that async tasks are metered"""
     await c.submit(asyncio.sleep, 0.1, key=("x-123", 0))
-    assert a.digests_total["execute", "x" "thread-cpu", "seconds"] == 0
-    assert 0 < a.digests_total["execute", "x", "thread-noncpu", "seconds"] < 1
+    assert a.digests_total["execute", span_id(s), "x" "thread-cpu", "seconds"] == 0
+    assert (
+        0 < a.digests_total["execute", span_id(s), "x", "thread-noncpu", "seconds"] < 1
+    )
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -134,31 +149,41 @@ async def test_custom_executor(c, s, a):
             await c.submit(sleep, 0.1)
 
     assert list(get_digests(a, "execute")) == [
-        ("execute", "sleep", "deserialize", "seconds"),
-        ("execute", "sleep", "executor", "seconds"),
-        ("execute", "sleep", "other", "seconds"),
+        ("execute", span_id(s), "sleep", "deserialize", "seconds"),
+        ("execute", span_id(s), "sleep", "executor", "seconds"),
+        ("execute", span_id(s), "sleep", "other", "seconds"),
     ]
 
-    assert 0 < a.digests_total["execute", "sleep", "executor", "seconds"] < 1
+    assert (
+        0 < a.digests_total["execute", span_id(s), "sleep", "executor", "seconds"] < 1
+    )
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_run_spec_deserialization(c, s, a):
     """Test that deserialization of run_spec is metered"""
     await c.submit(inc, 1, key="x")
-    assert 0 < a.digests_total["execute", "x", "deserialize", "seconds"] < 1
+    assert 0 < a.digests_total["execute", span_id(s), "x", "deserialize", "seconds"] < 1
 
 
 @gen_cluster(client=True)
-async def test_offload(c, s, a, b):
+async def test_offload(c, s, a, b, monkeypatch):
     """Test that functions wrapped by offload() are metered"""
-    nbytes = int(OFFLOAD_THRESHOLD * 1.1)
-    x = c.submit(secrets.token_bytes, nbytes, key="x", workers=[a.address])
+    monkeypatch.setattr(distributed.comm.utils, "OFFLOAD_THRESHOLD", 1)
+    monkeypatch.setattr(distributed.worker, "OFFLOAD_THRESHOLD", 1)
+
+    x = c.submit(inc, 1, key="x", workers=[a.address])
     y = c.submit(lambda x: None, x, key="y", workers=[b.address])
     await y
 
-    assert 0 < a.digests_total["get-data", "serialize", "seconds"] < 1
-    assert 0 < b.digests_total["gather-dep", "deserialize", "seconds"] < 1
+    assert list(get_digests(b, {"offload", "serialize", "deserialize"})) == [
+        ("gather-dep", "offload", "seconds"),
+        ("gather-dep", "deserialize", "seconds"),
+        ("execute", span_id(s), "y", "offload", "seconds"),
+        ("execute", span_id(s), "y", "deserialize", "seconds"),
+        ("get-data", "offload", "seconds"),
+        ("get-data", "serialize", "seconds"),
+    ]
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -167,7 +192,7 @@ async def test_execute_failed(c, s, a):
     x = c.submit(lambda: 1 / 0, key="x")
     await wait(x)
 
-    assert list(get_digests(a)) == [("execute", "x", "failed", "seconds")]
+    assert list(get_digests(a)) == [("execute", span_id(s), "x", "failed", "seconds")]
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -181,7 +206,9 @@ async def test_cancelled_execute(c, s, a):
     await ev.set()
     await async_poll_for(lambda: not a.state.tasks, timeout=5)
 
-    assert list(get_digests(a)) == [("execute", "x", "cancelled", "seconds")]
+    assert list(get_digests(a)) == [
+        ("execute", span_id(s), "x", "cancelled", "seconds")
+    ]
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -315,11 +342,7 @@ async def test_memory_monitor(c, s, a):
     x = c.submit(inc, 1, key="x")
     await async_poll_for(lambda: a.data.disk, timeout=5)
 
-    assert list(get_digests(a)) == [
-        ("execute", "x", "deserialize", "seconds"),
-        ("execute", "x", "thread-cpu", "seconds"),
-        ("execute", "x", "thread-noncpu", "seconds"),
-        ("execute", "x", "other", "seconds"),
+    assert list(get_digests(a, "memory-monitor")) == [
         ("memory-monitor", "serialize", "seconds"),
         ("memory-monitor", "compress", "seconds"),
         ("memory-monitor", "disk-write", "seconds"),
@@ -340,16 +363,18 @@ async def test_user_metrics_sync(c, s, a):
     await wait(c.submit(f, key="x"))
 
     assert list(get_digests(a)) == [
-        ("execute", "x", "deserialize", "seconds"),
-        ("execute", "x", "I/O", "seconds"),
-        ("execute", "x", "thread-cpu", "seconds"),
-        ("execute", "x", "thread-noncpu", "seconds"),
-        ("execute", "x", "other", "seconds"),
+        ("execute", span_id(s), "x", "deserialize", "seconds"),
+        ("execute", span_id(s), "x", "I/O", "seconds"),
+        ("execute", span_id(s), "x", "thread-cpu", "seconds"),
+        ("execute", span_id(s), "x", "thread-noncpu", "seconds"),
+        ("execute", span_id(s), "x", "executor", "seconds"),
+        ("execute", span_id(s), "x", "other", "seconds"),
     ]
-    assert get_digests(a)["execute", "x", "I/O", "seconds"] == 5
-    assert get_digests(a)["execute", "x", "thread-cpu", "seconds"] == 0
-    assert get_digests(a)["execute", "x", "thread-noncpu", "seconds"] == 0
-    assert get_digests(a)["execute", "x", "other", "seconds"] == 0
+    assert get_digests(a)["execute", span_id(s), "x", "I/O", "seconds"] == 5
+    assert get_digests(a)["execute", span_id(s), "x", "thread-cpu", "seconds"] == 0
+    assert get_digests(a)["execute", span_id(s), "x", "thread-noncpu", "seconds"] == 0
+    assert get_digests(a)["execute", span_id(s), "x", "executor", "seconds"] == 0
+    assert get_digests(a)["execute", span_id(s), "x", "other", "seconds"] == 0
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -361,14 +386,14 @@ async def test_user_metrics_async(c, s, a):
     await wait(c.submit(f, key="x"))
 
     assert list(get_digests(a)) == [
-        ("execute", "x", "deserialize", "seconds"),
-        ("execute", "x", "I/O", "seconds"),
-        ("execute", "x", "thread-noncpu", "seconds"),
-        ("execute", "x", "other", "seconds"),
+        ("execute", span_id(s), "x", "deserialize", "seconds"),
+        ("execute", span_id(s), "x", "I/O", "seconds"),
+        ("execute", span_id(s), "x", "thread-noncpu", "seconds"),
+        ("execute", span_id(s), "x", "other", "seconds"),
     ]
-    assert get_digests(a)["execute", "x", "I/O", "seconds"] == 5
-    assert get_digests(a)["execute", "x", "thread-noncpu", "seconds"] == 0
-    assert get_digests(a)["execute", "x", "other", "seconds"] == 0
+    assert get_digests(a)["execute", span_id(s), "x", "I/O", "seconds"] == 5
+    assert get_digests(a)["execute", span_id(s), "x", "thread-noncpu", "seconds"] == 0
+    assert get_digests(a)["execute", span_id(s), "x", "other", "seconds"] == 0
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -381,11 +406,42 @@ async def test_user_metrics_fail(c, s, a):
     await wait(c.submit(f, key="x"))
 
     assert list(get_digests(a)) == [
-        ("execute", "x", "I/O", "bytes"),
-        ("execute", "x", "failed", "seconds"),
+        ("execute", span_id(s), "x", "I/O", "bytes"),
+        ("execute", span_id(s), "x", "failed", "seconds"),
     ]
-    assert get_digests(a)["execute", "x", "I/O", "bytes"] == 100
-    assert get_digests(a)["execute", "x", "failed", "seconds"] < 1
+    assert get_digests(a)["execute", span_id(s), "x", "I/O", "bytes"] == 100
+    assert get_digests(a)["execute", span_id(s), "x", "failed", "seconds"] < 1
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_user_metrics_weird(c, s, a):
+    """label can be any msgpack-serializable Hashable
+    unit can be any string
+    """
+
+    def f():
+        context_meter.digest_metric(("foo", 1), 1, "seconds")
+        context_meter.digest_metric(None, 2, "custom")
+
+    await wait(c.submit(f, key="x"))
+    await a.heartbeat()
+
+    s_metrics = get_digests(s)
+    a_metrics = get_digests(a)
+
+    assert list(s_metrics) == [
+        ("execute", "x", "deserialize", "seconds"),
+        ("execute", "x", ("foo", 1), "seconds"),
+        ("execute", "x", None, "custom"),
+        ("execute", "x", "thread-cpu", "seconds"),
+        ("execute", "x", "thread-noncpu", "seconds"),
+        ("execute", "x", "executor", "seconds"),
+        ("execute", "x", "other", "seconds"),
+    ]
+    for (context, prefix, activity, unit), v in s_metrics.items():
+        assert a_metrics[context, span_id(s), prefix, activity, unit] == pytest.approx(
+            v
+        )
 
 
 @gen_cluster(client=True, nthreads=[("", 3)])
@@ -393,21 +449,172 @@ async def test_do_not_leak_metrics(c, s, a, b):
     def f(k):
         for _ in range(10):
             sleep(0.05)
-            context_meter.digest_metric(("ping", k), 1, "count")
+            context_meter.digest_metric(f"ping-{k}", 1, "count")
 
     async def g(k):
         for _ in range(10):
             await asyncio.sleep(0.05)
-            context_meter.digest_metric(("ping", k), 1, "count")
+            context_meter.digest_metric(f"ping-{k}", 1, "count")
 
     x = c.submit(f, "x", key="x")
     y = c.submit(f, "y", key="y")
     z = c.submit(g, "z", key="z")
-    await c.run(g, "w")
+    await c.run(g, "w")  # Metrics are discarded
     await wait([x, y, z])
 
-    assert get_digests(a, "ping") == {
-        ("execute", "x", "ping", "x", "count"): 10,
-        ("execute", "y", "ping", "y", "count"): 10,
-        ("execute", "z", "ping", "z", "count"): 10,
+    assert get_digests(a, "count") == {
+        ("execute", span_id(s), "x", "ping-x", "count"): 10,
+        ("execute", span_id(s), "y", "ping-y", "count"): 10,
+        ("execute", span_id(s), "z", "ping-z", "count"): 10,
     }
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 2,
+    config={"distributed.scheduler.work-stealing": False},
+)
+async def test_reschedule(c, s, a, b):
+    """A task raises Reschedule()
+
+    See also
+    --------
+    test_reschedule.py
+    """
+    a_address = a.address
+
+    def f(x):
+        sleep(0.1)
+        if get_worker().address == a_address:
+            raise Reschedule()
+
+    futures = c.map(f, range(4), key=["x-1", "x-2", "x-3", "x-4"])
+    futures2 = c.map(slowinc, range(10), delay=0.1, key="clog", workers=[a.address])
+    await wait(futures)
+    assert all(f.key in b.data for f in futures)
+
+    evs = get_digests(a, "x")
+    k = ("execute", span_id(s), "x", "cancelled", "seconds")
+    assert list(evs) == [k]
+    assert evs[k] > 0
+
+
+@gen_cluster(
+    client=True, scheduler_kwargs={"extensions": {}}, worker_kwargs={"extensions": {}}
+)
+async def test_send_metrics_to_scheduler(c, s, a, b):
+    """Test that Worker.digests_total are sync'ed by the heartbeat to
+    Scheduler.cumulative_worker_metrics
+
+    See also
+    --------
+    test_spans.py::test_worker_metrics
+    """
+    # Race condition: metrics that are updated while idle may or may not be there already
+    assert s.cumulative_worker_metrics.keys() in (set(), {"latency"})
+
+    x0 = c.submit(inc, 1, key=("x", 0), workers=[a.address])
+    x1 = c.submit(inc, 1, key=("x", 1), workers=[b.address])
+    # Trigger gather_dep and get_data
+    x2 = c.submit(inc, x0, key=("x", 2), workers=[b.address])
+    x3 = c.submit(inc, x1, key=("x", 3), workers=[a.address])
+    await wait([x2, x3])
+    # Flush metrics from workers to scheduler
+    await a.heartbeat()
+    await b.heartbeat()
+
+    # Make sure that cumulative sync over multiple heartbeats works as expected
+    x4 = c.submit(inc, 1, key=("x", 4))
+    await wait(x4)
+    await a.heartbeat()
+    await b.heartbeat()
+
+    # Metrics from workers have been summed up on scheduler
+    a_metrics = get_digests(a)
+    b_metrics = get_digests(b)
+    s_metrics = get_digests(s)
+
+    expect_worker = [
+        ("execute", None, "x", "deserialize", "seconds"),
+        ("execute", None, "x", "thread-cpu", "seconds"),
+        ("execute", None, "x", "thread-noncpu", "seconds"),
+        ("execute", None, "x", "executor", "seconds"),
+        ("execute", None, "x", "other", "seconds"),
+        ("get-data", "memory-read", "count"),
+        ("get-data", "memory-read", "bytes"),
+        ("get-data", "serialize", "seconds"),
+        ("get-data", "compress", "seconds"),
+        ("gather-dep", "decompress", "seconds"),
+        ("gather-dep", "deserialize", "seconds"),
+        ("gather-dep", "network", "seconds"),
+        ("gather-dep", "other", "seconds"),
+        ("get-data", "network", "seconds"),
+        ("execute", None, "x", "memory-read", "count"),
+        ("execute", None, "x", "memory-read", "bytes"),
+    ]
+    assert list(a_metrics) == list(b_metrics) == expect_worker
+    expect_scheduler = [
+        k[:1] + k[2:] if k[0] == "execute" else k for k in expect_worker
+    ]
+    assert list(s_metrics) == expect_scheduler
+
+    for wk, sk in zip(expect_worker, expect_scheduler):
+        if not WINDOWS:
+            assert a_metrics[wk] > 0
+            assert b_metrics[wk] > 0
+        assert s_metrics[sk] == pytest.approx(a_metrics[wk] + b_metrics[wk])
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    scheduler_kwargs={"extensions": {}},
+    worker_kwargs={"extensions": {}},
+)
+async def test_no_spans_extension(c, s, a):
+    await wait(c.submit(lambda: 1 / 0, key="x"))
+    await wait(c.submit(inc, 1, key="y"))
+    await a.heartbeat()
+
+    w_metrics = get_digests(a)
+    s_metrics = get_digests(s)
+    expect_worker = [
+        ("execute", None, "x", "failed", "seconds"),
+        ("execute", None, "y", "deserialize", "seconds"),
+        ("execute", None, "y", "thread-cpu", "seconds"),
+        ("execute", None, "y", "thread-noncpu", "seconds"),
+        ("execute", None, "y", "executor", "seconds"),
+        ("execute", None, "y", "other", "seconds"),
+    ]
+    expect_scheduler = [
+        k[:1] + k[2:] if k[0] == "execute" else k for k in expect_worker
+    ]
+    assert list(w_metrics) == expect_worker
+    assert list(s_metrics) == expect_scheduler
+
+    for wk, sk in zip(expect_worker, expect_scheduler):
+        if not WINDOWS:
+            assert w_metrics[wk] > 0
+        assert s_metrics[sk] == pytest.approx(w_metrics[wk])
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_new_metrics_during_heartbeat(c, s, a):
+    """Make sure that metrics generated during the heartbeat don't get lost"""
+    # Create default span
+    await c.submit(inc, 1)
+    span = s.extensions["spans"].spans_search_by_name["default",][0]
+
+    hb_task = asyncio.create_task(a.heartbeat())
+    n = 0
+    while not hb_task.done():
+        n += 1
+        a.digest_metric(("execute", span.id, "x", "test", "test"), 1)
+        await asyncio.sleep(0)
+    await hb_task
+    assert n > 10
+    await a.heartbeat()
+
+    assert a.digests_total["execute", span.id, "x", "test", "test"] == n
+    assert s.cumulative_worker_metrics["execute", "x", "test", "test"] == n
+    assert span.cumulative_worker_metrics["execute", "x", "test", "test"] == n

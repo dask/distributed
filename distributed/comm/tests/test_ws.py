@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import random
 import warnings
 
 import pytest
@@ -128,18 +129,8 @@ async def test_collections(c, s, a, b):
 
 @gen_cluster(client=True, scheduler_kwargs={"protocol": "ws://"})
 async def test_large_transfer(c, s, a, b):
-    np = pytest.importorskip("numpy")
-    await c.scatter(np.random.random(1_000_000))
-
-
-@gen_test()
-async def test_large_transfer_with_no_compression():
-    np = pytest.importorskip("numpy")
-    with dask.config.set({"distributed.comm.compression": None}):
-        async with Scheduler(protocol="ws://") as s:
-            async with Worker(s.address, protocol="ws://"):
-                async with Client(s.address, asynchronous=True) as c:
-                    await c.scatter(np.random.random(1_500_000))
+    x = await c.scatter(random.randbytes(12_000_000))
+    await c.gather(x)
 
 
 @pytest.mark.parametrize(

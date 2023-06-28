@@ -9,10 +9,10 @@ import operator
 import pickle
 import re
 import sys
+from collections.abc import Collection
 from itertools import product
 from textwrap import dedent
 from time import sleep
-from typing import Collection
 from unittest import mock
 
 import cloudpickle
@@ -30,6 +30,7 @@ from distributed import (
     CancelledError,
     Client,
     Event,
+    Future,
     Lock,
     Nanny,
     SchedulerPlugin,
@@ -50,8 +51,10 @@ from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
     BrokenComm,
+    NoSchedulerDelayWorker,
     assert_story,
     async_poll_for,
+    captured_handler,
     captured_logger,
     cluster,
     dec,
@@ -2242,11 +2245,14 @@ async def test_collect_versions(c, s, a, b):
 @gen_cluster(client=True)
 async def test_idle_timeout(c, s, a, b):
     beginning = time()
+    assert s.check_idle() is not None
+    assert s.check_idle() is not None  # Repeated calls should still not be None
     s.idle_timeout = 0.500
     pc = PeriodicCallback(s.check_idle, 10)
     future = c.submit(slowinc, 1)
     while not s.tasks:
         await asyncio.sleep(0.01)
+    assert s.check_idle() is None
     pc.start()
     await future
     assert s.idle_since is None or s.idle_since > beginning
@@ -2304,24 +2310,6 @@ async def test_idle_timeout_no_workers(c, s):
     assert not s.check_idle()
 
     assert s.check_idle()
-
-
-@gen_cluster(client=True)
-async def test_cumulative_worker_metrics(c, s, a, b):
-    # Race condition: metrics that are updated while idle may or may not be there already
-    assert s.cumulative_worker_metrics.keys() in (set(), {"latency"})
-    await c.submit(inc, 1, key="do_work")
-
-    await a.heartbeat()
-    await b.heartbeat()
-
-    metrics = s.cumulative_worker_metrics
-
-    # Subset of expected keys
-    assert "latency" in metrics
-    assert ("execute", "do_work", "deserialize", "seconds") in metrics
-
-    assert all(isinstance(value, float) for value in metrics.values())
 
 
 @gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})
@@ -2540,7 +2528,8 @@ async def test_default_task_duration_splits(c, s, a, b):
     pd = pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
 
-    # We don't care about the actual computation here but we'll schedule one anyhow to verify that we're looking for the correct key
+    # We don't care about the actual computation here but we'll schedule one anyhow to
+    # verify that we're looking for the correct key
     npart = 10
     df = dd.from_pandas(pd.DataFrame({"A": range(100), "B": 1}), npartitions=npart)
     graph = df.shuffle(
@@ -2571,22 +2560,6 @@ async def test_no_dangling_asyncio_tasks():
 
     tasks = asyncio.all_tasks()
     assert tasks == start
-
-
-class NoSchedulerDelayWorker(Worker):
-    """Custom worker class which does not update `scheduler_delay`.
-
-    This worker class is useful for some tests which make time
-    comparisons using times reported from workers.
-    """
-
-    @property
-    def scheduler_delay(self):
-        return 0
-
-    @scheduler_delay.setter
-    def scheduler_delay(self, value):
-        pass
 
 
 @gen_cluster(client=True, Worker=NoSchedulerDelayWorker, config=NO_AMM)
@@ -2636,6 +2609,125 @@ async def test_task_groups(c, s, a, b):
     assert tg.start > start
     assert tg.stop < stop
     assert "compute" in tg.all_durations
+
+
+@gen_cluster(client=True, nthreads=[("", 2)], Worker=NoSchedulerDelayWorker)
+async def test_task_groups_update_start_stop(c, s, a):
+    """TaskGroup.stop increases as the tasks in the group finish.
+    TaskGroup.start can move backwards in the following use case:
+
+    - task (x, 0) starts
+    - task (x, 1) starts
+    - task (x, 1) finishes
+    - task (x, 0) finishes
+    """
+    ev = Event()
+    t0 = time()
+    x0 = c.submit(ev.wait, key=("x", 0))
+    await wait_for_state(str(x0.key), "executing", a)
+    tg = s.task_groups["x"]
+    assert tg.start == tg.stop == 0
+    t1 = time()
+    x1 = c.submit(inc, 1, key=("x", 1))
+    await x1
+    t2 = time()
+    assert t0 < t1 < tg.start < tg.stop < t2
+
+    await ev.set()
+    await x0
+    t3 = time()
+    assert t0 < tg.start < t1 < t2 < tg.stop < t3
+
+    x2 = c.submit(inc, 1, key=("x", 2))
+    await x2
+    t4 = time()
+    assert t0 < tg.start < t1 < t2 < t3 < tg.stop < t4
+
+
+@gen_cluster(client=True)
+async def test_task_group_done(c, s, a, b):
+    """TaskGroup.done is True iff all of its tasks are in memory, erred, released, or
+    forgotten state
+    """
+    x0 = c.submit(inc, 1, key=("x", 0))  # memory
+    x1 = c.submit(lambda: 1 / 0, key=("x", 1))  # erred
+    x2 = c.submit(inc, 3, key=("x", 2))
+
+    x3 = c.submit(inc, 3, key=("x", 3))  # released
+    y = c.submit(inc, x3, key="y")
+    del x3
+
+    await wait([x0, x1, x2, y])
+    del x2  # forgotten
+    await async_poll_for(lambda: str(("x", 2)) not in s.tasks, timeout=5)
+
+    tg = s.task_groups["x"]
+    assert tg.states == {
+        "erred": 1,
+        "forgotten": 1,
+        "memory": 1,
+        "no-worker": 0,
+        "processing": 0,
+        "queued": 0,
+        "released": 1,
+        "waiting": 0,
+    }
+    assert tg.done
+
+
+@gen_cluster(client=True)
+async def test_task_group_not_done_waiting(c, s, a, b):
+    """TaskGroup.done is False if any of its tasks are in waiting state"""
+    ev = Event()
+    x = c.submit(ev.wait, key="x")
+    y0 = c.submit(lambda x: x, x, key=("y", 0))
+    y1 = c.submit(inc, 1, key=("y", 1))
+    await wait_for_state(y0.key, "waiting", s)
+    await y1
+
+    tg = s.task_groups["y"]
+    assert not tg.done
+    await ev.set()
+
+
+@gen_cluster(client=True)
+async def test_task_group_not_done_noworker(c, s, a, b):
+    """TaskGroup.done is False if any of its tasks are in no-worker state"""
+    x0 = c.submit(inc, 1, key=("x", 0), resources={"X": 1})
+    x1 = c.submit(inc, 1, key=("x", 1))
+    await wait_for_state(x0.key, "no-worker", s)
+    await x1
+
+    tg = s.task_groups["x"]
+    assert not tg.done
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[],
+    config={"distributed.scheduler.worker-saturation": 1.0},
+    timeout=3,
+)
+async def test_task_group_not_done_queued(c, s):
+    """TaskGroup.done is False if any of its tasks are in queued state"""
+    futs = c.map(inc, range(4))
+    await wait_for_state(futs[0].key, "queued", s)
+    tg = s.task_groups["inc"]
+    assert not tg.done
+
+
+@gen_cluster(client=True)
+async def test_task_group_not_done_processing(c, s, a, b):
+    """TaskGroup.done is False if any of its tasks are in processing state"""
+    ev = Event()
+    x0 = c.submit(ev.wait, key=("x", 0))
+    x1 = c.submit(inc, 1, key=("x", 1))
+    await wait_for_state(x0.key, "processing", s)
+    await x1
+
+    tg = s.task_groups["x"]
+    assert not tg.done
+    await ev.set()
 
 
 @gen_cluster(client=True)
@@ -2725,17 +2817,20 @@ class FlakyConnectionPool(ConnectionPool):
 
 
 @gen_cluster(client=True)
-async def test_gather_failing_cnn_recover(c, s, a, b, caplog):
+async def test_gather_failing_cnn_recover(c, s, a, b):
     x = await c.scatter({"x": 1}, workers=a.address)
     rpc = await FlakyConnectionPool(failing_connections=1)
     with mock.patch.object(s, "rpc", rpc), dask.config.set(
         {"distributed.comm.retry.count": 1}
-    ), caplog.at_level(logging.INFO):
-        caplog.clear()
+    ), captured_handler(
+        logging.getLogger("distributed").handlers[0]
+    ) as distributed_log:
         res = await s.gather(keys=["x"])
-    assert [
-        record.message for record in caplog.records if record.levelno == logging.INFO
-    ] == ["Retrying get_data_from_worker after exception in attempt 0/1: "]
+    assert re.match(
+        r"\A\d+-\d+-\d+ \d+:\d+:\d+,\d+ - distributed.utils_comm - INFO - "
+        r"Retrying get_data_from_worker after exception in attempt 0/1: \n\Z",
+        distributed_log.getvalue(),
+    )
     assert res["status"] == "OK"
 
 
@@ -2829,28 +2924,44 @@ async def test_too_many_groups(c, s, a, b):
 
 
 @gen_test()
-async def test_multiple_listeners():
-    with captured_logger("distributed.scheduler") as log:
-        async with Scheduler(dashboard_address=":0", protocol=["inproc", "tcp"]) as s:
-            async with Worker(s.listeners[0].contact_address) as a:
-                async with Worker(s.listeners[1].contact_address) as b:
-                    assert a.address.startswith("inproc")
-                    assert a.scheduler.address.startswith("inproc")
-                    assert b.address.startswith("tcp")
-                    assert b.scheduler.address.startswith("tcp")
+@pytest.mark.parametrize(
+    "dashboard_link_template,expected_dashboard_link",
+    (
+        ("{scheme}://{host}:{port}/status", r"dashboard at:\s*http://"),
+        ("{ENV_VAR_MISSING}", r"dashboard at:\s*:\d*"),
+    ),
+)
+async def test_multiple_listeners(dashboard_link_template, expected_dashboard_link):
+    with dask.config.set({"distributed.dashboard.link": dashboard_link_template}):
+        with captured_logger("distributed.scheduler") as log:
+            async with Scheduler(
+                dashboard_address=":0", protocol=["inproc", "tcp"]
+            ) as s:
+                async with Worker(s.listeners[0].contact_address) as a:
+                    async with Worker(s.listeners[1].contact_address) as b:
+                        assert a.address.startswith("inproc")
+                        assert a.scheduler.address.startswith("inproc")
+                        assert b.address.startswith("tcp")
+                        assert b.scheduler.address.startswith("tcp")
 
-                    async with Client(s.address, asynchronous=True) as c:
-                        futures = c.map(inc, range(20))
-                        await wait(futures)
+                        async with Client(s.address, asynchronous=True) as c:
+                            futures = c.map(inc, range(20))
+                            await wait(futures)
 
-                        # Force inter-worker communication both ways
-                        await c.submit(sum, futures, workers=[a.address])
-                        await c.submit(len, futures, workers=[b.address])
+                            # Force inter-worker communication both ways
+                            await c.submit(sum, futures, workers=[a.address])
+                            await c.submit(len, futures, workers=[b.address])
 
     log = log.getvalue()
     assert re.search(r"Scheduler at:\s*tcp://", log)
     assert re.search(r"Scheduler at:\s*inproc://", log)
-    assert re.search(r"dashboard at:\s*http://", log)
+
+    # Dashboard link formatting can fail if template contains env vars which aren't
+    # present. Don't kill scheduler, but revert to outputting the port and helpful msg
+    assert re.search(expected_dashboard_link, log)
+    if "ENV_VAR_MISSING" in dashboard_link_template:
+        msg = r"Failed to format dashboard link, unknown value: 'ENV_VAR_MISSING'"
+        assert re.search(msg, log)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)])
@@ -3071,6 +3182,7 @@ async def assert_memory(
     config={
         "distributed.worker.memory.recent-to-old-time": "4s",
         "distributed.worker.memory.spill": 0.7,
+        "distributed.worker.memory.spill-compression": "zlib",
     },
     worker_kwargs={
         "heartbeat_interval": "20ms",
@@ -3144,27 +3256,14 @@ async def test_memory(c, s, *nannies):
         ]
     )
 
-    # dask serialization compresses ("x" * 50 * 2**20) from 50 MiB to ~200 kiB.
+    # dask serialization compresses ("x" * 50 * 2**20) from 50 MiB to ~50 kiB.
     # Test that spilled reports the actual size on disk and not the output of
     # sizeof().
-    # FIXME https://github.com/dask/distributed/issues/5807
-    #       This would be more robust if we could just enable zlib compression in
-    #       @gen_cluster
-    from distributed.protocol.compression import default_compression
-
-    if default_compression:
-        await asyncio.gather(
-            assert_memory(a, "spilled", 0.1, 0.5, timeout=3),
-            assert_memory(b, "spilled", 0.1, 0.5, timeout=3),
-            assert_memory(s, "spilled", 0.2, 1.0, timeout=3.1),
-        )
-    else:
-        # Long timeout to allow spilling 100 MiB to disk
-        await asyncio.gather(
-            assert_memory(a, "spilled", 50, 51, timeout=10),
-            assert_memory(b, "spilled", 50, 51, timeout=10),
-            assert_memory(s, "spilled", 100, 102, timeout=10.1),
-        )
+    await asyncio.gather(
+        assert_memory(a, "spilled", 0.04, 0.08, timeout=3),
+        assert_memory(b, "spilled", 0.04, 0.08, timeout=3),
+        assert_memory(s, "spilled", 0.08, 0.16, timeout=3.1),
+    )
 
     # FIXME on Windows and MacOS we occasionally observe managed = 49 bytes
     await asyncio.gather(
@@ -3735,40 +3834,6 @@ async def test_delete_worker_data_bad_task(c, s, a, bad_first):
     assert a.data == {y.key: "y"}
     assert s.tasks.keys() == {y.key}
     assert s.workers[a.address].nbytes == s.tasks[y.key].nbytes
-
-
-@gen_cluster(client=True)
-async def test_computations(c, s, a, b):
-    da = pytest.importorskip("dask.array")
-
-    x = da.ones(100, chunks=(10,))
-    y = (x + 1).persist()
-    await y
-
-    z = (x - 2).persist()
-    await z
-
-    assert len(s.computations) == 2
-    assert "add" in str(s.computations[0].groups)
-    assert "sub" in str(s.computations[1].groups)
-    assert "sub" not in str(s.computations[0].groups)
-
-    assert isinstance(repr(s.computations[1]), str)
-
-    assert s.computations[1].stop == max(tg.stop for tg in s.task_groups.values())
-
-    assert s.computations[0].states["memory"] == y.npartitions
-
-
-@gen_cluster(client=True)
-async def test_computations_futures(c, s, a, b):
-    futures = [c.submit(inc, i) for i in range(10)]
-    total = c.submit(sum, futures)
-    await total
-
-    [computation] = s.computations
-    assert "sum" in str(computation.groups)
-    assert "inc" in str(computation.groups)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -4348,10 +4413,6 @@ async def test_submit_dependency_of_erred_task(c, s, a, b):
         await y
 
 
-@pytest.mark.skipif(
-    condition=sys.version_info < (3, 9),
-    reason="flaky on python 3.8",
-)  # seems related to https://github.com/python/cpython/issues/86296
 @gen_cluster(client=True)
 async def test_tell_workers_when_peers_have_left(c, s, a, b):
     f = (await c.scatter({"f": 1}, workers=[a.address, b.address], broadcast=True))["f"]
@@ -4375,3 +4436,42 @@ async def test_tell_workers_when_peers_have_left(c, s, a, b):
         g = await c.submit(inc, f, key="g", workers=[w3.address])
         # fails over to the second worker in less than the connect timeout
         assert time() < start + connect_timeout
+
+
+@gen_cluster(client=True)
+async def test_client_desires_keys_creates_ts(c, s, a, b):
+    """A TaskState object is created by client_desires_keys, and
+    is only later submitted with submit/compute by a different client
+
+    See also
+    --------
+    test_scheduler.py::test_scatter_creates_ts
+    test_spans.py::test_client_desires_keys_creates_ts
+    """
+    x = Future(key="x")
+    await wait_for_state("x", "released", s)
+    assert s.tasks["x"].run_spec is None
+    async with Client(s.address, asynchronous=True) as c2:
+        c2.submit(inc, 1, key="x")
+        assert await x == 2
+    assert s.tasks["x"].run_spec is not None
+
+
+@gen_cluster(client=True)
+async def test_scatter_creates_ts(c, s, a, b):
+    """A TaskState object is created by scatter, and only later becomes runnable
+
+    See also
+    --------
+    test_scheduler.py::test_client_desires_keys_creates_ts
+    test_spans.py::test_scatter_creates_ts
+    """
+    x1 = (await c.scatter({"x": 1}, workers=[a.address]))["x"]
+    await wait_for_state("x", "memory", s)
+    assert s.tasks["x"].run_spec is None
+    async with Client(s.address, asynchronous=True) as c2:
+        x2 = c2.submit(inc, 1, key="x")
+        assert await x2 == 1
+        await a.close()
+        assert await x2 == 2
+    assert s.tasks["x"].run_spec is not None

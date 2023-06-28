@@ -659,13 +659,14 @@ def sizeof_serialized(obj):
     return sizeof(obj.header) + sizeof(obj.frames)
 
 
-def serialize_bytelist(x, **kwargs):
+def serialize_bytelist(
+    x: object, compression: str | None | Literal[False] = "auto", **kwargs: Any
+) -> list[bytes | bytearray | memoryview]:
     header, frames = serialize_and_split(x, **kwargs)
     if frames:
-        compression, frames = zip(*map(maybe_compress, frames))
-    else:
-        compression = []
-    header["compression"] = compression
+        header["compression"], frames = zip(
+            *(maybe_compress(frame, compression=compression) for frame in frames)
+        )
     header["count"] = len(frames)
 
     header = msgpack.dumps(header, use_bin_type=True)
@@ -845,6 +846,27 @@ def _is_msgpack_serializable(v):
         and all(type(x) is str for x in v.keys())
         or isinstance(v, (list, tuple))
         and all(map(_is_msgpack_serializable, v))
+    )
+
+
+def _is_dumpable(v):
+    typ = type(v)
+    return (
+        v is None
+        or typ is str
+        or typ is bool
+        or typ is bytes
+        or typ is int
+        or typ is float
+        or typ is Pickled
+        or typ is Serialize
+        or typ is Serialized
+        or typ is ToPickle
+        or isinstance(v, dict)
+        and all(map(_is_dumpable, v.values()))
+        and all(type(x) is str for x in v.keys())
+        or isinstance(v, (list, tuple))
+        and all(map(_is_dumpable, v))
     )
 
 

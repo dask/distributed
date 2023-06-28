@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import contextlib
 import copy
 import logging
 import math
@@ -23,7 +24,12 @@ from distributed.deploy.adaptive import Adaptive
 from distributed.deploy.cluster import Cluster
 from distributed.scheduler import Scheduler
 from distributed.security import Security
-from distributed.utils import NoOpAwaitable, TimeoutError, import_term, silence_logging
+from distributed.utils import (
+    NoOpAwaitable,
+    TimeoutError,
+    import_term,
+    silence_logging_cmgr,
+)
 
 if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.11)
@@ -245,6 +251,7 @@ class SpecCluster(Cluster):
         if loop is None and asynchronous:
             loop = IOLoop.current()
 
+        self.__exit_stack = stack = contextlib.ExitStack()
         self._created = weakref.WeakSet()
 
         self.scheduler_spec = copy.copy(scheduler)
@@ -257,10 +264,8 @@ class SpecCluster(Cluster):
         self._futures = set()
 
         if silence_logs:
-            self._old_logging_level = silence_logging(level=silence_logs)
-            self._old_bokeh_logging_level = silence_logging(
-                level=silence_logs, root="bokeh"
-            )
+            stack.enter_context(silence_logging_cmgr(level=silence_logs))
+            stack.enter_context(silence_logging_cmgr(level=silence_logs, root="bokeh"))
 
         self._instances.add(self)
         self._correct_state_waiting = None
@@ -274,21 +279,21 @@ class SpecCluster(Cluster):
             scheduler_sync_interval=scheduler_sync_interval,
         )
 
-        try:
-            called_from_running_loop = (
-                getattr(loop, "asyncio_loop", None) is asyncio.get_running_loop()
-            )
-        except RuntimeError:
-            called_from_running_loop = asynchronous
-
-        if not called_from_running_loop:
+        if not self.called_from_running_loop:
             self._loop_runner.start()
             self.sync(self._start)
             try:
                 self.sync(self._correct_state)
             except Exception:
                 self.sync(self.close)
+                self._loop_runner.stop()
                 raise
+
+    def close(self, timeout: float | None = None) -> Awaitable[None] | None:
+        aw = super().close(timeout)
+        if not self.asynchronous:
+            self._loop_runner.stop()
+        return aw
 
     async def _start(self):
         while self.status == Status.starting:
@@ -458,11 +463,7 @@ class SpecCluster(Cluster):
                     Status.failed,
                 }, w.status
 
-        if hasattr(self, "_old_logging_level"):
-            silence_logging(self._old_logging_level)
-        if hasattr(self, "_old_bokeh_logging_level"):
-            silence_logging(self._old_bokeh_logging_level, root="bokeh")
-
+        self.__exit_stack.__exit__(None, None, None)
         await super()._close()
 
     async def __aenter__(self):
@@ -470,10 +471,6 @@ class SpecCluster(Cluster):
         await self._correct_state()
         assert self.status == Status.running
         return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        super().__exit__(exc_type, exc_value, traceback)
-        self._loop_runner.stop()
 
     def _threads_per_worker(self) -> int:
         """Return the number of threads per worker for new workers"""

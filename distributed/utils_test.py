@@ -6,7 +6,6 @@ import contextlib
 import copy
 import errno
 import functools
-import gc
 import inspect
 import io
 import logging
@@ -24,11 +23,11 @@ import threading
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Generator, Iterator, Mapping
 from contextlib import contextmanager, nullcontext, suppress
 from itertools import count
 from time import sleep
-from typing import IO, Any, Generator, Iterator, Literal
+from typing import IO, Any, Literal
 
 import pytest
 import yaml
@@ -64,6 +63,7 @@ from distributed.protocol import deserialize
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.security import Security
 from distributed.utils import (
+    Deadline,
     DequeHandler,
     _offload_executor,
     get_ip,
@@ -111,6 +111,7 @@ logging_levels = {
 
 _TEST_TIMEOUT = 30
 _offload_executor.submit(lambda: None).result()  # create thread during import
+
 
 # Dask configuration to completely disable the Active Memory Manager.
 # This is typically used with @gen_cluster(config=NO_AMM)
@@ -915,7 +916,6 @@ def gen_cluster(
     )
     if is_debugging():
         timeout = 3600
-
     scheduler_kwargs = merge(
         dict(
             dashboard=False,
@@ -927,7 +927,6 @@ def gen_cluster(
     worker_kwargs = merge(
         dict(
             memory_limit=system.MEMORY_LIMIT,
-            death_timeout=15,
             transition_counter_max=50_000,
         ),
         worker_kwargs,
@@ -941,6 +940,8 @@ def gen_cluster(
         @config_for_cluster_tests(**{"distributed.comm.timeouts.connect": "5s"})
         @clean(**clean_kwargs)
         def test_func(*outer_args, **kwargs):
+            deadline = Deadline.after(timeout)
+
             @contextlib.asynccontextmanager
             async def _client_factory(s):
                 if client:
@@ -967,7 +968,10 @@ def gen_cluster(
                                 security=security,
                                 Worker=Worker,
                                 scheduler_kwargs=scheduler_kwargs,
-                                worker_kwargs=worker_kwargs,
+                                worker_kwargs=merge(
+                                    {"death_timeout": min(15, int(deadline.remaining))},
+                                    worker_kwargs,
+                                ),
                             )
                         except Exception as e:
                             logger.error(
@@ -999,12 +1003,15 @@ def gen_cluster(
                         try:
                             coro = func(*args, *outer_args, **kwargs)
                             task = asyncio.create_task(coro)
-                            coro2 = utils_wait_for(asyncio.shield(task), timeout)
+                            coro2 = utils_wait_for(
+                                asyncio.shield(task), timeout=deadline.remaining
+                            )
                             result = await coro2
                             validate_state(s, *workers)
 
                         except asyncio.TimeoutError:
                             assert task
+                            elapsed = deadline.elapsed
                             buffer = io.StringIO()
                             # This stack indicates where the coro/test is suspended
                             task.print_stack(file=buffer)
@@ -1030,7 +1037,7 @@ def gen_cluster(
                             # uninteresting boilerplate from utils_test and asyncio
                             # and not from the code being tested.
                             raise asyncio.TimeoutError(
-                                f"Test timeout after {timeout}s.\n"
+                                f"Test timeout ({timeout}) hit after {elapsed}s.\n"
                                 "========== Test stack trace starts here ==========\n"
                                 f"{buffer.getvalue()}"
                             ) from None
@@ -1057,23 +1064,18 @@ def gen_cluster(
                     else:
                         await c._close(fast=True)
 
-                    def get_unclosed():
-                        return [c for c in Comm._instances if not c.closed()] + [
+                    try:
+                        unclosed = [c for c in Comm._instances if not c.closed()] + [
                             c for c in _global_clients.values() if c.status != "closed"
                         ]
-
-                    try:
-                        start = time()
-                        while time() < start + 60:
-                            gc.collect()
-                            if not get_unclosed():
-                                break
-                            await asyncio.sleep(0.05)
-                        else:
-                            if allow_unclosed:
-                                print(f"Unclosed Comms: {get_unclosed()}")
-                            else:
-                                raise RuntimeError("Unclosed Comms", get_unclosed())
+                        try:
+                            if unclosed:
+                                if allow_unclosed:
+                                    print(f"Unclosed Comms: {unclosed}")
+                                else:
+                                    raise RuntimeError("Unclosed Comms", unclosed)
+                        finally:
+                            del unclosed
                     finally:
                         Comm._instances.clear()
                         _global_clients.clear()
@@ -2570,3 +2572,24 @@ class SizeOf:
 def gen_nbytes(nbytes: int) -> SizeOf:
     """A function that emulates exactly nbytes on the worker data structure."""
     return SizeOf(nbytes)
+
+
+def relative_frame_linenumber(frame):
+    """Line number of call relative to the frame"""
+    return inspect.getframeinfo(frame).lineno - frame.f_code.co_firstlineno
+
+
+class NoSchedulerDelayWorker(Worker):
+    """Custom worker class which does not update `scheduler_delay`.
+
+    This worker class is useful for some tests which make time
+    comparisons using times reported from workers.
+    """
+
+    @property
+    def scheduler_delay(self):
+        return 0
+
+    @scheduler_delay.setter
+    def scheduler_delay(self, value):
+        pass
