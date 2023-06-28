@@ -553,6 +553,7 @@ class Worker(BaseWorker, ServerNode):
                 stacklevel=2,
             )
         self.__exit_stack = stack = contextlib.ExitStack()
+        self.loop = self.io_loop = IOLoop.current()
         self.nanny = nanny
         self._lock = threading.Lock()
 
@@ -629,7 +630,6 @@ class Worker(BaseWorker, ServerNode):
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("worker")
 
-        self.loop = self.io_loop = IOLoop.current()
         if scheduler_sni:
             self.connection_args["server_hostname"] = scheduler_sni
 
@@ -985,10 +985,15 @@ class Worker(BaseWorker, ServerNode):
             "topic": topic,
             "msg": msg,
         }
-        if self.thread_id == threading.get_ident():
-            self.batched_send(full_msg)
+        try:
+            asyncio_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            pass
         else:
-            self.loop.add_callback(self.batched_send, full_msg)
+            if asyncio_loop is self.loop.asyncio_loop:  # type: ignore[attr-defined]
+                self.batched_send(full_msg)
+                return
+        self.loop.add_callback(self.batched_send, full_msg)
 
     @property
     def worker_address(self):
