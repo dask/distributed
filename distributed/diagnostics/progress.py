@@ -146,7 +146,7 @@ class MultiProgress(Progress):
 
     Alternatively, a ``scheduler_func`` can be provided. This should be the
     name of a method on the scheduler that accepts task ``key`` as an argument,
-    and returns a string.
+    and returns either a string, or a tuple of (group_name, group_id)
 
     State
     -----
@@ -187,7 +187,7 @@ class MultiProgress(Progress):
     def get_group(self, key: str) -> str:
         """Get group name by task key."""
         if self.scheduler_func:
-            return getattr(self.scheduler, self.scheduler_func)(key) or "unassigned"
+            return getattr(self.scheduler, self.scheduler_func)(key)
         return self.func(key)
 
     async def setup(self):

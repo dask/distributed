@@ -319,7 +319,6 @@ class MultiProgressBar:
             response = await self.comm.read(
                 deserializers=self.client()._deserializers if self.client else None
             )
-            print(f"\n{response = }")
             self._last_response = response
             self.status = response["status"]
             self._draw_bar(**response)

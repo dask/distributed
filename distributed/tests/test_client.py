@@ -1220,6 +1220,18 @@ async def test_get_task_prefix_states(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_get_task_span_name(c, s, a, b):
+    f = c.submit(inc, 1)
+    _ = await f
+    span_name, span_id = s.get_task_span_name(f.key)
+    assert span_name == "default"
+
+    with mock.patch.dict(s.extensions, values={}, clear=True):
+        span_name, span_id = s.get_task_span_name(f.key)
+        assert span_name == span_id != "default"
+
+
+@gen_cluster(client=True)
 async def test_get_nbytes(c, s, a, b):
     [x] = await c.scatter([1])
     assert s.get_nbytes(summary=False) == {x.key: sizeof(1)}

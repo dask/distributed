@@ -210,6 +210,7 @@ async def test_multibar_complete(c, s, a, b):
     y2 = c.submit(dec, y1, key="y-2")
     e = c.submit(throws, y2, key="e")
     other = c.submit(inc, 123, key="other")
+    await other.cancel()
 
     p = MultiProgressWidget([e.key], scheduler=s.address, complete=True)
     await p.listen()
@@ -239,23 +240,23 @@ def test_multibar_use_spans(client):
         L2 = client.map(dec, L)
     with span("span 3"):
         L3 = client.map(add, L, L2)
+    with span("other span"):
+        _ = client.submit(inc, 123)
+    e = client.submit(throws, L3)
 
-    p = progress(L3, multi=True, complete=True, notebook=True, use_spans=True)
+    p = progress(e, complete=True, multi=True, notebook=True, use_spans=True)
     client.sync(p.listen)
 
     # keys are tuples of (group_name, group_id), just get names
-    bar_items = {k[0]: v for k, v in p.bars.items()}
-    bar_texts = {k[0]: v for k, v in p.bar_texts.items()}
-    bar_labels = {k[0]: v for k, v in p.bar_labels.items()}
+    bar_items = {k[0]: v.value for k, v in p.bars.items()}
+    bar_texts = {k[0]: v.value for k, v in p.bar_texts.items()}
+    bar_labels = {k[0]: v.value for k, v in p.bar_labels.items()}
 
-    assert bar_items.keys() == {"span 1", "span 2", "span 3"}
-    assert all(v.value == 1 for v in bar_items.values())
-
-    assert bar_texts.keys() == {"span 1", "span 2", "span 3"}
-    assert all("100 / 100" in v.value for v in bar_texts.values())
-
-    assert bar_labels.keys() == {"span 1", "span 2", "span 3"}
-    assert all(">span " in v.value for v in bar_labels.values())
+    assert bar_items == {"span 1": 1, "span 2": 1, "span 3": 1, "default": 0}
+    assert bar_texts.keys() == {"span 1", "span 2", "span 3", "default"}
+    assert all("100 / 100" in v for k, v in bar_texts.items() if k != "default")
+    assert bar_labels.keys() == {"span 1", "span 2", "span 3", "default"}
+    assert all(f">{k}<" in v for k, v in bar_labels.items())
 
 
 @mock_widget()
