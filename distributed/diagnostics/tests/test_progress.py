@@ -73,6 +73,17 @@ async def test_multiprogress(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_multiprogress_scheduler_func(c, s, a, b):
+    x = c.submit(f, 1)
+    p = MultiProgress(
+        [x], scheduler=s, complete=True, scheduler_func="get_task_span_name"
+    )
+    await p.setup()
+    group_names = {k[0] for k in p.all_keys}
+    assert group_names == {"default"}
+
+
+@gen_cluster(client=True)
 async def test_robust_to_bad_plugin(c, s, a, b):
     class Bad(SchedulerPlugin):
         def transition(self, key, start, finish, **kwargs):
