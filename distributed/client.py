@@ -1844,7 +1844,7 @@ class Client(SyncMethodMixin):
         allow_other_workers=False,
         actor=False,
         actors=False,
-        pure=None,
+        pure=True,
         **kwargs,
     ):
         """Submit a function application to the scheduler
@@ -1885,7 +1885,9 @@ class Client(SyncMethodMixin):
             Alias for `actor`
         pure : bool (defaults to True)
             Whether or not the function is pure.  Set ``pure=False`` for
-            impure functions like ``np.random.random``.
+            impure functions like ``np.random.random``. Note that if both
+            ``actor`` and ``pure`` kwargs are set to True, then the value
+            of ``pure`` will be reverted to False, since an actor is stateful.
             See :ref:`pure functions` for more details.
         **kwargs
 
@@ -1924,7 +1926,7 @@ class Client(SyncMethodMixin):
             raise TypeError("First input to submit must be a callable function")
 
         actor = actor or actors
-        if pure is None:
+        if actor:
             pure = not actor
 
         if allow_other_workers not in (True, False, None):
@@ -1983,7 +1985,7 @@ class Client(SyncMethodMixin):
         fifo_timeout="100 ms",
         actor=False,
         actors=False,
-        pure=None,
+        pure=True,
         batch_size=None,
         **kwargs,
     ):
@@ -2027,7 +2029,9 @@ class Client(SyncMethodMixin):
             Alias for `actor`
         pure : bool (defaults to True)
             Whether or not the function is pure.  Set ``pure=False`` for
-            impure functions like ``np.random.random``.
+            impure functions like ``np.random.random``. Note that if both
+            ``actor`` and ``pure`` kwargs are set to True, then the value
+            of ``pure`` will be reverted to False, since an actor is stateful.
             See :ref:`pure functions` for more details.
         batch_size : int, optional (default: just one batch whose size is the entire iterable)
             Submit tasks to the scheduler in batches of (at most)
@@ -2105,7 +2109,7 @@ class Client(SyncMethodMixin):
 
         key = key or funcname(func)
         actor = actor or actors
-        if pure is None:
+        if actor:
             pure = not actor
 
         if allow_other_workers and workers is None:
@@ -3113,7 +3117,7 @@ class Client(SyncMethodMixin):
                 annotations["resources"] = resources
 
             # Merge global and local annotations
-            annotations = merge(dask.config.get("annotations", {}), annotations)
+            annotations = merge(dask.get_annotations(), annotations)
 
             # Pack the high level graph before sending it to the scheduler
             keyset = set(keys)

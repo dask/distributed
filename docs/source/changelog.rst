@@ -1,6 +1,53 @@
 Changelog
 =========
 
+.. _v2023.6.1:
+
+2023.6.1
+--------
+
+Released on June 26, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Add idle time to fine performance metrics (:pr:`7938`) `crusaderky`_
+- Spans: capture code snippets (:pr:`7930`) `crusaderky`_
+- Improve memory footprint of P2P rechunking (:pr:`7897`) `Hendrik Makait`_
+- Improve error message on invalid state in ``_handle_remove_replicas`` (:pr:`7920`) `Hendrik Makait`_
+- Make ``ShuffleSchedulerExtension.remove_worker`` more robust (:pr:`7921`) `Hendrik Makait`_
+- Provide more information if occupancy drops below zero (:pr:`7924`) `Hendrik Makait`_
+- Improved conversion between ``pyarrow`` and ``pandas`` in P2P shuffling (:pr:`7896`) `Hendrik Makait`_
+
+Bug Fixes
+^^^^^^^^^
+- Add ``Cluster.called_from_running_loop`` and fix ``Cluster.asynchronous`` (:pr:`7941`) `Jacob Tomlinson`_
+- Fix annotations and spans leaking between threads (:pr:`7935`) `Irina Truong`_
+- Handle null partitions in P2P shuffling (:pr:`7922`) `Jonathan De Troye`_
+- Fix race condition in Fine Performance Metrics sync (:pr:`7927`) `crusaderky`_
+- Avoid (:pr:`7923`) by starting ``run_id`` at 1 (:pr:`7925`) `Hendrik Makait`_
+- Fix glitches in Fine Performance Metrics stacked graph (:pr:`7919`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Wipe the cache after (:pr:`7935`) (:pr:`7946`) `crusaderky`_
+- Remove grace period for unclosed comms in ``gen_cluster`` (:pr:`7937`) `Thomas Grainger`_
+- ``raise pytest.skip`` is redundant (:pr:`7939`) `crusaderky`_
+- Fix ``test_rechunk_with_{fully|partially}_unknown_dimension`` on CI (:pr:`7934`) `Hendrik Makait`_
+- Fix compatibility with ``numpy`` 1.25 (:pr:`7932`) `crusaderky`_
+- Spans: refactor sums of mappings (:pr:`7918`) `crusaderky`_
+- Fix flaky ``test_send_metrics_to_scheduler`` (:pr:`7931`) `crusaderky`_
+- Avoid calls to ``make_current()`` and ``make_clear()`` by using ``asyncio.run`` in ``LoopRunner`` (:pr:`7467`) `Thomas Grainger`_
+- Add ``needs triage`` label to re/opened PRs and issues (:pr:`7916`) `Miles`_
+- Remove ``span_id`` from global metrics on scheduler (:pr:`7917`) `crusaderky`_
+- Add spans to Fine Performance Metrics bokeh dashboard (:pr:`7911`) `crusaderky`_
+- FinePerformanceMetrics dashboard overhaul (:pr:`7910`) `crusaderky`_
+- Check for ``skip-caching`` label (:pr:`7907`) `Miles`_
+- Fix CI changes from (:pr:`7902`) (:pr:`7905`) `Hendrik Makait`_
+- Rename ``get_default_shuffle_algorithm`` to ``get_default_shuffle_method`` (:pr:`7902`) `Hendrik Makait`_
+- Bump actions/checkout from 3.5.2 to 3.5.3 (:pr:`7904`)
+- Refactor P2P rechunk validation (:pr:`7890`) `Hendrik Makait`_
+
+
 .. _v2023.6.0:
 
 2023.6.0

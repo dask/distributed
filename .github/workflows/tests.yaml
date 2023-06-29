@@ -103,7 +103,12 @@ jobs:
           keyword: "[skip-caching]"
 
       - name: Get Date
-        if: steps.skip-caching.outputs.trigger-found != 'true'
+        if: |
+          (
+            steps.skip-caching.outputs.trigger-found != 'true'
+            && !(github.event_name == 'pull_request' 
+                 && contains(github.event.pull_request.labels.*.name, 'skip-caching'))
+          )
         id: get-date
         run: echo "::set-output name=today::$(/bin/date -u '+%Y%m%d')"
         shell: bash
@@ -116,12 +121,18 @@ jobs:
           key: conda-${{ matrix.os }}-${{ steps.get-date.outputs.today }}-${{ hashFiles(env.CONDA_FILE) }}-${{ env.CACHE_NUMBER }}
         env:
           # Increase this value to reset cache if continuous_integration/environment-${{ matrix.environment }}.yaml has not changed
-          CACHE_NUMBER: 0
+          CACHE_NUMBER: 1
         id: cache
 
       - name: Update environment
         run: mamba env update -n dask-distributed -f ${{ env.CONDA_FILE }}
-        if: steps.skip-caching.outputs.trigger-found == 'true' || steps.cache.outputs.cache-hit != 'true'
+        if: |
+          (
+            steps.skip-caching.outputs.trigger-found == 'true' 
+            || (github.event_name == 'pull_request' 
+                && contains(github.event.pull_request.labels.*.name, 'skip-caching'))
+            || steps.cache.outputs.cache-hit != 'true'
+          )
 
       - name: Install
         shell: bash -l {0}

@@ -56,7 +56,7 @@ from distributed.diagnostics.plugin import (
 from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.scheduler import KilledWorker, Scheduler
-from distributed.utils import sync
+from distributed.utils import sync, wait_for
 from distributed.utils_test import (
     NO_AMM,
     BlockedExecute,
@@ -1649,7 +1649,7 @@ async def test_close_async_task_handles_cancellation(c, s, a):
     with captured_logger(
         "distributed.worker.state_machine", level=logging.ERROR
     ) as logger:
-        await asyncio.wait_for(a.close(timeout=1), timeout=5)
+        await wait_for(a.close(timeout=1), timeout=5)
     assert "Failed to cancel asyncio task" in logger.getvalue()
     assert not task.cancelled()
     assert s.tasks["f1"].state in ("queued", "no-worker")

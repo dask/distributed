@@ -342,6 +342,13 @@ async def test_WorkersMemory(c, s, a, b):
 async def test_FinePerformanceMetrics(c, s, a, b):
     cl = FinePerformanceMetrics(s)
 
+    # Test with no metrics
+    cl.update()
+    assert not cl.visible_functions
+    assert not cl.span_tag_selector.options
+    assert not cl.function_selector.options
+    assert cl.unit_selector.options == ["seconds"]
+
     # execute on default span; multiple tasks in same TaskGroup
     x0 = c.submit(inc, 0, key="x-0", workers=[a.address])
     x1 = c.submit(inc, 1, key="x-1", workers=[a.address])
@@ -368,8 +375,9 @@ async def test_FinePerformanceMetrics(c, s, a, b):
 
     # Custom metric with non-string label and custom unit
     def f():
-        context_meter.digest_metric(None, 1, "custom")
-        context_meter.digest_metric(("foo", 1), 2, "custom")
+        context_meter.digest_metric(None, 1, "seconds")
+        context_meter.digest_metric(("foo", 1), 2, "seconds")
+        context_meter.digest_metric("hideme", 1.1, "custom")
 
     v = c.submit(f, key="v")
     await wait([y0, y1, z, v])
@@ -377,14 +385,63 @@ async def test_FinePerformanceMetrics(c, s, a, b):
     await a.heartbeat()
     await b.heartbeat()
 
-    assert not cl.task_exec_data
     cl.update()
-    assert cl.task_exec_data
-    assert set(cl.task_exec_data["functions"]) == {"v", "w", "x", "y", "z"}
-    assert set(cl.unit_selector.options) == {"seconds", "count", "bytes", "custom"}
-    assert "thread-cpu" in cl.task_activities
-    assert "('foo', 1)" in cl.task_activities
-    assert "None" in cl.task_activities
+    assert sorted(cl.visible_functions) == ["N/A", "v", "w", "x", "y", "z"]
+    assert sorted(cl.function_selector.options) == ["N/A", "v", "w", "x", "y", "z"]
+    assert sorted(cl.unit_selector.options) == ["bytes", "count", "custom", "seconds"]
+    assert "thread-cpu" in cl.visible_activities
+    assert "('foo', 1)" in cl.visible_activities
+    assert "None" in cl.visible_activities
+    assert "hideme" not in cl.visible_activities
+    assert sorted(cl.span_tag_selector.options) == ["default", "foo"]
+
+    orig_activities = cl.visible_activities[:]
+
+    cl.unit_selector.value = "bytes"
+    cl.update()
+    assert sorted(cl.visible_activities) == ["disk-read", "disk-write", "memory-read"]
+
+    cl.unit_selector.value = "count"
+    cl.update()
+    assert sorted(cl.visible_activities) == ["disk-read", "disk-write", "memory-read"]
+
+    cl.unit_selector.value = "custom"
+    cl.update()
+    assert sorted(cl.visible_activities) == ["hideme"]
+
+    cl.unit_selector.value = "seconds"
+    cl.update()
+    assert cl.visible_activities == orig_activities
+
+    cl.span_tag_selector.value = ["foo"]
+    cl.update()
+    assert sorted(cl.visible_functions) == ["N/A", "y", "z"]
+    assert sorted(cl.function_selector.options) == ["N/A", "v", "w", "x", "y", "z"]
+
+
+@gen_cluster(
+    client=True,
+    scheduler_kwargs={"extensions": {}},
+    worker_kwargs={"extensions": {}},
+)
+async def test_FinePerformanceMetrics_no_spans(c, s, a, b):
+    cl = FinePerformanceMetrics(s)
+
+    # Test with no metrics
+    cl.update()
+    assert not cl.visible_functions
+    await c.submit(inc, 0, key="x-0")
+    await a.heartbeat()
+    await b.heartbeat()
+
+    cl.update()
+    assert sorted(cl.visible_functions) == ["x"]
+    assert sorted(cl.unit_selector.options) == ["bytes", "count", "seconds"]
+    assert "thread-cpu" in cl.visible_activities
+
+    cl.unit_selector.value = "bytes"
+    cl.update()
+    assert sorted(cl.visible_activities) == ["memory-read"]
 
 
 @gen_cluster(client=True)

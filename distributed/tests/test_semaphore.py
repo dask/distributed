@@ -299,24 +299,26 @@ class FlakyConnectionPool(ConnectionPool):
 async def test_retry_acquire(c, s, a, b):
     with dask.config.set({"distributed.comm.retry.count": 1}):
         pool = await FlakyConnectionPool(failing_connections=1)
+        try:
+            semaphore = await Semaphore(
+                max_leases=2,
+                name="resource_we_want_to_limit",
+                scheduler_rpc=pool(s.address),
+            )
+            pool.activate()
 
-        semaphore = await Semaphore(
-            max_leases=2,
-            name="resource_we_want_to_limit",
-            scheduler_rpc=pool(s.address),
-        )
-        pool.activate()
+            result = await semaphore.acquire()
+            assert result is True
 
-        result = await semaphore.acquire()
-        assert result is True
-
-        second = await semaphore.acquire()
-        assert second is True
-        start = time()
-        result = await semaphore.acquire(timeout=0.025)
-        stop = time()
-        assert stop - start < 0.2
-        assert result is False
+            second = await semaphore.acquire()
+            assert second is True
+            start = time()
+            result = await semaphore.acquire(timeout=0.025)
+            stop = time()
+            assert stop - start < 0.2
+            assert result is False
+        finally:
+            await pool.close()
 
 
 @gen_cluster(
@@ -527,24 +529,26 @@ async def test_release_retry(c, s, a, b):
     """Verify that we can properly retry a semaphore release operation"""
     with dask.config.set({"distributed.comm.retry.count": 1}):
         pool = await FlakyConnectionPool(failing_connections=1)
+        try:
+            semaphore = await Semaphore(
+                max_leases=2,
+                name="resource_we_want_to_limit",
+                scheduler_rpc=pool(s.address),
+            )
+            await semaphore.acquire()
+            pool.activate()  # Comm chaos starts
+            with captured_logger("distributed.utils_comm") as caplog:
+                assert await semaphore.release() is True
+            logs = caplog.getvalue().split("\n")
+            log = logs[0]
+            assert log.startswith("Retrying semaphore release:") and log.endswith(
+                "after exception in attempt 0/1: "
+            )
 
-        semaphore = await Semaphore(
-            max_leases=2,
-            name="resource_we_want_to_limit",
-            scheduler_rpc=pool(s.address),
-        )
-        await semaphore.acquire()
-        pool.activate()  # Comm chaos starts
-        with captured_logger("distributed.utils_comm") as caplog:
+            assert await semaphore.acquire() is True
             assert await semaphore.release() is True
-        logs = caplog.getvalue().split("\n")
-        log = logs[0]
-        assert log.startswith("Retrying semaphore release:") and log.endswith(
-            "after exception in attempt 0/1: "
-        )
-
-        assert await semaphore.acquire() is True
-        assert await semaphore.release() is True
+        finally:
+            await pool.close()
 
 
 @gen_cluster(
@@ -561,21 +565,24 @@ async def test_release_failure(c, s, a, b, caplog):
 
     with dask.config.set({"distributed.comm.retry.count": 1}):
         pool = await FlakyConnectionPool(failing_connections=5)
-        ext = s.extensions["semaphores"]
-        name = "foo"
-        semaphore = await Semaphore(
-            max_leases=2,
-            name=name,
-            scheduler_rpc=pool(s.address),
-        )
-        await semaphore.acquire()
-        pool.activate()  # Comm chaos starts
-        assert await semaphore.release() is False
+        try:
+            ext = s.extensions["semaphores"]
+            name = "foo"
+            semaphore = await Semaphore(
+                max_leases=2,
+                name=name,
+                scheduler_rpc=pool(s.address),
+            )
+            await semaphore.acquire()
+            pool.activate()  # Comm chaos starts
+            assert await semaphore.release() is False
 
-        pool.deactivate()  # comm chaos stops
-        assert ext.get_value(name) == 1  # lease is still registered
-        while not (await semaphore.get_value() == 0):
-            await asyncio.sleep(0.01)
+            pool.deactivate()  # comm chaos stops
+            assert ext.get_value(name) == 1  # lease is still registered
+            while not (await semaphore.get_value() == 0):
+                await asyncio.sleep(0.01)
+        finally:
+            await pool.close()
 
 
 @gen_cluster(client=True, nthreads=[])

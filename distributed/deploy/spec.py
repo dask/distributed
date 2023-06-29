@@ -279,21 +279,21 @@ class SpecCluster(Cluster):
             scheduler_sync_interval=scheduler_sync_interval,
         )
 
-        try:
-            called_from_running_loop = (
-                getattr(loop, "asyncio_loop", None) is asyncio.get_running_loop()
-            )
-        except RuntimeError:
-            called_from_running_loop = asynchronous
-
-        if not called_from_running_loop:
+        if not self.called_from_running_loop:
             self._loop_runner.start()
             self.sync(self._start)
             try:
                 self.sync(self._correct_state)
             except Exception:
                 self.sync(self.close)
+                self._loop_runner.stop()
                 raise
+
+    def close(self, timeout: float | None = None) -> Awaitable[None] | None:
+        aw = super().close(timeout)
+        if not self.asynchronous:
+            self._loop_runner.stop()
+        return aw
 
     async def _start(self):
         while self.status == Status.starting:
@@ -471,10 +471,6 @@ class SpecCluster(Cluster):
         await self._correct_state()
         assert self.status == Status.running
         return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        super().__exit__(exc_type, exc_value, traceback)
-        self._loop_runner.stop()
 
     def _threads_per_worker(self) -> int:
         """Return the number of threads per worker for new workers"""
