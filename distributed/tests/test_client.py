@@ -4026,6 +4026,7 @@ async def test_as_current(c, s, a, b):
     ) as c2:
         with temp_default_client(c):
             assert Client.current() is c
+            assert Client.current(allow_global=False) is c
             with c1.as_current():
                 assert Client.current() is c1
                 assert Client.current(allow_global=True) is c1
