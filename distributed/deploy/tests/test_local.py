@@ -175,7 +175,6 @@ def test_transports_tcp_port(loop):
         dashboard_address=":0",
         loop=loop,
     ) as c:
-
         assert c.scheduler_address == f"tcp://127.0.0.1:{port}"
         assert c.workers[0].address.startswith("tcp://")
         with Client(c.scheduler.address, loop=loop) as e:
@@ -499,7 +498,6 @@ async def test_scale_up_and_down():
         asynchronous=True,
     ) as cluster:
         async with Client(cluster, asynchronous=True) as c:
-
             assert not cluster.workers
 
             cluster.scale(2)
@@ -766,7 +764,6 @@ def test_adapt_then_manual(loop):
         assert not cluster.workers
 
         with Client(cluster) as client:
-
             futures = client.map(slowinc, range(1000), delay=0.1)
             sleep(0.2)
 

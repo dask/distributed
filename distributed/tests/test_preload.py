@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import os
 import re
 import shutil
@@ -43,7 +42,6 @@ def test_worker_preload_file(loop):
         with cluster(worker_kwargs={"preload": [path]}) as (s, workers), Client(
             s["address"], loop=loop
         ) as c:
-
             assert c.run(check_worker) == {
                 worker["address"]: worker["address"] for worker in workers
             }
@@ -100,7 +98,6 @@ def test_worker_preload_module(loop):
             s,
             workers,
         ), Client(s["address"], loop=loop) as c:
-
             assert c.run(check_worker) == {
                 worker["address"]: worker["address"] for worker in workers
             }
@@ -124,7 +121,7 @@ def dask_setup(worker):
 
 
 @gen_cluster(nthreads=[])
-async def test_worker_preload_click_async(s, tmpdir):
+async def test_worker_preload_click_async(s, tmp_path):
     # Ensure we allow for click commands wrapping coroutines
     # https://github.com/dask/distributed/issues/4169
     text = """
@@ -298,8 +295,8 @@ def dask_teardown(worker):
     raise Exception(456)
 """
 
-    with captured_logger(logging.getLogger("distributed.scheduler")) as s_logger:
-        with captured_logger(logging.getLogger("distributed.worker")) as w_logger:
+    with captured_logger("distributed.scheduler") as s_logger:
+        with captured_logger("distributed.worker") as w_logger:
             async with Scheduler(dashboard_address=":0", preload=text) as s:
                 async with Worker(s.address, preload=[text]) as w:
                     pass

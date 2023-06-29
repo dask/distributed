@@ -131,10 +131,7 @@ async def test_gpu_metrics(s, a, b):
         == pynvml.nvmlDeviceGetMemoryInfo(h).used
     )
     assert "gpu" in a.startup_information
-    assert (
-        s.workers[a.address].extra["gpu"]["name"]
-        == pynvml.nvmlDeviceGetName(h).decode()
-    )
+    assert s.workers[a.address].extra["gpu"]["name"] == nvml._get_name(h)
 
 
 @pytest.mark.flaky(reruns=5, reruns_delay=2)
@@ -154,7 +151,7 @@ async def test_gpu_monitoring_recent(s, a, b):
         res[a.address]["range_query"]["gpu_memory_used"]
         == pynvml.nvmlDeviceGetMemoryInfo(h).used
     )
-    assert res[a.address]["gpu_name"] == pynvml.nvmlDeviceGetName(h).decode()
+    assert res[a.address]["gpu_name"] == nvml._get_name(h)
     assert res[a.address]["gpu_memory_total"] == pynvml.nvmlDeviceGetMemoryInfo(h).total
 
 

@@ -4,28 +4,28 @@ import heapq
 import itertools
 import weakref
 from collections import OrderedDict, UserDict
-from collections.abc import Callable, Hashable, Iterator
-from typing import MutableSet  # TODO move to collections.abc (requires Python >=3.9)
+from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, MutableSet
 from typing import Any, TypeVar, cast
 
 T = TypeVar("T", bound=Hashable)
+K = TypeVar("K", bound=Hashable)
+V = TypeVar("V")
 
 
-# TODO change to UserDict[K, V] (requires Python >=3.9)
-class LRU(UserDict):
+class LRU(UserDict[K, V]):
     """Limited size mapping, evicting the least recently looked-up key when full"""
 
-    def __init__(self, maxsize: float):
+    def __init__(self, maxsize: float) -> None:
         super().__init__()
         self.data = OrderedDict()
         self.maxsize = maxsize
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: K) -> V:
         value = super().__getitem__(key)
         cast(OrderedDict, self.data).move_to_end(key)
         return value
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: K, value: V) -> None:
         if len(self) >= self.maxsize:
             cast(OrderedDict, self.data).popitem(last=False)
         super().__setitem__(key, value)
@@ -121,7 +121,7 @@ class HeapSet(MutableSet[T]):
         """Iterate over the n smallest elements without removing them.
         This is O(1) for n == 1; O(n*logn) otherwise.
         """
-        if n <= 0:
+        if n <= 0 or not self:
             return  # empty iterator
         if n == 1:
             yield self.peek()
@@ -198,3 +198,17 @@ class HeapSet(MutableSet[T]):
         self._data.clear()
         self._heap.clear()
         self._sorted = True
+
+
+def sum_mappings(ds: Iterable[Mapping[K, V] | Iterable[tuple[K, V]]], /) -> dict[K, V]:
+    """Sum the values of the given mappings, key by key"""
+    out: dict[K, V] = {}
+    for d in ds:
+        if isinstance(d, Mapping):
+            d = d.items()
+        for k, v in d:
+            try:
+                out[k] += v  # type: ignore
+            except KeyError:
+                out[k] = v
+    return out

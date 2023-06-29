@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import os
+import random
 import warnings
 
 import pytest
@@ -33,10 +35,15 @@ def test_registered():
 
 @gen_test()
 async def test_listen_connect():
+    comm_closed = asyncio.Event()
+
     async def handle_comm(comm):
-        while True:
-            msg = await comm.read()
-            await comm.write(msg)
+        try:
+            while True:
+                msg = await comm.read()
+                await comm.write(msg)
+        finally:
+            comm_closed.set()
 
     async with listen("ws://", handle_comm) as listener:
         comm = await connect(listener.contact_address)
@@ -45,14 +52,20 @@ async def test_listen_connect():
         assert result == b"Hello!"
 
         await comm.close()
+        await comm_closed.wait()
 
 
 @gen_test()
 async def test_listen_connect_wss():
+    comm_closed = asyncio.Event()
+
     async def handle_comm(comm):
-        while True:
-            msg = await comm.read()
-            await comm.write(msg)
+        try:
+            while True:
+                msg = await comm.read()
+                await comm.write(msg)
+        finally:
+            comm_closed.set()
 
     server_ctx = get_server_ssl_context()
     client_ctx = get_client_ssl_context()
@@ -65,6 +78,7 @@ async def test_listen_connect_wss():
         result = await comm.read()
         assert result == b"Hello!"
         await comm.close()
+        await comm_closed.wait()
 
 
 @gen_test()
@@ -77,12 +91,12 @@ async def test_expect_ssl_context():
 
 
 @gen_test()
-async def test_expect_scheduler_ssl_when_sharing_server(tmpdir):
+async def test_expect_scheduler_ssl_when_sharing_server(tmp_path):
     xfail_ssl_issue5601()
     pytest.importorskip("cryptography")
     security = Security.temporary()
-    key_path = os.path.join(str(tmpdir), "dask.pem")
-    cert_path = os.path.join(str(tmpdir), "dask.crt")
+    key_path = os.path.join(str(tmp_path), "dask.pem")
+    cert_path = os.path.join(str(tmp_path), "dask.crt")
     with open(key_path, "w") as f:
         f.write(security.tls_scheduler_key)
     with open(cert_path, "w") as f:
@@ -115,18 +129,8 @@ async def test_collections(c, s, a, b):
 
 @gen_cluster(client=True, scheduler_kwargs={"protocol": "ws://"})
 async def test_large_transfer(c, s, a, b):
-    np = pytest.importorskip("numpy")
-    await c.scatter(np.random.random(1_000_000))
-
-
-@gen_test()
-async def test_large_transfer_with_no_compression():
-    np = pytest.importorskip("numpy")
-    with dask.config.set({"distributed.comm.compression": None}):
-        async with Scheduler(protocol="ws://") as s:
-            async with Worker(s.address, protocol="ws://"):
-                async with Client(s.address, asynchronous=True) as c:
-                    await c.scatter(np.random.random(1_500_000))
+    x = await c.scatter(random.randbytes(12_000_000))
+    await c.gather(x)
 
 
 @pytest.mark.parametrize(

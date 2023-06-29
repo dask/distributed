@@ -11,15 +11,17 @@ from distributed.dashboard.components.nvml import (
     gpu_memory_doc,
     gpu_utilization_doc,
 )
+from distributed.dashboard.components.rmm import rmm_memory_doc
 from distributed.dashboard.components.scheduler import (
     AggregateAction,
     BandwidthTypes,
     BandwidthWorkers,
     ClusterMemory,
     ComputePerKey,
+    Contention,
     CurrentLoad,
-    EventLoop,
     ExceptionsTable,
+    FinePerformanceMetrics,
     MemoryByKey,
     Occupancy,
     SystemMonitor,
@@ -110,16 +112,18 @@ applications = {
     "/individual-compute-time-per-key": individual_doc(ComputePerKey, 500),
     "/individual-aggregate-time-per-action": individual_doc(AggregateAction, 500),
     "/individual-scheduler-system": individual_doc(SystemMonitor, 500),
-    "/individual-event-loop": individual_doc(EventLoop, 500),
+    "/individual-contention": individual_doc(Contention, 500),
+    "/individual-fine-performance-metrics": individual_doc(FinePerformanceMetrics, 500),
     "/individual-profile": individual_profile_doc,
     "/individual-profile-server": individual_profile_server_doc,
     "/individual-gpu-memory": gpu_memory_doc,
     "/individual-gpu-utilization": gpu_utilization_doc,
+    "/individual-rmm-memory": rmm_memory_doc,
 }
 
 
 @memoize
-def template_variables():
+def template_variables(scheduler):
     from distributed.diagnostics.nvml import device_get_count
 
     template_variables = {
@@ -140,12 +144,14 @@ def template_variables():
                 "name": " ".join(x.strip("/").split("-")[1:])
                 .title()
                 .replace("Cpu", "CPU")
-                .replace("Gpu", "GPU"),
+                .replace("Gpu", "GPU")
+                .replace("Rmm", "RMM"),
             }
             for x in applications
             if "individual" in x
         ]
         + [{"url": "hardware", "name": "Hardware"}],
+        "jupyter": scheduler.jupyter,
     }
     template_variables["plots"] = sorted(
         template_variables["plots"], key=lambda d: d["name"]
@@ -155,7 +161,10 @@ def template_variables():
 
 def connect(application, http_server, scheduler, prefix=""):
     bokeh_app = BokehApplication(
-        applications, scheduler, prefix=prefix, template_variables=template_variables()
+        applications,
+        scheduler,
+        prefix=prefix,
+        template_variables=template_variables(scheduler),
     )
     application.add_application(bokeh_app)
     bokeh_app.initialize(IOLoop.current())

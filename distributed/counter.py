@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-
-from tornado.ioloop import IOLoop
-
-from distributed.compatibility import PeriodicCallback
+from collections.abc import Hashable, Iterable, Sequence
 
 try:
     from crick import TDigest
@@ -13,21 +10,21 @@ except ImportError:
 else:
 
     class Digest:
-        def __init__(self, loop=None, intervals=(5, 60, 3600)):
+        intervals: Sequence[float]
+        components: list[TDigest]
+        __slots__ = ("intervals", "components")
+
+        def __init__(self, intervals: Sequence[float] = (5, 60, 3600)):
             self.intervals = intervals
-            self.components = [TDigest() for i in self.intervals]
+            self.components = [TDigest() for _ in intervals]
 
-            self.loop = loop or IOLoop.current()
-            self._pc = PeriodicCallback(self.shift, self.intervals[0] * 1000)
-            self.loop.add_callback(self._pc.start)
-
-        def add(self, item):
+        def add(self, item: float) -> None:
             self.components[0].add(item)
 
-        def update(self, seq):
+        def update(self, seq: Iterable[float]) -> None:
             self.components[0].update(seq)
 
-        def shift(self):
+        def shift(self) -> None:
             for i in range(len(self.intervals) - 1):
                 frac = 0.2 * self.intervals[0] / self.intervals[i]
                 part = self.components[i].scale(frac)
@@ -36,23 +33,23 @@ else:
                 self.components[i + 1].merge(part)
                 self.components[i] = rest
 
-        def size(self):
+        def size(self) -> float:
             return sum(d.size() for d in self.components)
 
 
 class Counter:
-    def __init__(self, loop=None, intervals=(5, 60, 3600)):
+    intervals: Sequence[float]
+    components: list[defaultdict[Hashable, float]]
+    __slots__ = ("intervals", "components")
+
+    def __init__(self, intervals: Sequence[float] = (5, 60, 3600)):
         self.intervals = intervals
-        self.components = [defaultdict(lambda: 0) for i in self.intervals]
+        self.components = [defaultdict(lambda: 0) for _ in intervals]
 
-        self.loop = loop or IOLoop.current()
-        self._pc = PeriodicCallback(self.shift, self.intervals[0] * 1000)
-        self.loop.add_callback(self._pc.start)
-
-    def add(self, item):
+    def add(self, item: Hashable) -> None:
         self.components[0][item] += 1
 
-    def shift(self):
+    def shift(self) -> None:
         for i in range(len(self.intervals) - 1):
             frac = 0.2 * self.intervals[0] / self.intervals[i]
             part = {k: v * frac for k, v in self.components[i].items()}
@@ -60,9 +57,9 @@ class Counter:
 
             for k, v in part.items():
                 self.components[i + 1][k] += v
-            d = defaultdict(lambda: 0)
+            d: defaultdict[Hashable, float] = defaultdict(lambda: 0)
             d.update(rest)
             self.components[i] = d
 
-    def size(self):
+    def size(self) -> float:
         return sum(sum(d.values()) for d in self.components)

@@ -6,14 +6,14 @@ on:
   pull_request:
     paths:
       - setup.py
-      - requirements.txt
       - continuous_integration/recipes/**
       - .github/workflows/conda.yml
+      - pyproject.toml
 
 # When this workflow is queued, automatically cancel any previous running
 # or pending jobs from the same branch
 concurrency:
-  group: conda-${{ github.head_ref }}
+  group: conda-${{ github.ref }}
   cancel-in-progress: true
 
 # Required shell entrypoint to have properly activated conda environments
@@ -26,7 +26,7 @@ jobs:
     name: Build (and upload)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3.2.0
+      - uses: actions/checkout@v3.5.3
         with:
           fetch-depth: 0
       - name: Set up Python
@@ -34,10 +34,11 @@ jobs:
         with:
           miniforge-variant: Mambaforge
           use-mamba: true
-          python-version: 3.8
+          python-version: 3.9
+          channel-priority: strict
       - name: Install dependencies
         run: |
-          mamba install boa conda-verify
+          mamba install -c conda-forge boa conda-verify
 
           which python
           pip list
@@ -73,5 +74,6 @@ jobs:
           ANACONDA_API_TOKEN: ${{ secrets.DASK_CONDA_TOKEN }}
         run: |
           # install anaconda for upload
-          mamba install anaconda-client
+          mamba install -c conda-forge anaconda-client
+
           anaconda upload --label dev noarch/*.tar.bz2

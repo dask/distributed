@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import abc
-import asyncio
 import functools
-import sys
 import threading
+from collections.abc import Awaitable, Generator
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Generic, Literal, NoReturn, TypeVar
@@ -13,43 +12,11 @@ from tornado.ioloop import IOLoop
 
 from distributed.client import Future
 from distributed.protocol import to_serialize
-from distributed.utils import iscoroutinefunction, sync, thread_state
+from distributed.utils import LateLoopEvent, iscoroutinefunction, sync, thread_state
 from distributed.utils_comm import WrappedKey
 from distributed.worker import get_client, get_worker
 
 _T = TypeVar("_T")
-
-if sys.version_info >= (3, 9):
-    from collections.abc import Awaitable, Generator
-else:
-    from typing import Awaitable, Generator
-
-if sys.version_info >= (3, 10):
-    from asyncio import Event as _LateLoopEvent
-else:
-    # In python 3.10 asyncio.Lock and other primitives no longer support
-    # passing a loop kwarg to bind to a loop running in another thread
-    # e.g. calling from Client(asynchronous=False). Instead the loop is bound
-    # as late as possible: when calling any methods that wait on or wake
-    # Future instances. See: https://bugs.python.org/issue42392
-    class _LateLoopEvent:
-        def __init__(self) -> None:
-            self._event: asyncio.Event | None = None
-
-        def set(self) -> None:
-            if self._event is None:
-                self._event = asyncio.Event()
-
-            self._event.set()
-
-        def is_set(self) -> bool:
-            return self._event is not None and self._event.is_set()
-
-        async def wait(self) -> bool:
-            if self._event is None:
-                self._event = asyncio.Event()
-
-            return await self._event.wait()
 
 
 class Actor(WrappedKey):
@@ -95,20 +62,22 @@ class Actor(WrappedKey):
         super().__init__(key)
         self._cls = cls
         self._address = address
+        self._key = key
         self._future = None
-        if worker:
-            self._worker = worker
-            self._client = None
-        else:
+        self._worker = worker
+        self._client = None
+        self._try_bind_worker_client()
+
+    def _try_bind_worker_client(self):
+        if not self._worker:
             try:
-                # TODO: `get_worker` may return the wrong worker instance for async local clusters (most tests)
-                # when run outside of a task (when deserializing a key pointing to an Actor, etc.)
                 self._worker = get_worker()
             except ValueError:
                 self._worker = None
+        if not self._client:
             try:
                 self._client = get_client()
-                self._future = Future(key, inform=self._worker is None)
+                self._future = Future(self._key, inform=False)
                 # ^ When running on a worker, only hold a weak reference to the key, otherwise the key could become unreleasable.
             except ValueError:
                 self._client = None
@@ -121,6 +90,8 @@ class Actor(WrappedKey):
 
     @property
     def _io_loop(self):
+        if self._worker is None and self._client is None:
+            self._try_bind_worker_client()
         if self._worker:
             return self._worker.loop
         else:
@@ -128,6 +99,8 @@ class Actor(WrappedKey):
 
     @property
     def _scheduler_rpc(self):
+        if self._worker is None and self._client is None:
+            self._try_bind_worker_client()
         if self._worker:
             return self._worker.scheduler
         else:
@@ -135,6 +108,8 @@ class Actor(WrappedKey):
 
     @property
     def _worker_rpc(self):
+        if self._worker is None and self._client is None:
+            self._try_bind_worker_client()
         if self._worker:
             return self._worker.rpc(self._address)
         else:
@@ -164,12 +139,11 @@ class Actor(WrappedKey):
         return sorted(o)
 
     def __getattr__(self, key):
-
         if self._future and self._future.status not in ("finished", "pending"):
             raise ValueError(
                 "Worker holding Actor was lost.  Status: " + self._future.status
             )
-
+        self._try_bind_worker_client()
         if (
             self._worker
             and self._worker.address == self._address
@@ -272,11 +246,11 @@ class BaseActorFuture(abc.ABC, Awaitable[_T]):
 
     @abc.abstractmethod
     def result(self, timeout: str | timedelta | float | None = None) -> _T:
-        ...
+        ...  # pragma: nocover
 
     @abc.abstractmethod
     def done(self) -> bool:
-        ...
+        ...  # pragma: nocover
 
     def __repr__(self) -> Literal["<ActorFuture>"]:
         return "<ActorFuture>"
@@ -318,7 +292,7 @@ class _Error:
 class ActorFuture(BaseActorFuture[_T]):
     def __init__(self, io_loop: IOLoop):
         self._io_loop = io_loop
-        self._event = _LateLoopEvent()
+        self._event = LateLoopEvent()
         self._out: _Error | _OK[_T] | None = None
 
     def __await__(self) -> Generator[object, None, _T]:

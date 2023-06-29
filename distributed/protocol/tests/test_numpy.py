@@ -217,17 +217,16 @@ def test_itemsize(dt, size):
 
 
 def test_compress_numpy():
-    pytest.importorskip("lz4")
     x = np.ones(10000000, dtype="i4")
-    frames = dumps({"x": to_serialize(x)})
+    frames = dumps({"x": to_serialize(x)}, context={"compression": "zlib"})
     assert sum(map(nbytes, frames)) < x.nbytes
-
     header = msgpack.loads(frames[1], raw=False, use_list=False, strict_map_key=False)
+    assert header["compression"] == ("zlib",)
 
 
 def test_compress_memoryview():
     mv = memoryview(b"0" * 1000000)
-    compression, compressed = maybe_compress(mv)
+    compression, compressed = maybe_compress(mv, compression="zlib")
     if compression:
         assert len(compressed) < len(mv)
 

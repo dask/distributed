@@ -16,7 +16,7 @@ from tornado.ioloop import IOLoop
 from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.metrics import time
 from distributed.process import AsyncProcess
-from distributed.utils import get_mp_context
+from distributed.utils import get_mp_context, wait_for
 from distributed.utils_test import gen_test, nodebug
 
 
@@ -171,7 +171,7 @@ def assert_exit_code(proc: AsyncProcess, expect: signal.Signals) -> None:
     elif MACOS:
         # FIXME this happens very frequently on GitHub MacOSX CI. Reason unknown.
         if expect != signal.SIGKILL and proc.exitcode == -signal.SIGKILL:
-            raise pytest.xfail(reason="https://github.com/dask/distributed/issues/6393")
+            pytest.xfail(reason="https://github.com/dask/distributed/issues/6393")
         assert proc.exitcode == -expect
     else:
         assert LINUX
@@ -254,7 +254,7 @@ async def test_exit_callback():
     assert not evt.is_set()
 
     to_child.put(None)
-    await asyncio.wait_for(evt.wait(), 5)
+    await wait_for(evt.wait(), 5)
     assert evt.is_set()
     assert not proc.is_alive()
 
@@ -270,7 +270,7 @@ async def test_exit_callback():
     assert not evt.is_set()
 
     await proc.terminate()
-    await asyncio.wait_for(evt.wait(), 5)
+    await wait_for(evt.wait(), 5)
     assert evt.is_set()
 
 
@@ -387,7 +387,7 @@ def _parent_process(child_pipe):
 
     async def run_with_timeout():
         t = asyncio.create_task(parent_process_coroutine())
-        return await asyncio.wait_for(t, timeout=10)
+        return await wait_for(t, timeout=10)
 
     asyncio.run(run_with_timeout())
     raise RuntimeError("this should be unreachable due to os._exit")

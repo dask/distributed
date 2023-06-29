@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import contextlib
 import copy
 import logging
 import math
 import weakref
+from collections.abc import Awaitable, Generator
 from contextlib import suppress
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 
 from tornado import gen
 from tornado.ioloop import IOLoop
@@ -22,9 +24,17 @@ from distributed.deploy.adaptive import Adaptive
 from distributed.deploy.cluster import Cluster
 from distributed.scheduler import Scheduler
 from distributed.security import Security
-from distributed.utils import NoOpAwaitable, TimeoutError, import_term, silence_logging
+from distributed.utils import (
+    NoOpAwaitable,
+    TimeoutError,
+    import_term,
+    silence_logging_cmgr,
+)
 
 if TYPE_CHECKING:
+    # TODO import from typing (requires Python >=3.11)
+    from typing_extensions import Self
+
     # Circular imports
     from distributed import Nanny, Worker
 
@@ -106,6 +116,13 @@ class ProcessInterface:
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         await self.close()
+
+
+_T = TypeVar("_T")
+
+
+async def _wrap_awaitable(aw: Awaitable[_T]) -> _T:
+    return await aw
 
 
 class SpecCluster(Cluster):
@@ -234,6 +251,7 @@ class SpecCluster(Cluster):
         if loop is None and asynchronous:
             loop = IOLoop.current()
 
+        self.__exit_stack = stack = contextlib.ExitStack()
         self._created = weakref.WeakSet()
 
         self.scheduler_spec = copy.copy(scheduler)
@@ -246,10 +264,8 @@ class SpecCluster(Cluster):
         self._futures = set()
 
         if silence_logs:
-            self._old_logging_level = silence_logging(level=silence_logs)
-            self._old_bokeh_logging_level = silence_logging(
-                level=silence_logs, root="bokeh"
-            )
+            stack.enter_context(silence_logging_cmgr(level=silence_logs))
+            stack.enter_context(silence_logging_cmgr(level=silence_logs, root="bokeh"))
 
         self._instances.add(self)
         self._correct_state_waiting = None
@@ -263,21 +279,21 @@ class SpecCluster(Cluster):
             scheduler_sync_interval=scheduler_sync_interval,
         )
 
-        try:
-            called_from_running_loop = (
-                getattr(loop, "asyncio_loop", None) is asyncio.get_running_loop()
-            )
-        except RuntimeError:
-            called_from_running_loop = asynchronous
-
-        if not called_from_running_loop:
+        if not self.called_from_running_loop:
             self._loop_runner.start()
             self.sync(self._start)
             try:
                 self.sync(self._correct_state)
             except Exception:
                 self.sync(self.close)
+                self._loop_runner.stop()
                 raise
+
+    def close(self, timeout: float | None = None) -> Awaitable[None] | None:
+        aw = super().close(timeout)
+        if not self.asynchronous:
+            self._loop_runner.stop()
+        return aw
 
     async def _start(self):
         while self.status == Status.starting:
@@ -327,7 +343,7 @@ class SpecCluster(Cluster):
             self._correct_state_waiting = task
             return task
 
-    async def _correct_state_internal(self):
+    async def _correct_state_internal(self) -> None:
         async with self._lock:
             self._correct_state_waiting = None
 
@@ -363,7 +379,9 @@ class SpecCluster(Cluster):
                 self._created.add(worker)
                 workers.append(worker)
             if workers:
-                await asyncio.wait(workers)
+                await asyncio.wait(
+                    [asyncio.create_task(_wrap_awaitable(w)) for w in workers]
+                )
                 for w in workers:
                     w._cluster = weakref.ref(self)
                     await w  # for tornado gen.coroutine support
@@ -392,14 +410,19 @@ class SpecCluster(Cluster):
             asyncio.get_running_loop().call_later(delay, f)
         super()._update_worker_status(op, msg)
 
-    def __await__(self):
-        async def _():
+    def __await__(self: Self) -> Generator[Any, Any, Self]:
+        async def _() -> Self:
             if self.status == Status.created:
                 await self._start()
             await self.scheduler
             await self._correct_state()
             if self.workers:
-                await asyncio.wait(list(self.workers.values()))  # maybe there are more
+                await asyncio.wait(
+                    [
+                        asyncio.create_task(_wrap_awaitable(w))
+                        for w in self.workers.values()
+                    ]
+                )  # maybe there are more
             return self
 
         return _().__await__()
@@ -440,11 +463,7 @@ class SpecCluster(Cluster):
                     Status.failed,
                 }, w.status
 
-        if hasattr(self, "_old_logging_level"):
-            silence_logging(self._old_logging_level)
-        if hasattr(self, "_old_bokeh_logging_level"):
-            silence_logging(self._old_bokeh_logging_level, root="bokeh")
-
+        self.__exit_stack.__exit__(None, None, None)
         await super()._close()
 
     async def __aenter__(self):
@@ -452,10 +471,6 @@ class SpecCluster(Cluster):
         await self._correct_state()
         assert self.status == Status.running
         return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        super().__exit__(exc_type, exc_value, traceback)
-        self._loop_runner.stop()
 
     def _threads_per_worker(self) -> int:
         """Return the number of threads per worker for new workers"""

@@ -1,3 +1,5 @@
+.. _worker-state:
+
 Worker State Machine
 ====================
 

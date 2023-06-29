@@ -8,16 +8,15 @@ import logging
 import multiprocessing
 import os
 import shutil
-import tempfile
 import threading
 import uuid
 import warnings
 import weakref
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from inspect import isawaitable
 from queue import Empty
 from time import sleep as sync_sleep
-from typing import TYPE_CHECKING, Callable, ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 from toolz import merge
 from tornado.ioloop import IOLoop
@@ -32,18 +31,19 @@ from distributed.comm.addressing import address_from_user_args
 from distributed.core import (
     AsyncTaskGroupClosedError,
     CommClosedError,
+    ErrorMessage,
     RPCClosed,
     Status,
     coerce_to_address,
     error_message,
 )
 from distributed.diagnostics.plugin import _get_plugin_name
-from distributed.diskutils import WorkSpace
 from distributed.metrics import time
 from distributed.node import ServerNode
 from distributed.process import AsyncProcess
 from distributed.proctitle import enable_proctitle_on_children
 from distributed.protocol import pickle
+from distributed.protocol.serialize import _is_dumpable
 from distributed.security import Security
 from distributed.utils import (
     get_ip,
@@ -51,7 +51,8 @@ from distributed.utils import (
     json_load_robust,
     log_errors,
     parse_ports,
-    silence_logging,
+    silence_logging_cmgr,
+    wait_for,
 )
 from distributed.worker import Worker, run
 from distributed.worker_memory import (
@@ -162,6 +163,7 @@ class Nanny(ServerNode):
                 stacklevel=2,
             )
 
+        self.__exit_stack = stack = contextlib.ExitStack()
         self.process = None
         self._setup_logging(logger)
         self.loop = self.io_loop = IOLoop.current()
@@ -171,19 +173,6 @@ class Nanny(ServerNode):
         self.security = security or Security()
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("worker")
-
-        if local_directory is None:
-            local_directory = (
-                dask.config.get("temporary-directory") or tempfile.gettempdir()
-            )
-            self._original_local_dir = local_directory
-            local_directory = os.path.join(local_directory, "dask-worker-space")
-        else:
-            self._original_local_dir = local_directory
-
-        # Create directory if it doesn't exist and test for write access.
-        # In case of PermissionError, change the name.
-        self.local_directory = WorkSpace(local_directory).base_dir
 
         self.preload = preload
         if self.preload is None:
@@ -196,6 +185,25 @@ class Nanny(ServerNode):
             preload_nanny = dask.config.get("distributed.nanny.preload")
         if preload_nanny_argv is None:
             preload_nanny_argv = dask.config.get("distributed.nanny.preload-argv")
+
+        handlers = {
+            "instantiate": self.instantiate,
+            "kill": self.kill,
+            "restart": self.restart,
+            "get_logs": self.get_logs,
+            # cannot call it 'close' on the rpc side for naming conflict
+            "terminate": self.close,
+            "close_gracefully": self.close_gracefully,
+            "run": self.run,
+            "plugin_add": self.plugin_add,
+            "plugin_remove": self.plugin_remove,
+        }
+        super().__init__(
+            handlers=handlers,
+            connection_args=self.connection_args,
+            local_directory=local_directory,
+            needs_workdir=False,
+        )
 
         self.preloads = preloading.process_preloads(
             self, preload_nanny, preload_nanny_argv, file_dir=self.local_directory
@@ -218,7 +226,7 @@ class Nanny(ServerNode):
                 protocol = protocol_address[0]
 
         self._given_worker_port = worker_port
-        self.nthreads = nthreads or CPU_COUNT
+        self.nthreads: int = nthreads or CPU_COUNT
         self.reconnect = reconnect
         self.validate = validate
         self.resources = resources
@@ -250,26 +258,10 @@ class Nanny(ServerNode):
         self.quiet = quiet
 
         if silence_logs:
-            silence_logging(level=silence_logs)
+            stack.enter_context(silence_logging_cmgr(level=silence_logs))
         self.silence_logs = silence_logs
 
-        handlers = {
-            "instantiate": self.instantiate,
-            "kill": self.kill,
-            "restart": self.restart,
-            "get_logs": self.get_logs,
-            # cannot call it 'close' on the rpc side for naming conflict
-            "terminate": self.close,
-            "close_gracefully": self.close_gracefully,
-            "run": self.run,
-            "plugin_add": self.plugin_add,
-            "plugin_remove": self.plugin_remove,
-        }
-
         self.plugins: dict[str, NannyPlugin] = {}
-
-        super().__init__(handlers=handlers, connection_args=self.connection_args)
-
         self.scheduler = self.rpc(self.scheduler_addr)
         self.memory_manager = NannyMemoryManager(self, memory_limit=memory_limit)
 
@@ -304,7 +296,7 @@ class Nanny(ServerNode):
             return
 
         try:
-            await asyncio.wait_for(
+            await wait_for(
                 self.scheduler.unregister(
                     address=self.worker_address, stimulus_id=f"nanny-close-{time()}"
                 ),
@@ -423,9 +415,7 @@ class Nanny(ServerNode):
 
         if self.death_timeout:
             try:
-                result = await asyncio.wait_for(
-                    self.process.start(), self.death_timeout
-                )
+                result = await wait_for(self.process.start(), self.death_timeout)
             except asyncio.TimeoutError:
                 logger.error(
                     "Timed out connecting Nanny '%s' to scheduler '%s'",
@@ -489,19 +479,21 @@ class Nanny(ServerNode):
 
     async def restart(
         self, timeout: float = 30, reason: str = "nanny-restart"
-    ) -> Literal["OK", "timed out"]:
+    ) -> Literal["OK", "timed out"] | ErrorMessage:
         async def _():
             if self.process is not None:
                 await self.kill(reason=reason)
                 await self.instantiate()
 
         try:
-            await asyncio.wait_for(_(), timeout)
+            await wait_for(_(), timeout)
         except asyncio.TimeoutError:
             logger.error(
                 f"Restart timed out after {timeout}s; returning before finished"
             )
             return "timed out"
+        except Exception as e:
+            return error_message(e)
         else:
             return "OK"
 
@@ -514,7 +506,9 @@ class Nanny(ServerNode):
     def _on_worker_exit_sync(self, exitcode):
         try:
             self._ongoing_background_tasks.call_soon(self._on_worker_exit, exitcode)
-        except AsyncTaskGroupClosedError:  # Async task group has already been closed, so the nanny is already clos(ed|ing).
+        except (
+            AsyncTaskGroupClosedError
+        ):  # Async task group has already been closed, so the nanny is already clos(ed|ing).
             pass
 
     @log_errors
@@ -607,6 +601,7 @@ class Nanny(ServerNode):
         await self.rpc.close()
         self.status = Status.closed
         await super().close()
+        self.__exit_stack.__exit__(None, None, None)
         return "OK"
 
     async def _log_event(self, topic, msg):
@@ -616,6 +611,24 @@ class Nanny(ServerNode):
         )
 
     def log_event(self, topic, msg):
+        """Log an event under a given topic
+
+        Parameters
+        ----------
+        topic : str, list[str]
+            Name of the topic under which to log an event. To log the same
+            event under multiple topics, pass a list of topic names.
+        msg
+            Event message to log. Note this must be msgpack serializable.
+
+        See also
+        --------
+        Client.log_event
+        """
+        if not _is_dumpable(msg):
+            raise TypeError(
+                f"Message must be msgpack serializable. Got {type(msg)=} instead."
+            )
         self._ongoing_background_tasks.call_soon(self._log_event, topic, msg)
 
 
@@ -796,8 +809,13 @@ class WorkerProcess:
         if self.status == Status.stopping:
             await self.stopped.wait()
             return
+        # If the process is not properly up it will not watch the closing queue
+        # and we may end up leaking this process
+        # Therefore wait for it to be properly started before killing it
+        if self.status == Status.starting:
+            await self.running.wait()
+
         assert self.status in (
-            Status.starting,
             Status.running,
             Status.failed,  # process failed to start, but hasn't been joined yet
         ), self.status

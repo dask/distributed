@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from time import sleep
 
+import pytest
+
 import dask
 
 from distributed.system_monitor import SystemMonitor
@@ -94,3 +96,27 @@ def test_host_cpu():
         sm = SystemMonitor()
         a = sm.update()
         assert "host_cpu.user" in a
+
+
+def test_gil_contention():
+    pytest.importorskip("gilknocker")
+
+    # Default enabled if gilknocker installed
+    sm = SystemMonitor()
+    a = sm.update()
+    assert "gil_contention" in a
+
+    assert sm._gilknocker.is_running
+    sm.close()
+    sm.close()  # Idempotent
+    assert not sm._gilknocker.is_running
+
+    sm = SystemMonitor(monitor_gil_contention=False)
+    a = sm.update()
+    assert "gil_contention" not in a
+
+    assert dask.config.get("distributed.admin.system-monitor.gil.enabled")
+    with dask.config.set({"distributed.admin.system-monitor.gil.enabled": False}):
+        sm = SystemMonitor()
+        a = sm.update()
+        assert "gil_contention" not in a

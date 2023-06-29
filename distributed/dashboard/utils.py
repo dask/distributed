@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from itertools import chain
 from numbers import Number
 
 import bokeh
@@ -46,7 +47,9 @@ def update(source, data):
         arrays
     3.  If profiling then perform the update in another callback
     """
-    if not np or not any(isinstance(v, np.ndarray) for v in source.data.values()):
+    if not np or not any(
+        isinstance(v, np.ndarray) for v in chain(source.data.values(), data.values())
+    ):
         if source.data == data:
             return
     if np and len(data[first(data)]) > 10:
@@ -54,6 +57,8 @@ def update(source, data):
         for k, v in data.items():
             if type(v) is not np.ndarray and isinstance(v[0], Number):
                 d[k] = np.array(v)
+                if d[k].dtype == np.int32:  # avoid int32 (Windows default)
+                    d[k] = d[k].astype("int64")
             else:
                 d[k] = v
     else:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import array
-import logging
 import os
 import random
 import uuid
@@ -9,27 +8,25 @@ from pathlib import Path
 
 import pytest
 
+import dask.config
 from dask.sizeof import sizeof
 
 from distributed import profile
 from distributed.compatibility import WINDOWS
-from distributed.spill import SpillBuffer, has_zict_210, has_zict_220
+from distributed.metrics import meter
+from distributed.spill import SpillBuffer
+from distributed.utils import RateLimiterFilter
 from distributed.utils_test import captured_logger
-
-requires_zict_210 = pytest.mark.skipif(
-    not has_zict_210,
-    reason="requires zict version >= 2.1.0",
-)
-requires_zict_220 = pytest.mark.skipif(
-    not has_zict_220,
-    reason="requires zict version >= 2.2.0",
-)
 
 
 def psize(tmp_path: Path, **objs: object) -> tuple[int, int]:
+    # zict 2.2: tmp_path/key
+    # zict >=3.0: tmp_path/key#0
+    fnames = tmp_path.glob("*")
+    key_to_fname = {fname.name.split("#")[0]: fname for fname in fnames}
     return (
         sum(sizeof(o) for o in objs.values()),
-        sum(os.stat(tmp_path / k).st_size for k in objs),
+        sum(os.stat(key_to_fname[k]).st_size for k in objs),
     )
 
 
@@ -44,8 +41,8 @@ def assert_buf(
         assert buf[k] is v
 
     # assertions on slow
-    assert set(buf.slow) == expect_slow.keys()
-    slow = buf.slow.data if has_zict_220 else buf.slow  # type: ignore
+    assert set(buf.slow) == set(expect_slow)
+    slow = buf._slow_uncached
     assert slow.weight_by_key == {
         k: psize(tmp_path, **{k: v}) for k, v in expect_slow.items()
     }
@@ -130,10 +127,9 @@ def test_disk_size_calculation(tmp_path):
     assert_buf(buf, tmp_path, {}, {"a": a, "b": b})
 
 
-@requires_zict_210
 def test_spillbuffer_maxlim(tmp_path_factory):
     buf_dir = tmp_path_factory.mktemp("buf")
-    buf = SpillBuffer(str(buf_dir), target=200, max_spill=600, min_log_interval=0)
+    buf = SpillBuffer(str(buf_dir), target=200, max_spill=600)
 
     a, b, c, d, e = "a" * 200, "b" * 100, "c" * 99, "d" * 199, "e" * 98
 
@@ -155,7 +151,7 @@ def test_spillbuffer_maxlim(tmp_path_factory):
     # size of e < target but e+c > target, this will trigger movement of c to slow
     # but the max spill limit prevents it. Resulting in e remaining in fast
 
-    with captured_logger(logging.getLogger("distributed.spill")) as logs_e:
+    with captured_logger("distributed.spill") as logs_e:
         buf["e"] = e
 
     assert "disk reached capacity" in logs_e.getvalue()
@@ -164,7 +160,8 @@ def test_spillbuffer_maxlim(tmp_path_factory):
     # size of d > target, d should go to slow but slow reached the max_spill limit then
     # d will end up on fast with c (which can't be move to slow because it won't fit
     # either)
-    with captured_logger(logging.getLogger("distributed.spill")) as logs_d:
+    RateLimiterFilter.reset_timer("distributed.spill")
+    with captured_logger("distributed.spill") as logs_d:
         buf["d"] = d
 
     assert "disk reached capacity" in logs_d.getvalue()
@@ -181,7 +178,8 @@ def test_spillbuffer_maxlim(tmp_path_factory):
     unlimited_buf["a_large"] = a_large
     assert psize(unlimited_buf_dir, a_large=a_large)[1] > 600
 
-    with captured_logger(logging.getLogger("distributed.spill")) as logs_alarge:
+    RateLimiterFilter.reset_timer("distributed.spill")
+    with captured_logger("distributed.spill") as logs_alarge:
         buf["a"] = a_large
 
     assert "disk reached capacity" in logs_alarge.getvalue()
@@ -191,7 +189,8 @@ def test_spillbuffer_maxlim(tmp_path_factory):
     # max_spill
 
     d_large = "d" * 501
-    with captured_logger(logging.getLogger("distributed.spill")) as logs_dlarge:
+    RateLimiterFilter.reset_timer("distributed.spill")
+    with captured_logger("distributed.spill") as logs_dlarge:
         buf["d"] = d_large
 
     assert "disk reached capacity" in logs_dlarge.getvalue()
@@ -213,16 +212,15 @@ class Bad:
         return self.size
 
 
-@requires_zict_210
 def test_spillbuffer_fail_to_serialize(tmp_path):
-    buf = SpillBuffer(str(tmp_path), target=200, max_spill=600, min_log_interval=0)
+    buf = SpillBuffer(str(tmp_path), target=200, max_spill=600)
 
     # bad data individually larger than spill threshold target 200
     a = Bad(size=201)
 
     # Exception caught in the worker
     with pytest.raises(TypeError, match="Could not serialize"):
-        with captured_logger(logging.getLogger("distributed.spill")) as logs_bad_key:
+        with captured_logger("distributed.spill") as logs_bad_key:
             buf["a"] = a
 
     # spill.py must remain silent because we're already logging in worker.py
@@ -235,7 +233,7 @@ def test_spillbuffer_fail_to_serialize(tmp_path):
     assert_buf(buf, tmp_path, {"b": b}, {})
 
     c = "c" * 100
-    with captured_logger(logging.getLogger("distributed.spill")) as logs_bad_key_mem:
+    with captured_logger("distributed.spill") as logs_bad_key_mem:
         # This will go to fast and try to kick b out,
         # but keep b in fast since it's not pickable
         buf["c"] = c
@@ -247,10 +245,9 @@ def test_spillbuffer_fail_to_serialize(tmp_path):
     assert_buf(buf, tmp_path, {"b": b, "c": c}, {})
 
 
-@requires_zict_210
 @pytest.mark.skipif(WINDOWS, reason="Needs chmod")
 def test_spillbuffer_oserror(tmp_path):
-    buf = SpillBuffer(str(tmp_path), target=200, max_spill=800, min_log_interval=0)
+    buf = SpillBuffer(str(tmp_path), target=200, max_spill=800)
 
     a, b, c, d = (
         "a" * 200,
@@ -269,7 +266,7 @@ def test_spillbuffer_oserror(tmp_path):
     os.chmod(tmp_path, 0o555)
 
     # Add key > than target
-    with captured_logger(logging.getLogger("distributed.spill")) as logs_oserror_slow:
+    with captured_logger("distributed.spill") as logs_oserror_slow:
         buf["c"] = c
 
     assert "Spill to disk failed" in logs_oserror_slow.getvalue()
@@ -280,16 +277,16 @@ def test_spillbuffer_oserror(tmp_path):
 
     # add key to fast which is smaller than target but when added it triggers spill,
     # which triggers OSError
-    with captured_logger(logging.getLogger("distributed.spill")) as logs_oserror_evict:
+    RateLimiterFilter.reset_timer("distributed.spill")
+    with captured_logger("distributed.spill") as logs_oserror_evict:
         buf["d"] = d
 
     assert "Spill to disk failed" in logs_oserror_evict.getvalue()
     assert_buf(buf, tmp_path, {"b": b, "d": d}, {"a": a})
 
 
-@requires_zict_210
 def test_spillbuffer_evict(tmp_path):
-    buf = SpillBuffer(str(tmp_path), target=300, min_log_interval=0)
+    buf = SpillBuffer(str(tmp_path), target=300)
 
     bad = Bad(size=100)
     a = "a" * 100
@@ -306,13 +303,19 @@ def test_spillbuffer_evict(tmp_path):
     assert_buf(buf, tmp_path, {"bad": bad}, {"a": a})
 
     # unsuccessful eviction
-    with captured_logger(logging.getLogger("distributed.spill")) as logs_evict_key:
+    with captured_logger("distributed.spill") as logs_evict_key:
         weight = buf.evict()
     assert weight == -1
 
     assert "Failed to pickle" in logs_evict_key.getvalue()
     # bad keys stays in fast
     assert_buf(buf, tmp_path, {"bad": bad}, {"a": a})
+
+
+def test_no_pop(tmp_path):
+    buf = SpillBuffer(str(tmp_path), target=100)
+    with pytest.raises(NotImplementedError):
+        buf.pop("x", None)
 
 
 class NoWeakRef:
@@ -341,10 +344,7 @@ class SupportsWeakRef(NoWeakRef):
 
 @pytest.mark.parametrize(
     "cls,expect_cached",
-    [
-        (SupportsWeakRef, has_zict_220),
-        (NoWeakRef, False),
-    ],
+    [(SupportsWeakRef, True), (NoWeakRef, False)],
 )
 @pytest.mark.parametrize("size", [60, 110])
 def test_weakref_cache(tmp_path, cls, expect_cached, size):
@@ -384,3 +384,73 @@ def test_weakref_cache(tmp_path, cls, expect_cached, size):
 
     # Test that we update the weakref cache on getitem
     assert (buf["x"] is x2) == expect_cached
+
+
+def test_metrics(tmp_path):
+    buf = SpillBuffer(str(tmp_path), target=35_000)
+    assert buf.cumulative_metrics == {}
+
+    a = "a" * 20_000  # <target, highly compressible
+    b = "b"
+    c = random.randbytes(30_000)  # <target, uncompressible
+    d = "d" * 40_000  # >target, highly compressible
+
+    with meter() as m:
+        buf["a"] = a
+        buf["b"] = b
+        del buf["b"]  # No effect
+        _ = buf["a"]  # Cache hit
+        buf["c"] = c  # Auto evict a (c < target; pushes older keys to slow)
+        buf.evict()  # Manual evict c
+        buf["d"] = d  # Auto evict d (d > target; goes to slow)
+
+        a_size = psize(tmp_path, a=a)
+        c_size = psize(tmp_path, c=c)
+        d_size = psize(tmp_path, d=d)
+
+        _ = buf["c"]  # Unspill / cache miss (c < target, goes back to fast)
+        _ = buf["d"]  # Unspill / cache miss (d > target, stays in slow)
+
+    assert (set(buf.fast), set(buf.slow)) == ({"c"}, {"a", "d"})
+
+    assert {
+        (label, unit): v
+        for (label, unit), v in buf.cumulative_metrics.items()
+        if unit != "seconds"
+    } == {
+        ("disk-read", "bytes"): c_size[1] + d_size[1],
+        ("disk-read", "count"): 2,
+        ("disk-write", "bytes"): a_size[1] + c_size[1] + d_size[1],
+        ("disk-write", "count"): 3,
+        ("memory-read", "bytes"): a_size[0],
+        ("memory-read", "count"): 1,
+    }
+
+    time_metrics = {
+        (label, unit): v
+        for (label, unit), v in buf.cumulative_metrics.items()
+        if unit == "seconds"
+    }
+    assert all(v > 0 for v in time_metrics.values())
+    assert list(time_metrics) == [
+        ("serialize", "seconds"),
+        ("compress", "seconds"),
+        ("disk-write", "seconds"),
+        ("disk-read", "seconds"),
+        ("decompress", "seconds"),
+        ("deserialize", "seconds"),
+    ]
+    if not WINDOWS:  # Fiddly rounding; see distributed.metrics._WindowsTime
+        assert sum(time_metrics.values()) <= m.delta
+
+
+@pytest.mark.parametrize(
+    "compression,minsize,maxsize",
+    [("zlib", 100, 500), (None, 20_000, 20_500)],
+)
+def test_compression_settings(tmp_path, compression, minsize, maxsize):
+    with dask.config.set({"distributed.worker.memory.spill-compression": compression}):
+        buf = SpillBuffer(str(tmp_path), target=1)
+        x = "x" * 20_000
+        buf["x"] = x
+        assert minsize <= psize(tmp_path, x=x)[1] <= maxsize

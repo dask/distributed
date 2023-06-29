@@ -4,16 +4,19 @@ import asyncio
 import contextvars
 import functools
 import io
+import logging
 import multiprocessing
 import os
 import queue
 import socket
 import traceback
 import warnings
+import xml
 from array import array
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from time import sleep
+from unittest import mock
 
 import pytest
 from tornado.ioloop import IOLoop
@@ -27,6 +30,7 @@ from distributed.utils import (
     Log,
     Logs,
     LoopRunner,
+    RateLimiterFilter,
     TimeoutError,
     _maybe_complex,
     ensure_ip,
@@ -46,6 +50,7 @@ from distributed.utils import (
     parse_ports,
     read_block,
     recursive_to_dict,
+    run_in_executor_with_context,
     seek_delimiter,
     set_thread_state,
     sync,
@@ -389,57 +394,41 @@ def assert_not_running(loop):
             q.get(timeout=0.02)
 
 
-_loop_not_running_property_warning = functools.partial(
-    pytest.warns,
-    DeprecationWarning,
-    match=r"Accessing the loop property while the loop is not running is deprecated",
-)
-_explicit_loop_is_not_running_warning = functools.partial(
-    pytest.warns,
-    DeprecationWarning,
-    match=r"Constructing LoopRunner\(loop=loop\) without a running loop is deprecated",
-)
-_implicit_loop_is_not_running_warning = functools.partial(
-    pytest.warns,
-    DeprecationWarning,
-    match=r"Constructing a LoopRunner\(asynchronous=True\) without a running loop is deprecated",
-)
-
-
-@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
-@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
 def test_loop_runner(loop_in_thread):
     # Implicit loop
-    loop = IOLoop()
-    loop.make_current()
-    runner = LoopRunner()
-    with _loop_not_running_property_warning():
-        assert runner.loop not in (loop, loop_in_thread)
+    async def make_looprunner_in_async_context():
+        return IOLoop.current(), LoopRunner()
+
+    loop, runner = asyncio.run(make_looprunner_in_async_context())
+    with pytest.raises(
+        RuntimeError,
+        match=r"Accessing the loop property while the loop is not running is not supported",
+    ):
+        runner.loop
     assert not runner.is_started()
-    with _loop_not_running_property_warning():
-        assert_not_running(runner.loop)
     runner.start()
     assert runner.is_started()
     assert_running(runner.loop)
+    assert runner.loop is not loop
     runner.stop()
     assert not runner.is_started()
-    with _loop_not_running_property_warning():
-        assert_not_running(runner.loop)
+    with pytest.raises(
+        RuntimeError,
+        match=r"Accessing the loop property while the loop is not running is not supported",
+    ):
+        runner.loop
+
+    async def make_io_loop_in_async_context():
+        # calling IOLoop() raises DeprecationWarning: There is no current event loop
+        return IOLoop.current()
 
     # Explicit loop
-    loop = IOLoop()
-    with _explicit_loop_is_not_running_warning():
-        runner = LoopRunner(loop=loop)
-    with _loop_not_running_property_warning():
-        assert runner.loop is loop
-    assert not runner.is_started()
-    assert_not_running(loop)
-    runner.start()
-    assert runner.is_started()
-    assert_running(loop)
-    runner.stop()
-    assert not runner.is_started()
-    assert_not_running(loop)
+    loop = asyncio.run(make_io_loop_in_async_context())
+    with pytest.raises(
+        RuntimeError,
+        match=r"Constructing LoopRunner\(loop=loop\) without a running loop is not supported",
+    ):
+        LoopRunner(loop=loop)
 
     # Explicit loop, already started
     runner = LoopRunner(loop=loop_in_thread)
@@ -453,57 +442,30 @@ def test_loop_runner(loop_in_thread):
     assert_running(loop_in_thread)
 
     # Implicit loop, asynchronous=True
-    loop = IOLoop()
-    loop.make_current()
-    with _implicit_loop_is_not_running_warning():
-        runner = LoopRunner(asynchronous=True)
-    with _loop_not_running_property_warning():
-        assert runner.loop is loop
-    assert not runner.is_started()
-    with _loop_not_running_property_warning():
-        assert_not_running(runner.loop)
-    runner.start()
-    assert runner.is_started()
-    with _loop_not_running_property_warning():
-        assert_not_running(runner.loop)
-    runner.stop()
-    assert not runner.is_started()
-    with _loop_not_running_property_warning():
-        assert_not_running(runner.loop)
+    with pytest.raises(
+        RuntimeError,
+        match=r"Constructing LoopRunner\(asynchronous=True\) without a running loop is not supported",
+    ):
+        LoopRunner(asynchronous=True)
 
-    # Explicit loop, asynchronous=True
-    loop = IOLoop()
-    with _explicit_loop_is_not_running_warning():
-        runner = LoopRunner(loop=loop, asynchronous=True)
-    with _loop_not_running_property_warning():
-        assert runner.loop is loop
-    assert not runner.is_started()
-    with _loop_not_running_property_warning():
-        assert_not_running(runner.loop)
-    runner.start()
-    assert runner.is_started()
-    with _loop_not_running_property_warning():
-        assert_not_running(runner.loop)
-    runner.stop()
-    assert not runner.is_started()
-    with _loop_not_running_property_warning():
-        assert_not_running(runner.loop)
+    # Explicit loop
+    loop = asyncio.run(make_io_loop_in_async_context())
+    with pytest.raises(
+        RuntimeError,
+        match=r"Constructing LoopRunner\(loop=loop\) without a running loop is not supported",
+    ):
+        LoopRunner(loop=loop, asynchronous=True)
 
 
-@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
-@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
 def test_two_loop_runners(loop_in_thread):
     # Loop runners tied to the same loop should cooperate
 
     # ABCCBA
-    loop = IOLoop()
-    with _explicit_loop_is_not_running_warning():
-        a = LoopRunner(loop=loop)
-    with _explicit_loop_is_not_running_warning():
-        b = LoopRunner(loop=loop)
-    assert_not_running(loop)
+    a = LoopRunner()
     a.start()
+    loop = a.loop
     assert_running(loop)
+    b = LoopRunner(loop=loop)
     c = LoopRunner(loop=loop)
     b.start()
     assert_running(loop)
@@ -517,13 +479,12 @@ def test_two_loop_runners(loop_in_thread):
     assert_not_running(loop)
 
     # ABCABC
-    loop = IOLoop()
-    with _explicit_loop_is_not_running_warning():
-        a = LoopRunner(loop=loop)
-    with _explicit_loop_is_not_running_warning():
-        b = LoopRunner(loop=loop)
-    assert_not_running(loop)
+    a = LoopRunner()
     a.start()
+    loop = a.loop
+    assert_running(loop)
+    b = LoopRunner(loop=loop)
+    c = LoopRunner(loop=loop)
     assert_running(loop)
     b.start()
     assert_running(loop)
@@ -563,6 +524,32 @@ async def test_loop_runner_gen():
     runner.stop()
     assert not runner.is_started()
     await asyncio.sleep(0.01)
+
+
+def test_loop_runner_exception_in_start(cleanup):
+    class MyException(Exception):
+        pass
+
+    with (
+        mock.patch("tornado.ioloop.IOLoop.current", side_effect=MyException),
+        pytest.raises(MyException),
+    ):
+        LoopRunner().start()
+
+
+def test_loop_runner_exception_in_teardown(cleanup):
+    runner = LoopRunner()
+    runner.start()
+
+    async def cancel_all_tasks():
+        current_task = asyncio.current_task()
+        for task in asyncio.all_tasks():
+            if task is not current_task:
+                task.cancel()
+
+    runner.run_sync(cancel_all_tasks)
+    with pytest.raises(asyncio.CancelledError):
+        runner.stop()
 
 
 @gen_test()
@@ -619,7 +606,7 @@ def test_logs():
 
 def test_is_valid_xml():
     assert is_valid_xml("<a>foo</a>")
-    with pytest.raises(Exception):
+    with pytest.raises(xml.etree.ElementTree.ParseError):
         assert is_valid_xml("<a>foo")
 
 
@@ -658,6 +645,37 @@ def test_parse_ports():
         parse_ports("foo")
     with pytest.raises(ValueError):
         parse_ports("100.5")
+
+
+@gen_test()
+async def test_run_in_executor_with_context():
+    class MyExecutor(Executor):
+        call_count = 0
+
+        def submit(self, __fn, *args, **kwargs):
+            self.call_count += 1
+            f = Future()
+            f.set_result(__fn(*args, **kwargs))
+            return f
+
+    ex = MyExecutor()
+    out = await run_in_executor_with_context(ex, inc, 1)
+    assert out == 2
+    assert ex.call_count == 1
+
+
+@gen_test()
+async def test_run_in_executor_with_context_preserves_contextvars():
+    var = contextvars.ContextVar("var")
+
+    with ThreadPoolExecutor(2) as ex:
+
+        async def set_var(v: str) -> None:
+            var.set(v)
+            r = await run_in_executor_with_context(ex, var.get)
+            assert r == v
+
+        await asyncio.gather(set_var("foo"), set_var("bar"))
 
 
 @gen_test()
@@ -887,7 +905,6 @@ async def test_log_errors():
 
     # Use the logger of the caller module
     with captured_logger("test_utils") as caplog:
-
         # Context manager
         with log_errors():
             pass
@@ -989,13 +1006,12 @@ async def test_log_errors():
     assert caplog.getvalue().startswith("err7\n")
 
 
-def test_load_json_robust_timeout(tmpdir):
-    path = tmpdir / "foo.json"
+def test_load_json_robust_timeout(tmp_path):
+    path = tmp_path / "foo.json"
     with pytest.raises(TimeoutError):
         json_load_robust(path, timeout=0.01)
 
     with ThreadPoolExecutor() as tpe:
-
         fut = tpe.submit(json_load_robust, path, timeout=30)
         import json
 
@@ -1005,3 +1021,22 @@ def test_load_json_robust_timeout(tmpdir):
         assert fut.result() == {"foo": "bar"}
 
     assert json_load_robust(path) == {"foo": "bar"}
+
+
+def test_rate_limiter_filter(caplog):
+    logger = logging.getLogger("test_rate_limiter_filter")
+    logger.addFilter(RateLimiterFilter(r"Hello .*", rate="10ms"))
+    logger.warning("Hello Al!")  # Match
+    logger.warning("Hello Bianca!")  # Match and <10ms
+    logger.warning("Hello %s!", "Charlie")  # Match and <10ms, with args
+    logger.warning("Goodbye Al!")  # No match
+    sleep(0.02)
+    logger.warning("Hello again!")  # Match and >10ms
+    RateLimiterFilter.reset_timer("test_rate_limiter_filter")
+    logger.warning("Hello once more!")  # Match and <10ms, but after calling clear()
+    assert [record.msg for record in caplog.records] == [
+        "Hello Al!",
+        "Goodbye Al!",
+        "Hello again!",
+        "Hello once more!",
+    ]

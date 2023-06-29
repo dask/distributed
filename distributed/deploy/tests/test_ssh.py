@@ -213,24 +213,6 @@ async def test_config_inherited_by_subprocess(loop):
 
 
 @gen_test()
-async def test_unimplemented_options():
-    with pytest.raises(Exception):
-        async with SSHCluster(
-            ["127.0.0.1"] * 3,
-            connect_kwargs=dict(known_hosts=None),
-            asynchronous=True,
-            worker_kwargs={
-                "nthreads": 2,
-                "memory_limit": "2 GiB",
-                "death_timeout": "5s",
-                "unimplemented_option": 2,
-            },
-            scheduler_kwargs={"idle_timeout": "5s"},
-        ) as cluster:
-            assert cluster
-
-
-@gen_test()
 async def test_list_of_connect_options():
     async with SSHCluster(
         ["127.0.0.1"] * 3,

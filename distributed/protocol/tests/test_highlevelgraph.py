@@ -4,17 +4,17 @@ import ast
 
 import pytest
 
+np = pytest.importorskip("numpy")
+pd = pytest.importorskip("pandas")
+
+from numpy.testing import assert_array_equal
+
 import dask
 import dask.array as da
 import dask.dataframe as dd
 
 from distributed.diagnostics import SchedulerPlugin
 from distributed.utils_test import gen_cluster
-
-np = pytest.importorskip("numpy")
-pd = pytest.importorskip("pandas")
-
-from numpy.testing import assert_array_equal
 
 
 @gen_cluster(client=True)
@@ -26,6 +26,7 @@ async def test_combo_of_layer_types(c, s, a, b):
 
     y = c.submit(lambda x: x, 2)
     z = c.submit(lambda x: x, 3)
+    xx = await c.submit(lambda x: x + 1, y)
     x = da.blockwise(
         add,
         "x",

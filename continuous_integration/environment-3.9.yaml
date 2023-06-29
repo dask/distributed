@@ -8,17 +8,18 @@ dependencies:
   - packaging
   - pip
   - asyncssh
-  # Temporary restriction until https://github.com/dask/distributed/issues/7173 is resolved
-  - bokeh<3
+  - bokeh
   - click
   - cloudpickle
   - coverage
+  - cython  # Only tested here; also a dependency of crick
   - dask  # overridden by git tip below
   - filesystem-spec
+  - gilknocker>=0.4.0
   - h5py
-  - ipykernel
-  - ipywidgets
-  - jinja2
+  - ipykernel <6.22.0  # https://github.com/dask/distributed/issues/7688
+  - ipywidgets <8.0.5  # https://github.com/dask/distributed/issues/7688
+  - jinja2 >=2.10.3
   - locket >=1.0
   - lz4 >=0.23.1  # Only tested here
   - msgpack-python
@@ -50,4 +51,5 @@ dependencies:
   - zstandard >=0.9.0
   - pip:
       - git+https://github.com/dask/dask
+      - git+https://github.com/dask/crick  # Only tested here
       - keras

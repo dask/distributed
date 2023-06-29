@@ -19,7 +19,7 @@ from distributed import (
 )
 from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.metrics import time
-from distributed.utils_test import async_wait_for, gen_test, slowinc
+from distributed.utils_test import async_poll_for, gen_test, slowinc
 
 
 def test_adaptive_local_cluster(loop):
@@ -58,7 +58,6 @@ async def test_adaptive_local_cluster_multi_workers():
         dashboard_address=":0",
         asynchronous=True,
     ) as cluster:
-
         cluster.scheduler.allowed_failures = 1000
         adapt = cluster.adapt(interval="100 ms")
         async with Client(cluster, asynchronous=True) as c:
@@ -280,8 +279,6 @@ async def test_no_more_workers_than_tasks():
                 assert len(cluster.scheduler.workers) <= 1
 
 
-@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
-@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
 def test_basic_no_loop(cleanup):
     loop = None
     try:
@@ -294,8 +291,7 @@ def test_basic_no_loop(cleanup):
                 assert future.result() == 2
             loop = cluster.loop
     finally:
-        if loop is not None:
-            loop.add_callback(loop.stop)
+        assert loop is None or not loop.asyncio_loop.is_running()
 
 
 @pytest.mark.flaky(condition=LINUX, reruns=10, reruns_delay=5)
@@ -468,7 +464,7 @@ async def test_scale_needs_to_be_awaited():
             await client.gather(futures)
 
             del futures
-            await async_wait_for(lambda: not cluster.workers, 10)
+            await async_poll_for(lambda: not cluster.workers, 10)
 
 
 @gen_test()
@@ -483,8 +479,8 @@ async def test_adaptive_stopped():
         instance = cluster.adapt(interval="10ms")
         assert instance.periodic_callback is not None
 
-        await async_wait_for(lambda: instance.periodic_callback.is_running(), timeout=5)
+        await async_poll_for(lambda: instance.periodic_callback.is_running(), timeout=5)
 
         pc = instance.periodic_callback
 
-    await async_wait_for(lambda: not pc.is_running(), timeout=5)
+    await async_poll_for(lambda: not pc.is_running(), timeout=5)

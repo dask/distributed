@@ -8,6 +8,8 @@ import pytest
 
 import dask
 
+from distributed.utils import wait_for
+
 pytestmark = pytest.mark.gpu
 
 ucp = pytest.importorskip("ucp")
@@ -39,7 +41,7 @@ def test_registered(ucx_loop):
 
 
 async def get_comm_pair(
-    listen_addr="ucx://" + HOST, listen_args=None, connect_args=None, **kwargs
+    listen_addr=f"ucx://{HOST}", listen_args=None, connect_args=None, **kwargs
 ):
     listen_args = listen_args or {}
     connect_args = connect_args or {}
@@ -321,7 +323,9 @@ async def test_stress(
 async def test_simple(
     ucx_loop,
 ):
-    async with LocalCluster(protocol="ucx", asynchronous=True) as cluster:
+    async with LocalCluster(
+        protocol="ucx", n_workers=2, threads_per_worker=2, asynchronous=True
+    ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             assert cluster.scheduler_address.startswith("ucx://")
             assert await client.submit(lambda x: x + 1, 10) == 11
@@ -369,7 +373,9 @@ async def test_transpose(
 ):
     da = pytest.importorskip("dask.array")
 
-    async with LocalCluster(protocol="ucx", asynchronous=True) as cluster:
+    async with LocalCluster(
+        protocol="ucx", n_workers=2, threads_per_worker=2, asynchronous=True
+    ) as cluster:
         async with Client(cluster, asynchronous=True):
             assert cluster.scheduler_address.startswith("ucx://")
             x = da.ones((10000, 10000), chunks=(1000, 1000)).persist()
@@ -404,6 +410,6 @@ async def test_comm_closed_on_read_error():
     # Depending on the UCP protocol selected, it may raise either
     # `asyncio.TimeoutError` or `CommClosedError`, so validate either one.
     with pytest.raises((asyncio.TimeoutError, CommClosedError)):
-        await asyncio.wait_for(reader.read(), 0.01)
+        await wait_for(reader.read(), 0.01)
 
     assert reader.closed()

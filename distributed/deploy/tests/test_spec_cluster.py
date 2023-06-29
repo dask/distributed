@@ -82,8 +82,6 @@ def test_spec_sync(loop):
             assert result == 11
 
 
-@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
-@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
 def test_loop_started_in_constructor(cleanup):
     # test that SpecCluster.__init__ starts a loop in another thread
     cluster = SpecCluster(worker_spec, scheduler=scheduler, loop=None)
@@ -141,7 +139,6 @@ async def test_scale():
 @gen_test()
 async def test_adaptive_killed_worker():
     with dask.config.set({"distributed.deploy.lost-worker-timeout": 0.1}):
-
         async with SpecCluster(
             asynchronous=True,
             worker={"cls": Nanny, "options": {"nthreads": 1}},
@@ -355,7 +352,6 @@ async def test_widget():
         asynchronous=True,
         worker={"cls": Worker, "options": {"nthreads": 1}},
     ) as cluster:
-
         start = time()  # wait for all workers
         while len(cluster.scheduler_info["workers"]) < len(cluster.worker_spec):
             await asyncio.sleep(0.01)

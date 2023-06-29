@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import functools
 import importlib
@@ -20,9 +21,21 @@ import weakref
 import xml.etree.ElementTree
 from asyncio import TimeoutError
 from collections import deque
-from collections.abc import Callable, Collection, Container, KeysView, ValuesView
-from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
-from contextlib import contextmanager, suppress
+from collections.abc import (
+    Awaitable,
+    Callable,
+    Collection,
+    Container,
+    Generator,
+    Iterator,
+    KeysView,
+    ValuesView,
+)
+from concurrent.futures import (  # noqa: F401
+    CancelledError,
+    Executor,
+    ThreadPoolExecutor,
+)
 from contextvars import ContextVar
 from datetime import timedelta
 from functools import wraps
@@ -33,9 +46,10 @@ from time import sleep
 from types import ModuleType
 from typing import TYPE_CHECKING
 from typing import Any as AnyType
-from typing import ClassVar, Iterator, TypeVar, overload
+from typing import ClassVar, TypeVar, overload
 
 import click
+import psutil
 import tblib.pickling_support
 
 try:
@@ -55,7 +69,7 @@ from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
 from distributed.compatibility import WINDOWS
-from distributed.metrics import time
+from distributed.metrics import context_meter, monotonic, time
 
 try:
     from dask.context import thread_state
@@ -200,8 +214,6 @@ def get_ip_interface(ifname):
     ValueError is raised if the interface does no have an IPv4 address
     associated with it.
     """
-    import psutil
-
     net_if_addrs = psutil.net_if_addrs()
 
     if ifname not in net_if_addrs:
@@ -322,7 +334,12 @@ class SyncMethodMixin:
     @property
     def asynchronous(self):
         """Are we running in the event loop?"""
-        return in_async_call(self.loop, default=getattr(self, "_asynchronous", False))
+        try:
+            return in_async_call(
+                self.loop, default=getattr(self, "_asynchronous", False)
+            )
+        except RuntimeError:
+            return False
 
     def sync(self, func, *args, asynchronous=None, callback_timeout=None, **kwargs):
         """Call `func` with `args` synchronously or asynchronously depending on
@@ -333,7 +350,7 @@ class SyncMethodMixin:
         if asynchronous:
             future = func(*args, **kwargs)
             if callback_timeout is not None:
-                future = asyncio.wait_for(future, callback_timeout)
+                future = wait_for(future, callback_timeout)
             return future
         else:
             return sync(
@@ -374,7 +391,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             yield gen.moment
             future = func(*args, **kwargs)
             if callback_timeout is not None:
-                future = asyncio.wait_for(future, callback_timeout)
+                future = wait_for(future, callback_timeout)
             future = asyncio.ensure_future(future)
             result = yield future
         except Exception:
@@ -408,6 +425,63 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
         return result
 
 
+if sys.version_info >= (3, 10):
+    from asyncio import Event as LateLoopEvent
+else:
+    # In python 3.10 asyncio.Lock and other primitives no longer support
+    # passing a loop kwarg to bind to a loop running in another thread
+    # e.g. calling from Client(asynchronous=False). Instead the loop is bound
+    # as late as possible: when calling any methods that wait on or wake
+    # Future instances. See: https://bugs.python.org/issue42392
+    class LateLoopEvent:
+        _event: asyncio.Event | None
+
+        def __init__(self) -> None:
+            self._event = None
+
+        def set(self) -> None:
+            if self._event is None:
+                self._event = asyncio.Event()
+
+            self._event.set()
+
+        def is_set(self) -> bool:
+            return self._event is not None and self._event.is_set()
+
+        async def wait(self) -> bool:
+            if self._event is None:
+                self._event = asyncio.Event()
+
+            return await self._event.wait()
+
+
+class _CollectErrorThread:
+    def __init__(self, target: Callable[[], None], daemon: bool, name: str):
+        self._exception: BaseException | None = None
+
+        def wrapper() -> None:
+            try:
+                target()
+            except BaseException as e:
+                self._exception = e
+
+        self._thread = thread = threading.Thread(
+            target=wrapper, daemon=daemon, name=name
+        )
+        thread.start()
+
+    def join(self, timeout: float | None = None) -> None:
+        thread = self._thread
+        thread.join(timeout=timeout)
+        if thread.is_alive():
+            raise TimeoutError("join timed out")
+        if self._exception is not None:
+            try:
+                raise self._exception
+            finally:  # remove a reference cycle
+                del self._exception
+
+
 class LoopRunner:
     """
     A helper to start and stop an IO loop in a controlled way.
@@ -430,36 +504,30 @@ class LoopRunner:
         weakref.WeakKeyDictionary[IOLoop, tuple[int, LoopRunner | None]]
     ] = weakref.WeakKeyDictionary()
     _lock = threading.Lock()
+    _loop_thread: _CollectErrorThread | None
 
-    def __init__(self, loop=None, asynchronous=False):
+    def __init__(self, loop: IOLoop | None = None, asynchronous: bool = False):
         if loop is None:
             if asynchronous:
+                # raises RuntimeError if there's no running loop
                 try:
                     asyncio.get_running_loop()
-                except RuntimeError:
-                    warnings.warn(
-                        "Constructing a LoopRunner(asynchronous=True) without a running loop is deprecated",
-                        DeprecationWarning,
-                        stacklevel=2,
-                    )
-                self._loop = IOLoop.current()
-            else:
-                # We're expecting the loop to run in another thread,
-                # avoid re-using this thread's assigned loop
-                self._loop = IOLoop()
-        else:
-            if not loop.asyncio_loop.is_running():
-                warnings.warn(
-                    "Constructing LoopRunner(loop=loop) without a running loop is deprecated",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-            self._loop = loop
+                except RuntimeError as e:
+                    raise RuntimeError(
+                        "Constructing LoopRunner(asynchronous=True) without a running loop is not supported"
+                    ) from e
+                loop = IOLoop.current()
+        elif not loop.asyncio_loop.is_running():  # type: ignore[attr-defined]
+            # LoopRunner is not responsible for starting a foreign IOLoop
+            raise RuntimeError(
+                "Constructing LoopRunner(loop=loop) without a running loop is not supported"
+            )
+
+        self._loop = loop
         self._asynchronous = asynchronous
         self._loop_thread = None
         self._started = False
-        with self._lock:
-            self._all_loops.setdefault(self._loop, (0, None))
+        self._stop_event = LateLoopEvent()
 
     def start(self):
         """
@@ -471,62 +539,53 @@ class LoopRunner:
         with self._lock:
             self._start_unlocked()
 
-    def _start_unlocked(self):
+    def _start_unlocked(self) -> None:
         assert not self._started
 
-        count, real_runner = self._all_loops[self._loop]
-        if self._asynchronous or real_runner is not None or count > 0:
+        if self._loop is not None:
+            try:
+                count, real_runner = self._all_loops[self._loop]
+            except KeyError:
+                assert self._loop.asyncio_loop.is_running()  # type: ignore[attr-defined]
+                self._started = True
+                return
+
             self._all_loops[self._loop] = count + 1, real_runner
             self._started = True
             return
 
         assert self._loop_thread is None
-        assert count == 0
 
-        loop_evt = threading.Event()
-        done_evt = threading.Event()
-        in_thread = [None]
-        start_exc = [None]
+        start_evt = threading.Event()
+        start_exc = None
+        loop = None
 
-        def loop_cb():
-            in_thread[0] = threading.current_thread()
-            loop_evt.set()
+        async def amain() -> None:
+            nonlocal loop
+            loop = IOLoop.current()
+            start_evt.set()
+            await self._stop_event.wait()
 
-        def run_loop(loop=self._loop):
-            loop.add_callback(loop_cb)
-            # run loop forever if it's not running already
+        def run_loop() -> None:
+            nonlocal start_exc
             try:
-                if not loop.asyncio_loop.is_running():
-                    loop.start()
-            except Exception as e:
-                start_exc[0] = e
-            finally:
-                done_evt.set()
+                asyncio.run(amain())
+            except BaseException as e:
+                if start_evt.is_set():
+                    raise
+                start_exc = e
+                start_evt.set()
 
-        thread = threading.Thread(target=run_loop, name="IO loop")
-        thread.daemon = True
-        thread.start()
-
-        loop_evt.wait(timeout=10)
+        self._loop_thread = _CollectErrorThread(
+            target=run_loop, daemon=True, name="IO loop"
+        )
+        start_evt.wait(timeout=10)
+        if start_exc is not None:
+            raise start_exc
+        assert loop is not None
+        self._loop = loop
         self._started = True
-
-        actual_thread = in_thread[0]
-        if actual_thread is not thread:
-            # Loop already running in other thread (user-launched)
-            done_evt.wait(5)
-            if start_exc[0] is not None and not isinstance(start_exc[0], RuntimeError):
-                if not isinstance(
-                    start_exc[0], Exception
-                ):  # track down infrequent error
-                    raise TypeError(
-                        f"not an exception: {start_exc[0]!r}",
-                    )
-                raise start_exc[0]
-            self._all_loops[self._loop] = count + 1, None
-        else:
-            assert start_exc[0] is None, start_exc
-            self._loop_thread = thread
-            self._all_loops[self._loop] = count + 1, self
+        self._all_loops[loop] = (1, self)
 
     def stop(self, timeout=10):
         """
@@ -542,25 +601,26 @@ class LoopRunner:
 
         self._started = False
 
-        count, real_runner = self._all_loops[self._loop]
+        try:
+            count, real_runner = self._all_loops[self._loop]
+        except KeyError:
+            return
+
         if count > 1:
             self._all_loops[self._loop] = count - 1, real_runner
-        else:
-            assert count == 1
-            del self._all_loops[self._loop]
-            if real_runner is not None:
-                real_runner._real_stop(timeout)
+            return
+
+        assert count == 1
+        del self._all_loops[self._loop]
+        real_runner._real_stop(timeout)
 
     def _real_stop(self, timeout):
         assert self._loop_thread is not None
-        if self._loop_thread is not None:
-            try:
-                self._loop.add_callback(self._loop.stop)
-                self._loop_thread.join(timeout=timeout)
-                with suppress(KeyError):  # IOLoop can be missing
-                    self._loop.close()
-            finally:
-                self._loop_thread = None
+        try:
+            self._loop.add_callback(self._stop_event.set)
+            self._loop_thread.join(timeout=timeout)
+        finally:
+            self._loop_thread = None
 
     def is_started(self):
         """
@@ -585,16 +645,14 @@ class LoopRunner:
     @property
     def loop(self):
         loop = self._loop
-        if not loop.asyncio_loop.is_running():
-            warnings.warn(
-                "Accessing the loop property while the loop is not running is deprecated",
-                DeprecationWarning,
-                stacklevel=2,
+        if loop is None or not loop.asyncio_loop.is_running():
+            raise RuntimeError(
+                "Accessing the loop property while the loop is not running is not supported"
             )
         return self._loop
 
 
-@contextmanager
+@contextlib.contextmanager
 def set_thread_state(**kwargs):
     old = {}
     for k in kwargs:
@@ -616,7 +674,7 @@ def set_thread_state(**kwargs):
                 setattr(thread_state, k, v)
 
 
-@contextmanager
+@contextlib.contextmanager
 def tmp_text(filename, text):
     fn = os.path.join(tempfile.gettempdir(), filename)
     with open(fn, "w") as f:
@@ -779,6 +837,11 @@ def silence_logging(level, root="distributed"):
     """
     Change all StreamHandlers for the given logger to the given level
     """
+    warnings.warn(
+        "silence_logging is deprecated, call silence_logging_cmgr",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if isinstance(level, str):
         level = getattr(logging, level.upper())
 
@@ -790,6 +853,27 @@ def silence_logging(level, root="distributed"):
             handler.setLevel(level)
 
     return old
+
+
+@contextlib.contextmanager
+def silence_logging_cmgr(
+    level: str | int, root: str = "distributed"
+) -> Generator[None, None, None]:
+    """
+    Temporarily change all StreamHandlers for the given logger to the given level
+    """
+    if isinstance(level, str):
+        level = getattr(logging, level.upper())
+
+    logger = logging.getLogger(root)
+    with contextlib.ExitStack() as stack:
+        for handler in logger.handlers:
+            if isinstance(handler, logging.StreamHandler):
+                old = handler.level
+                if old != level:
+                    handler.setLevel(level)
+                    stack.callback(handler.setLevel, old)
+        yield
 
 
 @toolz.memoize
@@ -1041,7 +1125,7 @@ def import_file(path: str) -> list[ModuleType]:
         names_to_import.append(name)
     if ext == ".py":  # Ensure that no pyc file will be reused
         cache_file = cache_from_source(path)
-        with suppress(OSError):
+        with contextlib.suppress(OSError):
             os.remove(cache_file)
     if ext in (".egg", ".zip", ".pyz"):
         if path not in sys.path:
@@ -1217,7 +1301,7 @@ def iscoroutinefunction(f):
     return inspect.iscoroutinefunction(f) or gen.is_coroutine_function(f)
 
 
-@contextmanager
+@contextlib.contextmanager
 def warn_on_duration(duration: str | float | timedelta, msg: str) -> Iterator[None]:
     """Generate a UserWarning if the operation in this context takes longer than
     *duration* and print *msg*
@@ -1391,7 +1475,6 @@ def is_valid_xml(text):
 
 
 _offload_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="Dask-Offload")
-weakref.finalize(_offload_executor, _offload_executor.shutdown)
 
 
 def import_term(name: str) -> AnyType:
@@ -1411,13 +1494,48 @@ def import_term(name: str) -> AnyType:
     return getattr(module, attr_name)
 
 
-async def offload(fn, *args, **kwargs):
+async def run_in_executor_with_context(
+    executor: Executor | None,
+    func: Callable[P, T],
+    /,
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> T:
+    """Variant of :meth:`~asyncio.AbstractEventLoop.run_in_executor`, which
+    propagates contextvars.
+    Note that this limits the type of Executor to those that do not pickle objects.
+
+    See also
+    --------
+    asyncio.AbstractEventLoop.run_in_executor
+    offload
+    https://bugs.python.org/issue34014
+    """
     loop = asyncio.get_running_loop()
-    # Retain context vars while deserializing; see https://bugs.python.org/issue34014
     context = contextvars.copy_context()
     return await loop.run_in_executor(
-        _offload_executor, lambda: context.run(fn, *args, **kwargs)
+        executor, lambda: context.run(func, *args, **kwargs)
     )
+
+
+def offload(
+    func: Callable[P, T],
+    /,
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> Awaitable[T]:
+    """Run a synchronous function in a separate thread.
+    Unlike :meth:`asyncio.to_thread`, this propagates contextvars and offloads to an
+    ad-hoc thread pool with a single worker.
+
+    See also
+    --------
+    asyncio.to_thread
+    run_in_executor_with_context
+    https://bugs.python.org/issue34014
+    """
+    with context_meter.meter("offload"):
+        return run_in_executor_with_context(_offload_executor, func, *args, **kwargs)
 
 
 class EmptyContext:
@@ -1758,3 +1876,49 @@ class Deadline:
     def expired(self) -> bool:
         """Whether the deadline has already expired"""
         return self.remaining == 0
+
+
+class RateLimiterFilter(logging.Filter):
+    """A Logging filter that ensures a matching message is emitted at most every
+    `rate` seconds"""
+
+    pattern: re.Pattern
+    rate: float
+    _last_seen: float
+
+    def __init__(self, pattern: str, *, name: str = "", rate: str | float = "10s"):
+        super().__init__(name)
+        self.pattern = re.compile(pattern)
+        self.rate = _parse_timedelta(rate)
+        self._last_seen = -self.rate
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if self.pattern.match(record.msg):
+            now = monotonic()
+            if now - self._last_seen < self.rate:
+                return False
+            self._last_seen = now
+        return True
+
+    @classmethod
+    def reset_timer(cls, logger: logging.Logger | str) -> None:
+        """Reset the timer on all RateLimiterFilters on a logger.
+        Useful in unit testing.
+        """
+        if isinstance(logger, str):
+            logger = logging.getLogger(logger)
+        for filter in logger.filters:
+            if isinstance(filter, cls):
+                filter._last_seen = -filter.rate
+
+
+if sys.version_info >= (3, 11):
+
+    async def wait_for(fut: Awaitable[T], timeout: float) -> T:
+        async with asyncio.timeout(timeout):
+            return await fut
+
+else:
+
+    async def wait_for(fut: Awaitable[T], timeout: float) -> T:
+        return await asyncio.wait_for(fut, timeout)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 import struct
 import warnings
 import weakref
@@ -24,11 +25,11 @@ import dask
 
 from distributed.comm.addressing import parse_host_port, unparse_host_port
 from distributed.comm.core import (
+    BaseListener,
     Comm,
     CommClosedError,
     Connector,
     FatalCommClosedError,
-    Listener,
 )
 from distributed.comm.registry import backends
 from distributed.comm.tcp import (
@@ -173,6 +174,16 @@ class WSHandlerComm(Comm):
         assert isinstance(ip, str)
         return ip + ":0"
 
+    @property
+    def same_host(self) -> bool:
+        """Override Comm.same_host, adding support for HTTP-only subdomains, which won't
+        have a port and that may not be known to the DNS service
+        """
+        try:
+            return super().same_host
+        except (ValueError, socket.gaierror):
+            return False
+
     def closed(self):
         return (
             self.handler.closed
@@ -285,6 +296,16 @@ class WS(Comm):
     def peer_address(self) -> str:
         return f"{self.prefix}{self.sock.parsed.netloc}"
 
+    @property
+    def same_host(self) -> bool:
+        """Override Comm.same_host, adding support for HTTP-only subdomains, which won't
+        have a port and that may not be known to the DNS service
+        """
+        try:
+            return super().same_host
+        except (ValueError, socket.gaierror):
+            return False
+
     def _read_extra(self):
         pass
 
@@ -311,7 +332,7 @@ class WSS(WS):
             )
 
 
-class WSListener(Listener):
+class WSListener(BaseListener):
     prefix = "ws://"
 
     def __init__(
@@ -322,6 +343,7 @@ class WSListener(Listener):
         allow_offload: bool = False,
         **connection_args: Any,
     ):
+        super().__init__()
         if not address.startswith(self.prefix):
             address = f"{self.prefix}{address}"
 

@@ -95,7 +95,10 @@ async def test_prometheus_collect_cost_total_by_cost_multipliers(c, s, a, b):
 
 
 @gen_cluster(
-    client=True, clean_kwargs={"threads": False}, scheduler_kwargs={"extensions": {}}
+    client=True,
+    clean_kwargs={"threads": False},
+    scheduler_kwargs={"extensions": {}},
+    worker_kwargs={"extensions": {}},
 )
 async def test_prometheus_without_stealing_extension(c, s, a, b):
     pytest.importorskip("prometheus_client")

@@ -25,9 +25,10 @@ from distributed.dashboard.components.scheduler import (
     AggregateAction,
     ClusterMemory,
     ComputePerKey,
+    Contention,
     CurrentLoad,
-    EventLoop,
     Events,
+    FinePerformanceMetrics,
     Hardware,
     MemoryByKey,
     MemoryColor,
@@ -51,7 +52,8 @@ from distributed.dashboard.components.scheduler import (
 from distributed.dashboard.components.worker import Counters
 from distributed.dashboard.scheduler import applications
 from distributed.diagnostics.task_stream import TaskStreamPlugin
-from distributed.metrics import time
+from distributed.metrics import context_meter, time
+from distributed.spans import span
 from distributed.utils import format_dashboard_link
 from distributed.utils_test import (
     block_on_event,
@@ -108,7 +110,7 @@ async def test_basic(c, s, a, b):
         SystemMonitor,
         Occupancy,
         StealingTimeSeries,
-        EventLoop,
+        Contention,
     ]:
         ss = component(s)
 
@@ -321,11 +323,125 @@ async def test_WorkersMemory(c, s, a, b):
     cl.update()
     d = dict(cl.source.data)
     llens = {len(l) for l in d.values()}
-    # There are 2 workers. There is definitely going to be managed_in_memory and
-    # unmanaged_old; there may be unmanaged_new. There won't be managed_spilled.
+    # There are 2 workers. There is definitely going to be managed and
+    # unmanaged_old; there may be unmanaged_new. There won't be spilled.
     # Empty rects are removed.
     assert llens in ({4}, {5}, {6})
     assert all(d["width"])
+
+
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.memory.target": 0.7,
+        "distributed.worker.memory.spill": False,
+        "distributed.worker.memory.pause": False,
+    },
+    worker_kwargs={"memory_limit": 100},
+)
+async def test_FinePerformanceMetrics(c, s, a, b):
+    cl = FinePerformanceMetrics(s)
+
+    # Test with no metrics
+    cl.update()
+    assert not cl.visible_functions
+    assert not cl.span_tag_selector.options
+    assert not cl.function_selector.options
+    assert cl.unit_selector.options == ["seconds"]
+
+    # execute on default span; multiple tasks in same TaskGroup
+    x0 = c.submit(inc, 0, key="x-0", workers=[a.address])
+    x1 = c.submit(inc, 1, key="x-1", workers=[a.address])
+
+    # execute with spill (output size is individually larger than target)
+    w = c.submit(lambda: "x" * 75, key="w", workers=[a.address])
+
+    await wait([x0, x1, w])
+
+    a.data.evict()
+    a.data.evict()
+    assert not a.data.fast
+    assert set(a.data.slow) == {"x-0", "x-1", "w"}
+
+    with span("foo"):
+        # execute on named span, with unspill
+        y0 = c.submit(inc, x0, key="y-0", workers=[a.address])
+        # get_data with unspill + gather_dep + execute on named span
+        y1 = c.submit(inc, x1, key="y-1", workers=[b.address])
+
+    # execute on named span (duplicate name, different id)
+    with span("foo"):
+        z = c.submit(inc, 3, key="z")
+
+    # Custom metric with non-string label and custom unit
+    def f():
+        context_meter.digest_metric(None, 1, "seconds")
+        context_meter.digest_metric(("foo", 1), 2, "seconds")
+        context_meter.digest_metric("hideme", 1.1, "custom")
+
+    v = c.submit(f, key="v")
+    await wait([y0, y1, z, v])
+
+    await a.heartbeat()
+    await b.heartbeat()
+
+    cl.update()
+    assert sorted(cl.visible_functions) == ["N/A", "v", "w", "x", "y", "z"]
+    assert sorted(cl.function_selector.options) == ["N/A", "v", "w", "x", "y", "z"]
+    assert sorted(cl.unit_selector.options) == ["bytes", "count", "custom", "seconds"]
+    assert "thread-cpu" in cl.visible_activities
+    assert "('foo', 1)" in cl.visible_activities
+    assert "None" in cl.visible_activities
+    assert "hideme" not in cl.visible_activities
+    assert sorted(cl.span_tag_selector.options) == ["default", "foo"]
+
+    orig_activities = cl.visible_activities[:]
+
+    cl.unit_selector.value = "bytes"
+    cl.update()
+    assert sorted(cl.visible_activities) == ["disk-read", "disk-write", "memory-read"]
+
+    cl.unit_selector.value = "count"
+    cl.update()
+    assert sorted(cl.visible_activities) == ["disk-read", "disk-write", "memory-read"]
+
+    cl.unit_selector.value = "custom"
+    cl.update()
+    assert sorted(cl.visible_activities) == ["hideme"]
+
+    cl.unit_selector.value = "seconds"
+    cl.update()
+    assert cl.visible_activities == orig_activities
+
+    cl.span_tag_selector.value = ["foo"]
+    cl.update()
+    assert sorted(cl.visible_functions) == ["N/A", "y", "z"]
+    assert sorted(cl.function_selector.options) == ["N/A", "v", "w", "x", "y", "z"]
+
+
+@gen_cluster(
+    client=True,
+    scheduler_kwargs={"extensions": {}},
+    worker_kwargs={"extensions": {}},
+)
+async def test_FinePerformanceMetrics_no_spans(c, s, a, b):
+    cl = FinePerformanceMetrics(s)
+
+    # Test with no metrics
+    cl.update()
+    assert not cl.visible_functions
+    await c.submit(inc, 0, key="x-0")
+    await a.heartbeat()
+    await b.heartbeat()
+
+    cl.update()
+    assert sorted(cl.visible_functions) == ["x"]
+    assert sorted(cl.unit_selector.options) == ["bytes", "count", "seconds"]
+    assert "thread-cpu" in cl.visible_activities
+
+    cl.unit_selector.value = "bytes"
+    cl.update()
+    assert sorted(cl.visible_activities) == ["memory-read"]
 
 
 @gen_cluster(client=True)
@@ -340,8 +456,8 @@ async def test_ClusterMemory(c, s, a, b):
     llens = {len(l) for l in d.values()}
     # Unlike WorkersMemory, empty rects here aren't pruned away.
     assert llens == {4}
-    # There is definitely going to be managed_in_memory and
-    # unmanaged_old; there may be unmanaged_new. There won't be managed_spilled.
+    # There is definitely going to be managed and
+    # unmanaged_old; there may be unmanaged_new. There won't be spilled.
     assert any(d["width"])
     assert not all(d["width"])
 
@@ -546,7 +662,6 @@ async def test_WorkerTable_custom_metric_overlap_with_core_metric(c, s, a, b):
 
 @gen_cluster(client=True, worker_kwargs={"memory_limit": 0})
 async def test_WorkerTable_with_memory_limit_as_0(c, s, a, b):
-
     wt = WorkerTable(s)
     wt.update()
     assert all(wt.source.data.values())
@@ -1118,13 +1233,19 @@ async def test_shuffling(c, s, a, b):
     dd = pytest.importorskip("dask.dataframe")
     ss = Shuffling(s)
 
-    df = dask.datasets.timeseries()
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-02-01",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
     df2 = dd.shuffle.shuffle(df, "x", shuffle="p2p").persist()
     start = time()
-    while not ss.source.data["disk_read"]:
+    while not ss.source.data["comm_written"]:
         ss.update()
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0)
         assert time() < start + 5
+    await df2
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True}, timeout=60)

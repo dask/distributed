@@ -18,19 +18,20 @@ build:
 
 requirements:
   host:
-    - python >=3.8
+    - python >=3.9
     - dask-core {{ dask_version }}
     - distributed {{ version }}
   run:
-    - python >=3.8
+    - python >=3.9
     - {{ pin_compatible('dask-core', max_pin='x.x.x.x') }}
     - {{ pin_compatible('distributed', exact=True) }}
     - cytoolz >=0.8.2
-    - lz4
-    - numpy >=1.18
-    - pandas >=1.0
-    - bokeh >=2.4.2,<3
-    - jinja2
+    - lz4 >=4.3.2
+    - numpy >=1.21
+    - pandas >=1.3
+    - bokeh >=2.4.2,!=3.0.*
+    - jinja2 >=2.10.3
+    - pyarrow >=7.0
 
   run_constrained:
     - openssl !=1.1.1e

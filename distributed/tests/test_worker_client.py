@@ -42,6 +42,24 @@ async def test_submit_from_worker(c, s, a, b):
     assert len([id for id in s.clients if id.lower().startswith("client")]) == 1
 
 
+@gen_cluster(client=True)
+async def test_submit_from_worker_async(c, s, a, b):
+    async def func(x):
+        with worker_client() as c:
+            x = c.submit(inc, x)
+            y = c.submit(double, x)
+            return await x + await y
+
+    x, y = c.map(func, [10, 20])
+    xx, yy = await c.gather([x, y])
+
+    assert xx == 10 + 1 + (10 + 1) * 2
+    assert yy == 20 + 1 + (20 + 1) * 2
+
+    assert len(s.transition_log) > 10
+    assert len([id for id in s.clients if id.lower().startswith("client")]) == 1
+
+
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
 async def test_scatter_from_worker(c, s, a, b):
     def func():
@@ -256,9 +274,14 @@ def test_secede_without_stealing_issue_1262():
     Tests that seceding works with the Stealing extension disabled
     https://github.com/dask/distributed/issues/1262
     """
+
     # run the loop as an inner function so all workers are closed
     # and exceptions can be examined
-    @gen_cluster(client=True, scheduler_kwargs={"extensions": {}})
+    @gen_cluster(
+        client=True,
+        scheduler_kwargs={"extensions": {}},
+        worker_kwargs={"extensions": {}},
+    )
     async def secede_test(c, s, a, b):
         def func(x):
             with worker_client() as wc:
@@ -321,6 +344,7 @@ async def test_submit_different_names(s, a, b):
 async def test_secede_does_not_claim_worker(c, s, a, b):
     """A seceded task must not block the task running it. Tasks scheduled from
     within should be evenly distributed"""
+
     # https://github.com/dask/distributed/issues/5332
     def get_addr(x):
         w = get_worker()
