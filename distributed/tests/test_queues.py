@@ -303,15 +303,15 @@ def test_queue_in_task(loop):
                 assert result == 123
 
 
-@gen_cluster(client=True, nthreads=[])
-async def test_unpickle_without_client(c, s):
+@gen_cluster(nthreads=[])
+async def test_unpickle_without_client(s):
     """Ensure that the object properly pickle roundtrips even if no client, worker, etc. is active in the given context.
 
     This typically happens if the object is being deserialized on the scheduler.
     """
-    q = await Queue()
-    pickled = pickle.dumps(q)
-    await c.close()
+    async with Client(s.address, asynchronous=True) as c:
+        q = await Queue()
+        pickled = pickle.dumps(q)
 
     # We do not want to initialize a client during unpickling
     with pytest.raises(ValueError):

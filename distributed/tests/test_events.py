@@ -224,15 +224,15 @@ async def test_two_events_on_workers(c, s, a, b):
     assert not s.extensions["events"]._waiter_count
 
 
-@gen_cluster(client=True, nthreads=[])
-async def test_unpickle_without_client(c, s):
+@gen_cluster(nthreads=[])
+async def test_unpickle_without_client(s):
     """Ensure that the object properly pickle roundtrips even if no client, worker, etc. is active in the given context.
 
     This typically happens if the object is being deserialized on the scheduler.
     """
-    obj = await Event()
-    pickled = pickle.dumps(obj)
-    await c.close()
+    async with Client(s.address, asynchronous=True) as c:
+        obj = await Event()
+        pickled = pickle.dumps(obj)
 
     # We do not want to initialize a client during unpickling
     with pytest.raises(ValueError):
