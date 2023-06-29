@@ -1403,8 +1403,6 @@ class Client(SyncMethodMixin):
         bcomm = BatchedSend(interval="10ms", loop=self.loop)
         bcomm.start(comm)
         self.scheduler_comm = bcomm
-        if self._set_as_default:
-            _set_global_client(self)
         self.status = "running"
 
         for msg in self._pending_msg_buffer:
