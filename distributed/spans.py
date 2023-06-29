@@ -77,11 +77,12 @@ def span(*tags: str) -> Iterator[str]:
     if not tags:
         raise ValueError("Must specify at least one span tag")
 
-    prev_tags = dask.config.get("annotations.span.name", ())
+    annotation = dask.get_annotations().get("span")
+    prev_tags = annotation["name"] if annotation else ()
     # You must specify the full history of IDs, not just the parent, because
     # otherwise you would not be able to uniquely identify grandparents when
     # they have no tasks of their own.
-    prev_ids = dask.config.get("annotations.span.ids", ())
+    prev_ids = annotation["ids"] if annotation else ()
     ids = tuple(str(uuid.uuid4()) for _ in tags)
     with dask.annotate(span={"name": prev_tags + tags, "ids": prev_ids + ids}):
         yield ids[-1]
