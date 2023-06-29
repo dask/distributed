@@ -62,6 +62,7 @@ from distributed.client import (
     Client,
     Future,
     _get_global_client,
+    _global_clients,
     as_completed,
     default_client,
     ensure_default_client,
@@ -1142,10 +1143,10 @@ async def test_get_releases_data(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-def test_current(s, a, b, loop_in_thread):
-    loop = loop_in_thread
+def test_current(s, loop):
     with Client(s["address"], loop=loop) as c:
         assert Client.current() is c
+        assert Client.current(allow_global=False) is c
     with pytest.raises(
         ValueError,
         match=r"No clients found"
@@ -1156,6 +1157,121 @@ def test_current(s, a, b, loop_in_thread):
         Client.current()
     with Client(s["address"], loop=loop) as c:
         assert Client.current() is c
+        assert Client.current(allow_global=False) is c
+
+
+def test_current_nested(s, loop):
+    with pytest.raises(
+        ValueError,
+        match=r"No clients found"
+        r"\nStart a client and point it to the scheduler address"
+        r"\n  from distributed import Client"
+        r"\n  client = Client\('ip-addr-of-scheduler:8786'\)",
+    ):
+        Client.current()
+
+    class MyException(Exception):
+        pass
+
+    with Client(s["address"], loop=loop) as c_outer:
+        assert Client.current() is c_outer
+        assert Client.current(allow_global=False) is c_outer
+
+        with Client(s["address"], loop=loop) as c_inner:
+            assert Client.current() is c_inner
+            assert Client.current(allow_global=False) is c_inner
+
+        assert Client.current() is c_outer
+        assert Client.current(allow_global=False) is c_outer
+
+        with pytest.raises(MyException):
+            with Client(s["address"], loop=loop) as c_inner2:
+                assert Client.current() is c_inner2
+                assert Client.current(allow_global=False) is c_inner2
+                raise MyException
+
+        assert Client.current() is c_outer
+        assert Client.current(allow_global=False) is c_outer
+
+
+@gen_cluster(nthreads=[])
+async def test_current_nested_async(s):
+    with pytest.raises(
+        ValueError,
+        match=r"No clients found"
+        r"\nStart a client and point it to the scheduler address"
+        r"\n  from distributed import Client"
+        r"\n  client = Client\('ip-addr-of-scheduler:8786'\)",
+    ):
+        Client.current()
+
+    class MyException(Exception):
+        pass
+
+    async with Client(s.address, asynchronous=True) as c_outer:
+        assert Client.current() is c_outer
+        assert Client.current(allow_global=False) is c_outer
+
+        async with Client(s.address, asynchronous=True) as c_inner:
+            assert Client.current() is c_inner
+            assert Client.current(allow_global=False) is c_inner
+
+        assert Client.current() is c_outer
+        assert Client.current(allow_global=False) is c_outer
+
+        with pytest.raises(MyException):
+            async with Client(s.address, asynchronous=True) as c_inner2:
+                assert Client.current() is c_inner2
+                assert Client.current(allow_global=False) is c_inner2
+                raise MyException
+
+        assert Client.current() is c_outer
+        assert Client.current(allow_global=False) is c_outer
+
+
+@gen_cluster(nthreads=[])
+async def test_current_concurrent(s):
+    client_1_started = asyncio.Event()
+    client_2_started = asyncio.Event()
+    stop_client_1 = asyncio.Event()
+    stop_client_2 = asyncio.Event()
+    client_2_stopped = asyncio.Event()
+
+    c1 = None
+    c2 = None
+
+    def _all_global_clients():
+        return [v for _, v in sorted(_global_clients.items())]
+
+    async def client_1():
+        nonlocal c1
+        async with Client(s.address, asynchronous=True) as c1:
+            assert _all_global_clients() == [c1]
+            assert Client.current() is c1
+            client_1_started.set()
+            await client_2_started.wait()
+            # c2 is the highest priority global client
+            assert _all_global_clients() == [c1, c2]
+            # but the contextvar means the current client is still us
+            assert Client.current() is c1
+            stop_client_2.set()
+            await stop_client_1.wait()
+
+    async def client_2():
+        nonlocal c2
+        await client_1_started.wait()
+        async with Client(s.address, asynchronous=True) as c2:
+            assert _all_global_clients() == [c1, c2]
+            assert Client.current() is c2
+            client_2_started.set()
+            await stop_client_2.wait()
+
+        assert _all_global_clients() == [c1]
+        # Client.current() is now based on _global_clients instead of the cvar
+        assert Client.current() is c1
+        stop_client_1.set()
+
+    await asyncio.gather(client_1(), client_2())
 
 
 def test_global_clients(loop):
