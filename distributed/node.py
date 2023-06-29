@@ -107,7 +107,7 @@ class ServerNode(Server):
                 weakref.finalize(self, logger.removeHandler, handler)
 
     def log_event(self, topic, msg):
-        pass
+        pass  # pragma: no cover
 
     def get_logs(self, start=0, n=None, timestamps=False):
         """
