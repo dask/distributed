@@ -1503,19 +1503,19 @@ class Client(SyncMethodMixin):
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
+        if self._previous_as_current:
+            _current_client.reset(self._previous_as_current)
         await self._close(
             # if we're handling an exception, we assume that it's more
             # important to deliver that exception than shutdown gracefully.
             fast=exc_type
             is not None
         )
-        if self._previous_as_current:
-            _current_client.reset(self._previous_as_current)
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.close()
         if self._previous_as_current:
             _current_client.reset(self._previous_as_current)
+        self.close()
 
     def __del__(self):
         # If the loop never got assigned, we failed early in the constructor,
