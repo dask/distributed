@@ -56,7 +56,7 @@ WorkerDataParameter: TypeAlias = Union[
     # pre-initialized
     MutableMapping[str, object],
     # constructor
-    Callable[Iterable, MutableMapping[str, object]],
+    Callable[..., MutableMapping[str, object]],
     # constructor, passed worker.local_directory
     Callable[[str], MutableMapping[str, object]],
     # (constructor, kwargs to constructor)
