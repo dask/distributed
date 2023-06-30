@@ -140,13 +140,18 @@ class Progress(SchedulerPlugin):
 class MultiProgress(Progress):
     """Progress variant that keeps track of different groups of keys
 
-    See Progress for most details.  This only adds a function ``func=``
-    that splits keys.  This defaults to ``key_split`` which aligns with naming
-    conventions chosen in the dask project (tuples, hyphens, etc..).
+    See Progress for most details.
 
-    Alternatively, a ``scheduler_func`` can be provided. This should be the
-    name of a method on the scheduler that accepts task ``key`` as an argument,
-    and returns either a string, or a tuple of (group_name, group_id)
+    Parameters
+    ----------
+
+    func : Callable
+        Function that splits keys. This defaults to ``key_split`` which
+        aligns with naming conventions chosen in the dask project (tuples,
+        hyphens, etc..)
+
+    spans : bool, default: False
+        Use spans to group keys. If True, `func` can't be used.
 
     State
     -----
@@ -170,25 +175,19 @@ class MultiProgress(Progress):
         scheduler=None,
         *,
         func=None,
-        scheduler_func=None,
+        spans=False,
         minimum=0,
         dt=0.1,
         complete=False,
     ):
-        if func is None and scheduler_func is None:
+        if func is None and not spans:
             func = key_split
         self.func = func
-        self.scheduler_func = scheduler_func
-        name = f"multi-progress-{tokenize(keys, func, scheduler_func, minimum, dt, complete)}"
+        self.spans = spans
+        name = f"multi-progress-{tokenize(keys, func, spans, minimum, dt, complete)}"
         super().__init__(
             keys, scheduler, minimum=minimum, dt=dt, complete=complete, name=name
         )
-
-    def get_group(self, key: str) -> str:
-        """Get group name by task key."""
-        if self.scheduler_func:
-            return getattr(self.scheduler, self.scheduler_func)(key)
-        return self.func(key)
 
     async def setup(self):
         keys = self.keys
@@ -212,9 +211,20 @@ class MultiProgress(Progress):
         if not self.keys:
             self.stop(exception=None, key=None)
 
+        if self.spans:
+            group_keys = {}
+            spans_ext = self.scheduler.extensions["spans"]
+            for k in self.all_keys:
+                span_id = self.scheduler.tasks[k].group.span_id
+                span_name = (
+                    ", ".join(spans_ext.spans[span_id].name) if spans_ext else span_id
+                )
+                group_keys[k] = span_name, span_id
+            self.func = group_keys.get
+
         # Group keys by func name
-        self.keys = valmap(set, groupby(self.get_group, self.keys))
-        self.all_keys = valmap(set, groupby(self.get_group, self.all_keys))
+        self.keys = valmap(set, groupby(self.func, self.keys))
+        self.all_keys = valmap(set, groupby(self.func, self.all_keys))
         for k in self.all_keys:
             if k not in self.keys:
                 self.keys[k] = set()
@@ -225,7 +235,7 @@ class MultiProgress(Progress):
 
     def transition(self, key, start, finish, *args, **kwargs):
         if start == "processing" and finish == "memory":
-            s = self.keys.get(self.get_group(key), None)
+            s = self.keys.get(self.func(key), None)
             if s and key in s:
                 s.remove(key)
 
@@ -234,12 +244,12 @@ class MultiProgress(Progress):
 
         if finish == "erred":
             logger.debug("Progress sees task erred")
-            k = self.get_group(key)
+            k = self.func(key)
             if k in self.all_keys and key in self.all_keys[k]:
                 self.stop(exception=kwargs.get("exception"), key=key)
 
         if finish == "forgotten":
-            k = self.get_group(key)
+            k = self.func(key)
             if k in self.all_keys and key in self.all_keys[k]:
                 logger.debug("A task was cancelled (%s), stopping progress", key)
                 self.stop(exception=True)

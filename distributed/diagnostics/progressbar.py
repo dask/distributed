@@ -245,7 +245,7 @@ class MultiProgressBar:
         scheduler=None,
         *,
         func=None,
-        scheduler_func=None,
+        spans=False,
         interval="100ms",
         complete=False,
         **kwargs,
@@ -258,14 +258,14 @@ class MultiProgressBar:
                 self.client = weakref.ref(key.client)
                 break
 
-        if func is None and scheduler_func is None:
+        if func is not None and spans:
+            raise ValueError("provide either `func` or `spans=True`")
+        if func is None and not spans:
             func = key_split
-        if (func is None) == (scheduler_func is None):
-            raise ValueError("provide either `func` or `scheduler_func`")
 
         self.keys = {k.key if hasattr(k, "key") else k for k in keys}
         self.func = func
-        self.scheduler_func = scheduler_func
+        self.spans = spans
         self.interval = interval
         self.complete = complete
         self._start_time = default_timer()
@@ -278,7 +278,7 @@ class MultiProgressBar:
         complete = self.complete
         keys = self.keys
         func = self.func
-        scheduler_func = self.scheduler_func
+        spans = self.spans
 
         async def setup(scheduler):
             p = MultiProgress(
@@ -286,7 +286,7 @@ class MultiProgressBar:
                 scheduler,
                 complete=complete,
                 func=func,
-                scheduler_func=scheduler_func,
+                spans=spans,
             )
             await p.setup()
             return p
@@ -446,9 +446,7 @@ class MultiProgressWidget(MultiProgressBar):
             )
 
 
-def progress(
-    *futures, notebook=None, multi=True, complete=True, use_spans=False, **kwargs
-):
+def progress(*futures, notebook=None, multi=True, complete=True, spans=False, **kwargs):
     """Track progress of futures
 
     This operates differently in the notebook and the console
@@ -467,7 +465,7 @@ def progress(
     complete : bool (optional)
         Track all keys (True) or only keys that have not yet run (False)
         (defaults to True)
-    use_spans : bool (optional)
+    spans : bool (optional)
         Use spans instead of task key names for grouping tasks
         (defaults to False)
 
@@ -487,15 +485,11 @@ def progress(
         futures = [futures]
     if notebook is None:
         notebook = is_kernel()  # often but not always correct assumption
-    if use_spans:
-        if kwargs.get("func", None) is not None:
-            raise ValueError("`func` can't be used with `use_spans=True`")
-        if kwargs.get("scheduler_func", None) is not None:
-            raise ValueError("`scheduler_func` can't be used with `use_spans=True`")
-        kwargs["scheduler_func"] = "get_task_span_name"
+    if spans and kwargs.get("func", None) is not None:
+        raise ValueError("`func` can't be used with `spans=True`")
     if notebook:
         if multi:
-            bar = MultiProgressWidget(futures, complete=complete, **kwargs)
+            bar = MultiProgressWidget(futures, complete=complete, spans=spans, **kwargs)
         else:
             bar = ProgressWidget(futures, complete=complete, **kwargs)
         return bar

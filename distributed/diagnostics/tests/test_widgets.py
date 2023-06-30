@@ -232,8 +232,8 @@ def test_fast(client):
 
 
 @mock_widget()
-def test_multibar_use_spans(client):
-    """Test progress(use_spans=True)"""
+def test_multibar_with_spans(client):
+    """Test progress(spans=True)"""
     with span("span 1"):
         L = client.map(inc, range(100))
     with span("span 2"):
@@ -244,7 +244,7 @@ def test_multibar_use_spans(client):
         _ = client.submit(inc, 123)
     e = client.submit(throws, L3)
 
-    p = progress(e, complete=True, multi=True, notebook=True, use_spans=True)
+    p = progress(e, complete=True, multi=True, notebook=True, spans=True)
     client.sync(p.listen)
 
     # keys are tuples of (group_name, group_id), just get names
@@ -261,7 +261,7 @@ def test_multibar_use_spans(client):
 
 @mock_widget()
 def test_multibar_func_raises(client):
-    """Should raise when `scheduler_func` and `func` are set"""
+    """Should raise when `func` and `spans=True`"""
     L = client.map(inc, range(100))
     L2 = client.map(dec, L)
     L3 = client.map(add, L, L2)
@@ -270,8 +270,8 @@ def test_multibar_func_raises(client):
     p = MultiProgressWidget(L3)
     assert p.func == key_split
 
-    with pytest.raises(ValueError, match="provide either `func`"):
-        MultiProgressWidget(L3, func="foo", scheduler_func="foo")
+    with pytest.raises(ValueError, match="provide either `func` or `spans=True`"):
+        MultiProgressWidget(L3, func="foo", spans=True)
 
 
 @mock_widget()
