@@ -212,14 +212,15 @@ class MultiProgress(Progress):
             self.stop(exception=None, key=None)
 
         if self.spans:
-            group_keys = {}
             spans_ext = self.scheduler.extensions["spans"]
-            for k in self.all_keys:
+            span_defs = spans_ext.spans if spans_ext else None
+
+            def group_key(k):
                 span_id = self.scheduler.tasks[k].group.span_id
-                span_name = (
-                    ", ".join(spans_ext.spans[span_id].name) if spans_ext else span_id
-                )
-                group_keys[k] = span_name, span_id
+                span_name = ", ".join(span_defs[span_id].name) if span_defs else span_id
+                return span_name, span_id
+
+            group_keys = {k: group_key(k) for k in self.all_keys}
             self.func = group_keys.get
 
         # Group keys by func name
