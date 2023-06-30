@@ -25,7 +25,7 @@ import logging
 import os
 import sys
 import warnings
-from collections.abc import Callable, Container, Hashable, MutableMapping
+from collections.abc import Callable, Container, Hashable, MutableMapping, Iterable
 from contextlib import suppress
 from functools import partial
 from typing import TYPE_CHECKING, Any, Literal, Union, cast
@@ -56,9 +56,9 @@ WorkerDataParameter: TypeAlias = Union[
     # pre-initialized
     MutableMapping[str, object],
     # constructor
-    Callable[[], MutableMapping[str, object]],
+    Callable[Iterable, MutableMapping[str, object]],
     # constructor, passed worker.local_directory
-    Callable[[str], MutableMapping[str, object]],
+    Callable[Iterable[str], MutableMapping[str, object]],
     # (constructor, kwargs to constructor)
     tuple[Callable[..., MutableMapping[str, object]], dict[str, Any]],
     # initialize internally
