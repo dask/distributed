@@ -4,10 +4,13 @@ import asyncio
 
 import pytest
 
+import dask
 from dask import delayed
 
+import distributed
 from distributed import Client, Event, Future, Worker, wait
 from distributed.compatibility import WINDOWS
+from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.metrics import time
 from distributed.spans import span
 from distributed.utils_test import (
@@ -38,15 +41,24 @@ async def test_spans(c, s, a):
 
     ext = s.extensions["spans"]
 
+    p2_id = s.tasks[z.key].group.span_id
     assert mywf_id
     assert p1_id
+    assert p2_id
     assert s.tasks[y.key].group.span_id == p1_id
+    assert mywf_id != p1_id != p2_id
+
+    expect_annotations = {
+        x: {},
+        y: {"span": {"name": ("my workflow", "p1"), "ids": (mywf_id, p1_id)}},
+        z: {"span": {"name": ("my workflow", "p2"), "ids": (mywf_id, p2_id)}},
+    }
 
     for fut in (x, y, z):
         sts = s.tasks[fut.key]
         wts = a.state.tasks[fut.key]
-        assert sts.annotations == {}
-        assert wts.annotations == {}
+        assert sts.annotations == expect_annotations[fut]
+        assert wts.annotations == expect_annotations[fut]
         assert sts.group.span_id == wts.span_id
         assert sts.group.span_id in ext.spans
         assert sts.group in ext.spans[sts.group.span_id].groups
@@ -82,6 +94,10 @@ async def test_spans(c, s, a):
     assert ext.root_spans == [mywf, default]
     assert ext.spans_search_by_name["my workflow",] == [mywf]
     assert ext.spans_search_by_tag["my workflow"] == [mywf, p2, p1]
+
+    assert default.annotation is None
+    assert mywf.annotation == {"name": ("my workflow",), "ids": (mywf.id,)}
+    assert p1.annotation == {"name": ("my workflow", "p1"), "ids": (mywf.id, p1.id)}
 
     # Test that spans survive their tasks
     prev_span_ids = set(ext.spans)
@@ -319,8 +335,17 @@ async def test_duplicate_task_group(c, s, a, b):
 async def test_mismatched_span(c, s, a, use_default):
     """Test use case of 2+ tasks within the same TaskGroup, but different spans.
     All tasks are coerced to the span of the first seen task, and the annotations are
-    updated.
+    updated. This includes scheduler plugins.
     """
+
+    class MyPlugin(SchedulerPlugin):
+        annotations = []
+
+        def update_graph(self, scheduler, annotations, **kwargs):
+            self.annotations.append(annotations)
+
+    s.add_plugin(MyPlugin(), name="my-plugin")
+
     if use_default:
         x0 = delayed(inc)(1, dask_key_name=("x", 0)).persist()
     else:
@@ -345,6 +370,19 @@ async def test_mismatched_span(c, s, a, use_default):
     wts1 = a.state.tasks[str(x1.key)]
     assert sts0.group is sts1.group
     assert wts0.span_id == wts1.span_id
+
+    if use_default:
+        assert s.plugins["my-plugin"].annotations == [{}, {}]
+        for ts in (sts0, sts1, wts0, wts1):
+            assert "span" not in ts.annotations
+    else:
+        expect = {"ids": (wts0.span_id,), "name": ("p1",)}
+        assert s.plugins["my-plugin"].annotations == [
+            {"span": {"('x', 0)": expect}},
+            {"span": {"('x', 1)": expect}},
+        ]
+        for ts in (sts0, sts1, wts0, wts1):
+            assert ts.annotations["span"] == expect
 
 
 def test_no_tags():
@@ -787,3 +825,22 @@ async def test_active_cpu_seconds_merged(c, s, a):
     assert merged.active_cpu_seconds == pytest.approx(
         (bar.stop - foo.enqueued + baz.stop - baz.enqueued) * 2
     )
+
+
+@gen_cluster(client=True)
+async def test_spans_are_visible_from_tasks(c, s, a, b):
+    def f():
+        client = distributed.get_client()
+        with span("bar"):
+            return client.submit(inc, 1).result()
+
+    with span("foo") as foo_id:
+        annotations = await c.submit(dask.get_annotations)
+        assert annotations == {"span": {"name": ("foo",), "ids": (foo_id,)}}
+        assert await c.submit(f) == 2
+
+    ext = s.extensions["spans"]
+    assert list(ext.spans_search_by_name) == [("foo",), ("foo", "bar")]
+
+    # No annotation is created for the default span
+    assert await c.submit(dask.get_annotations) == {}

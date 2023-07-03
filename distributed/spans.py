@@ -73,6 +73,9 @@ def span(*tags: str) -> Iterator[str]:
     -----
     Spans are based on annotations, and just like annotations they can be lost during
     optimization. Set config ``optimization.fuse.active: false`` to prevent this issue.
+
+    You may retrieve the current span with ``dask.get_annotations().get("span")``.
+    You can do so in the client code as well as from inside a task.
     """
     if not tags:
         raise ValueError("Must specify at least one span tag")
@@ -174,6 +177,22 @@ class Span:
             assert out
             return out
         return None
+
+    @property
+    def annotation(self) -> dict[str, tuple[str, ...]] | None:
+        """Rebuild the dask graph annotation which contains the full id history
+
+        Note that this may not match the original annotation in case of TaskGroup
+        collision.
+        """
+        if self.name == ("default",):
+            return None
+        ids = []
+        node: Span | None = self
+        while node:
+            ids.append(node.id)
+            node = node.parent
+        return {"name": self.name, "ids": tuple(reversed(ids))}
 
     def traverse_spans(self) -> Iterator[Span]:
         """Top-down recursion of all spans belonging to this branch off span tree,
@@ -474,14 +493,19 @@ class SpansSchedulerExtension:
 
     def observe_tasks(
         self, tss: Iterable[TaskState], code: tuple[SourceCode, ...]
-    ) -> None:
+    ) -> dict[str, dict]:
         """Acknowledge the existence of runnable tasks on the scheduler. These may
         either be new tasks, tasks that were previously unrunnable, or tasks that were
         already fed into this method already.
 
         Attach newly observed tasks to either the desired span or to ("default", ).
         Update TaskGroup.span_id and wipe TaskState.annotations["span"].
+
+        Returns
+        -------
+        Updated 'span' annotations: {key: {"name": (..., ...), "ids": (..., ...)}}
         """
+        out = {}
         default_span = None
 
         for ts in tss:
@@ -508,10 +532,12 @@ class SpansSchedulerExtension:
 
             # The span may be completely different from the one referenced by the
             # annotation, due to the TaskGroup collision issue explained above.
-            # Remove the annotation to avoid confusion, and instead rely on
-            # distributed.scheduler.TaskState.group.span_id and
-            # distributed.worker_state_machine.TaskState.span_id.
-            ts.annotations.pop("span", None)
+            if ann := span.annotation:
+                ts.annotations["span"] = out[ts.key] = ann
+            else:
+                ts.annotations.pop("span", None)
+
+        return out
 
     def _ensure_default_span(self) -> Span:
         """Return the currently active default span, or create one if the previous one
