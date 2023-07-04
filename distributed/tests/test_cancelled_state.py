@@ -489,8 +489,7 @@ async def test_resumed_cancelled_handle_compute(
         await lock_compute.release()
         await exit_compute.wait()
 
-        while f3.key in b.state.tasks:
-            await asyncio.sleep(0.01)
+        await async_poll_for(lambda: f3.key not in b.state.tasks, timeout=5)
 
     f1 = c.submit(inc, 1, key="f1", workers=[a.address])
     f2 = c.submit(inc, f1, key="f2", workers=[a.address])
