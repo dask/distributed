@@ -3621,7 +3621,7 @@ class BaseWorker(abc.ABC):
 
         @wraps(func)
         async def wrapper() -> StateMachineEvent:
-            with ledger.record():
+            with ledger.record(key="async-instruction"):
                 return await func(*args, **kwargs)
 
         task = asyncio.create_task(wrapper(), name=task_name)
@@ -3650,8 +3650,11 @@ class BaseWorker(abc.ABC):
             logger.exception("async instruction handlers should never raise!")
             raise
 
-        with ledger.record():
-            # Capture metric events in _transition_to_memory()
+        # Capture metric events in _transition_to_memory()
+        # As this may trigger calls to _start_async_instruction for more tasks,
+        # make sure we don't endlessly pile up context_meter callbacks by specifying
+        # the same key as in _start_async_instruction.
+        with ledger.record(key="async-instruction"):
             self.handle_stimulus(stim)
 
         self._finalize_metrics(stim, ledger, span_id)
