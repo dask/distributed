@@ -249,11 +249,13 @@ class Span:
         done
         distributed.scheduler.TaskGroup.stop
         """
-        if not self.done:
-            return time()
-        out = max(tg.stop for tg in self.traverse_groups())
-        # absorb small errors in worker delay calculation
-        return max(self.enqueued, out)
+        if self.done:
+            out = max(tg.stop for tg in self.traverse_groups())
+        else:
+            out = time()
+        # absorb small errors in worker delay calculation, as well as in time() not
+        # being perfectly monotonic
+        return max(out, self.enqueued)
 
     @property
     def states(self) -> dict[TaskStateState, int]:
@@ -383,26 +385,25 @@ class Span:
         """If this span is the output of :meth:`merge`, yield
         (timestamp, True if at least one input span is active), forward-fill.
         """
-        now = time()
         if self.id != "(merged)":
             yield self.enqueued, True
-            yield self.stop if self.done else now, False
+            yield self.stop, False
             return
 
         events = []
         for child in self.children:
-            events.append((child.enqueued, 1))
-            events.append((child.stop if child.done else now, -1))
+            events += [(child.enqueued, 1), (child.stop, -1)]
         events.sort()
 
         n_active = 0
         for t, delta in events:
-            if not n_active:
-                assert delta > 0
+            # Note: in case of identical timestamps, there may be loops after sorting
+            # were n_active < 0
+            if n_active == 0 and delta == 1:
                 yield t, True
-            n_active += delta
-            if n_active == 0:
+            elif n_active == 1 and delta == -1:
                 yield t, False
+            n_active += delta
 
     @property
     def nthreads_intervals(self) -> list[tuple[float, float, int]]:
