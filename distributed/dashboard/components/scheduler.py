@@ -3386,7 +3386,7 @@ class FinePerformanceMetrics(DashboardComponent):
     BASE_TOOLS = ["pan", "wheel_zoom", "box_zoom", "reset"]
     scheduler: Scheduler
     task_exec_by_prefix_src: ColumnDataSource
-    task_exec_by_prefix_ymax: float
+    task_exec_by_prefix_xmax: float
     task_exec_by_activity_src: ColumnDataSource
     get_data_by_activity_src: ColumnDataSource
     substantial_change: bool
@@ -3404,7 +3404,7 @@ class FinePerformanceMetrics(DashboardComponent):
     def __init__(self, scheduler: Scheduler, **kwargs: Any):
         self.scheduler = scheduler
         self.task_exec_by_prefix_src = ColumnDataSource(data={})
-        self.task_exec_by_prefix_ymax = 0.0
+        self.task_exec_by_prefix_xmax = 0.0
         self.task_exec_by_activity_src = ColumnDataSource(data={})
         self.get_data_by_activity_src = ColumnDataSource(data={})
         self.substantial_change = False
@@ -3447,17 +3447,9 @@ class FinePerformanceMetrics(DashboardComponent):
 
     def _handle_change_unit(self, attr: str, old: str, new: str) -> None:
         self.substantial_change = True
-
-        if new == "seconds":
-            yfmt = "00:00:00"
-        elif new == "bytes":
-            yfmt = "0.00b"
-        elif new == "count":
-            yfmt = "0"
-        else:
-            yfmt = "0.000"
         assert self.task_exec_by_prefix_chart
-        self.task_exec_by_prefix_chart.yaxis[0].formatter.format = yfmt
+        fmt = self._bokeh_unit_format()
+        self.task_exec_by_prefix_chart.xaxis[0].formatter.format = fmt
 
     @without_property_validation
     @log_errors
@@ -3485,7 +3477,7 @@ class FinePerformanceMetrics(DashboardComponent):
                 title="Send data, by activity",
             )
 
-        self.task_exec_by_prefix_chart.y_range.end = self.task_exec_by_prefix_ymax * 1.1
+        self.task_exec_by_prefix_chart.x_range.end = self.task_exec_by_prefix_xmax * 1.1
 
         if self.substantial_change:
             # Visible activities and/or functions changed
@@ -3556,9 +3548,19 @@ class FinePerformanceMetrics(DashboardComponent):
                     f"Filter by span tag ({len(self.span_tag_selector.options)}):"
                 )
 
+    def _bokeh_unit_format(self) -> str:
+        unit = self.unit_selector.value
+        if unit == "seconds":
+            return "00:00:00"
+        elif unit == "bytes":
+            return "0.00b"
+        elif unit == "count":
+            return "0"
+        else:
+            return "0.000"
+
     def _format(self, val: float) -> str:
         unit = self.unit_selector.value
-        assert isinstance(unit, str)
         if unit == "seconds":
             return format_time(val)
         elif unit == "bytes":
@@ -3663,7 +3665,7 @@ class FinePerformanceMetrics(DashboardComponent):
 
         (
             self.task_exec_by_prefix_src.data,
-            self.task_exec_by_prefix_ymax,
+            self.task_exec_by_prefix_xmax,
         ) = self._build_task_execution_by_prefix_data(execute_by_func)
         self.task_exec_by_activity_src.data = self._build_pie_data(execute)
         self.get_data_by_activity_src.data = self._build_pie_data(get_data)
@@ -3779,7 +3781,7 @@ class FinePerformanceMetrics(DashboardComponent):
         _update_task_execution_by_prefix_chart
         """
         barchart = figure(
-            x_range=[],
+            y_range=[],
             height=500,
             sizing_mode="scale_both",
             title="Task execution, by function",
@@ -3788,9 +3790,9 @@ class FinePerformanceMetrics(DashboardComponent):
         barchart.yaxis.visible = True
         # As of Bokeh 3.1, DataRange1D (the default) does not work when switching back
         # from bytes (GiBs) to seconds (hundreds). So we need to manually update it.
-        barchart.y_range = Range1d(0, 1)
-        barchart.yaxis[0].formatter = NumeralTickFormatter(format="00:00:00")
-        barchart.xaxis.major_label_orientation = 0.2
+        barchart.x_range = Range1d(0, 1)
+        barchart.xaxis[0].formatter = NumeralTickFormatter(format="00:00:00")
+        barchart.xaxis.major_label_orientation = 0.4
         barchart.grid.grid_line_color = None
         return barchart
 
@@ -3804,7 +3806,7 @@ class FinePerformanceMetrics(DashboardComponent):
         """
         barchart = self.task_exec_by_prefix_chart
         assert barchart is not None
-        barchart.x_range = FactorRange(*self.visible_functions)
+        barchart.y_range = FactorRange(*self.visible_functions)
 
         palette = [
             p
@@ -3812,9 +3814,9 @@ class FinePerformanceMetrics(DashboardComponent):
             if a in self.stacked_chart_visible_activities
         ]
         assert len(palette) == len(self.stacked_chart_visible_activities)
-        renderers = barchart.vbar_stack(
+        renderers = barchart.hbar_stack(
             self.stacked_chart_visible_activities,
-            x="__functions",
+            y="__functions",
             width=0.9,
             source=self.task_exec_by_prefix_src,
             color=palette,
