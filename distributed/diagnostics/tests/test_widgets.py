@@ -233,7 +233,7 @@ def test_fast(client):
 
 @mock_widget()
 def test_multibar_with_spans(client):
-    """Test progress(spans=True)"""
+    """Test progress(group_by='spans'"""
     with span("span 1"):
         L = client.map(inc, range(100))
     with span("span 2"):
@@ -244,7 +244,7 @@ def test_multibar_with_spans(client):
         _ = client.submit(inc, 123)
     e = client.submit(throws, L3)
 
-    p = progress(e, complete=True, multi=True, notebook=True, spans=True)
+    p = progress(e, complete=True, multi=True, notebook=True, group_by="spans")
     client.sync(p.listen)
 
     # keys are tuples of (group_name, group_id), just get names
@@ -260,18 +260,20 @@ def test_multibar_with_spans(client):
 
 
 @mock_widget()
-def test_multibar_func_raises(client):
-    """Should raise when `func` and `spans=True`"""
+def test_multibar_func_warns(client):
+    """Deprecate `func`, use `group_by`"""
     L = client.map(inc, range(100))
     L2 = client.map(dec, L)
     L3 = client.map(add, L, L2)
 
     # ensure default value if nothing is set
     p = MultiProgressWidget(L3)
-    assert p.func == key_split
+    assert p.group_by == key_split
 
-    with pytest.raises(ValueError, match="provide either `func` or `spans=True`"):
-        MultiProgressWidget(L3, func="foo", spans=True)
+    with pytest.warns(
+        DeprecationWarning, match="`func` is deprecated, use `group_by` instead"
+    ):
+        MultiProgressWidget(L3, func="foo")
 
 
 @mock_widget()

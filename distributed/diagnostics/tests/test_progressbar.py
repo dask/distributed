@@ -77,10 +77,14 @@ def test_progress_function_w_kwargs(client, capsys):
     check_bar_completed(capsys)
 
 
+def test_progress_function_warns(client):
+    with pytest.warns(DeprecationWarning, match="`func` is deprecated"):
+        progress(None, func="prefix")
+
+
 def test_progress_function_raises():
-    """Raises early enough so it doesn't need a Client"""
-    with pytest.raises(ValueError, match="`func` can't be used"):
-        progress(None, func="foo", spans=True)
+    with pytest.raises(ValueError, match="`group_by` should be "):
+        progress(None, group_by="incorrect")
 
 
 @gen_cluster(client=True, nthreads=[])

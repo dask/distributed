@@ -7,6 +7,7 @@ import warnings
 import weakref
 from contextlib import suppress
 from timeit import default_timer
+from typing import Callable
 
 from tlz import valmap
 from tornado.ioloop import IOLoop
@@ -245,7 +246,7 @@ class MultiProgressBar:
         scheduler=None,
         *,
         func=None,
-        spans=False,
+        group_by="prefix",
         interval="100ms",
         complete=False,
         **kwargs,
@@ -258,14 +259,17 @@ class MultiProgressBar:
                 self.client = weakref.ref(key.client)
                 break
 
-        if func is not None and spans:
-            raise ValueError("provide either `func` or `spans=True`")
-        if func is None and not spans:
-            func = key_split
+        if func is not None:
+            warnings.warn(
+                "`func` is deprecated, use `group_by` instead",
+                category=DeprecationWarning,
+            )
+            group_by = func
+        elif group_by in (None, "prefix"):
+            group_by = key_split
 
         self.keys = {k.key if hasattr(k, "key") else k for k in keys}
-        self.func = func
-        self.spans = spans
+        self.group_by = group_by
         self.interval = interval
         self.complete = complete
         self._start_time = default_timer()
@@ -277,16 +281,14 @@ class MultiProgressBar:
     async def listen(self):
         complete = self.complete
         keys = self.keys
-        func = self.func
-        spans = self.spans
+        group_by = self.group_by
 
         async def setup(scheduler):
             p = MultiProgress(
                 keys,
                 scheduler,
                 complete=complete,
-                func=func,
-                spans=spans,
+                group_by=group_by,
             )
             await p.setup()
             return p
@@ -446,7 +448,9 @@ class MultiProgressWidget(MultiProgressBar):
             )
 
 
-def progress(*futures, notebook=None, multi=True, complete=True, spans=False, **kwargs):
+def progress(
+    *futures, notebook=None, multi=True, complete=True, group_by="prefix", **kwargs
+):
     """Track progress of futures
 
     This operates differently in the notebook and the console
@@ -465,9 +469,9 @@ def progress(*futures, notebook=None, multi=True, complete=True, spans=False, **
     complete : bool (optional)
         Track all keys (True) or only keys that have not yet run (False)
         (defaults to True)
-    spans : bool (optional)
+    group_by : Callable | Literal["spans"] | Literal["prefix"]
         Use spans instead of task key names for grouping tasks
-        (defaults to False)
+        (defaults to "prefix")
 
     Notes
     -----
@@ -485,11 +489,18 @@ def progress(*futures, notebook=None, multi=True, complete=True, spans=False, **
         futures = [futures]
     if notebook is None:
         notebook = is_kernel()  # often but not always correct assumption
-    if spans and kwargs.get("func", None) is not None:
-        raise ValueError("`func` can't be used with `spans=True`")
+    if kwargs.get("func", None) is not None:
+        warnings.warn(
+            "`func` is deprecated, use `group_by` instead", category=DeprecationWarning
+        )
+        group_by = kwargs.pop("func")
+    if group_by not in ("spans", "prefix") and not isinstance(group_by, Callable):
+        raise ValueError("`group_by` should be 'spans', 'prefix', or a Callable")
     if notebook:
         if multi:
-            bar = MultiProgressWidget(futures, complete=complete, spans=spans, **kwargs)
+            bar = MultiProgressWidget(
+                futures, complete=complete, group_by=group_by, **kwargs
+            )
         else:
             bar = ProgressWidget(futures, complete=complete, **kwargs)
         return bar

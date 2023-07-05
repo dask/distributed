@@ -104,7 +104,7 @@ async def test_multiprogress_cancel(c, s, a, b):
 @gen_cluster(client=True)
 async def test_multiprogress_with_spans(c, s, a, b):
     x = c.submit(inc, 1)
-    p = MultiProgress([x], scheduler=s, complete=True, spans=True)
+    p = MultiProgress([x], scheduler=s, complete=True, group_by="spans")
     await p.setup()
     group_names = {k[0] for k in p.all_keys}
     assert group_names == {"default"}

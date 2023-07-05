@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import warnings
 from collections import defaultdict
 from timeit import default_timer
 from typing import ClassVar
@@ -145,13 +146,14 @@ class MultiProgress(Progress):
     Parameters
     ----------
 
-    func : Callable
+    func : Callable (deprecated)
         Function that splits keys. This defaults to ``key_split`` which
         aligns with naming conventions chosen in the dask project (tuples,
         hyphens, etc..)
 
-    spans : bool, default: False
-        Use spans to group keys. If True, `func` can't be used.
+    group_by : Callable | Literal["spans"] | Literal["prefix"], default: "prefix"
+        How to group keys to display multiple bars. Defaults to "prefix",
+        which uses ``key_split`` from dask project
 
     State
     -----
@@ -175,16 +177,17 @@ class MultiProgress(Progress):
         scheduler=None,
         *,
         func=None,
-        spans=False,
+        group_by="prefix",
         minimum=0,
         dt=0.1,
         complete=False,
     ):
-        if func is None and not spans:
-            func = key_split
-        self.func = func
-        self.spans = spans
-        name = f"multi-progress-{tokenize(keys, func, spans, minimum, dt, complete)}"
+        if func is not None:
+            warnings.warn("`func` is deprecated, use `group_by`")
+            group_by = func
+        self.group_by = key_split if group_by in (None, "prefix") else group_by
+        self.func = None
+        name = f"multi-progress-{tokenize(keys, group_by, minimum, dt, complete)}"
         super().__init__(
             keys, scheduler, minimum=minimum, dt=dt, complete=complete, name=name
         )
@@ -211,7 +214,7 @@ class MultiProgress(Progress):
         if not self.keys:
             self.stop(exception=None, key=None)
 
-        if self.spans:
+        if self.group_by == "spans":
             spans_ext = self.scheduler.extensions["spans"]
             span_defs = spans_ext.spans if spans_ext else None
 
@@ -222,6 +225,10 @@ class MultiProgress(Progress):
 
             group_keys = {k: group_key(k) for k in self.all_keys}
             self.func = group_keys.get
+        elif self.group_by == "prefix":
+            self.func = key_split
+        else:
+            self.func = self.group_by
 
         # Group keys by func name
         self.keys = valmap(set, groupby(self.func, self.keys))
