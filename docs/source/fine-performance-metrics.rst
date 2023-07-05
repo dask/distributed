@@ -69,9 +69,9 @@ unit to bytes:
 
 The above gives us insights on spill/unspill activity (see :doc:`worker-memory`).
 In this workflow, in 99% of the cases there was enough RAM to accommodate all the data
-and it was unnecessary to retrieve it from disk; in other words we have a 99% *cache hit
-ratio*, which means that we would not get any benefit if we increased RAM, but we would
-likely start seeing slowdowns if we reduced it.
+and it was unnecessary to retrieve it from disk; in other words we have *cache hits* for
+99% of the data, which means that we would not get any benefit if we increased RAM, but
+we would likely start seeing slowdowns if we reduced it.
 
 
 Are task prefixes enough?
