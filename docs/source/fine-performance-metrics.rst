@@ -67,10 +67,10 @@ expected - in functions that are known to be I/O heavy. Here they are singled ou
 .. image:: images/fine-performance-metrics/seconds-IO.png
    :alt: Fine Performance Metrics dashboard, just the I/O functions
 
-And here's everything but those three I/O heavy functions:
+And here's all other functions that take a non-trivial amount of time:
 
 .. image:: images/fine-performance-metrics/seconds-not-IO.png
-   :alt: Fine Performance Metrics dashboard, except the I/O functions
+   :alt: Fine Performance Metrics dashboard, non-I/O functions
 
 This tells us an important piece of information: why is `astype`, which is a pure CPU
 function, spending so much time occupying workers' threads but without accruing any CPU
