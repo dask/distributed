@@ -618,3 +618,22 @@ async def test_new_metrics_during_heartbeat(c, s, a):
     assert a.digests_total["execute", span.id, "x", "test", "test"] == n
     assert s.cumulative_worker_metrics["execute", "x", "test", "test"] == n
     assert span.cumulative_worker_metrics["execute", "x", "test", "test"] == n
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    config={"distributed.scheduler.worker-saturation": float("inf")},
+)
+async def test_delayed_ledger_is_not_reentrant(c, s, a):
+    """https://github.com/dask/distributed/issues/7949
+
+    Test that, when there's a long chain of task done -> task start events,
+    the callbacks added by the delayed ledger don't pile up on top of each other.
+    """
+
+    def f(_):
+        return len(context_meter._callbacks.get())
+
+    out = await c.gather(c.map(f, range(1000)))
+    assert max(out) < 10
