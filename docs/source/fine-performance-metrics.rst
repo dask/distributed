@@ -22,8 +22,8 @@ Alternatively, if you're using Jupyter Lab and `dask-labextension
 .. image:: images/fine-performance-metrics/seconds-full.png
    :alt: Populated Fine Performance Metrics dashboard
 
-The central panel shows, of all the time that the cluster spent doing something, what
-*activities* it spent performing. The most important ones are:
+The central panel shows what *activities* the cluster spent its time on. 
+The most important ones are:
 
 ``thread-cpu``
   CPU time spent by tasks while running on workers
