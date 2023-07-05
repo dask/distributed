@@ -53,12 +53,12 @@ ones are:
 The grand total of the time shown should roughly add up to the end-to-end runtime of
 your workload, multiplied by the number of threads on the cluster.
 
+The left panel (**Task execution, by function**) shows the same information as the
+central one, but broken down by function.
+
 The right panel (**Send data, by activity**) shows network transfer time. Note that most
 of it should be pipelined with task execution, so it may not have an impact. You should
 worry about this only if you have a very large ``idle`` time.
-
-The left panel (**Task execution, by function**) shows the same information as the
-central one, but broken down by function.
 
 There is a filter that allows you to show only selected functions. In the sample
 screenshots, you can observe that most of the `thread-noncpu` time is concentrated - as
