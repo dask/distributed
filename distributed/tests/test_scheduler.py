@@ -4163,17 +4163,17 @@ async def test_non_idempotent_plugins(s):
 async def test_plugin_removal(s):
     class Plugin(SchedulerPlugin):
         def __init__(self):
-            self.name = 'plugin'
+            self.name = "plugin"
 
     plugin = Plugin()
     await s.register_scheduler_plugin(plugin=dumps(plugin))
-    assert 'plugin' in s.plugins
+    assert "plugin" in s.plugins
 
-    await s.unregister_scheduler_plugin(name='plugin')
-    assert 'plugin' not in s.plugins
+    await s.unregister_scheduler_plugin(name="plugin")
+    assert "plugin" not in s.plugins
 
-    with pytest.raises(ValueError, match='Could not find plugin'):
-        await s.unregister_scheduler_plugin(name='plugin')
+    with pytest.raises(ValueError, match="Could not find plugin"):
+        await s.unregister_scheduler_plugin(name="plugin")
 
 
 @gen_cluster(nthreads=[("", 1)])
