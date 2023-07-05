@@ -3700,6 +3700,7 @@ class Scheduler(SchedulerState, ServerNode):
             "get_task_stream": self.get_task_stream,
             "get_task_prefix_states": self.get_task_prefix_states,
             "register_scheduler_plugin": self.register_scheduler_plugin,
+            "unregister_scheduler_plugin": self.unregister_scheduler_plugin,
             "register_worker_plugin": self.register_worker_plugin,
             "unregister_worker_plugin": self.unregister_worker_plugin,
             "register_nanny_plugin": self.register_nanny_plugin,
@@ -5727,11 +5728,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.plugins[name] = plugin
 
-    def remove_plugin(
-        self,
-        name: str | None = None,
-        plugin: SchedulerPlugin | None = None,
-    ) -> None:
+    def remove_plugin(self, name: str | None = None) -> None:
         """Remove external plugin from scheduler
 
         Parameters
@@ -5778,6 +5775,10 @@ class Scheduler(SchedulerState, ServerNode):
                 await result
 
         self.add_plugin(plugin, name=name, idempotent=idempotent)
+
+    async def unregister_scheduler_plugin(self, name: str) -> None:
+        """Unregister a plugin on the scheduler."""
+        self.remove_plugin(name)
 
     def worker_send(self, worker: str, msg: dict[str, Any]) -> None:
         """Send message to worker
