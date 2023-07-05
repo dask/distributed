@@ -15,7 +15,7 @@ can be suboptimal:
 - the same function may be applied to different parts of your workflow, with a different
   performance profile;
 - you may be in a multitenancy setup, where part of the load on the cluster was not
-  originated by your client code.
+  caused by your client code.
 
 In these situations, it may be useful to attach meaningful tags to your workflow, or
 segments of it.
