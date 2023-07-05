@@ -531,6 +531,7 @@ def test_executefailure_to_dict():
     ev = ExecuteFailureEvent(
         stimulus_id="test",
         key="x",
+        run_id=1,
         start=123.4,
         stop=456.7,
         exception=Serialize(ValueError("foo")),
@@ -546,6 +547,7 @@ def test_executefailure_to_dict():
         "stimulus_id": "test",
         "handled": 11.22,
         "key": "x",
+        "run_id": 1,
         "start": 123.4,
         "stop": 456.7,
         "exception": "<Serialize: foo>",
@@ -571,6 +573,7 @@ def test_executefailure_dummy():
     ev = ExecuteFailureEvent.dummy("x", stimulus_id="s")
     assert ev == ExecuteFailureEvent(
         key="x",
+        run_id=1,
         start=None,
         stop=None,
         exception=Serialize(None),
