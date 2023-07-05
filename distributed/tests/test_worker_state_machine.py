@@ -1334,7 +1334,7 @@ def test_gather_dep_failure(ws):
     ws.validate = False
 
 
-def test_compute_erred_task(ws):
+def test_recompute_erred_task(ws):
     instructions = ws.handle_stimulus(
         ComputeTaskEvent.dummy("x", run_id=1, stimulus_id="s1"),
         ExecuteFailureEvent.dummy("x", run_id=1, stimulus_id="s2"),
