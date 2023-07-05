@@ -97,7 +97,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     scheduler: Scheduler
     states: dict[ShuffleId, ShuffleState]
     heartbeats: defaultdict[ShuffleId, dict]
-    erred_shuffles: dict[ShuffleId, Exception]
 
     def __init__(self, scheduler: Scheduler):
         self.scheduler = scheduler
@@ -111,7 +110,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         )
         self.heartbeats = defaultdict(lambda: defaultdict(dict))
         self.states = {}
-        self.erred_shuffles = {}
         self.scheduler.add_plugin(self)
 
     def shuffle_ids(self) -> set[ShuffleId]:
@@ -119,6 +117,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
 
     async def barrier(self, id: ShuffleId, run_id: int) -> None:
         shuffle = self.states[id]
+        assert shuffle.run_id == run_id
         msg = {"op": "shuffle_inputs_done", "shuffle_id": id, "run_id": run_id}
         await self.scheduler.broadcast(
             msg=msg, workers=list(shuffle.participating_workers)
@@ -138,8 +137,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
                 self.heartbeats[shuffle_id][ws.address].update(d)
 
     def get(self, id: ShuffleId, worker: str) -> dict[str, Any]:
-        if exception := self.erred_shuffles.get(id):
-            return {"status": "error", "message": str(exception)}
         state = self.states[id]
         state.participating_workers.add(worker)
         return state.to_msg()
@@ -316,7 +313,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             exception = RuntimeError(
                 f"Worker {worker} left during active shuffle {shuffle_id}"
             )
-            # self.erred_shuffles[shuffle_id] = exception
             self._clean_on_scheduler(shuffle_id)
             self._fail_on_workers(shuffle, str(exception))
         self.states
@@ -357,7 +353,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
 
     def _clean_on_scheduler(self, id: ShuffleId) -> None:
         del self.states[id]
-        self.erred_shuffles.pop(id, None)
         with contextlib.suppress(KeyError):
             del self.heartbeats[id]
 
@@ -368,7 +363,6 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
     def restart(self, scheduler: Scheduler) -> None:
         self.states.clear()
         self.heartbeats.clear()
-        self.erred_shuffles.clear()
 
 
 def get_worker_for_range_sharding(
