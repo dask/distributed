@@ -119,9 +119,9 @@ Alternatively you may want to just label some of the time this way:
 
 In the above example, the function is split into an I/O intensive phase,
 ``read_from_network``, and a CPU-intensive one, ``preprocess``. The
-``context_meter.meter`` context manager will subtract the time spent by
-``read_from_network`` from ``thread-noncpu``, whereas the time spent by ``preprocess``
-will still be a mix of ``thread-cpu`` and ``thread-noncpu`` (the latter may, for
+``context_meter.meter`` context manager will log the time spent by
+``read_from_network`` as ``I/O``, whereas the time spent by ``preprocess``
+still be logged as a mix of ``thread-cpu`` and ``thread-noncpu`` (the latter may, for
 example, highlight GIL contention).
 
 .. note::
