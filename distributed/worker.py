@@ -2267,11 +2267,12 @@ class Worker(BaseWorker, ServerNode):
             self.active_keys.add(key)
             # Propagate span (see distributed.spans). This is useful when spawning
             # more tasks using worker_client() and for logging.
-            if "span" in ts.annotations:
-                span_ctx = dask.annotate(span=ts.annotations["span"])
-                span_ctx.__enter__()
-            else:
-                span_ctx = None
+            span_ctx = (
+                dask.annotate(span=ts.annotations["span"])
+                if "span" in ts.annotations
+                else contextlib.nullcontext()
+            )
+            span_ctx.__enter__()
 
             try:
                 ts.start_time = time()
@@ -2321,8 +2322,7 @@ class Worker(BaseWorker, ServerNode):
                         )
             finally:
                 self.active_keys.discard(key)
-                if span_ctx:
-                    span_ctx.__exit__(None, None, None)
+                span_ctx.__exit__(None, None, None)
 
             self.threads[key] = result["thread"]
 
