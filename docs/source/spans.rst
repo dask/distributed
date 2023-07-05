@@ -83,8 +83,8 @@ The possibilities are more or less endless - instead *or in addition to* a usern
 the top, you could store information on what dataset you're processing, etc.
 
 
-The "default" span
-------------------
+The default span
+----------------
 If you don't use the :func:`span` context manager, your tasks will be automatically
 attributed to the ``("default", )`` span.
 

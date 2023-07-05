@@ -6,10 +6,11 @@ Fine Performance Metrics
 
 You may want to investigate where your Dask workload spends the majority of its time;
 not only on which tasks, but also *doing what* while running said tasks.
-*Fine performance metrics* are collected automatically by Dask and attempt to answer
-this question.
+Dask automatically collects *fine performance metrics* to answer this question by
+breaking down the end-to-end runtime of a computation by task and, within each task, by
+a series of *activities* taken to complete it.
 
-In order to observe them, you should simply
+In order to observe these metrics, you can simply
 
 #. run your workload end-to-end
 #. open the Dask dashboard (default for a LocalCluster: `<http://localhost:8787>`_)
@@ -22,32 +23,46 @@ Alternatively, if you're using Jupyter Lab and `dask-labextension
 .. image:: images/fine-performance-metrics/seconds-full.png
    :alt: Populated Fine Performance Metrics dashboard
 
-The central panel shows what *activities* the cluster spent its time on. 
-The most important ones are:
+The central panel (**Task execution, by activity**) shows what *activities* the cluster
+spent its time on, cumulatively for all currently-visible functions. The most important
+ones are:
 
 ``thread-cpu``
-  CPU time spent by tasks while running on workers
+  CPU time spent by tasks while running on workers. This is typically "good" time; in
+  other words it's the same time you would have spent if you ran the workload serially
+  on a single CPU - but parallelized over however how many CPUs are available on
+  your cluster.
 ``thread-noncpu``
   Difference between wall clock time and CPU time spent by tasks while running on
-  workers. This is typically either I/O time, CPU contention, or GIL contention.
+  workers. This is typically I/O time, GPU time, CPU contention, or GIL contention.
+  If you observe large amounts of this in your overall workload, you probably want to
+  break it down by function and isolate those that are known to perform I/O or GPU
+  activity.
 ``idle``
   Time where a worker had a free thread, but nothing to run on it. This is typically
   caused by the workload not being able to fully utilize all threads on the cluster,
-  excessive CPU load on the scheduler, or network latency between scheduler and workers.
+  network latency between scheduler and workers, or excessive CPU load on the scheduler.
   This measure does not include time spent while the whole cluster was completely idle.
+``disk-read``, ``disk-write``, ``compress``, ``decompress``
+  Time spent spilling/unspilling to disk due to not having enough memory available.
+  See :doc:`worker-memory`.
+``executor``, ``offload``, ``other``
+  This is overhead from the Dask code and should be typically negligible. However,
+  it can be inflated by GIL contention and by spill/unspill activity.
 
 The grand total of the time shown should roughly add up to the end-to-end runtime of
 your workload, multiplied by the number of threads on the cluster.
 
-The plot on the right shows network transfer time. Note that most of it should be
-pipelined with task execution, so it may not have an impact. You should worry about this
-only if you have a very large ``idle`` time.
+The right panel (**Send data, by activity**) shows network transfer time. Note that most
+of it should be pipelined with task execution, so it may not have an impact. You should
+worry about this only if you have a very large ``idle`` time.
 
-The plot on the left shows the same information as the central one, but broken down by
-function. There is a filter that allows you to show only selected functions. In the
-sample screenshots, you can observe that most of the `thread-noncpu` time is
-concentrated - as expected - in functions that are known to be I/O heavy. Here they are
-singled out:
+The left panel (**Task execution, by function**) shows the same information as the
+central one, but broken down by function.
+
+There is a filter that allows you to show only selected functions. In the sample
+screenshots, you can observe that most of the `thread-noncpu` time is concentrated - as
+expected - in functions that are known to be I/O heavy. Here they are singled out:
 
 .. image:: images/fine-performance-metrics/seconds-IO.png
    :alt: Fine Performance Metrics dashboard, just the I/O functions
@@ -119,15 +134,15 @@ Alternatively you may want to just label some of the time this way:
 
 In the above example, the function is split into an I/O intensive phase,
 ``read_from_network``, and a CPU-intensive one, ``preprocess``. The
-``context_meter.meter`` context manager will log the time spent by
-``read_from_network`` as ``I/O``, whereas the time spent by ``preprocess``
-still be logged as a mix of ``thread-cpu`` and ``thread-noncpu`` (the latter may, for
-example, highlight GIL contention).
+:meth:`distributed.metrics.context_meter.meter` context manager will log the time spent
+by ``read_from_network`` as ``I/O``, whereas the time spent by ``preprocess`` still be
+logged as a mix of ``thread-cpu`` and ``thread-noncpu`` (the latter may, for example,
+highlight GIL contention).
 
 .. note::
-   The ``context_meter.meter`` context manager wraps around code that runs on the
-   worker, in a single task. It won't work if used to decorate client-side code that
-   defines the Dask graph. See :doc:`spans` for that.
+   The :meth:`distributed.metrics.context_meter.meter` context manager wraps around code
+   that runs on the worker, in a single task. It won't work if used to decorate
+   client-side code that defines the Dask graph. See :doc:`spans` for that.
 
 Finally, you may want to report a metric that is not just wall time. For example, if
 you're reading data from S3 Infrequent Access storage, you may want to keep track of it
