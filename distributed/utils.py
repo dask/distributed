@@ -500,8 +500,8 @@ def run_and_close_tornado(
     try:
         return asyncio.run(inner_fn())
     finally:
-        assert tornado_loop is not None
-        tornado_loop.close(all_fds=True)
+        if tornado_loop is not None:
+            tornado_loop.close(all_fds=True)
 
 
 # distributed.LocalCluster objects are closed using an atexit hook that calls
