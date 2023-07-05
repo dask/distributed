@@ -67,9 +67,9 @@ unit to bytes:
 .. image:: images/fine-performance-metrics/bytes.png
    :alt: Fine Performance Metrics dashboard, unit=bytes
 
-The above gives us insights on spill/unspill activity (see :doc:`worker-memory`): in
-this workflow, in 99% of the cases there was enough RAM to accommodate all the data and
-it was unnecessary to retrieve it from disk; in other words we have a 99% *cache hit
+The above gives us insights on spill/unspill activity (see :doc:`worker-memory`).
+In this workflow, in 99% of the cases there was enough RAM to accommodate all the data
+and it was unnecessary to retrieve it from disk; in other words we have a 99% *cache hit
 ratio*, which means that we would not get any benefit if we increased RAM, but we would
 likely start seeing slowdowns if we reduced it.
 

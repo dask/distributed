@@ -235,9 +235,9 @@ class ContextMeter:
         """Convenience context manager or decorator which calls func() before and after
         the wrapped code, calculates the delta, and finally calls :meth:`digest_metric`.
 
-        Exclusively for ``unit="seconds"``, it also subtracts any other calls to
-        :meth:`meter` or :meth:`digest_metric` with the same unit performed within the
-        context, so that the total is strictly additive.
+        If unit=='seconds', it also subtracts any other calls to :meth:`meter` or
+        :meth:`digest_metric` with the same unit performed within the context, so that
+        the total is strictly additive.
 
         Parameters
         ----------
@@ -253,7 +253,9 @@ class ContextMeter:
         Yields
         ------
         :class:`MeterOutput` where the ``start`` attribute is populated straight away,
-        while ``stop`` and ``delta`` are nan until context exit.
+        while ``stop`` and ``delta`` are nan until context exit. In case of multiple
+        nested calls to :meth:`meter`, then delta (for seconds only) is reduced by the
+        inner metrics, to a minimum of ``floor``.
         """
         offsets = []
 

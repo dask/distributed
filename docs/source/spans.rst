@@ -61,8 +61,8 @@ The example will create the following spans on the scheduler:
 - ``("Alice's workflow", "Model training")``
 
 Each of the spans will be mapped to the tasks matching the segment of the graph that was
-defined inside its context manager. The top-level span will be mapped to all tasks of
-its children.
+defined inside its context manager. The parent span will be mapped to all tasks of its
+children.
 
 Tags are arbitrary and nothing stops you from parameterizing them; for example
 
@@ -83,8 +83,8 @@ The possibilities are more or less endless - instead *or in addition to* a usern
 the top, you could store information on what dataset you're processing, etc.
 
 
-If you don't define spans
--------------------------
+The "default" span
+------------------
 If you don't use the :func:`span` context manager, your tasks will be automatically
 attributed to the ``("default", )`` span.
 
@@ -96,6 +96,9 @@ filter your workload:
 
 .. image:: images/fine-performance-metrics/spans.png
    :alt: Span selection in the Fine Performance Metrics dashboard
+
+Additionally, spans can be queried using scheduler extensions or
+:meth:`~distributed.Client.run_on_scheduler`; see :ref:`spans_developer_api`.
 
 
 User API
@@ -117,6 +120,8 @@ User API
 
 .. autofunction:: span
 
+
+.. _spans_developer_api:
 
 Dask Developer API
 ------------------
