@@ -285,12 +285,13 @@ async def test_closed_worker_during_transfer(c, s, a, b):
         freq="10 s",
     )
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    out = out.persist()
+    x, y = c.compute([df.x.size, out.x.size])
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
     await b.close()
 
-    with pytest.raises(RuntimeError):
-        out = await c.compute(out)
+    x = await x
+    y = await y
+    assert x == y
 
     await c.close()
     await clean_worker(a)
@@ -310,21 +311,21 @@ async def test_crashed_worker_during_transfer(c, s, a):
             freq="10 s",
         )
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-        out = out.persist()
+        x, y = c.compute([df.x.size, out.x.size])
         await wait_until_worker_has_tasks(
             "shuffle-transfer", killed_worker_address, 1, s
         )
         await n.process.process.kill()
 
-        with pytest.raises(RuntimeError):
-            out = await c.compute(out)
+        x = await x
+        y = await y
+        assert x == y
 
         await c.close()
         await clean_worker(a)
         await clean_scheduler(s)
 
 
-# TODO: Deduplicate instead of failing: distributed#7324
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_input_only_worker_during_transfer(c, s, a, b):
     def mock_get_worker_for_range_sharding(
@@ -343,12 +344,13 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
             freq="10 s",
         )
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-        out = out.persist()
+        x, y = c.compute([df.x.size, out.x.size])
         await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b, 0.001)
         await b.close()
 
-        with pytest.raises(RuntimeError):
-            out = await c.compute(out)
+        x = await x
+        y = await y
+        assert x == y
 
         await c.close()
         await clean_worker(a)
@@ -356,7 +358,6 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
         await clean_scheduler(s)
 
 
-# TODO: Deduplicate instead of failing: distributed#7324
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)], clean_kwargs={"processes": False})
 async def test_crashed_input_only_worker_during_transfer(c, s, a):
@@ -378,14 +379,15 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
                 freq="10 s",
             )
             out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-            out = out.persist()
+            x, y = c.compute([df.x.size, out.x.size])
             await wait_until_worker_has_tasks(
                 "shuffle-transfer", n.worker_address, 1, s
             )
             await n.process.process.kill()
 
-            with pytest.raises(RuntimeError):
-                out = await c.compute(out)
+            x = await x
+            y = await y
+            assert x == y
 
             await c.close()
             await clean_worker(a)
@@ -442,7 +444,7 @@ async def test_closed_worker_during_barrier(c, s, a, b):
         freq="10 s",
     )
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    out = out.persist()
+    x, y = c.compute([df.x.size, out.x.size])
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     key = barrier_key(shuffle_id)
     await wait_for_state(key, "processing", s)
@@ -464,8 +466,9 @@ async def test_closed_worker_during_barrier(c, s, a, b):
 
     alive_shuffle.block_inputs_done.set()
 
-    with pytest.raises(RuntimeError):
-        out = await c.compute(out)
+    x = await x
+    y = await y
+    assert x == y
 
     await c.close()
     await clean_worker(a)
@@ -486,7 +489,7 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
         freq="10 s",
     )
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    out = out.persist()
+    x, y = c.compute([df.x.size, out.x.size])
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
 
     key = barrier_key(shuffle_id)
@@ -510,8 +513,9 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
 
     alive_shuffle.block_inputs_done.set()
 
-    with pytest.raises(RuntimeError, match="shuffle_barrier failed"):
-        out = await c.compute(out)
+    x = await x
+    y = await y
+    assert x == y
 
     await c.close()
     await clean_worker(a)
@@ -534,7 +538,7 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
             freq="10 s",
         )
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-        out = out.persist()
+        x, y = c.compute([df.x.size, out.x.size])
         shuffle_id = await wait_until_new_shuffle_is_initialized(s)
         key = barrier_key(shuffle_id)
         # Ensure that barrier is not executed on the nanny
@@ -545,8 +549,9 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
         await n.process.process.kill()
         shuffle.block_inputs_done.set()
 
-        with pytest.raises(RuntimeError, match="shuffle"):
-            out = await c.compute(out)
+        x = await x
+        y = await y
+        assert x == y
 
         await c.close()
         await clean_worker(a)
@@ -562,12 +567,13 @@ async def test_closed_worker_during_unpack(c, s, a, b):
         freq="10 s",
     )
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    out = out.persist()
+    x, y = c.compute([df.x.size, out.x.size])
     await wait_for_tasks_in_state("shuffle-p2p", "memory", 1, b)
     await b.close()
 
-    with pytest.raises(RuntimeError):
-        out = await c.compute(out)
+    x = await x
+    y = await y
+    assert x == y
 
     await c.close()
     await clean_worker(a)
@@ -587,13 +593,13 @@ async def test_crashed_worker_during_unpack(c, s, a):
             freq="10 s",
         )
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-        out = out.persist()
+        x, y = c.compute([df.x.size, out.x.size])
         await wait_until_worker_has_tasks("shuffle-p2p", killed_worker_address, 1, s)
         await n.process.process.kill()
-        with pytest.raises(
-            RuntimeError,
-        ):
-            out = await c.compute(out)
+
+        x = await x
+        y = await y
+        assert x == y
 
         await c.close()
         await clean_worker(a)
@@ -1786,7 +1792,7 @@ async def test_closed_worker_returns_before_barrier(c, s):
             freq="10 s",
         )
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-        out = out.persist()
+        x, y = c.compute([df.x.size, out.x.size])
         shuffle_id = await wait_until_new_shuffle_is_initialized(s)
         key = barrier_key(shuffle_id)
         await wait_for_state(key, "processing", s)
@@ -1817,10 +1823,9 @@ async def test_closed_worker_returns_before_barrier(c, s):
 
         scheduler_extension.block_barrier.set()
 
-        with pytest.raises(
-            RuntimeError, match=f"shuffle_barrier failed .* {shuffle_id}"
-        ):
-            await c.compute(out.x.size)
+        x = await x
+        y = await y
+        assert x == y
 
         blocking_extension.block_remove_worker.set()
         await c.close()
