@@ -79,7 +79,7 @@ This is useful for example if you want to observe either all the workload
 submitted by Alice, while hiding Bob's activity, or alternatively all the data loading
 activity, regardless of who submitted it.
 
-The possibilities are more or less arbitrary - instead *or in addition to* a username at
+The possibilities are more or less endless - instead *or in addition to* a username at
 the top, you could store information on what dataset you're processing, etc.
 
 
