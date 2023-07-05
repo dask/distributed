@@ -43,8 +43,8 @@ from distributed.batched import BatchedSend
 from distributed.client import Client, _global_clients, default_client
 from distributed.comm import Comm
 from distributed.comm.tcp import TCP
-from distributed.compatibility import MACOS, WINDOWS
-from distributed.config import initialize_logging
+from distributed.compatibility import MACOS, WINDOWS, asyncio_run
+from distributed.config import get_loop_factory, initialize_logging
 from distributed.core import (
     CommClosedError,
     ConnectionPool,
@@ -375,7 +375,7 @@ def _run_and_close_tornado(async_fn, /, *args, **kwargs):
         return await async_fn(*args, **kwargs)
 
     try:
-        return asyncio.run(inner_fn())
+        return asyncio_run(inner_fn(), loop_factory=get_loop_factory())
     finally:
         tornado_loop.close(all_fds=True)
 
