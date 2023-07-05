@@ -504,11 +504,12 @@ def run_and_close_tornado(
         tornado_loop.close(all_fds=True)
 
 
-# distributed.Client objects are closed using an atexit hook that calls
-# Client.close, this sends an {"op": "close-client"} to the scheduler.
+# distributed.LocalCluster objects are closed using an atexit hook that calls
+# LocalCluster.close, eventually this calls the retire_workers RPC method
+# on the scheduler.
 # On the Windows ProactorEventLoop tornado also sets an atexit hook that
-# closes the AddThreadSelectorEventLoop that is managing our Client's socket
-# to the scheduler causing the {"op": "close-client"} message to fail.
+# closes the AddThreadSelectorEventLoop that is managing our LocalCluster's
+# RPC socket causing the retire_workers RPC to fail.
 # because we manage the cleanup of the tornado event loop ourselves we want to
 # disable the tornado atexit hook
 # https://github.com/tornadoweb/tornado/issues/3291
