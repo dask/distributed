@@ -61,7 +61,7 @@ This tells us an important piece of information: why is `astype`, which is a pur
 function, spending so much time occupying workers' threads but without accruing any CPU
 time? The answer, almost certainly, it's that it doesn't properly release the GIL.
 
-Fine Performance Metrics don't collect exclusively wall clock timings. We can change the
+Fine Performance Metrics collect more than wall clock timings. We can change the
 unit to bytes:
 
 .. image:: images/fine-performance-metrics/bytes.png
