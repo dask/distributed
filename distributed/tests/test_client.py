@@ -75,7 +75,7 @@ from distributed.cluster_dump import load_cluster_dump
 from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import Status, error_message
-from distributed.diagnostics.plugin import WorkerPlugin
+from distributed.diagnostics.plugin import SchedulerPlugin, WorkerPlugin
 from distributed.metrics import time
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
 from distributed.shuffle import check_minimal_arrow_version
@@ -6789,6 +6789,18 @@ async def test_register_worker_plugin_exception(c, s, a, b):
 
     with pytest.raises(ValueError, match="Setup failed"):
         await c.register_worker_plugin(MyPlugin())
+
+
+@gen_cluster(client=True)
+async def test_scheduler_plugins(c, s, a, b):
+    class Plugin(SchedulerPlugin):
+        name = "plugin"
+
+    assert "plugin" not in s.plugins
+    await c.register_scheduler_plugin(Plugin())
+    assert "plugin" in s.plugins
+    await c.unregister_scheduler_plugin("plugin")
+    assert "plugin" not in s.plugins
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
