@@ -294,29 +294,32 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
 
         stimulus_id = f"shuffle-failed-worker-left-{time()}"
 
-        recs: Recs = {}
-        for shuffle_id, shuffle in self.states.items():
+        # If processing the transactions causes a task to get released, this
+        # removes the shuffle from self.states. Therefore, we must iterate
+        # over a copy.
+        for shuffle_id, shuffle in self.states.copy().items():
             if worker not in shuffle.participating_workers:
                 continue
+
+            recs: Recs = {}
+            barrier_task = self.scheduler.tasks[barrier_key(shuffle_id)]
+
+            for dt in barrier_task.dependents:
+                if worker not in dt.worker_restrictions:
+                    continue
+                self._unset_restriction(dt)
+
+            for dt in barrier_task.dependencies:
+                recs.update({dt.key: "waiting"})
+            self.scheduler.transitions(recs, stimulus_id=stimulus_id)
+
             exception = RuntimeError(
                 f"Worker {worker} left during active shuffle {shuffle_id}"
             )
-            self.erred_shuffles[shuffle_id] = exception
+            # self.erred_shuffles[shuffle_id] = exception
+            self._clean_on_scheduler(shuffle_id)
             self._fail_on_workers(shuffle, str(exception))
-
-            barrier_task = self.scheduler.tasks[barrier_key(shuffle_id)]
-            if barrier_task.state == "memory":
-                for dt in barrier_task.dependents:
-                    if worker not in dt.worker_restrictions:
-                        continue
-                    self._unset_restriction(dt)
-                    recs.update({dt.key: "waiting"})
-                # TODO: Do we need to handle other states?
-
-        # If processing the transactions causes a task to get released, this
-        # removes the shuffle from self.states. Therefore, we must process them
-        # outside of the loop.
-        self.scheduler.transitions(recs, stimulus_id=stimulus_id)
+        self.states
 
     def transition(
         self,
