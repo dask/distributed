@@ -4884,6 +4884,7 @@ class Scheduler(SchedulerState, ServerNode):
         exception=None,
         stimulus_id=None,
         traceback=None,
+        run_id=None,
         **kwargs,
     ):
         """Mark that a task has erred on a particular worker"""
@@ -4891,6 +4892,11 @@ class Scheduler(SchedulerState, ServerNode):
 
         ts: TaskState = self.tasks.get(key)
         if ts is None or ts.state != "processing":
+            return {}, {}, {}
+
+        if ts.run_id != run_id:
+            if ts.processing_on and ts.processing_on.address == worker:
+                return self._transition(key, "released", stimulus_id)
             return {}, {}, {}
 
         if ts.retries > 0:
