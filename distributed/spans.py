@@ -393,17 +393,19 @@ class Span:
         events = []
         for child in self.children:
             events += [(child.enqueued, 1), (child.stop, -1)]
-        events.sort()
+        # enqueued <= stop by construction.
+        # Occasionally, enqueued == stop, e.g. when the clock is adjusted backwards.
+        # Prevent negative n_active when this happens.
+        events.sort(key=lambda el: el[0])
 
         n_active = 0
         for t, delta in events:
-            # Note: in case of identical timestamps, there may be loops after sorting
-            # were n_active < 0
-            if n_active == 0 and delta == 1:
+            if not n_active:
+                assert delta == 1
                 yield t, True
-            elif n_active == 1 and delta == -1:
-                yield t, False
             n_active += delta
+            if not n_active:
+                yield t, False
 
     @property
     def nthreads_intervals(self) -> list[tuple[float, float, int]]:
