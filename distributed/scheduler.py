@@ -5076,12 +5076,14 @@ class Scheduler(SchedulerState, ServerNode):
                         scheduler=self, worker=address, stimulus_id=stimulus_id
                     )
                 except TypeError:
-                    warnings.warn(
-                        "The `stimulus_id` keyword argument has been added to `SchedulerPlugin.remove_worker`. "
-                        "Not supporting the `stimulus_id` keyword argument or `**kwargs` will no longer be supported in future versions.",
-                        FutureWarning,
-                    )
-                    result = plugin.remove_worker(scheduler=self, worker=address)  # type: ignore
+                    parameters = inspect.signature(plugin.remove_worker).parameters
+                    if not ("stimulus_id" in parameters or "kwargs" in parameters):
+                        warnings.warn(
+                            "The `stimulus_id` keyword argument has been added to `SchedulerPlugin.remove_worker`. "
+                            "Not supporting the `stimulus_id` keyword argument or `**kwargs` will no longer be supported in future versions.",
+                            FutureWarning,
+                        )
+                        result = plugin.remove_worker(scheduler=self, worker=address)  # type: ignore
                 if inspect.isawaitable(result):
                     awaitables.append(result)
             except Exception as e:
