@@ -1978,7 +1978,9 @@ class SchedulerState:
                     self.tasks[ts.key] = ts
                 for plugin in list(self.plugins.values()):
                     try:
-                        plugin.transition(key, start, actual_finish, **kwargs)
+                        plugin.transition(
+                            key, start, actual_finish, stimulus_id, **kwargs
+                        )
                     except Exception:
                         logger.info("Plugin failed with exception", exc_info=True)
                 if ts.state == "forgotten":
@@ -5069,7 +5071,9 @@ class Scheduler(SchedulerState, ServerNode):
         awaitables = []
         for plugin in list(self.plugins.values()):
             try:
-                result = plugin.remove_worker(scheduler=self, worker=address)
+                result = plugin.remove_worker(
+                    scheduler=self, worker=address, stimulus_id=stimulus_id
+                )
                 if inspect.isawaitable(result):
                     awaitables.append(result)
             except Exception as e:
@@ -8420,7 +8424,9 @@ class WorkerStatusPlugin(SchedulerPlugin):
         except CommClosedError:
             scheduler.remove_plugin(name=self.name)
 
-    def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
+    def remove_worker(
+        self, scheduler: Scheduler, worker: str, stimulus_id: str
+    ) -> None:
         try:
             self.bcomm.send(["remove", worker])
         except CommClosedError:
@@ -8458,6 +8464,7 @@ class CollectTaskMetaDataPlugin(SchedulerPlugin):
         key: str,
         start: TaskStateState,
         finish: TaskStateState,
+        stimulus_id: str,
         *args: Any,
         **kwargs: Any,
     ) -> None:

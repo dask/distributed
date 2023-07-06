@@ -21,7 +21,7 @@ class WebsocketPlugin(SchedulerPlugin):
         """Run when a new worker enters the cluster"""
         self.socket.send("add_worker", {"worker": worker})
 
-    def remove_worker(self, scheduler=None, worker=None, **kwargs):
+    def remove_worker(self, scheduler=None, worker=None, stimulus_id=None, **kwargs):
         """Run when a worker leaves the cluster"""
         self.socket.send("remove_worker", {"worker": worker})
 
@@ -37,7 +37,7 @@ class WebsocketPlugin(SchedulerPlugin):
         """Run when a new graph / tasks enter the scheduler"""
         self.socket.send("update_graph", {"client": client})
 
-    def transition(self, key, start, finish, *args, **kwargs):
+    def transition(self, key, start, finish, stimulus_id, *args, **kwargs):
         """Run whenever a task changes state
 
         Parameters

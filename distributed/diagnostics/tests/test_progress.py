@@ -75,7 +75,7 @@ async def test_multiprogress(c, s, a, b):
 @gen_cluster(client=True)
 async def test_robust_to_bad_plugin(c, s, a, b):
     class Bad(SchedulerPlugin):
-        def transition(self, key, start, finish, **kwargs):
+        def transition(self, key, start, finish, stimulus_id, **kwargs):
             raise Exception()
 
     bad = Bad()

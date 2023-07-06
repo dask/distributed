@@ -289,7 +289,9 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         original_restrictions = ts.annotations.pop("shuffle_original_restrictions")
         self.scheduler.set_restrictions({ts.key: original_restrictions})
 
-    def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
+    def remove_worker(
+        self, scheduler: Scheduler, worker: str, stimulus_id: str
+    ) -> None:
         from time import time
 
         stimulus_id = f"shuffle-failed-worker-left-{time()}"
@@ -323,6 +325,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         key: str,
         start: TaskStateState,
         finish: TaskStateState,
+        stimulus_id: str,
         *args: Any,
         **kwargs: Any,
     ) -> None:

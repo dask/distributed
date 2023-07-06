@@ -18,7 +18,7 @@ class EventStream(SchedulerPlugin):
         if scheduler:
             scheduler.add_plugin(self)
 
-    def transition(self, key, start, finish, *args, **kwargs):
+    def transition(self, key, start, finish, stimulus_id, *args, **kwargs):
         if start == "processing":
             kwargs["key"] = key
             if finish == "memory" or finish == "erred":

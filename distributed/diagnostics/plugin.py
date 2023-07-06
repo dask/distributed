@@ -44,7 +44,7 @@ class SchedulerPlugin:
     ...     def __init__(self):
     ...         self.counter = 0
     ...
-    ...     def transition(self, key, start, finish, *args, **kwargs):
+    ...     def transition(self, key, start, finish, stimulus_id, *args, **kwargs):
     ...         if start == 'processing' and finish == 'memory':
     ...             self.counter += 1
     ...
@@ -122,6 +122,7 @@ class SchedulerPlugin:
         key: str,
         start: TaskStateState,
         finish: TaskStateState,
+        stimulus_id: str,
         *args: Any,
         **kwargs: Any,
     ) -> None:
@@ -164,7 +165,7 @@ class SchedulerPlugin:
         """
 
     def remove_worker(
-        self, scheduler: Scheduler, worker: str
+        self, scheduler: Scheduler, worker: str, stimulus_id: str
     ) -> None | Awaitable[None]:
         """Run when a worker leaves the cluster
 
