@@ -8464,7 +8464,6 @@ class CollectTaskMetaDataPlugin(SchedulerPlugin):
         key: str,
         start: TaskStateState,
         finish: TaskStateState,
-        stimulus_id: str,
         *args: Any,
         **kwargs: Any,
     ) -> None:

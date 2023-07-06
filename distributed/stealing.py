@@ -177,8 +177,8 @@ class WorkStealing(SchedulerPlugin):
         key: str,
         start: TaskStateState,
         finish: TaskStateState,
-        stimulus_id: str,
         *args: Any,
+        stimulus_id: str,
         **kwargs: Any,
     ) -> None:
         if finish == "processing":

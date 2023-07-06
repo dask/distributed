@@ -94,7 +94,7 @@ class GraphLayout(SchedulerPlugin):
                 self.next_edge_index += 1
                 self.new_edges.append(edge)
 
-    def transition(self, key, start, finish, stimulus_id, *args, **kwargs):
+    def transition(self, key, start, finish, *args, stimulus_id, **kwargs):
         if finish != "forgotten":
             self.state_updates.append((self.index[key], finish))
         else:
