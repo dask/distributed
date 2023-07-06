@@ -5064,8 +5064,6 @@ class Scheduler(SchedulerState, ServerNode):
                 else:  # pure data
                     recommendations[ts.key] = "forgotten"
 
-        self.transitions(recommendations, stimulus_id=stimulus_id)
-
         awaitables = []
         for plugin in list(self.plugins.values()):
             try:
@@ -5074,6 +5072,8 @@ class Scheduler(SchedulerState, ServerNode):
                     awaitables.append(result)
             except Exception as e:
                 logger.exception(e)
+
+        self.transitions(recommendations, stimulus_id=stimulus_id)
 
         plugin_msgs = await asyncio.gather(*awaitables, return_exceptions=True)
         plugins_exceptions = [msg for msg in plugin_msgs if isinstance(msg, Exception)]

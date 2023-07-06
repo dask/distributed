@@ -120,7 +120,8 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         assert shuffle.run_id == run_id
         msg = {"op": "shuffle_inputs_done", "shuffle_id": id, "run_id": run_id}
         await self.scheduler.broadcast(
-            msg=msg, workers=list(shuffle.participating_workers)
+            msg=msg,
+            workers=list(shuffle.participating_workers),
         )
 
     def restrict_task(self, id: ShuffleId, run_id: int, key: str, worker: str) -> dict:
@@ -298,16 +299,19 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             if worker not in shuffle.participating_workers:
                 continue
 
-            recs: Recs = {}
             barrier_task = self.scheduler.tasks[barrier_key(shuffle_id)]
+            recs: Recs = {}
 
             for dt in barrier_task.dependents:
                 if worker not in dt.worker_restrictions:
                     continue
                 self._unset_restriction(dt)
 
+            for dt in barrier_task.dependents:
+                recs.update({dt.key: "released"})
             for dt in barrier_task.dependencies:
-                recs.update({dt.key: "waiting"})
+                recs.update({dt.key: "released"})
+            recs.update({barrier_task.key: "released"})
             self.scheduler.transitions(recs, stimulus_id=stimulus_id)
 
             exception = RuntimeError(
