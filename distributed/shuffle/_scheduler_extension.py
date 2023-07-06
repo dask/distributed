@@ -287,6 +287,24 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         original_restrictions = ts.annotations.pop("shuffle_original_restrictions")
         self.scheduler.set_restrictions({ts.key: original_restrictions})
 
+    def _restart_recommendations(self, id: ShuffleId) -> Recs:
+        barrier_task = self.scheduler.tasks[barrier_key(id)]
+        recs: Recs = {}
+        for dt in barrier_task.dependents:
+            if dt.state == "erred":
+                return {}
+            recs.update({dt.key: "released"})
+
+        if barrier_task.state == "erred":
+            return {}
+        recs.update({barrier_task.key: "released"})
+
+        for dt in barrier_task.dependencies:
+            if dt.state == "erred":
+                return {}
+            recs.update({dt.key: "released"})
+        return recs
+
     def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
         from time import time
 
@@ -299,19 +317,8 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             if worker not in shuffle.participating_workers:
                 continue
 
-            barrier_task = self.scheduler.tasks[barrier_key(shuffle_id)]
-            recs: Recs = {}
+            recs = self._restart_recommendations(shuffle_id)
 
-            for dt in barrier_task.dependents:
-                if worker not in dt.worker_restrictions:
-                    continue
-                self._unset_restriction(dt)
-
-            for dt in barrier_task.dependents:
-                recs.update({dt.key: "released"})
-            for dt in barrier_task.dependencies:
-                recs.update({dt.key: "released"})
-            recs.update({barrier_task.key: "released"})
             self.scheduler.transitions(recs, stimulus_id=stimulus_id)
 
             exception = RuntimeError(
