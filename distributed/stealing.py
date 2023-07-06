@@ -162,7 +162,7 @@ class WorkStealing(SchedulerPlugin):
         self.stealable[worker] = tuple(set() for _ in range(15))
 
     def remove_worker(
-        self, scheduler: Scheduler, worker: str, stimulus_id: str
+        self, scheduler: Scheduler, worker: str, *, stimulus_id: str
     ) -> None:
         del self.stealable[worker]
 

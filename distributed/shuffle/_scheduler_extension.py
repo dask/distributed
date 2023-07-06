@@ -290,7 +290,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self.scheduler.set_restrictions({ts.key: original_restrictions})
 
     def remove_worker(
-        self, scheduler: Scheduler, worker: str, stimulus_id: str
+        self, scheduler: Scheduler, worker: str, *, stimulus_id: str
     ) -> None:
         from time import time
 

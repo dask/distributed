@@ -8425,7 +8425,7 @@ class WorkerStatusPlugin(SchedulerPlugin):
             scheduler.remove_plugin(name=self.name)
 
     def remove_worker(
-        self, scheduler: Scheduler, worker: str, stimulus_id: str
+        self, scheduler: Scheduler, worker: str, *, stimulus_id: str
     ) -> None:
         try:
             self.bcomm.send(["remove", worker])

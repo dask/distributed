@@ -51,7 +51,7 @@ async def test_add_remove_worker(s):
             assert scheduler is s
             events.append(("add_worker", worker))
 
-        def remove_worker(self, worker, scheduler, stimulus_id):
+        def remove_worker(self, worker, scheduler, *, stimulus_id):
             assert scheduler is s
             events.append(("remove_worker", worker))
 
@@ -91,7 +91,7 @@ async def test_async_add_remove_worker(s):
             assert scheduler is s
             events.append(("add_worker", worker))
 
-        async def remove_worker(self, worker, scheduler, stimulus_id):
+        async def remove_worker(self, worker, scheduler, *, stimulus_id):
             assert scheduler is s
             events.append(("remove_worker", worker))
 
@@ -135,7 +135,7 @@ async def test_async_and_sync_add_remove_worker(s):
             await asyncio.sleep(0)
             events.append((self.name, "add_worker", worker))
 
-        async def remove_worker(self, scheduler, worker, stimulus_id):
+        async def remove_worker(self, scheduler, worker, *, stimulus_id):
             assert scheduler is s
             self.in_remove_worker.set()
             await self.block_remove_worker.wait()
@@ -149,7 +149,7 @@ async def test_async_and_sync_add_remove_worker(s):
             assert scheduler is s
             events.append((self.name, "add_worker", worker))
 
-        def remove_worker(self, worker, scheduler, stimulus_id):
+        def remove_worker(self, worker, scheduler, *, stimulus_id):
             assert scheduler is s
             events.append((self.name, "remove_worker", worker))
 
@@ -229,7 +229,7 @@ async def test_failing_async_add_remove_worker(s):
             await asyncio.sleep(0)
             raise RuntimeError("Async add_worker failed")
 
-        async def remove_worker(self, scheduler, worker, stimulus_id):
+        async def remove_worker(self, scheduler, worker, *, stimulus_id):
             assert scheduler is s
             await asyncio.sleep(0)
             raise RuntimeError("Async remove_worker failed")
@@ -257,7 +257,7 @@ async def test_failing_sync_add_remove_worker(s):
             assert scheduler is s
             raise RuntimeError("Async add_worker failed")
 
-        def remove_worker(self, scheduler, worker, stimulus_id):
+        def remove_worker(self, scheduler, worker, *, stimulus_id):
             assert scheduler is s
             raise RuntimeError("Async remove_worker failed")
 
