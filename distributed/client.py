@@ -5818,6 +5818,38 @@ class performance_report:
         client.sync(self.__aexit__, exc_type, exc_value, traceback, code=code)
 
 
+def submit(**kwargs):
+    """
+    Decorate a function to submit tasks to Dask
+
+    This converts a normal function to instead return Dask Futures.
+    That function can then be used in parallel.
+
+    This takes the same keywords as ``client.submit``
+
+    Example
+    -------
+
+    >>> from dask.distributed import submit
+    >>> @submit()
+    ... def f(x):
+    ...     return x + 1
+
+    >>> futures = [f(x) for x in range(10)]
+    >>> results = [future.result() for future in futures]
+
+    See Also
+    --------
+    Client.submit
+    dask.delayed
+    """
+
+    def _(function):
+        return partial(get_client().submit, function, **kwargs)
+
+    return _
+
+
 class get_task_metadata:
     """Collect task metadata within a context block
 

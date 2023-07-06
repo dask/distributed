@@ -57,6 +57,7 @@ from distributed import (
     performance_report,
     profile,
     secede,
+    submit,
 )
 from distributed.client import (
     Client,
@@ -8310,3 +8311,17 @@ async def test_resolves_future_in_dict(c, s, a, b):
     outer_future = c.submit(identity, {"x": inner_future, "y": 2})
     result = await outer_future
     assert result == {"x": 1, "y": 2}
+
+
+@gen_cluster(client=True)
+async def test_submit_decorator(c, s, a, b):
+    @submit(retries=123)
+    def f(x):
+        return x + 1
+
+    future = f(10)
+    assert isinstance(future, Future)
+    result = await future
+    assert result == 11
+
+    assert s.tasks[future.key].retries == 123

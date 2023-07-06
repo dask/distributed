@@ -32,6 +32,7 @@ from distributed.client import (
     get_task_metadata,
     get_task_stream,
     performance_report,
+    submit,
     wait,
 )
 from distributed.core import Status, connect, rpc
@@ -174,6 +175,7 @@ __all__ = [
     "rejoin",
     "rpc",
     "secede",
+    "submit",
     "sync",
     "wait",
     "warn",
