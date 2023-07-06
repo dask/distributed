@@ -345,6 +345,7 @@ async def test_FinePerformanceMetrics(c, s, a, b):
     # Test with no metrics
     cl.update()
     assert not cl.visible_functions
+    assert not cl.visible_activities
     assert not cl.span_tag_selector.options
     assert not cl.function_selector.options
     assert cl.unit_selector.options == ["seconds"]
@@ -393,6 +394,8 @@ async def test_FinePerformanceMetrics(c, s, a, b):
     assert "('foo', 1)" in cl.visible_activities
     assert "None" in cl.visible_activities
     assert "hideme" not in cl.visible_activities
+    assert "idle" in cl.visible_activities
+    assert "idle or other spans" not in cl.visible_activities
     assert sorted(cl.span_tag_selector.options) == ["default", "foo"]
 
     orig_activities = cl.visible_activities[:]
@@ -417,6 +420,8 @@ async def test_FinePerformanceMetrics(c, s, a, b):
     cl.update()
     assert sorted(cl.visible_functions) == ["N/A", "y", "z"]
     assert sorted(cl.function_selector.options) == ["N/A", "v", "w", "x", "y", "z"]
+    assert "idle" not in cl.visible_activities
+    assert "idle or other spans" in cl.visible_activities
 
 
 @gen_cluster(
