@@ -28,6 +28,7 @@ from distributed.shuffle._arrow import (
 )
 from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
+from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._rechunk import ChunkedAxes, NDIndex
 from distributed.shuffle._rechunk import ShardID as ArrayRechunkShardID
@@ -50,10 +51,6 @@ T_partition_type = TypeVar("T_partition_type")
 T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
-
-
-class ShuffleClosedError(RuntimeError):
-    pass
 
 
 class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type]):
@@ -162,9 +159,7 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         if self.closed:
             if self._exception:
                 raise self._exception
-            raise ShuffleClosedError(
-                f"Shuffle {self.id} has been closed on {self.local_address}"
-            )
+            raise ShuffleClosedError(f"{self!r} has been closed")
 
     async def inputs_done(self) -> None:
         self.raise_if_closed()
@@ -346,7 +341,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NDIndex, "np.ndarray"]):
     async def add_partition(self, data: np.ndarray, partition_id: NDIndex) -> int:
         self.raise_if_closed()
         if self.transferred:
-            raise RuntimeError(f"Cannot add more partitions to shuffle {self}")
+            raise RuntimeError(f"Cannot add more partitions to {self!r}")
 
         def _() -> dict[str, list[tuple[ArrayRechunkShardID, bytes]]]:
             """Return a mapping of worker addresses to a list of tuples of shard IDs
@@ -511,7 +506,7 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
     async def add_partition(self, data: pd.DataFrame, partition_id: int) -> int:
         self.raise_if_closed()
         if self.transferred:
-            raise RuntimeError(f"Cannot add more partitions to shuffle {self}")
+            raise RuntimeError(f"Cannot add more partitions to {self!r}")
 
         def _() -> dict[str, list[tuple[int, bytes]]]:
             out = split_by_worker(
@@ -696,10 +691,10 @@ class ShuffleWorkerExtension:
                 shuffle_id=shuffle_id,
             )
         if run_id < shuffle.run_id:
-            raise RuntimeError("Stale shuffle")
+            raise RuntimeError(f"{shuffle!r} stale, expected run_id=={run_id}")
         elif run_id > shuffle.run_id:
             # This should never happen
-            raise RuntimeError("Invalid shuffle state")
+            raise RuntimeError(f"{shuffle!r} invalid, expected run_id=={run_id}")
 
         if shuffle._exception:
             raise shuffle._exception
@@ -799,7 +794,9 @@ class ShuffleWorkerExtension:
                 return existing
             else:
                 self.shuffles.pop(shuffle_id)
-                existing.fail(RuntimeError("Stale Shuffle"))
+                existing.fail(
+                    RuntimeError("{existing!r} stale, expected run_id=={run_id}")
+                )
 
                 async def _(
                     extension: ShuffleWorkerExtension, shuffle: ShuffleRun

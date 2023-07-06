@@ -1978,7 +1978,19 @@ class SchedulerState:
                     self.tasks[ts.key] = ts
                 for plugin in list(self.plugins.values()):
                     try:
-                        plugin.transition(key, start, actual_finish, **kwargs)
+                        if (
+                            "stimulus_id"
+                            in inspect.signature(plugin.transition).parameters
+                        ):
+                            plugin.transition(
+                                key,
+                                start,
+                                actual_finish,
+                                stimulus_id=stimulus_id,
+                                **kwargs,
+                            )
+                        else:
+                            plugin.transition(key, start, actual_finish, **kwargs)
                     except Exception:
                         logger.info("Plugin failed with exception", exc_info=True)
                 if ts.state == "forgotten":
@@ -5069,7 +5081,12 @@ class Scheduler(SchedulerState, ServerNode):
         awaitables = []
         for plugin in list(self.plugins.values()):
             try:
-                result = plugin.remove_worker(scheduler=self, worker=address)
+                if "stimulus_id" in inspect.signature(plugin.remove_worker).parameters:
+                    result = plugin.remove_worker(
+                        scheduler=self, worker=address, stimulus_id=stimulus_id
+                    )
+                else:
+                    result = plugin.remove_worker(scheduler=self, worker=address)
                 if inspect.isawaitable(result):
                     awaitables.append(result)
             except Exception as e:

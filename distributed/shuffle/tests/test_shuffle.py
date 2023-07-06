@@ -1650,7 +1650,7 @@ async def test_shuffle_run_consistency(c, s, a):
 
     # This should never occur, but fetching an ID larger than the ID available on
     # the scheduler should result in an error.
-    with pytest.raises(RuntimeError, match="Invalid shuffle state"):
+    with pytest.raises(RuntimeError, match="invalid"):
         await worker_ext._get_shuffle_run(shuffle_id, shuffle_dict["run_id"] + 1)
 
     # Finish first execution
@@ -1677,7 +1677,7 @@ async def test_shuffle_run_consistency(c, s, a):
     assert await worker_ext._get_shuffle_run(shuffle_id, new_shuffle_dict["run_id"])
 
     # Fetching a stale run from a worker aware of the new run raises an error
-    with pytest.raises(RuntimeError, match="Stale shuffle"):
+    with pytest.raises(RuntimeError, match="stale"):
         await worker_ext._get_shuffle_run(shuffle_id, shuffle_dict["run_id"])
 
     worker_ext.block_barrier.set()
