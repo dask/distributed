@@ -111,6 +111,21 @@ async def test_multiprogress_with_spans(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_multiprogress_with_prefix(c, s, a, b):
+    x = c.submit(inc, 1)
+    p = MultiProgress([x], scheduler=s, complete=True, group_by="prefix")
+    await p.setup()
+    group_names = {k for k in p.all_keys}
+    assert group_names == {"inc"}
+
+
+def test_multiprogress_warns():
+    with pytest.warns(DeprecationWarning, match="func` is deprecated, use `group_by"):
+        p = MultiProgress([], complete=True, func="spans")
+        assert p.group_by == "spans"
+
+
+@gen_cluster(client=True)
 async def test_robust_to_bad_plugin(c, s, a, b):
     class Bad(SchedulerPlugin):
         def transition(self, key, start, finish, **kwargs):

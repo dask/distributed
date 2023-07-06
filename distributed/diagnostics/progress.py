@@ -183,7 +183,9 @@ class MultiProgress(Progress):
         complete=False,
     ):
         if func is not None:
-            warnings.warn("`func` is deprecated, use `group_by`")
+            warnings.warn(
+                "`func` is deprecated, use `group_by`", category=DeprecationWarning
+            )
             group_by = func
         self.group_by = key_split if group_by in (None, "prefix") else group_by
         self.func = None
