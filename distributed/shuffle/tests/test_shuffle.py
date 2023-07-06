@@ -49,6 +49,7 @@ from distributed.shuffle.tests.utils import (
 )
 from distributed.utils import Deadline
 from distributed.utils_test import (
+    async_poll_for,
     cluster,
     gen_cluster,
     gen_test,
@@ -456,7 +457,7 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     ts = s.tasks[key]
     processing_worker = a if ts.processing_on.address == a.address else b
     if processing_worker == a:
-        close_worker = a
+        close_worker, alive_worker = a, b
         alive_shuffle = shuffleB
 
     else:
@@ -465,6 +466,20 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     await close_worker.close()
 
     alive_shuffle.block_inputs_done.set()
+    alive_shuffles = alive_worker.extensions["shuffle"].shuffles
+
+    def shuffle_restarted():
+        try:
+            return alive_shuffles[shuffle_id].run_id > alive_shuffle.run_id
+        except KeyError:
+            return False
+
+    await async_poll_for(
+        shuffle_restarted,
+        timeout=5,
+    )
+    restarted_shuffle = alive_shuffles[shuffle_id]
+    restarted_shuffle.block_inputs_done.set()
 
     x = await x
     y = await y
@@ -503,15 +518,29 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
     ts = s.tasks[key]
     processing_worker = a if ts.processing_on.address == a.address else b
     if processing_worker == a:
-        close_worker = b
+        close_worker, alive_worker = b, a
         alive_shuffle = shuffleA
 
     else:
-        close_worker = a
+        close_worker, alive_worker = a, b
         alive_shuffle = shuffleB
     await close_worker.close()
 
     alive_shuffle.block_inputs_done.set()
+    alive_shuffles = alive_worker.extensions["shuffle"].shuffles
+
+    def shuffle_restarted():
+        try:
+            return alive_shuffles[shuffle_id].run_id > alive_shuffle.run_id
+        except KeyError:
+            return False
+
+    await async_poll_for(
+        shuffle_restarted,
+        timeout=5,
+    )
+    restarted_shuffle = alive_shuffles[shuffle_id]
+    restarted_shuffle.block_inputs_done.set()
 
     x = await x
     y = await y
@@ -544,10 +573,24 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
         # Ensure that barrier is not executed on the nanny
         s.set_restrictions({key: {a.address}})
         await wait_for_state(key, "processing", s, interval=0)
-        shuffle = a.extensions["shuffle"].shuffles[shuffle_id]
+        shuffles = a.extensions["shuffle"].shuffles
+        shuffle = shuffles[shuffle_id]
         await shuffle.in_inputs_done.wait()
         await n.process.process.kill()
         shuffle.block_inputs_done.set()
+
+        def shuffle_restarted():
+            try:
+                return shuffles[shuffle_id].run_id > shuffle.run_id
+            except KeyError:
+                return False
+
+        await async_poll_for(
+            shuffle_restarted,
+            timeout=5,
+        )
+        restarted_shuffle = shuffles[shuffle_id]
+        restarted_shuffle.block_inputs_done.set()
 
         x = await x
         y = await y
