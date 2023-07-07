@@ -3412,6 +3412,7 @@ async def test_get_scheduler_default_client_config_interleaving(s):
 
 @gen_cluster()
 async def test_ensure_default_client(s, a, b):
+    # Note: this test will fail if you use `async with Client`
     c = await Client(s.address, asynchronous=True)
     try:
         assert c is default_client()
