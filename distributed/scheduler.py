@@ -4474,11 +4474,12 @@ class Scheduler(SchedulerState, ServerNode):
             # _generate_taskstates is not the only thing that calls new_task(). A
             # TaskState may have also been created by client_desires_keys or scatter,
             # and only later gained a run_spec.
-            spans_ext.observe_tasks(runnable, code=code)
-            # TaskGroup.span_id could be completely different from the one in the
-            # original annotations, so it has been dropped. Drop it here as well in
-            # order not to confuse SchedulerPlugin authors.
-            resolved_annotations.pop("span", None)
+            span_annotations = spans_ext.observe_tasks(runnable, code=code)
+            # In case of TaskGroup collision, spans may have changed
+            if span_annotations:
+                resolved_annotations["span"] = span_annotations
+            else:
+                resolved_annotations.pop("span", None)
 
         for plugin in list(self.plugins.values()):
             try:
