@@ -297,15 +297,15 @@ async def test_variables_do_not_leak_client(c, s, a, b):
         assert time() < start + 5
 
 
-@gen_cluster(client=True, nthreads=[])
-async def test_unpickle_without_client(c, s):
+@gen_cluster(nthreads=[])
+async def test_unpickle_without_client(s):
     """Ensure that the object properly pickle roundtrips even if no client, worker, etc. is active in the given context.
 
     This typically happens if the object is being deserialized on the scheduler.
     """
-    obj = Variable("foo")
-    pickled = pickle.dumps(obj)
-    await c.close()
+    async with Client(s.address, asynchronous=True) as c:
+        obj = Variable("foo")
+        pickled = pickle.dumps(obj)
 
     # We do not want to initialize a client during unpickling
     with pytest.raises(ValueError):
