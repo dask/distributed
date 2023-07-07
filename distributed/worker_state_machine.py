@@ -482,6 +482,7 @@ class TaskErredMsg(SendMessageToScheduler):
     op = "task-erred"
 
     key: str
+    run_id: int
     exception: Serialize
     traceback: Serialize | None
     exception_text: str
@@ -497,11 +498,12 @@ class TaskErredMsg(SendMessageToScheduler):
 
     @staticmethod
     def from_task(
-        ts: TaskState, stimulus_id: str, thread: int | None = None
+        ts: TaskState, run_id: int, stimulus_id: str, thread: int | None = None
     ) -> TaskErredMsg:
         assert ts.exception
         return TaskErredMsg(
             key=ts.key,
+            run_id=run_id,
             exception=ts.exception,
             traceback=ts.traceback,
             exception_text=ts.exception_text,
@@ -903,6 +905,7 @@ class ExecuteSuccessEvent(ExecuteDoneEvent):
 
 @dataclass
 class ExecuteFailureEvent(ExecuteDoneEvent):
+    run_id: int  # FIXME: Utilize the run ID in all ExecuteDoneEvents
     start: float | None
     stop: float | None
     exception: Serialize
@@ -921,6 +924,7 @@ class ExecuteFailureEvent(ExecuteDoneEvent):
         err_or_msg: BaseException | ErrorMessage,
         *,
         key: str,
+        run_id: int,
         start: float | None = None,
         stop: float | None = None,
         stimulus_id: str,
@@ -932,6 +936,7 @@ class ExecuteFailureEvent(ExecuteDoneEvent):
 
         return cls(
             key=key,
+            run_id=run_id,
             start=start,
             stop=stop,
             exception=msg["exception"],
@@ -945,6 +950,7 @@ class ExecuteFailureEvent(ExecuteDoneEvent):
     def dummy(
         key: str,
         *,
+        run_id: int = 1,
         stimulus_id: str,
     ) -> ExecuteFailureEvent:
         """Build a dummy event, with most attributes set to a reasonable default.
@@ -952,6 +958,7 @@ class ExecuteFailureEvent(ExecuteDoneEvent):
         """
         return ExecuteFailureEvent(
             key=key,
+            run_id=run_id,
             start=None,
             stop=None,
             exception=Serialize(None),
@@ -2025,6 +2032,7 @@ class WorkerState:
         traceback: Serialize | None,
         exception_text: str,
         traceback_text: str,
+        run_id: int,
         *,
         stimulus_id: str,
     ) -> RecsInstrs:
@@ -2035,6 +2043,7 @@ class WorkerState:
         ts.state = "error"
         smsg = TaskErredMsg.from_task(
             ts,
+            run_id=run_id,
             stimulus_id=stimulus_id,
             thread=self.threads.get(ts.key),
         )
@@ -2048,6 +2057,7 @@ class WorkerState:
         traceback: Serialize | None,
         exception_text: str,
         traceback_text: str,
+        run_id: int,
         *,
         stimulus_id: str,
     ) -> RecsInstrs:
@@ -2438,7 +2448,7 @@ class WorkerState:
                 # Third-party MutableMappings (dask-cuda etc.) may have other use cases
                 # for this.
                 msg = error_message(e)
-                return {ts: tuple(msg.values())}, []
+                return {ts: tuple(msg.values()) + (run_id,)}, []
 
             stop = time()
             if stop - start > 0.005:
@@ -2859,7 +2869,9 @@ class WorkerState:
                 )
             )
         elif ts.state == "error":
-            instructions.append(TaskErredMsg.from_task(ts, stimulus_id=ev.stimulus_id))
+            instructions.append(
+                TaskErredMsg.from_task(ts, run_id=ev.run_id, stimulus_id=ev.stimulus_id)
+            )
         elif ts.state in {
             "released",
             "fetch",
@@ -3042,6 +3054,7 @@ class WorkerState:
                 ev.traceback,
                 ev.exception_text,
                 ev.traceback_text,
+                ts.run_id,
             )
             for ts in self._gather_dep_done_common(ev)
         }
@@ -3179,6 +3192,7 @@ class WorkerState:
             ev.traceback,
             ev.exception_text,
             ev.traceback_text,
+            ev.run_id,
         )
         return recs, instr
 
@@ -3621,7 +3635,7 @@ class BaseWorker(abc.ABC):
 
         @wraps(func)
         async def wrapper() -> StateMachineEvent:
-            with ledger.record():
+            with ledger.record(key="async-instruction"):
                 return await func(*args, **kwargs)
 
         task = asyncio.create_task(wrapper(), name=task_name)
@@ -3650,8 +3664,11 @@ class BaseWorker(abc.ABC):
             logger.exception("async instruction handlers should never raise!")
             raise
 
-        with ledger.record():
-            # Capture metric events in _transition_to_memory()
+        # Capture metric events in _transition_to_memory()
+        # As this may trigger calls to _start_async_instruction for more tasks,
+        # make sure we don't endlessly pile up context_meter callbacks by specifying
+        # the same key as in _start_async_instruction.
+        with ledger.record(key="async-instruction"):
             self.handle_stimulus(stim)
 
         self._finalize_metrics(stim, ledger, span_id)

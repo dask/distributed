@@ -4462,11 +4462,12 @@ class Scheduler(SchedulerState, ServerNode):
             # _generate_taskstates is not the only thing that calls new_task(). A
             # TaskState may have also been created by client_desires_keys or scatter,
             # and only later gained a run_spec.
-            spans_ext.observe_tasks(runnable, code=code)
-            # TaskGroup.span_id could be completely different from the one in the
-            # original annotations, so it has been dropped. Drop it here as well in
-            # order not to confuse SchedulerPlugin authors.
-            resolved_annotations.pop("span", None)
+            span_annotations = spans_ext.observe_tasks(runnable, code=code)
+            # In case of TaskGroup collision, spans may have changed
+            if span_annotations:
+                resolved_annotations["span"] = span_annotations
+            else:
+                resolved_annotations.pop("span", None)
 
         for plugin in list(self.plugins.values()):
             try:
@@ -4884,6 +4885,7 @@ class Scheduler(SchedulerState, ServerNode):
         exception=None,
         stimulus_id=None,
         traceback=None,
+        run_id=None,
         **kwargs,
     ):
         """Mark that a task has erred on a particular worker"""
@@ -4891,6 +4893,11 @@ class Scheduler(SchedulerState, ServerNode):
 
         ts: TaskState = self.tasks.get(key)
         if ts is None or ts.state != "processing":
+            return {}, {}, {}
+
+        if ts.run_id != run_id:
+            if ts.processing_on and ts.processing_on.address == worker:
+                return self._transition(key, "released", stimulus_id)
             return {}, {}, {}
 
         if ts.retries > 0:
